@@ -127,6 +127,15 @@ module EmployeeLinks
     scope.exists?
   end
 
+  # Demo and live never mix in one login (D5): a demo company's links are
+  # open only to a login whose home company is a demo, and a live company's
+  # only to a login with no demo ties (DemoOutbound.demo_user?).
+  def self.demo_boundary_allows?(user, company)
+    return false unless user && company
+
+    company.demo? ? user.company&.demo? == true : !DemoOutbound.demo_user?(user)
+  end
+
   # A link to a client subdomain belongs to that subdomain's company only.
   def self.origin_allows_company?(azp, company_id)
     return true unless TenantSubdomainRegistry.client_origin?(azp)

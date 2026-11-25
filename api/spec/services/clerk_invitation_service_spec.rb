@@ -224,4 +224,31 @@ RSpec.describe ClerkInvitationService do
 
     expect(described_class.new.fetch_user("user_requested")).to be_nil
   end
+
+  describe "#create_invitation logging" do
+    let(:address) { "reviewer+manager@demo-mail.example" }
+    let(:logged) { [] }
+
+    before do
+      allow(StagingOutboundPolicy).to receive(:clerk_target!)
+      allow(Rails.logger).to receive(:info) { |line| logged << line }
+      allow(Rails.logger).to receive(:error) { |line| logged << line }
+    end
+
+    it "logs the domain, never the address, on success" do
+      stub_request(:post, "https://api.clerk.com/v1/invitations").to_return(status: 200, body: { id: "inv_1", status: "pending" }.to_json)
+      expect(described_class.new.create_invitation(email: address)).to include(success: true, invitation_id: "inv_1")
+      expect(logged.join).to include("***@demo-mail.example")
+      expect(logged.join).not_to include("reviewer")
+    end
+
+    it "logs a stable code instead of Clerk's text on failure, and returns the code" do
+      body = { errors: [ { code: "form_identifier_exists", long_message: "#{address} is taken" } ] }
+      stub_request(:post, "https://api.clerk.com/v1/invitations").to_return(status: 422, body: body.to_json)
+      result = described_class.new.create_invitation(email: address)
+      expect(result).to include(success: false, status_code: 422, error_code: "form_identifier_exists")
+      expect(logged.join).to include("code=form_identifier_exists")
+      expect(logged.join).not_to include("reviewer")
+    end
+  end
 end

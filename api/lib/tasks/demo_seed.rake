@@ -32,8 +32,12 @@ namespace :demo do
       DemoCompany::InviteClients.new(organization: organization, actor: actor,
         manager_email: ENV.fetch("MANAGER_EMAIL"), user_email: ENV.fetch("USER_EMAIL")).call
     end
-    # Addresses are printed by domain only.
-    outcomes.each { |outcome| puts "OK    demo:invite_clients #{outcome.email.split('@').last} #{outcome.status}" }
+    # Addresses are printed by domain only. Any undelivered invite fails the
+    # task; a rerun retries it.
+    outcomes.each do |outcome|
+      puts "#{outcome.complete? ? 'OK  ' : 'FAIL'}  demo:invite_clients #{outcome.email.split('@').last} #{outcome.status}"
+    end
+    abort "FAIL  demo:invite_clients #{outcomes.count { |outcome| !outcome.complete? }} invite(s) not delivered; rerun to retry" unless outcomes.all?(&:complete?)
   rescue DemoCompany::InviteClients::Refused, ActiveRecord::RecordInvalid, KeyError => e
     abort "FAIL  demo:invite_clients #{e.message}"
   end

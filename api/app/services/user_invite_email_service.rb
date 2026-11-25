@@ -38,13 +38,13 @@ class UserInviteEmailService
         return :captured
       end
 
-      Rails.logger.info("[InviteEmail] Sent invite to #{user.email} response=#{response.inspect}") unless StagingOutboundPolicy.staging?
+      Rails.logger.info("[InviteEmail] Sent invite user_id=#{user.id} to #{LogRedaction.email(user.email)} id=#{response['id']}") unless StagingOutboundPolicy.staging?
       true
     rescue StandardError => e
       if StagingOutboundPolicy.staging?
         Rails.logger.error("[InviteEmail] Failed user_id=#{user.id}: #{e.class}; content redacted")
       else
-        Rails.logger.error("[InviteEmail] Failed for #{user.email}: #{e.class} #{e.message}")
+        Rails.logger.error("[InviteEmail] Failed user_id=#{user.id} to #{LogRedaction.email(user.email)}: #{e.class}")
       end
       false
     end

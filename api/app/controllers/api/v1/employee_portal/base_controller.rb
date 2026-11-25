@@ -46,7 +46,7 @@ module Api
 
           @employee_link = TenantScope.as_system(reason: "Resolve employee link for verified Clerk user") do
             link = @current_user.employee_account_links.portal_eligible.find_by(id: link_id)
-            link if link&.portal_enabled?
+            link if link&.portal_enabled? && EmployeeLinks.demo_boundary_allows?(@current_user, link.company)
           end
           return head :not_found unless @employee_link
 
