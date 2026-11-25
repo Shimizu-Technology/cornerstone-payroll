@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/button';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
@@ -47,7 +48,7 @@ export function ResourceActivity({ id, api, revision }: { id: number; api: Resou
       {!loading && !error && events.length === 0 && <p className="text-neutral-500">No activity recorded yet.</p>}
       <ol className="space-y-3">{events.map(event => <li key={event.id} className="break-words">
         <p className="text-neutral-800">{event.headline}</p>
-        <time className="text-xs text-neutral-500" dateTime={event.created_at}>{new Date(event.created_at).toLocaleString('en-US', { timeZone: 'Pacific/Guam', dateStyle: 'medium', timeStyle: 'short' })}</time>
+        <time className="text-xs text-neutral-500" dateTime={event.created_at}>{formatGuamDateTime(event.created_at, { second: undefined })}</time>
       </li>)}</ol>
       {loading && <p role="status">Loading activity…</p>}
       {hasMorePages(meta) && <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void loadMore()}>Load more activity</Button>}

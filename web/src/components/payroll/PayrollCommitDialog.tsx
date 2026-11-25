@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, payPeriodsApi, type PayrollCommitSnapshot } from '@/services/api';
 import { payrollClientCommitReason } from '@/lib/payrollClientCommitReason';
@@ -5,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { FicaHistoryReviewNotice } from './FicaHistoryReviewNotice';
 import { BusyStatus } from '@/components/ui/busy-status';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { formatCurrency, formatDateRange, formatDate } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import type { PayPeriod } from '@/types';
 
 type Props = {

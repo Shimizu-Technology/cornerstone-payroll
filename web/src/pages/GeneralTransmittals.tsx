@@ -1,3 +1,5 @@
+import { formatGuamDateTime } from '@/lib/utils';
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
@@ -79,12 +81,6 @@ const currency = (value?: number | null) => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
 }).format(Number(value || 0));
-
-const dateOnly = (value?: string | null) => {
-  if (!value) return 'Not set';
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString();
-};
 
 const formatBytes = (value: number) => value > 1024 * 1024
   ? `${(value / (1024 * 1024)).toFixed(1)} MB`
@@ -457,7 +453,7 @@ export function GeneralTransmittals() {
                 <option value="">Choose a pay period…</option>
                 {payPeriods.map((period) => (
                   <option key={period.id} value={period.id}>
-                    {dateOnly(period.start_date)} – {dateOnly(period.end_date)} · {period.status}
+                    {formatDateRange(period.start_date, period.end_date)} · {period.status}
                   </option>
                 ))}
               </select>
@@ -497,7 +493,7 @@ export function GeneralTransmittals() {
                     {form.pay_period && (
                       <p className="mt-1 flex items-center gap-1.5 text-sm text-neutral-500">
                         <CalendarRange className="h-4 w-4" />
-                        {dateOnly(form.pay_period.start_date)} – {dateOnly(form.pay_period.end_date)} · Pay date {dateOnly(form.pay_period.pay_date)}
+                        {formatDateRange(form.pay_period.start_date, form.pay_period.end_date)} · Pay date {formatDate(form.pay_period.pay_date) || 'Not set'}
                       </p>
                     )}
                   </div>
@@ -627,7 +623,7 @@ export function GeneralTransmittals() {
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <p className="text-sm font-semibold text-neutral-900">Version {artifact.version_number}</p>
-                          <p className="text-xs text-neutral-600">{new Date(artifact.created_at).toLocaleString()} · {formatBytes(artifact.byte_size)}</p>
+                          <p className="text-xs text-neutral-600">{formatGuamDateTime(artifact.created_at)} · {formatBytes(artifact.byte_size)}</p>
                         </div>
                         <FileClock className="h-4 w-4 text-primary-600" />
                       </div>

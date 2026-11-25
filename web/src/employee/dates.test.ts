@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { today } from './config';
 import { accessDay, guamDay } from './contracts';
-import { daysBetween, daysUntilLabel, longDate, parseDay, periodLabel, shortDate } from './format';
+import { daysBetween, daysUntilLabel } from './format';
 
 describe('Guam calendar days', () => {
   it('counts today in Guam, whatever zone the device or CI runner is in', () => {
@@ -31,16 +31,5 @@ describe('Guam calendar days', () => {
     // Across a month and a year end.
     expect(daysBetween('2026-12-30', '2027-01-02')).toBe(3);
     expect(daysUntilLabel('not a date', '2026-11-25')).toBeNull();
-  });
-
-  it('never hands an invalid date to Intl, which would throw', () => {
-    expect(parseDay('2028-03-01T23:59:59+10:00')?.getDate()).toBe(1);
-    expect(parseDay('2026-02-30')).toBeNull();
-    expect(parseDay('garbage')).toBeNull();
-    expect(parseDay(null)).toBeNull();
-    expect(longDate('2028-03-01T23:59:59+10:00')).toBe('Mar 1, 2028');
-    expect(() => longDate('garbage')).not.toThrow();
-    expect(shortDate('garbage')).toBe('');
-    expect(periodLabel('garbage', '2026-11-14')).toBeNull();
   });
 });

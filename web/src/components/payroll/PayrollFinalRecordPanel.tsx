@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Eye, FileCheck2, Loader2, X } from 'lucide-react';
@@ -179,7 +180,7 @@ export function PayrollFinalRecordPanel({ companyId, payPeriodId, refreshToken =
             <DialogHeader>
               <DialogTitle>Final Payroll Record</DialogTitle>
               <DialogDescription>
-                {record ? `${record.company.name} · ${record.pay_period.start_date} through ${record.pay_period.end_date} · scheduled pay date ${record.pay_period.pay_date}` : 'Committed payroll record'}
+                {record ? `${record.company.name} · ${formatDateRange(record.pay_period.start_date, record.pay_period.end_date)} · scheduled pay date ${formatDate(record.pay_period.pay_date)}` : 'Committed payroll record'}
               </DialogDescription>
             </DialogHeader>
             <Button type="button" variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => setOpenFor(null)} aria-label="Close final payroll record">

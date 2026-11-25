@@ -313,14 +313,14 @@ describe('YtdSummaryPanel', () => {
     renderReportPanel(<YtdSummaryPanel />);
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Payroll summary period type' }), { target: { value: 'pay_run' } });
-    const runOption = await screen.findByRole('option', { name: /2026-04-01 – 2026-04-15 · paid 2026-04-30/ });
+    const runOption = await screen.findByRole('option', { name: /Apr 1 – 15, 2026 · paid Apr 30, 2026/ });
     expect(runOption).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
 
     expect(apiMocks.ytdSummary).toHaveBeenCalledWith(expect.objectContaining({
       start_date: '2026-04-30', end_date: '2026-04-30', pay_run_key: 'native:27',
     }));
-    expect(await screen.findByText('Payroll Summary by Pay Date — 2026-04-01 – 2026-04-15 (paid 2026-04-30)')).toBeTruthy();
+    expect(await screen.findByText('Payroll Summary by Pay Date — Apr 1 – 15, 2026 (paid Apr 30, 2026)')).toBeTruthy();
   });
 
   it('shows an actionable empty state instead of a zero-dollar employee grid', async () => {
