@@ -873,6 +873,56 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.index [ "company_id" ], name: "index_deduction_types_on_company_id"
   end
 
+  create_table "delivery_consents", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "user_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_account_link_id", null: false
+    t.bigint "delivery_disclosure_id", null: false
+    t.string "kind", null: false
+    t.string "disclosure_version", null: false
+    t.string "disclosure_digest", limit: 64, null: false
+    t.datetime "given_at", null: false
+    t.string "ip_address", limit: 64
+    t.string "user_agent", limit: 512
+    t.string "method", null: false
+    t.datetime "access_proof_verified_at"
+    t.datetime "withdrawn_at"
+    t.bigint "withdrawn_by_user_id"
+    t.string "withdrawn_ip_address", limit: 64
+    t.string "withdrawn_user_agent", limit: 512
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_id", "kind", "given_at", "id" ], name: "idx_delivery_consents_employee_kind"
+    t.index [ "company_id", "employee_id", "kind" ], name: "idx_delivery_consents_active_unique", unique: true, where: "(withdrawn_at IS NULL)"
+    t.index [ "delivery_disclosure_id" ], name: "index_delivery_consents_on_delivery_disclosure_id"
+    t.index [ "employee_account_link_id" ], name: "index_delivery_consents_on_employee_account_link_id"
+    t.index [ "user_id" ], name: "index_delivery_consents_on_user_id"
+    t.index [ "withdrawn_by_user_id" ], name: "index_delivery_consents_on_withdrawn_by_user_id"
+    t.check_constraint "disclosure_digest::text ~ '^[0-9a-f]{64}$'::text", name: "delivery_consents_digest_check"
+    t.check_constraint "kind::text <> 'w2gu'::text OR access_proof_verified_at IS NOT NULL", name: "delivery_consents_w2gu_access_proof_check"
+    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying::text, 'w2gu'::character varying::text])", name: "delivery_consents_kind_check"
+    t.check_constraint "method::text = ANY (ARRAY['employee_portal_checkbox'::character varying::text, 'employee_portal_pdf_verified'::character varying::text])", name: "delivery_consents_method_check"
+    t.check_constraint "withdrawn_at IS NULL OR withdrawn_at >= given_at", name: "delivery_consents_withdrawn_after_given_check"
+  end
+
+  create_table "delivery_disclosures", force: :cascade do |t|
+    t.string "kind", null: false
+    t.string "version", null: false
+    t.string "title", null: false
+    t.text "text", null: false
+    t.string "digest", limit: 64, null: false
+    t.string "status", default: "draft", null: false
+    t.datetime "published_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "kind", "status", "published_at", "id" ], name: "idx_delivery_disclosures_current"
+    t.index [ "kind", "version" ], name: "idx_delivery_disclosures_kind_version", unique: true
+    t.check_constraint "digest::text ~ '^[0-9a-f]{64}$'::text", name: "delivery_disclosures_digest_check"
+    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying::text, 'w2gu'::character varying::text])", name: "delivery_disclosures_kind_check"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'approved'::character varying::text])", name: "delivery_disclosures_status_check"
+  end
+
   create_table "department_ytd_totals", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "department_id", null: false
@@ -980,10 +1030,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.index [ "revoked_by_id" ], name: "index_employee_account_links_on_revoked_by_id"
     t.index [ "sign_up_reset_requested_by_id" ], name: "index_employee_account_links_on_sign_up_reset_requested_by_id"
     t.index [ "user_id" ], name: "index_employee_account_links_on_user_id"
-    t.check_constraint "failed_activation_attempts >= 0", name: "employee_account_links_failed_attempts_check"
-    t.check_constraint "invite_delivery IS NULL OR (invite_delivery::text = ANY (ARRAY['email'::character varying, 'code'::character varying]::text[]))", name: "employee_account_links_invite_delivery_check"
-    t.check_constraint "invite_generation >= 0", name: "employee_account_links_invite_generation_check"
     t.check_constraint "(sign_up_reset_requested_at IS NULL) = (sign_up_reset_reason IS NULL)", name: "employee_account_links_sign_up_reset_check"
+    t.check_constraint "failed_activation_attempts >= 0", name: "employee_account_links_failed_attempts_check"
+    t.check_constraint "invite_delivery IS NULL OR (invite_delivery::text = ANY (ARRAY['email'::character varying::text, 'code'::character varying::text]))", name: "employee_account_links_invite_delivery_check"
+    t.check_constraint "invite_generation >= 0", name: "employee_account_links_invite_generation_check"
     t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
     t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
@@ -1083,7 +1133,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.index [ "company_id", "confirmed_at", "id" ], name: "idx_contact_changes_confirmation"
     t.index [ "confirmed_by_id" ], name: "index_employee_contact_changes_to_confirm_on_confirmed_by_id"
     t.index [ "employee_id", "company_id" ], name: "idx_contact_changes_employee"
-    t.check_constraint "change_kind::text = ANY (ARRAY['contact'::character varying, 'address'::character varying]::text[])", name: "employee_contact_changes_kind_check"
+    t.check_constraint "change_kind::text = ANY (ARRAY['contact'::character varying::text, 'address'::character varying::text, 'delivery_consent'::character varying::text])", name: "employee_contact_changes_kind_check"
   end
 
   create_table "employee_deductions", force: :cascade do |t|
@@ -1206,7 +1256,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.check_constraint "num_nonnulls(payroll_item_id, historical_paycheck_id, tax_year) = 1 AND (tax_year IS NULL) = (employee_id IS NULL)", name: "employee_documents_one_source"
     t.check_constraint "revision > 0", name: "employee_documents_positive_revision"
     t.check_constraint "sha256::text ~ '^[a-f0-9]{64}$'::text", name: "employee_documents_sha256"
-    t.check_constraint "status::text = ANY (ARRAY['posted'::character varying, 'replaced'::character varying, 'withdrawn'::character varying]::text[])", name: "employee_documents_valid_status"
+    t.check_constraint "status::text = ANY (ARRAY['posted'::character varying::text, 'replaced'::character varying::text, 'withdrawn'::character varying::text])", name: "employee_documents_valid_status"
   end
 
   create_table "employee_emergency_contacts", force: :cascade do |t|
@@ -5002,7 +5052,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.index [ "practice_company_id" ], name: "index_users_on_practice_company_id"
     t.index [ "workos_id" ], name: "index_users_on_workos_id", unique: true
     t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
-    t.check_constraint "deactivation_reason IS NULL OR (deactivation_reason::text = ANY (ARRAY['last_employee_link_closed'::character varying, 'pending_sign_up_closed'::character varying, 'deactivated'::character varying]::text[]))", name: "users_deactivation_reason_check"
+    t.check_constraint "deactivation_reason IS NULL OR (deactivation_reason::text = ANY (ARRAY['last_employee_link_closed'::character varying::text, 'pending_sign_up_closed'::character varying::text, 'deactivated'::character varying::text]))", name: "users_deactivation_reason_check"
     t.check_constraint "practice_company_id IS NULL OR company_id = practice_company_id AND role = 4", name: "users_practice_scope"
   end
 
@@ -5240,6 +5290,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
   add_foreign_key "daily_time_records", "employee_work_profiles"
   add_foreign_key "daily_time_records", "employees"
   add_foreign_key "deduction_types", "companies"
+  add_foreign_key "delivery_consents", "companies"
+  add_foreign_key "delivery_consents", "delivery_disclosures", on_delete: :restrict
+  add_foreign_key "delivery_consents", "employee_account_links", column: [ "employee_account_link_id", "employee_id", "company_id" ], primary_key: [ "id", "employee_id", "company_id" ], name: "fk_delivery_consents_link", on_delete: :restrict
+  add_foreign_key "delivery_consents", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_delivery_consents_employee", on_delete: :restrict
+  add_foreign_key "delivery_consents", "users", column: "withdrawn_by_user_id", on_delete: :nullify
+  add_foreign_key "delivery_consents", "users", on_delete: :restrict
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "department_ytd_totals", "departments", column: [ "department_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_department_ytd_totals_company_parent"
   add_foreign_key "departments", "companies"
