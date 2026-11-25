@@ -18,7 +18,9 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/check_print_runs" => %w[create pdf confirm],
     "api/v1/admin/check_print_generations" => %w[create],
     "api/v1/admin/check_register" => %w[create_event],
-    "api/v1/admin/non_employee_checks" => %w[create update destroy mark_printed void_check batch_pdf mark_all_printed check_pdf voucher_pdf],
+    "api/v1/admin/non_employee_checks" => %w[
+      create update destroy mark_printed void_check batch_pdf mark_all_printed check_pdf voucher_pdf mark_paid supersede_with_payroll_item
+    ],
     "api/v1/admin/general_transmittals" => %w[generate_pdf artifact_pdf],
     "api/v1/admin/reports" => %w[
       start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task

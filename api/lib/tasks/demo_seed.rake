@@ -17,6 +17,6 @@ namespace :demo do
   desc "Write the fictional QuickBooks export bundle and matching pay-stub PDF to OUTPUT_DIR for the import and stub upload screens"
   task quickbooks_sample: :environment do
     result = DemoCompany::QuickbooksSample.new(output_dir: ENV.fetch("OUTPUT_DIR")).call
-    puts "OK    demo:quickbooks_sample files=#{result.files.size} stub_pdf=#{File.basename(result.stub_pdf)}"
+    puts "OK    demo:quickbooks_sample files=#{result.files.size} stub_pdfs=#{result.stub_pdfs.size}"
   end
 end

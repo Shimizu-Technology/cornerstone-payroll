@@ -1,28 +1,34 @@
 # frozen_string_literal: true
 
+require "tmpdir"
+require "zlib"
+
 module DemoCompany
-  # Seeds the two permanent demo employers with fictional people and several
-  # months of biweekly payroll, run through the real calculator and committed
-  # through the normal lifecycle. Safe to run again: each company, person and
-  # pay period is found before it is created, and a committed period is never
-  # touched. Each period is calculated and committed in its own transaction,
-  # so an interrupted run resumes where it stopped.
+  # Seeds the two permanent demo employers from DemoCompany::Roster.
   #
-  # It only ever writes to demo companies, creates no logins and sends no
-  # email, and leaves every employee-app switch off.
+  # Harbor Finch Kitchen starts the way a real migrated client does: its
+  # January–July 2026 QuickBooks history is imported, prepared, applied,
+  # verified, reviewed, locked and bridged into YTD through the real services,
+  # and only then does native payroll run from the August 7 payday. Harbor
+  # Finch Catering is native-only. Native periods run through the real
+  # calculator and are committed through the normal lifecycle.
+  #
+  # Safe to run again (a finished run is a no-op), safe if interrupted (each
+  # step and period resumes), and serialized per organization. It writes only
+  # to demo companies, creates no logins, sends no email and leaves every
+  # employee-app switch off.
   class Seed
     class Refused < StandardError; end
 
-    Result = Data.define(:companies, :employees_created, :periods_committed, :periods_skipped)
-
-    CITY = { city: "Hagåtña", state: "GU", zip: "96910" }.freeze
+    Result = Data.define(:companies, :employees_created, :periods_committed, :periods_skipped, :quickbooks_imported)
 
     COMPANIES = [
       {
-        key: "harbor-finch-kitchen", name: "Harbor Finch Kitchen", slug: "harborfinch",
+        key: Roster::KITCHEN, name: "Harbor Finch Kitchen", slug: "harborfinch",
         # The 07 EIN prefix is never issued, so the number can't collide with a real employer.
-        profile: { ein: "07-2026101", address_line1: "214 Marine Corps Drive", phone: "(671) 555-0140",
-                   email: "office@harborfinch.example", filing_contact_name: "Maren Fable", **CITY },
+        profile: { ein: "07-2026101", address_line1: "214 Marine Corps Drive", city: "Hagåtña", state: "GU", zip: "96910",
+                   phone: "(671) 555-0140", email: "office@harborfinch.example", filing_contact_name: "Maren Fable",
+                   historical_payroll_enabled: true },
         bank: { bank_name: "Tasi Cove Savings", bank_address: "88 Chalan Santo Papa, Hagåtña, GU 96910" },
         branding: { "display_name" => "Harbor Finch Kitchen", "primary_color" => "#1F4E5F", "accent_color" => "#E3A857" },
         help: [ { name: "Maren Fable", role: "General manager", phone: "(671) 555-0141", email: "manager@harborfinch.example" },
@@ -30,9 +36,9 @@ module DemoCompany
         departments: [ "Kitchen", "Front of house", "Office" ]
       },
       {
-        key: "harbor-finch-catering", name: "Harbor Finch Catering", slug: "harborfinch-catering",
-        profile: { ein: "07-2026102", address_line1: "17 Route 8, Maite", phone: "(671) 555-0150",
-                   email: "events@harborfinch-catering.example", filing_contact_name: "Maren Fable", city: "Maite", state: "GU", zip: "96910" },
+        key: Roster::CATERING, name: "Harbor Finch Catering", slug: "harborfinch-catering",
+        profile: { ein: "07-2026102", address_line1: "17 Route 8", city: "Maite", state: "GU", zip: "96910",
+                   phone: "(671) 555-0150", email: "events@harborfinch-catering.example", filing_contact_name: "Maren Fable" },
         bank: { bank_name: "Tasi Cove Savings", bank_address: "88 Chalan Santo Papa, Hagåtña, GU 96910" },
         branding: { "display_name" => "Harbor Finch Catering", "primary_color" => "#2E5E4E", "accent_color" => "#F2C14E" },
         help: [ { name: "Events desk", role: "Scheduling and pay", phone: "(671) 555-0151", email: "events@harborfinch-catering.example" } ],
@@ -40,41 +46,8 @@ module DemoCompany
       }
     ].freeze
 
-    # SSNs use the 900 area, which is never issued. Each person has a distinct
-    # last four; Kit Wren keeps one identity at both employers. Routing
-    # numbers fail the ABA checksum, so no real account is stored.
-    PEOPLE = [
-      { company: "harbor-finch-kitchen", first: "Robin", last: "Lantern", dept: "Kitchen", type: "hourly", rate: 17.50,
-        ssn: "900-01-1001", delivery: "direct_deposit", routing: "123456789", account: "4011001", hours: 80, overtime: [ 0, 6, 0, 4, 0, 8, 0 ] },
-      { company: "harbor-finch-kitchen", first: "Ellis", last: "Quill", dept: "Office", type: "salary", rate: 52_000,
-        ssn: "900-01-1002", delivery: "direct_deposit", routing: "987654321", account: "4011002" },
-      { company: "harbor-finch-kitchen", first: "Rowan", last: "Drift", dept: "Front of house", type: "hourly", rate: 9.25,
-        ssn: "900-01-1003", delivery: "paper_check", hours: 72, tips: [ 410.25, 388.50, 452.75, 401.00, 476.20, 395.40, 430.10 ] },
-      { company: "harbor-finch-kitchen", first: "Avery", last: "Sprig", dept: "Front of house", type: "hourly", rate: 11.00,
-        ssn: "900-01-1004", delivery: "paper_check", hours: 32 },
-      { company: "harbor-finch-kitchen", first: "Jules", last: "Reed", dept: "Kitchen", type: "hourly", rate: 13.75,
-        ssn: "900-01-1005", delivery: "paper_check", hours: 80, terminate_after: 3 },
-      { company: "harbor-finch-kitchen", first: "Quinn", last: "Sable", dept: "Kitchen", type: "hourly", rate: 14.25,
-        ssn: "900-01-1006", delivery: "direct_deposit", routing: "123456781", account: "4011006", hours: 80, terminate_after: 1, rehire_before: 4 },
-      { company: "harbor-finch-kitchen", first: "Maren", last: "Fable", dept: "Office", type: "salary", rate: 68_000,
-        ssn: "900-01-1007", delivery: "direct_deposit", routing: "987654322", account: "4011007" },
-      { company: "harbor-finch-kitchen", first: "Kit", last: "Wren", dept: "Kitchen", type: "hourly", rate: 12.50,
-        ssn: "900-01-1008", delivery: "paper_check", hours: 40 },
-      { company: "harbor-finch-kitchen", first: "Sky", last: "Lark", dept: "Front of house", type: "hourly", rate: 10.50,
-        ssn: "900-01-1009", delivery: "paper_check", hours: 64 },
-      { company: "harbor-finch-kitchen", first: "Drew", last: "Flint", dept: "Kitchen", type: "hourly", rate: 15.00,
-        ssn: "900-01-1010", delivery: "direct_deposit", routing: "123456782", account: "4011010", hours: 80 },
-      { company: "harbor-finch-catering", first: "Kit", last: "Wren", dept: "Events", type: "hourly", rate: 13.00,
-        ssn: "900-01-1008", delivery: "paper_check", hours: 24 },
-      { company: "harbor-finch-catering", first: "Morgan", last: "Tide", dept: "Events", type: "hourly", rate: 14.00,
-        ssn: "900-01-1011", delivery: "paper_check", hours: 48 }
-    ].freeze
-
-    # Seven finished biweekly periods from August 2, 2026, paid the Friday
-    # after they end, plus one open period left in draft.
-    FIRST_PERIOD_START = Date.new(2026, 8, 2)
-    COMMITTED_PERIODS = 7
-    HIRE_DATE = Date.new(2026, 7, 1)
+    REVIEW_NOTE = "Verified against the retained QuickBooks employee setup and the client's hiring records."
+    LOCK_NAMESPACE = "demo-company-seed"
 
     def initialize(organization:, actor:)
       @organization = organization
@@ -82,20 +55,18 @@ module DemoCompany
       @employees_created = 0
       @periods_committed = 0
       @periods_skipped = 0
+      @quickbooks_imported = false
     end
 
     def call
       authorize!
-      companies = COMPANIES.map { |spec| ensure_company!(spec) }
-      companies.each { |company| seed_company!(company) }
-      Result.new(companies: companies, employees_created: @employees_created,
-        periods_committed: @periods_committed, periods_skipped: @periods_skipped)
-    end
-
-    def self.periods
-      (0..COMMITTED_PERIODS).map do |index|
-        start = FIRST_PERIOD_START + (14 * index)
-        { index: index, start_date: start, end_date: start + 13, pay_date: start + 19, open: index == COMMITTED_PERIODS }
+      with_organization_lock do
+        companies = COMPANIES.map { |spec| ensure_company!(spec) }
+        kitchen = companies.find { |company| fixture_key(company) == Roster::KITCHEN }
+        seed_quickbooks_history!(kitchen)
+        companies.each { |company| seed_native_payroll!(company) }
+        Result.new(companies: companies, employees_created: @employees_created, periods_committed: @periods_committed,
+          periods_skipped: @periods_skipped, quickbooks_imported: @quickbooks_imported)
       end
     end
 
@@ -109,16 +80,39 @@ module DemoCompany
       raise Refused, "An organization administrator is required" unless allowed
     end
 
+    # One run per organization at a time; a second concurrent run is refused.
+    def with_organization_lock
+      connection = ApplicationRecord.connection
+      key = Zlib.crc32("#{LOCK_NAMESPACE}:#{organization.id}")
+      locked = connection.select_value(ActiveRecord::Base.sanitize_sql_array([ "SELECT pg_try_advisory_lock(?)", key ]))
+      raise Refused, "Another seed run is in progress for this organization" unless locked
+
+      begin
+        yield
+      ensure
+        connection.select_value(ActiveRecord::Base.sanitize_sql_array([ "SELECT pg_advisory_unlock(?)", key ]))
+      end
+    end
+
+    def fixture_key(company) = company.test_workspace_manifest["demo_fixture_key"]
+
+    def find_company(spec)
+      Company.where(organization_id: organization.id).where("test_workspace_manifest ->> 'demo_fixture_key' = ?", spec[:key]).first
+    end
+
     def ensure_company!(spec)
-      company = Company.where(organization_id: organization.id)
-        .where("test_workspace_manifest ->> 'demo_fixture_key' = ?", spec[:key]).first
+      company = find_company(spec)
       if company.nil?
         if Company.where("lower(subdomain_slug) = ?", spec[:slug]).exists?
           raise Refused, "The #{spec[:slug]} address belongs to another company"
         end
 
-        company = Create.new(organization: organization, actor: actor, name: spec[:name], fixture_key: spec[:key],
-          profile: spec[:profile]).call
+        begin
+          company = Create.new(organization: organization, actor: actor, name: spec[:name], fixture_key: spec[:key], profile: spec[:profile]).call
+        rescue ActiveRecord::RecordNotUnique, ArgumentError => error
+          # A concurrent run created it first: use that one.
+          company = find_company(spec) || raise(error)
+        end
       end
       demo!(company)
 
@@ -128,6 +122,7 @@ module DemoCompany
         updates = spec[:bank].reject { |field, _| company.public_send(field).present? }
         updates[:subdomain_slug] = spec[:slug] if company.subdomain_slug.blank?
         updates[:branding] = spec[:branding] if company.branding.blank?
+        updates[:historical_payroll_enabled] = true if spec.dig(:profile, :historical_payroll_enabled) && !company.historical_payroll_enabled?
         company.update!(updates) if updates.any?
         if company.help_contacts.none?
           spec[:help].each_with_index { |contact, index| company.help_contacts.create!(contact.merge(position: index + 1)) }
@@ -141,45 +136,110 @@ module DemoCompany
       raise Refused, "Refusing to seed #{company.name}: it is not a demo company" unless company.reload.demo?
     end
 
-    def seed_company!(company)
+    def spec_for(company) = COMPANIES.find { |entry| entry[:key] == fixture_key(company) }
+
+    def departments_for(company)
+      spec_for(company)[:departments].index_with { |name| Department.find_or_create_by!(company: company, name: name) }
+    end
+
+    # -- QuickBooks history (Kitchen) ------------------------------------------
+
+    def seed_quickbooks_history!(company)
+      demo!(company)
       TenantScope.with_company(company.id) do
-        spec = COMPANIES.find { |entry| entry[:key] == company.test_workspace_manifest["demo_fixture_key"] }
-        departments = spec[:departments].index_with { |name| Department.find_or_create_by!(company: company, name: name) }
-        workweek, schedule = ensure_calendar!(company)
-        people = PEOPLE.select { |person| person[:company] == spec[:key] }
-        employees = people.to_h { |person| [ person, ensure_employee!(company, departments.fetch(person[:dept]), person) ] }
+        batch = HistoricalImportBatch.where(company: company, source_system: "quickbooks_online").where.not(status: %w[failed reversed]).order(:id).last
+        return if batch&.locked? && batch.historical_ytd_bridges.where(status: "applied").exists?
 
-        self.class.periods.each do |period_spec|
-          apply_status_changes!(employees, period_spec)
-          period = ensure_period!(company, schedule, workweek, period_spec)
-          next if period_spec[:open]
-
-          if period.committed?
-            @periods_skipped += 1
-            next
-          end
-          run_and_commit!(period, employees, period_spec)
-          @periods_committed += 1
+        batch ||= Dir.mktmpdir("harbor-finch-quickbooks") do |dir|
+          files = QuickbooksSample.new(output_dir: dir).call.files
+          QuickbooksHistory::ImportService.new(company: company, files: files, actor: actor).call.batch
         end
+        @quickbooks_imported = true
+        prepare_employees_from_quickbooks!(company, batch)
+
+        lifecycle = QuickbooksHistory::LifecycleService.new(batch: batch.reload, actor: actor)
+        lifecycle.apply!(acknowledgement: QuickbooksHistory::LifecycleService::ACKNOWLEDGEMENT) if batch.previewed?
+        approve_cutover!(batch.reload) unless batch.reload.locked?
+        lifecycle.lock! unless batch.reload.locked?
+        activate_ytd_bridge!(batch.reload)
       end
     end
 
-    def ensure_calendar!(company)
-      workweek = company.company_workweeks.order(:effective_on, :id).first || CompanyWorkweek.create!(
-        company: company, starts_on_weekday: 0, starts_at_minutes: 0, timezone: "Pacific/Guam",
-        source: "operator_confirmed", confirmation_status: "confirmed", confirmed_by: actor, confirmed_at: Time.current,
-        notes: "Sunday workweek", effective_on: HIRE_DATE
-      )
-      schedule = company.company_pay_schedules.order(:effective_on, :id).first || CompanyPaySchedule.create!(
-        company: company, frequency: "biweekly", period_rule: "biweekly", pay_date_rule: "days_after_period_end",
-        pay_date_offset_days: 6, period_start_weekday: 0, period_anchor_date: FIRST_PERIOD_START, timezone: "Pacific/Guam",
-        source: "operator_confirmed", confirmation_status: "confirmed", confirmed_by: actor, confirmed_at: Time.current,
-        notes: "Biweekly, paid the Friday after the period ends", effective_on: HIRE_DATE
-      )
-      [ workweek, schedule ]
+    def prepare_employees_from_quickbooks!(company, batch)
+      bootstrap = batch.historical_client_bootstrap
+      unless bootstrap&.applied?
+        bootstrap = QuickbooksHistory::ClientBootstrapPreviewService.new(batch: batch, actor: actor).call
+        # The W-4 elections take effect from the start of the history, so the
+        # seeded native payroll (which follows it) can use them.
+        QuickbooksHistory::ClientBootstrapApplyService.new(bootstrap: bootstrap, actor: actor,
+          acknowledgement: QuickbooksHistory::ClientBootstrapApplyService::ACKNOWLEDGEMENT,
+          w4_effective_on: Roster::CALENDAR_ANCHOR).call
+      end
+
+      departments = departments_for(company)
+      Roster.people_for(company_key(company)).select { |person| person[:quickbooks] }.each do |person|
+        employee = Employee.find_by!(company: company, first_name: person[:first], last_name: person[:last])
+        complete_profile!(employee, person, departments.fetch(person[:dept]))
+        resolve_setup_reviews!(employee, person)
+      end
     end
 
-    def ensure_employee!(company, department, person)
+    def approve_cutover!(batch)
+      verification = QuickbooksHistory::CutoverVerificationService.new(batch: batch, actor: actor).call
+      raise Refused, "The QuickBooks history did not verify: #{Array(verification.review&.evidence&.dig('exceptions')).size} exception(s)" unless verification.passed
+
+      review = verification.review
+      return if review.approved?
+
+      service = QuickbooksHistory::CutoverReviewService.new(review: review, actor: actor)
+      service.save!(
+        exception_dispositions: Array(review.evidence["exceptions"]).to_h { |exception| [ exception.fetch("key"), "Reviewed against the retained QuickBooks reports." ] },
+        attestations: HistoricalImportCutoverReview::ATTESTATIONS.keys.index_with(true),
+        approval_notes: "QuickBooks January–July 2026 history reconciled to its Tax and Wage Summaries."
+      )
+      service.approve!(acknowledgement: HistoricalImportCutoverReview::APPROVAL_ACKNOWLEDGEMENT)
+    end
+
+    def activate_ytd_bridge!(batch)
+      return if batch.historical_ytd_bridges.where(status: "applied").exists?
+
+      bridge = QuickbooksHistory::YtdBridgePreviewService.new(batch: batch, actor: actor).call
+      QuickbooksHistory::YtdBridgeApplyService.new(bridge: bridge, actor: actor,
+        acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT).call
+    end
+
+    def resolve_setup_reviews!(employee, person)
+      employee.reload
+      Array(employee.configuration_review_items).map { |item| item["code"] }.uniq.each do |code|
+        EmployeeConfigurationReviewService.new(employee: employee.reload, actor: actor).resolve!(
+          code: code, resolution_note: REVIEW_NOTE, acknowledgement: EmployeeConfigurationReviewService::ACKNOWLEDGEMENT,
+          source_reference: "QuickBooks employee details, #{person[:first]} #{person[:last]}", effective_on: person[:hire_date]
+        )
+      end
+    end
+
+    # -- People ----------------------------------------------------------------
+
+    def company_key(company) = fixture_key(company)
+
+    # Fills the fields the employee app and payroll need, without overwriting
+    # anything a tester has since changed.
+    def complete_profile!(employee, person, department)
+      fill = {
+        department: employee.department || department,
+        date_of_birth: employee.date_of_birth || person[:dob],
+        phone: employee.phone.presence || person[:phone],
+        hire_date: employee.hire_date || person[:hire_date],
+        payment_delivery_method: employee.payment_delivery_method.presence || person[:delivery],
+        bank_routing_number_encrypted: employee.bank_routing_number_encrypted.presence || person[:routing],
+        bank_account_number_encrypted: employee.bank_account_number_encrypted.presence || person[:account],
+        address_line1: employee.address_line1.presence || "#{100 + Roster::PEOPLE.index(person)} Chalan Pasaheru",
+        city: employee.city.presence || "Hagåtña", state: employee.state.presence || "GU", zip: employee.zip.presence || "96910"
+      }
+      employee.update!(fill.select { |field, value| employee.public_send(field) != value })
+    end
+
+    def ensure_native_employee!(company, department, person)
       existing = Employee.find_by(company: company, first_name: person[:first], last_name: person[:last])
       return existing if existing
 
@@ -188,10 +248,10 @@ module DemoCompany
         company: company, department: department, first_name: person[:first], last_name: person[:last],
         email: nil, ssn_encrypted: person[:ssn], employment_type: salary ? "salary" : "hourly",
         salary_type: "annual", pay_rate: person[:rate], pay_frequency: "biweekly", status: "active",
-        filing_status: "single", allowances: 0, w4_effective_on: HIRE_DATE, hire_date: HIRE_DATE,
-        payment_delivery_method: person[:delivery],
+        filing_status: "single", allowances: 0, w4_effective_on: person[:hire_date], hire_date: person[:hire_date],
+        date_of_birth: person[:dob], phone: person[:phone], payment_delivery_method: person[:delivery],
         bank_routing_number_encrypted: person[:routing], bank_account_number_encrypted: person[:account],
-        address_line1: "#{100 + PEOPLE.index(person)} Chalan Pasaheru", **CITY
+        address_line1: "#{100 + Roster::PEOPLE.index(person)} Chalan Pasaheru", city: "Hagåtña", state: "GU", zip: "96910"
       )
       EmployeeW4ElectionChangeService.new(
         employee: employee,
@@ -200,6 +260,79 @@ module DemoCompany
       ).call!
       @employees_created += 1
       employee
+    end
+
+    # A fixed uniform deduction for one tipped server, set up once.
+    def ensure_deduction!(company, employee, person)
+      return unless person[:uniform_deduction]
+
+      definition = company.payroll_field_definitions.find_by(name: "Uniform") || company.payroll_field_definitions.create!(
+        name: "Uniform", kind: "deduction", category: "other", tax_treatment: "post_tax_deduction", amount_type: "fixed",
+        default_amount: person[:uniform_deduction], show_in_payroll_grid: true
+      )
+      EmployeePayrollField.find_or_create_by!(employee: employee, payroll_field_definition: definition) do |field|
+        field.amount = person[:uniform_deduction]
+        field.active = true
+      end
+    end
+
+    # -- Native payroll --------------------------------------------------------
+
+    def seed_native_payroll!(company)
+      demo!(company)
+      TenantScope.with_company(company.id) do
+        departments = departments_for(company)
+        workweek, schedule = ensure_calendar!(company)
+        people = Roster.people_for(company_key(company))
+        employees = people.to_h do |person|
+          employee = ensure_native_employee!(company, departments.fetch(person[:dept]), person)
+          complete_profile!(employee, person, departments.fetch(person[:dept]))
+          ensure_deduction!(company, employee, person)
+          [ person, employee ]
+        end
+
+        Roster.native_periods.each do |period_spec|
+          apply_status_changes!(employees, period_spec)
+          apply_raises!(employees, period_spec)
+          period = period_for_window!(company, schedule, workweek, period_spec)
+          next if period_spec[:open]
+
+          unless period
+            @periods_skipped += 1
+            next
+          end
+          run_and_commit!(period, employees, period_spec) ? @periods_committed += 1 : @periods_skipped += 1
+        end
+      end
+    end
+
+    def ensure_calendar!(company)
+      workweek = company.company_workweeks.order(:effective_on, :id).first || CompanyWorkweek.create!(
+        company: company, starts_on_weekday: 0, starts_at_minutes: 0, timezone: "Pacific/Guam",
+        source: "operator_confirmed", confirmation_status: "confirmed", confirmed_by: actor, confirmed_at: Time.current,
+        notes: "Sunday workweek", effective_on: Roster::CALENDAR_ANCHOR
+      )
+      schedule = company.company_pay_schedules.order(:effective_on, :id).first || CompanyPaySchedule.create!(
+        company: company, frequency: "biweekly", period_rule: "biweekly", pay_date_rule: "days_after_period_end",
+        pay_date_offset_days: 6, period_start_weekday: 0, period_anchor_date: Roster::CALENDAR_ANCHOR, timezone: "Pacific/Guam",
+        source: "operator_confirmed", confirmation_status: "confirmed", confirmed_by: actor, confirmed_at: Time.current,
+        notes: "Biweekly, paid the Friday after the period ends", effective_on: Roster::CALENDAR_ANCHOR
+      )
+      [ workweek, schedule ]
+    end
+
+    # The window's period to work on: an unfinished one to resume, or a new
+    # draft. Any other period already in the window (committed or voided,
+    # including a voided one with its correction) means the window is done.
+    def period_for_window!(company, schedule, workweek, period_spec)
+      existing = PayPeriod.where(company: company, start_date: period_spec[:start_date], end_date: period_spec[:end_date]).order(:id).to_a
+      if existing.any?
+        return existing.find { |period| period.status.in?(%w[draft calculated approved]) && !period.voided? && period.correction_status.nil? }
+      end
+
+      PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,
+        start_date: period_spec[:start_date], end_date: period_spec[:end_date], pay_date: period_spec[:pay_date],
+        status: "draft", run_purpose: "regular", run_purpose_source: "operator_selected", includes_base_salary: true)
     end
 
     # Terminations and the rehire happen between periods, in pay-date order,
@@ -222,39 +355,54 @@ module DemoCompany
       end
     end
 
-    def ensure_period!(company, schedule, workweek, period_spec)
-      PayPeriod.find_by(company: company, start_date: period_spec[:start_date], end_date: period_spec[:end_date], correction_status: nil) ||
-        PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,
-          start_date: period_spec[:start_date], end_date: period_spec[:end_date], pay_date: period_spec[:pay_date],
-          status: "draft", run_purpose: "regular", run_purpose_source: "operator_selected", includes_base_salary: true)
+    # One effective-dated raise, recorded through the normal compensation
+    # change service once.
+    def apply_raises!(employees, period_spec)
+      employees.each do |person, employee|
+        raise_spec = person[:raise]
+        next unless raise_spec && period_spec[:index] == raise_spec[:from_index]
+        next if employee.reload.employee_compensation_changes.where(effective_on: period_spec[:start_date]).exists?
+
+        EmployeeCompensationChangeService.new(employee: employee, actor: actor, source: "operator",
+          reason: "Annual review raise", effective_on: period_spec[:start_date], pay_rate: raise_spec[:rate]).call!
+      end
     end
 
+    # Returns true when the period was committed by this run.
     def run_and_commit!(period, employees, period_spec)
       ApplicationRecord.transaction do
         period.lock!
         demo!(period.company)
-        working = employees.select { |_person, employee| employee.reload.status == "active" }
-        working.each do |person, employee|
+        next false if period.committed? || period.voided? || !period.status.in?(%w[draft calculated approved])
+
+        # An approved period resumed after an interruption only needs its commit.
+        calculate_period!(period, employees, period_spec) if period.draft? || period.calculated?
+        PayPeriodLifecycleService.new(pay_period: period.reload, actor: actor).commit!(
+          expected_next_check_number: period.company.reload.next_check_number
+        )
+        true
+      end
+    end
+
+    def calculate_period!(period, employees, period_spec)
+      working = employees.select { |_person, employee| employee.reload.status == "active" }
+      working.each do |person, employee|
           item = period.payroll_items.find_or_initialize_by(employee_id: employee.id)
+          hours = person[:type] == "salary" ? 0 : (person.dig(:short_hours, period_spec[:index]) || person[:hours])
           item.assign_attributes(
             company_id: period.company_id, employee: employee, employment_type: employee.employment_type,
-            pay_rate: employee.pay_rate, payment_delivery_method: person[:delivery],
-            hours_worked: person[:type] == "salary" ? 0 : person[:hours],
+            pay_rate: employee.payroll_rate_on(period.end_date), payment_delivery_method: person[:delivery],
+            hours_worked: hours,
             overtime_hours: Array(person[:overtime])[period_spec[:index]] || 0,
             tips: Array(person[:tips])[period_spec[:index]] || 0,
             reported_tips: Array(person[:tips])[period_spec[:index]] || 0
           )
           item.save! if item.new_record?
           item.calculate!
-        end
-        period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: actor.id, approved_at: nil, approved_by_id: nil)
-        PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
-        lifecycle = PayPeriodLifecycleService.new(pay_period: period.reload, actor: actor)
-        lifecycle.approve!
-        PayPeriodLifecycleService.new(pay_period: period.reload, actor: actor).commit!(
-          expected_next_check_number: period.company.reload.next_check_number
-        )
       end
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: actor.id, approved_at: nil, approved_by_id: nil)
+      PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
+      PayPeriodLifecycleService.new(pay_period: period.reload, actor: actor).approve!
     end
   end
 end
