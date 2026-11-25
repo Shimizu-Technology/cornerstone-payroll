@@ -46,7 +46,8 @@ module Api
       private
 
       def employee_links_count
-        EmployeeLinks.openable_links(current_user, azp: @clerk_token_payload&.fetch("azp", nil)).size
+        EmployeeLinks.openable_links(current_user, azp: @clerk_token_payload&.fetch("azp", nil),
+          origin: request.headers["Origin"]).size
       end
 
       def rls_system_reason

@@ -222,6 +222,11 @@ RSpec.describe "Employee app switch security" do
 
     before { allow(ClerkInvitationService).to receive(:new).and_return(clerk) }
 
+    # The job a claim queued for the row (the only one allowed to act on it).
+    def owning_job(revocation)
+      described_class.new(revocation.id).tap { |job| job.job_id = revocation.reload.job_id }
+    end
+
     it "keeps one pending request per target and allows a new one once confirmed" do
       first = request!("sessions", login.id, user: login)
       expect(first).to be_persisted
@@ -273,14 +278,14 @@ RSpec.describe "Employee app switch security" do
       described_class.perform_now(bound.id)
       expect(bound.reload).to have_attributes(outcome: "accepted_sessions_revoked")
       expect(bound.confirmed_at).to be_present
-      expect(clerk).to have_received(:revoke_user_sessions).with("user_employee_1", created_before: anything, email: nil).twice
+      expect(clerk).to have_received(:revoke_user_sessions).with("user_employee_1", created_before: nil, email: nil).twice
 
       # Accepted but not bound yet: the one Clerk account with the invited address.
       pending = create(:user, company: company, organization: organization, clerk_id: "pending_abc", email: "pending.one@example.test")
       unbound = request!("invitation", "inv_unbound", user: pending)
       allow(clerk).to receive(:invitation_status).with("inv_unbound").and_return("accepted")
       allow(clerk).to receive(:users_with_email).with("pending.one@example.test").and_return([ { "id" => "user_new_account" } ])
-      allow(clerk).to receive(:revoke_user_sessions).with("user_new_account", created_before: anything, email: "pending.one@example.test")
+      allow(clerk).to receive(:revoke_user_sessions).with("user_new_account", created_before: nil, email: "pending.one@example.test")
         .and_return({ success: true })
       described_class.perform_now(unbound.id)
       expect(unbound.reload).to have_attributes(outcome: "accepted_sessions_revoked")
@@ -303,6 +308,96 @@ RSpec.describe "Employee app switch security" do
       expect(described_class).not_to have_been_enqueued
       # A later stop may request the same target again.
       expect(request!("invitation", "inv_lost", user: pending)).to be_persisted
+    end
+
+    it "ends every session of an accepted invitation's account, however late, and confirms only once none is active" do
+      previous = ENV["CLERK_SECRET_KEY"]
+      ENV["CLERK_SECRET_KEY"] = "sk_test_synthetic"
+      allow(ClerkInvitationService).to receive(:new).and_call_original
+      real = ClerkInvitationService.new
+      allow(ClerkInvitationService).to receive(:new).and_return(real)
+      allow(real).to receive(:invitation_status).with("inv_late").and_return("accepted")
+      revocation = TenantScope.as_system(reason: "spec") do
+        EmployeeAppClerkRevocation.request!(kind: "invitation", target: "inv_late", organization: organization, company: company,
+          source: EmployeeAppClerkRevocation::SOURCE_DEMO_STOP, requested_by: admin, user: login, now: 2.hours.ago)
+      end
+      # Accepted an hour after the stop, long past the stop-based cutoff.
+      late = (1.hour.ago.to_f * 1000).to_i
+      listing = stub_request(:get, "https://api.clerk.com/v1/sessions")
+        .with(query: { user_id: "user_employee_1", status: "active", limit: "100" })
+        .to_return({ status: 200, body: [ { id: "sess_late", created_at: late } ].to_json },
+          { status: 200, body: [ { id: "sess_later", created_at: late + 60_000 } ].to_json },
+          { status: 200, body: [ { id: "sess_later", created_at: late + 60_000 } ].to_json },
+          { status: 200, body: "[]" })
+      ended = %w[sess_late sess_later].map do |id|
+        stub_request(:post, "https://api.clerk.com/v1/sessions/#{id}/revoke").to_return(status: 200, body: "{}")
+      end
+
+      # A session still active on the confirming pass: not confirmed.
+      described_class.perform_now(revocation.id)
+      expect(revocation.reload).to have_attributes(confirmed_at: nil, last_error: "Sessions were still active after revocation")
+      expect(AuditLog.where(action: described_class::CONFIRMED_ACTION, record_id: revocation.id)).to be_empty
+
+      described_class.perform_now(revocation.id)
+      expect(revocation.reload).to have_attributes(outcome: "accepted_sessions_revoked", last_error: nil)
+      expect(revocation.confirmed_at).to be_present
+      expect(ended).to all(have_been_requested.once)
+      expect(listing).to have_been_requested.times(4)
+      expect(AuditLog.find_by!(action: described_class::CONFIRMED_ACTION, record_id: revocation.id).metadata)
+        .to include("outcome" => "accepted_sessions_revoked", "sessions_ended" => 1)
+    ensure
+      ENV["CLERK_SECRET_KEY"] = previous
+    end
+
+    it "records a follow-up and its audit together, so a failed audit leaves the row for the retry" do
+      pending = create(:user, company: company, organization: organization, clerk_id: "pending_audit", email: "pending.three@example.test")
+      revocation = request!("invitation", "inv_audit", user: pending)
+      allow(clerk).to receive(:invitation_status).with("inv_audit").and_return("accepted")
+      allow(clerk).to receive(:users_with_email).and_return([])
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::StatementInvalid, "audit write failed")
+
+      described_class.perform_now(revocation.id)
+      expect(revocation.reload).to have_attributes(follow_up_at: nil, outcome: nil, leased_until: nil, attempts: 1)
+      expect(revocation).to be_pending
+      expect(described_class).to have_been_enqueued.with(revocation.id)
+      expect(EmployeeAppClerkRevocation.stale(1.day.from_now).ids).to include(revocation.id)
+
+      allow(AuditLog).to receive(:record!).and_call_original
+      described_class.perform_now(revocation.id)
+      expect(revocation.reload).to have_attributes(outcome: "accepted_account_not_found", attempts: 2)
+      expect(revocation.follow_up_at).to be_present
+      expect(AuditLog.where(action: described_class::FOLLOW_UP_ACTION, record_id: revocation.id).count).to eq(1)
+    end
+
+    it "acts only as the row's owning job, one attempt at a time, and never records a second outcome" do
+      revocation = request!("sessions", login.id, user: login)
+      TenantScope.as_system(reason: "spec") { EmployeeAppClerkRevocation.enqueue!([ revocation.id ]) }
+      first_owner = owning_job(revocation)
+      allow(clerk).to receive(:revoke_user_sessions).and_return({ success: true, revoked: 1 })
+
+      # Replaced by the sweep (say the first job was only waiting in a
+      # backlog): the replaced job does nothing.
+      revocation.update_columns(updated_at: 7.hours.ago)
+      TenantScope.as_system(reason: "spec") { RetryEmployeeAppClerkRevocationsJob.perform_now }
+      expect(revocation.reload.job_id).not_to eq(first_owner.job_id)
+      first_owner.perform_now
+      expect(clerk).not_to have_received(:revoke_user_sessions)
+      expect(revocation.reload.attempts).to eq(0)
+
+      # An attempt in progress holds the lease: another run of the owner waits it out.
+      revocation.update_columns(leased_until: 5.minutes.from_now)
+      owning_job(revocation).perform_now
+      expect(clerk).not_to have_received(:revoke_user_sessions)
+
+      # An outcome recorded meanwhile (another run that finished) is never overwritten or audited twice.
+      revocation.update_columns(leased_until: nil)
+      allow(clerk).to receive(:revoke_user_sessions) do
+        revocation.update_columns(confirmed_at: 1.minute.ago, outcome: "sessions_revoked")
+        { success: true, revoked: 1 }
+      end
+      owning_job(revocation).perform_now
+      expect(revocation.reload).to have_attributes(attempts: 1, leased_until: nil)
+      expect(AuditLog.where(action: described_class::CONFIRMED_ACTION, record_id: revocation.id)).to be_empty
     end
   end
 
@@ -344,9 +439,34 @@ RSpec.describe "Employee app switch security" do
 
     it "leaves a row unqueued when its enqueue fails, so the next sweep tries again" do
       row = request!("201", at: 10.minutes.ago)
-      allow(RevokeEmployeeAppClerkJob).to receive(:perform_later).and_raise(ActiveJob::EnqueueError)
+      allow(RevokeEmployeeAppClerkJob.queue_adapter).to receive(:enqueue).and_raise(ActiveJob::EnqueueError)
       expect(TenantScope.as_system(reason: "spec") { EmployeeAppClerkRevocation.enqueue!([ row.id ]) }).to eq([])
-      expect(row.reload.enqueued_at).to be_nil
+      expect(row.reload).to have_attributes(enqueued_at: nil, job_id: nil)
+    end
+
+    it "lets exactly one of a sweep and a repeat stop queue a row both read as unqueued" do
+      row = request!("301", at: 10.minutes.ago)
+      raced = false
+      allow(RevokeEmployeeAppClerkJob).to receive(:new).and_wrap_original do |original, *args|
+        unless raced
+          raced = true
+          # The repeat stop reads and claims the row after the sweep read it.
+          expect(EmployeeAppClerkRevocation.enqueue!([ row.id ])).to eq([ row.id ])
+        end
+        original.call(*args)
+      end
+
+      expect(TenantScope.as_system(reason: "spec") { described_class.perform_now }).to eq(0)
+      expect(RevokeEmployeeAppClerkJob).to have_been_enqueued.with(row.id).exactly(:once)
+      expect(row.reload.job_id).to eq(enqueued_jobs.sole.fetch("job_id"))
+    end
+
+    it "doesn't replace the job of a row whose attempt is in progress" do
+      row = request!("401", at: 1.day.ago)
+      row.update_columns(enqueued_at: 1.day.ago, updated_at: 7.hours.ago, leased_until: 5.minutes.from_now)
+      expect(TenantScope.as_system(reason: "spec") { described_class.perform_now }).to eq(0)
+      row.update_columns(leased_until: 1.minute.ago)
+      expect(TenantScope.as_system(reason: "spec") { described_class.perform_now }).to eq(1)
     end
 
     it "runs on a schedule" do

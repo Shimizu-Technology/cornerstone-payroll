@@ -72,8 +72,16 @@ module EmployeeAppSwitch
       state[:phase] == "shadow" && state[:kill_switch_bypass] == false
     end
 
-    # The database state, cached for a few seconds per process;
+    # The database state, cached for CACHE_SECONDS per process;
     # CompanyFeatures reads it on every demo company lookup.
+    #
+    # Intentional: a verified result can be reused for up to CACHE_SECONDS
+    # after enforcement is turned off (RLS disabled on a table, or the kill
+    # switch set to bypass), so a demo's employee app can stay open on this
+    # process that long. A fresh read here would not close it any sooner:
+    # the RLS guard reads the kill switch through the same 5-second cache
+    # (RlsDatabase.bypass_state). The demo kill switch (DemoStop) and turning
+    # a demo's app off take effect on the next request, uncached.
     def cached_state
       cached = STATE_CACHE.get
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)

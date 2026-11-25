@@ -84,4 +84,30 @@ RSpec.describe "Employee portal demo guard", type: :request do
     expect(response.parsed_body["links"]).to eq([])
     expect(EmployeeLinks.openable_links(worker, azp: demo_origin)).to be_empty
   end
+
+  it "neither lists nor counts a demo link when the browser's Origin isn't its own subdomain" do
+    links = ->(origin) do
+      headers = bearer("user_jordan", azp: demo_origin)
+      headers["Origin"] = origin if origin
+      get "/api/v1/employee/links", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      response.parsed_body["links"].map { |row| row["id"] }
+    end
+    count = ->(origin) do
+      headers = bearer("user_jordan", azp: demo_origin)
+      headers["Origin"] = origin if origin
+      get "/api/v1/auth/me", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      response.parsed_body.dig("roles", "employee_links_count")
+    end
+
+    expect(links.call(shared_origin)).to eq([])
+    expect(count.call(shared_origin)).to eq(0)
+    expect(EmployeeLinks.openable_links(worker, azp: demo_origin, origin: shared_origin)).to be_empty
+
+    expect(links.call(demo_origin)).to eq([ link.id ])
+    expect(count.call(demo_origin)).to eq(1)
+    expect(links.call(nil)).to eq([ link.id ])
+    expect(count.call(nil)).to eq(1)
+  end
 end
