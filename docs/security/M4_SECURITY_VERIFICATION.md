@@ -9,19 +9,19 @@ This document records the automated security verification controls, findings fix
 
 ---
 
-## 1. Findings Fixed During Verification
+## 1. Findings & Hardening Fixed During Verification
 
-Two real security gaps and one CI test-isolation deadlock were identified during M4-11 verification and fixed in this slice:
+One real security gap, one defense-in-depth hardening fix, and one CI test-isolation deadlock were addressed in this slice:
 
-1. **Header enumeration oracle across employee 404 paths (fixed)**  
-   `Api::V1::EmployeePortal::BaseController` previously returned `head :not_found` from `authenticate_employee_user!` and `require_employee_link!` *before* subclasses set `Cache-Control: no-store`. As a result, a 404 caused by an invalid/revoked/cross-company link lacked `Cache-Control: no-store`, while a 404 caused by a valid link with a sub-feature off or another employee's record ID included `Cache-Control: no-store`.  
-   **Fix:** Set `Cache-Control: no-store` as the first `before_action` in `Api::V1::EmployeePortal::BaseController` and `Api::V1::EmployeePortal::ActivationsController`. Every employee failure response now emits identical status, body, and caching headers.
+1. **Header enumeration oracle across employee 404 paths (real vulnerability, fixed)**  
+   `Api::V1::EmployeePortal::BaseController` previously returned `head :not_found` from `authenticate_employee_user!` and `require_employee_link!` *before* subclasses set `Cache-Control: no-store`. As a result, a 404 caused by an invalid, revoked, or cross-company link lacked `Cache-Control: no-store`, while a 404 caused by a valid link with a sub-feature off or another employee's record ID included `Cache-Control: no-store`.  
+   **Fix:** Set `Cache-Control: no-store` as the first `before_action` in `Api::V1::EmployeePortal::BaseController` and `Api::V1::EmployeePortal::ActivationsController`. Every non-enumerating 404 employee failure response now emits identical status, body, and caching headers. Responses for already-authenticated sessions intentionally remain distinct where required by protocol: the session-fence `401` (`session_predates_reactivation`), MFA/step-up `403` (`mfa_required` / `reverification-error`), and view-as support responses (`403 view_as_read_only`, `404 view_as_unavailable`, `Cache-Control: private, no-store`).
 
-2. **Locked active/former links were not blocked on direct employee routes (fixed)**  
-   `ViewAsEmployeeContext.resolve` refused any link with `activation_locked_until > now`, but `EmployeeAccountLink.portal_eligible`, `EmployeeLinks.openable?`, `ProfileBaseController#writable_link?`, and `DeliveryConsentsController#writable_link?`/`#withdrawable_link?` did not check `activation_locked?`.  
-   **Fix:** Excluded locked links in `EmployeeAccountLink.portal_eligible`, `EmployeeLinks.openable?`, and both profile and consent write guards so locked links are uniformly hidden from `GET /api/v1/employee/links` and return an empty 404 on every link-scoped endpoint.
+2. **Locked active/former links refused on direct employee routes (defense-in-depth hardening)**  
+   `ViewAsEmployeeContext.resolve` already refused any link with `activation_locked_until > now`, whereas `EmployeeAccountLink.portal_eligible`, `EmployeeLinks.openable?`, `ProfileBaseController#writable_link?`, and `DeliveryConsentsController#writable_link?`/`#withdrawable_link?` did not check `activation_locked?`. In the current code, activation locks are written only while a link is still `invited` and cleared on bind/claim, so an `active` or `former` link cannot currently reach the locked state through normal flows.  
+   **Fix:** Excluded locked links in `EmployeeAccountLink.portal_eligible`, `EmployeeLinks.openable?`, and both profile and consent write guards as defense-in-depth hardening, keeping direct employee routes consistent with `ViewAsEmployeeContext.resolve` and documenting the invariant in `EmployeeAppRollout#status_of`.
 
-3. **Flaky `contact_details_enforced_rls_spec` deadlock (fixed)**  
+3. **Flaky `contact_details_enforced_rls_spec` deadlock (CI test-isolation fix)**  
    In CI, three parallel RSpec shards share one PostgreSQL 16 cluster (`pg_authid` is cluster-wide, not per-database). `contact_details_enforced_rls_spec.rb` created `payroll_app` then `payroll_owner_sim` while `company_rls_isolation_spec.rb` created `payroll_owner_sim` then `payroll_app`, causing an AB-BA deadlock on `pg_authid`. The spec also ran `ALTER TABLE ... ENABLE/FORCE ROW LEVEL SECURITY` (`ACCESS EXCLUSIVE` across every protected table) inside transactional tests without flushing idle pool connections.  
    **Fix:** Switched `contact_details_enforced_rls_spec.rb` to `use_transactional_tests = false`, flushed idle connections before opening a single explicit rolled-back transaction, acquired table locks in sorted order, and created unique per-process non-bypass/owner roles instead of colliding on cluster-wide `payroll_app` and `payroll_owner_sim`.
 
@@ -29,11 +29,11 @@ Two real security gaps and one CI test-isolation deadlock were identified during
 
 ## 2. Automated Coverage Summary
 
-All backend security specs run with **real RS256-signed Clerk JWT verification** (`ClerkTokenVerifier` against a test JWKS, no auth stubs) and `RLS_CONTEXT_GUARD_MODE=raise` with `AUTH_ENABLED=true` and `REQUIRE_MFA=true`.
+The employee security suites (`employee_endpoint_isolation_spec.rb`, `employee_enumeration_spec.rb`, `view_as_grants_spec.rb`, and the `employee_link_*` suites) run with **real RS256-signed Clerk JWT verification** (`ClerkTokenVerifier` against a test JWKS, no auth stubs) and `RLS_CONTEXT_GUARD_MODE=raise` with `AUTH_ENABLED=true` and `REQUIRE_MFA=true`. Separately, `contact_details_enforced_rls_spec.rb` tests PostgreSQL RLS enforcement on client/admin contact write endpoints under a non-bypass role and stubs `current_user` rather than Clerk JWT verification.
 
 ### 2.1 Route-Generated Employee Isolation Suite
 - **File:** `api/spec/security/employee_endpoint_isolation_spec.rb`
-- **Route-completeness guard:** Inspects `Rails.application.routes.routes` dynamically for every route under `/api/v1/employee` or `api/v1/employee_portal/*` (28 mounted verb+path combinations covering links, activation, claim, reactivate, context, help, statements, tax forms, profile, phone/email changes, emergency contacts, address requests, and delivery consents). CI fails automatically if a new employee route is added without isolation coverage.
+- **Route-completeness guard:** Inspects `Rails.application.routes.routes` dynamically for every route under `/api/v1/employee` or `api/v1/employee_portal/*` (28 mounted verb+path combinations covering links, activation, claim, reactivate, context, help, statements, tax forms, profile, phone/email changes, emergency contacts, address requests, and delivery consents). Link-scoped routes are exercised automatically across every dimension; non-link (`:account` and `:public`) routes are checked at runtime in every dimension via `ActiveSupport::Notifications` so adding any new employee route fails CI until real HTTP tests cover it.
 - **Dimensions verified for every endpoint:**
   1. Positive baseline (proves every link-scoped route reaches its controller under valid real auth rather than passing due to a routing 404).
   2. Cross-company isolation (wrong subdomain `azp`, cross-company resource IDs, cross-organization claim/reactivate, spoofed `X-Company-Id`).
@@ -57,18 +57,21 @@ All backend security specs run with **real RS256-signed Clerk JWT verification**
 ### 2.3 View-Only "Sign in as" Support Access
 - **File:** `api/spec/requests/view_as_grants_spec.rb`
 - Verifies:
-  - **No escalation:** Requires `super_admin` + `view_as_allowed` + verified MFA + fresh step-up + explicit reason + company access. Rejects Clerk impersonation tokens carrying an `act` claim on targets, start, and reads. Rejects all non-`super_admin` roles even if `view_as_allowed` is set. Refuses all staff targets and any employee linked to a staff user. Enforces strict surface isolation (client grants cannot hit employee/admin/finance/Form 500/targets routes; employee grants cannot hit client/admin/auth/links/targets routes). Rejects spoofed `X-Company-Id`, `X-Organization-Id`, and `X-Employee-Link-Id` headers. Closes immediately when company, permission, or portal is deactivated. Gates `ViewAsGrant.ready?` in production on `VIEW_AS_READY=true`, `REQUIRE_MFA=true`, `RLS_CONTEXT_GUARD_MODE=raise`, and `CLERK_AUTHORIZED_PARTIES`.
+  - **No escalation:** Requires `super_admin` + `view_as_allowed` + verified MFA + fresh step-up + explicit reason + company access. Rejects Clerk impersonation tokens carrying an `act` claim on targets, start, and reads. Rejects all non-`super_admin` roles even if `view_as_allowed` is set. Refuses all staff targets and any employee linked to a staff user. Enforces strict surface isolation (client grants cannot hit employee/admin/finance/Form 500/targets routes; employee grants cannot hit client/admin/auth/links/targets routes). Rejects spoofed `X-Company-Id`, `X-Organization-Id`, and `X-Employee-Link-Id` headers. Closes immediately when company, permission, or portal is deactivated.
+  - **Production readiness gate (`ViewAsGrant.ready?`):** Stubs `Rails.env.production?` and asserts `ready?` returns `true` when all four production settings (`VIEW_AS_READY=true`, `REQUIRE_MFA=true`, `RLS_CONTEXT_GUARD_MODE=raise`, and non-empty `CLERK_AUTHORIZED_PARTIES`) are present, and returns `false` whenever any one of the four is missing or disabled.
   - **No writes in view-only:** Refuses all non-GET/HEAD/OPTIONS methods across payroll, admin, client, rollout, approval, signup, profile, consent, and link controllers (`403 view_as_read_only`), prevents DB writes via `ActiveRecord::Base.while_preventing_writes`, and blocks background job enqueueing or stub freezing during reads.
   - **Time limit:** Enforces the 30-minute expiry on both client and employee views (including mid-download PDF expiry) and immediate revocation on `DELETE /api/v1/auth/view_as`.
   - **Audit trail:** Stamps `user_id`, `real_user_id`, and `view_as_grant_id` on `view_as#started`, every audited read/download/failure, and idempotent `view_as#ended`; leaves target login activity and audit trail clean; exposes company-scoped `view_as#started` events (both client and employee views) to client admins via `GET /api/v1/client/support_access_logs` without internal reasons.
 
 ### 2.4 Automated OWASP ZAP Baseline Scan
-- **Script:** `scripts/security/zap_baseline_employee.sh`
-- **Local static header harness:** `scripts/security/serve_employee_dist.py` (serves `web/dist` with the exact Netlify `_headers` and `_redirects` emitted by `web/scripts/finalize-surface-dist.mjs`).
+- **Script:** `scripts/security/zap_baseline_employee.sh` (pinned to `ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af`)
+- **Local static header harness:** `scripts/security/serve_employee_dist.py` (binds to `127.0.0.1` and serves `web/dist` with the exact Netlify `_headers` and `_redirects` emitted by `web/scripts/finalize-surface-dist.mjs`).
+- **API path seed hook:** `scripts/security/zap_api_seed_hook.py` seeds 12 read-only paths (`/up`, `/health/dependencies`, `/api/v1/public/tenant_branding`, `/api/v1/auth/me`, `/api/v1/auth/view_as`, and `/api/v1/employee/{links,context,help,profile,statements,tax_forms,delivery_consents}`) so ZAP passively scans real JSON and 404 responses and headers, not just `/up` (while `zap_baseline_employee.sh` separately verifies `/api/v1/admin/companies` returns `404` under `APP_PROCESS_ROLE=employee_web`).
 - **Rule files:**
   - `scripts/security/zap_baseline_web_local.conf` / `zap_baseline_web_production.conf`
   - `scripts/security/zap_baseline_api_local.conf` / `zap_baseline_api_production.conf`
 - **CI workflow:** `.github/workflows/security-zap-baseline.yml` runs on pull requests touching employee surface/security files, weekly on schedule, and on `workflow_dispatch`. Reports (HTML, JSON, Markdown) are uploaded as the `owasp-zap-baseline-reports` artifact (30-day retention).
+- **Recorded local/CI ZAP baseline status:** _Pending CI run on this PR head; update with the observed workflow run ID, commit SHA, and pass/warn/fail counts once the `Security ZAP Baseline` workflow completes._
 
 ---
 
@@ -104,7 +107,7 @@ Static analysis and lint:
 
 ```bash
 cd api
-bundle exec brakeman -q
+bundle exec brakeman -q --no-pager
 bundle exec bundler-audit check --update
 bundle exec rubocop
 ```
@@ -117,7 +120,7 @@ bash scripts/security/zap_baseline_employee.sh \
   --output-dir tmp/zap-reports
 ```
 
-This builds `VITE_APP_SURFACE=employee`, starts the static server with generated `_headers`, boots the API with `APP_PROCESS_ROLE=employee_web` against a disposable test database, verifies `/api/v1/admin/companies` returns `404`, runs passive ZAP baseline scans against both surfaces, and tears down both servers and the temporary database on exit.
+This builds `VITE_APP_SURFACE=employee` with matching `DEPLOYMENT_ENV=production` / `VITE_DEPLOYMENT_ENV=production` and a synthetic `.test` placeholder Clerk key, starts the static server on `127.0.0.1` with generated `_headers`, boots the API on `127.0.0.1` with `APP_PROCESS_ROLE=employee_web` and `RAILS_ENV=production` (`FORCE_SSL=false`, `consider_all_requests_local = false`) against a disposable test database, verifies `/api/v1/admin/companies` returns `404`, runs passive ZAP baseline scans against both surfaces (with the API path seed hook), and tears down both servers and the temporary database on exit.
 
 ### 3.3 Production Pre-Invite OWASP ZAP Baseline Scan (Gate G9)
 
@@ -158,4 +161,4 @@ bash scripts/security/zap_baseline_employee.sh \
 | **CJK / Hangul PDF font gap** | Low (functional / availability) | `PdfUnicodeFont` embeds Liberation Sans (covering Latin, Chamorro, Vietnamese, Polish, Hawaiian, Turkish, Romanian, Greek, and Cyrillic). Liberation Sans lacks CJK and Hangul glyphs; checks and tax forms fail closed (`PdfUnicodeFont::UnprintableName`) rather than printing unreadable boxes. | Keep Latin-character legal names for checks and tax filings until a CJK fallback font is bundled and verified against IRS/DRT form metrics. |
 | **Resend webhook configuration (`RESEND_WEBHOOK_SECRET`)** | Medium before electronic-only W-2GU; Low during paper pilot | `POST /api/v1/integrations/email_events` verifies Svix signatures against `RESEND_WEBHOOK_SECRET`, masks all request parameters from logs, and deduplicates by Svix event ID. Without `RESEND_WEBHOOK_SECRET`, the endpoint fails closed (`404`) and notice delivery stays `unknown`. | Before enabling electronic-only W-2GU delivery (26 CFR 31.6051-1(j)), configure the Resend webhook (`email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`), set `RESEND_WEBHOOK_SECRET` on the Payroll API, and complete the 30-day paper-notice bounce workflow. |
 | **Enforced-RLS spec deadlock (`contact_details_enforced_rls_spec.rb`)** | Resolved (fixed in M4-11) | Root cause was cross-shard cluster-wide `pg_authid` contention (`CREATE ROLE payroll_app` / `payroll_owner_sim` in opposite order vs `company_rls_isolation_spec.rb`) plus `ACCESS EXCLUSIVE` locks inside transactional tests. Fixed with per-process unique roles, idle-pool flush, sorted table locks, and explicit single-connection rollback. Note: `company_rls_isolation_spec.rb` still creates the literal `payroll_app` role because it tests `RlsDatabase.verify_runtime!` and `RlsDatabase.login_link_decision_ready?`; local workstations with a persistent `payroll_app` role rely on CI's fresh PostgreSQL container for that suite. | Monitor CI stability across shards; no further code work expected. |
-| **Pre-launch operational gates outside M4-11** | Launch gates (G1–G5, G8) | Automated tests pass locally and in CI; live production ZAP scan waits on Gate G5 (`employee_web` + employee Netlify site + subdomains live). Full third-party penetration test is scheduled before onboarding clients outside Cornerstone's current book (M3 plan §5.2). | Complete production ZAP scan (§3.3), independent cross-family adversarial review, G1 counsel review, G2 WISP sign-off, G3 Clerk Pro + `REQUIRE_MFA=true`, and G4 RLS phase 3 enforcement before inviting employees. |
+| **Pre-launch operational gates outside M4-11** | Launch gates (G1–G5, G8, G9 live scan) | Backend security specs pass locally; local CI ZAP baseline scan runs via `.github/workflows/security-zap-baseline.yml`; live production ZAP scan waits on Gate G5 (`employee_web` + employee Netlify site + subdomains live). Full third-party penetration test is scheduled before onboarding clients outside Cornerstone's current book (M3 plan §5.2). | Complete CI ZAP baseline verification, live production ZAP scan (§3.3), G1 counsel review, G2 WISP sign-off, G3 Clerk Pro + `REQUIRE_MFA=true`, and G4 RLS phase 3 enforcement before inviting employees. |

@@ -18,7 +18,8 @@ MODE="local"
 OUTPUT_DIR="${ROOT_DIR}/tmp/zap-reports"
 WEB_URL=""
 API_URL=""
-ZAP_IMAGE="${ZAP_IMAGE:-ghcr.io/zaproxy/zaproxy:stable}"
+# Pinned OCI index digest of ghcr.io/zaproxy/zaproxy:stable (verified 2026-11-25).
+ZAP_IMAGE="${ZAP_IMAGE:-ghcr.io/zaproxy/zaproxy@sha256:9624669db72f54d86c4b46a7064518bd9bf79d8c61a4c31befa9923489f328af}"
 WEB_PORT="${ZAP_WEB_PORT:-4173}"
 API_PORT="${ZAP_API_PORT:-3011}"
 SKIP_BUILD="false"
@@ -88,7 +89,9 @@ run_zap_baseline() {
   local target_url="$1"
   local conf_file="$2"
   local prefix="$3"
+  local hook_file="${4:-}"
   local docker_net_args=()
+  local hook_args=()
   local zap_target="$target_url"
 
   if [[ "$MODE" == "local" ]]; then
@@ -101,6 +104,12 @@ run_zap_baseline() {
   fi
 
   cp "$conf_file" "${OUTPUT_DIR}/${prefix}.conf"
+  if [[ -n "$hook_file" ]]; then
+    local hook_basename
+    hook_basename="$(basename "$hook_file")"
+    cp "$hook_file" "${OUTPUT_DIR}/${hook_basename}"
+    hook_args=(--hook "/zap/wrk/${hook_basename}")
+  fi
 
   echo "==> Running OWASP ZAP baseline (${prefix}) against ${zap_target}"
   local status=0
@@ -111,6 +120,7 @@ run_zap_baseline() {
     zap-baseline.py \
       -t "$zap_target" \
       -c "${prefix}.conf" \
+      "${hook_args[@]}" \
       -r "${prefix}-report.html" \
       -J "${prefix}-report.json" \
       -w "${prefix}-report.md" \
@@ -127,28 +137,24 @@ run_zap_baseline() {
 
 if [[ "$MODE" == "local" ]]; then
   if [[ "$SKIP_BUILD" != "true" ]]; then
-    echo "==> Building employee web surface (VITE_APP_SURFACE=employee)"
-    # Base64 of "clerk.example.test$" -> valid pk_test_ format for non-production local scan.
+    echo "==> Building employee web surface (VITE_APP_SURFACE=employee, production mode with placeholder key)"
+    # Base64 of "clerk.example.test$" (RFC 2606 .test placeholder, never a real key).
     (
       cd "${ROOT_DIR}/web"
+      DEPLOYMENT_ENV=production \
+      VITE_DEPLOYMENT_ENV=production \
       VITE_APP_SURFACE=employee \
-      VITE_DEPLOYMENT_ENV=development \
       VITE_API_URL="https://employee-api.example.test/api/v1" \
-      VITE_CLERK_PUBLISHABLE_KEY="pk_test_Y2xlcmsuZXhhbXBsZS50ZXN0JA==" \
+      VITE_CLERK_PUBLISHABLE_KEY="pk_live_Y2xlcmsuZXhhbXBsZS50ZXN0JA==" \
       VITE_AUTH_ENABLED=true \
       npm run build
     )
   fi
 
-  local_bind_host="127.0.0.1"
-  if [[ "$(uname -s)" != "Linux" ]]; then
-    local_bind_host="0.0.0.0"
-  fi
-
-  echo "==> Starting employee static server with _headers on ${local_bind_host}:${WEB_PORT}"
+  echo "==> Starting employee static server with _headers on 127.0.0.1:${WEB_PORT}"
   python3 "${ROOT_DIR}/scripts/security/serve_employee_dist.py" \
     --dir "${ROOT_DIR}/web/dist" \
-    --host "$local_bind_host" \
+    --host "127.0.0.1" \
     --port "$WEB_PORT" >"${OUTPUT_DIR}/web-server.log" 2>&1 &
   PIDS+=("$!")
   wait_for_http "http://127.0.0.1:${WEB_PORT}/" "employee web server"
@@ -164,18 +170,31 @@ if [[ "$MODE" == "local" ]]; then
     )
   fi
 
-  echo "==> Starting employee API (APP_PROCESS_ROLE=employee_web) on ${local_bind_host}:${API_PORT}"
+  # Run in production mode (with FORCE_SSL=false for loopback HTTP) so
+  # consider_all_requests_local=false and Rack::Attack match production headers
+  # and 404 handling. RLS_CONTEXT_GUARD_MODE=off avoids requiring a dedicated
+  # payroll_app role for this HTTP-header scan (RLS is verified by RSpec under raise).
+  echo "==> Starting employee API (APP_PROCESS_ROLE=employee_web, RAILS_ENV=production, FORCE_SSL=false) on 127.0.0.1:${API_PORT}"
   (
     cd "${ROOT_DIR}/api"
     APP_PROCESS_ROLE=employee_web \
-    RAILS_ENV=test \
+    RAILS_ENV=production \
+    DEPLOYMENT_ENV=production \
+    FORCE_SSL=false \
+    USE_SOLID_CACHE=false \
+    USE_SOLID_QUEUE=false \
+    ACTIVE_STORAGE_SERVICE=local \
     AUTH_ENABLED=true \
     REQUIRE_MFA=true \
-    RLS_CONTEXT_GUARD_MODE=raise \
+    RLS_CONTEXT_GUARD_MODE=off \
     CLERK_ISSUER="https://clerk.example.test" \
     CLERK_AUTHORIZED_PARTIES="https://payroll.example.test" \
+    DATABASE_URL="${DATABASE_URL:-$TEST_DATABASE_URL}" \
     SECRET_KEY_BASE="zap-local-scan-secret-key-base-0123456789abcdef0123456789abcdef" \
-    bundle exec puma -b "tcp://${local_bind_host}:${API_PORT}" -w 0 -t 2:2
+    ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY="zap-local-scan-primary-key-0123456789" \
+    ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY="zap-local-scan-determ-key-0123456789" \
+    ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT="zap-local-scan-salt-0123456789abcdef" \
+    bundle exec puma -b "tcp://127.0.0.1:${API_PORT}" -w 0 -t 2:2
   ) >"${OUTPUT_DIR}/api-server.log" 2>&1 &
   PIDS+=("$!")
   wait_for_http "http://127.0.0.1:${API_PORT}/up" "employee API server"
@@ -191,7 +210,8 @@ if [[ "$MODE" == "local" ]]; then
   API_URL="http://127.0.0.1:${API_PORT}/up"
 
   run_zap_baseline "$WEB_URL" "${ROOT_DIR}/scripts/security/zap_baseline_web_local.conf" "employee-web-local"
-  run_zap_baseline "$API_URL" "${ROOT_DIR}/scripts/security/zap_baseline_api_local.conf" "employee-api-local"
+  run_zap_baseline "$API_URL" "${ROOT_DIR}/scripts/security/zap_baseline_api_local.conf" "employee-api-local" \
+    "${ROOT_DIR}/scripts/security/zap_api_seed_hook.py"
 else
   if [[ -z "$WEB_URL" || -z "$API_URL" ]]; then
     echo "Production mode requires --web-url and --api-url (both https://)." >&2
@@ -202,8 +222,8 @@ else
     exit 2
   fi
 
-  # Ensure API target probes /up (ZAP spider discovers public/health responses passively).
   api_target="${API_URL%/}/up"
   run_zap_baseline "$WEB_URL" "${ROOT_DIR}/scripts/security/zap_baseline_web_production.conf" "employee-web-production"
-  run_zap_baseline "$api_target" "${ROOT_DIR}/scripts/security/zap_baseline_api_production.conf" "employee-api-production"
+  run_zap_baseline "$api_target" "${ROOT_DIR}/scripts/security/zap_baseline_api_production.conf" "employee-api-production" \
+    "${ROOT_DIR}/scripts/security/zap_api_seed_hook.py"
 fi

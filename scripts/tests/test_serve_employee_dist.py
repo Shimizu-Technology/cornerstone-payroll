@@ -13,6 +13,21 @@ assert SPEC and SPEC.loader
 serve_employee_dist = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(serve_employee_dist)
 
+HOOK_PATH = Path(__file__).resolve().parents[1] / "security" / "zap_api_seed_hook.py"
+HOOK_SPEC = importlib.util.spec_from_file_location("zap_api_seed_hook", HOOK_PATH)
+assert HOOK_SPEC and HOOK_SPEC.loader
+zap_api_seed_hook = importlib.util.module_from_spec(HOOK_SPEC)
+HOOK_SPEC.loader.exec_module(zap_api_seed_hook)
+
+
+class FakeZap:
+    def __init__(self) -> None:
+        self.urls: list[str] = []
+
+    def urlopen(self, url: str) -> str:
+        self.urls.append(url)
+        return ""
+
 
 class ServeEmployeeDistTest(unittest.TestCase):
     def test_parse_netlify_headers_reads_wildcard_block_only(self) -> None:
@@ -37,6 +52,16 @@ class ServeEmployeeDistTest(unittest.TestCase):
                     ("Cache-Control", "no-store"),
                 ],
             )
+
+    def test_zap_api_seed_hook_seeds_employee_and_404_paths(self) -> None:
+        zap = FakeZap()
+        zap_api_seed_hook.zap_started(zap, "http://127.0.0.1:3011/up")
+        zap_api_seed_hook.zap_tuned(zap)
+        self.assertIn("http://127.0.0.1:3011/health/dependencies", zap.urls)
+        self.assertIn("http://127.0.0.1:3011/api/v1/auth/me", zap.urls)
+        self.assertIn("http://127.0.0.1:3011/api/v1/employee/context", zap.urls)
+        self.assertIn("http://127.0.0.1:3011/api/v1/employee/statements", zap.urls)
+        self.assertIn("http://127.0.0.1:3011/api/v1/public/tenant_branding?host=unknown.example.test", zap.urls)
 
 
 if __name__ == "__main__":

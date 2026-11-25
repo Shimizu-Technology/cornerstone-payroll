@@ -47,7 +47,7 @@ def make_handler(dist_dir: Path, extra_headers: list[tuple[str, str]]):
             super().__init__(*args, directory=str(resolved_root), **kwargs)
 
         def send_header(self, keyword: str, value: str) -> None:
-            # Let the Netlify _headers value win for Cache-Control / Server.
+            # Suppress Python's default Server header to avoid false-positive version banners.
             if keyword.lower() == "server":
                 return
             super().send_header(keyword, value)

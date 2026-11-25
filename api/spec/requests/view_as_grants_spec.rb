@@ -757,7 +757,8 @@ RSpec.describe "View-only support sessions", type: :request do
 
   it "gates ViewAsGrant.ready? in production on VIEW_AS_READY, MFA, RLS raise, and Clerk authorized parties" do
     allow(Rails.env).to receive(:production?).and_return(true)
-    saved = ENV.to_h.slice("VIEW_AS_READY", "REQUIRE_MFA", "RLS_CONTEXT_GUARD_MODE", "CLERK_AUTHORIZED_PARTIES")
+    keys = %w[VIEW_AS_READY REQUIRE_MFA RLS_CONTEXT_GUARD_MODE CLERK_AUTHORIZED_PARTIES]
+    saved = keys.index_with { |key| ENV[key] }
     begin
       ENV.update(
         "VIEW_AS_READY" => "true",
@@ -771,10 +772,18 @@ RSpec.describe "View-only support sessions", type: :request do
       expect(ViewAsGrant.ready?).to be(false)
 
       ENV["VIEW_AS_READY"] = "true"
+      ENV["REQUIRE_MFA"] = "false"
+      expect(ViewAsGrant.ready?).to be(false)
+
+      ENV["REQUIRE_MFA"] = "true"
       ENV["RLS_CONTEXT_GUARD_MODE"] = "log"
       expect(ViewAsGrant.ready?).to be(false)
+
+      ENV["RLS_CONTEXT_GUARD_MODE"] = "raise"
+      ENV["CLERK_AUTHORIZED_PARTIES"] = ""
+      expect(ViewAsGrant.ready?).to be(false)
     ensure
-      saved.each { |k, v| ENV[k] = v }
+      saved.each { |key, value| ENV[key] = value }
     end
   end
 end

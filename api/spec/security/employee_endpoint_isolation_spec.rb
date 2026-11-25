@@ -74,6 +74,28 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       { kind: :public, access: :write, feature: :portal }
   }.freeze
 
+  # Non-link routes (:account and :public) cannot be exercised generically via
+  # `link_routes`. Each dimension example wraps its assertions in
+  # `require_all_non_link_routes_exercised!(dimension)`, which observes every
+  # real HTTP request processed by Rails and fails if any non-link route in
+  # `ENDPOINT_MANIFEST` was not actually requested in that dimension. Adding a
+  # new :account or :public route therefore requires real HTTP tests in every
+  # dimension, not just a manifest entry.
+  def require_all_non_link_routes_exercised!(dimension)
+    exercised = Set.new
+    subscriber = lambda do |*, payload|
+      verb = payload[:method].to_s.upcase
+      path = payload[:path].to_s.split("?", 2).first
+      exercised << [ verb, path ]
+    end
+    ActiveSupport::Notifications.subscribed(subscriber, "process_action.action_controller") { yield }
+
+    expected = ENDPOINT_MANIFEST.select { |_, meta| meta[:kind] != :link }.keys.to_set
+    missing = (expected - exercised).to_a.sort
+    expect(missing).to be_empty,
+      "Non-link employee route(s) not actually exercised in #{dimension} dimension: #{missing.inspect}"
+  end
+
   def self.mounted_employee_routes
     Rails.application.routes.routes.filter_map do |route|
       path = route.path.spec.to_s.sub(/\(\.:format\)\z/, "")
@@ -265,7 +287,9 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
   end
 
   # 1. Fail-closed route coverage guard: CI fails if a new employee route is
-  # added without isolation coverage in ENDPOINT_MANIFEST.
+  # added without isolation coverage in ENDPOINT_MANIFEST. Link-scoped routes
+  # are exercised automatically via `link_routes`; non-link routes are enforced
+  # at runtime in every dimension via `require_all_non_link_routes_exercised!`.
   it "fails if any mounted employee route is missing from the isolation matrix" do
     expect(RlsContextGuard.mode).to eq("raise")
     mounted = self.class.mounted_employee_routes
@@ -312,6 +336,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
   # 2. Cross-company isolation across EVERY employee endpoint.
   it "enforces cross-company isolation across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:cross_company) do
     resources_a = seed_employee_resources(emp_a, link_a)
     resources_bravo = seed_employee_resources(emp_bravo, link_bravo)
 
@@ -381,10 +406,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     # POST /api/v1/employee/activation rejects cross-company DOB/SSN mismatch and cross-subdomain bind.
     post_activation(activation_params(emp_a, code: bravo_invite.code, ssn_last4: emp_a.ssn_digits.last(4)))
     expect(response).to have_http_status(:unprocessable_content)
+    end
   end
 
   # 3. Cross-employee isolation (same company) across EVERY employee endpoint.
   it "enforces cross-employee isolation within the same company across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:cross_employee) do
     resources_a = seed_employee_resources(emp_a, link_a)
     resources_b = seed_employee_resources(emp_b, link_b)
     headers_a = link_headers(link_a, azp: alpha_origin)
@@ -433,10 +460,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     post_activation(activation_params(emp_a, code: stranger_invite.code))
     expect(response).to have_http_status(:unprocessable_content)
+    end
   end
 
   # 4. Cross-link isolation across EVERY employee endpoint.
   it "enforces cross-link isolation across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:cross_link) do
     resources_b = seed_employee_resources(emp_b, link_b)
     resources_bravo = seed_employee_resources(emp_bravo, link_bravo)
 
@@ -473,13 +502,20 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
 
+    post "/api/v1/employee/links/reactivate",
+      params: activation_params(routed_emp, token: routed_invite.token).except(:email).to_json,
+      headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+    expect(response).to have_http_status(:not_found)
+
     post_activation(activation_params(routed_emp, token: routed_invite.token, email: "hijack@example.net"))
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body["next"]).to eq("sign_in")
+    end
   end
 
   # 5. Former employee (read-only and correct window) across EVERY employee endpoint.
   it "enforces former-employee read-only rules and access windows across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:former) do
     cutoff = Time.find_zone!("Pacific/Guam").local(2026, 7, 1, 23, 59, 59)
     travel_to(Time.find_zone!("Pacific/Guam").local(2026, 6, 20, 12)) do
       resources_before = seed_employee_resources(emp_a, link_a, pay_date: Date.new(2026, 6, 15))
@@ -547,12 +583,18 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
         params: activation_params(emp_a, token: "terminated-token").except(:email).to_json,
         headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
       expect(response).to have_http_status(:not_found)
+      post "/api/v1/employee/links/reactivate",
+        params: activation_params(emp_a, token: "terminated-token").except(:email).to_json,
+        headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      expect(response).to have_http_status(:not_found)
       expect(stale_invite.reload).to be_invited
+    end
     end
   end
 
   # 6. Revoked link across EVERY employee endpoint.
   it "blocks revoked links across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:revoked) do
     resources_a = seed_employee_resources(emp_a, link_a)
     link_a.update!(status: "revoked", revoked_at: Time.current, revoked_reason: "Lost device")
     headers = link_headers(link_a, azp: alpha_origin)
@@ -582,10 +624,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
       headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
+    end
   end
 
   # 7. Locked link across EVERY employee endpoint.
   it "blocks locked links across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:locked) do
     resources_a = seed_employee_resources(emp_a, link_a)
     link_a.update!(failed_activation_attempts: 5, activation_locked_at: Time.current, activation_locked_until: 24.hours.from_now)
     headers = link_headers(link_a, azp: alpha_origin)
@@ -615,10 +659,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
       headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
+    end
   end
 
   # 8. Feature off (404) across EVERY employee endpoint.
   it "returns 404 when the portal or individual feature switch is off across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:feature_off) do
     resources_a = seed_employee_resources(emp_a, link_a)
     headers = link_headers(link_a, azp: alpha_origin)
 
@@ -669,10 +715,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     post_activation(activation_params(inv.link.employee, code: inv.code))
     expect(response).to have_http_status(:unprocessable_content)
+    end
   end
 
   # 9. Demo versus live identity boundary across EVERY employee endpoint.
   it "enforces the demo versus live identity boundary across every employee endpoint" do
+    require_all_non_link_routes_exercised!(:demo_boundary) do
     demo = create_demo_company(organization: organization, name: "Demo Diner")
     demo_user = create(:user, company: demo, organization: organization, role: :client,
       email: "demo.worker@demo-iso.example", name: "Jordan Reyes", clerk_id: "user_iso_demo")
@@ -708,15 +756,23 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       headers: bearer(demo_user.clerk_id, fva: [ 0, 0 ], two_factor_enabled: true).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
 
+    # Activation with the existing demo user's email never creates or attaches a new live login.
+    post_activation(activation_params(live_emp, code: live_invite.code, email: demo_user.email))
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body["next"]).to eq("sign_in")
+    expect(live_invite.link.reload.user_id).to be_nil
+
     # Demo companies cannot host EmployeeAccountLink records at all.
     demo_emp = create(:employee, company: demo)
     expect(EmployeeAccountLink.new(user: worker_a, company: demo, employee: demo_emp, status: "active")).not_to be_valid
     expect(EmployeeLinks.demo_boundary_allows?(worker_a, demo)).to be(false)
     expect(EmployeeLinks.demo_boundary_allows?(demo_user, alpha)).to be(false)
+    end
   end
 
   # 10. View-only support grant across EVERY employee endpoint (no writes, scoped reads).
   it "enforces view-only support grants across every employee endpoint with zero writes" do
+    require_all_non_link_routes_exercised!(:view_only) do
     resources_a = seed_employee_resources(emp_a, link_a)
     resources_b = seed_employee_resources(emp_b, link_b)
 
@@ -770,5 +826,6 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     expect(PortalNotificationEvent.count).to eq(0)
     expect(AuditLog.where(user_id: worker_a.id)).to be_empty
     expect(AuditLog.where(view_as_grant_id: grant.id).distinct.pluck(:user_id, :real_user_id)).to eq([ [ staff.id, staff.id ] ])
+    end
   end
 end
