@@ -29,10 +29,10 @@ class EmployeeIntakeExceptionReviewService
           end
           EmployeeW4ElectionChangeService.new(employee: employee, actor: actor,
             source: "default_withholding", reason: reason,
-            attributes: { w4_effective_on: eligible_from, filing_status: "single", allowances: 0,
-              additional_withholding: 0, w4_dependent_credit: 0, w4_step2_multiple_jobs: false,
-              w4_step4a_other_income: 0, w4_step4b_deductions: 0, w4_form_version: 2020,
-              w4_signed_on: nil, w4_source_reference: "Manager approved default withholding; employee election outstanding" }).call!
+            attributes: EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.merge(
+              w4_effective_on: eligible_from,
+              w4_source_reference: "Manager approved default withholding; employee election outstanding"
+            )).call!
         end
         exception["payroll_setup_confirmed_by_id"] = actor.id
         exception["payroll_setup_confirmed_by_name"] = actor.name

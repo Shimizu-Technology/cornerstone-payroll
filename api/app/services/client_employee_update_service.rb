@@ -389,9 +389,15 @@ class ClientEmployeeUpdateService
       election_received: candidate_attrs[:w4_election_received]).validate_received_election!
     return if w4_attrs.empty?
 
-    EmployeeW4ElectionChangeService.new(employee: employee, actor: requested_by, source: "client_approved",
+    change = EmployeeW4ElectionChangeService.new(employee: employee.new_record? ? candidate : employee,
+      actor: requested_by, source: "client_approved",
       reason: "Client submitted withholding election", attributes: w4_attrs,
-      election_received: candidate_attrs[:w4_election_received]).validate_default_replacement!
+      election_received: candidate_attrs[:w4_election_received])
+    change.validate_default_replacement!
+    return if candidate.contractor? || !change.effective_before_signature?
+
+    employee.errors.add(:w4_effective_on, EmployeeW4Election::EFFECTIVE_BEFORE_SIGNATURE_MESSAGE)
+    raise ActiveRecord::RecordInvalid, employee
   rescue EmployeeW4ElectionChangeService::Error => e
     employee.errors.add(:w4_election_received, e.message)
     raise ActiveRecord::RecordInvalid, employee

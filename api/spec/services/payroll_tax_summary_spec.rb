@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe PayrollTaxSummary do
   it "reconciles an actual threshold-crossing calculation including additional W-4 withholding" do
     company = create(:company)
-    employee = create(:employee, company:, additional_withholding: 25)
+    employee = create(:employee, company:)
     config = create(:annual_tax_config, tax_year: 2030, ss_wage_base: 184_500,
       medicare_rate: 0.0145, additional_medicare_rate: 0.009, additional_medicare_threshold: 200_000)
     filing = create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 0)
@@ -16,6 +16,11 @@ RSpec.describe PayrollTaxSummary do
       social_security_taxable_tips: 0, additional_medicare_taxable_wages: 0,
       social_security_tax: 11_439, medicare_tax: 2_892.75)
     period = create(:pay_period, company:, start_date: "2030-01-15", end_date: "2030-01-28", pay_date: "2030-02-01")
+    # Pay uses the W-4 election in effect on the pay date, not the profile cache.
+    employee.employee_w4_elections.create!(
+      **EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(additional_withholding: 25),
+      company:, effective_on: period.pay_date, source: "staff", reason: "Synthetic W-4"
+    )
     item = build(:payroll_item, company:, employee:, pay_period: period, hours_worked: 1, pay_rate: 1_000)
 
     PayrollCalculator.for(employee, item).calculate

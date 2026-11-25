@@ -823,3 +823,15 @@ Sources: Leon's answers, and a read-only review of the Cornerstone mailbox. No e
 - GuamTax pages state no 1099 or W-2GU deadlines. Dates come from Tax Alert 23-01 (tax year 2023) and the IRS 2026 W-2 instructions.
 - I could not read the official eCFR (redirected). Federal regulation text came from Cornell LII, which mirrors the eCFR.
 - The Guam breach statute text is the 2009 compilation (COL 052809). I found no amendments, but confirm with the current Compiler edition.
+
+### W-4 effective date audit
+
+Run this read-only query with an authorized reporting connection to find records
+whose effective date precedes their recorded signature date.
+
+```sql
+SELECT id, company_id, source, effective_on, w4_signed_on
+FROM employee_w4_elections
+WHERE effective_on < w4_signed_on
+ORDER BY company_id, effective_on, id;
+```

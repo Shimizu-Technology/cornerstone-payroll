@@ -704,6 +704,34 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
         )
       end
 
+      it "requires an explicit effective date for the first election on update" do
+        expect {
+          patch "/api/v1/admin/employees/#{employee.id}", params: {
+            employee: { filing_status: "married" }
+          }
+        }.not_to change(EmployeeW4Election, :count)
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body.dig("details", "w4_effective_on")).to include(
+          "Enter an effective date for the first W-4 election."
+        )
+        expect(employee.reload.filing_status).to eq("single")
+      end
+
+      it "rejects a first election effective before the signature" do
+        expect {
+          patch "/api/v1/admin/employees/#{employee.id}", params: {
+            employee: { filing_status: "married", w4_effective_on: "2024-06-01", w4_signed_on: "2024-06-10" }
+          }
+        }.not_to change(EmployeeW4Election, :count)
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body.dig("details", "w4_effective_on")).to include(
+          "Set the effective date on or after the date the W-4 was signed."
+        )
+        expect(employee.reload.filing_status).to eq("single")
+      end
+
       it "appends effective-dated W-4 history while leaving the prior election intact" do
         EmployeeW4ElectionChangeService.new(
           employee: employee,

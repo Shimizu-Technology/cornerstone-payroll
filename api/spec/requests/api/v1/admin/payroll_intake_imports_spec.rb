@@ -431,7 +431,11 @@ RSpec.describe "Api::V1::Admin::PayrollIntakeImports", type: :request do
     end
 
     it "clears stale manual fields when force overwriting an existing payroll item" do
-      alice.update!(additional_withholding: 7)
+      # Pay uses the W-4 election in effect on the pay date, not the profile cache.
+      alice.employee_w4_elections.create!(
+        **EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(additional_withholding: 7),
+        company: company, effective_on: pay_period.pay_date, source: "staff", reason: "Synthetic W-4"
+      )
       create(
         :payroll_item,
         pay_period: pay_period,

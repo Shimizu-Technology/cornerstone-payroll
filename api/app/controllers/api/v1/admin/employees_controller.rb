@@ -187,7 +187,14 @@ module Api
             requested_pay_rate = attributes.key?(:pay_rate) ? attributes.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
             basis = attributes.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
             apply_contact_changes!(attributes, creation: false)
-            @employee.update!(attributes.merge(w4_attributes))
+            @employee.assign_attributes(attributes.merge(w4_attributes))
+            deferring_intake_election = @employee.intake_exception.present? && @employee.w4_effective_on.blank?
+            if @employee.w2_employee? && w4_attributes.present? && w4_attributes[:w4_effective_on].blank? &&
+                !deferring_intake_election && @employee.employee_w4_elections.none?
+              @employee.errors.add(:w4_effective_on, "Enter an effective date for the first W-4 election.")
+              raise ActiveRecord::RecordInvalid, @employee
+            end
+            @employee.save!
             EmployeeContactValidator.record_same_person_confirmation_audit!(
               employee: @employee,
               result: @contact_validation_result,
