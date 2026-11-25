@@ -174,6 +174,19 @@ RSpec.describe "Api::V1::Client::Employees", type: :request do
   end
 
   describe "PATCH /api/v1/client/employees/:id" do
+    it "rejects a W-4 effective date before its signature at submission" do
+      expect do
+        patch "/api/v1/client/employees/#{employee.id}", params: {
+          employee: { w4_effective_on: "2026-01-01", w4_signed_on: "2026-01-02", w4_election_received: true }
+        }
+      end.not_to change(EmployeeChangeRequest, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.dig("details", "w4_effective_on")).to include(
+        "Set the effective date on or after the date the W-4 was signed."
+      )
+    end
+
     it "persists suffix directly and does not write it again when unchanged" do
       patch "/api/v1/client/employees/#{employee.id}", params: { employee: { name_suffix: "JR" } }
       expect(response).to have_http_status(:ok), response.body

@@ -64,6 +64,14 @@ class EmployeeW4ElectionChangeService
     raise Error, "Provide a valid received election effective or signed date"
   end
 
+  def effective_before_signature?
+    values = complete_values
+    prior = employee.employee_w4_elections.recent_first.first
+    return false unless changed_from?(prior, values)
+
+    EmployeeW4Election.new(values.merge(source: source)).effective_before_signature?
+  end
+
   def validate_default_replacement!(prior: employee.employee_w4_elections.recent_first.first, values: complete_values)
     return unless prior&.source == "default_withholding" && source != "default_withholding"
     return unless changed_from?(prior, values) || election_received
