@@ -6,6 +6,7 @@
 # Load the new Tax Configuration seeds first
 load Rails.root.join("db/seeds/tax_configs.rb")
 load Rails.root.join("db/seeds/information_return_thresholds.rb")
+load Rails.root.join("db/seeds/delivery_disclosures.rb")
 
 AnnualRetirementLimit.find_or_create_by!(tax_year: 2026) do |limit|
   limit.elective_deferral_limit = 24_500

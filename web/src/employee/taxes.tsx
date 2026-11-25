@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { askManager } from './brand';
 import type { TaxForm } from './contracts';
 import { useBrand, useReadySession } from './contexts';
+import { DeliveryConsentSection } from './consent';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import { Card, Chip, EmpButton, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
@@ -98,6 +99,9 @@ export function TaxesTab(): ReactElement {
               <p>Your W-2GU will be here when it's ready. You'll still get a paper copy, the same way as other years.</p>
             </Placeholder>
           </Card>
+        )}
+        {state.info.features.deliveryConsent && (
+          <DeliveryConsentSection kinds={['w2gu']} />
         )}
       </div>
     </Page>

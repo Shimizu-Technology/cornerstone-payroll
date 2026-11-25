@@ -65,6 +65,7 @@ module Api
               include_configuration_review_history: true,
               include_document_readiness: true,
               include_compensation_history: true,
+              include_delivery_consents: true,
               contact_context: contact_context
             )
           }
@@ -118,6 +119,7 @@ module Api
               include_w4_history: true,
               include_document_readiness: true,
               include_compensation_history: true,
+              include_delivery_consents: true,
               contact_context: contact_context
             ),
             contact_warnings: @contact_validation_result&.warnings || []
@@ -326,7 +328,14 @@ module Api
           EmployeeIntakeExceptionReviewService.call!(employee: @employee, actor: current_user,
             attributes: params.require(:intake_exception).permit(:follow_up_due_on, :payroll_eligible_from,
               :confirm_payroll_setup, :reason, :acknowledge_default_withholding))
-          render json: { data: serialize_employee(@employee.reload, include_w4_history: true, include_document_readiness: true) }
+          render json: {
+            data: serialize_employee(
+              @employee.reload,
+              include_w4_history: true,
+              include_document_readiness: true,
+              include_delivery_consents: true
+            )
+          }
         rescue EmployeeIntakeExceptionReviewService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -349,7 +358,8 @@ module Api
               include_classification_history: true,
               include_lifecycle: true,
               include_w4_history: true,
-              include_configuration_review_history: true
+              include_configuration_review_history: true,
+              include_delivery_consents: true
             )
           }
         rescue EmployeeConfigurationReviewService::NotAuthorized => e
@@ -739,6 +749,7 @@ module Api
           include_configuration_review_history: false,
           include_document_readiness: false,
           include_compensation_history: false,
+          include_delivery_consents: false,
           contact_context: nil
         )
           data = employee.as_json(
@@ -827,6 +838,10 @@ module Api
 
           if include_document_readiness
             data["document_readiness"] = EmployeeDocumentReadiness.summary(employee)
+          end
+
+          if include_delivery_consents
+            data["delivery_consents"] = DeliveryConsents::StaffSummary.for(employee)
           end
 
           data
