@@ -153,6 +153,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
           ) : !period.review_pay_period_id && period.client_payroll_status !== 'committed' && (
             <p className="text-sm text-neutral-700">Cornerstone is preparing this payroll.</p>
           )}
+          {audience === 'staff' && period.pay_period_link_error && <p role="alert" className="break-words text-sm text-warning-950">{period.pay_period_link_error}</p>}
           {audience === 'staff' && period.review_pay_period_id && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={`/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}`}>Open payroll preview review</Link>}
           {audience === 'staff' && <StaffActions busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
 

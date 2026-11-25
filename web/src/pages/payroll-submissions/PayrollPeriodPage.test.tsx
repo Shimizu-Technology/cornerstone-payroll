@@ -191,3 +191,14 @@ it('orders the six staff sections and hides the single-revision picker', async (
   ]);
   expect(screen.queryByLabelText('Client’s revision')).toBeNull();
 });
+
+it('warns staff, and only staff, when the linked pay run is voided or ambiguous', async () => {
+  const warning = 'The linked pay run was voided. Link the replacement run before review.';
+  mocks.get.mockResolvedValue({ data: period({ pay_period_link_error: warning }) });
+  renderAt('staff');
+  expect((await screen.findByRole('alert')).textContent).toBe(warning);
+  cleanup();
+  renderAt('client');
+  await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' });
+  expect(screen.queryByText(warning)).toBeNull();
+});
