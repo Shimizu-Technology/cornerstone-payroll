@@ -4,7 +4,7 @@ module DemoCompany
   # Provisions an empty, permanent demo company. Seeding its employees and
   # payroll is a separate step; this only creates the company shape.
   class Create
-    FIXTURE_KEY_PATTERN = /\A[a-z0-9][a-z0-9-]{2,62}\z/
+    FIXTURE_KEY_PATTERN = Company::DEMO_FIXTURE_KEY_PATTERN
     PAY_FREQUENCIES = %w[biweekly weekly semimonthly monthly].freeze
     PROFILE_FIELDS = %i[ein address_line1 address_line2 city state zip phone email filing_contact_name].freeze
 

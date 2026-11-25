@@ -71,7 +71,9 @@ RSpec.describe Company, "demo purpose", type: :model do
   end
 
   it "requires a non-blank fixture key in the database" do
-    [ {}, { "demo_fixture_key" => "" }, { "demo_fixture_key" => "   " }, { "purpose" => "demo" } ].each do |manifest|
+    [ {}, { "demo_fixture_key" => "" }, { "demo_fixture_key" => "   " }, { "demo_fixture_key" => "\t\t" },
+      { "demo_fixture_key" => "\n" }, { "demo_fixture_key" => " \t\n " }, { "demo_fixture_key" => "Bad Key" },
+      { "demo_fixture_key" => "ok-key\n" }, { "purpose" => "demo" } ].each do |manifest|
       expect { raw_insert(company_columns(test_workspace_purpose: "demo", test_workspace_manifest: manifest.to_json)) }
         .to raise_error(ActiveRecord::StatementInvalid, /companies_test_workspace_shape_check/), "accepted #{manifest.inspect}"
     end
@@ -83,6 +85,10 @@ RSpec.describe Company, "demo purpose", type: :model do
   it "requires a fixture key and keeps it immutable" do
     expect(build(:company, organization: organization, payroll_environment: "migration_rehearsal",
       test_workspace_purpose: "demo", migration_rehearsal_status: "ready")).not_to be_valid
+    [ "\t\t", "\n", "Bad Key" ].each do |key|
+      expect(build(:company, organization: organization, payroll_environment: "migration_rehearsal", test_workspace_purpose: "demo",
+        migration_rehearsal_status: "ready", test_workspace_manifest: { "demo_fixture_key" => key })).not_to be_valid
+    end
 
     demo.test_workspace_manifest = demo.test_workspace_manifest.merge("demo_fixture_key" => "other-key")
     expect(demo).not_to be_valid

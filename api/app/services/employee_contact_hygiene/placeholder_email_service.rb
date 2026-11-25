@@ -116,6 +116,7 @@ module EmployeeContactHygiene
     end
 
     def authorize!
+      raise Forbidden, Company::DEMO_UNAVAILABLE_MESSAGE if @company&.demo?
       if @company&.test_workspace?
         raise Forbidden, "Placeholder email settings are organization-wide and cannot be changed from a test workspace."
       end

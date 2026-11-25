@@ -24,7 +24,7 @@ module Api
         private
 
         def report_meta(company, report_key)
-          super.merge(payroll_status_note: company&.test_workspace? ? "TEST ONLY — finished copied history and committed payroll" : nil)
+          super.merge(payroll_status_note: company&.practice_copy? ? "TEST ONLY — finished copied history and committed payroll" : nil)
         end
 
         def report_pay_periods
