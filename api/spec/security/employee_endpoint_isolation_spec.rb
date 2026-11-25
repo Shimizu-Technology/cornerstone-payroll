@@ -441,21 +441,32 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     end
   end
 
-  # Sign-up itself does not read the browser Origin: Bravo's own invitee with
-  # Bravo's correct DOB and SSN-4 starts a sign-up from any page. The subdomain
-  # binding is that the sign-up returns to Bravo's subdomain only, and Bind
-  # (/auth/me) refuses a token whose azp names another company's subdomain.
-  it "binds an activation from another company's subdomain only on the invite company's own subdomain" do
+  # Activation for a company with an enabled subdomain refuses a browser Origin
+  # from another client's subdomain with the same generic activation_failed
+  # answer (revealing nothing about the invite), succeeds from its own subdomain
+  # or without an Origin header, and Bind (/auth/me) still refuses a token whose
+  # azp names another company's subdomain.
+  it "refuses activation from another company's subdomain and binds only on the invite company's own subdomain" do
     bravo_emp = create(:employee, company: bravo, first_name: "Riley", last_name: "Santos", date_of_birth: Date.new(1990, 4, 12))
     bravo_invite = invite!(bravo_emp, actor: create(:user, role: :admin, company: bravo, organization: organization), delivery: "code")
 
+    # Bravo's invitee with correct DOB and SSN-4 from Alpha's origin is refused
+    # with the same generic failure and leaves the invite untouched.
     post_activation(activation_params(bravo_emp, code: bravo_invite.code), origin: alpha_origin)
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body).to eq("error" => Api::V1::EmployeePortal::ActivationsController::FAILED, "code" => "activation_failed")
+    expect(bravo_invite.link.reload).to have_attributes(status: "invited", user_id: nil, failed_activation_attempts: 0)
+    expect(clerk_invitations).to be_empty
+
+    # Same-origin activation from Bravo's own subdomain succeeds and redirects to Bravo.
+    post_activation(activation_params(bravo_emp, code: bravo_invite.code), origin: bravo_origin)
     expect_sign_up_started
     link = bravo_invite.link.reload
     expect(link).to have_attributes(status: "invited", company_id: bravo.id)
     expect(link.user).to have_attributes(company_id: bravo.id, clerk_id: nil)
     expect(clerk_invitations.last.fetch(:redirect_url)).to eq("#{bravo_origin}/sign-up")
 
+    # Bind (/auth/me) still refuses a foreign azp and accepts Bravo's own azp.
     metadata = { "payroll_employee_link_id" => link.id, "payroll_invite_generation" => link.invite_generation }
     bind = lambda do |azp|
       TenantScope.as_system(reason: "Check the employee bind subdomain rule") do
@@ -465,6 +476,25 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     expect(bind.call(alpha_origin)).to be_nil
     expect(bind.call(bravo_origin)).to eq(link)
     expect(link.reload).to have_attributes(status: "invited", user_id: link.user_id)
+  end
+
+  it "allows activation without an Origin header and keeps current behavior for companies without a subdomain" do
+    bravo_emp = create(:employee, company: bravo, first_name: "Morgan", last_name: "Cruz", date_of_birth: Date.new(1993, 8, 22))
+    bravo_invite = invite!(bravo_emp, actor: create(:user, role: :admin, company: bravo, organization: organization), delivery: "code")
+
+    post_activation(activation_params(bravo_emp, code: bravo_invite.code, email: "morgan.no.origin@example.net"))
+    expect_sign_up_started
+    expect(bravo_invite.link.reload.user).to have_attributes(company_id: bravo.id, clerk_id: nil)
+
+    shared_co = create(:company, organization: organization, name: "Shared Co", subdomain_slug: nil)
+    enable_employee_app!(shared_co, subdomain: false)
+    shared_emp = create(:employee, company: shared_co, first_name: "Devon", last_name: "Lim", date_of_birth: Date.new(1991, 11, 5))
+    shared_invite = invite!(shared_emp, actor: create(:user, role: :admin, company: shared_co, organization: organization), delivery: "code")
+
+    post_activation(activation_params(shared_emp, code: shared_invite.code, email: "devon.shared@example.net"),
+      origin: EmployeeLinkHelpers::APP_URL)
+    expect_sign_up_started
+    expect(shared_invite.link.reload.user).to have_attributes(company_id: shared_co.id, clerk_id: nil)
   end
 
   # 3. Cross-employee isolation (same company) across EVERY employee endpoint.
