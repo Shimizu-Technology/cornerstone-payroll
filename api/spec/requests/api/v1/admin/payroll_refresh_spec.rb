@@ -319,7 +319,7 @@ RSpec.describe "Payroll setup refresh API", type: :request do
     company.update!(client_payroll_approval_required: true)
     period.update!(status: "calculated")
     package = PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
-    client = create(:user, company: company, role: "client")
+    client = create(:user, :with_client_assignment, company: company, role: "client")
     period.update!(status: "approved")
     review_service = PayrollReview::RevisionService.new(pay_period: period, actor: actor)
     package = review_service.publish!

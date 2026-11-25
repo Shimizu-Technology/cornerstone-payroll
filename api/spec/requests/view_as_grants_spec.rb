@@ -10,7 +10,7 @@ RSpec.describe "View-only support sessions", type: :request do
   let(:organization) { create(:organization) }
   let(:company) { create(:company, organization: organization, subdomain_slug: "example-fixture") }
   let(:staff) { create(:user, company: company, role: :super_admin, view_as_allowed: true, clerk_id: "user_support", name: "Support Fixture") }
-  let(:client) { create(:user, company: company, role: :client, clerk_id: "user_client", name: "Client Fixture") }
+  let(:client) { create(:user, :with_client_assignment, company: company, role: :client, clerk_id: "user_client", name: "Client Fixture") }
   let(:employee) { create(:employee, company: company, first_name: "Worker", last_name: "Fixture") }
   let(:employee_origin) { "https://example-fixture.shimizu-technology.com" }
 
@@ -124,7 +124,6 @@ RSpec.describe "View-only support sessions", type: :request do
 
   it "pins the client identity and company, rejects cross-company pulls, and leaves both login records untouched" do
     second = create(:company, organization: organization)
-    create(:company_assignment, user: client, company: company)
     create(:company_assignment, user: client, company: second)
     token = token_for
     headers = viewing(token)
@@ -235,7 +234,7 @@ RSpec.describe "View-only support sessions", type: :request do
   it "exposes only the matching company's support events to its client user" do
     token_for
     other = create(:company, organization: organization)
-    peer = create(:user, role: :client, company: other, clerk_id: "user_peer", name: "Second Fixture")
+    peer = create(:user, :with_client_assignment, role: :client, company: other, clerk_id: "user_peer", name: "Second Fixture")
     token_for(peer, from: other)
     AuditLog.record!(user: staff, company_id: company.id, action: "employees#update", record_type: "Employee")
     get "/api/v1/client/support_access_logs", headers: authenticated(client)
