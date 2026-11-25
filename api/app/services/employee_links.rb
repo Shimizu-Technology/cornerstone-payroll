@@ -158,7 +158,7 @@ module EmployeeLinks
   end
 
   def self.openable?(user, link, azp:)
-    link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company)
+    !link.activation_locked? && link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company)
   end
 
   # A link to a client subdomain belongs to that subdomain's company only.

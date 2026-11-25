@@ -18,6 +18,7 @@ module Api
         include EmployeeLinkCheckParams
         include CompanyRlsScoped
 
+        before_action :set_employee_portal_no_store
         before_action :reject_query_credentials!
 
         FAILED = "We couldn't verify those details. Check them and try again, or ask your manager for a new invite."
@@ -28,7 +29,6 @@ module Api
         def create
           return head :forbidden if request.headers[ViewAsGrant::HEADER]
 
-          response.headers["Cache-Control"] = "no-store"
           return render_unavailable if WriteMaintenance.enabled?
 
           link_check_started!
@@ -46,6 +46,10 @@ module Api
         end
 
         private
+
+        def set_employee_portal_no_store
+          response.headers["Cache-Control"] = "no-store"
+        end
 
         def rls_system_reason
           "Check employee app sign-up before any session exists"
