@@ -33,6 +33,7 @@
     "decimal.js": "10.6.0",
     "dompurify": "^3.4.17",
     "jszip": "^3.10.1",
+    "libphonenumber-js": "1.13.17",
     "lucide-react": "^0.563.0",
     "pdfjs-dist": "^6.3.289",
     "posthog-js": "^1.364.2",

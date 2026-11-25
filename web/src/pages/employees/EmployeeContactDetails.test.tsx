@@ -220,9 +220,9 @@ describe('EmployeeContactDetails', () => {
     });
 
     // Saved: the row closes and shows the full, formatted number.
-    expect(await screen.findByText('+1 671 555-0199')).toBeTruthy();
+    expect(await screen.findByText('(671) 555-0199')).toBeTruthy();
     expect(screen.queryByLabelText('Mobile for Maria Cruz')).toBeNull();
-    expect((field('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('+16715550199');
+    expect((field('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('(671) 555-0199');
     expect((field('Street address for Maria Cruz') as HTMLInputElement).value).toBe('100 Marine Corps Dr');
   });
 
@@ -556,7 +556,7 @@ describe('EmployeeContactDetails', () => {
         7,
       );
     });
-    expect((field('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('+16715550199');
+    expect((field('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('(671) 555-0199');
     expect(document.body.textContent).not.toContain('123-45-6789');
   });
 

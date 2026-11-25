@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Header } from '@/components/layout/Header';
@@ -163,7 +164,7 @@ function EntryList({ title, entries }: { title: string; entries: HistoryEntry[] 
   const [page, setPage] = useState(0);
   const size = 25;
   return <section className={panel}><h2 className="text-lg font-semibold">{title}</h2><p className="mt-1 text-sm text-neutral-600">{entries.length} entries · {hours(String(entries.reduce((sum, row) => sum + Number(row.hours), 0)))} hours</p>
-    {entries.length > 0 && <><div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><caption className="sr-only">{title}</caption><thead><tr>{['Entry', 'Employee', 'Work date', 'Category', 'Hours', 'Source approval'].map((label) => <th className={cell} key={label}>{label}</th>)}</tr></thead><tbody>{entries.slice(page * size, (page + 1) * size).map((row) => <tr key={row.id}><td className={cell}>{row.id}</td><td className={cell}>{row.employee || 'Missing owner'}</td><td className={cell}>{row.work_date}</td><td className={cell}>{row.category || 'Unclassified'}</td><td className={cell}>{hours(row.hours)}</td><td className={cell}>{row.approval_status || 'Undetermined'}</td></tr>)}</tbody></table></div>
+    {entries.length > 0 && <><div className="mt-3 overflow-x-auto"><table className="w-full text-sm"><caption className="sr-only">{title}</caption><thead><tr>{['Entry', 'Employee', 'Work date', 'Category', 'Hours', 'Source approval'].map((label) => <th className={cell} key={label}>{label}</th>)}</tr></thead><tbody>{entries.slice(page * size, (page + 1) * size).map((row) => <tr key={row.id}><td className={cell}>{row.id}</td><td className={cell}>{row.employee || 'Missing owner'}</td><td className={cell}>{formatDate(row.work_date)}</td><td className={cell}>{row.category || 'Unclassified'}</td><td className={cell}>{hours(row.hours)}</td><td className={cell}>{row.approval_status || 'Undetermined'}</td></tr>)}</tbody></table></div>
       {entries.length > size && <div className="mt-3 flex items-center gap-3"><Button variant="outline" disabled={page === 0} onClick={() => setPage((value) => value - 1)} aria-label={`Previous ${title}`}>Previous</Button><span className="text-sm">{page + 1} / {Math.ceil(entries.length / size)}</span><Button variant="outline" disabled={(page + 1) * size >= entries.length} onClick={() => setPage((value) => value + 1)} aria-label={`Next ${title}`}>Next</Button></div>}
     </>}
   </section>;

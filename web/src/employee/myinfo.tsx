@@ -11,7 +11,8 @@ import { askManager } from './brand';
 import type { Address, AddressRequest, EmergencyContact, EmployeeProfile } from './contracts';
 import { useBrand, useEmployeeAuth, useReadySession } from './contexts';
 import { DeliveryConsentSection } from './consent';
-import { addressLines, formatPhone, longDate } from './format';
+import { formatPhone } from '@/lib/display-phone';
+import { addressLines, longDate } from './format';
 import { useSignOut } from './hooks';
 import { SECURITY_PATH } from './security';
 import { Card, Chip, EmpButton, EmpButtonLink, Field, FormMessage, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
@@ -160,7 +161,8 @@ function ChangeButton({ onClick, label }: { onClick: () => void; label: string }
 
 function PhoneEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; onSaved: ProfileProps['onSaved']; onClose: () => void }): ReactElement {
   const { api, state } = useReadySession();
-  const [phone, setPhone] = useState(profile.phone ?? '');
+  const [phoneDraft, setPhone] = useState<string | null>(null);
+  const phone = phoneDraft ?? profile.phone ?? '';
   const [problem, setProblem] = useState<string | null>(null);
   const change = useChange();
   const submit = async (event: FormEvent): Promise<void> => {
@@ -176,7 +178,7 @@ function PhoneEditor({ profile, onSaved, onClose }: { profile: EmployeeProfile; 
   };
   return (
     <form className="emp-form" onSubmit={(event) => { void submit(event); }} noValidate>
-      <Field label="Mobile phone" type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} error={problem} autoFocus />
+      <Field label="Mobile phone" type="tel" inputMode="tel" autoComplete="tel" value={phoneDraft ?? formatPhone(profile.phone)} onChange={(e) => setPhone(e.target.value)} error={problem} autoFocus />
       <StepUpNote />
       <ChangeProblem change={change} />
       <FormButtons saving={change.saving} label="Save phone" onCancel={onClose} />
@@ -433,7 +435,7 @@ function EmergencyForm({ contact, onSaved, onClose }: { contact?: EmergencyConta
     <form key={formKey} className="emp-form" onSubmit={(event) => { void submit(event, false); }} noValidate aria-label={contact ? `Edit ${contact.name}` : 'New emergency contact'}>
       <Field id={`${prefix}-name`} label="Name" autoComplete="off" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} error={problems.name} autoFocus />
       <Field id={`${prefix}-relationship`} label="Relationship (optional)" hint="For example: mother, partner, friend" autoComplete="off" value={draft.relationship} onChange={(e) => setDraft((d) => ({ ...d, relationship: e.target.value }))} />
-      <Field id={`${prefix}-phone`} label="Phone" type="tel" inputMode="tel" autoComplete="off" value={draft.phone} onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} error={problems.phone} />
+      <Field id={`${prefix}-phone`} label="Phone" type="tel" inputMode="tel" autoComplete="off" value={draft.phone === contact?.phone ? formatPhone(draft.phone) : draft.phone} onChange={(e) => setDraft((d) => ({ ...d, phone: e.target.value }))} error={problems.phone} />
       <StepUpNote />
       <ChangeProblem change={change} />
       <FormButtons

@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { Link } from 'react-router';
 import { needsTimeTrackingAccount, TIME_TRACKING_CONNECTION_MESSAGE } from '@/lib/time-tracking-account';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -5,7 +6,6 @@ import { AlertTriangle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { formatDate, formatDateRange } from '@/lib/utils';
 import { payPeriodsApi } from '@/services/api';
 import type { AirePayrollManualReview, PayPeriodStatus } from '@/types';
 

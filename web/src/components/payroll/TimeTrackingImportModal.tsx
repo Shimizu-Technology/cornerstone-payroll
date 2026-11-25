@@ -1,6 +1,7 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { exclusionCategoryLabels } from '@/lib/time-tracking-exclusions';
 import { supportsSourceOperation } from '@/lib/time-tracking';
-import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { controlClassName } from '@/components/ui/field-styles';

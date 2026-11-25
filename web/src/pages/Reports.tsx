@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { FilingEmployeeWarnings } from '@/components/reports/FilingEmployeeWarnings';
 import type { FilingEmployeeCompleteness } from '@/types';
 import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
@@ -347,7 +348,7 @@ export function PayrollRegisterPanel() {
                   {payPeriods.length === 0 && <option value="">No reportable pay periods</option>}
                   {payPeriods.map((pp) => (
                     <option key={pp.key} value={pp.key}>
-                      {pp.status === 'calculated' || pp.status === 'approved' ? 'TEST ONLY · ' : ''}{pp.source.label} · {pp.start_date} – {pp.end_date} (Pay: {pp.pay_date})
+                      {pp.status === 'calculated' || pp.status === 'approved' ? 'TEST ONLY · ' : ''}{pp.source.label} · {formatDateRange(pp.start_date, pp.end_date)} (Pay: {formatDate(pp.pay_date)})
                     </option>
                   ))}
                 </select>
@@ -490,7 +491,7 @@ function TaxSummaryPanel() {
     }
   }
 
-  const periodLabel = periodMode === 'custom' ? `${startDate} – ${endDate}` : (quarter ? `Q${quarter} ${year}` : `${year} Full Year`);
+  const periodLabel = periodMode === 'custom' ? formatDateRange(startDate, endDate) : (quarter ? `Q${quarter} ${year}` : `${year} Full Year`);
   const exportFormats: ReportDownloadFormat[] = [
     {
       key: 'pdf',
@@ -609,7 +610,7 @@ function TaxSummaryPanel() {
               Pay-date basis &bull; {report.pay_periods_included} pay period{report.pay_periods_included !== 1 ? 's' : ''} &bull;{' '}
               {report.employee_count} employee{report.employee_count !== 1 ? 's' : ''}
               {report.period.start_date && (
-                <> &bull; {report.period.start_date} – {report.period.end_date}</>
+                <> &bull; {formatDateRange(report.period.start_date, report.period.end_date)}</>
               )}
             </CardDescription>
           </CardHeader>
@@ -1408,7 +1409,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
             <CardContent className="space-y-3 sm:hidden">
               {report.history.map((history) => (
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
-                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{history.pay_date}</p><p className="mt-1 break-words text-xs text-neutral-600">{history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{formatDate(history.pay_date)}</p><p className="mt-1 break-words text-xs text-neutral-600">{formatDateRange(history.period_start, history.period_end) || history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div><div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div><div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div><div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div></dl></details>
                 </div>
@@ -1435,8 +1436,8 @@ export function EmployeePayHistoryPanel(): ReactNode {
                 <tbody>
                   {report.history.map((h) => (
                     <tr key={h.key} className="border-b last:border-0 hover:bg-neutral-50">
-                      <td className="py-2 pr-4">{h.pay_date}</td>
-                      <td className="py-2 pr-4 text-neutral-500">{h.period_description}</td>
+                      <td className="py-2 pr-4">{formatDate(h.pay_date)}</td>
+                      <td className="py-2 pr-4 text-neutral-500">{formatDateRange(h.period_start, h.period_end) || h.period_description}</td>
                       <td className="py-2 pr-4"><Badge variant={h.record_type === 'imported' ? 'warning' : 'default'}>{h.source.label}</Badge></td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
@@ -1658,7 +1659,7 @@ export function YtdSummaryPanel() {
   ];
   const noPayrollActivity = report != null && Number(report.company_totals?.payroll_count ?? 0) === 0;
   const reportLabel = periodMode === 'pay_run' && selectedPayRun
-    ? `${selectedPayRun.start_date} – ${selectedPayRun.end_date} (paid ${selectedPayRun.pay_date})`
+    ? `${formatDateRange(selectedPayRun.start_date, selectedPayRun.end_date)} (paid ${formatDate(selectedPayRun.pay_date)})`
     : report?.period.label;
 
   return (
@@ -1694,7 +1695,7 @@ export function YtdSummaryPanel() {
                     {payRuns.length === 0 && <option value="">No reportable payroll runs</option>}
                     {payRuns.map((payRun) => (
                       <option key={payRun.key} value={payRun.key}>
-                        {payRun.start_date} – {payRun.end_date} · paid {payRun.pay_date} · {payRun.source.label}
+                        {formatDateRange(payRun.start_date, payRun.end_date)} · paid {formatDate(payRun.pay_date)} · {payRun.source.label}
                       </option>
                     ))}
                   </select>
@@ -1837,7 +1838,7 @@ export function YtdSummaryPanel() {
                   <ul className="mt-2 space-y-1 text-sm text-neutral-700">
                     {report.included_payroll_runs?.map((payRun) => (
                       <li key={payRun.key}>
-                        {payRun.work_period_start} – {payRun.work_period_end} · paid {payRun.pay_date} · {payRun.source}
+                        {formatDateRange(payRun.work_period_start, payRun.work_period_end)} · paid {formatDate(payRun.pay_date)} · {payRun.source}
                       </li>
                     ))}
                   </ul>
