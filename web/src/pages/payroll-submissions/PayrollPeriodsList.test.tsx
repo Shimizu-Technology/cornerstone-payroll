@@ -17,13 +17,13 @@ afterEach(cleanup);
 it('shows outstanding file requests alongside the finalized status', async () => {
   vi.mocked(clientPayrollSubmissionsApi.list).mockResolvedValue({
     data: [{
-      ref: '9', label: 'Nov 2–15, 2026', pay_date: '2026-11-20', status: 'in_review',
+      ref: '9', label: 'Nov 2–15, 2026', start_date: '2026-11-02', end_date: '2026-11-15', pay_date: '2026-11-20', status: 'in_review',
       status_label: 'Requested files outstanding', client_payroll_status: 'committed',
     }],
     meta: { derives_from_schedule: true },
   } as Awaited<ReturnType<typeof clientPayrollSubmissionsApi.list>>);
   render(<MemoryRouter><PayrollPeriodsList audience="client" /></MemoryRouter>);
-  const row = await screen.findByRole('link', { name: /Payroll Nov 2/ });
+  const row = await screen.findByRole('link', { name: /Payroll Nov 2 – 15, 2026/ });
   expect(within(row).getByText('Finalized')).toBeTruthy();
   expect(within(row).getByText('Requested files outstanding')).toBeTruthy();
 });

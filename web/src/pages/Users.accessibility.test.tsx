@@ -80,6 +80,17 @@ describe('Users accessible account controls', () => {
     expect(screen.getAllByText('Accountant').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('shows last activity in Guam time in both layouts and the desktop tooltip', async () => {
+    apiMocks.users.list.mockResolvedValue({
+      data: [{ ...originalUser, last_active_at: '2026-11-20T14:38:52Z' }],
+    });
+    render(<Users />);
+
+    const labels = await screen.findAllByText('Nov 21, 2026, 12:38 AM ChST');
+    expect(inPresentation(labels, 'mobile')).toBeTruthy();
+    expect(inPresentation(labels, 'desktop').title).toBe('Nov 21, 2026, 12:38:52 AM ChST');
+  });
+
   it.each(['mobile', 'desktop'] as const)('cancels named edits and saves the intended user and assignments in the %s presentation', async (presentation) => {
     const user = userEvent.setup();
     apiMocks.users.list.mockResolvedValueOnce({ data: [originalUser] }).mockResolvedValue({ data: [savedUser] });

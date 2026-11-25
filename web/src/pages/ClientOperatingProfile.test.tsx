@@ -79,7 +79,7 @@ describe('Client operating profile editor', () => {
       lock_version: 0,
       changes: { 'tips.default': 'already_paid_out' },
     });
-    expect(await screen.findByText('Version 2 saved, effective 2026-11-16.')).toBeTruthy();
+    expect(await screen.findByText('Version 2 saved, effective Nov 16, 2026.')).toBeTruthy();
     expect(screen.getByText('Active version 2')).toBeTruthy();
     expect((screen.getByRole('combobox', { name: 'Tips default' }) as HTMLSelectElement).value).toBe('already_paid_out');
   });

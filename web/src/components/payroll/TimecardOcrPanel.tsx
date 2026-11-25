@@ -1,3 +1,4 @@
+import { formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { RotateCcw, RotateCw } from 'lucide-react';
@@ -388,7 +389,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
           </div>
           <div className="flex items-center gap-3 text-xs text-neutral-600 mt-0.5">
             {tc.period_start && tc.period_end ? (
-              <span>{tc.period_start} – {tc.period_end}</span>
+              <span>{formatDateRange(tc.period_start, tc.period_end)}</span>
             ) : (
               <span>Period not detected</span>
             )}

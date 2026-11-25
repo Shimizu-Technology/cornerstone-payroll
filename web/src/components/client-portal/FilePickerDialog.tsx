@@ -1,3 +1,4 @@
+import { formatGuamDate } from '@/lib/utils';
 import { useEffect, useId, useRef, useState, type ReactElement } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -111,7 +112,7 @@ export function FilePickerDialog({ open, onOpenChange, api, selectedIds, maxSele
                   <span className="min-w-0">
                     <span className="block break-words font-medium text-neutral-900 [overflow-wrap:anywhere]">{document.title}</span>
                     <span className="block break-words text-xs text-neutral-600 [overflow-wrap:anywhere]">
-                      {[document.file_name, fileTypeLabel(document.file_name), formatFileSize(document.file_size), document.employee_name, new Date(document.created_at).toLocaleDateString('en-US', { timeZone: 'Pacific/Guam' })].filter(Boolean).join(' · ')}
+                      {[document.file_name, fileTypeLabel(document.file_name), formatFileSize(document.file_size), document.employee_name, formatGuamDate(document.created_at)].filter(Boolean).join(' · ')}
                       {already ? ' · Already attached' : ''}
                     </span>
                   </span>

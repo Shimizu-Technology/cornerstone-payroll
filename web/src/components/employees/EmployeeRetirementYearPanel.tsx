@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
@@ -165,7 +166,7 @@ export function EmployeeRetirementYearPanel({ employee, initialYear }: { employe
         </div>}
         {!catchUpAgeEligible && <p className="text-sm leading-6 text-neutral-600">Prior-year wages need verification only before age-based catch-up is used. Check yearly records when there are imported contributions, outside-employer contributions, or additional opening balances to account for.</p>}
         <p className="text-sm leading-6 text-neutral-600"><a href="#retirement-plan" className="font-semibold text-primary-700 underline underline-offset-2">Review contribution settings</a> to change the amounts deducted each payroll. Saving yearly records does not change those amounts.</p>
-        {annual && <p className="text-xs leading-5 text-neutral-500">Age at year end: {age == null ? 'DOB needs verification' : age}. This preview uses {election ? `the election effective ${election.effective_on}` : 'legacy settings'} at year end; each paycheck uses its actual pay-date election. The ceiling combines Traditional and Roth. Plan restrictions, outside contributions, and available compensation may reduce it.</p>}
+        {annual && <p className="text-xs leading-5 text-neutral-500">Age at year end: {age == null ? 'DOB needs verification' : age}. This preview uses {election ? `the election effective ${formatDate(election.effective_on)}` : 'legacy settings'} at year end; each paycheck uses its actual pay-date election. The ceiling combines Traditional and Roth. Plan restrictions, outside contributions, and available compensation may reduce it.</p>}
         {historicalSource && <fieldset disabled={saving || !canManage} className={`min-w-0 rounded-xl border p-4 ${historicalReviewed ? 'border-neutral-200 bg-neutral-50' : 'border-warning-200 bg-warning-50'}`} aria-label="Retained historical retirement contributions">
           <p className="text-sm font-semibold text-neutral-900">{historicalReviewed ? 'Imported contribution types verified' : 'Confirm imported contribution types'}</p>
           <p className="mt-2 text-sm leading-6 text-neutral-700">Classify the retained retirement totals using the source evidence. This review does not rewrite gross pay, net pay, or taxes already paid. A separate historical tax-bucket or filing review may still be needed.</p>

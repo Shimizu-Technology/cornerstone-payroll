@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import type { EmployeePayrollField, PayrollFieldDefinition, PayrollFieldKind, PayrollFieldTaxTreatment, PayrollFieldAmountType, PayrollFieldCategory, PayrollFieldReportingGroup } from '@/types';
 
 export const payItemGroups: Array<{ kind: PayrollFieldKind; title: string; singular: string; action: string; description: string; className: string }> = [
@@ -28,8 +29,8 @@ export function payItemAmount(assignment: EmployeePayrollField, field: Pick<Payr
 export function payItemStatus(assignment: EmployeePayrollField, fieldActive: boolean, today: string): string {
   if (!fieldActive) return 'Archived field';
   if (!assignment.active) return 'Paused';
-  if (assignment.end_date && assignment.end_date < today) return `Ended ${assignment.end_date}`;
-  if (assignment.start_date && assignment.start_date > today) return `Starts ${assignment.start_date}`;
+  if (assignment.end_date && assignment.end_date < today) return `Ended ${formatDate(assignment.end_date)}`;
+  if (assignment.start_date && assignment.start_date > today) return `Starts ${formatDate(assignment.start_date)}`;
   return 'Active';
 }
 

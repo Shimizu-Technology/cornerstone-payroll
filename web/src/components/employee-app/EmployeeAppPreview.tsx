@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactElement, typ
 import { Banknote, CircleHelp, FileText, House, Mail, MessageSquare, Phone, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { brandRoleStyle, brandRoles } from '@/lib/tenant-brand-colors';
-import { formatPhone, possessive } from '@/lib/employee-app-text';
+import { formatPhone } from '@/lib/display-phone';
+import { possessive } from '@/lib/employee-app-text';
 import type { HelpContact } from '@/services/employee-app-settings-api';
 
 export type PreviewScreen = 'sign-in' | 'home' | 'help';

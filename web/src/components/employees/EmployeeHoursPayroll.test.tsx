@@ -34,6 +34,23 @@ describe('Employee hours and payroll evidence', () => {
     expect(screen.getByText('Check delivered · $300.00 net')).toBeTruthy();
     expect(screen.queryByText(/82.*owed/)).toBeNull();
   });
+  it('shows the start date in both headings when a work period has no end date', async () => {
+    const openPeriod = { ...period, end_date: null };
+    mocks.evidence.mockImplementation((_id, query) => Promise.resolve(query.period_id ? {
+      ...evidence, evidence: { ...evidence.evidence, period: { ...openPeriod, entries: [], coverage_lines: [] } },
+      payroll_records: [],
+    } : {
+      ...evidence, evidence: { ...evidence.evidence, periods: [openPeriod] },
+    }));
+    mount();
+
+    expect(await screen.findByRole('heading', { name: 'Aug 1, 2026' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Review period' }));
+    const back = await screen.findByRole('button', { name: 'All work periods' });
+    expect(back).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Aug 1, 2026' })).toBeTruthy();
+  });
+
   it('keeps date filters and cursor when entering and returning from a period', async () => {
     mocks.evidence.mockImplementation((_id, query) => Promise.resolve(query.period_id ? {
       ...evidence, evidence: { ...evidence.evidence, period: { ...period, entries: [], coverage_lines: [] } }, payroll_records: [],
