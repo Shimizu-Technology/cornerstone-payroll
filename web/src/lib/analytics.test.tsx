@@ -443,6 +443,81 @@ describe('analytics strict allowlist before_send', () => {
     expect(DROPPED_EVENT_TYPES.has('$web_vitals')).toBe(true);
     expect(DROPPED_EVENT_TYPES.has('$identify')).toBe(true);
   });
+
+  it('keeps custom workflow events parameterless and strips any non-allowlisted custom properties in before_send', () => {
+    for (const [name, helper] of Object.entries(analytics)) {
+      expect(helper.length, `analytics.${name} must accept zero arguments`).toBe(0);
+    }
+
+    const customEvents = [
+      'payroll_calculated',
+      'payroll_approved',
+      'payroll_committed',
+      'checks_downloaded',
+      'checks_printed',
+      'report_generated',
+      'employee_created',
+      'timecard_uploaded',
+      'timecard_ocr_applied',
+      'company_switched',
+    ];
+
+    const staffBeforeSend = createBeforeSend({ projectKey: 'phc_live_key', surface: 'staff' });
+    for (const eventName of customEvents) {
+      const scrubbed = staffBeforeSend({
+        uuid: `evt-${eventName}`,
+        event: eventName,
+        properties: {
+          token: 'phc_live_key',
+          distinct_id: VALID_UUID_V7,
+          surface: 'staff',
+          role: 'accountant',
+          amount: 12500.5,
+          gross_pay: 24000,
+          employee_count: 14,
+          company_id: 42,
+          company_name: "MoSa's",
+          employee_id: 99,
+          employee_name: 'Ada Lovelace',
+          pay_period_id: 77,
+          report_type: 'w2gu',
+          filename: 'timecard-ada.jpg',
+          $elements: [{ tag_name: 'button', 'attr__data-ph-name': 'commit' }],
+          $elements_chain: 'button:attr__data-ph-name="commit"',
+        },
+      });
+      expect(scrubbed).toEqual({
+        uuid: `evt-${eventName}`,
+        event: eventName,
+        properties: {
+          token: 'phc_live_key',
+          distinct_id: VALID_UUID_V7,
+          surface: 'staff',
+          role: 'accountant',
+        },
+      });
+    }
+
+    // Employee surface also drops role from custom events.
+    const employeeBeforeSend = createBeforeSend({ projectKey: 'phc_live_key', surface: 'employee' });
+    const employeeScrubbed = employeeBeforeSend({
+      uuid: 'evt-emp-custom',
+      event: 'report_generated',
+      properties: {
+        token: 'phc_live_key',
+        distinct_id: VALID_UUID_V7,
+        surface: 'employee',
+        role: 'employee',
+        amount: 999,
+        statement_id: 'stmt-9',
+      },
+    });
+    expect(employeeScrubbed?.properties).toEqual({
+      token: 'phc_live_key',
+      distinct_id: VALID_UUID_V7,
+      surface: 'employee',
+    });
+  });
 });
 
 describe('analytics legacy persistence cleanup and real SDK identity isolation (PostHog 1.399.2)', () => {

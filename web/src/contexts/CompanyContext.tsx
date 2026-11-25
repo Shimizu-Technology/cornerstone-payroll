@@ -70,6 +70,9 @@ function applyCompanyResponse(
   } else if (res.current_company_id) {
     setActiveCompanyId(res.current_company_id);
     companiesApi.switchCompany(res.current_company_id, res.companies.find(c => c.id === res.current_company_id)?.organization_id);
+    if (storedId && storedId !== res.current_company_id) {
+      analytics.companySwitch();
+    }
   }
   setFetched(true);
 }

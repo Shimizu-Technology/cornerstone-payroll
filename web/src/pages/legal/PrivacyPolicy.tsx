@@ -15,7 +15,7 @@ const serviceProviders = [
   {
     name: 'PostHog',
     purpose:
-      'Collects anonymous device-level usage events (page route templates with IDs removed, app surface, staff account role on the staff site only, and basic clicks without text or form contents) when enabled, with IP addresses discarded and no session recordings, names, emails, company or user IDs, or payroll data.',
+      'Collects anonymous device-level usage events (page route templates with IDs removed, app surface, staff account role on the staff site only, named product events with no amounts, names, or IDs, and basic clicks without text or form contents) when enabled, with IP addresses discarded and no session recordings, names, emails, company or user IDs, or payroll data.',
   },
   {
     name: 'OpenRouter and the AI model provider it connects to',
@@ -149,10 +149,11 @@ export function PrivacyPolicy() {
         <p>
           When analytics are enabled, we collect anonymous device-level usage events through PostHog to understand how
           the software is used and improve it. Events include only basic device and browser details, app surface (staff
-          or employee), account role (on the staff site only), page route templates with IDs removed, and basic click
-          events (element tag names only). We do not send names, email addresses, company or user IDs, payroll or tax
-          details, on-screen text, or form contents; we do not use session recordings; IP addresses are discarded; and
-          we honor Do Not Track and Global Privacy Control browser settings.{' '}
+          or employee), account role (on the staff site only), page route templates with IDs removed, named product
+          events (such as payroll or report actions, carrying no amounts, names, or IDs), and basic click events
+          (element tag names only). We do not send names, email addresses, company or user IDs, payroll or tax details,
+          on-screen text, or form contents; we do not use session recordings; IP addresses are discarded; and we honor
+          Do Not Track and Global Privacy Control browser settings.{' '}
           <span className="text-neutral-600">(Draft wording — pending counsel review.)</span>
         </p>
       </LegalSection>
