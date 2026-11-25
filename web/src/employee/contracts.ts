@@ -1,11 +1,9 @@
 // Every shape the employee app reads from or sends to /api/v1/employee/*, in
 // one file, so wiring the real endpoints is a small diff.
 //
-// Where a shape is already served, it says so. The rest are written against
-// the M4 build plan (docs/MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md)
-// and marked ASSUMED. Each parser accepts what the plan describes, drops
-// entries it can't use, and never throws, so a field the API adds or renames
-// later degrades to "hidden" instead of a broken screen.
+// Each section names the controller that serves it. Each parser accepts what
+// the API sends, drops entries it can't use, and never throws, so a field the
+// API adds or renames later degrades to "hidden" instead of a broken screen.
 
 /** Money arrives as a decimal string ("1234.50"), as EmployeePayStatements::Presenter#money writes it. */
 export type Money = string;
@@ -77,7 +75,7 @@ function oneOf<T extends string>(value: unknown, options: readonly T[]): T | nul
 // Served (ContextController, M4-4c):
 // { first_name, status: "active" | "former", former_access_until: "2028-03-01" | null
 //   (the last Guam day of access), next_payday: "2026-12-04" | null,
-//   w2_delivery: null (the company setting arrives with M4-5),
+//   w2_delivery: "mailed" | "handed_out" | null (the company's setting, M4-5),
 //   features: { stubs, tax_forms, profile_requests } }
 // next_payday is set only from the company's next regular run when its date
 // is settled (committed, or created on a confirmed schedule), never for a
@@ -351,9 +349,11 @@ export function parseStatementDetail(data: unknown): StatementDetail | null {
 }
 
 // ---------- GET /employee/tax_forms ----------
-// ASSUMED (M4-5): { tax_forms: [{ id, tax_year, kind: "w2gu", status, corrected }] }
-// status "posted" can be downloaded; "withdrawn" means staff pulled it and a
-// corrected form is being prepared (no W-2c yet). PDF: /employee/tax_forms/:id/pdf.
+// Served (TaxFormsController, M4-5): { tax_forms: [{ id, tax_year, kind: "w2gu",
+//   status: "posted" | "withdrawn", corrected, posted_at, pdf_available, available_through }] },
+// newest year first. "posted" can be downloaded; "withdrawn" means staff pulled
+// it and a corrected form is being prepared (no W-2c yet). PDF (frozen,
+// no-store): /employee/tax_forms/:id/pdf.
 
 export interface TaxForm {
   id: string;
@@ -368,8 +368,8 @@ export function parseTaxForms(data: unknown): TaxForm[] {
     const formId = id(form?.id);
     const year = form?.tax_year;
     if (!form || !formId || !Number.isInteger(year)) return [];
-    if (form.kind !== undefined && form.kind !== 'w2gu') return [];
-    return [{ id: formId, taxYear: year as number, status: form.status === 'withdrawn' ? 'withdrawn' : 'posted', corrected: bool(form.corrected) }];
+    if (form.kind !== 'w2gu' || (form.status !== 'posted' && form.status !== 'withdrawn')) return [];
+    return [{ id: formId, taxYear: year as number, status: form.status, corrected: bool(form.corrected) }];
   });
 }
 

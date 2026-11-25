@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -677,6 +677,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
     t.string "brand_logo_content_type"
     t.string "brand_logo_sha256"
     t.integer "brand_logo_byte_size"
+    t.string "w2_delivery"
     t.index "lower((subdomain_slug)::text)", name: "index_live_and_demo_companies_on_lower_subdomain_slug", unique: true, where: "((subdomain_slug IS NOT NULL) AND (((payroll_environment)::text = 'live'::text) OR ((COALESCE(test_workspace_purpose, ''::character varying))::text = 'demo'::text)))"
     t.index "lower((subdomain_slug)::text)", name: "index_live_companies_on_lower_subdomain_slug", unique: true, where: "(((payroll_environment)::text = 'live'::text) AND (subdomain_slug IS NOT NULL))"
     t.index "organization_id, ((test_workspace_manifest ->> 'demo_fixture_key'::text))", name: "index_demo_companies_on_organization_fixture_key", unique: true, where: "((COALESCE(test_workspace_purpose, ''::character varying))::text = 'demo'::text)"
@@ -699,6 +700,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
     t.check_constraint "regular_pay_threshold > 0 AND regular_pay_threshold <= regular_pay_lookback AND regular_pay_lookback <= 24", name: "regular_pay_rule"
     t.check_constraint "subdomain_slug IS NULL OR payroll_environment::text = 'live'::text OR payroll_environment::text = 'migration_rehearsal'::text AND COALESCE(test_workspace_purpose, ''::character varying)::text = 'demo'::text", name: "company_subdomain_requires_live_payroll"
     t.check_constraint "test_workspace_purpose IS NULL OR (test_workspace_purpose::text = ANY (ARRAY['sandbox'::character varying::text, 'migration_rehearsal'::character varying::text, 'training_replay'::character varying::text, 'backup_snapshot'::character varying::text, 'demo'::character varying::text]))", name: "companies_test_workspace_purpose_check"
+    t.check_constraint "w2_delivery IS NULL OR (w2_delivery::text = ANY (ARRAY['mailed'::character varying, 'handed_out'::character varying]::text[]))", name: "companies_w2_delivery_check"
   end
 
   create_table "company_assignments", force: :cascade do |t|
@@ -964,6 +966,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
     t.index [ "user_id" ], name: "index_direct_deposit_payment_confirmations_on_user_id"
   end
 
+  create_table "email_provider_events", force: :cascade do |t|
+    t.string "provider", default: "resend", null: false
+    t.string "event_id", null: false
+    t.string "event_type", null: false
+    t.string "provider_message_id"
+    t.string "delivery_status"
+    t.string "bounce_type"
+    t.datetime "occurred_at", null: false
+    t.datetime "applied_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "created_at" ], name: "idx_email_provider_events_unapplied", where: "((applied_at IS NULL) AND (delivery_status IS NOT NULL))"
+    t.index [ "provider", "event_id" ], name: "idx_email_provider_events_once", unique: true
+    t.index [ "provider_message_id", "occurred_at" ], name: "idx_email_provider_events_message"
+    t.check_constraint "delivery_status IS NULL OR (delivery_status::text = ANY (ARRAY['delivered'::character varying, 'delayed'::character varying, 'bounced'::character varying, 'complained'::character varying]::text[]))", name: "email_provider_events_delivery_status"
+  end
+
   create_table "employee_account_links", force: :cascade do |t|
     t.bigint "user_id"
     t.bigint "company_id", null: false
@@ -999,6 +1018,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
     t.date "profile_email_usage_date"
     t.integer "profile_email_daily_codes", default: 0, null: false
     t.integer "profile_email_daily_failures", default: 0, null: false
+    t.datetime "former_profile_access_until"
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"
@@ -1179,6 +1199,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
     t.index [ "reviewed_by_id" ], name: "index_employee_document_requirements_on_reviewed_by_id"
   end
 
+  create_table "employee_document_notices", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_document_id", null: false
+    t.bigint "employee_id", null: false
+    t.string "kind", null: false
+    t.string "status", default: "pending", null: false
+    t.string "skip_reason"
+    t.string "recipient_email"
+    t.string "provider_message_id"
+    t.string "delivery_status", default: "unknown", null: false
+    t.string "bounce_type"
+    t.datetime "sent_at"
+    t.datetime "delivery_event_at"
+    t.integer "attempts", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_document_id", "kind" ], name: "idx_employee_document_notices_once", unique: true
+    t.index [ "company_id", "employee_id" ], name: "idx_employee_document_notices_employee"
+    t.index [ "provider_message_id" ], name: "idx_employee_document_notices_provider_message", unique: true, where: "(provider_message_id IS NOT NULL)"
+    t.check_constraint "delivery_status::text = ANY (ARRAY['unknown'::character varying, 'delivered'::character varying, 'delayed'::character varying, 'bounced'::character varying, 'complained'::character varying]::text[])", name: "employee_document_notices_delivery_status"
+    t.check_constraint "kind::text = 'w2gu_available'::text", name: "employee_document_notices_kind"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'sent'::character varying, 'skipped'::character varying, 'failed'::character varying]::text[])", name: "employee_document_notices_status"
+  end
+
   create_table "employee_documents", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.bigint "payroll_item_id"
@@ -1198,12 +1242,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
     t.string "payroll_facts_sha256"
     t.datetime "payroll_facts_checked_at"
     t.string "withdrawal_reason"
+    t.datetime "withdrawn_at"
+    t.bigint "withdrawn_by_id"
+    t.text "withdrawal_note"
     t.index [ "company_id" ], name: "index_employee_documents_on_company_id"
     t.index [ "employee_id", "tax_year", "revision" ], name: "idx_on_employee_id_tax_year_revision_dbe51f3d5c", unique: true, where: "(tax_year IS NOT NULL)"
     t.index [ "historical_paycheck_id", "revision" ], name: "idx_on_historical_paycheck_id_revision_42100f7406", unique: true, where: "(historical_paycheck_id IS NOT NULL)"
     t.index [ "id", "company_id" ], name: "index_employee_documents_on_id_and_company_id", unique: true
     t.index [ "payroll_item_id", "revision" ], name: "index_employee_documents_on_payroll_item_id_and_revision", unique: true, where: "(payroll_item_id IS NOT NULL)"
     t.index [ "replaces_document_id" ], name: "index_employee_documents_on_replaces_document_id"
+    t.index [ "withdrawn_by_id" ], name: "index_employee_documents_on_withdrawn_by_id", where: "(withdrawn_by_id IS NOT NULL)"
     t.check_constraint "corrected = (replaces_document_id IS NOT NULL) AND replaces_document_id IS DISTINCT FROM id", name: "employee_documents_correction_link"
     t.check_constraint "num_nonnulls(payroll_item_id, historical_paycheck_id, tax_year) = 1 AND (tax_year IS NULL) = (employee_id IS NULL)", name: "employee_documents_one_source"
     t.check_constraint "revision > 0", name: "employee_documents_positive_revision"
@@ -5279,6 +5327,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
   add_foreign_key "employee_deductions", "deduction_types"
   add_foreign_key "employee_deductions", "employees"
   add_foreign_key "employee_deductions", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_deductions_company_parent"
+  add_foreign_key "employee_document_notices", "companies"
+  add_foreign_key "employee_document_notices", "employee_documents", column: [ "employee_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_notices_document"
+  add_foreign_key "employee_document_notices", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_notices_employee"
   add_foreign_key "employee_document_requirement_events", "client_documents", column: [ "client_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_requirement_events_document_tenant"
   add_foreign_key "employee_document_requirement_events", "companies"
   add_foreign_key "employee_document_requirement_events", "employee_document_requirements", column: [ "employee_document_requirement_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_requirement_events_requirement_tenant"
@@ -5294,6 +5345,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000500) do
   add_foreign_key "employee_documents", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_employee_id"
   add_foreign_key "employee_documents", "historical_paychecks", column: [ "historical_paycheck_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_historical_paycheck_id"
   add_foreign_key "employee_documents", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_payroll_item_id"
+  add_foreign_key "employee_documents", "users", column: "withdrawn_by_id"
   add_foreign_key "employee_emergency_contacts", "companies"
   add_foreign_key "employee_emergency_contacts", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_emergency_contacts_employee", on_delete: :cascade
   add_foreign_key "employee_loans", "companies"
