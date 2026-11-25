@@ -121,7 +121,7 @@ RSpec.describe "Demo company containment", type: :request do
       expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_UNAVAILABLE_MESSAGE)
     end
 
-    it "refuses e-files, filing records, commits, payments, shared config and billing" do
+    it "refuses e-files, filing records, FIT deposit checks, shared config and billing" do
       get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
       expect_neutral_refusal
       get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }
@@ -130,28 +130,24 @@ RSpec.describe "Demo company containment", type: :request do
       expect_neutral_refusal
       post "/api/v1/admin/payroll_filing_records/events", params: { filing_type: "w2_gu_w3_ss", agency: "ssa", tax_year: 2026 }
       expect_neutral_refusal
-      post "/api/v1/admin/pay_periods/#{draft.id}/commit"
-      expect_neutral_refusal
-      post "/api/v1/admin/pay_periods/#{period.id}/void"
-      expect_neutral_refusal
-      post "/api/v1/admin/pay_periods/#{period.id}/checks/batch_pdf"
+      post "/api/v1/admin/pay_periods/#{period.id}/generate_fit_check"
       expect_neutral_refusal
       post "/api/v1/admin/invoices", params: { invoice: { company_id: demo.id } }
       expect_neutral_refusal
       patch "/api/v1/admin/filing_submitter", params: { filing_submitter: { name: "Changed" } }
       expect_neutral_refusal
 
-      expect(draft.reload.status).to eq("draft")
       expect(period.reload.status).to eq("committed")
+      expect(NonEmployeeCheck.where(company: demo)).to be_empty
       expect(PayrollFilingRecord.where(company: demo)).to be_empty
       expect(Invoice.where(company: demo)).to be_empty
     end
 
-    it "refuses demo check output, the rehearsal preview, an org-wide Tax refresh and shared-email clearing" do
+    it "prints a demo check on plain paper, and refuses the rehearsal preview, an org-wide Tax refresh and shared-email clearing" do
       item = period.payroll_items.first
-      item.update_columns(check_number: "1001")
+      item.update_columns(check_number: "1001", payment_delivery_method: "paper_check")
       get "/api/v1/admin/payroll_items/#{item.id}/check"
-      expect_neutral_refusal
+      expect_pdf_download
       draft.update_columns(status: "calculated")
       get "/api/v1/admin/pay_periods/#{draft.id}/checks/rehearsal_preview_pdf"
       expect(response).to have_http_status(:unprocessable_entity)
