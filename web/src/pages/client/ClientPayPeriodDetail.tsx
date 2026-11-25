@@ -28,7 +28,7 @@ export function ClientPeriodFilesLink({ startDate, endDate }: { startDate: strin
     }).catch(() => {});
     return () => { active = false; };
   }, [startDate, endDate]);
-  return filesRef ? <Link className="inline-flex min-h-11 items-center px-4 text-primary-800 underline" to={`/payroll-files/${filesRef}`}>Pay Period Files</Link> : null;
+  return filesRef ? <Link className="inline-flex min-h-11 items-center px-4 text-primary-800 underline" to={`/payroll-files/${filesRef}`}>Pay period files</Link> : null;
 }
 
 export function ClientPayPeriodDetail(): ReactElement {
@@ -111,9 +111,9 @@ export function ClientPayPeriodDetail(): ReactElement {
   return (
     <div>
       <Header
-        title={resolvedPayPeriod ? `Pay Period: ${formatDateRange(resolvedPayPeriod.start_date, resolvedPayPeriod.end_date)}` : 'Pay Period'}
-        description={resolvedPayPeriod ? `Pay Date: ${formatDate(resolvedPayPeriod.pay_date)}` : 'Review employee payroll for this period.'}
-        actions={<>{resolvedPayPeriod && <ClientPeriodFilesLink key={routeKey} startDate={resolvedPayPeriod.start_date} endDate={resolvedPayPeriod.end_date} />}<Button variant="outline" onClick={() => navigate(returnTo)}>Back to List</Button></>}
+        title={resolvedPayPeriod ? `Pay period: ${formatDateRange(resolvedPayPeriod.start_date, resolvedPayPeriod.end_date)}` : 'Pay period'}
+        description={resolvedPayPeriod ? `Pay date: ${formatDate(resolvedPayPeriod.pay_date)}` : 'Review employee payroll for this period.'}
+        actions={<>{resolvedPayPeriod && <ClientPeriodFilesLink key={routeKey} startDate={resolvedPayPeriod.start_date} endDate={resolvedPayPeriod.end_date} />}<Button variant="outline" onClick={() => navigate(returnTo)}>Back to list</Button></>}
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
@@ -123,10 +123,10 @@ export function ClientPayPeriodDetail(): ReactElement {
           <div className="py-12 text-center text-sm text-gray-500">Loading pay period...</div>
         ) : resolvedPayPeriod ? (
           <>
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-6 xl:grid-cols-4">
               <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
-              <SummaryCard label="Gross Pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
-              <SummaryCard label="Net Pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
+              <SummaryCard label="Gross pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
+              <SummaryCard label="Net pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
               <SummaryCard label="Status" value={clientPayRunStatus({ ...resolvedPayPeriod, client_review_status: resolvedPayPeriod.payroll_review?.status })} />
             </div>
 
@@ -135,12 +135,12 @@ export function ClientPayPeriodDetail(): ReactElement {
               <CardHeader>
                 <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                   <div>
-                    <CardTitle>Employee Payroll</CardTitle>
+                    <CardTitle>Employee payroll</CardTitle>
                     <p className="mt-1 text-sm text-gray-500">Hours, earnings, taxes, deductions, and net pay for this exact payroll revision.</p>
                   </div>
                   <div className="flex flex-col gap-3 md:flex-row">
                     <Select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} className="w-full md:w-44">
-                      <option value="">All Types</option>
+                      <option value="">All types</option>
                       <option value="salary">Salary</option>
                       <option value="hourly">Hourly</option>
                       <option value="contractor">Contractor</option>
@@ -168,8 +168,9 @@ export function ClientPayPeriodDetail(): ReactElement {
                       <TableHead>Retirement</TableHead>
                       <TableHead>Loans</TableHead>
                       <TableHead>Insurance</TableHead>
-                      <TableHead>Total Ded.</TableHead>
-                      <TableHead>Net Pay</TableHead>
+                      <TableHead>Other deductions</TableHead>
+                      <TableHead>Total deductions</TableHead>
+                      <TableHead>Net pay</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody striped>
@@ -198,9 +199,9 @@ interface SummaryCardProps {
 function SummaryCard({ label, value }: SummaryCardProps): ReactElement {
   return (
     <Card>
-      <CardContent className="pt-6">
-        <p className="text-sm font-medium text-neutral-500">{label}</p>
-        <p className="mt-3 text-3xl font-semibold tracking-tight text-neutral-900">{value}</p>
+      <CardContent className="p-4 sm:p-6">
+        <p className="text-xs font-medium text-neutral-500 sm:text-sm">{label}</p>
+        <p className="mt-2 break-words text-xl font-semibold tracking-tight text-neutral-900 tabular-nums sm:mt-3 sm:text-3xl">{value}</p>
       </CardContent>
     </Card>
   );
@@ -216,13 +217,70 @@ function numericAmount(value: number | string | null | undefined): number {
 }
 
 function itemTaxes(item: PayrollItem): number {
-  return numericAmount(item.withholding_tax) + numericAmount(item.social_security_tax)
-    + numericAmount(item.medicare_tax) + numericAmount(item.additional_medicare_tax)
+  return numericAmount(item.withholding_tax) + numericAmount(item.additional_withholding)
+    + numericAmount(item.social_security_tax) + numericAmount(item.medicare_tax)
     + numericAmount(item.state_withheld);
 }
 
+function itemRetirement(item: PayrollItem): number {
+  return numericAmount(item.retirement_payment) + numericAmount(item.roth_retirement_payment);
+}
+
+function itemLoans(item: PayrollItem): number {
+  return numericAmount(item.loan_payment) || numericAmount(item.loan_deduction);
+}
+
+function itemInsurance(item: PayrollItem): number {
+  return numericAmount(item.insurance_payment);
+}
+
+function itemOtherDeductions(item: PayrollItem): number {
+  if (item.other_deductions != null && Number.isFinite(Number(item.other_deductions))) {
+    return numericAmount(item.other_deductions);
+  }
+  const total = numericAmount(item.total_deductions);
+  const diff = Math.round((total - (itemTaxes(item) + itemRetirement(item) + itemLoans(item) + itemInsurance(item))) * 100) / 100;
+  return total >= 0 ? Math.max(0, diff) : diff;
+}
+
+function formatWholeOrCents(amount: number): string {
+  const hasCents = Math.round(amount * 100) % 100 !== 0;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: hasCents ? 2 : 0,
+  }).format(amount);
+}
+
+function formatItemHours(item: PayrollItem): string {
+  const rawHours = item.total_hours ?? item.hours_worked;
+  const hoursNumber = numericAmount(rawHours);
+  if (item.employment_type === 'salary') {
+    return hoursNumber > 0 ? String(rawHours) : 'Salary';
+  }
+  if (item.employment_type === 'contractor' && item.contractor_pay_type !== 'hourly' && hoursNumber <= 0) {
+    return '—';
+  }
+  return rawHours == null ? '—' : String(rawHours);
+}
+
+function formatItemRate(item: PayrollItem): string {
+  if (item.pay_rate == null) return '—';
+  const rate = numericAmount(item.pay_rate);
+  if (item.employment_type === 'hourly') return `${formatCurrency(rate)}/hr`;
+  if (item.employment_type === 'contractor') {
+    return item.contractor_pay_type === 'hourly' ? `${formatCurrency(rate)}/hr` : `${formatCurrency(rate)}/period`;
+  }
+  if (item.employment_type === 'salary') {
+    if (item.salary_type === 'variable' && rate === 0) return 'Variable';
+    if (item.salary_type === 'per_period') return `${formatCurrency(rate)}/period`;
+    return `${formatWholeOrCents(rate)}/yr`;
+  }
+  return formatCurrency(rate);
+}
+
 function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
-  const hours = item.total_hours ?? item.hours_worked;
   return (
     <MobileRecordCard>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -237,13 +295,14 @@ function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
         </div>
       </div>
       <div className="mt-4 grid grid-cols-2 gap-3">
-        <MobileField label="Hours" value={hours ?? '—'} />
-        <MobileField label="Rate" value={item.pay_rate == null ? '—' : `${formatCurrency(numericAmount(item.pay_rate))}${item.employment_type === 'hourly' ? '/hr' : ''}`} />
+        <MobileField label="Hours" value={formatItemHours(item)} />
+        <MobileField label="Rate" value={formatItemRate(item)} />
         <MobileField label="Gross" value={formatCurrency(numericAmount(item.gross_pay))} />
         <MobileField label="Taxes" value={formatCurrency(itemTaxes(item))} />
-        <MobileField label="Retirement" value={formatCurrency(numericAmount(item.retirement_payment) + numericAmount(item.roth_retirement_payment))} />
-        <MobileField label="Loans" value={formatCurrency(numericAmount(item.loan_payment) || numericAmount(item.loan_deduction))} />
-        <MobileField label="Insurance" value={formatCurrency(numericAmount(item.insurance_payment))} />
+        <MobileField label="Retirement" value={formatCurrency(itemRetirement(item))} />
+        <MobileField label="Loans" value={formatCurrency(itemLoans(item))} />
+        <MobileField label="Insurance" value={formatCurrency(itemInsurance(item))} />
+        <MobileField label="Other deductions" value={formatCurrency(itemOtherDeductions(item))} />
         <MobileField label="Total deductions" value={formatCurrency(numericAmount(item.total_deductions))} />
       </div>
     </MobileRecordCard>
@@ -260,13 +319,14 @@ function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
           <p className="text-xs uppercase tracking-wide text-gray-500">{item.employment_type}</p>
         </div>
       </TableCell>
-      <TableCell>{item.total_hours ?? item.hours_worked ?? '—'}</TableCell>
-      <TableCell>{formatCurrency(item.pay_rate)}{item.employment_type === 'hourly' ? '/hr' : ''}</TableCell>
+      <TableCell>{formatItemHours(item)}</TableCell>
+      <TableCell>{formatItemRate(item)}</TableCell>
       <TableCell>{formatCurrency(item.gross_pay ?? 0)}</TableCell>
       <TableCell>{formatCurrency(itemTaxes(item))}</TableCell>
-      <TableCell>{formatCurrency((Number(item.retirement_payment) || 0) + (Number(item.roth_retirement_payment) || 0))}</TableCell>
-      <TableCell>{formatCurrency(Number(item.loan_payment) || Number(item.loan_deduction) || 0)}</TableCell>
-      <TableCell>{formatCurrency(item.insurance_payment ?? 0)}</TableCell>
+      <TableCell>{formatCurrency(itemRetirement(item))}</TableCell>
+      <TableCell>{formatCurrency(itemLoans(item))}</TableCell>
+      <TableCell>{formatCurrency(itemInsurance(item))}</TableCell>
+      <TableCell>{formatCurrency(itemOtherDeductions(item))}</TableCell>
       <TableCell>{formatCurrency(item.total_deductions ?? 0)}</TableCell>
       <TableCell>{formatCurrency(item.net_pay ?? 0)}</TableCell>
     </TableRow>

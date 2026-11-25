@@ -61,7 +61,7 @@ function CompanyRollout({ companyId, companyName, audience, showSettings }: {
 
   return (
     <div>
-      <Header title="Employee app rollout" mobileSticky={false} actions={showSettings && (
+      <Header title={audience === 'client' ? 'Employee app' : 'Employee app rollout'} mobileSticky={false} actions={showSettings && (
         <Link className={textLink} to={employeeAppSettingsPath(companyId)}>Branding and Help settings</Link>
       )} />
       <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6 lg:p-8">
@@ -132,7 +132,7 @@ function EmployeeTasks<Row extends { id: number; name: string }>({ title, rows, 
 }) {
   return (
     <details className="rounded-xl border border-neutral-200 bg-white px-3">
-      <summary className="cursor-pointer py-3 text-sm font-semibold text-neutral-800">{title} ({rows.length})</summary>
+      <summary className="flex min-h-11 cursor-pointer items-center py-3 text-sm font-semibold text-neutral-800">{title} ({rows.length})</summary>
       {rows.length === 0 ? <p className="pb-3 text-sm text-neutral-600">No employees to review.</p> : (
         <ul className="max-h-64 divide-y divide-neutral-100 overflow-y-auto pb-1">
           {rows.map((row) => (

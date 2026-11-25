@@ -302,7 +302,7 @@ export function EmployeeList() {
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => navigate(employeeContactDetailsPath(companyId))}>
               <Mail className="w-4 h-4 mr-2" />
-              Contact Details
+              {isClient ? 'Contact details' : 'Contact Details'}
               {typeof companyMeta?.needs_contact_details_count === 'number' && companyMeta.needs_contact_details_count > 0 && (
                 <Badge variant="warning" className="ml-2">
                   {companyMeta.needs_contact_details_count}
@@ -452,7 +452,7 @@ export function EmployeeList() {
                   <div key={type}>
                     <button
                       onClick={() => toggleGroup(type)}
-                      className="flex items-center gap-2 mb-3 group cursor-pointer"
+                      className="mb-3 flex min-h-11 items-center gap-2 group cursor-pointer"
                     >
                       <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
                       <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider group-hover:text-gray-700">
@@ -497,7 +497,7 @@ export function EmployeeList() {
                                 className="bg-gray-50"
                               />
                               <SortableHead
-                                label="Pay Rate"
+                                label="Pay rate"
                                 column="rate"
                                 activeColumn={sortBy}
                                 direction={sortDirection}
@@ -547,6 +547,7 @@ export function EmployeeList() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="min-h-11 min-w-11 sm:min-h-11"
                       disabled={companyMeta.current_page === 1}
                       onClick={() => updateFilter('page', String(companyMeta.current_page - 1))}
                     >
@@ -555,6 +556,7 @@ export function EmployeeList() {
                     <Button
                       variant="outline"
                       size="sm"
+                      className="min-h-11 min-w-11 sm:min-h-11"
                       disabled={companyMeta.current_page === companyMeta.total_pages}
                       onClick={() => updateFilter('page', String(companyMeta.current_page + 1))}
                     >
@@ -620,7 +622,7 @@ function EmployeeMobileCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <button type="button" onClick={onOpen} className="truncate text-left font-semibold text-primary-800 hover:text-primary-950 hover:underline">
+              <button type="button" onClick={onOpen} className="inline-flex min-h-11 max-w-full items-center truncate text-left font-semibold text-primary-800 hover:text-primary-950 hover:underline">
                 {employee.first_name} {employee.last_name}
               </button>
               {employee.email && <p className="truncate text-sm text-neutral-500">{employee.email}</p>}
@@ -651,7 +653,7 @@ function EmployeeMobileCard({
             </div>
           )}
           <MobileCardActions>
-            <Button variant="outline" size="sm" onClick={onOpen}>{actionLabel}</Button>
+            <Button variant="outline" size="sm" className="min-h-11 sm:min-h-11" onClick={onOpen}>{actionLabel}</Button>
           </MobileCardActions>
         </div>
       </div>
@@ -690,7 +692,7 @@ function EmployeeTableRow({
             </span>
           </div>
           <div>
-            <button type="button" onClick={onOpen} className="text-left font-medium text-primary-800 hover:text-primary-950 hover:underline">
+            <button type="button" onClick={onOpen} className="inline-flex min-h-11 items-center text-left font-medium text-primary-800 hover:text-primary-950 hover:underline">
               {employee.first_name} {employee.last_name}
             </button>
             {employee.email && (
@@ -760,6 +762,7 @@ function EmployeeTableRow({
         <Button 
           variant="ghost" 
           size="sm"
+          className="min-h-11 sm:min-h-11"
           onClick={onOpen}
         >
           {actionLabel}
@@ -793,7 +796,7 @@ function SortableHead({
       <button
         type="button"
         onClick={() => onToggle(column)}
-        className="inline-flex items-center gap-1.5 rounded text-left text-xs font-medium uppercase tracking-wider text-gray-500 transition-colors hover:text-gray-700"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded text-left text-xs font-medium text-neutral-600 transition-colors hover:text-neutral-900"
       >
         <span>{label}</span>
         <Icon className="h-3.5 w-3.5" />

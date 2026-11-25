@@ -161,7 +161,7 @@ export function ClientChangeRequests() {
 
   return (
     <div>
-      <Header title={profileRequestsEnabled ? 'Employee changes' : 'Change Requests'}
+      <Header title="Change requests"
         description={profileRequestsEnabled ? 'Review address requests and see applied contact changes.' : 'Track payroll-sensitive updates submitted for payroll team approval.'} />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
@@ -233,14 +233,14 @@ export function ClientChangeRequests() {
                       <TableHead>Employee</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Requested By</TableHead>
+                      <TableHead>Requested by</TableHead>
                       <TableHead>Submitted</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody striped>
                     {requests.map((request) => (
                       <TableRow key={request.id}>
-                        <TableCell className="font-medium text-gray-900"><button type="button" className="text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
+                        <TableCell className="font-medium text-gray-900"><button type="button" className="inline-flex min-h-11 items-center text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
@@ -266,7 +266,7 @@ export function ClientChangeRequests() {
 
           <Card ref={detailsRef} className="min-w-0 scroll-mt-4">
             <CardHeader>
-              <CardTitle>{selected ? `Request #${selected.id}` : 'Request Details'}</CardTitle>
+              <CardTitle>{selected ? `Request #${selected.id}` : 'Request details'}</CardTitle>
             </CardHeader>
             <CardContent>
               {selected ? (
@@ -281,9 +281,9 @@ export function ClientChangeRequests() {
                     <p className="text-sm font-medium text-gray-900">Employee</p>
                     <p className="text-sm text-gray-600">{selected.employee_name}</p>
                   </div>
-                  <DetailBlock title="Request Type" value={requestLabel(selected)} />
-                  <DetailBlock title="Request Notes" value={selected.request_notes} />
-                  <DetailBlock title="Review Notes" value={selected.review_notes} />
+                  <DetailBlock title="Request type" value={requestLabel(selected)} />
+                  <DetailBlock title="Request notes" value={selected.request_notes} />
+                  <DetailBlock title="Review notes" value={selected.review_notes} />
                   <ChangeComparison
                     before={selected.original_values}
                     after={selected.proposed_changes}

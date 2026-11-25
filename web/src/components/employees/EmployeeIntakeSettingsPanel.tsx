@@ -55,7 +55,9 @@ export function EmployeeIntakeSettingsPanel({ companyId, isClient, readOnly = fa
       <p className="font-semibold text-neutral-900">{settings.enabled ? 'Incomplete employee entry is temporarily enabled' : 'Full employee details required'}</p>
       <p className="mt-1 text-sm leading-6 text-neutral-600">{settings.enabled
         ? `Enabled by ${settings.enabled_by_name || 'an authorized operator'} until ${formatGuamDateTime(settings.expires_at || '')}. ${settings.reason || ''}`
-        : 'An administrator or an accountant with Client management can temporarily allow missing personal details for this client.'}</p>
+        : isClient
+          ? 'Each new employee needs a Social Security number, date of birth and address before Cornerstone can pay them.'
+          : 'An administrator or an accountant with Client management can temporarily allow missing personal details for this client.'}</p>
       {settings.enabled && <p className="mt-2 text-sm text-warning-800">Missing information stays on the employee checklist. Payroll documents and filing requirements still apply.</p>}
       {settings.can_manage && !effectiveReadOnly && (
         settings.enabled ? <Button className="mt-3" variant="outline" disabled={saving} onClick={() => void save(false)}>Require full details again</Button>

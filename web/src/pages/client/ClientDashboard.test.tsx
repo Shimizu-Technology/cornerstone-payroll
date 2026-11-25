@@ -91,6 +91,6 @@ it.each([{}, { pay_periods: [null] }, { pay_periods: [{ can_decide_payroll_revie
     render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
 
     expect(await screen.findByRole('button', { name: 'Try again' })).toBeTruthy();
-    expect(screen.getByText('Active Employees')).toBeTruthy();
+    expect(screen.getByText('Active employees')).toBeTruthy();
   },
 );

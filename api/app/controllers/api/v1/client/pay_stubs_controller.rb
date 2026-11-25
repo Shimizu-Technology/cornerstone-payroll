@@ -11,10 +11,27 @@ module Api
         def index
           employee = Employee.where(company_id: current_company_id).find(params[:employee_id])
           items = eligible_items.where(employee_id: employee.id).includes(:pay_period).order("pay_periods.pay_date DESC", id: :desc)
-          render json: { pay_stubs: items.select { |item| EarningsStatementEligibility.printable?(item) }.map { |item|
-            { id: item.id, pay_period_id: item.pay_period_id, pay_date: item.pay_period.pay_date,
-              period_description: item.pay_period.period_description, net_pay: item.net_pay }
-          } }
+          quickbooks_paychecks = EmployeeDocuments::QuickbooksHistory.for(employee).map do |check|
+            {
+              id: check[:historical_paycheck_id],
+              pay_date: check[:pay_date],
+              period_start: check[:period_start],
+              period_end: check[:period_end],
+              gross_pay: check[:gross_pay],
+              net_pay: check[:net_pay],
+              hours_total: check[:hours_total],
+              payment_method: check[:payment_method],
+              source_label: check[:source_label],
+              adjustment_note: check[:adjustment_note]
+            }
+          end
+          render json: {
+            pay_stubs: items.select { |item| EarningsStatementEligibility.printable?(item) }.map { |item|
+              { id: item.id, pay_period_id: item.pay_period_id, pay_date: item.pay_period.pay_date,
+                period_description: item.pay_period.period_description, net_pay: item.net_pay }
+            },
+            quickbooks_paychecks: quickbooks_paychecks
+          }
         end
 
         def download

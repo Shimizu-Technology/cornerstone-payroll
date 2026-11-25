@@ -168,18 +168,28 @@ module Api
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
             json[:payroll_review_history] = [] unless pay_period.company.client_payroll_approval_required?
             json[:payroll_items] = items.map do |item|
+              taxes_total = item.withholding_tax.to_d + item.additional_withholding.to_d + item.social_security_tax.to_d + item.medicare_tax.to_d
+              retirement_total = item.retirement_payment.to_d + item.roth_retirement_payment.to_d
+              loans_total = item.loan_payment.to_d.nonzero? || item.loan_deduction.to_d
+              insurance_total = item.insurance_payment.to_d
+              deduction_diff = (item.total_deductions.to_d - (taxes_total + retirement_total + loans_total + insurance_total)).round(2)
+              other_deductions_total = item.total_deductions.to_d >= 0 ? [ deduction_diff, 0.to_d ].max : deduction_diff
+
               {
                 id: item.id,
                 pay_stub_available: pay_period.client_finished? && EarningsStatementEligibility.printable?(item),
                 employee_id: item.employee_id,
                 employee_name: item.employee_full_name,
                 employment_type: item.employment_type,
+                salary_type: item.calculation_context_snapshot.to_h.dig("employee", "salary_type") || item.timekeeping_context_snapshot.to_h["salary_type"] || item.employee&.salary_type,
+                contractor_pay_type: item.calculation_context_snapshot.to_h.dig("employee", "contractor_pay_type") || item.employee&.contractor_pay_type,
                 pay_rate: item.pay_rate,
                 total_hours: item.total_hours,
                 hours_worked: item.hours_worked,
                 overtime_hours: item.overtime_hours,
                 gross_pay: item.gross_pay,
                 withholding_tax: item.withholding_tax,
+                additional_withholding: item.additional_withholding,
                 social_security_tax: item.social_security_tax,
                 medicare_tax: item.medicare_tax,
                 additional_medicare_tax: item.additional_medicare_tax,
@@ -189,6 +199,7 @@ module Api
                 loan_payment: item.loan_payment,
                 loan_deduction: item.loan_deduction,
                 insurance_payment: item.insurance_payment,
+                other_deductions: other_deductions_total,
                 custom_deductions: item.custom_deductions || [],
                 payroll_adjustments: item.payroll_adjustments || [],
                 total_deductions: item.total_deductions,
