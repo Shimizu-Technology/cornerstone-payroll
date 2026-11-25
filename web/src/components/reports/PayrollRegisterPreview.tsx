@@ -1,3 +1,4 @@
+import { formatDateRange } from '@/lib/display-date';
 import { PayrollReportReviewWarnings } from './PayrollReportReviewWarnings';
 import { Fragment, useEffect, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
@@ -785,7 +786,7 @@ export function PayrollRegisterPreviewModal({
           <div className="min-w-0">
             <p className="truncate text-sm font-bold sm:text-base">Payroll Register</p>
             <p className="truncate text-xs text-neutral-300">
-              {report ? `${report.pay_period.start_date} – ${report.pay_period.end_date}` : 'Loading report preview'}
+              {report ? formatDateRange(report.pay_period.start_date, report.pay_period.end_date) : 'Loading report preview'}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">

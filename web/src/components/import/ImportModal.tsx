@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
-import { cn, formatCurrency } from '@/lib/utils';
+import { cn, formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MOSA_SOURCE_ACCEPT, noticeTitle, sameSourceFiles } from '@/lib/importSources';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { ImportSourcePanel } from './ImportSourcePanel';
@@ -894,7 +894,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.portal_source.changes.map((row, index) => <li className="break-words" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
           {previewData.portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.portal_source.notes}</p>}
           {previewData.portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>}
-          {previewData.portal_source.staff_workbook && <p className="break-all text-sm">Staff workbook: {previewData.portal_source.staff_workbook.filename} · attached by {previewData.portal_source.staff_workbook.attached_by_name} · {new Date(previewData.portal_source.staff_workbook.attached_at).toLocaleString('en-US')} · SHA-256 {previewData.portal_source.staff_workbook.sha256}</p>}
+          {previewData.portal_source.staff_workbook && <p className="break-all text-sm">Staff workbook: {previewData.portal_source.staff_workbook.filename} · attached by {previewData.portal_source.staff_workbook.attached_by_name} · {formatGuamDateTime(previewData.portal_source.staff_workbook.attached_at)} · SHA-256 {previewData.portal_source.staff_workbook.sha256}</p>}
           {previewData.portal_source.changes_link_url && previewData.preview.source_warnings?.some(w => w.code === 'missing_workbook') && <div className="space-y-2">
             <p className="text-sm">Open it, download the workbook, and attach it here.</p>
             <label className="block text-sm">Downloaded workbook (Excel)<input className="mt-2 block w-full" type="file" accept=".xls,.xlsx" onChange={e => setStaffWorkbook(e.target.files?.[0] || null)} /></label>

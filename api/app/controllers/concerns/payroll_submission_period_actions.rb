@@ -39,7 +39,13 @@ module PayrollSubmissionPeriodActions
 
   def messages
     skip_default_audit_log!
-    message, replayed = payroll_actions.post_message!(@entry, body: params[:body], idempotency_key: params[:idempotency_key])
+    document_ids = PortalMessages::Attachments.requested_ids(params)
+    message, replayed = payroll_actions.post_message!(
+      @entry,
+      body: params[:body],
+      idempotency_key: params[:idempotency_key],
+      document_ids: document_ids
+    )
     render json: { data: ClientPortalThreadSerializer.new(current_user: current_user).message(message), thread_id: message.client_portal_thread_id },
       status: replayed ? :ok : :created
   end

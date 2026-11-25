@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -10,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi, type PayrollHistoryRecord, type ClientOpenPayrollPeriod } from '@/services/api';
-import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { currentAppPath, importedPayRunPath, payRunPath } from '@/lib/routes';
 import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { parsePositiveRouteId } from '@/lib/route-params';
@@ -85,7 +86,7 @@ export function ClientPayPeriods(): ReactElement {
   }, [load]);
 
   const visiblePayPeriods = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = search.trim().toLowerCase().replaceAll('–', '-');
     if (!query) return payPeriods;
     return payPeriods.filter((period) =>
       [
@@ -100,6 +101,7 @@ export function ClientPayPeriods(): ReactElement {
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
+        .replaceAll('–', '-')
         .includes(query)
     );
   }, [payPeriods, search]);
@@ -112,7 +114,7 @@ export function ClientPayPeriods(): ReactElement {
 
   return (
     <div>
-      <Header title="Pay Periods" description="Review payroll runs and employee pay information." />
+      <Header title="Pay periods" description="Review payroll runs and employee pay information." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
@@ -121,7 +123,7 @@ export function ClientPayPeriods(): ReactElement {
             <h2 className="font-semibold">{formatDateRange(openPeriodSummary.start_date, openPeriodSummary.end_date)}</h2>
             <p className="text-sm">{openPeriodSummary.pay_date ? `Pay date ${formatDate(openPeriodSummary.pay_date)}` : 'Pay date to be set'} · {clientPayrollStatus(openPeriodSummary.client_payroll_status)}</p>
             <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/payroll-files/${encodeURIComponent(openPeriodSummary.ref)}`}>
-              Open Pay Period Files
+              Open pay period files
             </Link>
           </Card>
         )}
@@ -146,7 +148,7 @@ export function ClientPayPeriods(): ReactElement {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
-                      <p className="mt-1 text-sm text-neutral-600">Pay date {formatDate(period.pay_date, { weekday: 'short', year: undefined })}</p>
+                      <p className="mt-1 text-sm text-neutral-600">Pay date {formatDate(period.pay_date)}</p>
                     </div>
                     <PeriodStatusBadge period={period} />
                   </div>
@@ -166,11 +168,11 @@ export function ClientPayPeriods(): ReactElement {
             <Table stickyHeader>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pay Period</TableHead>
-                  <TableHead>Pay Date</TableHead>
+                  <TableHead>Pay period</TableHead>
+                  <TableHead>Pay date</TableHead>
                   <TableHead>Employees</TableHead>
-                  <TableHead>Gross Pay</TableHead>
-                  <TableHead>Net Pay</TableHead>
+                  <TableHead>Gross pay</TableHead>
+                  <TableHead>Net pay</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -180,7 +182,7 @@ export function ClientPayPeriods(): ReactElement {
                 {visiblePayPeriods.map((period) => (
                   <TableRow key={period.key}>
                     <TableCell className="font-medium text-gray-900">{formatDateRange(period.start_date, period.end_date)}</TableCell>
-                    <TableCell>{formatDate(period.pay_date, { weekday: 'short', year: undefined })}</TableCell>
+                    <TableCell>{formatDate(period.pay_date)}</TableCell>
                     <TableCell>{period.employee_count}</TableCell>
                     <TableCell>{formatCurrency(period.total_gross ?? 0)}</TableCell>
                     <TableCell>{formatCurrency(period.total_net ?? 0)}</TableCell>
@@ -189,8 +191,8 @@ export function ClientPayPeriods(): ReactElement {
                       <PeriodStatusBadge period={period} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => openPeriod(period)}>
-                        {period.can_decide_payroll_review ? 'Review & Approve' : 'View'}
+                      <Button variant="ghost" size="sm" className="min-h-11 sm:min-h-11" onClick={() => openPeriod(period)}>
+                        {period.can_decide_payroll_review ? 'Review & approve' : 'View'}
                       </Button>
                     </TableCell>
                   </TableRow>

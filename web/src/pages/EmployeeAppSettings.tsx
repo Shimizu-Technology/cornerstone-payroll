@@ -9,7 +9,7 @@ import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmployeeAppPreview, type PreviewDevice, type PreviewScreen } from '@/components/employee-app/EmployeeAppPreview';
 import { HelpContactsEditor } from '@/components/employee-app/HelpContactsEditor';
-import { formatPhone } from '@/lib/employee-app-text';
+import { formatPhone } from '@/lib/display-phone';
 import { draftProblems, fromDraft, toDraft, type HelpContactDraft } from '@/lib/help-contact-drafts';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -71,7 +71,7 @@ function Segmented<T extends string>({ label, value, options, onChange }: {
           aria-checked={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            'inline-flex min-h-10 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300',
+            'inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300',
             value === option.value ? 'bg-white text-neutral-950 shadow-sm' : 'text-neutral-600 hover:text-neutral-900',
           )}
         >
@@ -475,7 +475,7 @@ export function EmployeeAppSettings(): ReactElement {
                           onChange={(value) => updateForm({ accent_color: value })} />
                       </div>
                       {form.accent_color && !brandingLocked && (
-                        <button type="button" className="text-sm font-semibold text-primary-700 underline-offset-2 hover:underline" onClick={() => updateForm({ accent_color: '' })}>
+                        <button type="button" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-700 underline-offset-2 hover:underline" onClick={() => updateForm({ accent_color: '' })}>
                           Clear accent color
                         </button>
                       )}

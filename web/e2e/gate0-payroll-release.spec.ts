@@ -982,7 +982,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     );
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
-    const delayedRow = page.getByRole('row').filter({ hasText: 'Jun 21 - Jul 4, 2026' });
+    const delayedRow = page.getByRole('row').filter({ hasText: 'Jun 21 – Jul 4, 2026' });
     await expect(delayedRow).toBeVisible();
     await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
     await approvalStarted;
@@ -1059,14 +1059,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
-    const delayedRow = page.getByRole('row').filter({ hasText: 'Jul 5 - 18, 2026' });
+    const delayedRow = page.getByRole('row').filter({ hasText: 'Jul 5 – 18, 2026' });
     await expect(delayedRow).toBeVisible();
     await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
     await approvalStarted;
 
     await page.getByRole('button', { name: /^Draft \(/ }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft`);
-    await expect(page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' })).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: 'Aug 2 – 15, 2026' })).toBeVisible();
 
     const approvalDelivered = page.waitForResponse((response): boolean => (
       response.request().method() === 'POST'
@@ -1080,7 +1080,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     expect(staleCalculatedReloadSeen).toBe(false);
     expect(currentDraftReloadSeen).toBe(true);
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?status=draft`);
-    await expect(page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' })).toBeVisible();
+    await expect(page.getByRole('row').filter({ hasText: 'Aug 2 – 15, 2026' })).toBeVisible();
     await expect(page.getByText('Synthetic silent refresh failure')).toBeVisible();
     await expect(delayedRow).toHaveCount(0);
   });
@@ -1514,7 +1514,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page.getByRole('link', { name: 'Pay Periods' })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug`);
-    await expect(page.getByRole('table').getByText('Aug 2 - 15, 2026')).toBeVisible();
+    await expect(page.getByRole('table').getByText('Aug 2 – 15, 2026')).toBeVisible();
     delayNextPrimaryResponse = true;
     await page.getByRole('button', { name: /^Draft/ }).click();
     await delayedRequestStarted;
@@ -1524,7 +1524,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(page).toHaveURL(`/companies/${fixture.other_company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug&status=draft`);
     await expect(page.getByText('Switched clients. Showing pay periods for the selected client.')).toBeVisible();
     await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
-    await expect(page.getByText('Aug 2 - 15, 2026')).toHaveCount(0);
+    await expect(page.getByText('Aug 2 – 15, 2026')).toHaveCount(0);
 
     const delayedPayRunResponseDelivered = page.waitForResponse((response): boolean => (
       new URL(response.url()).pathname === '/api/v1/admin/payroll_history'
@@ -1535,17 +1535,17 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await delayedRequestFinished;
     await waitForUiCommit(page);
     await expect(page.getByText('No pay periods match the current filters.')).toBeVisible();
-    await expect(page.getByText('Aug 2 - 15, 2026')).toHaveCount(0);
+    await expect(page.getByText('Aug 2 – 15, 2026')).toHaveCount(0);
 
     await page.getByRole('button', { name: /Synthetic Boundary Company/ }).click();
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs?sort=pay_date&direction=asc&year=2026&search=Aug&status=draft`);
-    await expect(page.getByRole('table').getByText('Aug 2 - 15, 2026')).toBeVisible();
+    await expect(page.getByRole('table').getByText('Aug 2 – 15, 2026')).toBeVisible();
 
     const queueUrl = page.url();
     const queueLocation = new URL(queueUrl);
     const queueReturnTo = `${queueLocation.pathname}${queueLocation.search}`;
-    const workflowRow = page.getByRole('row').filter({ hasText: 'Aug 2 - 15, 2026' });
+    const workflowRow = page.getByRole('row').filter({ hasText: 'Aug 2 – 15, 2026' });
 
     await workflowRow.getByRole('button', { name: 'View', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
@@ -1846,14 +1846,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const listUrl = `/companies/${fixture.company_id}/pay-runs?source=client-dashboard`;
 
     await page.goto(listUrl);
-    await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Pay periods' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Employees', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/employees`);
-    await expect(page.getByRole('link', { name: 'Pay Periods', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
+    await expect(page.getByRole('link', { name: 'Pay periods', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
     await page.getByRole('button', { name: 'View', exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp(
       `/companies/${fixture.company_id}/pay-runs/\\d+/overview\\?return_to=${encodeURIComponent(listUrl)}`,
     ));
-    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to list', exact: true }).click();
     await expect(page).toHaveURL(listUrl);
 
     await context.close();

@@ -40,7 +40,7 @@ describe('NotificationSettings', () => {
     expect(await screen.findByText(/Your choices are saved and alerts are recorded/)).toBeTruthy();
     expect((screen.getByLabelText('Client messages') as HTMLSelectElement).value).toBe('immediate');
     expect((screen.getByLabelText('Employee change requests') as HTMLSelectElement).value).toBe('digest');
-    expect(screen.getByText(/Daily digests arrive at 7:00 AM Chamorro Time/)).toBeTruthy();
+    expect(screen.getByText(/Daily digests arrive at 7:00 AM Guam time/)).toBeTruthy();
     expect(screen.getByText('Email delivery is off for now.')).toBeTruthy();
     expect(screen.getByText(/In the next daily digest/)).toBeTruthy();
     expect(screen.queryByText('Clients with no alert recipients')).toBeNull();

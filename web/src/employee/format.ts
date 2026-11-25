@@ -1,5 +1,6 @@
 // Plain-language formatting for the employee screens: money, dates, hours,
 // tax labels and the "vs last check" line.
+import { parseDay, shortDate } from '@/lib/display-date';
 import type { Money, StatementPayment, StatementSummary } from './contracts';
 
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
@@ -29,50 +30,13 @@ export function hoursLabel(value: string | null | undefined): string | null {
   return `${hours} ${hours === '1' ? 'hour' : 'hours'}`;
 }
 
-/**
- * A YYYY-MM-DD date (or the date part of an ISO datetime) read as a calendar
- * day, never shifted by the device's time zone. Null for anything else, so a
- * malformed date never reaches Intl (which throws on an invalid Date).
- */
-export function parseDay(value: string | null | undefined): Date | null {
-  const match = typeof value === 'string' ? /^(\d{4})-(\d{2})-(\d{2})/.exec(value) : null;
-  if (!match) return null;
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
-}
-
-const SHORT = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
-const LONG = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-const WEEKDAY = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-
-function formatDay(format: Intl.DateTimeFormat, value: string): string {
-  const day = parseDay(value);
-  return day ? format.format(day) : '';
-}
-
-/** "Nov 14" */
-export function shortDate(value: string): string {
-  return formatDay(SHORT, value);
-}
-
-/** "Nov 14, 2026" */
-export function longDate(value: string): string {
-  return formatDay(LONG, value);
-}
-
-/** "Friday, Nov 28" */
-export function weekdayDate(value: string): string {
-  return formatDay(WEEKDAY, value);
-}
+export { formatDate as longDate, shortDate, weekdayDate } from '@/lib/display-date';
 
 /** Whole calendar days from `from` to `to` (both YYYY-MM-DD), or null if either isn't a date. */
 export function daysBetween(from: string, to: string): number | null {
   const [a, b] = [parseDay(from), parseDay(to)];
   if (!a || !b) return null;
-  // UTC midnights, so a daylight-saving change on the device can't make a day 23 hours.
-  const utc = (d: Date): number => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
-  return Math.round((utc(b) - utc(a)) / 86_400_000);
+  return (b.getTime() - a.getTime()) / 86_400_000;
 }
 
 /** "Today", "Tomorrow" or "In 9 days" until a date; null once it has passed. */
@@ -80,16 +44,6 @@ export function daysUntilLabel(date: string, todayDate: string): string | null {
   const days = daysBetween(todayDate, date);
   if (days === null || days < 0) return null;
   return days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `In ${days} days`;
-}
-
-/** "Nov 1 – 14" or "Oct 25 – Nov 7". */
-export function periodLabel(start: string | null, end: string | null): string | null {
-  const [a, b] = [parseDay(start), parseDay(end)];
-  if (!a || !b) return null;
-  if (a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth()) {
-    return `${SHORT.format(a)} – ${b.getDate()}`;
-  }
-  return `${SHORT.format(a)} – ${SHORT.format(b)}`;
 }
 
 /** How the check was paid, in the words the frozen PDF prints (M4-4). */
@@ -162,9 +116,6 @@ export function comparisonLine(current: StatementSummary, statements: StatementS
   const amount = Math.abs(diff);
   return `${money} You worked ${amount} ${diff > 0 ? plural(amount, 'more hour', 'more hours') : plural(amount, 'fewer hour', 'fewer hours')}.`;
 }
-
-/** (671) 555-0100 for Guam and US numbers; anything else as entered. */
-export { formatPhone } from '@/lib/employee-app-text';
 
 export function telHref(phone: string): string {
   const digits = phone.replace(/[^\d+]/g, '');

@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -31,8 +32,21 @@ type PortalThreadsApi = ResourceActivityApi & {
   createMessage: (threadId: number, data: { body?: string; document_ids?: number[]; idempotency_key: string }) => Promise<{ data: ClientPortalMessage }>;
 };
 
+type PortalPeriodRefDetail = {
+  id: number | null;
+  ref: string;
+  label: string;
+  thread_id: number | null;
+};
+
+type PortalPeriodMessagesApi = {
+  get: (ref: string) => Promise<{ data: PortalPeriodRefDetail }>;
+  message: (ref: string, data: { body?: string; document_ids?: number[]; idempotency_key: string }) => Promise<{ data: ClientPortalMessage; thread_id: number }>;
+};
+
 type Props = {
   api: PortalThreadsApi;
+  periodApi?: PortalPeriodMessagesApi;
   documents: ClientDocument[];
   documentsApi?: PortalDocumentsApi;
   audience?: 'client' | 'staff';
@@ -54,7 +68,7 @@ const noDocumentsApi: PortalDocumentsApi = {
 
 function formatDateTime(value?: string | null) {
   if (!value) return 'No messages yet';
-  return new Date(value).toLocaleString('en-US', { timeZone: 'Pacific/Guam' });
+  return formatGuamDateTime(value);
 }
 
 function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread): ClientPortalThread[] {
@@ -83,7 +97,7 @@ export function PortalMessagesPanel(props: Props): ReactElement {
   return <PortalMessagesContent key={activeCompanyId} {...props} companyId={activeCompanyId} refreshCompanies={refreshCompanies} />;
 }
 
-function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, audience = 'client', initialThreadId = null, audienceLabel, description, canResolve = false, companyId, refreshCompanies }: Props & {
+function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDocumentsApi, audience = 'client', initialThreadId = null, audienceLabel, description, canResolve = false, companyId, refreshCompanies }: Props & {
   companyId: number | null;
   refreshCompanies: () => Promise<void>;
 }): ReactElement {
@@ -95,6 +109,7 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   const navigate = useNavigate();
   const filter = FILTERS.some(option => option.value === searchParams.get('conversations')) ? searchParams.get('conversations') || '' : '';
   const urlThreadId = Number(searchParams.get('thread_id')) || null;
+  const urlPeriodRef = (searchParams.get('period_ref') || searchParams.get('pay_period_id') || '').trim() || null;
   // Only a deep link scrolls the panel into view, not later selections.
   const deepLinkThreadId = useRef(initialThreadId);
   useEffect(() => {
@@ -128,7 +143,10 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   const unavailableRef = useRef(false);
   const dataGeneration = useRef(0);
   const [mobileConversationOpen, setMobileConversationOpen] = useState(Boolean(initialThreadId || urlThreadId));
-  const [newFormOpen, setNewFormOpen] = useState(() => hasDraft(`${draftScope}:new`));
+  const [newFormOpen, setNewFormOpen] = useState(() => hasDraft(`${draftScope}:new`) || Boolean(urlPeriodRef && periodApi));
+  const [linkedPeriod, setLinkedPeriod] = useState<PortalPeriodRefDetail | null>(null);
+  const [loadingLinkedPeriod, setLoadingLinkedPeriod] = useState(Boolean(urlPeriodRef && periodApi));
+  const [linkedPeriodError, setLinkedPeriodError] = useState<string | null>(null);
   const [requestOpen, setRequestOpen] = useState<{ threadId: number | null; subject: string | null } | null>(null);
   // Phone history: opening a conversation pushes an entry, so the browser's
   // Back and the in-page Back both return to the same filtered list.
@@ -151,22 +169,75 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
   const openConversation = useCallback((id: number): void => {
     setSelectedId(id);
     setMobileConversationOpen(true);
+    const hasPeriodParam = Boolean(searchParams.get('period_ref') || searchParams.get('pay_period_id'));
     if (desktop) {
       // Keeps the selection in the URL for reloads and links, without a history entry.
-      if (Number(searchParams.get('thread_id')) === id) return;
+      if (Number(searchParams.get('thread_id')) === id && !hasPeriodParam) return;
       const next = new URLSearchParams(searchParams);
+      next.delete('period_ref');
+      next.delete('pay_period_id');
       next.set('thread_id', String(id));
       setSearchParams(next, { replace: true });
       return;
     }
     listScroll.current = scrollContainer()?.scrollTop ?? window.scrollY;
     restoreListFocus.current = id;
-    if (Number(searchParams.get('thread_id')) === id) return;
+    if (Number(searchParams.get('thread_id')) === id && !hasPeriodParam) return;
     const next = new URLSearchParams(searchParams);
+    next.delete('period_ref');
+    next.delete('pay_period_id');
     next.set('thread_id', String(id));
-    pushedConversation.current = true;
-    setSearchParams(next);
+    pushedConversation.current = !hasPeriodParam;
+    setSearchParams(next, hasPeriodParam ? { replace: true } : undefined);
   }, [desktop, searchParams, setSearchParams]);
+
+  const clearPeriodLink = useCallback((): void => {
+    setLinkedPeriod(null);
+    setLinkedPeriodError(null);
+    setLoadingLinkedPeriod(false);
+    if (!searchParams.get('period_ref') && !searchParams.get('pay_period_id')) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete('period_ref');
+    next.delete('pay_period_id');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  useEffect(() => {
+    if (!urlPeriodRef || !periodApi || !companyId || unavailable) {
+      setLinkedPeriod(null);
+      setLinkedPeriodError(null);
+      setLoadingLinkedPeriod(false);
+      return;
+    }
+    let active = true;
+    const generation = dataGeneration.current;
+    setLoadingLinkedPeriod(true);
+    setLinkedPeriodError(null);
+    periodApi.get(urlPeriodRef)
+      .then((response) => {
+        if (!active || generation !== dataGeneration.current || unavailableRef.current) return;
+        const period = response.data;
+        if (period.thread_id) {
+          setLinkedPeriod(null);
+          setNewFormOpen(false);
+          openConversation(period.thread_id);
+          return;
+        }
+        setLinkedPeriod(period);
+        setNewFormOpen(true);
+        setMobileConversationOpen(false);
+      })
+      .catch((err) => {
+        if (!active || generation !== dataGeneration.current || unavailableRef.current) return;
+        setLinkedPeriod(null);
+        setLinkedPeriodError(err instanceof Error ? err.message : 'Could not load that pay period.');
+        setNewFormOpen(true);
+      })
+      .finally(() => {
+        if (active) setLoadingLinkedPeriod(false);
+      });
+    return () => { active = false; };
+  }, [companyId, openConversation, periodApi, unavailable, urlPeriodRef]);
 
   const closeConversation = useCallback((): void => {
     setMobileConversationOpen(false);
@@ -457,8 +528,32 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
 
   const createThread = async ({ subject, body, document_ids, idempotency_key }: ComposerSend): Promise<void> => {
     if (unavailableRef.current) throw new Error('This client is unavailable.');
-    if (!subject && !body && !document_ids.length) throw new Error('Add a subject or message to start a conversation.');
     const generation = dataGeneration.current;
+    if (linkedPeriod && periodApi) {
+      if (!body && !document_ids.length) throw new Error('Write a message or attach a file.');
+      const periodRef = linkedPeriod.id ? String(linkedPeriod.id) : linkedPeriod.ref;
+      const posted = await periodApi.message(periodRef, {
+        body: body || undefined,
+        document_ids: document_ids.length ? document_ids : undefined,
+        idempotency_key,
+      });
+      if (generation !== dataGeneration.current || unavailableRef.current) return;
+      window.dispatchEvent(new Event('portal-work-changed'));
+      setLinkedPeriod(null);
+      setNewFormOpen(false);
+      try {
+        const threadResponse = await fetchThread(posted.thread_id);
+        if (threadResponse && generation === dataGeneration.current && !unavailableRef.current && threadResponse.data.company_id === companyId) {
+          applyListedThread(threadResponse.data);
+          setSelectedThread(threadResponse.data);
+        }
+      } catch {
+        setError('Message sent. The conversation could not refresh. Reload to see it.');
+      }
+      openConversation(posted.thread_id);
+      return;
+    }
+    if (!subject && !body && !document_ids.length) throw new Error('Add a subject or message to start a conversation.');
     const response = await api.create({ subject: subject || 'Portal message', body: body || undefined, document_ids: document_ids.length ? document_ids : undefined, idempotency_key });
     if (generation !== dataGeneration.current || unavailableRef.current || response.data.company_id !== companyId) return;
     applyListedThread(response.data);
@@ -557,9 +652,37 @@ function PortalMessagesContent({ api, documents, documentsApi = noDocumentsApi, 
               {staff && <Button type="button" variant="outline" disabled={unavailable} onClick={() => setRequestOpen({ threadId: null, subject: null })}><FileQuestion className="mr-2 h-4 w-4" aria-hidden />Request a file</Button>}
             </div>
             <div id="portal-new-conversation" className={`${newFormOpen ? 'block' : 'hidden lg:block'} rounded-lg border border-neutral-200 bg-neutral-50 p-4`}>
-              <MessageComposer draftKey={`${draftScope}:new`} documentsApi={documentsApi} withSubject label={`Message ${audienceLabel}`}
-                placeholder={`Message ${audienceLabel}`} submitLabel="Start Conversation" disabled={unavailable} onSend={createThread}
-                actions={staff ? <Button type="button" variant="ghost" className="hidden lg:inline-flex" disabled={unavailable} onClick={() => setRequestOpen({ threadId: null, subject: null })}><FileQuestion className="mr-2 h-4 w-4" aria-hidden />Request a file</Button> : undefined} />
+              {urlPeriodRef && periodApi && loadingLinkedPeriod && (
+                <p role="status" className="mb-3 text-sm text-neutral-600">Loading pay period…</p>
+              )}
+              {linkedPeriodError && (
+                <div role="alert" className="mb-3 rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800">
+                  <p>{linkedPeriodError}</p>
+                  <button type="button" onClick={clearPeriodLink} className="mt-1 inline-flex min-h-11 items-center font-semibold underline">
+                    Start a general conversation instead
+                  </button>
+                </div>
+              )}
+              {linkedPeriod && (
+                <div className="mb-3 rounded-md border border-primary-200 bg-primary-50/70 px-3 py-2 text-sm text-neutral-900">
+                  <p className="font-semibold">Payroll {linkedPeriod.label}</p>
+                  <p className="mt-0.5 text-xs text-neutral-700">This conversation stays linked to this pay period.</p>
+                  <button type="button" onClick={clearPeriodLink} className="mt-1 inline-flex min-h-11 items-center text-xs font-semibold text-primary-800 underline">
+                    Start a general conversation instead
+                  </button>
+                </div>
+              )}
+              <MessageComposer
+                draftKey={linkedPeriod ? `${draftScope}:period:${linkedPeriod.id ? String(linkedPeriod.id) : linkedPeriod.ref}` : `${draftScope}:new`}
+                documentsApi={documentsApi}
+                withSubject={!linkedPeriod}
+                label={`Message ${audienceLabel}`}
+                placeholder={`Message ${audienceLabel}`}
+                submitLabel="Start Conversation"
+                disabled={unavailable || (Boolean(urlPeriodRef && periodApi) && (loadingLinkedPeriod || Boolean(linkedPeriodError)))}
+                onSend={createThread}
+                actions={staff ? <Button type="button" variant="ghost" className="hidden lg:inline-flex" disabled={unavailable} onClick={() => setRequestOpen({ threadId: null, subject: null })}><FileQuestion className="mr-2 h-4 w-4" aria-hidden />Request a file</Button> : undefined}
+              />
             </div>
 
             <label className="block text-xs font-medium text-neutral-600">Show

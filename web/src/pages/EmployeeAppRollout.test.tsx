@@ -143,4 +143,16 @@ describe('Employee app rollout', () => {
     expect(screen.queryByRole('dialog', { name: 'Print sign-up code' })).toBeNull();
     expect(screen.queryByText('ABCDE-FGHJK')).toBeNull();
   });
+
+  it('keeps the native disclosure marker on details summaries while maintaining 44px height', async () => {
+    mocks.get.mockResolvedValue({ data: rollout });
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+
+    const label = await screen.findByText('Locked sign-ups (0)');
+    const summary = label.closest('summary');
+    expect(summary).toBeTruthy();
+    expect(summary?.className).toContain('min-h-11');
+    expect(summary?.className.split(/\s+/)).not.toContain('flex');
+    expect(label.className).toContain('inline-flex');
+  });
 });

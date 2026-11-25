@@ -7,6 +7,16 @@ export function OrganizationSwitcher({ onNavigate }: { onNavigate?: () => void }
   const { organizations, activeOrganizationId, activeOrganizationName, switchOrganization } = useCompany();
   const navigate = useNavigate();
 
+  if (user?.role === 'client') {
+    return (
+      <div className="border-b border-neutral-200/70 px-4 py-2.5">
+        <p className="truncate text-xs font-medium text-neutral-600">
+          Payroll by <span className="font-semibold text-neutral-900">{activeOrganizationName || 'Loading...'}</span>
+        </p>
+      </div>
+    );
+  }
+
   if (user?.role !== 'super_admin' || organizations.length <= 1) {
     return (
       <div className="border-b border-neutral-200/70 px-4 py-3">
