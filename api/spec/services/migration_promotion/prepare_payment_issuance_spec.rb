@@ -132,7 +132,7 @@ RSpec.describe MigrationPromotion::PreparePaymentIssuance do
       starting_check_number: "5001", check_date: "2027-01-04"
     )
 
-    expect { next_year.call }.to raise_error(ArgumentError, /Check date must be in 2026/)
+    expect { next_year.call }.to raise_error(ArgumentError, /Check date must be in 2026.*use a check date in 2026, or void and re-run the payroll in 2027\./)
     expect(first_item.reload.check_number).to be_nil
   end
 

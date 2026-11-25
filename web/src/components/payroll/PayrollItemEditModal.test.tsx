@@ -362,3 +362,12 @@ it('keeps removal confirmation cancellable and announces saving while blocking r
   expect(screen.getByRole('status').lastElementChild?.textContent).toBe('Saving and recalculating payroll…');
   expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true);
 });
+
+it("bounds the check date to the pay date's tax year, which W-2GU and year-to-date totals use", async () => {
+  render(<PayrollItemEditModal open onOpenChange={vi.fn()} payPeriodId={3} payDate="2026-12-31" item={savedItem} onSaved={vi.fn()} />);
+  const checkDate = await screen.findByLabelText('Check Date');
+
+  expect(checkDate.getAttribute('min')).toBe('2026-01-01');
+  expect(checkDate.getAttribute('max')).toBe('2026-12-31');
+  expect(screen.getByText("Must be in 2026, the pay date's tax year")).toBeTruthy();
+});

@@ -239,11 +239,19 @@ class PayrollItem < ApplicationRecord
   # Tax years go by the pay period's pay_date (W-2GU, year-to-date totals,
   # the employee app's years), so a check dated in another year would be
   # printed in one year and reported in the other. nil when the date fits.
-  def self.check_date_year_problem(check_date, pay_date)
+  # A committed payroll's pay date can't change tax year, so its fix is a
+  # check date in that year or a void and re-run.
+  def self.check_date_year_problem(check_date, pay_period)
+    pay_date = pay_period&.pay_date
     return if check_date.blank? || pay_date.blank? || check_date.year == pay_date.year
 
+    fix = if pay_period.committed?
+      "use a check date in #{pay_date.year}, or void and re-run the payroll in #{check_date.year}"
+    else
+      "change the payroll's pay date instead"
+    end
     "must be in #{pay_date.year}, the year of this payroll's pay date (#{pay_date.strftime('%b %-d, %Y')}). " \
-      "W-2GU and year-to-date totals count this check in that year; change the payroll's pay date instead."
+      "W-2GU and year-to-date totals count this check in that year; #{fix}."
   end
 
   # The same three links as source_accounting_correction_linked?, for a run.
@@ -893,7 +901,7 @@ class PayrollItem < ApplicationRecord
   end
 
   def check_date_in_pay_date_year
-    problem = self.class.check_date_year_problem(check_date, pay_period&.pay_date)
+    problem = self.class.check_date_year_problem(check_date, pay_period)
     errors.add(:check_date, problem) if problem
   end
 
