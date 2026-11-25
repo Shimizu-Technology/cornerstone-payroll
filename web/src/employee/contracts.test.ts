@@ -100,8 +100,14 @@ describe('employee API contracts', () => {
   });
 
   it('reads tax forms, Help contacts and the profile defensively', () => {
-    expect(parseTaxForms({ tax_forms: [{ id: 3, tax_year: 2026, kind: 'w2gu', status: 'withdrawn' }, { id: 4, tax_year: 2026, kind: '1099' }] }))
-      .toEqual([{ id: '3', taxYear: 2026, status: 'withdrawn', corrected: false }]);
+    expect(parseTaxForms({ tax_forms: [
+      { id: '5', tax_year: 2027, kind: 'w2gu', status: 'posted', corrected: true, posted_at: '2028-01-20T00:00:00Z', pdf_available: true, available_through: '2028-10-15' },
+      { id: 3, tax_year: 2026, kind: 'w2gu', status: 'withdrawn', pdf_available: false },
+      { id: 4, tax_year: 2026, kind: '1099', status: 'posted' },
+      { id: 6, tax_year: 2026, kind: 'w2gu', status: 'replaced' },
+      { id: 7, tax_year: 2026, status: 'posted' },
+    ] }))
+      .toEqual([{ id: '5', taxYear: 2027, status: 'posted', corrected: true }, { id: '3', taxYear: 2026, status: 'withdrawn', corrected: false }]);
     expect(parseHelpContacts({ help_contacts: [{ name: 'Rina Calvo', role: 'Manager', phone: '671-555-0100', email: null, text_ok: true }, { name: 'No way to reach', phone: null, email: null }] }))
       .toEqual([{ name: 'Rina Calvo', role: 'Manager', phone: '671-555-0100', email: null, textOk: true }]);
     // Phones and emails become tel:, sms: and mailto: links, so anything else is dropped first.

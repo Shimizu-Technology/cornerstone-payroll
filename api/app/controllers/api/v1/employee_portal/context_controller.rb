@@ -18,8 +18,8 @@ module Api
             status: @employee_link.status,
             former_access_until: former_access_date&.iso8601,
             next_payday: next_payday&.iso8601,
-            # The per-company W-2 delivery setting is added in M4-5; until then it's unset.
-            w2_delivery: nil,
+            # How paper W-2s reach employees: "mailed", "handed_out", or nil when not set (M4-5).
+            w2_delivery: @employee_link.company.w2_delivery,
             features: FEATURES.index_with { |feature| features.employee_portal_feature?(feature) }
           }
         end
