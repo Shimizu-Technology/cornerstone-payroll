@@ -65,7 +65,12 @@ module Api
           features = CompanyFeatures.for(current_company)
           return if features.employee_portal_feature?(:profile_requests) || features.employee_portal_feature?(:delivery_consent)
 
-          head :not_found
+          # Still a 404, with a reason so the page can say the feature is off
+          # instead of "record not found".
+          render json: {
+            error: "Employee contact and address updates aren't turned on for this company.",
+            code: "feature_off"
+          }, status: :not_found
         end
       end
     end

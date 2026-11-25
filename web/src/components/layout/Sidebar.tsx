@@ -47,6 +47,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
+import { roleLabel } from '@/lib/role-labels';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
 import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppSwitchPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
@@ -255,16 +256,6 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
       </div>
     </div>
   );
-}
-
-function formatRoleLabel(role?: string): string {
-  if (!role) return 'User';
-  if (role === 'org_admin' || role === 'admin') return 'Organization Admin';
-
-  return role
-    .split('_')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
 }
 
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
@@ -566,7 +557,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               <div className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm font-medium text-neutral-900">{user?.name || 'User'}</p>
                 <p className="truncate text-xs text-neutral-600">
-                  {formatRoleLabel(user?.role)}
+                  {roleLabel(user?.role)}
                 </p>
               </div>
             )}

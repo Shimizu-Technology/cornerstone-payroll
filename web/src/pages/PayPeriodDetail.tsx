@@ -9,6 +9,7 @@ import { PayRunRecordHeader } from './pay-periods/pay-run/PayRunRecordHeader';
 import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
 import type { PayPeriodDetailProps } from './pay-periods/pay-run/payRunSupport';
 import { PayRunSteps } from './pay-periods/pay-run/PayRunWorkflowSteps';
+import { payRunNextStep } from './pay-periods/pay-run/payRunWorkflow';
 import { SourceCoverageDialog } from './pay-periods/pay-run/SourceCoverageDialog';
 import { PayRunReviewDialogs } from './pay-periods/pay-run/PayRunReviewDialogs';
 import { PayRunSummary } from './pay-periods/pay-run/PayRunSummary';
@@ -94,6 +95,10 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
   const route = (tab: 'work' | 'checks' | 'reports' | 'activity', hash = '') => `${payRunPath(companyId, payPeriod.id, tab, { returnTo })}${hash}`;
   const exclusions = exclusionCountMessages(payRunExclusionCounts(payPeriod.time_tracking));
   const unclassifiedExclusions = payRunUnclassifiedExclusionCount(payPeriod.time_tracking);
+  // Once approved, missing time tracking hours can't be added without
+  // unapproving, so the approved next step leads.
+  const coverageNote = payPeriod.status !== 'approved' && needsSourceCoverageAcknowledgement(payPeriod);
+  const nextStep = coverageNote ? { text: 'Time tracking hours have not been added', hash: '#time-tracking-sync' } : payRunNextStep(payPeriod.status);
   const preparedChecks = sections.processing.payrollItems.filter(item => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay) > 0 && ['prepared', 'printed'].includes(item.check_status || '')).length;
   const attention = [
     ...(payPeriod.intake_stale_at ? [{ text: 'Source changed · review required', href: route('work', '#payroll-blockers') }] : []),
@@ -114,7 +119,7 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     <PayRunReviewDialogs {...sections.reviewDialogs} />
     <RefreshSetupDialog {...sections.refreshDialog} />
     <PayRunRecordHeader payRun={payPeriod} client={activeCompany?.name} returnTo={returnTo}
-      attention={attention.length ? attention.map((item, index) => <span key={item.text}>{index > 0 && ' · '}<Link className="underline decoration-neutral-300 underline-offset-4 hover:text-primary-800" to={item.href}>{item.text}</Link></span>) : <Link className="underline decoration-neutral-300 underline-offset-4" to={route('work', needsSourceCoverageAcknowledgement(payPeriod) ? '#time-tracking-sync' : '#payroll-results')}>{needsSourceCoverageAcknowledgement(payPeriod) ? 'Time tracking hours have not been added' : payPeriod.status === 'draft' ? 'Enter or review pay, then calculate' : 'Review employee pay before the next step'}</Link>}
+      attention={attention.length ? attention.map((item, index) => <span key={item.text}>{index > 0 && ' · '}<Link className="underline decoration-neutral-300 underline-offset-4 hover:text-primary-800" to={item.href}>{item.text}</Link></span>) : <Link className="underline decoration-neutral-300 underline-offset-4" to={route('work', nextStep.hash)}>{nextStep.text}</Link>}
       information={exclusions.information.join(' · ')}
       actions={<PayRunProcessingActions {...sections.processing} />} totals={<PayRunSummary {...sections.summary} />} />
     {props.navigation}

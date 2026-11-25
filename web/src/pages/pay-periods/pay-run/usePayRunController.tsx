@@ -22,11 +22,17 @@ import { useCompany } from '@/contexts/CompanyContext';
 
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { currentAppPath, payRunsPath, safeInternalReturnPath } from '@/lib/routes';
-import type { AddBackResult, ExpectedEntries, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
+import type { AddBackResult, ExpectedEntries, NewHireDocumentGap, PayPeriod, PayrollItem, Employee, PayrollItemWageRateHours, NonEmployeeCheck, SupplementalPayPeriodSummary, PayPeriodComparisonResponse, PayrollFieldDefinition, PayrollLiabilityReconciliation, PayPeriodPayrollFieldAssignment, PayPeriodPayrollFieldInputs, NamedLoanOption } from '@/types';
 import { preservesWorksheetJobHours, type HoursEntry, type PayrollFieldDraftEntry, MAX_HOURS_PER_PERIOD, toNumber, payrollFieldAmountsEqual, effectiveLoanDeduction, unavailableSavedWageRateLabels, buildHoursMap, derivePayrollUiState, numericRecordsEqual, tipRecordsEqual, hoursRecordsEqual, type PayPeriodDetailProps, type CoverageAcknowledgement, type EmploymentGroup } from './payRunSupport';
 
 export type AddBackSource = 'expected_entries' | 'roster';
 export interface AddBackNoticeState { source: AddBackSource; result: AddBackResult; hoursEntered: boolean }
+
+function documentBlockedEmployeesFrom(err: unknown): NewHireDocumentGap[] {
+  if (!(err instanceof ApiError)) return [];
+  const data = err.data as { code?: string; blocked_employees?: NewHireDocumentGap[] } | undefined;
+  return data?.code === 'new_hire_documents_required' && Array.isArray(data.blocked_employees) ? data.blocked_employees : [];
+}
 
 export function usePayRunController({
   active = true,
@@ -69,6 +75,9 @@ export function usePayRunController({
   const [salaryOverrideMap, setSalaryOverrideMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  // Who an Approve was blocked for, so the error can link to their documents.
+  const [documentBlockedEmployees, setDocumentBlockedEmployees] = useState<NewHireDocumentGap[]>([]);
+  useEffect(() => { if (!error) setDocumentBlockedEmployees([]); }, [error]);
   const [calculationFailures, setCalculationFailures] = useState<PayrollCalculationFailure[]>([]);
   const [calculationNotice, setCalculationNotice] = useState<string | null>(null);
   const [worksheetRefreshWarning, setWorksheetRefreshWarning] = useState<string | null>(null);
@@ -111,9 +120,15 @@ export function usePayRunController({
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [finalRecordRefreshToken, setFinalRecordRefreshToken] = useState(0);
+  // The final record loads on its own when it mounts. The panel's first
+  // report is just its initial load, so only later ones (a reload after a
+  // print, or a saved check) refresh it. Refreshing on the first one
+  // re-requested the slowest report on every visit.
+  const nonEmployeeChecksLoadedRef = useRef(false);
   const handleNonEmployeeChecksLoaded = useCallback((checks: NonEmployeeCheck[]) => {
     setNonEmployeeChecks(checks);
-    setFinalRecordRefreshToken(token => token + 1);
+    if (nonEmployeeChecksLoadedRef.current) setFinalRecordRefreshToken(token => token + 1);
+    nonEmployeeChecksLoadedRef.current = true;
   }, []);
   const handleNonEmployeeChecksChanged = useCallback(() => {
     setFinalRecordRefreshToken(token => token + 1);
@@ -881,6 +896,7 @@ export function usePayRunController({
       setPayPeriod(response.pay_period);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve');
+      setDocumentBlockedEmployees(documentBlockedEmployeesFrom(err));
     } finally {
       setProcessing(false);
       setProcessingAction(null);
@@ -1598,7 +1614,7 @@ export function usePayRunController({
     summary: { payRunId, contractorItems, hasCorrectionPayBasisHold, payrollItems, totalContractorPay, totalDRTDeposit, totalDeductions, totalGross, totalNet },
     processing: { onPreviewDownloaded: (revision: number) => setPayPeriod(current => current?.id === payRunId && current.company_id === companyId
       ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, processingAction, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
-    feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
+    feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, documentBlockedEmployees, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
     blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
     source: { sourceCoverageProcessing: processing, onReviewSourceCoverage: isDraft || isCalculated ? () => { if (!processing) void handleRunPayroll(); } : undefined, aireSourceRefreshToken, companyId, currentAireRecord, hoursMap, invalidateAireSource, loadPayPeriod, payPeriod, setTimeTrackingAutoPreview, setTimeTrackingImportOpen },
     metadata: { formatCorrectionPayDate, isApproved, isCalculated, isCommitted, isCorrection, isVoided, payDateCorrections, payPeriod, processedBy, statusConfig },

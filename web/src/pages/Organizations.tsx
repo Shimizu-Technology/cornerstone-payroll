@@ -329,6 +329,7 @@ export function Organizations() {
     <div>
       <Header
         title="Organizations"
+        organizationWide
         description="Manage accounting firm workspaces and their administrators"
         actions={<div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setIsTransferring(true)} disabled={isTransferring}>Move existing client</Button>

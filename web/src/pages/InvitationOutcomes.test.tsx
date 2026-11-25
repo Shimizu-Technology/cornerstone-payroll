@@ -41,7 +41,7 @@ describe('invitation delivery outcomes', () => {
     render(<Users />);
     await screen.findAllByText('Synthetic Invitee');
     fireEvent.click(screen.getByRole('button', { name: 'Invite User' }));
-    fireEvent.change(screen.getByPlaceholderText('Email address *'), { target: { value: invitee.email } });
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: invitee.email } });
     fireEvent.click(screen.getByRole('button', { name: 'Send Invitation' }));
     expect(await screen.findByText(new RegExp(message.replace(/[()]/g, '\\$&')))).toBeTruthy();
     expect(screen.queryByText(/Invitation (?:re)?sent to/)).toBeNull();
@@ -53,7 +53,7 @@ describe('invitation delivery outcomes', () => {
     render(<Users />);
     await screen.findAllByText('Synthetic Invitee');
     fireEvent.click(screen.getByRole('button', { name: 'Invite User' }));
-    fireEvent.change(screen.getByPlaceholderText('Email address *'), { target: { value: invitee.email } });
+    fireEvent.change(screen.getByLabelText('Email address'), { target: { value: invitee.email } });
     fireEvent.click(screen.getByRole('button', { name: 'Send Invitation' }));
     expect(await screen.findByText(/Invitation email failed: Clerk API not configured\./)).toBeTruthy();
     expect(screen.getByText(/has an account, but cannot sign in yet because no invitation was sent/)).toBeTruthy();

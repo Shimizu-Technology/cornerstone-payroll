@@ -34,6 +34,8 @@ export function errorRecovery(message: string): string | null {
   if (/loan.*(balance|authorization|repayment|configuration|review)/i.test(message)) {
     return 'Check Employee Loans and the named employee’s deduction against the loan balance and authorized repayment schedule. Resolve the discrepancy, then recalculate.';
   }
+  // A message that names its field ("Email is required") already says what to fix.
+  if (/^[A-Z][\w ()'-]{0,40} (is required|can't be blank|has already been taken|is invalid|is not valid)\b/.test(message)) return null;
   // Keep useful server-supplied instructions instead of adding generic clutter.
   if (/\b(try again|retry|recalculate|reload|refresh|verify|check|review|choose|add|attach|select|contact|sign in|ask)\b/i.test(message)) return null;
   return 'Check the information for this action. If the message does not identify a field or the problem continues, contact support with the page, action, and this error message.';

@@ -16,3 +16,12 @@ export function payRunSteps(period: PayPeriod) {
     commitReason: period.status === 'approved' && payrollClientCommitReason(period) ? payrollClientCommitReason(period) : period.parallel_run ? 'Parallel comparison · cannot commit.' : period.status === 'draft' ? 'Calculate payroll and review the results first.' : period.status === 'calculated' ? 'Approve the reviewed results before commitment.' : '',
   };
 }
+
+// The header's next step when nothing needs attention. It follows the saved
+// status, so it moves on as soon as an approve or unapprove response lands.
+export function payRunNextStep(status: PayPeriod['status']): { text: string; hash: string } {
+  if (status === 'draft') return { text: 'Enter or review pay, then calculate', hash: '#payroll-results' };
+  if (status === 'approved') return { text: 'Approved. Commit when you\'re ready.', hash: '#payroll-commit' };
+  if (status === 'committed') return { text: 'Committed. Review checks and reports.', hash: '#payroll-results' };
+  return { text: 'Review employee pay, then approve', hash: '#payroll-results' };
+}
