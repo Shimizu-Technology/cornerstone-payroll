@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   let!(:company) { create(:company, name: "Portal Payroll Co") }
   let!(:client_user) { create(:user, company: company, role: "client", email: "portal-pay-periods@example.com") }
   let!(:committed_pay_period) do
@@ -96,6 +98,52 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
       source_metadata: { "private_note" => "never expose this" }
     )
     [ batch, period, paycheck ]
+  end
+
+  it "surfaces an open period without disclosing its unpublished payroll" do
+    today = PayrollSubmissions::Catalog.today
+    draft_pay_period.update!(start_date: today - 13.days, end_date: today, pay_date: today + 5.days)
+
+    get "/api/v1/client/pay_periods"
+
+    expect(response).to have_http_status(:ok)
+    open_period = response.parsed_body.fetch("open_period")
+    expect(open_period).to eq(
+      "ref" => "#{draft_pay_period.start_date}_#{draft_pay_period.end_date}",
+      "start_date" => draft_pay_period.start_date.iso8601,
+      "end_date" => draft_pay_period.end_date.iso8601,
+      "pay_date" => draft_pay_period.pay_date.iso8601,
+      "client_payroll_status" => "preparing"
+    )
+    expect(response.parsed_body.fetch("pay_periods").pluck("id")).not_to include(draft_pay_period.id)
+  end
+
+  it "offers a derived period with a manual pay date" do
+    travel_to Time.find_zone!("Pacific/Guam").local(2026, 11, 15, 12) do
+      CompanyPaySchedule.create!(company: company, frequency: "semimonthly", period_rule: "semimonthly",
+        pay_date_rule: "manual", timezone: "Pacific/Guam", source: "operator_confirmed",
+        confirmation_status: "needs_confirmation", effective_on: Date.new(2026, 1, 1))
+
+      get "/api/v1/client/pay_periods"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("open_period")).to include(
+        "end_date" => "2026-11-15", "pay_date" => nil, "client_payroll_status" => "preparing")
+    end
+  end
+
+  it "does not offer a submission period linked to a voided run as open" do
+    today = PayrollSubmissions::Catalog.today
+    run = create(:pay_period, :committed, company: company, start_date: today - 13.days,
+      end_date: today, pay_date: today + 5.days)
+    PayrollSubmissionPeriod.create!(company: company, pay_period: run, start_date: run.start_date,
+      end_date: run.end_date, pay_date: run.pay_date, source: "pay_period", status: "paid")
+    run.update_column(:correction_status, "voided")
+
+    get "/api/v1/client/pay_periods"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("open_period")).to be_nil
   end
 
   it "shows only reportable Cornerstone payrolls and locked QuickBooks payrolls" do
