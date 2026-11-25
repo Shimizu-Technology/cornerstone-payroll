@@ -171,6 +171,26 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response.parsed_body.fetch("error")).to include("Email can't be blank")
     end
 
+    it "requires at least one client for a client portal user" do
+      [ {}, { company_ids: [] }, { company_ids: [ "" ] } ].each do |assignment|
+        expect {
+          post "/api/v1/admin/users",
+            params: { user: { email: "portal-user@example.com", role: "client", **assignment } }
+        }.not_to change(User, :count)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body).to eq(
+          "error" => "Choose at least one client for a client portal user.",
+          "code" => "client_required"
+        )
+      end
+
+      post "/api/v1/admin/users",
+        params: { user: { email: "portal-user@example.com", role: "client", company_ids: [ client_company.id ] } }
+      expect(response).to have_http_status(:created), response.body
+      expect(User.find_by!(email: "portal-user@example.com").company_assignments.pluck(:company_id)).to eq([ client_company.id ])
+    end
+
     it "prevents organization admins from creating platform super admins" do
       expect {
         post "/api/v1/admin/users",

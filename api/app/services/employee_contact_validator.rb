@@ -34,6 +34,7 @@ class EmployeeContactValidator
     :matched_login_user,
     :login_email_rejected,
     :login_email_rejection_reason,
+    :email_error_code,
     keyword_init: true
   ) do
     def valid?
@@ -58,11 +59,16 @@ class EmployeeContactValidator
       end
     end
 
+    # email_error_code says why an email was refused, so the page can explain
+    # it: invalid_email, placeholder_email, personal_email_required or
+    # recipient_not_allowed. Login conflicts keep their own messages, which
+    # stay generic for client users.
     def contact_validation_payload
       {
         same_person_confirmation_required: same_person_confirmation_required?,
-        warnings: warnings
-      }
+        warnings: warnings,
+        email_error_code: email_error_code
+      }.compact
     end
   end
 
@@ -345,6 +351,7 @@ class EmployeeContactValidator
     matched_login_user = nil
     login_email_rejected = false
     login_email_rejection_reason = nil
+    email_error_code = nil
 
     normalized_email = @raw_email == :unchanged ? self.class.normalize_email(@employee&.email) : self.class.normalize_email(@raw_email)
     normalized_phone = @raw_phone == :unchanged ? @employee&.phone : nil
@@ -356,15 +363,22 @@ class EmployeeContactValidator
 
     if @raw_email != :unchanged && normalized_email.present?
       if !valid_email_format?(normalized_email)
+        email_error_code = "invalid_email"
         add_error(errors, :email, "must be a valid email address")
       elsif !DemoOutbound.contact_email_allowed?(@company, normalized_email)
         # A demo contact may only be replaced with an allow-listed or
         # non-delivering address, so a later notice can't leave the firm.
+        # This runs before the organization's marked placeholders so a demo
+        # never reveals that list; only the built-in placeholder patterns,
+        # which hold no client data, are named as not a real email.
+        email_error_code = self.class.structural_placeholder_email?(normalized_email) ? "placeholder_email" : "recipient_not_allowed"
         add_error(errors, :email, Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
       elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
+        email_error_code = @source == "employee" ? "personal_email_required" : "placeholder_email"
         add_error(errors, :email, @source == "employee" ? EMPLOYEE_PERSONAL_EMAIL_ERROR :
           "cannot be a placeholder or generic inbox address; enter the employee's own email")
       elsif @source == "employee" && self.class.structural_placeholder_email?(normalized_email)
+        email_error_code = "personal_email_required"
         add_error(errors, :email, EMPLOYEE_PERSONAL_EMAIL_ERROR)
       else
         if self.class.structural_placeholder_email?(normalized_email)
@@ -387,6 +401,7 @@ class EmployeeContactValidator
         if errors[:email].blank?
           coworker_count = same_company_coworker_email_count(normalized_email)
           if coworker_count >= 1 && @source == "employee"
+            email_error_code = "personal_email_required"
             add_error(errors, :email, EMPLOYEE_PERSONAL_EMAIL_ERROR)
           elsif coworker_count >= 1
             warnings << {
@@ -410,7 +425,8 @@ class EmployeeContactValidator
       confirmation_basis: confirmation_basis,
       matched_login_user: matched_login_user,
       login_email_rejected: login_email_rejected,
-      login_email_rejection_reason: login_email_rejection_reason
+      login_email_rejection_reason: login_email_rejection_reason,
+      email_error_code: email_error_code
     )
   end
 

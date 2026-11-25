@@ -38,6 +38,14 @@ module Api
 
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
+          if requested_role == "client" && normalize_company_ids(company_ids).empty?
+            # Without a client the login could sign in but open nothing.
+            return render json: {
+              error: "Choose at least one client for a client portal user.",
+              code: "client_required"
+            }, status: :unprocessable_entity
+          end
+
           user = User.new(permitted)
           user.role = requested_role
           user.company_id = current_user.company_id
