@@ -530,3 +530,65 @@ it('lets staff cancel asking again without sending that note with an acceptance,
   expect(screen.queryByText('That did not save. Try again.')).toBeNull();
   accept.mockRestore();
 });
+
+it('starts a period-linked conversation via the period message endpoint when opened with period_ref', async () => {
+  const periodApi = {
+    get: vi.fn().mockResolvedValue({
+      data: { id: 9, ref: '9', label: 'Nov 2–15, 2026', thread_id: null },
+    }),
+    message: vi.fn().mockResolvedValue({
+      data: { id: 501, thread_id: 88, body: 'Hours question', created_at: '2026-11-16T00:00:00Z' },
+      thread_id: 88,
+    }),
+  };
+  const createdThread = {
+    ...thread(2, 'Payroll Nov 2–15, 2026'),
+    id: 88,
+    messages: [{ id: 501, thread_id: 88, body: 'Hours question', author_name: 'Client', created_at: '2026-11-16T00:00:00Z' }],
+  } as ClientPortalThread;
+  api.get.mockResolvedValue({ data: createdThread });
+  api.createMessage.mockResolvedValue({ data: { id: 502, thread_id: 88, body: 'Follow-up', created_at: '2026-11-16T01:00:00Z' } });
+  let location = '';
+  const Probe = (): null => { location = useLocation().search; return null; };
+
+  render(
+    <MemoryRouter initialEntries={['/messages?period_ref=9']}>
+      <PortalMessagesPanel api={api} periodApi={periodApi} documents={[]} audienceLabel="Cornerstone" description="Client messages" />
+      <Probe />
+    </MemoryRouter>,
+  );
+
+  expect(await screen.findByText(/Payroll Nov 2–15, 2026/)).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText('Message Cornerstone'), { target: { value: 'Hours question' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Start Conversation' }));
+
+  await waitFor(() => expect(periodApi.message).toHaveBeenCalledWith('9', expect.objectContaining({ body: 'Hours question' })));
+  expect(api.create).not.toHaveBeenCalled();
+  await waitFor(() => expect(location).toBe('?thread_id=88'));
+  expect(await screen.findByPlaceholderText('Reply Cornerstone')).toBeTruthy();
+
+  fireEvent.change(screen.getByPlaceholderText('Reply Cornerstone'), { target: { value: 'Follow-up' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  await waitFor(() => expect(api.createMessage).toHaveBeenCalledWith(88, expect.objectContaining({ body: 'Follow-up' })));
+});
+
+it('opens the existing period thread directly when period_ref already has a thread', async () => {
+  const existing = { ...thread(2, 'Payroll Nov 2–15, 2026'), id: 55 };
+  const periodApi = {
+    get: vi.fn().mockResolvedValue({ data: { id: 9, ref: '9', label: 'Nov 2–15, 2026', thread_id: 55 } }),
+    message: vi.fn(),
+  };
+  api.get.mockResolvedValue({ data: existing });
+  let location = '';
+  const Probe = (): null => { location = useLocation().search; return null; };
+
+  render(
+    <MemoryRouter initialEntries={['/messages?period_ref=9']}>
+      <PortalMessagesPanel api={api} periodApi={periodApi} documents={[]} audienceLabel="Cornerstone" description="Client messages" />
+      <Probe />
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(location).toBe('?thread_id=55'));
+  expect(await screen.findByPlaceholderText('Reply Cornerstone')).toBeTruthy();
+});
