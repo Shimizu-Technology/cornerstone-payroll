@@ -248,7 +248,7 @@ describe('EmployeeAppSwitch', () => {
     renderPage();
 
     const summary = (await screen.findByRole('heading', { name: 'Ready to turn on' })).closest('section') as HTMLElement;
-    expect(within(summary).getByText("Every other check passes. Two-step sign-in isn't required yet. Turn it on under Switches below.")).toBeTruthy();
+    expect(within(summary).getByText("Every other check the employee app needs passes. Two-step sign-in isn't required yet. Turn it on under Switches below.")).toBeTruthy();
     expect(within(summary).queryByText(/demo early access/)).toBeNull();
   });
 

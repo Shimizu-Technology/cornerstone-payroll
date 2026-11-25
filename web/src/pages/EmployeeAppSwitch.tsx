@@ -225,7 +225,9 @@ function ReadinessSummary({ master, checks, names }: { master: SwitchRow; checks
   const summary = master.on
     ? failing ? `${failing} ${failing === 1 ? 'check needs' : 'checks need'} attention. Parts that depend on ${failing === 1 ? 'it' : 'them'} can't turn on.`
       : earlyAccess ? `On${earlyAccess}.${noteText}` : notes ? `Every other check passes.${noteText}` : 'Every check passes.'
-    : ready ? `${earlyAccess ? `Ready to turn on${earlyAccess}.` : notes ? 'Every other check passes.' : 'Every check the employee app needs passes.'}${noteText} Turn it on under Switches below.`
+    // Scoped to the app's own checks: a feature's failing check (consent, say)
+    // doesn't block the app and stays listed in the checklist below.
+    : ready ? `${earlyAccess ? `Ready to turn on${earlyAccess}.` : notes ? 'Every other check the employee app needs passes.' : 'Every check the employee app needs passes.'}${noteText} Turn it on under Switches below.`
       : 'These checks must pass before the employee app can turn on:';
   return (
     <section aria-labelledby="readiness-summary" className={`rounded-xl border p-4 ${ready ? 'border-success-200 bg-success-50' : 'border-warning-200 bg-warning-50'}`}>
