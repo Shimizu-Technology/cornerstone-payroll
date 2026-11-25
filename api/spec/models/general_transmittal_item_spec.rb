@@ -11,6 +11,8 @@ RSpec.describe GeneralTransmittalItem, type: :model do
 
   it "fills a missing company from the parent when a legacy item is updated" do
     item = create(:general_transmittal_item)
+    # Legacy rows predate the contract migration that requires company_id.
+    ActiveRecord::Base.connection.change_column_null :general_transmittal_items, :company_id, true
     item.update_column(:company_id, nil)
 
     item.update!(title: "Reviewed legacy line")
