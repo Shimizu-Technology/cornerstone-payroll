@@ -36,18 +36,27 @@ class PayrollInvitation
       return failure if failure
     end
 
+    # A demo login is invited only at an allow-listed address, checked before
+    # any token or Clerk invitation exists.
+    demo_company = DemoOutbound.demo_company_for(user)
+    if demo_company && !DemoOutbound.permit?(company: demo_company, email: email, channel: "payroll_invitation", user: user)
+      return { success: false, error: Company::DEMO_RECIPIENT_REFUSED_MESSAGE, refused: :recipient_not_allowed }
+    end
+
     nonce = SecureRandom.hex(32)
-    result = @clerk.create_invitation(
-      email: email,
-      redirect_url: redirect_url,
-      public_metadata: metadata.merge(
-        role: snapshot.fetch("role"),
-        organization_id: snapshot.fetch("organization_id"),
-        payroll_user_id: user.id,
-        payroll_invite_nonce: nonce
-      ),
-      ignore_existing: ignore_existing
-    )
+    result = DemoOutbound.scoped(demo_company) do
+      @clerk.create_invitation(
+        email: email,
+        redirect_url: redirect_url,
+        public_metadata: metadata.merge(
+          role: snapshot.fetch("role"),
+          organization_id: snapshot.fetch("organization_id"),
+          payroll_user_id: user.id,
+          payroll_invite_nonce: nonce
+        ),
+        ignore_existing: ignore_existing
+      )
+    end
     return result unless result[:success]
 
     invitation_id = result.fetch(:invitation_id)

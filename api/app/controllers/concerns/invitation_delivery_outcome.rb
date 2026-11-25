@@ -31,6 +31,12 @@ module InvitationDeliveryOutcome
   end
 
   def send_invite_email(user, invitation_url)
+    # Checked before enqueue; the job and the transport check again.
+    demo_company = DemoOutbound.demo_company_for(user)
+    if demo_company && !DemoOutbound.permit?(company: demo_company, email: user.email, channel: "user_invite_email", user: user)
+      return "failed"
+    end
+
     if StagingOutboundPolicy.staging?
       # Resolve capture now so a rehearsal acknowledgement describes the actual
       # transport outcome, rather than predicting what a later job might do.

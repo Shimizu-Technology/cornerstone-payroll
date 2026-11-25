@@ -18,9 +18,14 @@ module EmployeeLinks
       url = AppUrl.invite_url(link.company, path: path, secret: token)
       to = link.invite_email
       return :failed unless url && to
+      return :skipped unless DemoOutbound.permit?(company: link.company, email: to, channel: "employee_link_invite")
 
-      response = PortalNotifications::Transport.deliver(payload(link, url, path, to),
-        idempotency_key: "employee-link-invite-#{link.id}-#{link.invite_token_digest.first(16)}")
+      response = DemoOutbound.scoped(link.company) do
+        PortalNotifications::Transport.deliver(payload(link, url, path, to),
+          idempotency_key: "employee-link-invite-#{link.id}-#{link.invite_token_digest.first(16)}")
+      end
+      return :skipped if response["suppressed"]
+
       response["captured"] || response["staging_captured"] ? :captured : :sent
     rescue StandardError => error
       Rails.logger.warn("[EmployeeLinks::InviteEmail] Invite email for link #{link.id} failed: #{error.class}")

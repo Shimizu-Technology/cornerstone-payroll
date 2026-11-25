@@ -14,6 +14,10 @@ class ClerkInvitationService
   end
 
   def create_invitation(email:, redirect_url: nil, public_metadata: {}, ignore_existing: false)
+    scope = DemoOutbound.scope_company
+    if scope && !DemoOutbound.permit?(company: scope, email: email, channel: "clerk_invitation")
+      return { success: false, error: Company::DEMO_RECIPIENT_REFUSED_MESSAGE, refused: :recipient_not_allowed }
+    end
     StagingOutboundPolicy.clerk_target!(email: email)
     raise "CLERK_SECRET_KEY not configured" unless configured?
 

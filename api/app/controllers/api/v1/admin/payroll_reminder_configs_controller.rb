@@ -58,8 +58,13 @@ module Api
             User.transaction do
               revalidate_current_company_write_access!(capability: :manage_client_configuration)
             end
+            unless DemoOutbound.permit?(company: current_company, email: email, channel: "payroll_reminder_test")
+              failures << { email: email, error: Company::DEMO_RECIPIENT_REFUSED_MESSAGE }
+              next
+            end
+
             begin
-              result = StagingMailTransport.deliver(payload)
+              result = DemoOutbound.scoped(current_company) { StagingMailTransport.deliver(payload) }
               StagingOutboundPolicy.staging? && result["staging_captured"] ? captured += 1 : sent += 1
             rescue StandardError => e
               if StagingOutboundPolicy.staging?

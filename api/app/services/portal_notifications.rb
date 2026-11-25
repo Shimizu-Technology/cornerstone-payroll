@@ -160,7 +160,9 @@ module PortalNotifications
     # Repeating an event (a retried request, a replayed job) returns the saved
     # event instead of creating more alerts.
     def record!(event_type:, company:, actor:, subject:, dedupe_key:, metadata: {}, occurred_at: Time.current)
-      return if company.nil? || company.test_workspace?
+      # Practice copies never notify. A demo company notifies like a client,
+      # but only allow-listed recipients (DemoOutbound) are ever sent to.
+      return if company.nil? || company.practice_copy?
 
       existing = PortalNotificationEvent.find_by(dedupe_key: dedupe_key)
       return existing if existing
@@ -206,7 +208,9 @@ module PortalNotifications
       end
       # Rows recorded while email is off are final: enabling email later must
       # never send activity that happened before it was turned on.
-      if !delivery_enabled?
+      if !DemoOutbound.permit?(company: event.company, email: target.user&.email || target.email, channel: "portal_notification", user: target.user)
+        skipped.call("recipient_not_allowed")
+      elsif !delivery_enabled?
         skipped.call("email_delivery_disabled", mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode)
       elsif mode == "off"
         skipped.call("preference_off", CATEGORIES.dig(event.category, :default_mode))

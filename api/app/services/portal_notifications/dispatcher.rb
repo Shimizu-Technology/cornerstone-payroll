@@ -80,6 +80,11 @@ module PortalNotifications
 
       revoked = Recipients.revocation_reason(row)
       return revoked if revoked
+      # Rechecked before every send and retry, so a stale queued row for a
+      # demo address that has left the allow-list sends nothing.
+      unless DemoOutbound.permit?(company: event.company, email: row.address, channel: "portal_notification", user: row.user)
+        return "recipient_not_allowed"
+      end
       return nil unless row.user
       return "preference_off" if Preferences.mode_for(row.user, event.category) == "off"
       # Reading the conversation first makes a still-pending alert unnecessary.
@@ -91,7 +96,14 @@ module PortalNotifications
     def deliver(group)
       email = Email.new(audience: group.fetch(:audience), delivery_mode: group.fetch(:mode), events: group.fetch(:events),
         app_user: group.fetch(:user).present?)
-      response = Transport.deliver(email.payload(from: Transport.from_email, to: group.fetch(:address)), idempotency_key: group.fetch(:key))
+      demo_company = group.fetch(:events).map(&:company).find { |company| company&.demo? }
+      response = DemoOutbound.scoped(demo_company) do
+        Transport.deliver(email.payload(from: Transport.from_email, to: group.fetch(:address)), idempotency_key: group.fetch(:key))
+      end
+      if response["suppressed"]
+        complete!(group, status: "skipped", skip_reason: "recipient_not_allowed")
+        return false
+      end
       if response["staging_captured"]
         complete!(group, status: "skipped", skip_reason: "staging_contained")
         Rails.logger.info("[PortalNotification] staging contained batch=#{group[:key]} deliveries=#{group[:ids].size}")
