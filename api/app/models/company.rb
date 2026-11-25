@@ -25,6 +25,9 @@ class Company < ApplicationRecord
   # (filing transmission, payments, firm billing). It reads like an ordinary
   # unavailable state so the demo never announces itself to clients or staff.
   DEMO_UNAVAILABLE_MESSAGE = "This option isn't available for this client yet."
+  DEMO_ACCESS_DENIED_MESSAGE = "Your access does not allow this action for this client."
+  # Mirrors the database check on a demo's fixture key.
+  DEMO_FIXTURE_KEY_PATTERN = /\A[a-z0-9][a-z0-9-]{2,62}\z/
 
   before_destroy :protect_retained_portal_documents, prepend: true
 
@@ -151,6 +154,7 @@ class Company < ApplicationRecord
   validates :migration_rehearsal_status, presence: true, if: :test_workspace?
   validate :test_workspace_source_is_valid
   validate :demo_shape_is_permanent, if: :demo?
+  validate :demo_outputs_stay_simulated, if: :demo?
   validate :company_type_is_unchanged, on: :update
   validates :check_stock_type, inclusion: { in: CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
@@ -443,9 +447,15 @@ class Company < ApplicationRecord
     errors.add(:test_workspace_expires_at, "must be blank for a demo company") if test_workspace_expires_at.present?
     errors.add(:test_workspace_archived_at, "must be blank for a demo company") if test_workspace_archived_at.present?
     errors.add(:test_workspace_sealed_at, "must be blank for a demo company") if test_workspace_sealed_at.present?
-    if test_workspace_manifest.to_h["demo_fixture_key"].blank?
+    unless test_workspace_manifest.to_h["demo_fixture_key"].to_s.match?(DEMO_FIXTURE_KEY_PATTERN)
       errors.add(:test_workspace_manifest, "must name the demo fixture")
     end
+  end
+
+  # A demo never creates FIT deposit checks or prints on preprinted bank stock.
+  def demo_outputs_stay_simulated
+    errors.add(:auto_create_fit_check, "isn't available for this client") if auto_create_fit_check?
+    errors.add(:check_stock_type, "isn't available for this client") if first_hawaiian_4up_checks?
   end
 
   def company_type_is_unchanged

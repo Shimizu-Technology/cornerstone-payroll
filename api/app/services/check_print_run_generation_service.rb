@@ -97,6 +97,7 @@ class CheckPrintRunGenerationService
   end
 
   def validate_request!
+    raise InvalidSelectionError, Company::DEMO_UNAVAILABLE_MESSAGE if pay_period.company.demo?
     raise InvalidSelectionError, "Checks are only available for committed pay periods" unless pay_period.committed?
     raise InvalidSelectionError, "Select at least one printable check" if payroll_item_ids.empty? && non_employee_check_ids.empty?
     raise InvalidSelectionError, "Starting slot must be a number from 1 through 4" unless (1..4).cover?(starting_slot)

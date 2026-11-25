@@ -47,9 +47,9 @@ module ClientProfitability
       # Links to an invoice customer count only for customers in the book the
       # report reads fees from; any other is treated as not linked.
       @client_links = WorkHourClientLink.active.where(organization_id: @organization.id).includes(:invoice_recipient)
-                                        .where("company_id IS NULL OR company_id IN (?)", Company.where(organization_id: @organization.id).select(:id))
+                                        .where("company_id IS NULL OR company_id IN (?)", eligible_companies.select(:id))
                                         .where("invoice_recipient_id IS NULL OR invoice_recipient_id IN (?)",
-                                               InvoiceRecipient.where(organization_id: @organization.id, finance_book_id: finance_book&.id).select(:id))
+                                               InvoiceRecipient.eligible_for_firm_reports(@organization).where(finance_book_id: finance_book&.id).select(:id))
                                         .index_by(&:tax_client_id)
       @staff_links = WorkHourStaffLink.active.where(organization_id: @organization.id).includes(:employee)
                                       .select { |link| link.disposition == "no_payroll" || link.employee&.company_id == @practice_company&.id }
@@ -244,9 +244,15 @@ module ClientProfitability
       end
     end
 
+    # Only live clients carry payroll cost, mappings or fees. A stored link or
+    # setting that points at a demo or practice copy is ignored at read time.
+    def eligible_companies
+      Company.where(organization_id: @organization.id).live_payroll
+    end
+
     def recipient_company_id(recipient)
       company_id = recipient&.company_id
-      company_id if company_id && Company.where(id: company_id, organization_id: @organization.id).exists?
+      company_id if company_id && eligible_companies.where(id: company_id).exists?
     end
 
     # Fees keyed by report line. Every invoice lands on exactly one key:
@@ -265,9 +271,12 @@ module ClientProfitability
       recipient_keys = @client_links.values.select { |link| link.disposition == "recipient" }
                                     .to_h { |link| [ link.invoice_recipient_id, recipient_bucket(link).key ] }
       linked_companies = @client_links.values.filter_map { |link| link.company_id if link.disposition == "company" }.to_set
+      # Fees billed to a non-live company, directly or through a stale
+      # customer link, are dropped before grouping (live_clients_only).
       rows = InvoiceServiceFeeRevenue.call(finance_book: finance_book, service_month_from: @period.start_date,
                                            service_month_through: @period.end_date,
-                                           tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true)
+                                           tax_prep_service_names: @settings.tax_prep_service_names, by_recipient: true,
+                                           live_clients_only: true)
       recipient_companies = InvoiceRecipient.where(id: rows.filter_map { |row| row[:invoice_recipient_id] }).pluck(:id, :company_id).to_h
       rows.each_with_object({}) do |row, totals|
         key = if row[:company_id]

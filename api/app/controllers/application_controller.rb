@@ -130,8 +130,9 @@ class ApplicationController < ActionController::API
     @current_company_id ||= resolve_company_id
   end
 
+  # Form 500 saves and downloads stay internal, so a demo works like a live client.
   def forbid_migration_rehearsal_official_action!
-    return unless current_company&.test_workspace?
+    return unless current_company&.practice_copy?
 
     render json: {
       error: "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."

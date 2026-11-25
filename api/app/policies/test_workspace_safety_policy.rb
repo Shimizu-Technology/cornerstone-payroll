@@ -33,6 +33,32 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/invoice_credit_notes" => %w[create void]
   }.freeze
 
+  # A demo company works like a live client up to the point something would
+  # leave the firm or touch its own numbers. It keeps the shared-config,
+  # payment, commit and filing-transmission blocks above, but reviews,
+  # previews, copies and checklist steps work as they do for a live client.
+  # Integration and firm-finance prefixes stay closed (see blocked?).
+  DEMO_ALLOWED_ACTIONS = {
+    "api/v1/admin/check_numbers" => %w[update],
+    "api/v1/admin/general_transmittals" => %w[generate_pdf artifact_pdf],
+    "api/v1/admin/reports" => %w[
+      start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task
+      quarterly_compliance_packet_official_form_download w2_gu_mark_ready w3ss_pdf form_1096_totals
+      transmittal_log_pdf full_print_package_pdf check_signoff_sheet check_signoff_pdf
+      w2_gu_copy_1_drt form_1099_nec_payer_record
+    ],
+    "api/v1/admin/year_end" => %w[form_1099_mark_ready]
+  }.freeze
+
+  # Electronic filing files a demo never produces. A practice copy keeps its
+  # existing access to these; the e-files above are blocked for every workspace.
+  DEMO_BLOCKED_ACTIONS = {
+    "api/v1/admin/reports" => %w[quarterly_compliance_packet_swica_ascii],
+    "api/v1/admin/checks" => %w[show],
+    # A refresh pulls the whole organization's Cornerstone Tax hours.
+    "api/v1/admin/client_profitability" => %w[refresh]
+  }.freeze
+
   # Firm books are shared live records even while a copied payroll client is
   # selected. New finance actions fail closed until reviewed as read-only.
   FINANCE_READ_ACTIONS = {
@@ -50,7 +76,7 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/expense_vendors" => %w[index]
   }.freeze
 
-  def self.blocked?(controller_path:, action_name:, request_method: nil)
+  def self.blocked?(controller_path:, action_name:, request_method: nil, demo: false)
     if controller_path.start_with?("api/v1/admin/time_tracking_", "api/v1/admin/aire_")
       return false if request_method.in?(%w[GET HEAD])
       return !(controller_path == "api/v1/admin/time_tracking_sources" && action_name.in?(%w[index show]))
@@ -59,6 +85,9 @@ class TestWorkspaceSafetyPolicy
     if controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_")
       return !FINANCE_READ_ACTIONS.fetch(controller_path, []).include?(action_name)
     end
+
+    return true if demo && DEMO_BLOCKED_ACTIONS.fetch(controller_path, []).include?(action_name)
+    return false if demo && DEMO_ALLOWED_ACTIONS.fetch(controller_path, []).include?(action_name)
 
     BLOCKED_ACTIONS.fetch(controller_path, []).include?(action_name)
   end
