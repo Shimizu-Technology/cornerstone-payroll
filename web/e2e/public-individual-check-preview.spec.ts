@@ -22,7 +22,10 @@ for (const width of [1280, 390]) {
         if (path.endsWith('/checks')) result = { checks: [check], direct_deposit_items: [], earnings_statement_items: [], meta: { total: 1, prepared: 1, unprinted: 0, printed: 0, delivered: 0, voided: 0, check_stock_type: 'bottom_check' } };
         else if (path.endsWith('/non_employee_checks')) result = { non_employee_checks: [otherCheck] };
         else if (path.endsWith('/companies/1')) result = { company: { id: 1, name: 'Synthetic Client', check_stock_type: 'bottom_check' } };
-        else if (path.endsWith('/check_register')) result = { check_register: { rows: [], summary: {} } };
+        else if (path.endsWith('/check_register')) result = { check_register: { rows: [{
+          source_type: 'payroll_item', source_id: 42, status: 'prepared', payee: 'Avery Example',
+          check_number: '8101', amount: '960.00', register_date: '2026-10-08', previous_check_numbers: [],
+        }], summary: {} } };
         else if (path.endsWith('/payroll_liability_center')) result = { payroll_liability_center: null };
         await route.fulfill({ json: result });
       });
@@ -49,6 +52,7 @@ for (const width of [1280, 390]) {
       await expect(page.getByLabel('Page 1 preview')).toHaveAttribute('aria-hidden', 'false');
       await page.getByRole('button', { name: 'Close PDF preview' }).click();
       if (surface === 'payments') {
+        await expect(page.getByText(/Register date Oct 8, 2026/)).toBeVisible();
         await page.getByRole('button', { name: 'Voucher', exact: true }).click();
         await expect(page.getByRole('dialog', { name: 'Payment voucher' })).toBeVisible();
         await expect(page.getByLabel('Page 1 preview')).toHaveAttribute('aria-hidden', 'false');

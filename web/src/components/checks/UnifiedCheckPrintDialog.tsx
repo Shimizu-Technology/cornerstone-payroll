@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { checksApi, printerProfilesApi, type PrinterProfile } from '@/services/api';
 import type { CheckPrintGeneration, CheckPrintQueueItem, CheckPrintQueueResponse, CheckPrintRun } from '@/types';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { CheckPrintWorkspaceSkeleton } from './CheckPrintWorkspaceSkeleton';
 import { InlineCheckNumberField } from './InlineCheckNumberField';
 import { OperationStatusPanel } from './OperationStatusPanel';
@@ -662,7 +662,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                   {run && (
                     <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
                       <div className="border-b border-neutral-100 p-4">
-                        <div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-neutral-950">Package #{run.id}</div><div className="mt-1 text-xs text-neutral-500">Generated {new Date(run.generated_at).toLocaleString()} {run.created_by_name ? `by ${run.created_by_name}` : ''}</div></div>{packageBadge(run)}</div>
+                        <div className="flex items-start justify-between gap-3"><div><div className="font-semibold text-neutral-950">Package #{run.id}</div><div className="mt-1 text-xs text-neutral-500">Generated {formatGuamDateTime(run.generated_at)} {run.created_by_name ? `by ${run.created_by_name}` : ''}</div></div>{packageBadge(run)}</div>
                         <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs"><div><dt className="text-neutral-500">Checks</dt><dd className="mt-0.5 font-semibold text-neutral-900">{run.selected_count} · {packageRange}</dd></div><div><dt className="text-neutral-500">Total</dt><dd className="mt-0.5 font-semibold text-neutral-900">{formatCurrency(packageTotal)}</dd></div><div className="col-span-2"><dt className="text-neutral-500">Printer snapshot</dt><dd className="mt-0.5 font-semibold text-neutral-900">{run.printer_profile_name || 'Legacy calibration'}{run.printer_profile_lock_version !== null ? ` · version ${run.printer_profile_lock_version}` : ''}</dd></div></dl>
                       </div>
                       {open && previewBlob ? <div><div className="flex justify-end border-b border-neutral-100 p-2"><Button size="sm" variant="secondary" onClick={() => setPreviewExpanded(true)} className="gap-1.5 max-sm:min-h-[44px]"><Maximize2 className="h-3.5 w-3.5" /> Enlarge</Button></div><PdfDocumentView blob={previewBlob} className="h-96 flex-none" /></div> : <div><PdfPreviewPlaceholder loading={busyAction === 'preview'} />{busyAction !== 'preview' && <div className="border-b border-neutral-100 p-3 text-center"><Button size="sm" variant="outline" onClick={() => void loadPreview(run)}>Retry preview</Button></div>}</div>}
@@ -679,7 +679,7 @@ export function UnifiedCheckPrintDialog({ open, payPeriodId, onOpenChange, onPac
                   {runs.length > 0 && (
                     <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
                       <div className="border-b border-neutral-100 px-4 py-3"><div className="flex items-center gap-2 text-sm font-semibold text-neutral-900"><Clock3 className="h-4 w-4" />Saved package history</div><p className="mt-1 text-xs text-neutral-500">Every package is retained as an immutable payroll record.</p></div>
-                      <div className="divide-y divide-neutral-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-neutral-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-neutral-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-neutral-600">{new Date(savedRun.generated_at).toLocaleString()}</span></span>{packageBadge(savedRun)}</button>)}</div>
+                      <div className="divide-y divide-neutral-100">{runs.map((savedRun) => <button key={savedRun.id} type="button" onClick={() => requestOpenSavedRun(savedRun)} disabled={busyAction === 'preview' || savingNumbers} className={`flex w-full items-center justify-between gap-2 px-4 py-4 text-left transition-colors hover:bg-neutral-50 ${run?.id === savedRun.id ? 'bg-blue-50' : ''}`}><span><span className="block text-sm font-semibold text-neutral-900">Package #{savedRun.id} · {savedRun.selected_count} checks</span><span className="mt-1 block text-xs text-neutral-600">{formatGuamDateTime(savedRun.generated_at)}</span></span>{packageBadge(savedRun)}</button>)}</div>
                     </section>
                   )}
                 </aside>

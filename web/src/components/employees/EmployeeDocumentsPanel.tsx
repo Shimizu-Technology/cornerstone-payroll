@@ -17,7 +17,7 @@ import {
   reconcileEmployeeDocumentLoads,
   selectReadinessItem,
 } from '@/lib/employee-document-upload';
-import { cn } from '@/lib/utils';
+import { cn, formatGuamDateTime } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   adminClientDocumentsApi,
@@ -556,7 +556,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                               {(requirement.history || []).map((event) => (
                                 <div key={event.id} className="rounded-lg bg-white px-4 py-2 text-xs leading-5 text-neutral-600">
                                   <span className="font-semibold text-neutral-800">{requirementStatusLabel(event.to_status)}</span>
-                                  {event.actor_name ? ` by ${event.actor_name}` : ''} · {new Date(event.created_at).toLocaleString()}
+                                  {event.actor_name ? ` by ${event.actor_name}` : ''} · {formatGuamDateTime(event.created_at)}
                                   {event.document_title ? ` · ${event.document_title}` : ''}
                                   {event.note && <p className="mt-2 whitespace-pre-wrap">{event.note}</p>}
                                 </div>
@@ -692,7 +692,7 @@ export function EmployeeDocumentsPanel({ employeeId, employeeName, isClient, cla
                     {categoryLabel(document.category)} · {document.file_name} · {formatFileSize(document.file_size)}
                   </p>
                   <p className="text-xs text-neutral-500">
-                    Uploaded {new Date(document.created_at).toLocaleString()} by {document.uploaded_by_name || '—'}
+                    Uploaded {formatGuamDateTime(document.created_at)} by {document.uploaded_by_name || '—'}
                     {!document.visible_to_client && !isClient ? ' · Staff only' : ''}
                   </p>
                   {document.notes && <p className="mt-1 whitespace-pre-wrap text-xs text-neutral-600">{document.notes}</p>}

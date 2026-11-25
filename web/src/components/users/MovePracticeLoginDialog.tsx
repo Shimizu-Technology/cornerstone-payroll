@@ -1,3 +1,4 @@
+import { formatGuamDate } from '@/lib/utils';
 import { useState } from 'react';
 import { FlaskConical, RefreshCw } from 'lucide-react';
 import { ActionFeedback } from '@/components/ui/action-feedback';
@@ -95,7 +96,7 @@ export function MovePracticeLoginDialog({ user, companies, loadingCompanies, loa
                       <span className="block text-xs text-neutral-600">
                         {[
                           company.migration_source_company_name && `Copy of ${company.migration_source_company_name}`,
-                          company.test_workspace_expires_at && `open until ${new Date(company.test_workspace_expires_at).toLocaleDateString()}`,
+                          company.test_workspace_expires_at && `open until ${formatGuamDate(company.test_workspace_expires_at)}`,
                         ].filter(Boolean).join(' · ')}
                       </span>
                     </span>
