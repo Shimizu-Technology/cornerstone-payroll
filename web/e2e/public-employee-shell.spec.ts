@@ -330,8 +330,8 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       const url = page.url();
       const documentStart = await page.evaluate(() => performance.timeOrigin);
 
-      await expect(page.getByRole('heading', { name: "We couldn't reach the app" })).toBeFocused();
-      await expect(page.getByRole('alert')).toContainText('Check your connection and try again.');
+      await expect(page.getByRole('heading', { name: "We couldn't open the app" })).toBeFocused();
+      await expect(page.getByRole('alert')).toContainText('If this keeps happening, contact your employer.');
       brandingAvailable = true;
       await page.getByRole('button', { name: 'Try again' }).click();
 

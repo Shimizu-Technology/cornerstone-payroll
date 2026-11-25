@@ -148,10 +148,11 @@ export function TenantUnavailableScreen({ onRetry }: { onRetry: () => void }): R
 
 export function TenantConnectionErrorScreen({ onRetry }: { onRetry: () => void }): ReactElement {
   return (
-    <FullScreenState icon={WifiOff} title="We couldn't reach the app" focusHeading actions={
+    <FullScreenState icon={WifiOff} title="We couldn't open the app" focusHeading actions={
       <EmpButton block onClick={onRetry}>Try again</EmpButton>
     }>
-      <p className="emp-lead">Check your connection and try again.</p>
+      {/* A switched-off company's address fails like a dropped connection in the browser, so this covers both. */}
+      <p className="emp-lead">Check your connection and try again. If this keeps happening, contact your employer.</p>
     </FullScreenState>
   );
 }
