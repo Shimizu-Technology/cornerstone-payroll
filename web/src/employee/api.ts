@@ -8,7 +8,7 @@
 // Response shapes live in contracts.ts.
 import { SUPPORT_HEADER } from '@/support/grant';
 import {
-  accessDay, addressBody, identityBody, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts,
+  accessDay, addressBody, identityBody, isoDate, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts,
   parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, parseW2GuAccessProof, verificationIdFrom,
   type ActivationOutcome, type Address, type DeliveryConsentKind, type DeliveryConsentsState, type EmployeeContextInfo,
   type EmployeeProfile, type HelpContact, type IdentityCheck, type StatementDetail, type StatementPage, type TaxForm,
@@ -79,6 +79,7 @@ export interface EmployeeLink {
   subdomainSlug: string | null;
   status: string;
   formerAccessUntil: string | null;
+  latestPayDate: string | null;
 }
 
 export interface EmployeeApiOptions {
@@ -158,7 +159,7 @@ function linkIdFrom(value: unknown): string {
 
 /**
  * GET /employee/links (AccountController#links, served):
- * { links: [{ id, company_name, subdomain_slug, status, former_access_until }] }.
+ * { links: [{ id, company_name, subdomain_slug, status, former_access_until, latest_pay_date }] }.
  * Also accepts a bare array, and drops entries without a usable id.
  */
 export function parseLinks(data: unknown): EmployeeLink[] {
@@ -175,6 +176,7 @@ export function parseLinks(data: unknown): EmployeeLink[] {
       status: text(entry.status) ?? 'active',
       // An instant at the end of the last Guam day; kept as that day.
       formerAccessUntil: accessDay(entry.former_access_until),
+      latestPayDate: isoDate(entry.latest_pay_date),
     }];
   });
 }

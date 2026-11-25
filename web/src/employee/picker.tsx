@@ -1,9 +1,27 @@
 import type { ReactElement } from 'react';
 import { Building2, ChevronRight } from 'lucide-react';
 import type { EmployeeLink } from './api';
+import { today } from './config';
 import { useDocumentTitle } from './hooks';
-import { longDate } from './format';
+import { longDate, shortDate } from './format';
 import { EmpButton } from './ui';
+
+function lastPaidLabel(date: string | null): string | null {
+  if (!date) return null;
+  const formatted = date.slice(0, 4) === today().slice(0, 4) ? shortDate(date) : longDate(date);
+  return formatted ? `Last paid ${formatted}` : null;
+}
+
+function linkSubtitle(link: EmployeeLink): string {
+  const paid = lastPaidLabel(link.latestPayDate);
+  if (link.status === 'former') {
+    const parts = ['Former job'];
+    if (paid) parts.push(paid);
+    if (link.formerAccessUntil) parts.push(`view until ${longDate(link.formerAccessUntil)}`);
+    return parts.join(' · ');
+  }
+  return paid ? `Current job · ${paid}` : 'Current job';
+}
 
 /**
  * For someone paid by more than one employer, on the shared host. A client's
@@ -25,11 +43,7 @@ export function EmployerPicker({ links, onChoose, onSignOut }: { links: Employee
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="emp-row-title block break-words">{link.companyName || 'Your employer'}</span>
-                  <span className="emp-row-sub">
-                    {link.status === 'former'
-                      ? `Former job${link.formerAccessUntil ? ` · view until ${longDate(link.formerAccessUntil)}` : ''}`
-                      : 'Current job'}
-                  </span>
+                  <span className="emp-row-sub">{linkSubtitle(link)}</span>
                 </span>
                 <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-neutral-400" />
               </button>
