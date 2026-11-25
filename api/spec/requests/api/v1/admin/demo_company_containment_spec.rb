@@ -203,30 +203,28 @@ RSpec.describe "Demo company containment", type: :request do
 
   describe "Form 500 for a demo" do
     let!(:period) { create_committed_demo_pay_period(company: demo, pay_date: Date.new(2026, 3, 6), employee: demo_employee) }
-    let(:reviewer) { create(:user, company: live, organization: organization, role: "accountant") }
-    let(:operator) { create(:user, company: live, organization: organization, role: "accountant") }
+    let(:assigned) { create(:user, company: live, organization: organization, role: "accountant") }
+    let(:unassigned) { create(:user, company: live, organization: organization, role: "accountant") }
 
-    before do
-      CompanyAssignment.create!(user: reviewer, company: demo, workspace_access_level: "reviewer")
-      CompanyAssignment.create!(user: operator, company: demo, workspace_access_level: "operator")
-    end
+    # A demo follows the normal staff rules: the client's assigned accountant
+    # works on it, and no one can record a filing or payment for it.
+    before { CompanyAssignment.create!(user: assigned, company: demo) }
 
     def act_as(user)
       allow_any_instance_of(ApplicationController).to receive(:current_user) { User.find(user.id) }
       allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(user.id)
     end
 
-    it "lets a reviewer download but not save, and never records a filing or payment" do
-      act_as(reviewer)
+    it "lets the assigned accountant prepare and download, never file or pay, and keeps others out" do
+      act_as(unassigned)
       post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "prepared" } }
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_ACCESS_DENIED_MESSAGE)
+
+      act_as(assigned)
       post "/api/v1/form_500s/download", params: { form_500: { pay_period_id: period.id } }
       expect(response).to have_http_status(:ok), response.body
       expect(response.media_type).to eq("application/pdf")
       expect(response.body).to start_with("%PDF")
-
-      act_as(operator)
       post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "filed", payment_amount: "125.00",
         confirmation_number: "DRT-123", receipt_attached: true } }
       expect(response).to have_http_status(:unprocessable_entity)

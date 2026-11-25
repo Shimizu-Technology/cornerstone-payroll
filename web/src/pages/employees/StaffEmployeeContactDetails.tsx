@@ -65,7 +65,7 @@ export function StaffEmployeeContactDetails(): ReactElement {
       return;
     }
     let cancelled = false;
-    void staffContactHygieneApi.sharedEmails().then(
+    void staffContactHygieneApi.sharedEmails(companyId).then(
       (report) => {
         if (!cancelled) setSharedReportSummary(report.summary);
       },

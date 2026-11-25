@@ -12,6 +12,10 @@ module Api
               return render json: { error: "You do not have access to this company" }, status: :forbidden
             end
           end
+          # The selected company sets the scope, whatever the request names: a
+          # demo company's screen reports on that company alone, never on the
+          # live clients across the organization.
+          company_id = current_company.id if current_company&.demo?
 
           report = EmployeeContactHygiene::SharedEmailReport.new(
             actor: current_user,

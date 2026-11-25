@@ -22,6 +22,7 @@ class ViewAsEmployeeContext
 
       user = link.user
       return unless user&.active? && !user.staff_member? && user.organization_id == company.organization_id
+      return unless EmployeeLinks.demo_boundary_allows?(user, company)
     end
     if link.nil? && links.where(status: "revoked").joins(:user).where(users: { invitation_status: "accepted" }).exists?
       return

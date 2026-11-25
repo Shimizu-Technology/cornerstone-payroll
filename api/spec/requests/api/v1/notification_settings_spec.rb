@@ -91,6 +91,22 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     expect(response.body).not_to include("Hidden subject", "Hidden body")
   end
 
+  it "leaves out alerts from companies the person can no longer open" do
+    former = create(:company, organization: company.organization, name: "Former Client")
+    CompanyAssignment.create!(user: staff, company: former)
+    list_portal_recipient!(former, user: staff)
+    thread = create(:client_portal_thread, company: former, created_by: client)
+    PortalNotifications.message_created!(create(:client_portal_message, client_portal_thread: thread, company: former, author: client))
+    expect(staff.portal_notification_deliveries.where(company: former)).to exist
+    CompanyAssignment.where(user: staff, company: former).delete_all
+
+    act_as(User.find(staff.id))
+    get path
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "recent_alerts")).to be_empty
+    expect(response.body).not_to include("Former Client")
+  end
+
   it "shows administrators the clients whose portal work had nobody to notify" do
     admin = create(:user, company: company, role: "admin")
     thread = create(:client_portal_thread, company: company, created_by: client)

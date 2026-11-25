@@ -38,7 +38,7 @@ module EmployeePortalFrozenDocuments
       link = EmployeeAccountLink.portal_eligible.includes(company: :organization)
         .find_by(id: @employee_link.id, company_id: @employee_link.company_id, user_id: @employee_link.user_id,
           employee_id: @employee_link.employee_id)
-      link if link&.portal_enabled?
+      link if link && EmployeeLinks.openable?(link.user, link, azp: @clerk_token_payload&.fetch("azp", nil))
     end
   end
 
