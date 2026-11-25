@@ -175,21 +175,16 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
       context "as #{caller_role} with an active employee link" do
         let(:role) { caller_role }
 
-        it "applies global MFA by role before the company feature and preserves existing behavior when off" do
+        it "applies global MFA to every role, employees included, before the company feature, and nothing when off" do
           employee_context(fva: [ 5, -1 ], enrollment: caller_role != :portal_employee)
-          if caller_role == :portal_employee
-            expect(response).to have_http_status(:not_found)
-            expect(denials).to be_empty
-          else
-            expect(response).to have_http_status(:forbidden)
-            expect(response.parsed_body.fetch("code")).to eq("mfa_required")
-            expect(denials.last).to have_attributes(
-              user_id: user.id, subject_name: user.name, ip_address: "192.0.2.24", user_agent: "MFA request spec"
-            )
-          end
+          expect(response).to have_http_status(:forbidden)
+          expect(response.parsed_body.fetch("code")).to eq("mfa_required")
+          expect(denials.last).to have_attributes(
+            user_id: user.id, subject_name: user.name, ip_address: "192.0.2.24", user_agent: "MFA request spec"
+          )
 
           allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
-          employee_context(fva: caller_role == :portal_employee ? [ 5, -1 ] : [ 5, 1 ], enrollment: caller_role != :portal_employee)
+          employee_context(fva: [ 5, 1 ], enrollment: true)
           expect(response).to have_http_status(:ok)
 
           ENV["REQUIRE_MFA"] = "false"

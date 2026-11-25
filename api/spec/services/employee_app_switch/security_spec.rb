@@ -50,6 +50,30 @@ RSpec.describe "Employee app switch security" do
       expect(attestation.verify({ attestation: good }.to_json, nonce: nonce, env: {})).to eq([ nil, :not_configured ])
     end
 
+    it "counts only the employee service's own checks: not intentionally-off MFA or the payroll tax tables" do
+      service_env = env.merge(
+        "RAILS_ENV" => "production", "DB_POOL_MAX" => "3", "RACK_ATTACK_REDIS_URL" => "rediss://redis.example.test:6380",
+        "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com"
+      )
+      readiness = ProductionReadiness.new(
+        env: service_env, process_role: -> { ProcessRole::EMPLOYEE_WEB }, route_paths: -> { [ "/up(.:format)", "/api/v1/employee/context(.:format)" ] },
+        cable_mount_path: -> { nil }, primary_pool_size: -> { 3 },
+        rate_limit_store: -> { RackAttackStore::Failover.new(ActiveSupport::Cache::NullStore.new, ActiveSupport::Cache::MemoryStore.new) },
+        tax_year_readiness: -> { { warnings: [ { tax_year: 2027, message: "2027 tax tables are not verified yet." } ] } }
+      )
+      report = readiness.run(live: false)
+      expect(report.failures.map(&:name)).to include("2027 payroll tax tables are verified")
+      expect(report.warnings.map(&:name)).to include("MFA enforcement has instance-bound evidence")
+      expect(readiness.employee_service_checks.map(&:name)).to all(start_with("employee_web: "))
+      expect(readiness.employee_service_checks).to all(have_attributes(passed: true))
+
+      nonce = attestation.new_nonce
+      allow(attestation).to receive(:process_database_facts).and_return([ true, false ])
+      body = { attestation: attestation.sign(nonce: nonce, dependencies_healthy: true, env: service_env, readiness: -> { readiness }) }.to_json
+      observation, = attestation.verify(body, nonce: nonce, env: env)
+      expect(observation).to have_attributes(service_checks_passed: true, failed_checks: [], require_mfa: false, mfa_evidence_recorded: false)
+    end
+
     it "answers only a caller that proves it holds the secret" do
       nonce = attestation.new_nonce
       headers = attestation.request_headers(nonce, env: env)

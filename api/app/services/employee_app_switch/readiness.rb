@@ -11,6 +11,8 @@ module EmployeeAppSwitch
   # in-effect early-access window may have only the database check waived,
   # only in the intended shadow state, and only while the employee service's
   # guard runs in raise mode (docs/DEMO_COMPANY_PLAN_2026-11-25.md §4).
+  # While REQUIRE_MFA is off, the two-step check is advisory (waived) for
+  # every company (mfa_check).
   #
   # What the employee service runs comes from its live, signed health
   # response (ServiceAttestation), read once per check, never from a
@@ -168,8 +170,17 @@ module EmployeeAppSwitch
         "Test workspaces and inactive companies can't use the employee app.")
     end
 
+    MFA_OFF_DETAIL = "Two-step sign-in isn't required yet; it will be turned on for everyone before real " \
+      "employees use the app."
+
+    # REQUIRE_MFA off (Clerk Free, until the Pro rollout): advisory for every
+    # company, demo and live alike, shown as waived; step-up is then a fresh
+    # first factor. With it on, both services must require it with recorded
+    # evidence, exactly as before.
     def mfa_check
       name = "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)"
+      return mfa_off_check(name) unless MfaPolicy.enabled?(env: env)
+
       local = RolloutEnvironment.mfa_evidence_recorded?(env)
       remote = fresh_observation&.require_mfa && fresh_observation&.mfa_evidence_recorded
       detail = if !local
@@ -180,6 +191,10 @@ module EmployeeAppSwitch
         "The employee service isn't requiring two-step sign-in with recorded evidence of the claim yet."
       end
       check(:mfa, name, local && remote == true, detail)
+    end
+
+    def mfa_off_check(name)
+      Check.new(key: "mfa", name: name, status: "waived", detail: MFA_OFF_DETAIL)
     end
 
     def rls_guard_check
