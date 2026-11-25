@@ -7,7 +7,7 @@ RSpec.describe "Portal message attachments", type: :request do
   let(:org) { create(:organization) }
   let(:company) { create(:company, organization: org) }
   let(:other_company) { create(:company, organization: org) }
-  let(:client) { create(:user, company: company, organization: org, role: "client", created_at: 1.year.ago) }
+  let(:client) { create(:user, :with_client_assignment, company: company, organization: org, role: "client", created_at: 1.year.ago) }
   let(:staff) { create(:user, company: company, organization: org, role: "accountant", created_at: 1.year.ago) }
   let(:thread) { create(:client_portal_thread, company: company, created_by: client) }
 

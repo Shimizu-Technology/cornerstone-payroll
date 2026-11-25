@@ -8,6 +8,7 @@ RSpec.shared_examples "safe portal documents" do |namespace, controller, role|
   let(:base) { "/api/v1/#{namespace}" }
 
   before do
+    CompanyAssignment.create!(user: actor, company: company) if role == "client"
     allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
     allow_any_instance_of(controller).to receive(:current_user_id).and_return(actor.id)
     allow_any_instance_of(controller).to receive(:current_company_id).and_return(company.id)
@@ -140,6 +141,7 @@ RSpec.describe "Archived evidence access", type: :request do
   let!(:document) { create(:client_document, company: company, uploaded_by: client, archived_at: Time.current, archived_by: client, file_name: "w4.pdf", content_type: "application/pdf") }
 
   before do
+    CompanyAssignment.create!(user: client, company: company)
     [ [ Api::V1::Admin::ClientDocumentsController, staff ], [ Api::V1::Client::DocumentsController, client ] ].each do |controller, actor|
       allow_any_instance_of(controller).to receive(:current_user).and_return(actor)
       allow_any_instance_of(controller).to receive(:current_user_id).and_return(actor.id)

@@ -27,8 +27,10 @@ class Rack::Attack
   CLERK_SESSION_PATTERN = /\Asess_[A-Za-z0-9]{1,64}\z/
   BEARER_TOKEN = /\ABearer ([A-Za-z0-9_-]{1,2048}\.[A-Za-z0-9_-]{1,4096}\.[A-Za-z0-9_-]{1,2048})\z/
 
+  HEALTH_DEPENDENCIES_PATH = %r{\A/health/dependencies(?:\.[^/]+)?/?\z}
+
   def self.request_origin(request)
-    request.get_header("HTTP_ORIGIN") || request.get_header("HTTP_X_ORIGIN")
+    request.get_header("HTTP_ORIGIN")
   end
 
   # The Clerk session of a bearer token that verifies (signature, issuer,
@@ -214,6 +216,13 @@ class Rack::Attack
 
   throttle("kiosk/ip", limit: 60, period: 1.minute) do |request|
     throttle_ip(request) if KIOSK_PATH.match?(throttle_path(request))
+  end
+
+  # Public dependency probe: throttle per IP so an external caller cannot force
+  # repeated database/cache checks (especially on the smaller employee pool).
+  # Keep /up completely untouched for load-balancer liveness checks.
+  throttle("health_dependencies/ip", limit: ENV.fetch("HEALTH_DEPENDENCIES_THROTTLE_LIMIT", 60).to_i, period: 1.minute) do |request|
+    throttle_ip(request) if HEALTH_DEPENDENCIES_PATH.match?(throttle_path(request))
   end
 
   # Throttled and rejected responses never reach Rack::Cors, so they carry the

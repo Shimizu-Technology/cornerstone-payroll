@@ -119,8 +119,7 @@ module PortalNotifications
           User.where(id: event.subject.requested_by_id).to_a
         else
           assigned = CompanyAssignment.active_access.where(company_id: event.company_id).select(:user_id)
-          User.active.client.where(organization_id: event.organization_id)
-            .where("users.id IN (?) OR users.company_id = ?", assigned, event.company_id).order(:id).to_a
+          User.active.client.where(organization_id: event.organization_id, id: assigned).order(:id).to_a
         end
         candidates.select { |user| eligible_user?(user, event) }.map { |user| Target.new(user, nil) }
       end

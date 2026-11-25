@@ -225,7 +225,8 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         if (!backendUnauthorized.current) {
           backendUnauthorized.current = true;
           setAuthProblem(problem);
-          setAuthToken(null);
+          clearAllDrafts();
+          authApi.logout();
           try {
             await clerkSignOut();
           } catch {

@@ -12,6 +12,8 @@ module PayrollCors
   EXPOSED_HEADERS = %w[Content-Disposition Retry-After X-Pay-Stubs-Generated X-Pay-Stubs-Skipped].freeze
 
   def self.static_origin?(origin)
+    return false if ProcessRole.current == ProcessRole::EMPLOYEE_WEB
+
     STATIC_ORIGINS.include?(origin) && !TenantSubdomainRegistry.client_origin?(origin)
   end
 

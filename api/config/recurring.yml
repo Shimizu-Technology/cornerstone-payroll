@@ -45,6 +45,12 @@ production:
     queue: default
     schedule: every 10 minutes
 
+  # Retries any employee-link activation security notices left pending or failed.
+  retry_employee_activation_notices:
+    class: SendEmployeeActivationNoticeJob
+    queue: default
+    schedule: every 10 minutes
+
   retry_portal_upload_cleanups:
     class: PortalUploadCleanupJob
     queue: default

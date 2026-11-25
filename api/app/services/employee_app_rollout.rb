@@ -20,13 +20,14 @@ class EmployeeAppRollout
     latest_access_scope.where(employee_id: employee.id).first
   end
 
-  def employee_status(employee, access)
-    {
+  def employee_status(employee, access, include_issuer: false)
+    status = {
       id: employee.id,
       name: employee.display_name,
       email: employee.email,
       status: status_of(access),
       access_id: access&.id,
+      activated_at: access&.activated_at,
       former_access_until: access&.former_access_until,
       invite_expires_at: access&.invite_expires_at,
       invite_delivery: access&.invite_delivery,
@@ -34,6 +35,8 @@ class EmployeeAppRollout
       reset_pending: access&.sign_up_reset_pending? || false,
       can_invite: employee.active? && (!access || access.revoked? || access.former?)
     }
+    status[:invited_by_name] = access&.invited_by&.name if include_issuer
+    status
   end
 
   def summary(actor:)
@@ -87,7 +90,7 @@ class EmployeeAppRollout
   end
 
   def latest_access_scope
-    EmployeeAccountLink.where(company: @company).order(id: :desc)
+    EmployeeAccountLink.where(company: @company).includes(:invited_by).order(id: :desc)
   end
 
   def status_of(access)

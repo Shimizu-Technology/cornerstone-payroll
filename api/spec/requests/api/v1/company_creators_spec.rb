@@ -25,6 +25,7 @@ RSpec.describe "Company creator summaries", type: :request do
 
   it "does not add creator data to client portal responses" do
     actor.update!(role: :client)
+    CompanyAssignment.create!(user: actor, company: company)
     get "/api/v1/companies"
     expect(response).to have_http_status(:ok)
     expect(response.parsed_body.fetch("companies")).not_to be_empty
