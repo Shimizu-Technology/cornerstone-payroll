@@ -142,6 +142,12 @@ module Api
 
             @user.assign_attributes(permitted)
             @user.role = requested_role if role_changing
+            # Validate immutable identity/role rules (such as fixed demo logins)
+            # before syncing assignments so callers receive the real identity
+            # validation message rather than a secondary client_required error.
+            unless @user.practice_company_id? && company_ids_provided
+              raise ActiveRecord::RecordInvalid, @user unless @user.valid?
+            end
             sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
             @user.save!
             @user.association(:company_assignments).reset

@@ -14,7 +14,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       email_verified_at: 1.day.ago, address_line1: "100 Example Lane", ssn_encrypted: "999-00-0001", payment_delivery_method: "paper_check")
   end
   let(:link) { link_to(worker, employee) }
-  let(:reviewer) { create(:user, company: company, role: "client", clerk_id: "user_profile_reviewer") }
+  let(:reviewer) { create(:user, :with_client_assignment, company: company, role: "client", clerk_id: "user_profile_reviewer") }
   let(:address) { { address_line1: "200 Example Lane", city: "Example City", state: "GU", zip: "96910" } }
   let(:contact) { { name: "Example Contact", relationship: "Family", phone: "6715550100" } }
 
@@ -548,7 +548,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
   end
 
   it "keeps the self-approval guard for a dual-role account and shares the rejected decision" do
-    own_client = create(:user, company: company, role: "client", clerk_id: "user_profile_own_client")
+    own_client = create(:user, :with_client_assignment, company: company, role: "client", clerk_id: "user_profile_own_client")
     own_link = link_to(own_client, create(:employee, company: company))
     id = submit_address(own_link)
     patch "/api/v1/client/employee_change_requests/#{id}/approve", headers: client_headers(own_client)
