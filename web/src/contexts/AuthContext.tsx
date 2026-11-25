@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { useAuth as useClerkAuth } from '@clerk/react';
 import { ApiError, authApi, isMfaRequiredCode, MFA_REQUIRED_EVENT, setAuthToken, setAuthTokenProvider } from '@/services/api';
 import { clearAllDrafts } from '@/components/client-portal/messageDrafts';
+import { resetAnalytics } from '@/lib/analytics';
 
 interface User {
   id: number;
@@ -281,6 +282,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
           setUser(null);
           setAuthProblem(null);
           clearAllDrafts();
+          resetAnalytics();
           authApi.logout();
           try {
             await clerkSignOut();

@@ -25,6 +25,43 @@ export function apiOrigin(apiUrl) {
   return url.origin
 }
 
+const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com'
+const POSTHOG_US_HOSTS = new Set(['app.posthog.com', 'us.posthog.com', 'us.i.posthog.com', 'us-assets.i.posthog.com'])
+const POSTHOG_EU_HOSTS = new Set(['eu.posthog.com', 'eu.i.posthog.com', 'eu-assets.i.posthog.com'])
+
+export function posthogOrigins(env = {}) {
+  if (env.VITE_DEPLOYMENT_ENV === 'staging') return null
+  if (env.VITE_PUBLIC_POSTHOG_ENABLED !== 'true') return null
+  const key = String(env.VITE_PUBLIC_POSTHOG_KEY ?? '').trim()
+  if (!key || key === 'YOUR_POSTHOG_KEY') return null
+
+  const rawHost = String(env.VITE_PUBLIC_POSTHOG_HOST ?? '').trim() || DEFAULT_POSTHOG_HOST
+  let url
+  try {
+    url = new URL(rawHost)
+  } catch {
+    throw new Error('VITE_PUBLIC_POSTHOG_HOST must be an absolute https URL when PostHog is enabled')
+  }
+  if (url.protocol !== 'https:' || url.username || url.password) {
+    throw new Error('VITE_PUBLIC_POSTHOG_HOST must be an absolute https URL when PostHog is enabled')
+  }
+
+  const hostname = url.hostname.toLowerCase()
+  if (POSTHOG_US_HOSTS.has(hostname)) {
+    return {
+      apiOrigin: hostname === 'app.posthog.com' ? DEFAULT_POSTHOG_HOST : url.origin,
+      assetsOrigin: 'https://us-assets.i.posthog.com',
+    }
+  }
+  if (POSTHOG_EU_HOSTS.has(hostname)) {
+    return {
+      apiOrigin: url.origin,
+      assetsOrigin: 'https://eu-assets.i.posthog.com',
+    }
+  }
+  return { apiOrigin: url.origin, assetsOrigin: url.origin }
+}
+
 // Same host rule as ClerkTokenVerifier::HOSTNAME_PATTERN (api/app/services/clerk_token_verifier.rb),
 // so the build accepts exactly the frontend API hosts the API would verify tokens for.
 const CLERK_HOSTNAME = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i
@@ -51,19 +88,42 @@ export function clerkFrontendOrigin(publishableKey, { production = false } = {})
 //   frame-src   https://challenges.cloudflare.com, https://*.protect.clerk.com
 //   img-src     https://img.clerk.com
 //   worker-src  'self' blob:      style-src 'self' 'unsafe-inline'      form-action 'self'
-// Beyond that guide: the employee API, Clerk telemetry, Google Fonts and tenant logo hosts. The only
-// wildcards allowed are the documented Clerk ones (employeeSurfaceDeploy.test.ts enforces that).
-export function contentSecurityPolicy({ apiOrigin: api, clerkOrigin }) {
+// Beyond that guide: the employee API, Clerk telemetry, Google Fonts, tenant logo hosts, and
+// (only when PostHog is enabled in the build) the exact PostHog ingestion and assets origins
+// (PostHog loads extra scripts and remote config from e.g. https://us-assets.i.posthog.com).
+// The only wildcards allowed are the documented Clerk ones (employeeSurfaceDeploy.test.ts enforces that).
+export function contentSecurityPolicy({ apiOrigin: api, clerkOrigin, posthog = null }) {
+  const posthogScriptSources = posthog ? [posthog.assetsOrigin] : []
+  const posthogConnectSources = posthog
+    ? Array.from(new Set([posthog.apiOrigin, posthog.assetsOrigin]))
+    : []
+  const scriptSrc = [
+    "'self'",
+    clerkOrigin,
+    'https://challenges.cloudflare.com',
+    'https://*.protect.clerk.com',
+    ...posthogScriptSources,
+  ].join(' ')
+  const connectSrc = [
+    "'self'",
+    api,
+    clerkOrigin,
+    'https://*.protect.clerk.com:*',
+    'https://clerk-telemetry.com',
+    'https://*.clerk-telemetry.com',
+    ...posthogConnectSources,
+  ].join(' ')
+
   return [
     "default-src 'self'",
-    `script-src 'self' ${clerkOrigin} https://challenges.cloudflare.com https://*.protect.clerk.com`,
+    `script-src ${scriptSrc}`,
     // Clerk's components and the Google Fonts stylesheet in index.html inject styles.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     // https://img.clerk.com is Clerk's avatar host. Tenant logos come from a public HTTPS asset host
     // that differs per client, so any HTTPS image source stays allowed.
     "img-src 'self' data: blob: https://img.clerk.com https:",
-    `connect-src 'self' ${api} ${clerkOrigin} https://*.protect.clerk.com:* https://clerk-telemetry.com https://*.clerk-telemetry.com`,
+    `connect-src ${connectSrc}`,
     "frame-src 'self' blob: https://challenges.cloudflare.com https://*.protect.clerk.com",
     "worker-src 'self' blob:",
     "object-src 'none'",
@@ -88,6 +148,7 @@ export function finalizeEmployeeDist({ distDir, deployDir, env }) {
     clerkOrigin: clerkFrontendOrigin(env.VITE_CLERK_PUBLISHABLE_KEY, {
       production: env.VITE_DEPLOYMENT_ENV === 'production',
     }),
+    posthog: posthogOrigins(env),
   }
   writeFileSync(
     path.join(distDir, '_headers'),

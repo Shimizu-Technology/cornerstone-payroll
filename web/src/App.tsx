@@ -1,5 +1,5 @@
 // Staff surface entry. Vite resolves the employee surface to EmployeeApp.tsx.
-import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, useRef, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ClerkProvider } from '@clerk/react';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookGate } from '@/contexts/FinanceBookContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
+import { identifyUser, resetAnalytics } from '@/lib/analytics';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
@@ -277,18 +278,20 @@ function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
 function PostHogIdentify() {
   const { user } = useAuth();
   const posthog = usePostHog();
+  const wasIdentified = useRef(false);
 
   useEffect(() => {
     if (!isPostHogEnabled || !posthog) return;
     if (user) {
-      posthog.identify(String(user.id), {
-        email: user.email,
-        name: user.name,
+      identifyUser(posthog, {
+        userId: user.id,
         role: user.role,
-        company_id: user.company_id,
+        surface: 'staff',
       });
-    } else {
-      posthog.reset();
+      wasIdentified.current = true;
+    } else if (wasIdentified.current) {
+      resetAnalytics(posthog);
+      wasIdentified.current = false;
     }
   }, [user, posthog]);
 
@@ -492,7 +495,7 @@ function AppContents() {
   );
   return (
     <>
-      {!supportToken && <PostHogPageView />}
+      {!supportToken && <PostHogPageView surface="staff" />}
       <AppWithClerk>
         {supportToken
           ? clerkPubKey

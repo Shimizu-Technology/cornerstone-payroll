@@ -13,6 +13,11 @@ const serviceProviders = [
     purpose: 'Handles "Sign in with Google" if you choose to use it, and serves the web fonts your browser loads (Google Fonts).',
   },
   {
+    name: 'PostHog',
+    purpose:
+      'Collects pseudonymous usage analytics (page views and clicks with text hidden) when enabled, without session recordings, IP address storage, or payroll or personal data.',
+  },
+  {
     name: 'OpenRouter and the AI model provider it connects to',
     purpose:
       'Reads timecard images (including employee names and hours), pulls payroll details from emails that staff paste in or files they upload, and helps staff draft invoices (including client billing contacts and attachments). This happens only when staff use those optional AI-assisted tools and we have turned the AI service on.',
@@ -140,9 +145,14 @@ export function PrivacyPolicy() {
           browser to remember workspace settings, such as the selected company, and to keep unsent message drafts. We do
           not use advertising cookies.
         </p>
+        <h3 className="font-display text-base font-bold text-primary-950">Analytics</h3>
         <p>
-          The software includes a product-analytics tool, PostHog, which is turned off. If we turn it on, we will update
-          this policy first. It is set up without session recording and without automatically capturing what you type.
+          When analytics are enabled, we collect pseudonymous usage analytics (page views and clicks with on-screen text
+          and element attributes hidden) through PostHog to improve the product. We do not use session recordings, do
+          not store IP addresses, and do not send payroll or personal data (such as names, email addresses, Social
+          Security numbers, wages, or bank details) to PostHog. We honor Do Not Track and Global Privacy Control
+          browser settings.{' '}
+          <span className="text-neutral-600">(Draft wording — pending counsel review.)</span>
         </p>
       </LegalSection>
 
@@ -163,8 +173,9 @@ export function PrivacyPolicy() {
       <LegalSection id="location" title="Where it is stored">
         <p>
           The application servers and database are in Singapore. Other service providers, such as Clerk, Cloudflare,
-          Netlify, Resend, Google, and OpenRouter when it is turned on, may process or store information in the United
-          States or other countries. Information may therefore be stored and processed outside Guam.
+          Netlify, Resend, Google, PostHog when it is turned on, and OpenRouter when it is turned on, may process or
+          store information in the United States or other countries. Information may therefore be stored and processed
+          outside Guam.
         </p>
       </LegalSection>
 

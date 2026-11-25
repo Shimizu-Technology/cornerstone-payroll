@@ -11,6 +11,7 @@ import {
   contentSecurityPolicy,
   finalizeEmployeeDist,
   main,
+  posthogOrigins,
   renderHeaders,
 } from '../../scripts/finalize-surface-dist.mjs';
 
@@ -88,6 +89,72 @@ describe('employee site deploy files', () => {
     expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");
     expect(directive('object-src')).toBe("object-src 'none'");
     expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline/);
+    expect(csp).not.toContain('posthog.com');
+  });
+
+  it('adds exact PostHog origins to script-src and connect-src only when PostHog is enabled', () => {
+    expect(posthogOrigins({})).toBeNull();
+    expect(posthogOrigins({ VITE_PUBLIC_POSTHOG_ENABLED: 'false', VITE_PUBLIC_POSTHOG_KEY: 'phc_test' })).toBeNull();
+    expect(posthogOrigins({ VITE_PUBLIC_POSTHOG_ENABLED: 'true', VITE_PUBLIC_POSTHOG_KEY: 'YOUR_POSTHOG_KEY' })).toBeNull();
+    expect(
+      posthogOrigins({
+        VITE_DEPLOYMENT_ENV: 'staging',
+        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+        VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
+      }),
+    ).toBeNull();
+
+    const us = posthogOrigins({ VITE_PUBLIC_POSTHOG_ENABLED: 'true', VITE_PUBLIC_POSTHOG_KEY: 'phc_test' });
+    expect(us).toEqual({
+      apiOrigin: 'https://us.i.posthog.com',
+      assetsOrigin: 'https://us-assets.i.posthog.com',
+    });
+
+    expect(
+      posthogOrigins({
+        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+        VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
+        VITE_PUBLIC_POSTHOG_HOST: 'https://eu.i.posthog.com',
+      }),
+    ).toEqual({
+      apiOrigin: 'https://eu.i.posthog.com',
+      assetsOrigin: 'https://eu-assets.i.posthog.com',
+    });
+
+    expect(
+      posthogOrigins({
+        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+        VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
+        VITE_PUBLIC_POSTHOG_HOST: 'https://analytics.shimizu-technology.com/ingest',
+      }),
+    ).toEqual({
+      apiOrigin: 'https://analytics.shimizu-technology.com',
+      assetsOrigin: 'https://analytics.shimizu-technology.com',
+    });
+
+    for (const badHost of ['http://us.i.posthog.com', 'not-a-url', 'https://user:pw@us.i.posthog.com']) {
+      expect(() =>
+        posthogOrigins({
+          VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+          VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
+          VITE_PUBLIC_POSTHOG_HOST: badHost,
+        }),
+      ).toThrow(/VITE_PUBLIC_POSTHOG_HOST/);
+    }
+
+    const csp = contentSecurityPolicy({
+      apiOrigin: 'https://employee-api.example.test',
+      clerkOrigin: 'https://clerk.shimizu-technology.com',
+      posthog: us,
+    });
+    const directive = (name: string): string[] =>
+      (csp.split('; ').find((part) => part.startsWith(`${name} `)) ?? '').split(' ').slice(1);
+
+    expect(directive('script-src')).toContain('https://us-assets.i.posthog.com');
+    expect(directive('script-src')).not.toContain('https://us.i.posthog.com');
+    expect(directive('connect-src')).toContain('https://us.i.posthog.com');
+    expect(directive('connect-src')).toContain('https://us-assets.i.posthog.com');
+    expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline|https?:\/\/\*\.posthog\.com/);
   });
 
   // https://clerk.com/docs/guides/secure/best-practices/csp-headers
@@ -131,9 +198,16 @@ describe('employee site deploy files', () => {
     const dist = tempDir();
     for (const file of ['index.html', 'sw.js', 'offline.html', 'sitemap.xml', 'robots.txt', 'manifest.json']) writeFileSync(path.join(dist, file), 'staff');
 
-    finalizeEmployeeDist({ distDir: dist, deployDir, env });
+    finalizeEmployeeDist({
+      distDir: dist,
+      deployDir,
+      env: { ...env, VITE_PUBLIC_POSTHOG_ENABLED: 'true', VITE_PUBLIC_POSTHOG_KEY: 'phc_test' },
+    });
 
-    expect(readFileSync(path.join(dist, '_headers'), 'utf8')).toContain('https://employee-api.example.test');
+    const headers = readFileSync(path.join(dist, '_headers'), 'utf8');
+    expect(headers).toContain('https://employee-api.example.test');
+    expect(headers).toContain('https://us.i.posthog.com');
+    expect(headers).toContain('https://us-assets.i.posthog.com');
     expect(readFileSync(path.join(dist, '_redirects'), 'utf8')).toContain('/index.html   200');
     expect(readFileSync(path.join(dist, 'robots.txt'), 'utf8')).toContain('Disallow: /');
     for (const file of ['sw.js', 'offline.html', 'sitemap.xml']) expect(existsSync(path.join(dist, file))).toBe(false);

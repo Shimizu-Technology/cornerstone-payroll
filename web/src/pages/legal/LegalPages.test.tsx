@@ -31,6 +31,7 @@ describe('PrivacyPolicy', () => {
       'Netlify',
       'Resend',
       'Google',
+      'PostHog',
       'OpenRouter and the AI model provider it connects to',
     ]);
   });
@@ -40,7 +41,11 @@ describe('PrivacyPolicy', () => {
 
     expect(screen.getByText(/We do not sell personal information/)).toBeTruthy();
     expect(screen.getByText(/Social Security numbers, contractor EINs, and bank account details are encrypted in the database/)).toBeTruthy();
-    expect(screen.getByText(/PostHog, which is turned off/)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 3, name: 'Analytics' })).toBeTruthy();
+    expect(screen.getByText(/pseudonymous usage analytics.*through PostHog/i)).toBeTruthy();
+    expect(screen.getByText(/do not use session recordings, do not store IP addresses/i)).toBeTruthy();
+    expect(screen.getByText(/honor Do Not Track and Global Privacy Control/i)).toBeTruthy();
+    expect(screen.getByText(/pending counsel review/i)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'shimizutechnology@gmail.com' }).getAttribute('href')).toBe('mailto:shimizutechnology@gmail.com');
   });
 

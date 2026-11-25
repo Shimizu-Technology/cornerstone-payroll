@@ -16,6 +16,7 @@ The demo company uses the same draft wording, so it can be tested end to end bef
 | 8 | Client Service Agreement and Data Processing Addendum (Cornerstone ↔ Shimizu Technology) | Contract, outside the code | Awaiting counsel | Real-employee go-live (or a counsel-cleared pilot carve-out) |
 | 9 | DRT answer on electronic W-2GU copies and truncated SSNs | Agency inquiry (sent by Cornerstone) | Draft letter ready | Electronic-only W-2GU |
 | 10 | Pilot carve-out for the first real user, if used instead of full review | Signed by the client's owners and the first user | Not started | First real user only |
+| 11 | Public Privacy Policy — Analytics (PostHog) disclosure | `web/src/pages/legal/PrivacyPolicy.tsx` (`#cookies` — Analytics paragraph and service providers table). Describes pseudonymous usage analytics through PostHog (page views and clicks with text hidden, no session recordings, no IP storage, no payroll or personal data, honoring Do Not Track / Global Privacy Control). | Draft wording; awaiting counsel | Enabling `VITE_PUBLIC_POSTHOG_ENABLED=true` for real users |
 
 ## How an item is closed
 
