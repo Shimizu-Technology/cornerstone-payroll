@@ -21,7 +21,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
   const [artifact, setArtifact] = useState<PdfArtifact | null>(null);
   const review = payPeriod.payroll_review;
   const canReview = payPeriod.status === 'approved' && !!review?.published_at;
-  const canDecide = canReview && review?.status === 'pending';
+  const canDecide = canReview && review?.status === 'pending' && payPeriod.can_decide_payroll_review === true;
 
   const handleFailure = async (cause: unknown, fallback: string) => {
     if (!active.current) return;
@@ -71,7 +71,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
       <div>
         <h2 className="text-xl font-semibold text-neutral-950">Review preview</h2>
-        <p className="mt-1 text-sm text-neutral-700">{canReview ? `Revision ${review?.revision} · Review ID ${review?.checksum_short}. Your approval is needed before payroll is finalized. Review the preview checks and pay stubs, then approve or request changes.` : 'Payroll preview review is closed. See the revision history below.'}</p>
+        <p className="mt-1 text-sm text-neutral-700">{canReview ? `Revision ${review?.revision} · Review ID ${review?.checksum_short}${canDecide ? '. Review the preview checks and pay stubs, then approve or request changes.' : '.'}` : 'Payroll preview review is closed. See the revision history below.'}</p>
       </div>
       {canReview && <>
         <p className="text-sm font-medium">Gross pay {formatCurrency(payPeriod.total_gross ?? 0)} · Net pay {formatCurrency(payPeriod.total_net ?? 0)}</p>

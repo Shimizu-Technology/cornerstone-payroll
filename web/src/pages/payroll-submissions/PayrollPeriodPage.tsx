@@ -1,3 +1,5 @@
+import { clientPayrollStatus } from '@/lib/clientPayrollStatus';
+import { payRunPath } from '@/lib/routes';
 import { ApiError } from '@/services/api';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -108,14 +110,23 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const otherDrafts = period.drafts.filter(d => d !== currentDraft);
   const canSendFiles = period.accepts_files ?? activeCompany?.payroll_intake_source_types?.includes('mosa_revel');
   const canSubmit = canSendFiles && period.allowed_actions.includes('submit');
+  const reviewCompanyId = companyId ? Number(companyId) : activeCompanyId;
   return (
     <div>
       <Header title={`Payroll ${period.label}`} description={period.pay_date ? `Pay date ${formatDate(period.pay_date)}` : 'Pay date set by Cornerstone'} />
       <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6 lg:p-8">
         {hasInboxReturn ? <InboxReturnLink /> : <Link to={listPath} className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline">All pay periods</Link>}
         <section aria-labelledby="period-status" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
-          <div className="flex flex-wrap items-center gap-2"><h2 id="period-status" className="text-base font-semibold text-neutral-950">Status</h2><Badge variant={statusVariant(period.status)}>{!canSendFiles && period.status === 'waiting_for_files' ? 'Messages and drafts' : period.status_label}</Badge>
+          <div className="flex flex-wrap items-center gap-2"><h2 id="period-status" className="text-base font-semibold text-neutral-950">Status</h2><Badge variant={statusVariant(period.status)}>{audience === 'client' && period.client_payroll_status ? clientPayrollStatus(period.client_payroll_status) : !canSendFiles && period.status === 'waiting_for_files' ? 'Messages and drafts' : period.status_label}</Badge>
             {audience === 'staff' && period.pay_period_id && <Link className="text-sm font-medium text-primary-800 underline" to={`/companies/${companyId || activeCompanyId}/pay-runs/${period.pay_period_id}`}>Open pay run</Link>}</div>
+          {audience === 'client' && period.review_pay_period_id && reviewCompanyId && (
+            <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={payRunPath(reviewCompanyId, period.review_pay_period_id)}>
+              {period.client_payroll_status === 'committed' ? 'View payroll' : 'Open payroll preview'}
+            </Link>
+          )}
+          {audience === 'client' && period.status === 'in_review' && period.client_payroll_status === 'committed' && (
+            <p className="text-sm text-neutral-700">{period.status_label}</p>
+          )}
           {audience === 'staff' && <StaffActions mode="status" busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
           {notice && <p role="status" className="rounded-lg bg-success-50 p-3 text-sm text-success-800">{notice}</p>}
           {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
@@ -127,7 +138,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
             {audience === 'client' && canSubmit && current && !editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}>Send an update or replace a file</Button>}
           </div>
           {period.submissions.length ? period.submissions.filter(revision => revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)
-            : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : 'Use this period for source files and messages. Review payroll in the preview section.'}</p>}
+            : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : audience === 'staff' ? 'Use this period for source files and messages. Review payroll in the preview section.' : 'Use this period for source files and messages.'}</p>}
         </section>
 
         {audience === 'staff' && <section aria-labelledby="next-step" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
@@ -137,9 +148,12 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
         </section>}
         <section aria-labelledby="draft-section" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="draft-section" className="text-base font-semibold">Payroll preview review</h2>
-          <p className="text-sm text-neutral-700">Review and approve the preview on the pay run. Payroll files finish when Cornerstone commits that run. Earlier uploaded drafts remain below as history.</p>
-          {audience === 'staff' && period.pay_period_link_error && <p role="alert" className="break-words text-sm text-warning-950">{period.pay_period_link_error}</p>}
-          {period.review_pay_period_id && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={audience === 'staff' ? `/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}` : `/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}`}>Open payroll preview review</Link>}
+          {audience === 'staff' ? (
+            <p className="text-sm text-neutral-700">Review and approve the preview on the pay run. Payroll files finish when Cornerstone commits that run. Earlier uploaded drafts remain below as history.</p>
+          ) : !period.review_pay_period_id && period.client_payroll_status !== 'committed' && (
+            <p className="text-sm text-neutral-700">Cornerstone is preparing this payroll.</p>
+          )}
+          {audience === 'staff' && period.review_pay_period_id && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={`/companies/${companyId || activeCompanyId}/pay-runs/${period.review_pay_period_id}`}>Open payroll preview review</Link>}
           {audience === 'staff' && <StaffActions busy={staffBusy} setBusy={setStaffBusy} period={period} onDone={detail => { setNotice(null); accept(detail); }} />}
 
         {currentDraft && <div aria-labelledby="draft-review" className="space-y-3">

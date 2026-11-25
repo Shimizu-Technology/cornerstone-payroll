@@ -6462,6 +6462,8 @@ export interface PayrollHistoryRecord {
   end_date: string;
   pay_date: string;
   status: 'draft' | 'calculated' | 'approved' | 'committed' | 'locked';
+  client_review_status?: string;
+  can_decide_payroll_review?: boolean;
   run_purpose: import('@/types').PayRunPurpose;
   includes_base_salary: boolean;
   includes_recurring_items: boolean;
@@ -6494,7 +6496,17 @@ export interface ImportedPayPeriodDetail extends PayrollHistoryRecord {
   paychecks: HistoricalPaycheck[];
 }
 
+export interface ClientOpenPayrollPeriod {
+  ref: string;
+  start_date: string;
+  end_date: string;
+  pay_date: string;
+  review_pay_period_id?: number;
+  client_payroll_status: string;
+}
+
 export interface ClientPayrollHistoryResponse {
+  open_period?: ClientOpenPayrollPeriod | null;
   pay_periods: PayrollHistoryRecord[];
   meta: PaginationMeta & {
     statuses: Record<string, number>;

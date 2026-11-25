@@ -98,6 +98,24 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     [ batch, period, paycheck ]
   end
 
+  it "surfaces an open period without disclosing its unpublished payroll" do
+    today = PayrollSubmissions::Catalog.today
+    draft_pay_period.update!(start_date: today - 13.days, end_date: today, pay_date: today + 5.days)
+
+    get "/api/v1/client/pay_periods"
+
+    expect(response).to have_http_status(:ok)
+    open_period = response.parsed_body.fetch("open_period")
+    expect(open_period).to eq(
+      "ref" => "#{draft_pay_period.start_date}_#{draft_pay_period.end_date}",
+      "start_date" => draft_pay_period.start_date.iso8601,
+      "end_date" => draft_pay_period.end_date.iso8601,
+      "pay_date" => draft_pay_period.pay_date.iso8601,
+      "client_payroll_status" => "preparing"
+    )
+    expect(response.parsed_body.fetch("pay_periods").pluck("id")).not_to include(draft_pay_period.id)
+  end
+
   it "shows only reportable Cornerstone payrolls and locked QuickBooks payrolls" do
     _batch, imported_period, = create_imported_payroll(company: company)
     create_imported_payroll(company: company, status: "applied", suffix: "not-locked")

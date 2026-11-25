@@ -32,7 +32,7 @@ it('leads the client Home to the current period with its status and the Pay Peri
   expect(screen.getByText(/Pay date Nov 5, 2026/)).toBeTruthy();
   const send = screen.getByRole('link', { name: 'Send payroll files' });
   expect(send.getAttribute('href')).toBe('/payroll-files/2026-10-19_2026-11-01');
-  expect(screen.getByText(/shows payrolls Cornerstone has already processed/)).toBeTruthy();
+  expect(screen.getByText(/shows open payrolls, published previews and payroll history/)).toBeTruthy();
   expect(screen.getByRole('link', { name: 'See all pay periods for files' }).getAttribute('href')).toBe('/payroll-files');
 });
 
