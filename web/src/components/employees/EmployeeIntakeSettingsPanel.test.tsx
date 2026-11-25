@@ -56,6 +56,15 @@ describe('Company-scoped incomplete entry window', () => {
     expect(screen.queryByText('Allow incomplete entry temporarily')).toBeNull();
   });
 
+  it('shows plain-language client requirements text for clients and keeps staff copy for staff', async () => {
+    const view = render(<EmployeeIntakeSettingsPanel companyId={4} isClient={true} />);
+    expect(await screen.findByText('Each new employee needs a Social Security number, date of birth and address before Cornerstone can pay them.')).toBeTruthy();
+    expect(screen.queryByText(/An administrator or an accountant with Client management/)).toBeNull();
+
+    view.rerender(<EmployeeIntakeSettingsPanel companyId={4} isClient={false} />);
+    expect(await screen.findByText('An administrator or an accountant with Client management can temporarily allow missing personal details for this client.')).toBeTruthy();
+  });
+
   it('never carries another company’s enabled settings into the new company', async () => {
     let resolve!: (value: { data: typeof strict }) => void;
     mocks.settings.mockImplementation((id: number) => id === 4 ? Promise.resolve({ data: { ...strict, enabled: true, expires_at: new Date(Date.now() + 3_600_000).toISOString() } }) : new Promise((done) => { resolve = done; }));
