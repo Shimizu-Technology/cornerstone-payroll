@@ -119,6 +119,9 @@ class ReversePaycheckService
   end
 
   def reverse_liabilities!(period)
+    # A demo period never posted liabilities, so there is nothing to reverse.
+    return if period.company.demo?
+
     entries = period.payroll_liability_postings.joins(:entries)
       .where(payroll_liability_entries: { payroll_item_id: item.id })
 

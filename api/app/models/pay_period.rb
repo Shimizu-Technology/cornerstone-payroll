@@ -739,8 +739,9 @@ class PayPeriod < ApplicationRecord
     self.parallel_run = true if company&.practice_copy?
   end
 
+  # A demo commits its own simulated payroll; every other workspace never does.
   def test_workspace_cannot_be_committed
-    return unless test_workspace? && status == "committed"
+    return unless company&.practice_copy? && status == "committed"
 
     errors.add(:status, "cannot be committed in a test workspace")
   end
