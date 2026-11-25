@@ -150,6 +150,12 @@ module EmployeeLinks
     company.demo? ? home.demo? : !home.demo?
   end
 
+  # A login whose home company is a demo works only while its address is on
+  # the allow-list (DemoOutbound); every other login is unaffected.
+  def self.demo_login_allowed?(user)
+    !user.company&.demo? || DemoOutbound.allowed?(user.email)
+  end
+
   # The links a login can open from this origin: the employee app's list,
   # the link it opens and the /auth/me count all use this.
   def self.openable_links(user, azp:)

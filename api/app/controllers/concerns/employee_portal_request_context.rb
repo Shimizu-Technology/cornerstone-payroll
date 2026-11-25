@@ -59,7 +59,7 @@ module EmployeePortalRequestContext
   def reactivating_login?(user)
     allow_deactivated_employee_login? && user.portal_employee? && !user.active? &&
       user.deactivation_reason == "last_employee_link_closed" &&
-      user.invitation_status == "accepted" && user.organization&.active?
+      user.invitation_status == "accepted" && user.organization&.active? && EmployeeLinks.demo_login_allowed?(user)
   end
 
   # Only the rehire reactivation route accepts a deactivated employee-only

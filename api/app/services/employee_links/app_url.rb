@@ -20,7 +20,7 @@ module EmployeeLinks
     def subdomain_live?(company)
       slug = company.subdomain_slug
       slug.present? && TenantSubdomainRegistry::SLUG_PATTERN.match?(slug) &&
-        !TenantSubdomainRegistry::RESERVED_SLUGS.include?(slug) && company.active? && company.live_payroll? &&
+        !TenantSubdomainRegistry::RESERVED_SLUGS.include?(slug) && company.active? && (company.live_payroll? || company.demo?) &&
         company.organization.active? && CompanyFeatures.for(company).subdomain_enabled?
     end
 
