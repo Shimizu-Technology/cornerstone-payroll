@@ -44,13 +44,19 @@ END;
 $$;
 
 -- The installer calls this temporary function for every registered protected
--- table. Shared reference rows have a distinct read policy.
+-- table. Shared reference rows have a distinct read policy. policy_schema
+-- attaches the policies to a same-named table elsewhere (rls:enforce builds
+-- the expected policies on pg_temp copies to compare definitions); the
+-- predicate still names target_schema.
+-- BEGIN install_company_policy
 CREATE OR REPLACE FUNCTION pg_temp.install_company_policy(
-  target_schema text, child_table text, parent_table text DEFAULT NULL, foreign_key text DEFAULT NULL, shared_read boolean DEFAULT false
+  target_schema text, child_table text, parent_table text DEFAULT NULL, foreign_key text DEFAULT NULL, shared_read boolean DEFAULT false,
+  policy_schema text DEFAULT NULL
 ) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
   condition text;
   company_function text := format('%I.app_current_company_id()', target_schema);
+  target text := format('%I.%I', coalesce(policy_schema, target_schema), child_table);
 BEGIN
   IF parent_table IS NULL THEN
     condition := format('company_id = %s', company_function);
@@ -62,25 +68,26 @@ BEGIN
   END IF;
 
   condition := format('current_setting(''app.rls_mode'', true) = ''system'' OR (%s)', condition);
-  EXECUTE format('DROP POLICY IF EXISTS company_isolation ON %I.%I', target_schema, child_table);
-  EXECUTE format('DROP POLICY IF EXISTS company_select ON %I.%I', target_schema, child_table);
-  EXECUTE format('DROP POLICY IF EXISTS company_insert ON %I.%I', target_schema, child_table);
-  EXECUTE format('DROP POLICY IF EXISTS company_update ON %I.%I', target_schema, child_table);
-  EXECUTE format('DROP POLICY IF EXISTS company_delete ON %I.%I', target_schema, child_table);
+  EXECUTE format('DROP POLICY IF EXISTS company_isolation ON %s', target);
+  EXECUTE format('DROP POLICY IF EXISTS company_select ON %s', target);
+  EXECUTE format('DROP POLICY IF EXISTS company_insert ON %s', target);
+  EXECUTE format('DROP POLICY IF EXISTS company_update ON %s', target);
+  EXECUTE format('DROP POLICY IF EXISTS company_delete ON %s', target);
 
   IF shared_read THEN
     EXECUTE format(
-      'CREATE POLICY company_select ON %I.%I FOR SELECT USING (company_id IS NULL OR (%s))',
-      target_schema, child_table, condition
+      'CREATE POLICY company_select ON %s FOR SELECT USING (company_id IS NULL OR (%s))',
+      target, condition
     );
-    EXECUTE format('CREATE POLICY company_insert ON %I.%I FOR INSERT WITH CHECK (%s)', target_schema, child_table, condition);
-    EXECUTE format('CREATE POLICY company_update ON %I.%I FOR UPDATE USING (%s) WITH CHECK (%s)', target_schema, child_table, condition, condition);
-    EXECUTE format('CREATE POLICY company_delete ON %I.%I FOR DELETE USING (%s)', target_schema, child_table, condition);
+    EXECUTE format('CREATE POLICY company_insert ON %s FOR INSERT WITH CHECK (%s)', target, condition);
+    EXECUTE format('CREATE POLICY company_update ON %s FOR UPDATE USING (%s) WITH CHECK (%s)', target, condition, condition);
+    EXECUTE format('CREATE POLICY company_delete ON %s FOR DELETE USING (%s)', target, condition);
   ELSE
     EXECUTE format(
-      'CREATE POLICY company_isolation ON %I.%I USING (%s) WITH CHECK (%s)',
-      target_schema, child_table, condition, condition
+      'CREATE POLICY company_isolation ON %s USING (%s) WITH CHECK (%s)',
+      target, condition, condition
     );
   END IF;
 END;
 $$;
+-- END install_company_policy

@@ -65,6 +65,8 @@ RSpec.describe EmployeeCompensationChangeService do
       change!(effective_on: date, wage_rate_edits: [ { label: "Weekend", rate: 20 } ])
       rate = employee.employee_wage_rates.reload.sole
       expect(rate.company_id).to eq(company.id)
+      # Legacy rows predate the contract migration that requires company_id.
+      ActiveRecord::Base.connection.change_column_null :employee_wage_rates, :company_id, true
       rate.update_column(:company_id, nil)
       employee.reload
       before = PayrollCalculationContext.dated_wage_rate_attributes(employee, date)
