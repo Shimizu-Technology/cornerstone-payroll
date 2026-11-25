@@ -122,12 +122,15 @@ class PayrollReminderService
     # If email delivery fails, delete the log so the next run can retry.
     def send_period_reminder(config, pay_period, reminder_type)
       company = config.company
+      # A demo with no allow-listed recipient sends nothing and logs nothing.
+      recipients = allowed_recipients(config)
+      return if recipients.empty?
 
       log = PayrollReminderLog.create!(
         company_id: company.id,
         pay_period_id: pay_period.id,
         reminder_type: reminder_type,
-        recipients_snapshot: config.recipients,
+        recipients_snapshot: recipients,
         sent_at: Time.current
       )
 
@@ -140,7 +143,7 @@ class PayrollReminderService
         subject = "📋 Reminder: Payroll due for #{company.name} (#{pay_period.period_description})"
       end
 
-      record_delivery_outcome(log, deliver_to_recipients(config, subject, html, log: log))
+      record_delivery_outcome(log, deliver_to_recipients(config, subject, html, log: log, recipients: recipients))
 
       Rails.logger.info("[PayrollReminder] Sent #{reminder_type} for company=#{company.id} pay_period=#{pay_period.id}") unless StagingOutboundPolicy.staging?
     rescue ActiveRecord::RecordNotUnique
@@ -151,12 +154,15 @@ class PayrollReminderService
     end
 
     def send_create_reminder(config, company, expected)
+      recipients = allowed_recipients(config)
+      return if recipients.empty?
+
       log = PayrollReminderLog.create!(
         company_id: company.id,
         pay_period_id: nil,
         reminder_type: "create_payroll",
         expected_pay_date: expected[:pay_date],
-        recipients_snapshot: config.recipients,
+        recipients_snapshot: recipients,
         sent_at: Time.current
       )
 
@@ -164,7 +170,7 @@ class PayrollReminderService
       freq_label = company.pay_frequency.gsub("semimonthly", "semi-monthly").capitalize
       subject = "📅 Time to create #{freq_label} payroll for #{company.name}"
 
-      record_delivery_outcome(log, deliver_to_recipients(config, subject, html, log: log))
+      record_delivery_outcome(log, deliver_to_recipients(config, subject, html, log: log, recipients: recipients))
 
       Rails.logger.info("[PayrollReminder] Sent create_payroll for company=#{company.id} expected_pay_date=#{expected[:pay_date]}") unless StagingOutboundPolicy.staging?
     rescue ActiveRecord::RecordNotUnique
@@ -174,9 +180,14 @@ class PayrollReminderService
       Rails.logger.error("[PayrollReminder] Failed create_payroll for company=#{company.id}: #{e.class}#{" #{e.message}" unless StagingOutboundPolicy.staging?}")
     end
 
-    def deliver_to_recipients(config, subject, html, log:)
+    def allowed_recipients(config)
+      DemoOutbound.filter(company: config.company, emails: config.recipients, channel: "payroll_reminder")
+    end
+
+    # The transport rechecks each recipient inside the demo scope.
+    def deliver_to_recipients(config, subject, html, log:, recipients: allowed_recipients(config))
       company = config.company
-      DemoOutbound.filter(company: company, emails: config.recipients, channel: "payroll_reminder").map do |email|
+      recipients.map do |email|
         response = DemoOutbound.scoped(company) do
           StagingMailTransport.deliver({
             from: from_email,

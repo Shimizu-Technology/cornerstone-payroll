@@ -114,6 +114,102 @@ RSpec.describe DemoOutbound, :portal_notifications do
     end
   end
 
+  describe "binding and recovery (fix round)" do
+    let(:provider) { instance_double(ClerkInvitationService, configured?: true) }
+    let(:admin) { create(:user, company: live, organization: organization, role: "org_admin") }
+    let(:nonce) { SecureRandom.hex(32) }
+    let(:invitee) do
+      create(:user, company: live, organization: organization, role: "client", email: allowed, invitation_status: "pending",
+        clerk_invitation_id: "inv_demo", invite_nonce_digest: Digest::SHA256.hexdigest(nonce), invite_nonce_expires_at: 1.day.from_now)
+        .tap { |user| user.update_columns(company_id: demo.id) }
+    end
+
+    def clerk_user(primary:, verified: true)
+      { "id" => "user_demo", "public_metadata" => { "payroll_user_id" => invitee.id, "payroll_invite_nonce" => nonce },
+        "primary_email_address_id" => "e1",
+        "email_addresses" => [ { "id" => "e1", "email_address" => primary, "verification" => { "status" => verified ? "verified" : "unverified", "strategy" => "ticket" } } ] }
+    end
+
+    it "binds a demo client only when the login and the Clerk primary email are both allow-listed" do
+      allow(provider).to receive(:invitation_status).with("inv_demo").and_return("accepted")
+      allow(provider).to receive(:fetch_user).with("user_demo").and_return(clerk_user(primary: other_alias))
+      expect(PayrollInvitation.new(clerk: provider).bind_from_metadata("user_demo", request: nil)).to be_nil
+      expect(invitee.reload.clerk_id).to be_nil
+
+      allow(provider).to receive(:fetch_user).with("user_demo").and_return(clerk_user(primary: allowed, verified: false))
+      expect(PayrollInvitation.new(clerk: provider).bind_from_metadata("user_demo", request: nil)).to be_nil
+
+      # Demo client logins can't be saved until D5 grants demo access, so the
+      # allowed case is checked at the allow-list step itself.
+      invitation = PayrollInvitation.new(clerk: provider)
+      expect { invitation.send(:refuse_demo_binding!, invitee, [ allowed, allowed ], channel: "test") }.not_to raise_error
+      expect { invitation.send(:refuse_demo_binding!, invitee, [ allowed, nil ], channel: "test") }
+        .to raise_error(PayrollInvitation::BindingRefused, Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
+    end
+
+    it "refuses staff recovery when any address involved is not allow-listed" do
+      allow(provider).to receive(:recovery_account).with("user_demo").and_return(
+        { id: "user_demo", name: nil, verified_emails: [ allowed, other_alias ], primary_email: other_alias })
+      expect { PayrollInvitation.new(clerk: provider).recover!(invitee, "user_demo", confirm_email: allowed, actor: admin, request: nil) }
+        .to raise_error(PayrollInvitation::BindingRefused, Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
+      expect(invitee.reload.clerk_id).to be_nil
+    end
+
+    it "checks the allow-list before closing an earlier invitation" do
+      invitee.update_columns(email: other_alias)
+      expect(provider).not_to receive(:invitation_status)
+      expect(provider).not_to receive(:revoke_invitation)
+      result = PayrollInvitation.new(clerk: provider).send_invite(invitee.reload, redirect_url: "https://payroll.example.test/login")
+      expect(result).to include(refused: :recipient_not_allowed)
+      expect(invitee.reload.clerk_invitation_id).to eq("inv_demo")
+    end
+  end
+
+  describe "employee sign-up (fix round)" do
+    it "answers sign_in and creates no pending login for a non-allowed demo address" do
+      employee = create(:employee, company: demo, department: create(:department, company: demo))
+      link = instance_double(EmployeeAccountLink, claim_user_id: nil, company: demo, user: nil, employee: employee)
+      activation = EmployeeLinks::Activate.allocate
+      activation.instance_variable_set(:@email, other_alias)
+      expect { expect(activation.send(:prepare, link)).to eq(:sign_in) }.not_to change(User, :count)
+    end
+  end
+
+  describe "transport details (fix round)" do
+    it "filters string and symbol recipient keys together" do
+      allow(Resend::Emails).to receive(:send).and_return({ "id" => "sent" })
+      payload = { from: "alerts@example.test", to: allowed, "to" => other_alias, "cc" => [ other_alias ], subject: "Hi", html: "x" }
+      described_class.scoped(demo) { StagingMailTransport.deliver(payload) }
+      expect(Resend::Emails).to have_received(:send).with(satisfy { |sent| sent[:to] == [ allowed ] && !sent.key?("to") && !sent.key?(:cc) && !sent.key?("cc") })
+    end
+
+    it "keeps an outer demo scope inside a nested non-demo scope" do
+      described_class.scoped(demo) do
+        described_class.scoped(live) { expect(described_class.scope_company).to eq(demo) }
+        described_class.scoped(nil) { expect(described_class.scope_company).to eq(demo) }
+      end
+      expect(described_class.scope_company).to be_nil
+    end
+
+    it "never batches a demo alert with a live client's alert" do
+      with_portal_email do
+        staff = create(:user, company: live, organization: organization, role: "accountant", email: allowed)
+        [ live, demo ].each do |company|
+          CompanyAssignment.create!(user: staff, company: company, workspace_access_level: (company.demo? ? "operator" : nil))
+          list_portal_recipient!(company, user: staff)
+          thread = create(:client_portal_thread, company: company, created_by: create(:user, company: live, organization: organization, role: "client"))
+          PortalNotifications.record!(event_type: "client_message", company: company, actor: nil, subject: thread, dedupe_key: "mixed-#{company.id}")
+        end
+        PortalNotificationDelivery.update_all(deliver_after: 1.minute.ago)
+        allow_any_instance_of(ClientPortalThread).to receive(:unread_for?).and_return(true)
+        PortalNotifications::Dispatcher.run!(now: 1.minute.from_now)
+        keys = PortalNotificationDelivery.where.not(batch_key: nil).group(:company_id).pluck(:company_id, Arel.sql("MIN(batch_key)")).to_h
+        expect(keys.keys).to contain_exactly(live.id, demo.id)
+        expect(keys.values.uniq.size).to eq(2)
+      end
+    end
+  end
+
   describe "portal notifications" do
     let(:thread) { create(:client_portal_thread, company: demo, created_by: create(:user, company: live, organization: organization, role: "client")) }
 
@@ -211,6 +307,15 @@ RSpec.describe DemoOutbound, :portal_notifications do
   end
 
   describe "payroll reminders" do
+    it "logs nothing and sends nothing when every demo recipient is refused" do
+      allow(Resend::Emails).to receive(:send)
+      config = PayrollReminderConfig.new(company: demo, recipients: [ other_alias ])
+      period = create(:pay_period, company: demo)
+      expect(Rails.logger).not_to receive(:info).with(/\[PayrollReminder\] Sent/)
+      expect { PayrollReminderService.send(:send_period_reminder, config, period, "upcoming") }.not_to change(PayrollReminderLog, :count)
+      expect(Resend::Emails).not_to have_received(:send)
+    end
+
     it "sends a demo reminder only to allow-listed recipients" do
       allow(Resend::Emails).to receive(:send).and_return({ "id" => "sent" })
       config = PayrollReminderConfig.new(company: demo, recipients: [ allowed, other_alias ])
