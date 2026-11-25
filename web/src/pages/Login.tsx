@@ -28,7 +28,87 @@ const highlights = [
   },
 ];
 
+/**
+ * The recovery screen for an MFA denial, by its code: mfa_enrollment_required
+ * means this login has no second factor yet, so it shows how to add one;
+ * mfa_required means one is set up but this session skipped it, so it asks
+ * for a fresh sign-in with the code instead.
+ */
 function MfaPrompt() {
+  const { authProblem } = useAuth();
+  return authProblem?.code === 'mfa_enrollment_required' ? <MfaEnrollmentPrompt /> : <MfaSignInPrompt />;
+}
+
+function MfaSignInPrompt() {
+  const clerk = useClerk();
+  const { authProblem, refreshUser, signOut } = useAuth();
+  const [checking, setChecking] = useState(false);
+  const [stillUnverified, setStillUnverified] = useState(false);
+
+  async function checkVerification() {
+    setChecking(true);
+    setStillUnverified(false);
+    try {
+      try {
+        await clerk.session?.reload?.();
+      } catch {
+        // Proceed to force-refresh the session token even if reload fails.
+      }
+      await refreshUser({ skipTokenCache: true });
+      setStillUnverified(true);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <div className="mb-6 space-y-4 rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4 sm:p-5">
+      <div className="space-y-1.5">
+        <h2 className="text-xl font-semibold text-neutral-900">Finish two-step sign-in</h2>
+        <p className="text-sm leading-6 text-neutral-700">
+          Two-step sign-in is already set up on this account, but this session hasn&rsquo;t finished it. Sign in again
+          to open payroll.
+        </p>
+      </div>
+
+      <ol className="list-decimal space-y-2 pl-5 text-sm leading-6 text-neutral-700">
+        <li>
+          Select <span className="font-semibold text-neutral-900">Sign out and sign back in</span>.
+        </li>
+        <li>
+          When asked, enter the 6-digit code from your authenticator app, or one of your backup codes.
+        </li>
+      </ol>
+
+      {stillUnverified && (
+        <p role="status" className="rounded-xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-950">
+          This session still hasn&rsquo;t finished two-step sign-in. Sign out and sign back in with your code.
+        </p>
+      )}
+
+      {authProblem?.signOutFailed && (
+        <p role="alert" className="rounded-xl border border-danger-200 bg-danger-50 px-3.5 py-2.5 text-sm text-danger-900">
+          Could not sign out. Try again.
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" variant="primary" onClick={() => { void signOut().catch(() => undefined); }}>
+          Sign out and sign back in
+        </Button>
+        <Button type="button" variant="outline" loading={checking} onClick={() => { void checkVerification(); }}>
+          {checking ? 'Checking verification…' : 'Check verification'}
+        </Button>
+      </div>
+
+      <p className="text-xs leading-5 text-neutral-600">
+        Lost your authenticator app and backup codes? Ask your Cornerstone administrator.
+      </p>
+    </div>
+  );
+}
+
+function MfaEnrollmentPrompt() {
   const clerk = useClerk();
   const { authProblem, refreshUser, signOut } = useAuth();
   const [checking, setChecking] = useState(false);
@@ -57,9 +137,10 @@ function MfaPrompt() {
   return (
     <div className="mb-6 space-y-4 rounded-2xl border border-neutral-200 bg-neutral-50/60 p-4 sm:p-5">
       <div className="space-y-1.5">
-        <h2 className="text-xl font-semibold text-neutral-900">Multi-factor authentication required</h2>
+        <h2 className="text-xl font-semibold text-neutral-900">Set up two-step sign-in</h2>
         <p className="text-sm leading-6 text-neutral-700">
-          Cornerstone Payroll requires two-step sign-in on this account before you can open payroll.
+          Cornerstone Payroll requires two-step sign-in on this account before you can open payroll, and this account
+          doesn&rsquo;t have it set up yet.
         </p>
       </div>
 

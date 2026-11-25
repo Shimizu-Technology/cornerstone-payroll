@@ -83,6 +83,14 @@ function DevPreviewStepUp({ onConfirm, onCancel }: { onConfirm: () => void; onCa
 }
 
 /** Stands in for Clerk's account settings, where two-step sign-in is set up. */
+function DevPreviewAccountSecurityPanel(): ReactElement {
+  return (
+    <div className="emp-notice-inline" data-testid="dev-preview-account-settings">
+      <p className="text-neutral-600">Clerk's account settings show here, where two-step sign-in is set up. This local preview has no Clerk key.</p>
+    </div>
+  );
+}
+
 function DevPreviewAccountSettings({ onClose }: { onClose: () => void }): ReactElement {
   return (
     <div className="emp-dialog-backdrop">
@@ -136,6 +144,7 @@ export function DevPreviewAuthProvider({ children }: { children: ReactNode }): R
     SignUpForm: DevPreviewSignUpForm,
     stepUp,
     openAccountSettings: () => setSettingsOpen(true),
+    AccountSecurityPanel: DevPreviewAccountSecurityPanel,
     previewSignIn: () => {
       writeSignedIn(true);
       setSignedIn(true);
