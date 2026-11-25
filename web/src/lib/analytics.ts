@@ -76,7 +76,6 @@ const NUMBER_ALLOWLIST_KEYS = new Set([
 
 const VIEWPORT_KEY_PATTERN = /^\$viewport_[a-z0-9_]+$/;
 const SAFE_TAG_NAME_PATTERN = /^[a-z][a-z0-9-]*$/i;
-const SAFE_PH_NAME_PATTERN = /^[a-z0-9._ -]{1,80}$/i;
 
 const AUTOCAPTURE_IGNORE_SELECTORS = [
   'input',
@@ -254,16 +253,6 @@ export function scrubUrl(
 
 interface SanitizedElement {
   tag_name: string;
-  'attr__data-ph-name'?: string;
-}
-
-function sanitizePhName(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  if (!trimmed || trimmed.includes('@') || trimmed.includes('://') || /^blob:/i.test(trimmed)) {
-    return undefined;
-  }
-  return SAFE_PH_NAME_PATTERN.test(trimmed) ? trimmed : undefined;
 }
 
 function sanitizeElementsArray(rawElements: unknown): SanitizedElement[] | undefined {
@@ -274,32 +263,13 @@ function sanitizeElementsArray(rawElements: unknown): SanitizedElement[] | undef
     const record = item as Record<string, unknown>;
     const rawTag = typeof record.tag_name === 'string' ? record.tag_name.trim() : '';
     if (!SAFE_TAG_NAME_PATTERN.test(rawTag)) continue;
-    const nestedAttrs =
-      record.attributes && typeof record.attributes === 'object'
-        ? (record.attributes as Record<string, unknown>)
-        : undefined;
-    const phName = sanitizePhName(
-      record['attr__data-ph-name'] ??
-        record['data-ph-name'] ??
-        nestedAttrs?.['attr__data-ph-name'] ??
-        nestedAttrs?.['data-ph-name'],
-    );
-    const cleaned: SanitizedElement = { tag_name: rawTag.toLowerCase() };
-    if (phName) {
-      cleaned['attr__data-ph-name'] = phName;
-    }
-    result.push(cleaned);
+    result.push({ tag_name: rawTag.toLowerCase() });
   }
   return result.length > 0 ? result : undefined;
 }
 
 function formatElementsChain(elements: SanitizedElement[]): string {
-  return elements
-    .map((el) => {
-      const phName = el['attr__data-ph-name'];
-      return phName ? `${el.tag_name}:attr__data-ph-name="${phName}"` : `${el.tag_name}:`;
-    })
-    .join(';');
+  return elements.map((el) => `${el.tag_name}:`).join(';');
 }
 
 function splitElementsChainSegments(chain: string): string[] {
@@ -341,14 +311,7 @@ function sanitizeElementsChainString(rawChain: unknown): string | undefined {
   for (const segment of splitElementsChainSegments(rawChain)) {
     const tagMatch = /^([a-z][a-z0-9-]*)(?:[.:]|$)/i.exec(segment.trim());
     if (!tagMatch) continue;
-    const tagName = tagMatch[1].toLowerCase();
-    const attrMatch = /(?:^|[^a-z0-9_-])attr__data-ph-name="([^"]*)"/.exec(segment);
-    const phName = attrMatch ? sanitizePhName(attrMatch[1]) : undefined;
-    const cleaned: SanitizedElement = { tag_name: tagName };
-    if (phName) {
-      cleaned['attr__data-ph-name'] = phName;
-    }
-    parsed.push(cleaned);
+    parsed.push({ tag_name: tagMatch[1].toLowerCase() });
   }
   return parsed.length > 0 ? formatElementsChain(parsed) : undefined;
 }
@@ -364,7 +327,7 @@ function isFiniteNumber(value: unknown): value is number {
  * to matched React Router route templates (`/unknown` if unmatched), drops blocked
  * event types (`$exception`, `$web_vitals`, `$identify`, etc.), strips `$set`
  * and `$set_once`, and strips all autocapture attributes/text/hrefs except
- * element tag names and explicit `data-ph-name` labels.
+ * element tag names.
  */
 export function createBeforeSend(options: {
   projectKey?: string;
@@ -375,6 +338,7 @@ export function createBeforeSend(options: {
 
   return (event) => {
     if (!event) return null;
+    if (hasPrivacyOptOutSignal()) return null;
     if (DROPPED_EVENT_TYPES.has(event.event)) {
       return null;
     }
@@ -470,7 +434,7 @@ export function createBeforeSend(options: {
       out.role = rawProps.role.trim();
     }
 
-    // Autocapture: keep ONLY element tag names and explicit `data-ph-name` labels.
+    // Autocapture: keep ONLY element tag names.
     // Never keep `href`, `$el_text`, classes, IDs, or any other attributes.
     if (AUTOCAPTURE_EVENT_TYPES.has(event.event)) {
       const sanitizedElements = sanitizeElementsArray(rawProps.$elements);
@@ -523,7 +487,7 @@ export function registerAnalyticsContext(
 export function buildPostHogConfig(options: {
   env?: AnalyticsEnv;
   surface?: AnalyticsSurface;
-  client?: Partial<Pick<PostHog, 'reset' | 'register' | 'unregister'>>;
+  client?: Partial<Pick<PostHog, 'reset' | 'register' | 'unregister' | 'opt_out_capturing' | 'has_opted_out_capturing'>>;
   onInvalidDistinctId?: () => void;
 } = {}): Partial<PostHogConfig> {
   const env = options.env ?? import.meta.env;
@@ -531,8 +495,9 @@ export function buildPostHogConfig(options: {
   const projectKey = env.VITE_PUBLIC_POSTHOG_KEY?.trim();
   const apiHost = env.VITE_PUBLIC_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST;
   const isDev = env.DEV ?? import.meta.env.DEV;
-  let boundClient: Partial<Pick<PostHog, 'reset' | 'register' | 'unregister'>> | null =
-    options.client ?? null;
+  let boundClient: Partial<
+    Pick<PostHog, 'reset' | 'register' | 'unregister' | 'opt_out_capturing' | 'has_opted_out_capturing'>
+  > | null = options.client ?? null;
 
   return {
     api_host: apiHost,
@@ -606,6 +571,7 @@ export function buildPostHogConfig(options: {
           resetAnalytics(boundClient ?? posthog, {
             surface,
             keepRole: surface === 'staff',
+            isDev,
           });
         }),
     }),
@@ -657,11 +623,18 @@ export function initAnalytics(options: AnalyticsGateOptions & {
 }
 
 export function resetAnalytics(
-  client: Partial<Pick<PostHog, 'reset' | 'register' | 'unregister'>> | null | undefined = posthog,
-  options: { surface?: AnalyticsSurface; keepRole?: boolean } = {},
+  client: Partial<
+    Pick<PostHog, 'reset' | 'register' | 'unregister' | 'opt_out_capturing' | 'has_opted_out_capturing'>
+  > | null | undefined = posthog,
+  options: { surface?: AnalyticsSurface; keepRole?: boolean; isDev?: boolean } = {},
 ): void {
   const isCustomClient = client !== posthog;
   if ((!isCustomClient && !isPostHogEnabled) || !client) return;
+
+  const wasOptedOut =
+    typeof client.has_opted_out_capturing === 'function' && client.has_opted_out_capturing();
+  const shouldKeepOptOut =
+    wasOptedOut || (options.isDev ?? Boolean(import.meta.env.DEV)) || hasPrivacyOptOutSignal();
 
   const nextSurface = options.surface ?? activeSurface;
   const nextRole = options.keepRole && nextSurface === 'staff' ? activeRole : null;
@@ -671,6 +644,9 @@ export function resetAnalytics(
 
   if (typeof client.reset === 'function') {
     client.reset();
+  }
+  if (shouldKeepOptOut && typeof client.opt_out_capturing === 'function') {
+    client.opt_out_capturing();
   }
   registerAnalyticsContext(
     client as Pick<PostHog, 'register' | 'unregister'>,
@@ -700,25 +676,25 @@ function capture(event: string): void {
 }
 
 export const analytics = {
-  payrollCalculated: () => capture('payroll_calculated'),
+  payrollCalculated: (): void => capture('payroll_calculated'),
 
-  payrollApproved: () => capture('payroll_approved'),
+  payrollApproved: (): void => capture('payroll_approved'),
 
-  payrollCommitted: () => capture('payroll_committed'),
+  payrollCommitted: (): void => capture('payroll_committed'),
 
-  checksDownloaded: () => capture('checks_downloaded'),
+  checksDownloaded: (): void => capture('checks_downloaded'),
 
-  checksPrinted: () => capture('checks_printed'),
+  checksPrinted: (): void => capture('checks_printed'),
 
-  reportGenerated: () => capture('report_generated'),
+  reportGenerated: (): void => capture('report_generated'),
 
-  employeeCreated: () => capture('employee_created'),
+  employeeCreated: (): void => capture('employee_created'),
 
-  timecardUploaded: () => capture('timecard_uploaded'),
+  timecardUploaded: (): void => capture('timecard_uploaded'),
 
-  timecardOcrApplied: () => capture('timecard_ocr_applied'),
+  timecardOcrApplied: (): void => capture('timecard_ocr_applied'),
 
-  companySwitch: () => {
+  companySwitch: (): void => {
     resetAnalytics(posthog, { keepRole: true });
     capture('company_switched');
   },

@@ -275,22 +275,25 @@ function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function PostHogSessionSync() {
+export function PostHogSessionSync(): null {
   const { user } = useAuth();
   const posthog = usePostHog();
-  const hadUser = useRef(false);
+  const lastUserId = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isPostHogEnabled || !posthog) return;
     if (user) {
+      if (lastUserId.current !== null && lastUserId.current !== user.id) {
+        resetAnalytics(posthog, { surface: 'staff', keepRole: false });
+      }
       registerAnalyticsContext(posthog, {
         role: user.role,
         surface: 'staff',
       });
-      hadUser.current = true;
-    } else if (hadUser.current) {
+      lastUserId.current = user.id;
+    } else if (lastUserId.current !== null) {
       resetAnalytics(posthog, { surface: 'staff', keepRole: false });
-      hadUser.current = false;
+      lastUserId.current = null;
     }
   }, [user, posthog]);
 

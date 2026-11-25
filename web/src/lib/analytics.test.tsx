@@ -350,7 +350,7 @@ describe('analytics strict allowlist before_send', () => {
     expect(resolveRouteTemplate(UNKNOWN_ROUTE_TEMPLATE, 'employee')).toBe(UNKNOWN_ROUTE_TEMPLATE);
   });
 
-  it('keeps only element tag names and explicit data-ph-name on autocapture and strips href (including blob:) and $el_text', () => {
+  it('keeps only element tag names on autocapture and strips all attributes (including data-ph-name, href, blob:) and $el_text', () => {
     const beforeSend = createBeforeSend({ projectKey: 'phc_live_key', surface: 'employee' });
     const scrubbed = beforeSend({
       uuid: 'evt-auto-1',
@@ -393,19 +393,17 @@ describe('analytics strict allowlist before_send', () => {
       $pathname: '/pay/:statementId',
       $host: 'tenant.shimizu-technology.com',
       surface: 'employee',
-      $elements: [
-        { tag_name: 'a', 'attr__data-ph-name': 'download-pay-stub' },
-        { tag_name: 'div' },
-      ],
-      $elements_chain: 'a:attr__data-ph-name="download-pay-stub";div:',
+      $elements: [{ tag_name: 'a' }, { tag_name: 'div' }],
+      $elements_chain: 'a:;div:',
     });
     expect(JSON.stringify(scrubbed)).not.toContain('blob:');
     expect(JSON.stringify(scrubbed)).not.toContain('Ada Lovelace');
     expect(JSON.stringify(scrubbed)).not.toContain('mosas');
     expect(JSON.stringify(scrubbed)).not.toContain('attr__href');
+    expect(JSON.stringify(scrubbed)).not.toContain('download-pay-stub');
     expect(JSON.stringify(scrubbed)).not.toContain('role');
 
-    // Chain-only autocapture events (when $elements is omitted) are also strictly scrubbed.
+    // Chain-only autocapture events (when $elements is omitted) are also strictly scrubbed to tag names.
     const chainOnly = beforeSend({
       uuid: 'evt-auto-2',
       event: '$autocapture',
@@ -417,15 +415,32 @@ describe('analytics strict allowlist before_send', () => {
         surface: 'employee',
       },
     });
-    expect(chainOnly?.properties.$elements_chain).toBe('button:attr__data-ph-name="submit-run";section:');
+    expect(chainOnly?.properties.$elements_chain).toBe('button:;section:');
     expect(JSON.stringify(chainOnly)).not.toContain('blob:');
     expect(JSON.stringify(chainOnly)).not.toContain('50,000');
     expect(JSON.stringify(chainOnly)).not.toContain('company-42');
+    expect(JSON.stringify(chainOnly)).not.toContain('submit-run');
   });
 
-  it('drops $exception, $web_vitals, $identify, $set, and other blocked event types entirely', () => {
+  it('drops $exception, $web_vitals, $identify, $set, and other required blocked event types independently of DROPPED_EVENT_TYPES', () => {
+    const requiredBlockedEvents = [
+      '$exception',
+      '$web_vitals',
+      '$identify',
+      '$set',
+      '$groupidentify',
+      '$create_alias',
+      '$dead_click',
+      '$heatmap_data',
+      '$snapshot',
+      '$performance_event',
+      '$feature_flag_called',
+      'survey shown',
+      'survey sent',
+      'survey dismissed',
+    ];
     const beforeSend = createBeforeSend({ projectKey: 'phc_live_key', surface: 'staff' });
-    for (const eventName of DROPPED_EVENT_TYPES) {
+    for (const eventName of requiredBlockedEvents) {
       expect(
         beforeSend({
           uuid: `evt-${eventName}`,
@@ -437,11 +452,67 @@ describe('analytics strict allowlist before_send', () => {
             surface: 'staff',
           },
         }),
+        `expected blocked event "${eventName}" to be dropped`,
       ).toBeNull();
     }
-    expect(DROPPED_EVENT_TYPES.has('$exception')).toBe(true);
-    expect(DROPPED_EVENT_TYPES.has('$web_vitals')).toBe(true);
-    expect(DROPPED_EVENT_TYPES.has('$identify')).toBe(true);
+    for (const eventName of DROPPED_EVENT_TYPES) {
+      expect(requiredBlockedEvents).toContain(eventName);
+    }
+  });
+
+  it('drops events in before_send when Global Privacy Control or Do Not Track is enabled mid-session', () => {
+    const beforeSend = createBeforeSend({ projectKey: 'phc_live_key', surface: 'staff' });
+    const validEvent: CaptureResult = {
+      uuid: 'evt-mid-session-opt-out',
+      event: '$pageview',
+      properties: {
+        token: 'phc_live_key',
+        distinct_id: VALID_UUID_V7,
+        $pathname: '/app',
+        surface: 'staff',
+      },
+    };
+
+    const originalGpcDescriptor = Object.getOwnPropertyDescriptor(navigator, 'globalPrivacyControl');
+    const originalDntDescriptor = Object.getOwnPropertyDescriptor(navigator, 'doNotTrack');
+    try {
+      Object.defineProperty(navigator, 'globalPrivacyControl', {
+        configurable: true,
+        value: false,
+      });
+      Object.defineProperty(navigator, 'doNotTrack', {
+        configurable: true,
+        value: '0',
+      });
+      expect(beforeSend(validEvent)).not.toBeNull();
+
+      Object.defineProperty(navigator, 'globalPrivacyControl', {
+        configurable: true,
+        value: true,
+      });
+      expect(beforeSend(validEvent)).toBeNull();
+
+      Object.defineProperty(navigator, 'globalPrivacyControl', {
+        configurable: true,
+        value: false,
+      });
+      Object.defineProperty(navigator, 'doNotTrack', {
+        configurable: true,
+        value: '1',
+      });
+      expect(beforeSend(validEvent)).toBeNull();
+    } finally {
+      if (originalGpcDescriptor) {
+        Object.defineProperty(navigator, 'globalPrivacyControl', originalGpcDescriptor);
+      } else {
+        delete (navigator as unknown as Record<string, unknown>).globalPrivacyControl;
+      }
+      if (originalDntDescriptor) {
+        Object.defineProperty(navigator, 'doNotTrack', originalDntDescriptor);
+      } else {
+        delete (navigator as unknown as Record<string, unknown>).doNotTrack;
+      }
+    }
   });
 
   it('keeps custom workflow events parameterless and strips any non-allowlisted custom properties in before_send', () => {
@@ -578,6 +649,7 @@ describe('analytics legacy persistence cleanup and real SDK identity isolation (
     vi.spyOn(XMLHttpRequest.prototype, 'send').mockImplementation(() => undefined);
 
     const beaconUrls: string[] = [];
+    const originalSendBeaconDescriptor = Object.getOwnPropertyDescriptor(navigator, 'sendBeacon');
     Object.defineProperty(navigator, 'sendBeacon', {
       configurable: true,
       value: vi.fn((url: string) => {
@@ -586,36 +658,142 @@ describe('analytics legacy persistence cleanup and real SDK identity isolation (
       }),
     });
 
-    const createdScriptSrcs: string[] = [];
-    const origCreateElement = document.createElement.bind(document);
-    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
-      const el = origCreateElement(tagName, options);
-      if (tagName.toLowerCase() === 'script') {
-        const origSetAttr = el.setAttribute.bind(el);
-        el.setAttribute = (name: string, value: string) => {
-          if (name === 'src') createdScriptSrcs.push(value);
-          return origSetAttr(name, value);
-        };
-        Object.defineProperty(el, 'src', {
-          set(val: string) {
-            createdScriptSrcs.push(val);
-          },
-          get() {
-            return '';
+    try {
+      const createdScriptSrcs: string[] = [];
+      const origCreateElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+        const el = origCreateElement(tagName, options);
+        if (tagName.toLowerCase() === 'script') {
+          const origSetAttr = el.setAttribute.bind(el);
+          el.setAttribute = (name: string, value: string) => {
+            if (name === 'src') createdScriptSrcs.push(value);
+            return origSetAttr(name, value);
+          };
+          Object.defineProperty(el, 'src', {
+            set(val: string) {
+              createdScriptSrcs.push(val);
+            },
+            get() {
+              return '';
+            },
+          });
+        }
+        return el;
+      }) as typeof document.createElement);
+
+      const capturedPayloads: CaptureResult[] = [];
+      const env = {
+        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+        VITE_PUBLIC_POSTHOG_KEY: projectKey,
+        VITE_DEPLOYMENT_ENV: 'production',
+        DEV: false,
+      };
+
+      const instance = new PostHog();
+      const origInit = instance.init.bind(instance);
+      vi.spyOn(instance, 'init').mockImplementation((token, config) => {
+        const origBeforeSend = config?.before_send as (event: CaptureResult | null) => CaptureResult | null;
+        return origInit(token, {
+          ...config,
+          request_batching: false,
+          before_send: (event) => {
+            const result = origBeforeSend(event);
+            if (result) capturedPayloads.push(result);
+            return result;
           },
         });
+      });
+
+      const started = initAnalytics({
+        env,
+        isStagingEnv: false,
+        hasSupportToken: false,
+        navigatorObj: {},
+        windowObj: {},
+        surface: 'staff',
+        client: instance,
+      });
+      expect(started).toBe(true);
+
+      // Legacy persistence must be removed and the new v2 anonymous persistence key used instead.
+      expect(window.localStorage.getItem(legacyKey)).toBeNull();
+      expect(document.cookie).not.toContain(`${legacyKey}=`);
+      expect(window.localStorage.getItem(`ph_${ANALYTICS_PERSISTENCE_NAME}`)).not.toBeNull();
+      expect(instance.get_distinct_id()).not.toBe('42');
+      expect(isAnonymousDistinctId(instance.get_distinct_id())).toBe(true);
+
+      // Trigger pageview, blocked events, and explicit reloadFeatureFlags (must stay disabled).
+      capturePageView(instance, window.location.pathname + window.location.search + window.location.hash, 'staff');
+      instance.capture('$exception', { $exception_message: 'SSN 123-45-6789' });
+      instance.capture('$web_vitals', { $web_vitals_LCP_value: 1200 });
+      instance.reloadFeatureFlags();
+
+      const allUrls = [...requestUrls, ...xhrUrls, ...beaconUrls, ...createdScriptSrcs];
+      for (const url of allUrls) {
+        expect(url).not.toMatch(/\/flags\b|\/decide\b|\/array\/|us-assets\.i\.posthog\.com/i);
       }
-      return el;
-    }) as typeof document.createElement);
+      expect(createdScriptSrcs).toEqual([]);
 
+      // No raw Clerk ticket/status values or initial person info persisted in localStorage.
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const storageKey = window.localStorage.key(i);
+        const storageVal = storageKey ? window.localStorage.getItem(storageKey) ?? '' : '';
+        expect(storageVal).not.toContain('secret_clerk_ticket');
+        expect(storageVal).not.toContain('sign_up');
+        expect(storageVal).not.toContain('/companies/42/secret');
+        expect(storageVal).not.toContain('$initial_person_info');
+        expect(storageVal).not.toContain('$initial_referrer');
+      }
+
+      // Real SDK produced the $pageview with matched route template and valid UUIDv7 distinct_id.
+      expect(capturedPayloads.map((e) => e.event)).toEqual(['$pageview']);
+      const payload = capturedPayloads[0];
+      expect(payload.properties.$pathname).toBe('/companies/:companyId/employees/:id');
+      expect(payload.properties.$current_url).toBe(
+        `${window.location.origin}/companies/:companyId/employees/:id`,
+      );
+      expect(isAnonymousDistinctId(payload.properties.distinct_id)).toBe(true);
+      expect(payload.properties.distinct_id).not.toBe('42');
+      expect(payload.properties.surface).toBe('staff');
+      expect(payload.properties.token).toBe(projectKey);
+      expect(payload.properties).not.toHaveProperty('$session_entry_url');
+      expect(payload.properties).not.toHaveProperty('$session_entry_referrer');
+      expect(payload.properties).not.toHaveProperty('$initial_current_url');
+      expect(payload.properties).not.toHaveProperty('$initial_referrer');
+      expect(payload.properties).not.toHaveProperty('$referrer');
+      expect(payload).not.toHaveProperty('$set');
+      expect(payload).not.toHaveProperty('$set_once');
+      expect(JSON.stringify(payload)).not.toContain('__clerk_ticket');
+      expect(JSON.stringify(payload)).not.toContain('__clerk_status');
+      expect(JSON.stringify(payload)).not.toContain('ab12');
+      expect(JSON.stringify(payload)).not.toContain('x9k2');
+
+      // Defense-in-depth: if distinct_id is ever tainted with a non-UUIDv7 value,
+      // before_send drops the event and triggers reset(), regenerating a fresh UUIDv7.
+      const resetSpy = vi.spyOn(instance, 'reset');
+      instance.register({ distinct_id: '42' });
+      instance.capture('payroll_calculated');
+      expect(resetSpy).toHaveBeenCalledTimes(1);
+      expect(capturedPayloads).toHaveLength(1); // tainted event was dropped
+      expect(isAnonymousDistinctId(instance.get_distinct_id())).toBe(true);
+      expect(instance.get_distinct_id()).not.toBe('42');
+
+      // Subsequent event after reset succeeds with the new anonymous UUIDv7.
+      instance.capture('payroll_approved');
+      expect(capturedPayloads).toHaveLength(2);
+      expect(capturedPayloads[1].event).toBe('payroll_approved');
+      expect(isAnonymousDistinctId(capturedPayloads[1].properties.distinct_id)).toBe(true);
+    } finally {
+      if (originalSendBeaconDescriptor) {
+        Object.defineProperty(navigator, 'sendBeacon', originalSendBeaconDescriptor);
+      } else {
+        delete (navigator as unknown as Record<string, unknown>).sendBeacon;
+      }
+    }
+  });
+
+  it('keeps development opt-out in effect after resetAnalytics so subsequent captures remain rejected', () => {
     const capturedPayloads: CaptureResult[] = [];
-    const env = {
-      VITE_PUBLIC_POSTHOG_ENABLED: 'true',
-      VITE_PUBLIC_POSTHOG_KEY: projectKey,
-      VITE_DEPLOYMENT_ENV: 'production',
-      DEV: false,
-    };
-
     const instance = new PostHog();
     const origInit = instance.init.bind(instance);
     vi.spyOn(instance, 'init').mockImplementation((token, config) => {
@@ -632,7 +810,12 @@ describe('analytics legacy persistence cleanup and real SDK identity isolation (
     });
 
     const started = initAnalytics({
-      env,
+      env: {
+        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+        VITE_PUBLIC_POSTHOG_KEY: 'phc_dev_opt_out_test_key',
+        VITE_DEPLOYMENT_ENV: 'production',
+        DEV: true,
+      },
       isStagingEnv: false,
       hasSupportToken: false,
       navigatorObj: {},
@@ -641,75 +824,17 @@ describe('analytics legacy persistence cleanup and real SDK identity isolation (
       client: instance,
     });
     expect(started).toBe(true);
+    expect(instance.has_opted_out_capturing()).toBe(true);
 
-    // Legacy persistence must be removed and the new v2 anonymous persistence key used instead.
-    expect(window.localStorage.getItem(legacyKey)).toBeNull();
-    expect(document.cookie).not.toContain(`${legacyKey}=`);
-    expect(window.localStorage.getItem(`ph_${ANALYTICS_PERSISTENCE_NAME}`)).not.toBeNull();
-    expect(instance.get_distinct_id()).not.toBe('42');
-    expect(isAnonymousDistinctId(instance.get_distinct_id())).toBe(true);
+    const beforeResetId = instance.get_distinct_id();
+    resetAnalytics(instance, { surface: 'staff', keepRole: true, isDev: true });
 
-    // Trigger pageview, blocked events, and explicit reloadFeatureFlags (must stay disabled).
-    capturePageView(instance, window.location.pathname + window.location.search + window.location.hash, 'staff');
-    instance.capture('$exception', { $exception_message: 'SSN 123-45-6789' });
-    instance.capture('$web_vitals', { $web_vitals_LCP_value: 1200 });
-    instance.reloadFeatureFlags();
+    expect(instance.get_distinct_id()).not.toBe(beforeResetId);
+    expect(instance.has_opted_out_capturing()).toBe(true);
 
-    const allUrls = [...requestUrls, ...xhrUrls, ...beaconUrls, ...createdScriptSrcs];
-    for (const url of allUrls) {
-      expect(url).not.toMatch(/\/flags\b|\/decide\b|\/array\/|us-assets\.i\.posthog\.com/i);
-    }
-    expect(createdScriptSrcs).toEqual([]);
-
-    // No raw Clerk ticket/status values or initial person info persisted in localStorage.
-    for (let i = 0; i < window.localStorage.length; i += 1) {
-      const storageKey = window.localStorage.key(i);
-      const storageVal = storageKey ? window.localStorage.getItem(storageKey) ?? '' : '';
-      expect(storageVal).not.toContain('secret_clerk_ticket');
-      expect(storageVal).not.toContain('sign_up');
-      expect(storageVal).not.toContain('/companies/42/secret');
-      expect(storageVal).not.toContain('$initial_person_info');
-      expect(storageVal).not.toContain('$initial_referrer');
-    }
-
-    // Real SDK produced the $pageview with matched route template and valid UUIDv7 distinct_id.
-    expect(capturedPayloads.map((e) => e.event)).toEqual(['$pageview']);
-    const payload = capturedPayloads[0];
-    expect(payload.properties.$pathname).toBe('/companies/:companyId/employees/:id');
-    expect(payload.properties.$current_url).toBe(
-      `${window.location.origin}/companies/:companyId/employees/:id`,
-    );
-    expect(isAnonymousDistinctId(payload.properties.distinct_id)).toBe(true);
-    expect(payload.properties.distinct_id).not.toBe('42');
-    expect(payload.properties.surface).toBe('staff');
-    expect(payload.properties.token).toBe(projectKey);
-    expect(payload.properties).not.toHaveProperty('$session_entry_url');
-    expect(payload.properties).not.toHaveProperty('$session_entry_referrer');
-    expect(payload.properties).not.toHaveProperty('$initial_current_url');
-    expect(payload.properties).not.toHaveProperty('$initial_referrer');
-    expect(payload.properties).not.toHaveProperty('$referrer');
-    expect(payload).not.toHaveProperty('$set');
-    expect(payload).not.toHaveProperty('$set_once');
-    expect(JSON.stringify(payload)).not.toContain('__clerk_ticket');
-    expect(JSON.stringify(payload)).not.toContain('__clerk_status');
-    expect(JSON.stringify(payload)).not.toContain('ab12');
-    expect(JSON.stringify(payload)).not.toContain('x9k2');
-
-    // Defense-in-depth: if distinct_id is ever tainted with a non-UUIDv7 value,
-    // before_send drops the event and triggers reset(), regenerating a fresh UUIDv7.
-    const resetSpy = vi.spyOn(instance, 'reset');
-    instance.register({ distinct_id: '42' });
+    capturePageView(instance, '/app', 'staff');
     instance.capture('payroll_calculated');
-    expect(resetSpy).toHaveBeenCalledTimes(1);
-    expect(capturedPayloads).toHaveLength(1); // tainted event was dropped
-    expect(isAnonymousDistinctId(instance.get_distinct_id())).toBe(true);
-    expect(instance.get_distinct_id()).not.toBe('42');
-
-    // Subsequent event after reset succeeds with the new anonymous UUIDv7.
-    instance.capture('payroll_approved');
-    expect(capturedPayloads).toHaveLength(2);
-    expect(capturedPayloads[1].event).toBe('payroll_approved');
-    expect(isAnonymousDistinctId(capturedPayloads[1].properties.distinct_id)).toBe(true);
+    expect(capturedPayloads).toEqual([]);
   });
 });
 
@@ -958,6 +1083,70 @@ describe('analytics initialization gating and config', () => {
         vi.doUnmock('posthog-js');
         vi.resetModules();
       }
+    }
+  });
+
+  it('resets analytics in PostHogSessionSync when staff user ID changes directly without an intervening null', async () => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    vi.stubEnv('VITE_DEPLOYMENT_ENV', 'production');
+    vi.stubEnv('VITE_PUBLIC_POSTHOG_ENABLED', 'true');
+    vi.stubEnv('VITE_PUBLIC_POSTHOG_KEY', 'phc_session_sync_test_key');
+
+    let currentUser: { id: number; role: string } | null = { id: 101, role: 'accountant' };
+    const callOrder: string[] = [];
+    const posthogMock = {
+      reset: vi.fn(() => callOrder.push('reset')),
+      register: vi.fn((props: Record<string, unknown>) => callOrder.push(`register:${String(props.role ?? 'none')}`)),
+      unregister: vi.fn(),
+      opt_out_capturing: vi.fn(),
+      has_opted_out_capturing: vi.fn(() => false),
+    };
+
+    vi.doMock('@/contexts/AuthContext', () => ({
+      AuthProvider: ({ children }: { children: unknown }) => children,
+      useAuth: () => ({ user: currentUser }),
+    }));
+    vi.doMock('posthog-js/react', () => ({
+      PostHogProvider: ({ children }: { children: unknown }) => children,
+      usePostHog: () => posthogMock,
+    }));
+
+    try {
+      const { PostHogSessionSync } = await import('../App');
+      const { rerender } = render(<PostHogSessionSync />);
+
+      expect(posthogMock.reset).not.toHaveBeenCalled();
+      expect(posthogMock.register).toHaveBeenCalledWith({ surface: 'staff', role: 'accountant' });
+
+      // Same user ID with updated role: re-registers role without resetting anonymous ID.
+      currentUser = { id: 101, role: 'admin' };
+      rerender(<PostHogSessionSync />);
+      expect(posthogMock.reset).not.toHaveBeenCalled();
+      expect(posthogMock.register).toHaveBeenCalledWith({ surface: 'staff', role: 'admin' });
+
+      // Direct switch to a different staff user ID without an intervening null user: must reset first.
+      callOrder.length = 0;
+      currentUser = { id: 202, role: 'manager' };
+      rerender(<PostHogSessionSync />);
+      expect(posthogMock.reset).toHaveBeenCalledTimes(1);
+      expect(callOrder[0]).toBe('reset');
+      expect(posthogMock.register).toHaveBeenLastCalledWith({ surface: 'staff', role: 'manager' });
+
+      // Signing out to null resets once and clears role.
+      currentUser = null;
+      rerender(<PostHogSessionSync />);
+      expect(posthogMock.reset).toHaveBeenCalledTimes(2);
+      expect(posthogMock.unregister).toHaveBeenCalledWith('role');
+
+      // Staying signed out does not reset again.
+      rerender(<PostHogSessionSync />);
+      expect(posthogMock.reset).toHaveBeenCalledTimes(2);
+    } finally {
+      cleanup();
+      vi.doUnmock('@/contexts/AuthContext');
+      vi.doUnmock('posthog-js/react');
+      vi.resetModules();
     }
   });
 });

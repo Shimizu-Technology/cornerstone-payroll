@@ -49,13 +49,13 @@ export function posthogOrigins(env = {}) {
   const hostname = url.hostname.toLowerCase()
   if (POSTHOG_US_HOSTS.has(hostname)) {
     return {
-      apiOrigin: hostname === 'app.posthog.com' ? DEFAULT_POSTHOG_HOST : url.origin,
+      apiOrigin: DEFAULT_POSTHOG_HOST,
       assetsOrigin: 'https://us-assets.i.posthog.com',
     }
   }
   if (POSTHOG_EU_HOSTS.has(hostname)) {
     return {
-      apiOrigin: url.origin,
+      apiOrigin: 'https://eu.i.posthog.com',
       assetsOrigin: 'https://eu-assets.i.posthog.com',
     }
   }

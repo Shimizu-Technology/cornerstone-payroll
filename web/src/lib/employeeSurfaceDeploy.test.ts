@@ -110,16 +110,40 @@ describe('employee site deploy files', () => {
       assetsOrigin: 'https://us-assets.i.posthog.com',
     });
 
-    expect(
-      posthogOrigins({
-        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
-        VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
-        VITE_PUBLIC_POSTHOG_HOST: 'https://eu.i.posthog.com',
-      }),
-    ).toEqual({
-      apiOrigin: 'https://eu.i.posthog.com',
-      assetsOrigin: 'https://eu-assets.i.posthog.com',
-    });
+    for (const usAlias of [
+      'https://app.posthog.com',
+      'https://us.posthog.com',
+      'https://us.i.posthog.com',
+      'https://us-assets.i.posthog.com',
+    ]) {
+      expect(
+        posthogOrigins({
+          VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+          VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
+          VITE_PUBLIC_POSTHOG_HOST: usAlias,
+        }),
+      ).toEqual({
+        apiOrigin: 'https://us.i.posthog.com',
+        assetsOrigin: 'https://us-assets.i.posthog.com',
+      });
+    }
+
+    for (const euAlias of [
+      'https://eu.posthog.com',
+      'https://eu.i.posthog.com',
+      'https://eu-assets.i.posthog.com',
+    ]) {
+      expect(
+        posthogOrigins({
+          VITE_PUBLIC_POSTHOG_ENABLED: 'true',
+          VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
+          VITE_PUBLIC_POSTHOG_HOST: euAlias,
+        }),
+      ).toEqual({
+        apiOrigin: 'https://eu.i.posthog.com',
+        assetsOrigin: 'https://eu-assets.i.posthog.com',
+      });
+    }
 
     for (const badHost of [
       'http://us.i.posthog.com',
