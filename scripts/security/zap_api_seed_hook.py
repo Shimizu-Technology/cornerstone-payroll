@@ -2,9 +2,9 @@
 
 The employee API does not emit HTML hyperlinks for ZAP's spider to follow, so
 scanning `/up` alone misses the JSON and empty-404 employee portal responses.
-This hook visits read-only public, auth, employee portal, and dropped-admin
-paths after ZAP finishes tuning so the passive scanner inspects real status
-codes, JSON error bodies, and security headers (`Cache-Control: no-store`,
+This hook visits read-only public, auth, and employee portal paths after ZAP
+finishes tuning so the passive scanner inspects real status codes, JSON error
+bodies, and security headers (`Cache-Control: no-store`,
 `X-Content-Type-Options: nosniff`, CORS, HSTS in production).
 """
 
