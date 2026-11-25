@@ -129,6 +129,42 @@ RSpec.describe "RLS owner tasks", :rls do
       expect(summary).to include("phase" => "shadow", "enforced_tables" => 0)
     end
 
+    it "refuses a LOCK_WAIT outside 1 to 600 whole seconds, since 0 would wait forever" do
+      %w[0 -1 601 1.5 abc].each do |value|
+        with_env("LOCK_WAIT" => value) do
+          with_migration_url { expect { invoke("rls:disable") }.to raise_error(SystemExit, /LOCK_WAIT must be a whole number of seconds from 1 to 600/) }
+        end
+      end
+    end
+
+    it "lets an rls:disable started during a dry run finish within its wait bound" do
+      allow(RlsContextGuard).to receive(:mode).and_return("off")
+      allow(RlsEnforcement).to receive(:runtime_role_ready?).and_return(true)
+      ActiveRecord::Base.connection_pool.with_connection do |connection|
+        TenantScope.as_system(reason: "Enforce one test-only table") do
+          connection.execute("ALTER TABLE departments ENABLE ROW LEVEL SECURITY")
+          connection.execute("ALTER TABLE departments FORCE ROW LEVEL SECURITY")
+        end
+      end
+
+      # Midway through the dry run's policy comparison, after departments
+      # has been compared, a rollback starts and must not queue behind it.
+      elapsed = nil
+      allow(RlsDatabase).to receive(:policy_definitions).and_wrap_original do |original, connection, relation|
+        if relation == "pg_temp.employee_notes" && elapsed.nil?
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          Thread.new { invoke("rls:disable") }.join(10)
+          elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+        end
+        original.call(connection, relation)
+      end
+      with_env("DRY_RUN" => "1", "LOCK_WAIT" => "1") do
+        with_migration_url { expect { invoke("rls:enforce") }.to output(/Disabled RLS on departments.*Dry run: /m).to_stdout }
+      end
+      expect(elapsed).to be < RlsEnforcement::LOCK_TIMEOUT.to_f
+      expect(summary).to include("phase" => "shadow", "enforced_tables" => 0)
+    end
+
     it "lists pending batches on a dry run, enforces a subset, then all tables, and rolls back with rls:disable" do
       allow(RlsContextGuard).to receive(:mode).and_return("off")
       allow(RlsEnforcement).to receive(:runtime_role_ready?).and_return(true)
