@@ -60,9 +60,9 @@ test.describe('employee app on a phone', () => {
     await expect(page).toHaveURL(/\/pay\/906$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Pay stub' })).toBeFocused();
     const stub = page.getByRole('article');
-    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14' })).toBeVisible();
+    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14, 2026' })).toBeVisible();
     await expect(stub).toContainText('Paid Nov 20, 2026');
-    await expect(stub).not.toContainText('Pay period Nov 1 – 14');
+    await expect(stub).not.toContainText('Pay period Nov 1 – 14, 2026');
     await expect(stub).toContainText('36 hrs × $15.00');
     await expect(stub).toContainText('2.5 hrs × $22.50');
     await expect(stub.getByRole('row', { name: /Tips/ })).toContainText('$16.25');
@@ -84,7 +84,7 @@ test.describe('employee app on a phone', () => {
     await stub.getByRole('link', { name: /^Older:/ }).click();
     await expect(page).toHaveURL(/\/pay\/905$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Pay stub' })).toBeFocused();
-    await expect(page.getByRole('article').getByRole('heading', { name: 'Oct 18 – 31' })).toBeVisible();
+    await expect(page.getByRole('article').getByRole('heading', { name: 'Oct 18 – 31, 2026' })).toBeVisible();
     await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await expect(page.getByRole('heading', { level: 1, name: 'Pay stubs' })).toBeVisible();
   });
@@ -111,7 +111,7 @@ test.describe('employee app on a phone', () => {
     await expect(page.getByText('From QuickBooks records')).toBeVisible();
     await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await page.getByRole('list', { name: 'From QuickBooks records' }).getByRole('link', { name: /Aug 14/ }).click();
-    await expect(page.getByRole('heading', { name: 'Jul 26 – Aug 8' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Jul 26 – Aug 8, 2026' })).toBeVisible();
     await expect(page.getByRole('button', { name: /PDF|original/i })).toHaveCount(0);
     await expect(page.getByRole('main')).not.toContainText(/no original|not available|missing/i);
 
@@ -333,7 +333,7 @@ test.describe('employee app on a phone', () => {
 
     // A stub and back: all five are still listed, with no reload.
     await paychecks.getByRole('link', { name: /Sep 25/ }).click();
-    await expect(page.getByRole('article').getByRole('heading', { name: 'Sep 6 – 19' })).toBeVisible();
+    await expect(page.getByRole('article').getByRole('heading', { name: 'Sep 6 – 19, 2026' })).toBeVisible();
     await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await expect(page.getByRole('list', { name: 'Paychecks' }).getByRole('listitem')).toHaveCount(5);
   });

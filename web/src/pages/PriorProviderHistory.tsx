@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
+import { formatDateRange } from "@/lib/display-date";
+import { formatGuamDateTime } from "@/lib/utils";
 import { ApiError } from "@/services/api";
 import {
   amountLabels,
@@ -129,7 +131,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
       setPayload(initialPayload(result));
       setStep(result.draft?.step ?? 0);
       setVersion(result.draft?.lock_version);
-      setSavedAt(result.draft ? `${new Date(result.draft.updated_at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })} by ${result.draft.updated_by_name}` : "");
+      setSavedAt(result.draft ? `${formatGuamDateTime(result.draft.updated_at, { second: undefined })} by ${result.draft.updated_by_name}` : "");
       setSaveState(result.draft ? "saved" : "idle");
       dirty.current = false;
     } catch (err) {
@@ -153,7 +155,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
       const result = await priorProviderHistoryApi.saveDraft(payload, Math.min(step, 3), version);
       if (!mounted.current) return;
       setVersion(result.draft.lock_version);
-      setSavedAt(new Date(result.draft.updated_at).toLocaleTimeString("en-US", { timeStyle: "short" }));
+      setSavedAt(formatGuamDateTime(result.draft.updated_at, { second: undefined }));
       setSaveState(dirty.current ? "unsaved" : "saved");
     } catch (err) {
       if (!mounted.current) return;
@@ -228,7 +230,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
         if (!mounted.current) return;
         setPayload(result.draft.payload);
         setVersion(result.draft.lock_version);
-        setSavedAt(new Date(result.draft.updated_at).toLocaleTimeString("en-US", { timeStyle: "short" }));
+        setSavedAt(formatGuamDateTime(result.draft.updated_at, { second: undefined }));
         dirty.current = false;
         setSaveState("saved");
         setPreview(null);
@@ -396,7 +398,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
                     Undone history · {record.provider_name} · {record.tax_year}
                   </summary>
                   <p className="my-3">
-                    {record.reversal_reason} · {record.reversed_at ? new Date(record.reversed_at).toLocaleString() : ""}
+                    {record.reversal_reason} · {record.reversed_at ? formatGuamDateTime(record.reversed_at) : ""}
                   </p>
                   {record.source_files.map((file) => (
                     <Button key={file.id} variant="outline" size="sm" className="mb-2 mr-2" onClick={() => void download(record, file)}>
@@ -1312,7 +1314,7 @@ function RecordDialog({ open, payload, employees, files, busy, onClose, onConfir
         <DialogHeader>
           <DialogTitle>Record {payload.provider_name || "previous provider"} history?</DialogTitle>
           <DialogDescription>
-            {payload.periods.length} pay dates ({shortDate(dates[0])} – {shortDate(dates.at(-1))}) · {checks} paychecks · {money(gross)} gross · {money(net)} net · {files.length} register file(s)
+            {payload.periods.length} pay dates ({formatDateRange(dates[0], dates.at(-1)) || '—'}) · {checks} paychecks · {money(gross)} gross · {money(net)} net · {files.length} register file(s)
           </DialogDescription>
         </DialogHeader>
         <EmployeeTotalsTable rows={rows} caption="Year-to-date amounts this history will add" />

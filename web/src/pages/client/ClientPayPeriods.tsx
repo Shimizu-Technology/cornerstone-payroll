@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -10,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { clientPayPeriodsApi, type PayrollHistoryRecord, type ClientOpenPayrollPeriod } from '@/services/api';
-import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
 import { currentAppPath, importedPayRunPath, payRunPath } from '@/lib/routes';
 import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { parsePositiveRouteId } from '@/lib/route-params';
@@ -85,7 +86,7 @@ export function ClientPayPeriods(): ReactElement {
   }, [load]);
 
   const visiblePayPeriods = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = search.trim().toLowerCase().replaceAll('–', '-');
     if (!query) return payPeriods;
     return payPeriods.filter((period) =>
       [
@@ -100,6 +101,7 @@ export function ClientPayPeriods(): ReactElement {
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
+        .replaceAll('–', '-')
         .includes(query)
     );
   }, [payPeriods, search]);
@@ -146,7 +148,7 @@ export function ClientPayPeriods(): ReactElement {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
-                      <p className="mt-1 text-sm text-neutral-600">Pay date {formatDate(period.pay_date, { weekday: 'short', year: undefined })}</p>
+                      <p className="mt-1 text-sm text-neutral-600">Pay date {formatDate(period.pay_date)}</p>
                     </div>
                     <PeriodStatusBadge period={period} />
                   </div>
@@ -180,7 +182,7 @@ export function ClientPayPeriods(): ReactElement {
                 {visiblePayPeriods.map((period) => (
                   <TableRow key={period.key}>
                     <TableCell className="font-medium text-gray-900">{formatDateRange(period.start_date, period.end_date)}</TableCell>
-                    <TableCell>{formatDate(period.pay_date, { weekday: 'short', year: undefined })}</TableCell>
+                    <TableCell>{formatDate(period.pay_date)}</TableCell>
                     <TableCell>{period.employee_count}</TableCell>
                     <TableCell>{formatCurrency(period.total_gross ?? 0)}</TableCell>
                     <TableCell>{formatCurrency(period.total_net ?? 0)}</TableCell>

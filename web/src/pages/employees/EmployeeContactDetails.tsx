@@ -45,7 +45,8 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
-import { formatPhone, toContactRecord } from '@/lib/employee-contact';
+import { formatPhone } from '@/lib/display-phone';
+import { toContactRecord } from '@/lib/employee-contact';
 import { employeesPath } from '@/lib/routes';
 import { cn, getInitials } from '@/lib/utils';
 import { contactEmailErrorMessage } from '@/lib/contact-email-errors';
@@ -159,12 +160,17 @@ function effectiveDraft(employee: ContactEmployee, rowDraft: RowFieldDrafts | un
   return merged;
 }
 
+function isFieldChanged(field: ContactField, value: string, baseline: string): boolean {
+  if (field === 'phone') return formatPhone(value).trim() !== formatPhone(baseline).trim();
+  return value.trim() !== baseline.trim();
+}
+
 function changedEntriesForRow(rowDraft: RowFieldDrafts | undefined): Array<[ContactField, ContactFieldDraft]> {
   if (!rowDraft) return [];
   const changed: Array<[ContactField, ContactFieldDraft]> = [];
   for (const field of CONTACT_FIELDS) {
     const entry = rowDraft[field];
-    if (entry && entry.value.trim() !== entry.baselineValue.trim()) {
+    if (entry && isFieldChanged(field, entry.value, entry.baselineValue)) {
       changed.push([field, entry]);
     }
   }
@@ -449,7 +455,8 @@ export function EmployeeContactDetails({
       const baselineValue = existingField ? existingField.baselineValue : serverBaseline[field];
       const baselineRevision = existingField ? existingField.baselineRevision : serverRevision;
 
-      if (value.trim() === baselineValue.trim()) {
+      // Keep the typed phone text even when it matches the saved number.
+      if (field !== 'phone' && !isFieldChanged(field, value, baselineValue)) {
         delete existingRow[field];
       } else {
         existingRow[field] = { value, baselineValue, baselineRevision };
@@ -686,6 +693,11 @@ export function EmployeeContactDetails({
       for (const field of CONTACT_FIELDS) {
         const entry = existingRow[field];
         if (!entry) continue;
+        if (conflict.userChanges[field] === undefined) {
+          // A formatting-only phone draft was never sent in the conflicting save.
+          rebasedRow[field] = entry;
+          continue;
+        }
         rebasedRow[field] = {
           value: entry.value,
           baselineValue: serverBaseline[field],
@@ -773,8 +785,9 @@ export function EmployeeContactDetails({
               onConfirmAndSave={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
             />
           </div>
-          <EditorField label="Mobile" ariaLabel={`Mobile for ${name}`} type="tel" placeholder="671-555-0100" inputClassName="tabular-nums"
-            hint="For a 7-digit Guam number, +1 671 is added for you." {...fieldProps('phone')} />
+          <EditorField label="Mobile" ariaLabel={`Mobile for ${name}`} type="tel" placeholder="(671) 555-0100" inputClassName="tabular-nums"
+            hint="For a 7-digit Guam number, +1 671 is added for you." {...fieldProps('phone')}
+            value={drafts[employee.id]?.phone ? draft.phone : formatPhone(draft.phone)} />
         </div>
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_72px_112px]">
           <EditorField label="Street address" ariaLabel={`Street address for ${name}`} placeholder="Street address" className="col-span-2 lg:col-span-1" {...fieldProps('address_line1')} />
@@ -1260,6 +1273,8 @@ function RowConflictBanner({
     (field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField),
   );
   const serverValues = baselineFromEmployee(conflict.serverEmployee);
+  const displayValue = (field: ContactField, value?: string): string =>
+    (field === 'phone' ? formatPhone(value) : value) || '(blank)';
 
   return (
     <div role="alert" className="mt-2 rounded-lg border border-warning-300 bg-warning-50 p-4 text-xs text-warning-950">
@@ -1272,8 +1287,8 @@ function RowConflictBanner({
           {fieldsToShow.map((field) => (
             <li key={field} className="break-words leading-relaxed">
               <strong>{FIELD_LABELS[field]}:</strong> Someone else changed this to{' '}
-              <span className="break-all font-mono font-medium text-neutral-950">{serverValues[field] || '(blank)'}</span>. Keep yours (
-              <span className="break-all font-mono font-medium text-neutral-950">{conflict.userChanges[field] || '(blank)'}</span>) or use theirs?
+              <span className="break-all font-mono font-medium text-neutral-950">{displayValue(field, serverValues[field])}</span>. Keep yours (
+              <span className="break-all font-mono font-medium text-neutral-950">{displayValue(field, conflict.userChanges[field])}</span>) or use theirs?
             </li>
           ))}
         </ul>

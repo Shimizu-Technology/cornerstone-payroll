@@ -234,22 +234,22 @@ for (const width of [1440, 390]) {
     const run = (date: string) => width === 390
       ? page.getByRole('group', { name: `Pay period ${date}` })
       : page.getByRole('row').filter({ hasText: date });
-    await run('Jan 15 - 28, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
+    await run('Jan 15 – 28, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
     const success = page.getByText(/^Deleted MoSa/);
     await expect(success).toBeVisible();
     await success.hover();
-    await expect(run('Jan 15 - 28, 2024')).toHaveCount(0);
-    await run('Feb 1 - 14, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(run('Jan 15 – 28, 2024')).toHaveCount(0);
+    await run('Feb 1 – 14, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(success).toHaveCount(0);
     await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
     await expect(page.getByText('This run was approved before. Keep it and correct it instead.')).toBeVisible();
     await expect(success).toHaveCount(0);
     await page.screenshot({ path: `${process.env.ROUND2_EVIDENCE_DIR || 'test-results'}/delete-refusal-${width}.png`, fullPage: true });
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
-    await expect(run('Feb 1 - 14, 2024')).toBeVisible();
+    await expect(run('Feb 1 – 14, 2024')).toBeVisible();
     await page.reload();
-    await expect(run('Feb 1 - 14, 2024')).toBeVisible();
+    await expect(run('Feb 1 – 14, 2024')).toBeVisible();
     expect(deleteRequests).toEqual([77, 78]);
   });
 }

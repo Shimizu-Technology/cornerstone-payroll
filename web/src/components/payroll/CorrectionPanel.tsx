@@ -39,7 +39,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { FinancialCorrectionSourcePanel } from './FinancialCorrectionSourcePanel';
 import { Badge } from '@/components/ui/badge';
 import { payPeriodsApi, type PayrollCorrectionPreflight } from '@/services/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { correctionRunPath } from '@/lib/routes';
 import type { PayPeriod, PayPeriodCorrectionEvent } from '@/types';
 
@@ -383,7 +383,7 @@ export function CorrectionPanel({
               )}
               {payPeriod.voided_at && (
                 <p className="mt-0.5 text-xs text-red-500">
-                  Voided {new Date(payPeriod.voided_at).toLocaleString()}
+                  Voided {formatGuamDateTime(payPeriod.voided_at)}
                   {payPeriod.voided_by_name && ` by ${payPeriod.voided_by_name}`}
                 </p>
               )}
@@ -986,7 +986,7 @@ function CorrectionEventRow({ event, index, total, deletedRunIds, companyId, ret
             <Badge variant={variant}>{label}</Badge>
             <span className="text-gray-500 text-xs">
               <time dateTime={event.created_at}>
-                {new Date(event.created_at).toLocaleString()}
+                {formatGuamDateTime(event.created_at)}
               </time>
             </span>
             {event.actor_name && (

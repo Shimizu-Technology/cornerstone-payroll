@@ -1,3 +1,4 @@
+import { formatGuamDate } from '@/lib/utils';
 import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -317,7 +318,7 @@ export function NonEmployeeCheckEditModal({ check, onClose, onSaved }: NonEmploy
               )}
               {isPrinted && (
                 <Badge className="bg-green-100 text-green-800">
-                  Printed {new Date(check.printed_at!).toLocaleDateString()}
+                  Printed {formatGuamDate(check.printed_at!)}
                 </Badge>
               )}
             </div>

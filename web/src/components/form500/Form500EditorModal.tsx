@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -160,7 +161,7 @@ export function Form500EditorModal({ open, onClose, payPeriodId }: Form500Editor
             <div className="flex flex-wrap items-center gap-3 sm:shrink-0">
               {savedAt ? (
                 <span className="rounded-full bg-green-50 px-3 py-1 text-xs font-medium text-green-700">
-                  Saved {new Date(savedAt).toLocaleString()}
+                  Saved {formatGuamDateTime(savedAt)}
                 </span>
               ) : (
                 <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">Not saved yet</span>
