@@ -7,6 +7,7 @@ class EmployeeContactValidator
   ADDRESS_REQUIRED_FIELDS = %i[address_line1 city state zip].freeze
   MAX_EMAIL_LENGTH = 254
   CLIENT_GENERIC_LOGIN_EMAIL_ERROR = "This email can't be used here. Ask Cornerstone to set it."
+  EMPLOYEE_PERSONAL_EMAIL_ERROR = "Use a personal email address that only you can access."
   LOGIN_NAME_MISMATCH_ERROR = "The name on this login doesn't match this employee"
 
   # Structural placeholder local parts and domains (never put real addresses here).
@@ -357,7 +358,10 @@ class EmployeeContactValidator
       if !valid_email_format?(normalized_email)
         add_error(errors, :email, "must be a valid email address")
       elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
-        add_error(errors, :email, "cannot be a placeholder or generic inbox address; enter the employee's own email")
+        add_error(errors, :email, @source == "employee" ? EMPLOYEE_PERSONAL_EMAIL_ERROR :
+          "cannot be a placeholder or generic inbox address; enter the employee's own email")
+      elsif @source == "employee" && self.class.structural_placeholder_email?(normalized_email)
+        add_error(errors, :email, EMPLOYEE_PERSONAL_EMAIL_ERROR)
       else
         if self.class.structural_placeholder_email?(normalized_email)
           warnings << {
@@ -378,7 +382,9 @@ class EmployeeContactValidator
 
         if errors[:email].blank?
           coworker_count = same_company_coworker_email_count(normalized_email)
-          if coworker_count >= 1
+          if coworker_count >= 1 && @source == "employee"
+            add_error(errors, :email, EMPLOYEE_PERSONAL_EMAIL_ERROR)
+          elsif coworker_count >= 1
             warnings << {
               code: "shared_company_email",
               field: "email",
@@ -587,6 +593,7 @@ class EmployeeContactValidator
   end
 
   def staff_can_confirm_login_email?(login_user)
+    return false if @source == "employee"
     return false unless @actor&.staff_member? && @company.present?
     return false unless @actor.can_access_company?(@company.id)
     return false unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @company)

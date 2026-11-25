@@ -56,8 +56,16 @@ module PortalNotifications
 
       def subject_available?(event)
         subject = event.subject
-        if %w[address_approvals contact_changes employee_address_decisions].include?(event.category)
+        employee_submission = event.event_type == "employee_change_submitted" && subject.is_a?(EmployeeChangeRequest) &&
+          subject.requested_by_link_id.present?
+        return false if employee_submission && subject.cancelled?
+
+        if employee_submission || %w[address_approvals contact_changes employee_address_decisions].include?(event.category) ||
+            event.event_type == "employee_contact_confirmation_requested"
           return false unless CompanyFeatures.for(event.company).employee_portal_feature?(:profile_requests)
+        end
+        if event.event_type == "employee_contact_confirmation_requested" && subject.is_a?(EmployeeContactChangeToConfirm)
+          return false if subject.after_values.key?("emergency_contacts")
         end
         if event.category == "address_approvals"
           return subject.is_a?(EmployeeChangeRequest) && subject.company_id == event.company_id &&
@@ -118,8 +126,13 @@ module PortalNotifications
         return false if event.actor_id.present? && event.actor_id == user.id
 
         if event.audience == "staff"
-          staff_can_view_company?(user, company) &&
-            (event.category != "employee_changes" || StaffRolePolicy.allowed?(user, :manage_client_configuration, company: company))
+          return false unless staff_can_view_company?(user, company)
+
+          if event.event_type == "employee_contact_confirmation_requested"
+            StaffRolePolicy.allowed?(user, :payroll_operations, company: company)
+          else
+            event.category != "employee_changes" || StaffRolePolicy.allowed?(user, :manage_client_configuration, company: company)
+          end
         else
           user.client? && user.payroll_access_allowed? && user.organization_id == company.organization_id &&
             user.can_access_company?(company.id) &&

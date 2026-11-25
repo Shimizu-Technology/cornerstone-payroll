@@ -25,10 +25,11 @@ function displayValue(value: unknown): string {
   return String(value);
 }
 
-export function ChangeComparison({ before = {}, after = {}, requested = false }: {
+export function ChangeComparison({ before = {}, after = {}, requested = false, current = false }: {
   before?: Record<string, unknown>;
   after?: Record<string, unknown>;
   requested?: boolean;
+  current?: boolean;
 }) {
   const fields = Object.keys(after);
   if (!fields.length) return null;
@@ -38,7 +39,7 @@ export function ChangeComparison({ before = {}, after = {}, requested = false }:
       <thead className="border-b border-neutral-200 text-xs text-neutral-600">
         <tr>
           <th scope="col" className="w-[28%] p-2 font-medium">Field</th>
-          <th scope="col" className="p-2 font-medium">{requested ? 'Current' : 'Before'}</th>
+          <th scope="col" className="p-2 font-medium">{current ? 'Current' : 'Before'}</th>
           <th scope="col" className="p-2 font-medium">{requested ? 'Requested' : 'After'}</th>
         </tr>
       </thead>

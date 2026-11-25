@@ -125,6 +125,10 @@ describe('employee API contracts', () => {
     expect(profile.emergencyContacts).toHaveLength(1);
   });
 
+  it('drops SSN fragments from profile data', () => {
+    expect(parseProfile({ legal_name: 'Example Worker', ssn_last4: '0001' })).not.toHaveProperty('ssnLast4');
+  });
+
   it('follows only https or same-site sign-up URLs', () => {
     expect(signUpUrlFrom({ sign_up_url: 'https://accounts.example.test/x' }, 'https://app.example.test')).toBe('https://accounts.example.test/x');
     expect(signUpUrlFrom({ sign_up_url: '/sign-up?__clerk_ticket=t' }, 'http://127.0.0.1:4175')).toBe('http://127.0.0.1:4175/sign-up?__clerk_ticket=t');

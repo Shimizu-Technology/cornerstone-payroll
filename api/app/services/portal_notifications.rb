@@ -61,6 +61,7 @@ module PortalNotifications
     "client_upload" => { category: "client_uploads" },
     "employee_change_submitted" => { category: "employee_changes" },
     "address_approval_requested" => { category: "address_approvals" },
+    "employee_contact_confirmation_requested" => { category: "employee_changes" },
     "employee_contact_changed" => { category: "contact_changes" },
     "employee_address_decided" => { category: "employee_address_decisions" },
     "staff_reply" => { category: "portal_replies", message: true },
@@ -127,13 +128,15 @@ module PortalNotifications
       end
     end
 
-    def employee_contact_changed!(entry, actor: entry.changed_by)
+    def employee_contact_changed!(entry, actor: entry.changed_by, notify_staff: false)
       record!(event_type: "employee_contact_changed", company: entry.company, actor: actor,
         subject: entry, dedupe_key: "employee_contact_changed:#{entry.id}")
+      if notify_staff
+        record!(event_type: "employee_contact_confirmation_requested", company: entry.company, actor: actor,
+          subject: entry, dedupe_key: "employee_contact_confirmation_requested:#{entry.id}")
+      end
     end
 
-    # The employee submission slice opts in to this notice. Client request
-    # decisions continue to use their existing requester notification.
     def employee_address_decided!(change_request, actor:)
       record!(event_type: "employee_address_decided", company: change_request.company, actor: actor,
         subject: change_request, dedupe_key: "employee_address_decided:#{change_request.id}:#{change_request.status}")
