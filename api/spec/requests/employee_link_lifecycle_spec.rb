@@ -289,9 +289,11 @@ RSpec.describe "Employee link lifecycle", type: :request do
       post_activation(activation_params(employee, token: invite.token, email: "someone.else@example.net"))
       expect(response.parsed_body["next"]).to eq("sign_in")
 
-      claim("user_client", activation_params(employee, token: invite.token), fva: [ 0, 30 ], two_factor_enabled: true)
+      # MFA is off here, so the step-up is a fresh first factor; an old one is refused.
+      claim("user_client", activation_params(employee, token: invite.token), fva: [ 30, 30 ], two_factor_enabled: true)
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
+      expect(response.parsed_body.dig("clerk_error", "metadata", "reverification", "level")).to eq("first_factor")
       expect(invite.link.reload).to be_invited
 
       claim("user_client", activation_params(employee, token: invite.token), **fresh_second_factor)

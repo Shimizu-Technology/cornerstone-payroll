@@ -355,11 +355,17 @@ test.describe('employee app on a phone', () => {
     await page.goto(`/?${tenantQuery}`);
     await expect(page.getByRole('heading', { level: 1, name: 'Set up two-step sign-in' })).toBeVisible();
     await expect(page.getByText('Your access has ended')).toHaveCount(0);
-    await page.getByRole('button', { name: 'Set up two-step sign-in' }).click();
-    await expect(page.getByTestId('dev-preview-account-settings')).toBeVisible();
-    await page.getByRole('button', { name: 'Close' }).click();
     await expectPhoneBasics(page);
     await snap(page, '18-two-step-setup');
+
+    // Sign-in & security (/security) opens without the employee session the API is refusing.
+    await page.getByRole('link', { name: 'Set up two-step sign-in' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Sign-in & security' })).toBeVisible();
+    await expect(page.getByTestId('dev-preview-account-settings')).toBeVisible();
+    await expectPhoneBasics(page);
+    await snap(page, '18b-sign-in-security');
+    await page.getByRole('link', { name: 'Done' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Set up two-step sign-in' })).toBeVisible();
 
     await page.route('**/api/v1/employee/links', (route) => json(route, { error: 'Multi-factor authentication is required before accessing payroll.', code: 'mfa_required' }, 403));
     await page.getByRole('button', { name: "I've set it up, try again" }).click();
