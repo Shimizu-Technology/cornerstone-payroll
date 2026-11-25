@@ -122,7 +122,7 @@ module PdfUnicodeFont
     end
 
     def cjk_runs(text, primary)
-      text.each_char.chunk { |char| PdfUnicodeFont.cjk_codepoints.include?(char.ord) && !primary.glyph_present?(char) }.to_a
+      text.each_char.chunk { |char| !primary.glyph_present?(char) && PdfUnicodeFont.cjk_character?(char) && PdfUnicodeFont.cjk_codepoints.include?(char.ord) }.to_a
     end
   end
 
@@ -143,13 +143,13 @@ module PdfUnicodeFont
   module_function
 
   # Drop-in for Prawn::Document.new. Block forms receive the document.
-  def document(**options, &block)
-    pdf = apply!(Prawn::Document.new(**options))
+  def document(cjk: true, **options, &block)
+    pdf = apply!(Prawn::Document.new(**options), cjk: cjk)
     block&.call(pdf)
     pdf
   end
 
-  def apply!(pdf)
+  def apply!(pdf, cjk: true)
     # Prawn names each font from the registry size when it is built, so each
     # one is registered before the next is created to keep the names unique.
     styles = FILES.to_h do |style, file|
@@ -164,28 +164,34 @@ module PdfUnicodeFont
       "Helvetica-Oblique" => styles.merge(normal: styles[:italic], bold: styles[:bold_italic]),
       "Helvetica-BoldOblique" => styles.transform_values { styles[:bold_italic] }
     )
-    pdf.fallback_fonts = [ *pdf.fallback_fonts, CJK_FAMILY ]
-    pdf.extend(CjkText)
+    if cjk
+      pdf.fallback_fonts = [ *pdf.fallback_fonts, CJK_FAMILY ]
+      pdf.extend(CjkText)
+    end
     pdf.font(FAMILY)
     pdf
   end
 
-  # Multi-line values are checked line by line, since line breaks are layout
-  # rather than glyphs. Any other character without a glyph, including a tab,
-  # prints as a box.
-  def unprintable_characters(text)
-    text.to_s.each_line.flat_map { |line| line.chomp.each_char.to_a }
-      .reject { |char| char == " " || printable_codepoints.include?(char.ord) }.uniq
+  def cjk_character?(char)
+    char.match?(/[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}\p{Bopomofo}\u3000-\u303F\u31C0-\u31EF\u3200-\u33FF\uFE30-\uFE4F\uFF00-\uFFEF]/)
   end
 
-  def ensure_printable!(name, label:)
-    missing = unprintable_characters(name)
+  def unprintable_characters(text, cjk: true)
+    text.to_s.each_line.flat_map { |line| line.chomp.each_char.to_a }
+      .reject { |char| char == " " || latin_codepoints.include?(char.ord) || (cjk && cjk_character?(char) && cjk_codepoints.include?(char.ord)) }.uniq
+  end
+
+  def ensure_printable!(name, label:, cjk: true)
+    missing = unprintable_characters(name, cjk: cjk)
     raise UnprintableName.new(label, name, missing) if missing.any?
   end
 
   def printable_codepoints
-    # Glyph 0 is the .notdef box, so a code mapped to it can't print either.
-    @printable_codepoints ||= (codepoints_for(FILES[:normal]) | cjk_codepoints).freeze
+    @printable_codepoints ||= (latin_codepoints | cjk_codepoints).freeze
+  end
+
+  def latin_codepoints
+    @latin_codepoints ||= codepoints_for(FILES[:normal])
   end
 
   def cjk_codepoints
