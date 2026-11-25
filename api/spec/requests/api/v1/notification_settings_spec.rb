@@ -20,7 +20,7 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     expect(data.fetch("email_delivery_enabled")).to be(false)
     expect(data.fetch("digest_time_label")).to eq("7:00 AM Chamorro Time")
     expect(data.fetch("categories").map { |category| [ category["key"], category["delivery_mode"] ] }).to eq(
-      [ [ "client_messages", "immediate" ], [ "client_uploads", "immediate" ], [ "employee_changes", "digest" ], [ "payroll_submissions", "immediate" ] ])
+      [ [ "tax_form_paper_copies", "immediate" ], [ "client_messages", "immediate" ], [ "client_uploads", "immediate" ], [ "employee_changes", "digest" ], [ "payroll_submissions", "immediate" ] ])
     expect(data).not_to have_key("administration")
   end
 

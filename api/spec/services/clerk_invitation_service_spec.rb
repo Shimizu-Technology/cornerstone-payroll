@@ -310,4 +310,100 @@ RSpec.describe ClerkInvitationService do
       expect(logged.join).not_to include("reviewer")
     end
   end
+
+  describe "staging outbound policy pre-authorization" do
+    let!(:tester) { create(:user, email: "tester@example.test", clerk_id: "user_tester", clerk_invitation_id: "inv_tester") }
+
+    around do |example|
+      saved = ENV.to_h
+      ENV["DEPLOYMENT_ENV"] = "staging"
+      ENV["STAGING_TESTER_BINDINGS"] = [ { user_id: tester.id, email: tester.email, clerk_subject: tester.clerk_id } ].to_json
+      ENV["STAGING_INTEGRATION_HOSTS"] = "aire-staging.example.test"
+      ENV["PRODUCTION_INTEGRATION_HOSTS"] = "aire.example.test"
+      ENV["STAGING_STORAGE_BUCKET"] = "synthetic-staging-bucket"
+      ENV["PRODUCTION_STORAGE_BUCKET"] = "synthetic-live-bucket"
+      ENV["AWS_S3_BUCKET"] = "synthetic-staging-bucket"
+      ENV["AWS_ACCOUNT_ID"] = "111122223333"
+      ENV["AWS_REGION"] = "us-east-1"
+      ENV["STAGING_STORAGE_ACCOUNT_ID"] = "111122223333"
+      ENV["PRODUCTION_STORAGE_ACCOUNT_ID"] = "999988887777"
+      ENV["STAGING_STORAGE_ENDPOINT"] = "https://s3.us-east-1.amazonaws.com"
+      ENV["PRODUCTION_STORAGE_ENDPOINT"] = "https://s3.us-west-2.amazonaws.com"
+      ENV["STAGING_STORAGE_REGION"] = "us-east-1"
+      ENV["AWS_ACCESS_KEY_ID"] = "synthetic-staging-key"
+      ENV["AWS_SECRET_ACCESS_KEY"] = "synthetic-only"
+      ENV["STAGING_STORAGE_ACCESS_KEY_SHA256"] = Digest::SHA256.hexdigest("synthetic-staging-key")
+      ENV["PRODUCTION_STORAGE_ACCESS_KEY_SHA256"] = Digest::SHA256.hexdigest("synthetic-live-key")
+      example.run
+    ensure
+      ENV.replace(saved)
+    end
+
+    it "runs staging policy DB lookups before Timeout.timeout so no SQL runs inside the timed block" do
+      queries_inside_timeout = []
+      guard_calls_inside_timeout = 0
+
+      allow(Timeout).to receive(:timeout).and_wrap_original do |original, *args, &block|
+        sql_callback = ->(*, payload) { queries_inside_timeout << payload[:sql] unless payload[:name] == "SCHEMA" }
+        ActiveSupport::Notifications.subscribed(sql_callback, "sql.active_record") do
+          original.call(*args, &block)
+        end
+      end
+
+      http = Net::HTTP.new("api.clerk.com", 443)
+      http.use_ssl = true
+      allow(Net::HTTP).to receive(:new).with("api.clerk.com", 443).and_return(http)
+      allow(http).to receive(:request) do |outbound, &response_block|
+        # Exercise the same guard call StagingHttpGuard makes inside Timeout.timeout.
+        guard_calls_inside_timeout += 1
+        expect(StagingOutboundPolicy.http_request!(http, outbound)).to be(true)
+
+        body_text = outbound.method == "GET" ? [ { id: "inv_tester", status: "pending" } ].to_json : "{}"
+        response = Net::HTTPOK.new("1.1", "200", "OK")
+        allow(response).to receive(:read_body) do |dest = nil|
+          if dest
+            dest << body_text
+            response.instance_variable_set(:@body, dest)
+            response.instance_variable_set(:@read, true)
+          end
+          body_text
+        end
+        response_block&.call(response)
+        response
+      end
+
+      expect(described_class.new.invitation_status("inv_tester")).to eq("pending")
+      expect(described_class.new.revoke_invitation("inv_tester")).to eq(success: true)
+      expect(guard_calls_inside_timeout).to eq(2)
+      expect(queries_inside_timeout).to be_empty
+    end
+
+    it "still blocks unauthorized Clerk requests before entering Timeout.timeout and scopes pre-authorization strictly" do
+      expect(Timeout).not_to receive(:timeout)
+      expect { described_class.new.invitation_status("inv_other") }.to raise_error(StagingOutboundPolicy::Blocked)
+
+      http = Net::HTTP.new("api.clerk.com", 443)
+      http.use_ssl = true
+      req = Net::HTTP::Post.new("/v1/invitations")
+      req.body = { email_address: tester.email }.to_json
+      other_req = Net::HTTP::Post.new("/v1/invitations")
+      other_req.body = { email_address: tester.email }.to_json
+
+      StagingOutboundPolicy.with_preauthorized_clerk_request(req) do
+        expect(StagingOutboundPolicy.http_request!(http, req)).to be(true)
+        # Another request object with the same path/body is not covered by the token.
+        expect(StagingOutboundPolicy.preauthorized_clerk_request?(other_req, env: ENV)).to be(false)
+        # Body override argument cannot smuggle a non-tester payload.
+        expect(StagingOutboundPolicy.preauthorized_clerk_request?(req, env: ENV,
+          body: { email_address: "outsider@example.test" }.to_json)).to be(false)
+        # Mutated body on the same request object falls back to full validation and blocks.
+        req.body = { email_address: "outsider@example.test" }.to_json
+        expect { StagingOutboundPolicy.http_request!(http, req) }.to raise_error(StagingOutboundPolicy::Blocked)
+      end
+
+      # Pre-authorization expires once the block exits.
+      req.body = { email_address: tester.email }.to_json
+      expect(StagingOutboundPolicy.preauthorized_clerk_request?(req, env: ENV)).to be(false)
+    end
+  end
 end

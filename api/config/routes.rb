@@ -411,6 +411,7 @@ Rails.application.routes.draw do
         resources :employee_tax_forms, only: [ :index ], format: false do
           post :post_copies, on: :collection
           post :withdraw, on: :member
+          post :mark_paper_mailed, on: :member
         end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do
