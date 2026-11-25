@@ -1149,8 +1149,10 @@ BEGIN
     OR NEW.set_by_id IS DISTINCT FROM OLD.set_by_id
     OR NEW.created_at IS DISTINCT FROM OLD.created_at
     OR OLD.ended_at IS NOT NULL
+    OR OLD.retired_at IS NOT NULL
+    OR (NEW.ended_at IS NOT NULL AND NEW.retired_at IS NOT NULL)
   THEN
-    RAISE EXCEPTION 'employee_app_early_access_windows rows can only be ended once; set a new window instead'
+    RAISE EXCEPTION 'employee_app_early_access_windows rows can only be ended or retired once; set a new window instead'
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -1189,3 +1191,32 @@ CREATE TRIGGER employee_terms_versions_immutable
 BEFORE UPDATE OR DELETE ON employee_terms_versions
 FOR EACH ROW
 EXECUTE FUNCTION prevent_employee_terms_version_mutation();
+
+-- 20261126060400_create_employee_app_activations.rb
+CREATE OR REPLACE FUNCTION protect_employee_app_activation() RETURNS trigger AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'employee_app_activations rows are kept for the audit history'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.company_id IS DISTINCT FROM OLD.company_id
+    OR NEW.part IS DISTINCT FROM OLD.part
+    OR NEW.activated_at IS DISTINCT FROM OLD.activated_at
+    OR NEW.activated_by_id IS DISTINCT FROM OLD.activated_by_id
+    OR NEW.checks IS DISTINCT FROM OLD.checks
+    OR NEW.early_access_window_id IS DISTINCT FROM OLD.early_access_window_id
+    OR NEW.created_at IS DISTINCT FROM OLD.created_at
+    OR OLD.revoked_at IS NOT NULL
+  THEN
+    RAISE EXCEPTION 'employee_app_activations rows can only be revoked once; activate again instead'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS employee_app_activations_immutable ON employee_app_activations;
+CREATE TRIGGER employee_app_activations_immutable
+BEFORE UPDATE OR DELETE ON employee_app_activations
+FOR EACH ROW
+EXECUTE FUNCTION protect_employee_app_activation();

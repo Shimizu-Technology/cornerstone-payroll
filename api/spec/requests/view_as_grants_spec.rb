@@ -55,7 +55,7 @@ RSpec.describe "View-only support sessions", type: :request do
         subdomain_enabled: true, employee_portal: { features: { stubs: true, profile_requests: true, delivery_consent: true, tax_forms: true } }
       }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(target)
   end
 
   it "requires verified real staff, the explicit permission and a reason" do

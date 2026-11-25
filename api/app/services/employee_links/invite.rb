@@ -30,6 +30,7 @@ module EmployeeLinks
       EmployeeLinks.require_invitation_management!(@actor, company)
 
       result = ApplicationRecord.transaction do
+        EmployeeLinks.lock_for_issuance!(company)
         @employee.lock!
         raise Error, "Only active employees can be invited" unless @employee.active?
 

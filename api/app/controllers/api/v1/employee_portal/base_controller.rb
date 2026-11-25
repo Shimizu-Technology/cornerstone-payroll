@@ -10,6 +10,7 @@ module Api
         before_action :authenticate_employee_user!, :enforce_mfa!
         include ViewAsEnforcement
         before_action :require_employee_link!
+        before_action :require_guarded_demo_process!
         include CompanyRlsScoped
         # After the RLS scope, so audit rows are written inside the link's company.
         include Auditable
@@ -46,6 +47,17 @@ module Api
 
           @current_user = user
           set_current_employee_user(user)
+        end
+
+        # A demo company running under the early-access waiver (database RLS
+        # not yet enforced) is served only while THIS process runs the RLS
+        # guard in raise mode as the restricted role; otherwise it looks like
+        # no link at all.
+        def require_guarded_demo_process!
+          company = employee_access_context&.company
+          return if EmployeeAppSwitch::Enforcement.demo_request_allowed?(company)
+
+          head :not_found
         end
 
         def require_employee_link!

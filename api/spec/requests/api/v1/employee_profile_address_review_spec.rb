@@ -310,7 +310,7 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
       company: company, effective_on: Date.new(2026, 1, 1), version: 1, offering: "payroll_portals", hours_source: "manual",
       client_portal_enabled: true, employee_portal_enabled: true,
       options: { "employee_portal" => { "features" => { "profile_requests" => true } } }
-    )
+    ).tap { activate_employee_app!(company) }
   end
 
   def headers(user)

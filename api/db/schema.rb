@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_060300) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_060400) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1041,6 +1041,53 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060300) do
     t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
 
+  create_table "employee_app_activations", force: :cascade do |t|
+    t.datetime "activated_at", null: false
+    t.bigint "activated_by_id", null: false
+    t.jsonb "checks", default: [], null: false
+    t.bigint "company_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "early_access_window_id"
+    t.string "part", limit: 80, null: false
+    t.string "revoke_reason", limit: 500
+    t.datetime "revoked_at"
+    t.bigint "revoked_by_id"
+    t.datetime "updated_at", null: false
+    t.index [ "activated_by_id" ], name: "index_employee_app_activations_on_activated_by_id"
+    t.index [ "company_id", "activated_at", "id" ], name: "idx_employee_app_activations_history"
+    t.index [ "company_id", "part" ], name: "idx_employee_app_activations_open", unique: true, where: "(revoked_at IS NULL)"
+    t.index [ "early_access_window_id" ], name: "index_employee_app_activations_on_early_access_window_id"
+    t.index [ "revoked_by_id" ], name: "index_employee_app_activations_on_revoked_by_id"
+    t.check_constraint "jsonb_typeof(checks) = 'array'::text", name: "employee_app_activations_checks_check"
+    t.check_constraint "part::text = ANY (ARRAY['employee_portal_enabled'::character varying, 'subdomain_enabled'::character varying, 'employee_portal.features.stubs'::character varying, 'employee_portal.features.tax_forms'::character varying, 'employee_portal.features.profile_requests'::character varying, 'employee_portal.features.delivery_consent'::character varying]::text[])", name: "employee_app_activations_part_check"
+    t.check_constraint "revoked_at IS NULL AND revoked_by_id IS NULL AND revoke_reason IS NULL OR revoked_at IS NOT NULL AND length(btrim(revoke_reason::text)) > 0", name: "employee_app_activations_revoke_shape_check"
+  end
+
+  create_table "employee_app_clerk_revocations", force: :cascade do |t|
+    t.integer "attempts", default: 0, null: false
+    t.bigint "company_id", null: false
+    t.datetime "confirmed_at"
+    t.datetime "created_at", null: false
+    t.datetime "gave_up_at"
+    t.string "kind", limit: 20, null: false
+    t.string "last_error", limit: 200
+    t.bigint "organization_id", null: false
+    t.datetime "requested_at", null: false
+    t.bigint "requested_by_id"
+    t.string "source", limit: 40, null: false
+    t.string "target", limit: 255, null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index [ "company_id" ], name: "index_employee_app_clerk_revocations_on_company_id"
+    t.index [ "kind", "target" ], name: "idx_employee_app_clerk_revocations_pending", unique: true, where: "((confirmed_at IS NULL) AND (gave_up_at IS NULL))"
+    t.index [ "organization_id" ], name: "index_employee_app_clerk_revocations_on_organization_id"
+    t.index [ "requested_by_id" ], name: "index_employee_app_clerk_revocations_on_requested_by_id"
+    t.index [ "user_id" ], name: "index_employee_app_clerk_revocations_on_user_id"
+    t.check_constraint "NOT (confirmed_at IS NOT NULL AND gave_up_at IS NOT NULL)", name: "employee_app_clerk_revocations_outcome_check"
+    t.check_constraint "attempts >= 0", name: "employee_app_clerk_revocations_attempts_check"
+    t.check_constraint "kind::text = ANY (ARRAY['invitation'::character varying, 'sessions'::character varying]::text[])", name: "employee_app_clerk_revocations_kind_check"
+  end
+
   create_table "employee_app_early_access_windows", force: :cascade do |t|
     t.bigint "company_ids", null: false, array: true
     t.datetime "created_at", null: false
@@ -1050,15 +1097,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060300) do
     t.date "expires_on", null: false
     t.bigint "organization_id", null: false
     t.string "reason", limit: 500, null: false
+    t.datetime "retired_at"
     t.bigint "set_by_id", null: false
     t.datetime "updated_at", null: false
     t.index [ "ended_by_id" ], name: "index_employee_app_early_access_windows_on_ended_by_id"
     t.index [ "organization_id", "created_at", "id" ], name: "idx_employee_app_early_access_windows_history"
-    t.index [ "organization_id" ], name: "idx_employee_app_early_access_windows_one_open", unique: true, where: "(ended_at IS NULL)"
+    t.index [ "organization_id" ], name: "idx_employee_app_early_access_windows_one_open", unique: true, where: "((ended_at IS NULL) AND (retired_at IS NULL))"
     t.index [ "set_by_id" ], name: "index_employee_app_early_access_windows_on_set_by_id"
     t.check_constraint "cardinality(company_ids) >= 1 AND cardinality(company_ids) <= 2 AND array_position(company_ids, NULL::bigint) IS NULL", name: "employee_app_early_access_windows_company_ids_check"
     t.check_constraint "ended_at IS NULL AND ended_by_id IS NULL AND end_reason IS NULL OR ended_at IS NOT NULL AND ended_by_id IS NOT NULL AND length(btrim(end_reason::text)) > 0", name: "employee_app_early_access_windows_end_shape_check"
-    t.check_constraint "expires_on >= ((created_at AT TIME ZONE 'UTC'::text) AT TIME ZONE 'Pacific/Guam'::text)::date AND expires_on <= (((created_at AT TIME ZONE 'UTC'::text) AT TIME ZONE 'Pacific/Guam'::text)::date + 31)", name: "employee_app_early_access_windows_expiry_check"
+    t.check_constraint "expires_on >= ((created_at AT TIME ZONE 'UTC'::text) AT TIME ZONE 'Pacific/Guam'::text)::date AND expires_on <= (((created_at AT TIME ZONE 'UTC'::text) AT TIME ZONE 'Pacific/Guam'::text)::date + 30)", name: "employee_app_early_access_windows_expiry_check"
     t.check_constraint "length(btrim(reason::text)) > 0", name: "employee_app_early_access_windows_reason_check"
   end
 
@@ -1467,27 +1515,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060300) do
     t.check_constraint "prior_year_wage_status::text = 'unknown'::text AND prior_year_fica_wages IS NULL OR prior_year_wage_status::text <> 'unknown'::text AND prior_year_fica_wages IS NOT NULL AND prior_year_wage_source IS NOT NULL AND btrim(prior_year_wage_source) <> ''::text AND (prior_year_wage_status::text <> 'no_prior_employer_wages'::text OR prior_year_fica_wages = 0::numeric)", name: "retirement_year_input_wage_evidence"
     t.check_constraint "prior_year_wage_status::text = ANY (ARRAY['unknown'::character varying::text, 'verified'::character varying::text, 'no_prior_employer_wages'::character varying::text])", name: "retirement_year_input_wage_status"
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "retirement_year_input_year"
-  end
-
-  create_table "employee_service_observations", force: :cascade do |t|
-    t.boolean "authorized_parties_valid", default: false, null: false
-    t.datetime "created_at", null: false
-    t.boolean "dependencies_healthy", default: false, null: false
-    t.jsonb "failed_checks", default: [], null: false
-    t.boolean "mfa_evidence_recorded", default: false, null: false
-    t.datetime "observed_at", null: false
-    t.string "process_role", limit: 40, null: false
-    t.boolean "require_mfa", default: false, null: false
-    t.string "revision", limit: 80
-    t.string "rls_guard_mode", limit: 10, null: false
-    t.boolean "rls_runtime_role_verified", default: false, null: false
-    t.string "service", limit: 40, null: false
-    t.boolean "service_checks_passed", default: false, null: false
-    t.datetime "updated_at", null: false
-    t.index [ "service" ], name: "idx_employee_service_observations_service", unique: true
-    t.check_constraint "jsonb_typeof(failed_checks) = 'array'::text", name: "employee_service_observations_failed_checks_check"
-    t.check_constraint "rls_guard_mode::text = ANY (ARRAY['off'::character varying, 'log'::character varying, 'raise'::character varying]::text[])", name: "employee_service_observations_guard_mode_check"
-    t.check_constraint "service::text = 'employee_web'::text", name: "employee_service_observations_service_check"
   end
 
   create_table "employee_status_events", force: :cascade do |t|
@@ -5387,6 +5414,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060300) do
   add_foreign_key "employee_account_links", "users", column: "invited_by_id"
   add_foreign_key "employee_account_links", "users", column: "revoked_by_id"
   add_foreign_key "employee_account_links", "users", column: "sign_up_reset_requested_by_id"
+  add_foreign_key "employee_app_activations", "companies", on_delete: :restrict
+  add_foreign_key "employee_app_activations", "employee_app_early_access_windows", column: "early_access_window_id", on_delete: :restrict
+  add_foreign_key "employee_app_activations", "users", column: "activated_by_id", on_delete: :restrict
+  add_foreign_key "employee_app_activations", "users", column: "revoked_by_id", on_delete: :restrict
+  add_foreign_key "employee_app_clerk_revocations", "companies", on_delete: :restrict
+  add_foreign_key "employee_app_clerk_revocations", "organizations", on_delete: :restrict
+  add_foreign_key "employee_app_clerk_revocations", "users", column: "requested_by_id", on_delete: :restrict
+  add_foreign_key "employee_app_clerk_revocations", "users", on_delete: :restrict
   add_foreign_key "employee_app_early_access_windows", "organizations", on_delete: :restrict
   add_foreign_key "employee_app_early_access_windows", "users", column: "ended_by_id", on_delete: :restrict
   add_foreign_key "employee_app_early_access_windows", "users", column: "set_by_id", on_delete: :restrict

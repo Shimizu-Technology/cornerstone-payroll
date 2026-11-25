@@ -29,7 +29,7 @@ RSpec.describe "Employee statements", type: :request do
       effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service", hours_source: "manual",
       employee_portal_enabled: true, options: { "employee_portal" => { "features" => { "stubs" => stubs } } }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(target)
   end
 
   def headers_for(target_link = link, subject: "user_jordan")

@@ -20,7 +20,7 @@ module EmployeeLinks
       return :failed unless url && to
       return :skipped unless DemoOutbound.permit?(company: link.company, email: to, channel: "employee_link_invite")
 
-      response = DemoOutbound.scoped(link.company) do
+      response = DemoOutbound.scoped(link.company, channel: "employee_link_invite") do
         PortalNotifications::Transport.deliver(payload(link, url, path, to),
           idempotency_key: "employee-link-invite-#{link.id}-#{link.invite_token_digest.first(16)}")
       end

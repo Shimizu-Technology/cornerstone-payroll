@@ -11,8 +11,10 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
   let(:company) { create(:company, organization: organization, name: "Example Grill", subdomain_slug: "example-grill") }
   let(:demo) { create_demo_company(organization: organization, subdomain_slug: "harborfinch") }
   let(:org_admin) { create(:user, company: company, organization: organization, role: :org_admin, clerk_id: "user_org_admin", name: "Avery Admin") }
-  let(:database_state) { { phase: "enforced", enforced: true, enforced_tables: 1, protected_tables: 1 } }
-  let(:ping) { { configured: true, ok: true } }
+  let(:owner) { create(:user, company: company, organization: organization, role: :super_admin, clerk_id: "user_owner", name: "Olive Owner") }
+  let(:database_state) { { phase: "enforced", enforced: true, kill_switch_bypass: false, enforced_tables: 1, protected_tables: 1 } }
+  let(:enforced_state) { { phase: "enforced", enforced: true, kill_switch_bypass: false, enforced_tables: 1, protected_tables: 1 } }
+  let(:shadow_state) { { phase: "shadow", enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 1 } }
   let(:terms_status) { "approved" }
   let(:ready_env) do
     {
@@ -30,8 +32,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
   end
 
   before do
-    allow(EmployeeAppSwitch::Readiness).to receive(:database_state) { database_state }
-    allow(EmployeeAppSwitch::Readiness).to receive(:ping_employee_service) { ping }
+    allow(EmployeeAppSwitch::Enforcement).to receive(:database_state) { database_state }
+    allow(EmployeeAppSwitch::Readiness).to receive(:ping_employee_service) { @ping }
     observe!
     EmployeeTermsVersion.create!(version: "terms-1", status: terms_status, terms_url: "https://example.com/terms",
       privacy_url: "https://example.com/privacy", published_at: 1.day.ago)
@@ -41,13 +43,18 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     end
   end
 
+  # What the employee service's live, signed health answer says.
   def observe!(**overrides)
-    EmployeeServiceObservation.where(service: "employee_web").delete_all
-    EmployeeServiceObservation.create!({
-      service: "employee_web", observed_at: Time.current, revision: "abc123", process_role: "employee_web",
-      rls_guard_mode: "raise", rls_runtime_role_verified: true, require_mfa: true, mfa_evidence_recorded: true,
-      authorized_parties_valid: true, dependencies_healthy: true, service_checks_passed: true, failed_checks: []
+    observation = EmployeeAppSwitch::ServiceAttestation::Observation.new(**{
+      revision: "abc123", process_role: "employee_web", rls_guard_mode: "raise", rls_runtime_role_verified: true,
+      rls_kill_switch_bypass: false, require_mfa: true, mfa_evidence_recorded: true, authorized_parties_valid: true,
+      dependencies_healthy: true, service_checks_passed: true, failed_checks: [], issued_at: Time.current
     }.merge(overrides))
+    @ping = { configured: true, ok: true, observation: observation, attestation_error: nil }
+  end
+
+  def unsigned_ping!(error = :bad_signature, ok: true)
+    @ping = { configured: true, ok: ok, observation: nil, attestation_error: error }
   end
 
   def auth(user = org_admin, recent: true, target: company)
@@ -72,10 +79,22 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     response.parsed_body.dig("data", "readiness", "checks").find { |row| row["key"] == key }
   end
 
+  # A part the switch turned on: the profile value and its activation.
   def turn_on_directly!(target, keys)
     target.with_lock do
       EmployeeAppSwitch::ProfileWriter.apply!(company: target, actor: org_admin, values: keys.index_with(true), reason: "Fixture")
     end
+    activate_employee_app!(target, keys, actor: org_admin)
+  end
+
+  # A write around the switch: the profile row only, no activation.
+  def write_profile_flags!(target, keys, effective_on: PayrollBusinessClock.today)
+    attributes = ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(target)
+    values = OperatingProfileCatalog.values_for(ClientOperatingProfile.new(attributes)).merge(keys.index_with(true))
+    existing = target.client_operating_profiles.order(:effective_on).to_a
+    existing.last&.update!(ends_on: effective_on - 1) if existing.any? && effective_on > existing.last.effective_on
+    target.client_operating_profiles.create!(**OperatingProfileCatalog.attributes_from(values), effective_on: effective_on,
+      version: (existing.map(&:version).max || 0) + 1)
   end
 
   describe "who can use it" do
@@ -179,13 +198,16 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       "mfa" => [ "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)", -> { ENV["REQUIRE_MFA"] = "false" } ],
       "employee mfa" => [ "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)", -> { observe!(require_mfa: false) } ],
       "rls_guard" => [ "The employee service refuses any database read without a company (RLS guard in raise mode)", -> { observe!(rls_guard_mode: "log") } ],
+      "employee kill switch" => [ "The employee service refuses any database read without a company (RLS guard in raise mode)",
+        -> { observe!(rls_kill_switch_bypass: true) } ],
       "rls_database" => [ "The database enforces company separation (row-level security on)",
-        -> { allow(EmployeeAppSwitch::Readiness).to receive(:database_state).and_return(phase: "shadow", enforced: false, enforced_tables: 0, protected_tables: 1) } ],
+        -> { allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state) } ],
       "authorized_parties" => [ "Sign-in accepts only our own web addresses (CLERK_AUTHORIZED_PARTIES set)", -> { ENV["CLERK_AUTHORIZED_PARTIES"] = "" } ],
       "subdomain" => [ "The company's web address (subdomain) is set", -> { company.update_columns(subdomain_slug: nil) } ],
       "employee_service" => [ "The employee service is running and healthy",
-        -> { allow(EmployeeAppSwitch::Readiness).to receive(:ping_employee_service).and_return(configured: true, ok: false) } ],
-      "stale employee service" => [ "The employee service is running and healthy", -> { observe!(observed_at: 10.minutes.ago) } ],
+        -> { unsigned_ping!(:unreachable, ok: false) } ],
+      "unsigned employee service" => [ "The employee service is running and healthy", -> { unsigned_ping!(:bad_signature) } ],
+      "stale employee service" => [ "The employee service is running and healthy", -> { unsigned_ping!(:stale) } ],
       "terms" => [ "Employee App Terms and Privacy Notice wording is approved by counsel", -> { } ],
       "company" => [ "This is a live client or a demo company", -> { company.update_columns(active: false) } ]
     }.each do |label, (name, break_it)|
@@ -233,9 +255,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       turn_on_directly!(company, %w[employee_portal_enabled subdomain_enabled employee_portal.features.stubs employee_portal.features.tax_forms])
       ENV["REQUIRE_MFA"] = "false"
       ENV["CLERK_AUTHORIZED_PARTIES"] = ""
-      EmployeeServiceObservation.delete_all
-      allow(EmployeeAppSwitch::Readiness).to receive(:database_state).and_return(phase: "shadow", enforced: false, enforced_tables: 0, protected_tables: 1)
-      allow(EmployeeAppSwitch::Readiness).to receive(:ping_employee_service).and_return(configured: false, ok: false)
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state.merge(phase: "unknown", kill_switch_bypass: nil))
+      @ping = { configured: false, ok: false, observation: nil, attestation_error: :not_configured }
       company.update_columns(subdomain_slug: nil)
 
       switch!({ "employee_portal_enabled" => false, "subdomain_enabled" => false }, reason: "Pause the pilot", recent: false)
@@ -257,8 +278,123 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(later.reload.employee_portal_enabled).to be(false)
       expect(EmployeeAppSwitch.stored_values(company, today: PayrollBusinessClock.today + 20)["employee_portal_enabled"]).to be(false)
+      expect(EmployeeAppActivation.open.where(company_id: company.id)).to be_empty
+    end
+
+    it "clears a part that is on only in a future row, and counts it as something to change" do
+      turn_on_directly!(company, %w[employee_portal_enabled])
+      current = company.client_operating_profiles.history_order.first
+      current.update!(ends_on: PayrollBusinessClock.today + 13)
+      future = company.client_operating_profiles.create!(current.attributes.except("id", "created_at", "updated_at", "lock_version")
+        .merge("effective_on" => PayrollBusinessClock.today + 14, "ends_on" => nil, "version" => current.version + 1,
+          "options" => current.options.deep_merge("employee_portal" => { "features" => { "stubs" => true } })))
+      expect(stored["employee_portal.features.stubs"]).to be(false)
+
+      switch!({ "employee_portal_enabled" => false }, recent: false)
+      expect(response).to have_http_status(:ok), response.body
+      expect(future.reload.option_value("employee_portal.features.stubs")).to be(false)
+      expect(future.employee_portal_enabled).to be(false)
+      audit = AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: company.id).order(:id).last
+      expect(audit.metadata["turned_off"]).to eq([ "employee_portal_enabled", "employee_portal.features.stubs" ])
+
+      # Only a future row still had stubs on: that alone is something to turn off.
+      future.update!(options: future.options.deep_merge("employee_portal" => { "features" => { "stubs" => true } }))
+      switch!({ "employee_portal.features.stubs" => false }, recent: false)
+      expect(response).to have_http_status(:ok), response.body
+      expect(future.reload.option_value("employee_portal.features.stubs")).to be(false)
+
+      switch!({ "employee_portal.features.stubs" => false }, recent: false)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to start_with("Nothing to change")
     end
   end
+
+  describe "writes around the switch" do
+    it "opens nothing from a direct profile write or a future row, and needs the switch's activation" do
+      write_profile_flags!(company, %w[employee_portal_enabled subdomain_enabled employee_portal.features.stubs])
+      write_profile_flags!(company, %w[employee_portal_enabled employee_portal.features.tax_forms], effective_on: PayrollBusinessClock.today + 3)
+
+      expect(EmployeeAppSwitch.effective_values(company).values).to all(be(false))
+      expect(CompanyFeatures.for(company, on: PayrollBusinessClock.today + 5).employee_portal_feature?(:tax_forms)).to be(false)
+      expect(EmployeeAccountLink.portal_enabled_for?(company)).to be(false)
+      get path, headers: auth
+      on = response.parsed_body.dig("data", "switches").to_h { |row| [ row["key"], row["on"] ] }
+      expect(on.values).to all(be(false))
+
+      # The switch turns a written flag on only through its checks, and records that.
+      switch!({ "employee_portal_enabled" => true })
+      expect(response).to have_http_status(:ok), response.body
+      activation = EmployeeAppActivation.open.find_by!(company_id: company.id, part: "employee_portal_enabled")
+      expect(activation).to have_attributes(activated_by_id: org_admin.id)
+      expect(activation.checks).to include({ "key" => "rls_database", "status" => "passed" })
+      expect(EmployeeAppSwitch.effective_values(company)).to include("employee_portal_enabled" => true,
+        "employee_portal.features.stubs" => false, "subdomain_enabled" => false)
+
+      switch!({ "employee_portal_enabled" => false }, recent: false)
+      expect(activation.reload.revoked_at).to be_present
+      expect(activation.revoked_by_id).to eq(org_admin.id)
+      expect(EmployeeAppSwitch.effective_values(company).values).to all(be(false))
+
+      savepoint = ->(&block) { EmployeeAppActivation.transaction(requires_new: true, &block) }
+      expect { savepoint.call { activation.update_columns(revoked_at: nil, revoked_by_id: nil, revoke_reason: nil) } }
+        .to raise_error(ActiveRecord::StatementInvalid)
+      expect { savepoint.call { activation.delete } }.to raise_error(ActiveRecord::StatementInvalid)
+    end
+
+    it "keeps bank changes and the M5/M6 switches off in storage and at read time" do
+      profile = write_profile_flags!(company, %w[employee_portal_enabled])
+      activate_employee_app!(company)
+      options = profile.options.deep_merge("employee_portal" => { "features" => { "bank_requests" => true } })
+      expect(profile.update(options: options)).to be(false)
+      expect(profile.errors.full_messages.join).to include("locked until its milestone launches")
+      expect(profile.update(options: profile.reload.options.merge("time_module_enabled" => true))).to be(false)
+
+      profile.reload.update_columns(options: options.merge("time_module_enabled" => true).deep_merge(
+        "employee_portal" => { "features" => { "pto" => true, "documents" => true, "w4_requests" => true } }))
+      features = CompanyFeatures.for(company)
+      expect(features.employee_portal_enabled?).to be(true)
+      %i[bank_requests pto documents w4_requests].each { |feature| expect(features.employee_portal_feature?(feature)).to be(false) }
+      expect(features.time_module_enabled?).to be(false)
+    end
+  end
+
+  describe "the database row-level security check" do
+    it "fails while the global kill switch bypasses, even with every table enforced, and when it can't be read" do
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
+        .and_return(database_state.merge(phase: "bypassed", enforced: false, kill_switch_bypass: true))
+      expect(check("rls_database")).to include("status" => "failed")
+      expect(response.parsed_body.dig("data", "readiness", "checks").find { |row| row["key"] == "rls_database" }["detail"])
+        .to include("kill switch is bypassing")
+
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
+        .and_return(database_state.merge(phase: "unknown", enforced: false, kill_switch_bypass: nil))
+      switch!({ "employee_portal_enabled" => true })
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(failing_names).to eq([ "The database enforces company separation (row-level security on)" ])
+    end
+
+    it "reads the kill switch itself: enforced only with every table forced and the switch known off" do
+      rows = RlsTables::PROTECTED_TABLES.map { |table| { "table" => table, "enabled" => true, "forced" => true, "policy" => true } }
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_call_original
+      allow(RlsDatabase).to receive(:table_status).and_return(rows)
+      allow(EmployeeAppSwitch::Enforcement).to receive(:kill_switch_bypass).and_return(false)
+      expect(EmployeeAppSwitch::Enforcement.database_state).to include(phase: "enforced", enforced: true)
+
+      allow(EmployeeAppSwitch::Enforcement).to receive(:kill_switch_bypass).and_return(true)
+      expect(EmployeeAppSwitch::Enforcement.database_state).to include(phase: "bypassed", enforced: false)
+      allow(EmployeeAppSwitch::Enforcement).to receive(:kill_switch_bypass).and_return(nil)
+      expect(EmployeeAppSwitch::Enforcement.database_state).to include(phase: "unknown", enforced: false)
+
+      allow(EmployeeAppSwitch::Enforcement).to receive(:kill_switch_bypass).and_return(false)
+      allow(RlsDatabase).to receive(:table_status).and_return(rows.map { |row| row.merge("enabled" => false, "forced" => false) })
+      expect(EmployeeAppSwitch::Enforcement.database_state).to include(phase: "shadow", enforced: false)
+      allow(RlsDatabase).to receive(:table_status).and_return(rows.each_with_index.map { |row, index| index.zero? ? row : row.merge("forced" => false) })
+      expect(EmployeeAppSwitch::Enforcement.database_state).to include(phase: "partial", enforced: false)
+      allow(RlsDatabase).to receive(:table_status).and_raise(ActiveRecord::StatementInvalid, "boom")
+      expect(EmployeeAppSwitch::Enforcement.database_state).to include(phase: "unknown", enforced: false)
+    end
+  end
+
 
   describe "the operating profile editor" do
     it "keeps a switched-on value through other edits but can't turn one on" do
@@ -284,34 +420,35 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
   end
 
   describe "the demo early-access rule" do
-    let(:shadow) { { phase: "shadow", enforced: false, enforced_tables: 0, protected_tables: 1 } }
-    let(:database_state) { shadow }
-
-    def open_window!(company_ids: [ demo.id ], expires_on: PayrollBusinessClock.today + 7)
-      put "#{path}/early_access", params: { expires_on: expires_on.iso8601, company_ids: company_ids, reason: "Owner approved rehearsal" },
-        as: :json, headers: auth(target: demo)
-    end
-
+    let(:database_state) { shadow_state }
     let(:terms_status) { "draft" }
+
+    def open_window!(company_ids: [ demo.id ], expires_on: PayrollBusinessClock.today + 7, user: owner, reason: "Owner approved rehearsal")
+      put "#{path}/early_access", params: { expires_on: expires_on.iso8601, company_ids: company_ids, reason: reason },
+        as: :json, headers: auth(user, target: demo)
+    end
 
     it "waives only the database check, only for a named demo, only before expiry" do
       open_window!
       expect(response).to have_http_status(:ok), response.body
       window = EmployeeAppEarlyAccessWindow.sole
-      expect(window).to have_attributes(company_ids: [ demo.id ], set_by_id: org_admin.id, reason: "Owner approved rehearsal")
-      expect(AuditLog.find_by!(action: "employee_app_early_access#set").metadata).to include("company_ids" => [ demo.id ])
+      expect(window).to have_attributes(company_ids: [ demo.id ], set_by_id: owner.id, approved_by: owner, reason: "Owner approved rehearsal")
+      expect(AuditLog.find_by!(action: "employee_app_early_access#set").metadata)
+        .to include("company_ids" => [ demo.id ], "approved_by_id" => owner.id)
 
       expect(check("rls_database", target: demo)).to include("status" => "waived")
       data = response.parsed_body["data"]
-      expect(data.dig("readiness", "observed")).to include("rls_guard_mode" => "raise", "rls_runtime_role_verified" => true)
+      expect(data.dig("readiness", "observed")).to include("rls_guard_mode" => "raise", "rls_runtime_role_verified" => true, "verified" => true)
       expect(data.dig("readiness", "database")).to include("phase" => "shadow", "enforced" => false)
 
       switch!({ "employee_portal_enabled" => true }, target: demo)
       expect(response).to have_http_status(:ok), response.body
       expect(stored(demo)["employee_portal_enabled"]).to be(true)
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
       audit = AuditLog.find_by!(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: demo.id)
       expect(audit.metadata).to include("early_access_window_id" => window.id)
       expect(audit.metadata["readiness"]).to include({ "key" => "rls_database", "status" => "waived" })
+      expect(EmployeeAppActivation.open.find_by!(company_id: demo.id, part: "employee_portal_enabled").early_access_window_id).to eq(window.id)
 
       # A real company never gets the exception, and draft terms never count for it.
       EmployeeTermsVersion.create!(version: "terms-draft-2", status: "draft", terms_url: "https://example.com/terms",
@@ -323,11 +460,24 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
       travel_to((PayrollBusinessClock.today + 8).in_time_zone(PayrollBusinessClock::TIME_ZONE).change(hour: 9)) do
         observe!
+        # Expiry closes the demo's app at read time, before any sweep runs.
+        expect(stored(demo)["employee_portal_enabled"]).to be(true)
+        expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(false)
+        expect(EmployeeAccountLink.portal_enabled_for?(demo)).to be(false)
         expect(check("rls_database", target: demo)).to include("status" => "failed")
         expect(check("rls_database", target: demo)["detail"]).to include("window ended on #{window.expires_on.iso8601}")
         switch!({ "subdomain_enabled" => true }, target: demo)
         expect(response).to have_http_status(:unprocessable_entity)
         expect(failing_names).to eq([ "The database enforces company separation (row-level security on)" ])
+      end
+    end
+
+    it "accepts only the intended shadow state, with the kill switch known off" do
+      open_window!
+      [ shadow_state.merge(kill_switch_bypass: true, phase: "bypassed"), shadow_state.merge(phase: "partial"),
+        shadow_state.merge(phase: "unknown", kill_switch_bypass: nil), shadow_state.merge(phase: "not_installed") ].each do |state|
+        allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(state)
+        expect(check("rls_database", target: demo)).to include("status" => "failed"), state.inspect
       end
     end
 
@@ -347,22 +497,81 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         subdomain_slug: "harborfinch-catering")
       open_window!
       expect(check("rls_database", target: other_demo)["detail"]).to include("No demo early-access window covers this company")
+      turn_on_directly!(other_demo, %w[employee_portal_enabled])
+      expect(EmployeeAppSwitch.effective_values(other_demo)["employee_portal_enabled"]).to be(false)
     end
 
-    it "accepts only demo companies and an expiry within #{EmployeeAppEarlyAccessWindow::MAX_DAYS} days, with a fresh second factor" do
+    it "is set only by the owner, for at most #{EmployeeAppEarlyAccessWindow::MAX_DAYS} days, for demo companies, with a fresh second factor" do
+      open_window!(user: org_admin)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to include("Only the owner")
+
       open_window!(company_ids: [ company.id ])
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["error"]).to include("Real companies can't use early access")
 
-      open_window!(expires_on: PayrollBusinessClock.today + 32)
+      open_window!(expires_on: PayrollBusinessClock.today + 31)
       expect(response).to have_http_status(:unprocessable_entity)
       open_window!(expires_on: PayrollBusinessClock.today - 1)
       expect(response).to have_http_status(:unprocessable_entity)
 
       put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "x" },
-        as: :json, headers: auth(recent: false, target: demo)
+        as: :json, headers: auth(owner, recent: false, target: demo)
       expect(response).to have_http_status(:forbidden)
       expect(EmployeeAppEarlyAccessWindow.count).to eq(0)
+
+      open_window!(expires_on: PayrollBusinessClock.today + 30)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "early_access", "can_set")).to be(true)
+      get path, headers: auth(target: demo)
+      expect(response.parsed_body.dig("data", "early_access", "can_set")).to be(false)
+      expect(response.parsed_body.dig("data", "early_access", "windows", 0)).to include("approved_by" => "Olive Owner")
+    end
+
+    it "extends only with a new owner approval and reason" do
+      open_window!(expires_on: PayrollBusinessClock.today + 3)
+      first = EmployeeAppEarlyAccessWindow.sole
+
+      open_window!(expires_on: PayrollBusinessClock.today + 20, reason: " ")
+      expect(response).to have_http_status(:unprocessable_entity)
+      open_window!(expires_on: PayrollBusinessClock.today + 20, user: org_admin, reason: "Longer rehearsal")
+      expect(response).to have_http_status(:forbidden)
+      expect(first.reload.ended_at).to be_nil
+
+      open_window!(expires_on: PayrollBusinessClock.today + 20, reason: "Owner extended the rehearsal")
+      expect(response).to have_http_status(:ok), response.body
+      expect(first.reload).to have_attributes(end_reason: "Replaced by a new early-access window")
+      current = EmployeeAppEarlyAccessWindow.current_for(organization.id)
+      expect(current).to have_attributes(expires_on: PayrollBusinessClock.today + 20, set_by_id: owner.id, reason: "Owner extended the rehearsal")
+      expect(AuditLog.where(action: "employee_app_early_access#set").order(:id).last.metadata)
+        .to include("replaced_window_id" => first.id, "extension" => true)
+    end
+
+    it "retires for good once the database enforces RLS; a return to shadow mode doesn't revive it" do
+      open_window!
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      window = EmployeeAppEarlyAccessWindow.sole
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+      EmployeeAppSwitch::Enforcement.reset_cache!
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+      expect(window.reload.retired_at).to be_present
+      expect(window.status).to eq("retired")
+
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
+      EmployeeAppSwitch::Enforcement.reset_cache!
+      expect(EmployeeAppEarlyAccessWindow.current_for(organization.id)).to be_nil
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(false)
+      expect(check("rls_database", target: demo)).to include("status" => "failed")
+
+      savepoint = ->(&block) { EmployeeAppEarlyAccessWindow.transaction(requires_new: true, &block) }
+      expect { savepoint.call { window.update_columns(retired_at: nil) } }.to raise_error(ActiveRecord::StatementInvalid)
+
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+      open_window!
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("already enforces row-level security")
     end
 
     it "ends a window with a reason, and the row can't be edited afterwards" do
@@ -375,21 +584,21 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       savepoint = ->(&block) { EmployeeAppEarlyAccessWindow.transaction(requires_new: true, &block) }
       expect { savepoint.call { window.update_columns(expires_on: PayrollBusinessClock.today + 3) } }.to raise_error(ActiveRecord::StatementInvalid)
       expect { savepoint.call { window.update_columns(end_reason: "Rewritten") } }.to raise_error(ActiveRecord::StatementInvalid)
+      expect { savepoint.call { window.update_columns(retired_at: Time.current) } }.to raise_error(ActiveRecord::StatementInvalid)
       expect { savepoint.call { window.delete } }.to raise_error(ActiveRecord::StatementInvalid)
       expect(AuditLog.find_by!(action: "employee_app_early_access#ended").metadata).to include("reason" => "Rehearsal finished")
     end
   end
 
   describe "when demo early access stops applying" do
-    let(:database_state) { { phase: "shadow", enforced: false, enforced_tables: 0, protected_tables: 1 } }
-    let(:shadow) { -> { database_state } }
+    let(:database_state) { shadow_state }
 
     def open_window_for(target, expires_on:)
       EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ target.id ], expires_on: expires_on,
-        reason: "Owner approved", set_by: org_admin)
+        reason: "Owner approved", set_by: owner)
     end
 
-    it "closes a demo's switches automatically after the expiry date, and never a real company's" do
+    it "closes a demo's stored switches after the expiry date, revokes them, and never touches a real company" do
       open_window_for(demo, expires_on: PayrollBusinessClock.today + 2)
       turn_on_directly!(demo, %w[employee_portal_enabled employee_portal.features.stubs])
       turn_on_directly!(company, %w[employee_portal_enabled])
@@ -400,6 +609,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       travel_to((PayrollBusinessClock.today + 3).in_time_zone(PayrollBusinessClock::TIME_ZONE).change(hour: 0, min: 5)) do
         CloseExpiredDemoEarlyAccessJob.perform_now
         expect(stored(demo).values).to all(be(false))
+        expect(EmployeeAppActivation.open.where(company_id: demo.id)).to be_empty
         expect(stored(company)["employee_portal_enabled"]).to be(true)
         audit = AuditLog.find_by!(action: EmployeeAppSwitch::DemoExpiry::ACTION, company_id: demo.id)
         expect(audit.metadata).to include("turned_off" => [ "employee_portal_enabled", "employee_portal.features.stubs" ])
@@ -407,23 +617,27 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       end
     end
 
-    it "closes right away when an admin ends the window, and does nothing once the database enforces RLS" do
-      open_window_for(demo, expires_on: PayrollBusinessClock.today + 5)
+    it "closes right away when an admin ends the window, and retires windows once the database enforces RLS" do
+      window = open_window_for(demo, expires_on: PayrollBusinessClock.today + 5)
       turn_on_directly!(demo, %w[employee_portal_enabled])
       expect(EmployeeAppSwitch::DemoExpiry.call(database_state: -> { { enforced: true } })).to eq([])
+      expect(window.reload.retired_at).to be_present
+      expect(AuditLog.find_by!(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION).record_id).to eq(window.id)
 
+      other = open_window_for(demo, expires_on: PayrollBusinessClock.today + 5)
       delete "#{path}/early_access", params: { reason: "Guard failed" }, as: :json, headers: auth(recent: false, target: demo)
       expect(response).to have_http_status(:ok), response.body
+      expect(other.reload.ended_at).to be_present
       expect(stored(demo)["employee_portal_enabled"]).to be(false)
     end
   end
 
   describe "the demo kill switch" do
-    let(:database_state) { { phase: "shadow", enforced: false, enforced_tables: 0, protected_tables: 1 } }
+    let(:database_state) { shadow_state }
 
     it "turns every demo's employee app off, ends early access and support views, keeps data, and leaves real companies alone" do
       EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ demo.id ], expires_on: PayrollBusinessClock.today + 5,
-        reason: "Owner approved", set_by: org_admin)
+        reason: "Owner approved", set_by: owner)
       turn_on_directly!(demo, %w[employee_portal_enabled subdomain_enabled employee_portal.features.stubs])
       turn_on_directly!(company, %w[employee_portal_enabled])
       staff = create(:user, company: company, organization: organization, role: :super_admin, clerk_id: "user_support")
@@ -435,6 +649,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response).to have_http_status(:ok), response.body
 
       expect(stored(demo).values).to all(be(false))
+      expect(EmployeeAppActivation.open.where(company_id: demo.id)).to be_empty
       expect(stored(company)["employee_portal_enabled"]).to be(true)
       expect(EmployeeAppEarlyAccessWindow.sole.ended_at).to be_present
       expect(EmployeeAppEarlyAccessWindow.sole.end_reason).to eq("Demo employee access stopped: Leak suspected")
@@ -444,29 +659,102 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         "turned_off" => [ "employee_portal_enabled", "subdomain_enabled", "employee_portal.features.stubs" ], "support_views_ended" => 1))
       expect(AuditLog.where(action: "employee_app_switch#demo_stopped", organization_id: organization.id).count).to eq(1)
       expect(AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: demo.id).last.metadata)
-        .to include("demo_stop" => true, "reason" => "Leak suspected")
+        .to include("demo_stop" => true, "reason" => "Leak suspected", "confirmed" => include("support_views_ended" => 1),
+          "requested" => include("clerk_session_revocations" => 0))
       expect(AuditLog.where(action: "view_as#ended", company_id: demo.id).count).to eq(1)
     end
 
-    it "revokes pending demo invitations and ends employee-only demo sign-ins" do
+    it "turns off a demo part that is on only in a future row" do
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      current = demo.client_operating_profiles.history_order.first
+      current.update!(ends_on: PayrollBusinessClock.today + 6)
+      future = demo.client_operating_profiles.create!(current.attributes.except("id", "created_at", "updated_at", "lock_version")
+        .merge("effective_on" => PayrollBusinessClock.today + 7, "ends_on" => nil, "version" => current.version + 1,
+          "options" => current.options.deep_merge("subdomain_enabled" => true)))
+      EmployeeAppSwitch::ProfileWriter.apply!(company: demo, actor: org_admin, values: { "employee_portal_enabled" => false }, reason: "Fixture")
+      future.update!(employee_portal_enabled: true)
+
+      post "#{path}/demo_stop", params: { reason: "Stop" }, as: :json, headers: auth(recent: false, target: demo)
+      expect(response).to have_http_status(:ok), response.body
+      expect(future.reload.employee_portal_enabled).to be(false)
+      expect(future.option_value("subdomain_enabled")).to be(false)
+    end
+
+    it "records Clerk revocations durably, retries them until confirmed, and a repeat stop queues no duplicates" do
+      employee = create(:employee, company: demo)
+      login = build(:user, company: demo, organization: organization, role: :portal_employee, clerk_id: "user_demo_employee")
+      skip "Needs demo employee logins and links (demo D6, PR #585)" unless login.valid?
+
+      login.save!
+      probe = EmployeeAccountLink.new(company: demo, employee: employee, user: login, status: "active", activated_at: Time.current)
+      skip "Needs demo employee links (demo D6, PR #585)" unless probe.valid?
+
+      as_staff_in(demo) { probe.save! }
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      clerk = instance_double(ClerkInvitationService)
+      allow(ClerkInvitationService).to receive(:new).and_return(clerk)
+      allow(clerk).to receive(:revoke_user_sessions).and_return({ success: false, error: "Clerk down" }, { success: true })
+
+      expect do
+        post "#{path}/demo_stop", params: { reason: "Leak" }, as: :json, headers: auth(recent: false, target: demo)
+      end.to have_enqueued_job(RevokeEmployeeAppClerkJob).exactly(:once)
+      revocation = EmployeeAppClerkRevocation.sole
+      expect(revocation).to have_attributes(kind: "sessions", target: login.id.to_s, source: "demo_stop", confirmed_at: nil)
+
+      expect do
+        post "#{path}/demo_stop", params: { reason: "Again" }, as: :json, headers: auth(recent: false, target: demo)
+      end.not_to have_enqueued_job(RevokeEmployeeAppClerkJob)
+      expect(EmployeeAppClerkRevocation.count).to eq(1)
+      expect(AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: demo.id).order(:id).last.metadata["requested"])
+        .to include("clerk_session_revocations" => 0, "already_pending" => 1)
+
+      expect { RevokeEmployeeAppClerkJob.perform_now(revocation.id) }.not_to raise_error # retry_on reschedules
+      expect(revocation.reload).to have_attributes(attempts: 1, last_error: "Clerk down", confirmed_at: nil)
+      RevokeEmployeeAppClerkJob.perform_now(revocation.id)
+      expect(revocation.reload.confirmed_at).to be_present
+      expect(AuditLog.where(action: RevokeEmployeeAppClerkJob::CONFIRMED_ACTION, record_id: revocation.id).count).to eq(1)
+    end
+
+    it "revokes pending demo invitations and their Clerk sign-up invitations" do
       employee = create(:employee, company: demo)
       probe = EmployeeAccountLink.new(company: demo, employee: employee, status: "invited")
       skip "Needs demo employee links (demo D6, PR #585)" unless probe.valid?
 
       turn_on_directly!(demo, %w[employee_portal_enabled])
       invited = invite!(employee, actor: org_admin, delivery: "code").link
+      pending = create(:user, company: demo, organization: organization, role: :portal_employee, invitation_status: "pending",
+        clerk_id: nil, clerk_invitation_id: "inv_demo_pending")
+      invited.update_columns(user_id: pending.id)
       expect(invited.reload).to be_invited
 
       post "#{path}/demo_stop", params: { reason: "Rehearsal over" }, as: :json, headers: auth(recent: false, target: demo)
       expect(response).to have_http_status(:ok), response.body
       expect(invited.reload).to have_attributes(status: "revoked", revoked_reason: "Demo employee access stopped: Rehearsal over")
       expect(response.parsed_body.dig("stopped", "companies", 0, "invitations_revoked")).to eq(1)
+      expect(EmployeeAppClerkRevocation.find_by!(kind: "invitation")).to have_attributes(target: "inv_demo_pending")
     end
 
     it "is for organization admins only" do
       admin = create(:user, company: company, organization: organization, role: :admin, clerk_id: "user_plain_admin")
       post "#{path}/demo_stop", params: { reason: "Stop" }, as: :json, headers: auth(admin, target: demo)
       expect(response).to have_http_status(:forbidden)
+    end
+  end
+
+  describe "invitation issuance during a stop" do
+    it "issues a demo invitation only under the company lock with the app still on" do
+      employee = create(:employee, company: demo)
+      skip "Needs demo employee links (demo D6, PR #585)" unless EmployeeAccountLink.new(company: demo, employee: employee, status: "invited").valid?
+
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      locked = []
+      allow(EmployeeLinks).to receive(:lock_for_issuance!).and_wrap_original { |original, company| locked << company.id; original.call(company) }
+      invite!(employee, actor: org_admin, delivery: "code")
+      expect(locked).to eq([ demo.id ])
+
+      EmployeeAppSwitch::DemoStop.call(organization: organization, actor: org_admin, reason: "Stop")
+      other = create(:employee, company: demo)
+      expect { invite!(other, actor: org_admin, delivery: "code") }.to raise_error(EmployeeLinks::Error, /isn't turned on/)
     end
   end
 end

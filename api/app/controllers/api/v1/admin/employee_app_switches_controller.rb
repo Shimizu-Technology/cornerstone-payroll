@@ -5,9 +5,10 @@ module Api
     module Admin
       # M4-9d: the selected company's employee app switch, its readiness
       # checklist, the organization's demo early-access window and the demo
-      # kill switch. Org admins only (manage_employee_app_switch). Turning
-      # anything on, or setting early access, needs a fresh second factor;
-      # turning off and the kill switch never do.
+      # kill switch. Org admins only (manage_employee_app_switch); setting or
+      # extending early access is for a super_admin (the owner) only.
+      # Turning anything on, or setting early access, needs a fresh second
+      # factor; turning off, ending early access and the kill switch never do.
       class EmployeeAppSwitchesController < BaseController
         include RecentVerification
 
@@ -107,7 +108,7 @@ module Api
 
         def payload(readiness)
           company = current_company
-          stored = EmployeeAppSwitch.stored_values(company)
+          stored = EmployeeAppSwitch.switched_on_values(company)
           effective = EmployeeAppSwitch.effective_values(company)
           failures = readiness.as_json
           {
@@ -132,6 +133,7 @@ module Api
           people = User.where(id: windows.flat_map { |window| [ window.set_by_id, window.ended_by_id ] }.compact).pluck(:id, :name).to_h
           {
             name: EmployeeAppEarlyAccessWindow::NAME,
+            can_set: current_user.super_admin?,
             max_days: EmployeeAppEarlyAccessWindow::MAX_DAYS,
             max_companies: EmployeeAppEarlyAccessWindow::MAX_COMPANIES,
             demo_companies: demos,
@@ -139,7 +141,8 @@ module Api
               {
                 id: window.id, status: window.status, expires_on: window.expires_on.iso8601,
                 companies: window.company_ids.map { |id| { id: id, name: names[id] } },
-                reason: window.reason, set_by: people[window.set_by_id], set_at: window.created_at.utc.iso8601,
+                reason: window.reason, set_by: people[window.set_by_id], approved_by: people[window.set_by_id],
+                set_at: window.created_at.utc.iso8601, retired_at: window.retired_at&.utc&.iso8601,
                 ended_at: window.ended_at&.utc&.iso8601, ended_by: people[window.ended_by_id], end_reason: window.end_reason
               }
             end

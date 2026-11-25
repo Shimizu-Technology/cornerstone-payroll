@@ -2,10 +2,22 @@
 
 module EmployeeAppSwitch
   # The demo kill switch: one action that turns every demo company's
-  # employee app off, ends the early-access window, revokes pending demo
+  # employee app off (today and every later scheduled version, revoking the
+  # activations), ends the early-access window, revokes pending demo
   # invitations (tickets), ends demo support views and employee-only demo
   # sessions, and so stops demo employee notifications (DemoOutbound refuses
-  # employee mail while a demo's app is off). Data and audit history stay.
+  # employee mail while a demo's app is off, rechecked right before each
+  # send). Data and audit history stay.
+  #
+  # Each company is stopped under its row lock, which invitation issuance
+  # also takes (EmployeeLinks.with_issuance_lock), so no invitation is
+  # issued halfway through a stop. Clerk revocations (pending sign-up
+  # invitations and employee sessions) are recorded as
+  # EmployeeAppClerkRevocation rows and retried until Clerk confirms; the
+  # stop's audit lists what it did in the database (confirmed) separately
+  # from what it asked Clerk to do (requested), and the job audits each
+  # confirmation. A repeat stop finds the still-pending requests instead of
+  # queueing duplicates.
   class DemoStop
     ACTION = "employee_app_switch#demo_stopped"
 
@@ -22,7 +34,7 @@ module EmployeeAppSwitch
 
     def call
       reason = EmployeeAppSwitch.reason!(@reason)
-      sessions = []
+      queued = []
       summary = ApplicationRecord.transaction do
         @organization.lock!
         EarlyAccess.authorize!(@actor, @organization)
@@ -30,53 +42,59 @@ module EmployeeAppSwitch
         EarlyAccess.end_window!(window, @actor, "Demo employee access stopped: #{reason}") if window
 
         companies = Company.demo.where(organization_id: @organization.id).order(:id).to_a
-        results = companies.map { |company| stop_company!(company, reason, sessions) }
+        results = companies.map { |company| stop_company!(company, reason, queued) }
         result = { companies: results, early_access_window_ended: window.present? }
         audit!(nil, ACTION, @organization.name, { reason: reason, early_access_window_id: window&.id,
-          companies: results.map { |row| row.slice(:company_id, :turned_off, :invitations_revoked, :support_views_ended, :sessions_ended) } }.compact)
+          companies: results.map { |row| row.slice(:company_id, :confirmed, :requested) } }.compact)
         result
       end
       # Clerk calls run after commit, like every other session revocation.
-      sessions.uniq.each { |user_id| RevokeEmployeeSessionsJob.perform_later(user_id, @now.iso8601) }
+      queued.each { |revocation_id| RevokeEmployeeAppClerkJob.perform_later(revocation_id) }
       summary
     end
 
     private
 
-    def stop_company!(company, reason, sessions)
+    def stop_company!(company, reason, queued)
       company.with_lock do
-        before = EmployeeAppSwitch.stored_values(company)
-        scheduled = company.client_operating_profiles.where("effective_on > ?", PayrollBusinessClock.today)
-          .order(:effective_on, :id).any? { |profile| KEYS.any? { |key| profile_value(profile, key) } }
-        turned_off = KEYS.select { |key| before[key] }
-        if turned_off.any? || scheduled
+        turned_off = EmployeeAppSwitch.on_anywhere(company)
+        if turned_off.any?
           ProfileWriter.apply!(company: company, actor: @actor, values: KEYS.index_with(false),
             reason: "Demo employee access stopped: #{reason}")
         end
 
-        revoked = revoke_pending_invitations!(company, reason)
+        invitations = []
+        revoked = revoke_pending_invitations!(company, reason, invitations)
         views = end_support_views!(company)
         users = employee_only_logins(company)
-        sessions.concat(users)
-        row = { company_id: company.id, name: company.name, turned_off: turned_off, invitations_revoked: revoked,
-                support_views_ended: views, sessions_ended: users.size }
+        requested_invitations = invitations.filter_map do |invitation_id, user_id|
+          request!(company, "invitation", invitation_id, user_id: user_id)
+        end
+        requested_sessions = users.filter_map { |user_id| request!(company, "sessions", user_id, user_id: user_id) }
+        queued.concat(requested_invitations.map(&:id) + requested_sessions.map(&:id))
+
+        confirmed = { turned_off: turned_off, invitations_revoked: revoked, support_views_ended: views }
+        requested = { clerk_invitation_revocations: requested_invitations.size, clerk_session_revocations: requested_sessions.size,
+                      already_pending: invitations.size + users.size - requested_invitations.size - requested_sessions.size }
         audit!(company, EmployeeAppSwitch::AUDIT_ACTION, company.name,
-          { reason: reason, turned_on: [], turned_off: turned_off, demo_stop: true,
-            invitations_revoked: revoked, support_views_ended: views, sessions_ended: users.size })
-        row
+          { reason: reason, turned_on: [], turned_off: turned_off, demo_stop: true, confirmed: confirmed, requested: requested })
+        { company_id: company.id, name: company.name, turned_off: turned_off, invitations_revoked: revoked,
+          support_views_ended: views, sessions_ended: requested_sessions.size, confirmed: confirmed, requested: requested }
       end
     end
 
-    def profile_value(profile, key)
-      (key == MASTER ? profile.employee_portal_enabled : profile.option_value(key)) == true
+    def request!(company, kind, target, user_id:)
+      EmployeeAppClerkRevocation.request!(kind: kind, target: target, organization: @organization, company: company,
+        user: User.find_by(id: user_id), source: EmployeeAppClerkRevocation::SOURCE_DEMO_STOP, requested_by: @actor, now: @now)
     end
 
-    def revoke_pending_invitations!(company, reason)
+    def revoke_pending_invitations!(company, reason, invitations)
       EmployeeAccountLink.where(company_id: company.id, status: "invited").order(:id).to_a.count do |link|
         next false unless EmployeeLinks::Close.lock_link_and_login!(link)
         next false unless link.invited?
 
-        EmployeeLinks::Close.revoke!(link, reason: "Demo employee access stopped: #{reason}", actor: @actor)
+        EmployeeLinks::Close.revoke!(link, reason: "Demo employee access stopped: #{reason}", actor: @actor,
+          invitation_revocations: invitations)
         true
       end
     end

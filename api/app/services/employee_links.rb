@@ -161,6 +161,26 @@ module EmployeeLinks
     link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company)
   end
 
+  # Invitation issuance for a demo company holds the company row lock,
+  # shared, which the demo kill switch takes exclusively (DemoStop), so an
+  # invitation is never issued halfway through a stop. Call first inside the
+  # issuing transaction, then re-check the employee app is on.
+  def self.lock_for_issuance!(company)
+    return unless company&.demo?
+
+    Company.where(id: company.id).lock("FOR SHARE").pick(:id)
+  end
+
+  # A demo link's activation, claim and bind must come from that demo
+  # company's own subdomain, and (under the early-access waiver) this
+  # process must run the RLS guard in raise mode as the restricted role.
+  def self.demo_request_allowed?(company, origin)
+    return true unless company&.demo?
+
+    TenantSubdomainRegistry.client_origin?(origin) && TenantSubdomainRegistry.enabled_origin_company_id(origin) == company.id &&
+      EmployeeAppSwitch::Enforcement.demo_request_allowed?(company)
+  end
+
   # A link to a client subdomain belongs to that subdomain's company only.
   def self.origin_allows_company?(azp, company_id)
     return true unless TenantSubdomainRegistry.client_origin?(azp)

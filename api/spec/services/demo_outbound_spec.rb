@@ -89,6 +89,27 @@ RSpec.describe DemoOutbound, :portal_notifications do
       expect(Resend::Emails).to have_received(:send).twice
     end
 
+    it "rechecks a demo's employee app right before sending employee mail, as the kill switch may have run since enqueue" do
+      allow(Resend::Emails).to receive(:send).and_return({ "id" => "sent-1" })
+      payload = { from: "alerts@example.test", to: [ allowed ], subject: "Your invite", html: "<p>Hi</p>" }
+      open = true
+      allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?) { open }
+
+      described_class.scoped(demo, channel: "employee_link_invite") { StagingMailTransport.deliver(payload) }
+      expect(Resend::Emails).to have_received(:send).once
+
+      open = false
+      result = described_class.scoped(demo, channel: "employee_link_invite") { StagingMailTransport.deliver(payload) }
+      expect(result).to include("suppressed" => true)
+      expect(Resend::Emails).to have_received(:send).once
+      expect(AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last.metadata)
+        .to include("channel" => "employee_link_invite", "reason" => "employee_app_off")
+
+      # Other demo mail still follows the allow-list alone.
+      described_class.scoped(demo) { StagingMailTransport.deliver(payload) }
+      expect(Resend::Emails).to have_received(:send).twice
+    end
+
     it "refuses a Clerk invitation for a non-allowed address inside a demo scope" do
       service = ClerkInvitationService.new
       expect(Net::HTTP).not_to receive(:start)
@@ -291,6 +312,8 @@ RSpec.describe DemoOutbound, :portal_notifications do
       claim.instance_variable_set(:@user, outsider)
       claim.instance_variable_set(:@azp, nil)
       allow(EmployeeLinks).to receive(:origin_allows_company?).and_return(true)
+      # The demo's own-subdomain and guarded-process rule has its own spec.
+      allow(EmployeeLinks).to receive(:demo_request_allowed?).and_return(true)
       allow(demo).to receive(:organization_id).and_return(outsider.organization_id)
       expect(claim.send(:claimable?, link)).to be(false)
 
