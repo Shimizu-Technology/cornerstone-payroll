@@ -120,9 +120,15 @@ export function usePayRunController({
   const [checkPrintOpen, setCheckPrintOpen] = useState(false);
   const [checkPrintRefreshToken, setCheckPrintRefreshToken] = useState(0);
   const [finalRecordRefreshToken, setFinalRecordRefreshToken] = useState(0);
+  // The final record loads on its own when it mounts. The panel's first
+  // report is just its initial load, so only later ones (a reload after a
+  // print, or a saved check) refresh it. Refreshing on the first one
+  // re-requested the slowest report on every visit.
+  const nonEmployeeChecksLoadedRef = useRef(false);
   const handleNonEmployeeChecksLoaded = useCallback((checks: NonEmployeeCheck[]) => {
     setNonEmployeeChecks(checks);
-    setFinalRecordRefreshToken(token => token + 1);
+    if (nonEmployeeChecksLoadedRef.current) setFinalRecordRefreshToken(token => token + 1);
+    nonEmployeeChecksLoadedRef.current = true;
   }, []);
   const handleNonEmployeeChecksChanged = useCallback(() => {
     setFinalRecordRefreshToken(token => token + 1);

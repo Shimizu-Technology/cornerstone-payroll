@@ -266,6 +266,7 @@ export default function TaxConfigs() {
     <div>
       <Header
         title="Tax Configuration"
+        organizationWide
         description="Manage annual tax rates, brackets, deductions, and retirement limits"
         actions={
           <Button onClick={() => setShowCreateModal(true)}>

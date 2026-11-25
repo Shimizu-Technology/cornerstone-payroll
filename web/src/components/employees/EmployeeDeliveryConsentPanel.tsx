@@ -32,6 +32,11 @@ export function EmployeeDeliveryConsentPanel({
               ? 'Paper copies continue during the pilot regardless of consent status.'
               : 'Electronic-only readiness checks pass for consented items.'}
           </p>
+          {!summary.feature_enabled && (
+            <p className="mt-1 text-sm text-neutral-500">
+              Employees don't see these consent screens yet: electronic delivery is switched off for this client.
+            </p>
+          )}
         </div>
         {!summary.feature_enabled && (
           <Badge variant="outline">Employee screens hidden</Badge>
@@ -64,6 +69,9 @@ export function EmployeeDeliveryConsentPanel({
               )}
               {item.status === 'not_consented' && (
                 <p className="text-xs text-neutral-500">No electronic consent recorded.</p>
+              )}
+              {item.disclosure_status === 'draft' && (
+                <p className="text-xs text-neutral-500">The consent wording is still a draft waiting for counsel to approve it.</p>
               )}
             </div>
           </div>
