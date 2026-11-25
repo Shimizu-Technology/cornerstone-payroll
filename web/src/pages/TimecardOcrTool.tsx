@@ -6,7 +6,7 @@ export function TimecardOcrTool() {
     <div>
       <Header
         title="Timecard OCR"
-        description="Upload timecard images or PDFs to extract punch times using GPT. Review and correct as needed."
+        description="Upload timecard images or PDFs. We'll read the punch times for you to review and correct."
       />
 
       <div className="p-6 lg:p-8">

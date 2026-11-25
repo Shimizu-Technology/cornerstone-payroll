@@ -18,6 +18,7 @@ import { PayRunComparison } from './PayRunComparison';
 import { PayRunEmployerTaxes } from './PayRunEmployerTaxes';
 import { PayRunEmptyState } from './PayRunEmptyState';
 import { PayRunTimecardOcr } from './PayRunTimecardOcr';
+import { NewHireDocumentsNotice } from './NewHireDocumentsNotice';
 
 function Step({ id, title, number, current, summary, children, savedStatus }: { id: string; title: string; number: number; current: boolean; summary: string; children: ReactNode; savedStatus: string }) {
   return <details key={savedStatus} id={id} tabIndex={-1} open={current} data-current={current || undefined} className={`group scroll-mt-16 rounded-xl border bg-white ${current ? 'border-primary-200' : 'border-neutral-200'}`}>
@@ -42,6 +43,7 @@ export function PayRunSteps({ sections }: { sections: PayRunSections }) {
       <ul>{payPeriod.ineligible_workers.map(worker => <li key={worker.employee_id}>{worker.reason}{worker.resolution && <p>{worker.resolution}</p>}</li>)}</ul>
       <p>For workers without AIRE time or tax evidence, use Edit payroll → Remove from Payroll, or reactivate them, before approving or committing. No paychecks are removed automatically.</p>
     </div>}
+    <NewHireDocumentsNotice gaps={payPeriod.new_hire_document_gaps} companyId={sections.feedback.companyId} returnTo={sections.feedback.currentPath} status={payPeriod.status} />
     <ExpectedEntriesPanel key={payPeriod.id} onUnapprove={sections.processing.handleUnapprove} payPeriod={payPeriod} disabled={sections.roster.processing || sections.roster.financialActionsHeld || !sections.roster.canEditPayPeriod || (payPeriod.status !== 'approved' && sections.roster.hasStagedWorksheetChanges)}
       onRestore={employeeId => sections.roster.handleRestoreEmployee(employeeId)} addBackNotice={sections.roster.addBackNotice} onCalculate={sections.roster.onCalculateExpectedEntry} onSaved={() => sections.roster.loadPayPeriod(payPeriod.id, true, true)} onEnterPay={id => {
         sections.roster.setAdditionalEmployeeIds(prev => new Set([...prev, id]));

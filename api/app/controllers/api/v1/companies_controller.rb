@@ -58,6 +58,9 @@ module Api
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
           **CompanyWorkspacePresentation.fields(company),
           practice_portal: current_user.client? && current_user.practice_company_id == company.id,
+          # The switch's own company rule, so a "turn it on" step only
+          # appears where the employee app can be switched on.
+          employee_app_switch_eligible: EmployeeAppSwitch.eligible_company?(company),
           workspace_can_write: company_write_allowed?(company),
           workspace_write_permissions: workspace_write_permissions(company)
         }

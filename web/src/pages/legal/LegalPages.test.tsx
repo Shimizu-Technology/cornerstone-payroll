@@ -31,6 +31,7 @@ describe('PrivacyPolicy', () => {
       'Netlify',
       'Resend',
       'Google',
+      'PostHog',
       'OpenRouter and the AI model provider it connects to',
     ]);
   });
@@ -40,7 +41,18 @@ describe('PrivacyPolicy', () => {
 
     expect(screen.getByText(/We do not sell personal information/)).toBeTruthy();
     expect(screen.getByText(/Social Security numbers, contractor EINs, and bank account details are encrypted in the database/)).toBeTruthy();
-    expect(screen.getByText(/PostHog, which is turned off/)).toBeTruthy();
+    const analyticsHeading = screen.getByRole('heading', { level: 3, name: 'Analytics' });
+    const analyticsSection = within(analyticsHeading.closest('section')!);
+    expect(analyticsSection.getByText(/anonymous device-level usage events through PostHog/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/app surface \(staff\s+or employee\)/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/account role \(on the staff site only\)/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/page route templates with IDs removed/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/named product\s+events.*carrying no amounts, names, or IDs/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/do not send names, email addresses, company or user IDs/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/on-screen text, or form contents/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/do not use session recordings; IP addresses are discarded/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/honor Do Not Track and Global Privacy Control/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/pending counsel review/i)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'shimizutechnology@gmail.com' }).getAttribute('href')).toBe('mailto:shimizutechnology@gmail.com');
   });
 

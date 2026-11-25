@@ -197,7 +197,7 @@ function CompanyActivityHistory(): ReactElement {
 
   return (
     <div>
-      <Header title="Activity History" description="Track who changed what, when it happened, and what changed." />
+      <Header title="Activity History" organizationWide={isAdmin && !companyIdFilter} description="Track who changed what, when it happened, and what changed." />
 
       <div className="p-4 sm:p-6 lg:p-8">
         <Card className="mb-4 p-4">

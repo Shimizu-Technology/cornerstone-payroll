@@ -2223,7 +2223,50 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.fetch("error")).to include("Resolve required new-hire documents")
+      expect(response.parsed_body).to include("code" => "new_hire_documents_required")
+      # Only IDs, names, and requirement labels; no document statuses or file details.
+      expected_gap = {
+        "employee_id" => employee.id,
+        "employee_name" => employee.full_name,
+        "missing" => [ "Signed withholding election", "Identity and work authorization" ]
+      }
+      expect(response.parsed_body.fetch("blocked_employees")).to eq([ expected_gap ])
       expect(pay_period.reload).to be_calculated
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response.parsed_body.dig("pay_period", "new_hire_document_gaps")).to eq([ expected_gap ])
+    end
+
+    it "lists only this company's new hires in document gaps and approval blocks" do
+      other_company = Company.create!(name: "Other Company", organization: organization)
+      other_employee = Employee.create!(
+        company: other_company, first_name: "Rowan", last_name: "Elsewhere", employment_type: "hourly",
+        ssn_encrypted: "900-70-0011", pay_rate: 15, pay_frequency: "biweekly", filing_status: "single",
+        address_line1: "9 Other Way", city: "Hagatna", state: "GU", zip: "96910", status: "active",
+        hire_date: Date.today - 1.week, document_readiness_required: true
+      )
+      create(:employee_document_requirement, company: other_company, employee: other_employee)
+      other_period = PayPeriod.create!(company: other_company, start_date: Date.today - 14.days, end_date: Date.today,
+        pay_date: Date.today + 3.days, status: "calculated")
+      create(:payroll_item, pay_period: other_period, company: other_company, employee: other_employee, gross_pay: 100, net_pay: 90)
+      pay_period.update!(status: "calculated")
+      create(:payroll_item, pay_period: pay_period, company: company, employee: employee, gross_pay: 100, net_pay: 90)
+      employee.update!(document_readiness_required: true)
+      create(:employee_document_requirement, company: company, employee: employee)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/approve"
+      expect(response.parsed_body.fetch("blocked_employees").pluck("employee_id")).to eq([ employee.id ])
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      gaps = response.parsed_body.dig("pay_period", "new_hire_document_gaps")
+      expect(gaps.pluck("employee_id")).to eq([ employee.id ])
+      expect(response.body).not_to include("Elsewhere")
+
+      get "/api/v1/admin/pay_periods/#{other_period.id}"
+      expect(response).to have_http_status(:not_found)
+      post "/api/v1/admin/pay_periods/#{other_period.id}/approve"
+      expect(response).to have_http_status(:not_found)
+      expect(other_period.reload).to be_calculated
     end
 
     it "publishes the current revision at staff approval and gates commit instead" do
@@ -2404,6 +2447,14 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.fetch("error")).to include("Resolve required new-hire documents")
+      expect(response.parsed_body).to include("code" => "new_hire_documents_required")
+      expect(response.parsed_body.fetch("blocked_employees")).to eq([
+        {
+          "employee_id" => employee.id,
+          "employee_name" => employee.full_name,
+          "missing" => [ "Signed withholding election", "Identity and work authorization" ]
+        }
+      ])
       expect(pay_period.reload).to be_approved
     end
 

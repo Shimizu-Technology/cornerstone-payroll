@@ -49,5 +49,27 @@ describe('EmployeeDeliveryConsentPanel', () => {
     expect(screen.getByText('Form W-2GU')).toBeTruthy();
     expect(screen.getByText('Withdrawn (paper)')).toBeTruthy();
     expect(screen.getAllByText('Draft wording')).toHaveLength(2);
+    // Each badge says what it means in plain words.
+    expect(screen.getByText(/Employees don't see these consent screens yet/)).toBeTruthy();
+    expect(screen.getAllByText('The consent wording is still a draft waiting for counsel to approve it.')).toHaveLength(2);
+  });
+
+  it('leaves out the explanations when the screens are on and the wording is approved', () => {
+    render(
+      <EmployeeDeliveryConsentPanel
+        summary={{
+          feature_enabled: true,
+          paper_delivery_continues: false,
+          items: [{
+            kind: 'pay_statements', status: 'not_consented', disclosure_version: '2026-11-25-v1', disclosure_status: 'approved',
+            given_at: null, withdrawn_at: null, method: null, electronic_only_ready: false, paper_continues: false,
+          }],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText('Employee screens hidden')).toBeNull();
+    expect(screen.queryByText(/Employees don't see these consent screens yet/)).toBeNull();
+    expect(screen.queryByText(/still a draft/)).toBeNull();
   });
 });

@@ -139,6 +139,32 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(screen.getAllByText('Direct deposit').length).toBeGreaterThan(0);
   });
 
+  it('tells staff which new-hire documents are needed and links straight to them', async () => {
+    apiMocks.get.mockResolvedValue({ data: { ...employee, document_readiness: { total: 2, required: 2, satisfied: 1, ready_for_payroll: false, missing: ['Signed withholding election'] } } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    const card = (await screen.findByRole('heading', { name: "Before this employee's first payroll" })).closest('section')!;
+    expect(within(card).getByText(/Upload and verify: Signed withholding election\./)).toBeTruthy();
+    expect(within(card).getByRole('link', { name: /Upload or verify/ }).getAttribute('href'))
+      .toBe('/companies/1/employees/2/edit?return_to=%2Fcompanies%2F1%2Femployees%2F2%2Foverview#employee-documents');
+  });
+
+  it('shows no documents card once the new hire is payroll ready', async () => {
+    apiMocks.get.mockResolvedValue({ data: { ...employee, document_readiness: { total: 2, required: 2, satisfied: 2, ready_for_payroll: true, missing: [] } } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Employment context');
+    expect(screen.queryByRole('heading', { name: "Before this employee's first payroll" })).toBeNull();
+  });
+
   it('identifies an unreviewed payment method as a paper check default', async () => {
     render(
       <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
@@ -175,6 +201,35 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(within(phoneCard).getByText('$800.00')).toBeTruthy();
     expect(screen.queryByText('Not assigned')).toBeNull();
     expect(screen.getAllByRole('button', { name: 'View stub for Sep 19, 2026' })[0]).toBeTruthy();
+  });
+
+  it('keeps an unconfirmed bank payment open with a way to confirm it, and drops the link once confirmed', async () => {
+    const deposit = {
+      record_type: 'native', pay_period_id: 5,
+      source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
+      gross_pay: 900, total_deductions: 100, net_pay: 800,
+      payment_delivery_method: 'direct_deposit', check_number: null,
+    };
+    apiMocks.employeePayHistory.mockResolvedValue({ report: { summary: {}, history: [
+      { ...deposit, key: 'native:4', payroll_item_id: 4, pay_date: '2026-09-19', period_description: 'September payroll',
+        payment_evidence: { status: 'unissued', label: 'Transfer not confirmed', effective_on: null } },
+      { ...deposit, key: 'native:6', payroll_item_id: 6, pay_period_id: 7, pay_date: '2026-08-19', period_description: 'August payroll',
+        payment_evidence: { status: 'issued', label: 'Transfer confirmed', effective_on: '2026-08-19' } },
+    ] } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/pay-history']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    const phoneCard = await screen.findByRole('group', { name: 'Pay history for Sep 19, 2026' });
+    expect(within(phoneCard).getByText(/Bank payment not confirmed yet/)).toBeTruthy();
+    const links = screen.getAllByRole('link', { name: 'Confirm bank payment for Sep 19, 2026' });
+    expect(links).toHaveLength(2);
+    for (const link of links) expect(link.getAttribute('href')).toContain('/pay-runs/5/checks');
+    expect(screen.queryByText(/handled outside the app/)).toBeNull();
+    expect(within(screen.getByRole('group', { name: 'Pay history for Aug 19, 2026' })).getByText('Transfer confirmed')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Confirm bank payment for Aug 19, 2026' })).toBeNull();
   });
 
   it('keeps a zero-net loan statement discoverable with an accurate payment label on phone and desktop', async () => {

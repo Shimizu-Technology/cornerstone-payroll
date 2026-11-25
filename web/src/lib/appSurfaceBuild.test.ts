@@ -21,7 +21,7 @@ describe('application surface build', () => {
     expect(employeeAlias && './App.tsx'.match(employeeAlias.find)).toBeTruthy();
   });
 
-  it('emits the employee entry without staff code, PostHog, a service worker or dev-only code', async () => {
+  it('emits the employee entry without staff code, a service worker or dev-only code', async () => {
     // Vitest runs with NODE_ENV=test, which would build with import.meta.env.DEV on.
     vi.stubEnv('NODE_ENV', 'production');
     vi.stubEnv('VITE_APP_SURFACE', 'employee');
@@ -61,15 +61,14 @@ describe('application surface build', () => {
     expect(modules).toContainEqual(expect.stringMatching(/\/src\/employee\/api\.ts$/));
     expect(modules).toContainEqual(expect.stringMatching(/\/src\/employee\/ClerkAuth\.tsx$/));
     expect(modules).toContainEqual(expect.stringMatching(/node_modules\/@clerk\/react\//));
-    // Staff entry, pages, API client, contexts, layout and analytics stay out.
+    // Staff entry, pages, API client, contexts and layout stay out; shared privacy-safe analytics is allowed.
     expect(modules).not.toContainEqual(expect.stringMatching(
-      /\/src\/(?:main\.tsx|App\.tsx|pages\/|services\/|contexts\/|providers\/|components\/(?:layout|routing|auth)\/)/,
+      /\/src\/(?:main\.tsx|App\.tsx|pages\/|services\/|contexts\/|components\/(?:layout|routing|auth)\/)/,
     ));
-    expect(modules).not.toContainEqual(expect.stringMatching(/posthog/i));
+    expect(modules).toContainEqual(expect.stringMatching(/\/src\/lib\/analytics\.ts$/));
     expect(modules).not.toContainEqual(expect.stringMatching(/\/src\/employee\/DevPreviewAuth\.tsx$/));
 
     const bundled = code.join('\n');
-    expect(bundled).not.toMatch(/posthog/i);
     expect(bundled).not.toMatch(/serviceWorker/);
     expect(bundled).not.toMatch(/dev-preview|previewViewAs|previewSignOutFails/);
 

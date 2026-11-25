@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { EmployeeAppTurnOnStep } from '@/components/employee-app/EmployeeAppTurnOnStep';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -173,6 +174,9 @@ export function EmployeeW2Copies({ companyId, companyName, year, canWrite, check
                   ? 'The W-2s are ready. Posting adds any missing copies and schedules email notices for eligible employees.'
                   : list.blocker_message ?? 'Posting is unavailable for this tax year.'}
               </p>
+              {list.blocker === 'feature_off' && (
+                <p className="text-sm text-neutral-700"><EmployeeAppTurnOnStep companyId={companyId} audience="admin" /></p>
+              )}
               {!canWrite && <p className="text-sm text-neutral-700">You have read-only access to these copies.</p>}
               {canWrite && <Button type="button" onClick={postCopies} disabled={!canChange || !list.can_post}>Post {year} copies</Button>}
             </div>

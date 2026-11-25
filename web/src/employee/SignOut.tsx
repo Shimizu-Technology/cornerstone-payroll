@@ -4,6 +4,7 @@ import { SignOutContext, useEmployeeAuth, type SignOutValue } from './contexts';
 import { clearSigningOut, markSigningOut } from './routing';
 import { forgetInviteToken } from './signupState';
 import { EmpButton } from './ui';
+import { resetAnalytics } from '@/lib/analytics';
 
 /**
  * One place that signs out, so every Sign out button behaves the same: it
@@ -19,6 +20,7 @@ export function SignOutProvider({ children }: { children: ReactNode }): ReactEle
     setFailed(false);
     markSigningOut();
     forgetInviteToken();
+    resetAnalytics();
     try {
       await authSignOut();
       return true;
