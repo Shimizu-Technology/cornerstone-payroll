@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
 import { Link, createMemoryRouter, RouterProvider, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod, TimeTrackingExclusionCounts } from '@/types';
@@ -12,9 +12,13 @@ import { usePayRunController } from './pay-periods/pay-run/usePayRunController';
 import { payrollFinalRecordFixture, voidedFinalRecordFixture } from '@/components/payroll/PayrollFinalRecordPanel.fixtures';
 
 // Exercise moved controls through the same tab seam used by the workspace.
+// Tabs mount on first open, so open each once before starting on Payroll;
+// these refresh tests watch panels on every tab.
 function PayPeriodDetail(props: ComponentProps<typeof PayPeriodDetailPage>) {
   const [tab, setTab] = useState<'work' | 'checks' | 'reports' | 'activity'>('work');
-  return <PayPeriodDetailPage {...props} activeTab={tab} navigation={<nav aria-label="Test payroll tabs">{(['work', 'checks', 'reports', 'activity'] as const).map(id => <button key={id} onClick={() => setTab(id)}>Tab {id}</button>)}</nav>} />;
+  const [unopened, setUnopened] = useState<Array<'checks' | 'reports' | 'activity'>>(['checks', 'reports', 'activity']);
+  useLayoutEffect(() => { if (unopened.length) setUnopened(unopened.slice(1)); }, [unopened]);
+  return <PayPeriodDetailPage {...props} activeTab={unopened[0] ?? tab} navigation={<nav aria-label="Test payroll tabs">{(['work', 'checks', 'reports', 'activity'] as const).map(id => <button key={id} onClick={() => setTab(id)}>Tab {id}</button>)}</nav>} />;
 }
 
 function payRunButton(name: string | RegExp): HTMLElement {
@@ -35,6 +39,7 @@ async function findPayRunButton(name: string): Promise<HTMLElement> {
 
 const apiMocks = vi.hoisted(() => ({
   get: vi.fn(),
+  nonEmployeeChecksList: vi.fn(),
   delete: vi.fn(),
   clientReview: vi.fn(),
   recordClientApproval: vi.fn(),
@@ -75,6 +80,7 @@ vi.mock('@/services/api', () => ({
     comparison: apiMocks.comparison,
   },
   employeesApi: { list: apiMocks.employeesList },
+  nonEmployeeChecksApi: { list: (...args: unknown[]) => apiMocks.nonEmployeeChecksList(...args) ?? Promise.resolve({ non_employee_checks: [] }) },
   payrollItemsApi: {},
   reportsApi: { payrollFinalRecord: apiMocks.payrollFinalRecord },
 }));
@@ -211,6 +217,50 @@ function RoutedFeedbackPayRun({ period }: { period: PayPeriod }): ReactElement {
       navigation={<nav aria-label="Feedback test tabs">{(['work', 'checks', 'reports', 'activity'] as const).map(id => <Link key={id} to={`/companies/7/pay-runs/12/${id}`}>Go to {id}</Link>)}</nav>} />
   </>;
 }
+
+function mockCommittedRunReads(): void {
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+}
+
+it('mounts Checks, Reports and Activity only when first opened and keeps them after leaving', async (): Promise<void> => {
+  vi.clearAllMocks();
+  const user = userEvent.setup();
+  mockCommittedRunReads();
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={initialPayPeriod} />} /></Routes></MemoryRouter>);
+  await screen.findByRole('banner', { name: 'Pay run identity' });
+  expect(screen.queryByTestId('processing-check-list-refresh-token')).toBeNull();
+  await screen.findByRole('region', { name: 'Payroll workspace' });
+  expect(document.querySelector('section[aria-label="Reports workspace"]')?.childElementCount).toBe(0);
+  expect(document.querySelector('section[aria-label="Activity workspace"]')?.textContent).toBe('');
+
+  await user.click(screen.getByRole('link', { name: 'Go to checks' }));
+  expect(await screen.findByTestId('processing-check-list-refresh-token')).toBeTruthy();
+  await user.click(screen.getByRole('link', { name: 'Go to work' }));
+  expect(screen.getByTestId('processing-check-list-refresh-token').closest('section')?.hidden).toBe(true);
+});
+
+it('checks a committed run for a FIT deposit override without opening Checks', async (): Promise<void> => {
+  vi.clearAllMocks();
+  mockCommittedRunReads();
+  apiMocks.nonEmployeeChecksList.mockResolvedValue({ non_employee_checks: [{ id: 5, check_type: 'tax_deposit', auto_generated_type: 'fit_deposit', amount: '25.00', voided: false }] });
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0, gross_pay: 64, net_pay: 44, withholding_tax: 20 };
+  const period = { ...initialPayPeriod, payroll_items: [item] } as unknown as PayPeriod;
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={period} />} /></Routes></MemoryRouter>);
+  expect(await screen.findByText('FIT deposit overridden')).toBeTruthy();
+  expect(apiMocks.nonEmployeeChecksList).toHaveBeenCalledTimes(1);
+  expect(apiMocks.nonEmployeeChecksList).toHaveBeenCalledWith({ pay_period_id: period.id });
+  expect(screen.queryByTestId('processing-check-list-refresh-token')).toBeNull();
+});
+
+it('leaves the non-employee check list to the Checks tab when the run opens there', async (): Promise<void> => {
+  vi.clearAllMocks();
+  mockCommittedRunReads();
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={initialPayPeriod} />} /></Routes></MemoryRouter>);
+  expect(await screen.findByTestId('processing-check-list-refresh-token')).toBeTruthy();
+  expect(apiMocks.nonEmployeeChecksList).not.toHaveBeenCalled();
+});
 
 it.each(['reports', 'checks', 'activity'] as const)('retains %s navigation after a successful calculation', async (tab): Promise<void> => {
   vi.clearAllMocks();

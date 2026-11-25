@@ -1,4 +1,3 @@
-import { PayrollPreviewCard } from '@/components/payroll/PayrollPreviewCard';
 import { PriorProviderHistoryNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
@@ -22,16 +21,10 @@ import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-acc
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { PayRunRecordHeader } from './pay-run/PayRunRecordHeader';
-import { ReportsDownloadPanel } from '@/components/reports/ReportsDownloadPanel';
 import { PayrollItemReviewDialog } from '@/components/payroll/PayrollItemReviewDialog';
-import { NonEmployeeChecksPanel } from '@/components/checks/NonEmployeeChecksPanel';
-import { PaymentMethodDialog } from '@/components/payroll/PaymentMethodDialog';
-import { ChecksPanel } from '@/components/payroll/ChecksPanel';
-import { UnifiedCheckPrintDialog } from '@/components/checks/UnifiedCheckPrintDialog';
-import { PdfPreview, type PdfArtifact } from '@/components/documents/PdfPreview';
+import type { PdfArtifact } from '@/components/documents/PdfPreview';
 import { WorkspaceTabs } from '@/components/records/WorkspaceTabs';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
-import { RecordActivityTimeline } from '@/components/records/RecordActivityTimeline';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -56,6 +49,15 @@ import type { PromotedPaymentPreview } from '@/services/api';
 import type { NonEmployeeCheck, PayPeriod, PayrollItem } from '@/types';
 
 const PayPeriodDetail = lazy(() => import('@/pages/PayPeriodDetail').then((module) => ({ default: module.PayPeriodDetail })));
+// Checks, Reports and Activity panels load only when their tab is opened.
+const PayrollPreviewCard = lazy(() => import('@/components/payroll/PayrollPreviewCard').then((module) => ({ default: module.PayrollPreviewCard })));
+const ReportsDownloadPanel = lazy(() => import('@/components/reports/ReportsDownloadPanel').then((module) => ({ default: module.ReportsDownloadPanel })));
+const NonEmployeeChecksPanel = lazy(() => import('@/components/checks/NonEmployeeChecksPanel').then((module) => ({ default: module.NonEmployeeChecksPanel })));
+const PaymentMethodDialog = lazy(() => import('@/components/payroll/PaymentMethodDialog').then((module) => ({ default: module.PaymentMethodDialog })));
+const ChecksPanel = lazy(() => import('@/components/payroll/ChecksPanel').then((module) => ({ default: module.ChecksPanel })));
+const UnifiedCheckPrintDialog = lazy(() => import('@/components/checks/UnifiedCheckPrintDialog').then((module) => ({ default: module.UnifiedCheckPrintDialog })));
+const PdfPreview = lazy(() => import('@/components/documents/PdfPreview').then((module) => ({ default: module.PdfPreview })));
+const RecordActivityTimeline = lazy(() => import('@/components/records/RecordActivityTimeline').then((module) => ({ default: module.RecordActivityTimeline })));
 
 const tabs: Array<{ id: PayRunWorkspaceTab; label: string; mobileLabel: string; icon: typeof ClipboardList }> = [
   { id: 'work', label: 'Payroll', mobileLabel: 'Payroll', icon: Banknote },
@@ -209,9 +211,11 @@ export function PayRunWorkspace(): ReactElement {
     <h2 className="sr-only">{activeTab === 'reports' ? 'Reports' : activeTab === 'activity' ? 'Activity' : activeTab === 'checks' ? 'Checks and payments' : 'Payroll'}</h2>
     <div className="min-h-[24rem] space-y-6 p-4 sm:p-6 lg:p-8">
       {activeTab === 'work' && <PayRunOverview companyId={companyId} payRun={payRun} items={reportableItems} returnTo={currentPath} workspaceReturnTo={returnTo} readOnlyMode={readOnlyMode} />}
-      {activeTab === 'checks' && checks}
-      {activeTab === 'activity' && activity}
-      {activeTab === 'reports' && (payRun.status !== 'draft' && reportableItems.length ? <ReportsDownloadPanel readOnly payPeriodId={payRun.id} payPeriodStatus={payRun.status} payDate={payRun.pay_date} /> : <p className="text-sm text-neutral-600">Reports are available after payroll is calculated.</p>)}
+      <Suspense fallback={<WorkspaceLoader label="Loading this section" minHeightClassName="min-h-[12rem]" />}>
+        {activeTab === 'checks' && checks}
+        {activeTab === 'activity' && activity}
+        {activeTab === 'reports' && (payRun.status !== 'draft' && reportableItems.length ? <ReportsDownloadPanel readOnly payPeriodId={payRun.id} payPeriodStatus={payRun.status} payDate={payRun.pay_date} /> : <p className="text-sm text-neutral-600">Reports are available after payroll is calculated.</p>)}
+      </Suspense>
     </div>
   </div>;
 
