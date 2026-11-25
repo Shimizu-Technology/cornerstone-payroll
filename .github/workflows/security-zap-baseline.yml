@@ -1,0 +1,75 @@
+name: Security ZAP Baseline
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  pull_request:
+    paths:
+      - "api/app/controllers/api/v1/employee_portal/**"
+      - "api/app/controllers/concerns/view_as_enforcement.rb"
+      - "api/config/initializers/cors.rb"
+      - "api/config/initializers/rack_attack.rb"
+      - "web/deploy/employee/**"
+      - "web/scripts/finalize-surface-dist.mjs"
+      - "web/src/EmployeeApp.tsx"
+      - "scripts/security/**"
+      - ".github/workflows/security-zap-baseline.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-zap-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  zap-baseline:
+    name: OWASP ZAP baseline (employee surface + API)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cornerstone_payroll_zap_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      RAILS_ENV: test
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_zap_test
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cornerstone_payroll_zap_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+          working-directory: api
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Load test schema
+        working-directory: api
+        run: bundle exec rails db:schema:load
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Run OWASP ZAP baseline against local employee web and API
+        run: bash scripts/security/zap_baseline_employee.sh --mode local --output-dir tmp/zap-reports
+      - name: Upload OWASP ZAP baseline reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owasp-zap-baseline-reports
+          path: tmp/zap-reports
+          retention-days: 30

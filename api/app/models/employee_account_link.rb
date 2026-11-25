@@ -30,7 +30,9 @@ class EmployeeAccountLink < ApplicationRecord
   validate :employee_belongs_to_live_company
 
   scope :portal_eligible, -> {
-    where(status: "active").or(where(status: "former").where("former_access_until > ?", Time.current))
+    now = Time.current
+    where(status: "active").or(where(status: "former").where("employee_account_links.former_access_until > ?", now))
+      .where("employee_account_links.activation_locked_until IS NULL OR employee_account_links.activation_locked_until <= ?", now)
   }
 
   # Narrow decision lookup that returns only :conflict, :allowed, :none or
