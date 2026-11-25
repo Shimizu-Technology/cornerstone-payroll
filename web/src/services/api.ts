@@ -5048,7 +5048,7 @@ export interface EmployeeContactActivity {
   employee_id: number;
   employee_name: string;
   changed_by_name: string | null;
-  change_kind: 'contact' | 'address';
+  change_kind: 'contact' | 'address' | 'delivery_consent';
   before_values: Record<string, unknown>;
   after_values: Record<string, unknown>;
   created_at: string;
@@ -5058,7 +5058,7 @@ export interface EmployeeContactActivity {
 
 export type ContactActivityFilters = {
   search?: string;
-  kind?: 'contact' | 'address';
+  kind?: 'contact' | 'address' | 'delivery_consent';
   status?: 'unconfirmed' | 'confirmed';
 };
 

@@ -10,6 +10,7 @@ import { EmployeeApiError, StepUpCancelledError } from './api';
 import { askManager } from './brand';
 import type { Address, AddressRequest, EmergencyContact, EmployeeProfile } from './contracts';
 import { useBrand, useEmployeeAuth, useReadySession } from './contexts';
+import { DeliveryConsentSection } from './consent';
 import { addressLines, formatPhone, longDate } from './format';
 import { useSignOut } from './hooks';
 import { Card, Chip, EmpButton, Field, FormMessage, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
@@ -608,6 +609,9 @@ export function MyInfoTab(): ReactElement {
               <p>Your phone number, email and home address will be listed here.</p>
             </Placeholder>
           </Card>
+        )}
+        {state.info.features.deliveryConsent && (
+          <DeliveryConsentSection kinds={['pay_statements', 'w2gu']} />
         )}
       </div>
       <AccountCard />

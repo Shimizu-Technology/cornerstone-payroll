@@ -11,7 +11,7 @@ module RlsTables
     check_print_runs check_reconciliation_events check_signoff_sheets
     check_supersession_rollout_approvals client_documents client_operating_profiles
     client_portal_messages client_portal_threads company_help_contacts company_pay_schedules company_workweeks
-    company_ytd_totals daily_time_records deduction_types department_ytd_totals departments
+    company_ytd_totals daily_time_records deduction_types delivery_consents department_ytd_totals departments
     direct_deposit_payment_confirmations employee_account_links employee_change_requests
     employee_compensation_changes employee_configuration_review_resolutions employee_contact_changes_to_confirm employee_deductions
     employee_document_requirement_events employee_document_requirements employee_documents employee_emergency_contacts employee_loans employee_notes
@@ -74,7 +74,7 @@ module RlsTables
   ].freeze
 
   RLS_GLOBAL_TABLES = %w[
-    annual_retirement_limits annual_tax_configs filing_status_configs information_return_thresholds
+    annual_retirement_limits annual_tax_configs delivery_disclosures filing_status_configs information_return_thresholds
     operational_queue_probes solid_queue_blocked_executions solid_queue_claimed_executions
     solid_queue_failed_executions solid_queue_jobs solid_queue_pauses solid_queue_processes
     solid_queue_ready_executions solid_queue_recurring_executions solid_queue_recurring_tasks

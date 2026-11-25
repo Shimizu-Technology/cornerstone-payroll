@@ -48,6 +48,7 @@ RSpec.describe OperatingProfileCatalog do
         employee_portal.features.stubs
         employee_portal.features.tax_forms
         employee_portal.features.profile_requests
+        employee_portal.features.delivery_consent
         employee_portal.features.documents
         employee_portal.features.pto
         employee_portal.features.bank_requests

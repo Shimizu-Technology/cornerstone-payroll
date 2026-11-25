@@ -7,7 +7,7 @@ module Api
       # job is current or former, the company's switches, and the next payday
       # when it is known for certain.
       class ContextController < BaseController
-        FEATURES = %i[stubs tax_forms profile_requests].freeze
+        FEATURES = %i[stubs tax_forms profile_requests delivery_consent].freeze
         OPEN_STATUSES = %w[draft calculated approved committed].freeze
 
         def show

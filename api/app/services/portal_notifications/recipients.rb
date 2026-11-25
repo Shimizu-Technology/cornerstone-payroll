@@ -60,7 +60,10 @@ module PortalNotifications
           subject.requested_by_link_id.present?
         return false if employee_submission && subject.cancelled?
 
-        if employee_submission || %w[address_approvals contact_changes employee_address_decisions].include?(event.category) ||
+        if event.event_type == "employee_contact_confirmation_requested" && subject.is_a?(EmployeeContactChangeToConfirm) &&
+            subject.change_kind == "delivery_consent"
+          return false unless CompanyFeatures.for(event.company).employee_portal_feature?(:delivery_consent)
+        elsif employee_submission || %w[address_approvals contact_changes employee_address_decisions].include?(event.category) ||
             event.event_type == "employee_contact_confirmation_requested"
           return false unless CompanyFeatures.for(event.company).employee_portal_feature?(:profile_requests)
         end
