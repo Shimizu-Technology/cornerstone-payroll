@@ -99,11 +99,17 @@ module PayrollReview
       audit!(package, "withdrawn")
     end
 
+    def self.client_can_decide?(package, actor)
+      package&.pending? && !package.changes_requested_at && actor&.active? && actor.client? &&
+        package.generated_by_id != actor.id && Current.view_as_grant.nil?
+    end
+
     def request_changes!(revision_id:, note:)
       package = nil
       with_decision_lock do
         package = decision_package!(revision_id)
         validate_approver!(actor)
+        deny_self_decision!(package, actor)
         note = note.to_s.strip
         raise Error, "Describe the change you need." if note.blank?
         raise Error, "Keep the note under 2,000 characters." if note.length > 2_000
@@ -122,6 +128,7 @@ module PayrollReview
       with_decision_lock do
         review_package = decision_package!(revision_id)
         validate_approver!(approver)
+        deny_self_decision!(review_package, approver) if approval_method == "client_portal"
         validate_recording_method!(approval_method, approver, recorded_by, evidence_reference)
 
         review_package.update!(
@@ -217,6 +224,10 @@ module PayrollReview
       end
     rescue StandardError => e
       Rails.logger.error("Payroll review notification failed: package=#{package.id} event=#{event} error=#{e.class}")
+    end
+
+    def deny_self_decision!(package, user)
+      raise Error, "You cannot decide a payroll preview you prepared." if package.generated_by_id == user.id
     end
 
     def validate_approver!(approver)
