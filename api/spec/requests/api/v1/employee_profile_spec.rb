@@ -567,7 +567,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_portals", hours_source: "manual",
       client_portal_enabled: true, employee_portal_enabled: true,
       options: { "employee_portal" => { "features" => { "profile_requests" => true } } }
-    )
+    ).tap { activate_employee_app!(company) }
   end
 
   def link_to(user, employee)

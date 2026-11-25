@@ -100,17 +100,27 @@ module RlsDatabase
       status["runtime_can_execute"] != false
   end
 
+  # The guard and tenant scope treat only a known bypass as a bypass, so an
+  # unreadable switch keeps them enforcing.
   def self.bypass_enabled?(connection)
-    # Tests can exercise the switch explicitly. Production consults the
-    # durable switch only after the direct runtime URL has been configured.
+    bypass_state(connection) == true
+  end
+
+  # true, false, or nil when the singleton row is missing (unknown). Callers
+  # that open something on "no bypass" must compare with false, so unknown
+  # fails closed. Tests can exercise the switch explicitly; production
+  # consults the durable switch only after the direct runtime URL has been
+  # configured.
+  def self.bypass_state(connection)
     return false unless RlsConfiguration.runtime_url
 
     cached = SWITCH_CACHE.get
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     return cached.first if cached && now < cached.last
 
-    enabled = connection.select_value("SELECT bypass_enabled FROM #{SWITCH} WHERE singleton") == true
-    SWITCH_CACHE.compare_and_set(cached, [ enabled, now + 5 ].freeze)
-    SWITCH_CACHE.get.first
+    value = connection.select_value("SELECT bypass_enabled FROM #{SWITCH} WHERE singleton")
+    state = [ true, false ].include?(value) ? value : nil
+    SWITCH_CACHE.compare_and_set(cached, [ state, now + 5 ].freeze)
+    state
   end
 end

@@ -55,7 +55,7 @@ RSpec.describe "View-only support sessions", type: :request do
         subdomain_enabled: true, employee_portal: { features: { stubs: true, profile_requests: true, delivery_consent: true, tax_forms: true } }
       }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(target)
   end
 
   it "requires verified real staff, the explicit permission and a reason" do
@@ -551,7 +551,17 @@ RSpec.describe "View-only support sessions", type: :request do
       let(:demo_employee) { create(:employee, company: demo, first_name: "Robin", last_name: "Lantern") }
       let(:demo_worker) { create(:user, company: demo, role: :portal_employee, email: demo_email, clerk_id: "user_demo_worker") }
 
-      before { enable_employee_surface!(demo) }
+      before do
+        # M4-9d: in shadow mode a demo opens only under the owner's early-access
+        # window, on a process running the RLS guard as the restricted role.
+        allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
+          .and_return({ phase: "shadow", enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 1 })
+        allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
+        owner = create(:user, role: :super_admin, company: company, organization: company.organization)
+        EmployeeAppEarlyAccessWindow.create!(organization: demo.organization, company_ids: [ demo.id ],
+          expires_on: PayrollBusinessClock.today + 7, reason: "Owner approved the demo rehearsal", set_by: owner)
+        enable_employee_surface!(demo)
+      end
 
       it "views a demo employee like a live client's, inside the demo company only" do
         link = EmployeeAccountLink.create!(user: demo_worker, company: demo, employee: demo_employee, status: "active")

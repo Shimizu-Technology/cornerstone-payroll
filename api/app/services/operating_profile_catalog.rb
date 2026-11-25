@@ -41,7 +41,8 @@ class OperatingProfileCatalog
         example: example,
         effect: effect,
         requires: requires,
-        locked_until_milestone: OperatingProfileCatalog.locked_milestone_for(self)
+        locked_until_milestone: OperatingProfileCatalog.locked_milestone_for(self),
+        managed_by_employee_app_switch: OperatingProfileCatalog::EMPLOYEE_APP_SWITCH_IDS.include?(id)
       }
     end
   end
@@ -79,6 +80,12 @@ class OperatingProfileCatalog
     "time_module_enabled" => 6
   }.freeze
   M4_TO_M6_TOGGLE_IDS = LOCKED_TOGGLE_MILESTONES.keys.freeze
+  # Turned on per company from the Employee app switch (M4-9d), behind its
+  # readiness checks; see EmployeeAppSwitch::KEYS.
+  EMPLOYEE_APP_SWITCH_IDS = %w[
+    employee_portal_enabled subdomain_enabled employee_portal.features.stubs employee_portal.features.tax_forms
+    employee_portal.features.profile_requests employee_portal.features.delivery_consent
+  ].freeze
 
   OFFERING_PRESETS = {
     "payroll_service" => { "hours_source" => "manual", "intake_adapter" => nil, "client_portal_enabled" => false },

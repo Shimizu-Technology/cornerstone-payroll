@@ -70,7 +70,7 @@ module EmployeeLinkHelpers
       effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service", hours_source: "manual",
       employee_portal_enabled: true, options: { subdomain_enabled: subdomain }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(company)
   end
 
   # Runs the way a staff controller does: a company scope, with the RLS guard

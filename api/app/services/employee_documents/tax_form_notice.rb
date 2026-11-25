@@ -89,7 +89,7 @@ module EmployeeDocuments
     def send!(notice, document)
       to = document.employee.email
       notice.update!(attempts: notice.attempts + 1, recipient_email: to)
-      response = DemoOutbound.scoped(document.company) do
+      response = DemoOutbound.scoped(document.company, channel: CHANNEL) do
         PortalNotifications::Transport.deliver(payload(document, to), idempotency_key: "employee-tax-form-notice-#{document.id}")
       end
       if response["suppressed"]

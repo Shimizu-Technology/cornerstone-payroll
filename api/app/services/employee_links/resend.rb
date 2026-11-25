@@ -46,6 +46,7 @@ module EmployeeLinks
       # the login and its invitation are still the ones Clerk closed.
       closed = prepare_clerk!(current_pending_login)
       result = ApplicationRecord.transaction do
+        EmployeeLinks.lock_for_issuance!(@link.company)
         # EmployeeLinks lock order: employee, then the link's login, then the link.
         employee.lock!
         pending_id = EmployeeAccountLink.where(id: @link.id).pick(:user_id)

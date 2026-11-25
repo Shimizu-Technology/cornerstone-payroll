@@ -21,6 +21,18 @@ production:
     queue: default
     schedule: "15 3 * * * Pacific/Guam"
 
+  # The demo early-access rule ends on its own after its expiry date (M4-9d).
+  close_expired_demo_early_access:
+    class: CloseExpiredDemoEarlyAccessJob
+    queue: default
+    schedule: every 15 minutes
+
+  # Re-enqueues demo kill switch Clerk revocations left without a job (M4-9d).
+  retry_employee_app_clerk_revocations:
+    class: RetryEmployeeAppClerkRevocationsJob
+    queue: default
+    schedule: every 15 minutes
+
   expire_practice_portal_access:
     class: ExpirePracticePortalAccessJob
     queue: default
