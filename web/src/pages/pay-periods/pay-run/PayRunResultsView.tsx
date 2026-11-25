@@ -32,7 +32,7 @@ export function PayRunResultsView(props: Props) {
     if (item.employment_type === 'salary' && !hasSalaryTimekeeping) {
       return payPeriod.includes_base_salary === false
         ? <span className="text-neutral-600" title="Salary hours do not apply to this run">—</span>
-        : <span className="whitespace-normal text-xs font-medium text-warning-700" title="No salary timekeeping record was available for this payroll item">Not recorded</span>;
+        : <span className="whitespace-normal text-xs font-medium text-neutral-600" title="Paid by salary; no hours were recorded for this payroll item">Salary</span>;
     }
     const regular = Number(item.hours_worked || 0).toFixed(2);
     const overtime = Number(item.overtime_hours || 0).toFixed(2);

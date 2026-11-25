@@ -53,12 +53,27 @@ afterEach(cleanup);
 it('shows the current revision and keeps the superseded one visible', async () => {
   renderAt('client');
   expect(await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' })).toBeTruthy();
-  expect(screen.getByText('Pay date Nov 20, 2026')).toBeTruthy();
+  expect(screen.getByText(/Pay date Nov 20, 2026/)).toBeTruthy();
   const current = screen.getByRole('region', { name: 'Revision 2' });
   expect(within(current).getByText('Current')).toBeTruthy();
   expect(within(current).getByText(/Sam Worker · 35 hours paid leave/)).toBeTruthy();
   expect(screen.getByText('Superseded')).toBeTruthy();
   expect(screen.getByText('Sent to Cornerstone')).toBeTruthy();
+});
+
+it('links clients to Messages for the period conversation without rendering an inline composer', async () => {
+  mocks.get.mockResolvedValue({ data: period({ thread_id: 55 }) });
+  renderAt('client');
+  const link = await screen.findByRole('link', { name: /Open this period’s conversation in Messages/ });
+  expect(link.getAttribute('href')).toBe('/messages?thread_id=55');
+  expect(screen.queryByRole('button', { name: 'Send message' })).toBeNull();
+});
+
+it('carries the period reference to Messages when no period conversation exists yet', async () => {
+  mocks.get.mockResolvedValue({ data: period({ id: null, ref: '2026-11-02_2026-11-15', thread_id: null }) });
+  renderAt('client', '/payroll-files/2026-11-02_2026-11-15');
+  const link = await screen.findByRole('link', { name: /Start this period’s conversation in Messages/ });
+  expect(link.getAttribute('href')).toBe('/messages?period_ref=2026-11-02_2026-11-15');
 });
 
 it('sends an update as a new revision carrying the Revel PDF forward with a stable retry key', async () => {

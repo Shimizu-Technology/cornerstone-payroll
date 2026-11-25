@@ -32,8 +32,8 @@ it('defaults to employee and net together, opens the existing review and retains
 });
 
 it.each([
-  { baseSalary: true, regular: 0, source: null, expected: 'Not recorded' },
-  { baseSalary: undefined, regular: 0, source: null, expected: 'Not recorded' },
+  { baseSalary: true, regular: 0, source: null, expected: 'Salary' },
+  { baseSalary: undefined, regular: 0, source: null, expected: 'Salary' },
   { baseSalary: false, regular: 0, source: null, expected: '—' },
   { baseSalary: true, regular: 0, source: 'schedule' as const, expected: '0.00' },
   { baseSalary: false, regular: 0, source: 'schedule' as const, expected: '0.00' },
@@ -48,6 +48,11 @@ it.each([
   expect(desktopHours.textContent).toBe(expected);
   expect(phoneHours.textContent).toBe(expected);
   expect(screen.getByRole('row', { name: /Totals \(1\)/ }).textContent).toContain('42.00');
+  if (expected === 'Salary') for (const cell of [desktopHours, phoneHours]) {
+    const label = within(cell as HTMLElement).getByText('Salary');
+    expect(label.className).toContain('text-neutral-600');
+    expect(label.className).not.toContain('warning');
+  }
 });
 it('reveals full tax columns using the keyboard and persists the preference', async (): Promise<void> => {
   const user = userEvent.setup(); const view = setup();

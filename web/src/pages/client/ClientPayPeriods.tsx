@@ -114,7 +114,7 @@ export function ClientPayPeriods(): ReactElement {
 
   return (
     <div>
-      <Header title="Pay Periods" description="Review payroll runs and employee pay information." />
+      <Header title="Pay periods" description="Review payroll runs and employee pay information." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
@@ -123,7 +123,7 @@ export function ClientPayPeriods(): ReactElement {
             <h2 className="font-semibold">{formatDateRange(openPeriodSummary.start_date, openPeriodSummary.end_date)}</h2>
             <p className="text-sm">{openPeriodSummary.pay_date ? `Pay date ${formatDate(openPeriodSummary.pay_date)}` : 'Pay date to be set'} · {clientPayrollStatus(openPeriodSummary.client_payroll_status)}</p>
             <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/payroll-files/${encodeURIComponent(openPeriodSummary.ref)}`}>
-              Open Pay Period Files
+              Open pay period files
             </Link>
           </Card>
         )}
@@ -168,11 +168,11 @@ export function ClientPayPeriods(): ReactElement {
             <Table stickyHeader>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pay Period</TableHead>
-                  <TableHead>Pay Date</TableHead>
+                  <TableHead>Pay period</TableHead>
+                  <TableHead>Pay date</TableHead>
                   <TableHead>Employees</TableHead>
-                  <TableHead>Gross Pay</TableHead>
-                  <TableHead>Net Pay</TableHead>
+                  <TableHead>Gross pay</TableHead>
+                  <TableHead>Net pay</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -191,8 +191,8 @@ export function ClientPayPeriods(): ReactElement {
                       <PeriodStatusBadge period={period} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => openPeriod(period)}>
-                        {period.can_decide_payroll_review ? 'Review & Approve' : 'View'}
+                      <Button variant="ghost" size="sm" className="min-h-11 sm:min-h-11" onClick={() => openPeriod(period)}>
+                        {period.can_decide_payroll_review ? 'Review & approve' : 'View'}
                       </Button>
                     </TableCell>
                   </TableRow>

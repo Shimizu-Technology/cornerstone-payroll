@@ -96,7 +96,7 @@ export async function loadAllEmployees(fetchPage: (page: number) => Promise<Empl
 type SharedPeriodApi = {
   list: () => Promise<{ data: PeriodSummary[]; meta: { derives_from_schedule: boolean } }>;
   get: (ref: string) => Promise<Detail>;
-  message: (ref: string, data: { body: string; idempotency_key: string }) => Promise<{ data: ClientPortalMessage; thread_id: number }>;
+  message: (ref: string, data: { body?: string; document_ids?: number[]; idempotency_key: string }) => Promise<{ data: ClientPortalMessage; thread_id: number }>;
 };
 
 function sharedApi(base: '/client' | '/admin'): SharedPeriodApi {
@@ -104,7 +104,7 @@ function sharedApi(base: '/client' | '/admin'): SharedPeriodApi {
   return {
     list: () => api.get<{ data: PeriodSummary[]; meta: { derives_from_schedule: boolean } }>(root),
     get: (ref: string) => api.get<Detail>(`${root}/${encode(ref)}`),
-    message: (ref: string, data: { body: string; idempotency_key: string }) =>
+    message: (ref: string, data: { body?: string; document_ids?: number[]; idempotency_key: string }) =>
       api.post<{ data: ClientPortalMessage; thread_id: number }>(`${root}/${encode(ref)}/messages`, data),
   };
 }
