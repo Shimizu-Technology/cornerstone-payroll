@@ -70,6 +70,16 @@ beforeEach(() => {
 });
 
 describe('Users accessible account controls', () => {
+  it('marks a legacy admin account in both the phone and desktop lists', async () => {
+    apiMocks.users.list.mockResolvedValue({ data: [{ ...originalUser, id: 3, name: 'Legacy Admin', email: 'legacy-admin@example.invalid', role: 'admin' }, originalUser] });
+    render(<Users />);
+
+    const labels = await screen.findAllByText('Organization Admin (legacy)');
+    expect(labels.some((label) => Boolean(label.closest('table')))).toBe(true);
+    expect(labels.some((label) => !label.closest('table'))).toBe(true);
+    expect(screen.getAllByText('Accountant').length).toBeGreaterThanOrEqual(2);
+  });
+
   it.each(['mobile', 'desktop'] as const)('cancels named edits and saves the intended user and assignments in the %s presentation', async (presentation) => {
     const user = userEvent.setup();
     apiMocks.users.list.mockResolvedValueOnce({ data: [originalUser] }).mockResolvedValue({ data: [savedUser] });

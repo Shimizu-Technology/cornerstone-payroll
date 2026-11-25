@@ -230,18 +230,17 @@ export function YearEndChecklist(): ReactElement {
               ))}
             </ol>
 
-            {canManageCopies && (
-              <EmployeeW2Copies key={`w2-copies:${scope}`} companyId={companyId} companyName={checklist.company.name} year={year}
-                canWrite={canWriteCompany(activeCompany, 'manage_client_administration')} checklistLoading={loading} />
-            )}
-
-            <PayrollHistoryReview key={`payroll-history:${scope}`} companyId={companyId} year={year} onSaved={onSaved} onRefresh={onRefresh} />
-
             {(checklist.files_w2 || checklist.files_1099) && (
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">{checklist.steps.length + 1}. File and confirm</CardTitle>
-                  <CardDescription>After you file outside the app, keep the receipt and the agency's result here.</CardDescription>
+                <CardHeader className="flex-row items-start gap-3 space-y-0">
+                  {/* Numbered like the step cards above: filing comes after the last step. */}
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-sm font-bold text-neutral-700" aria-hidden="true">
+                    {checklist.steps.length + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <CardTitle className="text-base"><span className="sr-only">Step {checklist.steps.length + 1}: </span>File and confirm</CardTitle>
+                    <CardDescription>After you file outside the app, keep the receipt and the agency's result here.</CardDescription>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {checklist.files_w2 && ((checklist.tax_year >= 2026 ? ['ssa', 'drt'] : [undefined]).map((agency) => (
@@ -268,6 +267,14 @@ export function YearEndChecklist(): ReactElement {
                 </CardContent>
               </Card>
             )}
+
+            <p className="pt-2 text-sm font-semibold text-neutral-700">Also for this year</p>
+            {canManageCopies && (
+              <EmployeeW2Copies key={`w2-copies:${scope}`} companyId={companyId} companyName={checklist.company.name} year={year}
+                canWrite={canWriteCompany(activeCompany, 'manage_client_administration')} checklistLoading={loading} />
+            )}
+
+            <PayrollHistoryReview key={`payroll-history:${scope}`} companyId={companyId} year={year} onSaved={onSaved} onRefresh={onRefresh} />
           </>
         )}
       </div>

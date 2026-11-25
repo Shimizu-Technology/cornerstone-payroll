@@ -25,6 +25,27 @@ export function payrollPaymentLabel(record: PayrollPaymentRecord): string {
   return source || (record.check_number ? 'Paper check' : 'Not recorded');
 }
 
+interface PaymentEvidenceRecord {
+  payment_delivery_method?: string | null;
+  payment_evidence?: { status: string; label: string } | null;
+}
+
+/**
+ * The server can't tell a transfer Cornerstone still has to confirm from one
+ * handled outside the app, so an unconfirmed direct deposit stays an open item
+ * that staff can confirm from the pay run's Checks tab.
+ */
+export function paymentEvidenceLabel(record: PaymentEvidenceRecord): string {
+  const evidence = record.payment_evidence;
+  if (!evidence) return 'Payment evidence not available';
+  if (needsBankPaymentConfirmation(record)) return 'Bank payment not confirmed yet';
+  return evidence.label;
+}
+
+export function needsBankPaymentConfirmation(record: PaymentEvidenceRecord): boolean {
+  return record.payment_delivery_method === 'direct_deposit' && record.payment_evidence?.status === 'unissued';
+}
+
 interface PayRunPaymentDisplay {
   method: string;
   description: string;

@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
+import { useEffect, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react';
 import { Link, createMemoryRouter, RouterProvider, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AirePayrollCalendarState, Employee, PayPeriod, TimeTrackingExclusionCounts } from '@/types';
@@ -90,9 +90,13 @@ vi.mock('@/components/payroll/PaymentMethodDialog', () => ({
   PaymentMethodDialog: ({ onSaved }: { onSaved: () => Promise<void> }) => { componentMocks.paymentMethodSaved(onSaved); return null; },
 }));
 vi.mock('@/components/checks/NonEmployeeChecksPanel', () => ({
-  NonEmployeeChecksPanel: ({ onChecksLoaded, onChecksChanged }: { onChecksLoaded?: (checks: []) => void; onChecksChanged?: () => void }) => componentMocks.finalRecordEnabled
-    ? <><button onClick={() => onChecksLoaded?.([])}>Saved liability check changed</button>
-      <button onClick={onChecksChanged}>Liability saved without a list reload</button></> : null,
+  NonEmployeeChecksPanel: ({ onChecksLoaded, onChecksChanged }: { onChecksLoaded?: (checks: []) => void; onChecksChanged?: () => void }) => {
+    // Like the real panel, report the initial load once it finishes.
+    useEffect(() => { if (componentMocks.finalRecordEnabled) onChecksLoaded?.([]); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    return componentMocks.finalRecordEnabled
+      ? <><button onClick={() => onChecksLoaded?.([])}>Saved liability check changed</button>
+        <button onClick={onChecksChanged}>Liability saved without a list reload</button></> : null;
+  },
 }));
 vi.mock('@/components/reports/ReportsDownloadPanel', () => ({ ReportsDownloadPanel: () => null }));
 vi.mock('@/components/payroll/PayrollFinalRecordPanel', async importOriginal => {
@@ -725,6 +729,27 @@ function approvedCommitView(refreshToken = 0, withAire = false) {
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved', ...(withAire ? { time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } : {}) } as PayPeriod} refreshToken={refreshToken} />} />
   </Routes></MemoryRouter>;
 }
+it('leads the approved header with the commit step even when time tracking hours were never added', async () => {
+  vi.clearAllMocks();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } });
+  render(approvedCommitView(0, true));
+  const next = await screen.findByRole('link', { name: "Approved. Commit when you're ready." });
+  expect(next.getAttribute('href')).toContain('#payroll-commit');
+  expect(screen.queryByRole('link', { name: 'Time tracking hours have not been added' })).toBeNull();
+});
+it('keeps the time tracking coverage note in the header while hours can still be added', async () => {
+  vi.clearAllMocks();
+  const calculated = { ...initialPayPeriod, status: 'calculated', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as PayPeriod;
+  apiMocks.get.mockResolvedValue({ pay_period: calculated });
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={calculated} />} />
+  </Routes></MemoryRouter>);
+  const note = await screen.findByRole('link', { name: 'Time tracking hours have not been added' });
+  expect(note.getAttribute('href')).toContain('#time-tracking-sync');
+});
 it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
   vi.clearAllMocks(); render(approvedCommitView());
   fireEvent.click(await findPayRunButton('Commit'));
@@ -1328,6 +1353,8 @@ it('refreshes final liability totals when the non-employee check observer report
   enableFinalRecord();
   await renderCorrectionRefresh();
   await screen.findByText('$316.50 outstanding');
+  // The checks panel's initial load doesn't fetch the final record a second time.
+  expect(apiMocks.payrollFinalRecord).toHaveBeenCalledTimes(1);
   apiMocks.payrollFinalRecord.mockResolvedValueOnce({ final_record: { ...payrollFinalRecordFixture,
     company: { id: 7, name: 'Synthetic correction client' }, pay_period: { ...payrollFinalRecordFixture.pay_period, id: 12 },
     liabilities: { ...payrollFinalRecordFixture.liabilities, paid_amount: '316.5', outstanding_amount: '0.0' } } });

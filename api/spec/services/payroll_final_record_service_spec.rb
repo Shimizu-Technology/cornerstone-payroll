@@ -91,6 +91,29 @@ RSpec.describe PayrollFinalRecordService do
     expect(result.dig(:completion, :open_items).join).not_to include("employee check")
   end
 
+  it "loads the year's pay periods once, not once per payroll item" do
+    pay_period_queries = lambda do
+      count = 0
+      counter = ->(*, payload) { count += 1 if !payload[:cached] && payload[:sql].include?('FROM "pay_periods"') }
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") do
+        ActiveRecord::Base.cache { described_class.new(pay_period: period).call }
+      end
+      count
+    end
+    add_earlier_payroll = lambda do |month|
+      earlier = create(:pay_period, :committed, company:, start_date: Date.new(2026, month, 1),
+        end_date: Date.new(2026, month, 15), pay_date: Date.new(2026, month, 20))
+      create(:payroll_item, company:, pay_period: earlier, employee:, gross_pay: 500, net_pay: 400)
+    end
+
+    add_earlier_payroll.call(5)
+    baseline = pay_period_queries.call
+    add_earlier_payroll.call(6)
+    add_earlier_payroll.call(7)
+
+    expect(pay_period_queries.call).to eq(baseline)
+  end
+
   it "rejects a draft because it is not an official payroll record" do
     period.update!(status: "draft", committed_at: nil)
 

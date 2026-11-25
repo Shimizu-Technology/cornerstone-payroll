@@ -191,8 +191,11 @@ class PayrollFinalRecordService
       start_date: Date.new(pay_period.pay_date.year, 1, 1),
       end_date: pay_period.pay_date
     )
+    # source_summary reads each item's pay date; preload the periods so a
+    # year of payrolls is one query instead of one per item.
     native = PayrollItem.joins(:pay_period)
       .includes(:payroll_item_field_entries, payroll_item_deductions: :deduction_type)
+      .preload(:pay_period)
       .financially_reportable.reportable
       .where(company_id: pay_period.company_id, pay_periods: {
         id: PayPeriod.reportable_committed.where(company_id: pay_period.company_id, pay_date: period.range).select(:id)
