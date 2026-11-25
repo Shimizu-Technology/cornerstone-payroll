@@ -7,11 +7,15 @@ export interface EmployeeTaxFormCopy {
   employee_id: number;
   employee_name: string | null;
   status: 'posted' | 'withdrawn';
+  revision: number;
   posted_at: string;
+  withdrawn_at: string | null;
+  withdrawn_by: string | null;
   withdrawal_note: string | null;
   inputs_changed_since_posting: boolean;
   notice: {
     status: 'pending' | 'sent' | 'skipped' | 'failed';
+    skip_reason?: string | null;
     delivery_status: 'unknown' | 'delivered' | 'delayed' | 'bounced' | 'complained';
   } | null;
 }

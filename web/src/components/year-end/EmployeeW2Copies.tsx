@@ -7,11 +7,33 @@ import { Textarea } from '@/components/ui/textarea';
 import { formatGuamDate } from '@/lib/utils';
 import { employeeTaxFormsApi, type EmployeeTaxFormCopy, type EmployeeTaxForms, type W2Delivery } from '@/services/employee-tax-forms-api';
 
+const skipReasons: ReadonlyMap<string, string> = new Map([
+  ['document_unavailable', 'Copy unavailable'],
+  ['feature_off', 'Tax forms are turned off'],
+  ['no_app_access', 'No app access yet'],
+  ['email_not_verified', 'Email not verified'],
+  ['email_delivery_disabled', 'Email notices are turned off'],
+  ['email_not_configured', 'Email delivery is not set up'],
+  ['recipient_not_allowed', 'Recipient is not allowed for test delivery'],
+]);
+
+function copyStatus(copy: EmployeeTaxFormCopy): string {
+  if (copy.status === 'posted') return `Posted ${formatGuamDate(copy.posted_at)}`;
+
+  const date = formatGuamDate(copy.withdrawn_at);
+  return `Withdrawn${date ? ` ${date}` : ''}${copy.withdrawn_by ? ` by ${copy.withdrawn_by}` : ''}`;
+}
+
 function noticeLabel(notice: EmployeeTaxFormCopy['notice']): string {
-  if (!notice) return 'Unknown';
+  if (!notice) return 'Not scheduled yet';
   if (notice.delivery_status === 'bounced') return 'Bounced';
   if (notice.delivery_status === 'complained') return 'Reported as spam';
-  if (notice.status !== 'sent') return { pending: 'Waiting to send', skipped: 'Skipped', failed: 'Send failed' }[notice.status];
+  if (notice.status === 'skipped') {
+    const reason = skipReasons.get(notice.skip_reason ?? '');
+    return reason ? `Skipped · ${reason}` : 'Skipped';
+  }
+  if (notice.status === 'pending') return 'Waiting to send';
+  if (notice.status === 'failed') return 'Send failed';
   return {
     unknown: 'Sent · Delivery unknown',
     delivered: 'Sent · Delivered',
@@ -40,6 +62,10 @@ export function EmployeeW2Copies({ companyId, companyName, year, canWrite, check
   const reasonId = useId();
   const historyTitle = useRef<HTMLHeadingElement>(null);
   const api = employeeTaxFormsApi(companyId, year);
+  const copiesPerEmployee = new Map<number, number>();
+  for (const copy of list?.documents ?? []) {
+    copiesPerEmployee.set(copy.employee_id, (copiesPerEmployee.get(copy.employee_id) ?? 0) + 1);
+  }
   const delivery = deliveryDraft ?? list?.w2_delivery ?? '';
   const busy = checklistLoading || loading || pending;
   const canChange = canWrite && !busy && !loadError;
@@ -157,8 +183,11 @@ export function EmployeeW2Copies({ companyId, companyName, year, canWrite, check
               {list.documents.map((copy) => (
                 <li key={copy.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
                   <div className="min-w-0 space-y-1 text-sm [overflow-wrap:anywhere]">
-                    <p className="font-semibold text-neutral-950">{copy.employee_name ?? `Employee #${copy.employee_id}`}</p>
-                    <p className="text-neutral-700">{copy.status === 'posted' ? `Posted ${formatGuamDate(copy.posted_at)}` : 'Withdrawn'} · Email notice: {noticeLabel(copy.notice)}</p>
+                    <p className="font-semibold text-neutral-950">
+                      {copy.employee_name ?? `Employee #${copy.employee_id}`}
+                      {(copiesPerEmployee.get(copy.employee_id) ?? 0) > 1 && <span className="font-normal text-neutral-700"> · Revision {copy.revision}</span>}
+                    </p>
+                    <p className="text-neutral-700">{copyStatus(copy)} · Email notice: {noticeLabel(copy.notice)}</p>
                     {copy.inputs_changed_since_posting && <p className="font-medium text-warning-800">W-2 figures changed since posting.</p>}
                     {copy.withdrawal_note && <p className="text-neutral-700">Withdrawal reason: {copy.withdrawal_note}</p>}
                   </div>
