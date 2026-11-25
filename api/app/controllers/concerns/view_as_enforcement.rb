@@ -37,21 +37,22 @@ module ViewAsEnforcement
     return view_as_unavailable unless grant.open? && ViewAsGrant.allowed_staff?(Current.real_user) &&
       ViewAsGrant.allowed_company?(Current.real_user, grant.company) && view_as_surface_allowed?(grant)
 
-    TenantScope.with_company(grant.company_id) do
+    target_user = TenantScope.with_company(grant.company_id) do
       if grant.employee_view?
         @view_as_employee_context = grant.employee_context
         return view_as_unavailable unless @view_as_employee_context
 
-        @current_user = @view_as_employee_context.user
+        @view_as_employee_context.user
       else
-        target = grant.client_target
-        return view_as_unavailable unless target
+        client = grant.client_target
+        return view_as_unavailable unless client
 
-        @current_user = target
+        client
       end
     end
     @view_as_real_user = Current.real_user
     @applied_view_as_grant = Current.view_as_grant = grant
+    @current_user = target_user
     Current.company_id = @current_company_id = grant.company_id
     Current.organization_id = grant.company.organization_id
     Current.user = @current_user
