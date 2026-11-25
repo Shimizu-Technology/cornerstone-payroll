@@ -69,22 +69,39 @@ RSpec.describe StagingCloneContainment do
     expect(StagingQuarantine.suppressed?("solid_queue_jobs", fresh.id)).to eq(false)
   end
 
-  it "clears subdomain enablement from all copied profiles during quarantine" do
+  it "clears subdomain enablement from all copied profiles and revokes copied activations during quarantine" do
     today = PayrollBusinessClock.today
     company = create(:company, subdomain_slug: "cloned-client")
     current = company.client_operating_profiles.create!(
       effective_on: today, ends_on: today, version: 1, offering: "payroll_service",
-      hours_source: "manual", options: { subdomain_enabled: true, time_module_enabled: true }
+      hours_source: "manual", options: { subdomain_enabled: true }
     )
+    # Copied as production stored it: a legacy row may hold a now-locked
+    # flag on, which the model would refuse to save today.
+    current.update_columns(options: current.options.merge("time_module_enabled" => true))
     scheduled = company.client_operating_profiles.create!(
       effective_on: today + 1.day, version: 2, offering: "payroll_service",
       hours_source: "manual", options: { subdomain_enabled: true }
     )
+    actor = create(:user, company: company, organization: company.organization, role: :org_admin)
+    activate_employee_app!(company, %w[employee_portal_enabled subdomain_enabled], actor: actor)
+    revoked_earlier = TenantScope.as_system(reason: "spec") do
+      EmployeeAppActivation.where(company_id: company.id, part: "subdomain_enabled").sole.tap do |row|
+        row.update!(revoked_at: 1.day.ago, revoke_reason: "Turned off earlier")
+      end
+    end
 
     described_class.new.quarantine(apply: true)
 
     expect(current.reload.options).to include("subdomain_enabled" => false, "time_module_enabled" => true)
     expect(scheduled.reload.options).to include("subdomain_enabled" => false)
+    TenantScope.as_system(reason: "spec") do
+      expect(EmployeeAppActivation.where(company_id: company.id, revoked_at: nil)).to be_empty
+      expect(EmployeeAppActivation.find_by!(company_id: company.id, part: "employee_portal_enabled").revoke_reason)
+        .to eq("STAGING clone quarantine")
+      expect(revoked_earlier.reload.revoke_reason).to eq("Turned off earlier")
+    end
+    expect(EmployeeAppSwitch.switched_on_values(company).values).to all(be(false))
   end
 
   it "makes no tester binding writes when provider identity proof fails" do
