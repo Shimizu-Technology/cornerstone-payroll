@@ -21,7 +21,10 @@ module Api
         # GET /api/v1/employee/links
         def links
           links = @current_user.employee_account_links.portal_eligible.includes(company: :organization).order(:id)
-            .select { |link| link.portal_enabled? && EmployeeLinks.origin_allows_company?(azp, link.company_id) }
+            .select do |link|
+              link.portal_enabled? && EmployeeLinks.origin_allows_company?(azp, link.company_id) &&
+                EmployeeLinks.demo_boundary_allows?(@current_user, link.company)
+            end
           response.headers["Cache-Control"] = "no-store"
           render json: { links: links.map { |link| link_payload(link) } }
         end

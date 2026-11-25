@@ -21,6 +21,10 @@ module EmployeeLinks
   # lock_users: logins the caller will change, given the link as first read
   # (unlocked). They are locked before the link (EmployeeLinks lock order);
   # if the link's login changed in between, the check fails generically.
+  #
+  # admit: whether the caller could ever use the link, given its first,
+  # unlocked read. A link it can't is treated like no match: nothing is
+  # locked, counted or written on it.
   class Verify
     ALERT_LOCKS = 3
     ALERT_WINDOW = 1.hour
@@ -35,12 +39,13 @@ module EmployeeLinks
       new(**options).call(&block)
     end
 
-    def initialize(token:, code:, date_of_birth:, ssn_last4:, request: nil, lock_users: nil)
+    def initialize(token:, code:, date_of_birth:, ssn_last4:, request: nil, lock_users: nil, admit: nil)
       @credential = Credentials.select(token: token, code: code)
       @date_of_birth = date_of_birth
       @ssn_last4 = ssn_last4
       @request = request
       @lock_users = lock_users
+      @admit = admit
     end
 
     # Returns the block's outcome, or nil for every kind of failure.
@@ -90,12 +95,12 @@ module EmployeeLinks
     end
 
     def lock_link(lookup)
-      return EmployeeAccountLink.lock.find_by(lookup) unless @lock_users
+      return EmployeeAccountLink.lock.find_by(lookup) unless @lock_users || @admit
 
       first_read = EmployeeAccountLink.find_by(lookup)
-      return unless first_read
+      return unless first_read && (@admit.nil? || @admit.call(first_read))
 
-      EmployeeLinks.lock_users!(Array(@lock_users.call(first_read)).map(&:id))
+      EmployeeLinks.lock_users!(Array(@lock_users.call(first_read)).map(&:id)) if @lock_users
       link = EmployeeAccountLink.lock.find_by(lookup.merge(id: first_read.id))
       link if link&.user_id == first_read.user_id
     end

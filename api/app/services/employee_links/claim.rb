@@ -36,7 +36,10 @@ module EmployeeLinks
       # The claimant (and an abandoned pending sign-up on the link) are locked
       # before the link, so two claims by one login serialize and the second
       # sees the first's link as open (EmployeeLinks lock order).
-      link = Verify.call(**@check, request: @request, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
+      # A link on the other side of the demo boundary is refused before
+      # anything on it is locked, counted or written.
+      admit = ->(first_read) { EmployeeLinks.demo_boundary_allows?(@user, first_read.company) }
+      link = Verify.call(**@check, request: @request, admit: admit, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
         # Re-read the login under its lock (taken before the link's).
         @user.reload
         next unless user_allowed? && claimable?(candidate)
@@ -73,6 +76,7 @@ module EmployeeLinks
     def claimable?(link)
       return false if link.claim_user_id.present? && link.claim_user_id != @user.id
       return false unless link.company.organization_id == @user.organization_id
+      return false unless EmployeeLinks.demo_boundary_allows?(@user, link.company)
       return false unless EmployeeLinks.origin_allows_company?(@azp, link.company_id)
       return false unless DemoOutbound.permit?(company: link.company, email: @user.email, channel: "employee_link_claim", user: @user)
       return false if link.user_id.present? && link.user_id != @user.id && !pending_sign_up?(link.user)

@@ -60,7 +60,42 @@ RSpec.describe "Demo company staff and client access", type: :request do
       expect(User.find(live_client.id).accessible_company_ids).to contain_exactly(live.id)
 
       unassigned = create(:user, company: demo, organization: organization, role: "client", email: user_email)
-      expect(unassigned.accessible_company_ids).to eq([ demo.id ])
+      expect(unassigned.accessible_company_ids).to be_empty
+      expect(unassigned.payroll_access_allowed?).to be(false)
+    end
+
+    it "lets an admin deactivate a demo client login after its address left the allow-list" do
+      maren = demo_client
+      ENV[DemoOutbound::ENV_KEY] = user_email
+      expect(User.find(maren.id).payroll_access_allowed?).to be(false)
+      sign_in(admin)
+      post "/api/v1/admin/users/#{maren.id}/deactivate"
+      expect(response).to have_http_status(:ok), response.body
+      expect(maren.reload).to have_attributes(active: false, deactivation_reason: "deactivated")
+      # Reactivating needs the address back on the allow-list.
+      post "/api/v1/admin/users/#{maren.id}/activate"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(maren.reload.active).to be(false)
+    end
+
+    it "never turns a demo client identity into staff or moves it to a live client" do
+      maren = demo_client
+      expect(maren.tap { |user| user.role = "org_admin" }).not_to be_valid
+      maren.reload
+      expect(maren.tap { |user| user.company = live }).not_to be_valid
+
+      sign_in(admin)
+      %w[org_admin admin accountant manager].each do |role|
+        patch "/api/v1/admin/users/#{maren.id}", params: { user: { role: role } }
+        expect(response).to have_http_status(:unprocessable_entity), "#{role}: #{response.body}"
+        expect(response.body).not_to match(/demo/i)
+      end
+      expect(maren.reload).to have_attributes(role: "client", company_id: demo.id)
+      expect(maren.company_assignments.pluck(:company_id)).to eq([ demo.id ])
+      expect(maren.accessible_company_ids).to eq([ demo.id ])
+
+      patch "/api/v1/admin/users/#{live_client.id}", params: { user: { role: "accountant" } }
+      expect(response).to have_http_status(:ok), response.body
     end
   end
 
@@ -146,6 +181,26 @@ RSpec.describe "Demo company staff and client access", type: :request do
       expect(Company::DEMO_UNAVAILABLE_MESSAGE).not_to match(/demo/i)
     end
 
+    it "leaves the organization-wide placeholder list out of a demo-scoped shared-email report" do
+      EmployeePlaceholderEmail.create!(organization: organization, email: "retired-inbox@client.example", marked_by: admin)
+      demo_only = create(:user, company: live, organization: organization, role: "accountant", email: "demo-only@firm.example")
+      CompanyAssignment.create!(user: demo_only, company: demo, client_management: true, granted_by: admin)
+      live_delegate = create(:user, company: live, organization: organization, role: "accountant", email: "live-delegate@firm.example")
+      CompanyAssignment.create!(user: live_delegate, company: live, client_management: true, granted_by: admin)
+      report = ->(actor, company) { EmployeeContactHygiene::SharedEmailReport.new(actor: actor, organization_id: organization.id, company_id: company&.id).call }
+
+      expect(report.call(demo_only, demo)).to include(marked_placeholders: [], placeholder_marks: [])
+      expect(report.call(admin, demo)).to include(marked_placeholders: [], placeholder_marks: [])
+      expect(report.call(demo_only, nil).to_json).not_to include("retired-inbox")
+      expect(report.call(live_delegate, live)[:marked_placeholders]).to include("retired-inbox@client.example")
+      expect(report.call(admin, live)[:marked_placeholders]).to include("retired-inbox@client.example")
+
+      sign_in(demo_only)
+      get "/api/v1/admin/employee_contact_hygiene/shared_emails", params: { company_id: demo.id }, headers: { "X-Company-Id" => demo.id.to_s }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.body).not_to include("retired-inbox")
+    end
+
     it "creates a client login for a demo company on that company" do
       sign_in(admin)
       allow_any_instance_of(PayrollInvitation).to receive(:send_invite).and_return(success: false, error: "not sent in tests")
@@ -205,40 +260,99 @@ RSpec.describe "Demo company staff and client access", type: :request do
 
   describe "rake demo:invite_clients" do
     let(:invitation) { instance_double(PayrollInvitation) }
+    let(:clerk) { instance_double(ClerkInvitationService) }
 
     def invite(manager: manager_email, user: user_email)
-      DemoCompany::InviteClients.new(organization: organization, actor: admin, manager_email: manager, user_email: user, invitation: invitation).call
+      DemoCompany::InviteClients.new(organization: organization, actor: admin, manager_email: manager, user_email: user,
+        clerk: clerk, invitation: invitation).call
     end
 
-    before { allow(UserInviteEmailService).to receive(:send_invite).and_return(true) }
+    def issue_invitations!
+      allow(invitation).to receive(:send_invite) do |login, **|
+        login.update!(clerk_invitation_id: "inv_#{login.id}")
+        { success: true, url: "https://payroll.example.test/login" }
+      end
+    end
+
+    before do
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(true)
+      allow(clerk).to receive(:invitation_status).and_return("pending")
+    end
 
     it "invites both personas through the normal invitation once, and refuses addresses off the allow-list" do
       expect { invite(user: "someone@client.example") }.to raise_error(DemoCompany::InviteClients::Refused, /allow-list/)
       expect(User.where(company: demo)).to be_empty
 
-      allow(invitation).to receive(:send_invite) do |login, **|
-        login.update!(clerk_invitation_id: "inv_#{login.id}")
-        { success: true, url: "https://payroll.example.test/login" }
-      end
+      issue_invitations!
       outcomes = invite
       expect(outcomes.map(&:status)).to eq(%w[invited invited])
+      expect(outcomes).to all(be_complete)
       expect(User.where(company: demo).order(:name).pluck(:name, :role)).to eq([ [ "Maren Fable", "client" ], [ "Tessa Vale", "client" ] ])
       expect(CompanyAssignment.where(company: demo).count).to eq(2)
 
       expect(invite.map(&:status)).to eq(%w[already_invited already_invited])
       expect(invitation).to have_received(:send_invite).twice
+      expect(UserInviteEmailService).to have_received(:send_invite).twice
+      expect(clerk).not_to have_received(:invitation_status)
     end
 
-    it "runs as a rake task and prints domains, not addresses" do
+    it "tracks the email apart from the invitation and retries it against the still-open invitation" do
+      issue_invitations!
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(false)
+      outcomes = invite
+      expect(outcomes.map(&:status)).to eq(%w[failed_email:not_sent failed_email:not_sent])
+      expect(outcomes.none?(&:complete?)).to be(true)
+
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(true)
+      expect(invite.map(&:status)).to eq(%w[invited invited])
+      # The existing invitations were reused, not replaced.
+      expect(invitation).to have_received(:send_invite).twice
+      expect(User.where(company: demo).pluck(:clerk_invitation_id)).to all(start_with("inv_"))
+      expect(invite.map(&:status)).to eq(%w[already_invited already_invited])
+    end
+
+    it "issues a new invitation when the undelivered one closed, and leaves an accepted one alone" do
+      issue_invitations!
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(false)
+      invite
+      maren = User.find_by!(name: "Maren Fable")
+      allow(clerk).to receive(:invitation_status).with(maren.clerk_invitation_id).and_return("expired")
+      allow(clerk).to receive(:invitation_status).with(User.find_by!(name: "Tessa Vale").clerk_invitation_id).and_return("accepted")
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(true)
+
+      expect(invite.map(&:status)).to eq(%w[invited already_accepted])
+      expect(invitation).to have_received(:send_invite).exactly(3).times
+    end
+
+    it "reports a Clerk failure by code only" do
+      allow(invitation).to receive(:send_invite).and_return(success: false, status_code: 422, error_code: "form_identifier_exists",
+        error: "That email address reviewer+manager@demo-mail.example is taken")
+      outcomes = invite
+      expect(outcomes.map(&:status)).to eq(%w[failed_invitation:clerk_form_identifier_exists failed_invitation:clerk_form_identifier_exists])
+      expect(outcomes.map(&:status).join).not_to include("reviewer")
+      expect(UserInviteEmailService).not_to have_received(:send_invite)
+    end
+
+    it "runs as a rake task, prints domains, not addresses, and fails while an email is undelivered" do
       Rails.application.load_tasks unless Rake::Task.task_defined?("demo:invite_clients")
       task = Rake::Task["demo:invite_clients"]
-      task.reenable
       allow(PayrollInvitation).to receive(:new).and_return(invitation)
-      allow(invitation).to receive(:send_invite) { |login, **| login.update!(clerk_invitation_id: "inv_#{login.id}") && { success: true, url: "u" } }
+      allow(ClerkInvitationService).to receive(:new).and_return(clerk)
+      issue_invitations!
       saved = ENV.to_h.slice("ORGANIZATION_ID", "ACTOR_ID", "MANAGER_EMAIL", "USER_EMAIL")
       ENV.update("ORGANIZATION_ID" => organization.id.to_s, "ACTOR_ID" => admin.id.to_s, "MANAGER_EMAIL" => manager_email, "USER_EMAIL" => user_email)
-      expect { task.invoke }.to output(/OK    demo:invite_clients demo-mail\.example invited/).to_stdout
-      expect { task.reenable; task.invoke }.not_to output(/reviewer\+/).to_stdout
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(false)
+      run = lambda do
+        task.reenable
+        task.invoke
+      end
+
+      expect { expect(&run).to raise_error(SystemExit) { |error| expect(error.status).not_to eq(0) } }
+        .to output(/FAIL  demo:invite_clients demo-mail\.example failed_email:not_sent/).to_stdout.and output(/not delivered/).to_stderr
+
+      allow(UserInviteEmailService).to receive(:send_invite).and_return(true)
+      expect(&run).to output(/OK    demo:invite_clients demo-mail\.example invited/).to_stdout
+      expect(&run).not_to output(/reviewer\+/).to_stdout
     ensure
       %w[ORGANIZATION_ID ACTOR_ID MANAGER_EMAIL USER_EMAIL].each { |key| ENV[key] = saved&.dig(key) }
     end
