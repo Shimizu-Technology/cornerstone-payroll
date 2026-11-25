@@ -8,6 +8,8 @@ module EmployeeBulkImport
   module SsnPreviewCache
     SALT = "employee_bulk_import/ssn_preview_cache/v1"
     PURPOSE_PREFIX = "employee_bulk_import_ssn_preview"
+    LEGACY_KEY_PREFIX = "bulk_import_ssn:"
+    V2_KEY_PREFIX = "bulk_import_ssn:v2:"
     TTL = 2.hours
     PREVIEW_ID_PATTERN = /\A[0-9a-f-]{16,64}\z/i
 
@@ -60,13 +62,55 @@ module EmployeeBulkImport
       true
     end
 
+    # Deletes any legacy plaintext Solid Cache entries written before the v2
+    # encrypted namespace (`bulk_import_ssn:<uuid>`, with or without the
+    # configured Solid Cache namespace prefix) without touching v2 encrypted
+    # keys (`bulk_import_ssn:v2:...`) or unrelated cache entries. Idempotent.
+    def purge_legacy_entries!(entry_class: nil, namespaces: nil)
+      klass = entry_class || (defined?(SolidCache::Entry) ? SolidCache::Entry : nil)
+      return 0 unless klass
+      return 0 unless entry_class || klass.table_exists?
+
+      prefixes = [ "" ] + resolved_namespaces(namespaces).map { |ns| "#{ns}:" }
+      legacy_clause = prefixes.map { "key LIKE ?" }.join(" OR ")
+      v2_clause = prefixes.map { "key LIKE ?" }.join(" OR ")
+      legacy_binds = prefixes.map { |prefix| binary_pattern("#{prefix}#{LEGACY_KEY_PREFIX}%") }
+      v2_binds = prefixes.map { |prefix| binary_pattern("#{prefix}#{V2_KEY_PREFIX}%") }
+
+      klass
+        .where(legacy_clause, *legacy_binds)
+        .where("NOT (#{v2_clause})", *v2_binds)
+        .delete_all
+    rescue ActiveRecord::NoDatabaseError, ActiveRecord::StatementInvalid => e
+      raise if entry_class
+
+      Rails.logger.warn("[EmployeeBulkImport::SsnPreviewCache] Skipping legacy Solid Cache purge: #{e.class}")
+      0
+    end
+
+    def resolved_namespaces(namespaces)
+      raw = if namespaces.nil?
+        cache_namespace = Rails.cache.options[:namespace] if Rails.cache.respond_to?(:options) && Rails.cache.options.is_a?(Hash)
+        [ cache_namespace, Rails.env ]
+      else
+        Array(namespaces)
+      end
+      raw.filter_map { |ns| ns.to_s.strip.presence }.uniq
+    end
+    private_class_method :resolved_namespaces
+
+    def binary_pattern(value)
+      ActiveModel::Type::Binary::Data.new(value.b)
+    end
+    private_class_method :binary_pattern
+
     def valid_binding?(company_id, user_id, preview_id)
       company_id.to_i.positive? && user_id.to_i.positive? && PREVIEW_ID_PATTERN.match?(preview_id.to_s)
     end
     private_class_method :valid_binding?
 
     def cache_key(company_id, user_id, preview_id)
-      "bulk_import_ssn:v2:#{company_id.to_i}:#{user_id.to_i}:#{preview_id}"
+      "#{V2_KEY_PREFIX}#{company_id.to_i}:#{user_id.to_i}:#{preview_id}"
     end
     private_class_method :cache_key
 

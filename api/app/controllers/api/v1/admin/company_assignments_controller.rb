@@ -106,19 +106,11 @@ module Api
             current_assignment = user.company_assignments.find_by(id: assignment.id)
             next unless current_assignment
 
-            if user.client? && user.active? && !current_assignment.expired?
-              remaining_active = user.company_assignments.active_access
-                .joins(:company)
-                .where(companies: { test_workspace_archived_at: nil })
-                .where.not(id: current_assignment.id)
-                .exists?
-              unless remaining_active
-                refused = true
-                next
-              end
-            end
-
             current_assignment.destroy!
+            if user.client? && user.active? && !user.has_effective_client_grant?
+              refused = true
+              raise ActiveRecord::Rollback
+            end
           end
 
           if refused
@@ -150,18 +142,6 @@ module Api
             retained_assignments = existing_assignments.select { |assignment| company_ids.include?(assignment.company_id) }
             new_company_ids = company_ids - existing_assignments.map(&:company_id)
 
-            if user.client? && user.active?
-              has_active_retained = retained_assignments.any? do |assignment|
-                !assignment.expired? && assignment.company&.test_workspace_archived_at.nil?
-              end
-              has_active_new = new_company_ids.any? &&
-                Company.where(id: new_company_ids, test_workspace_archived_at: nil).exists?
-              unless has_active_retained || has_active_new
-                refused = true
-                next
-              end
-            end
-
             retained_assignments.each do |assignment|
               assignment.user = user
               raise ActiveRecord::RecordInvalid, assignment unless assignment.valid?
@@ -176,6 +156,11 @@ module Api
                 workspace_access_level: company.practice_copy? ? "operator" : nil,
                 granted_by: current_user
               )
+            end
+
+            if user.client? && user.active? && !user.has_effective_client_grant?
+              refused = true
+              raise ActiveRecord::Rollback
             end
           end
 

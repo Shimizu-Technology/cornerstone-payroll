@@ -38,6 +38,34 @@ RSpec.describe "Security client access & API hardening", type: :request do
       expect(response).to have_http_status(:forbidden)
     end
 
+    it "omits home company metadata and features from /auth/me without a header once the client's last grant expires" do
+      ClientOperatingProfile.create!(
+        company: home_company,
+        effective_on: Date.new(2026, 1, 1),
+        version: 1,
+        offering: "payroll_portals",
+        hours_source: "manual",
+        client_portal_enabled: true,
+        employee_portal_enabled: true
+      )
+      allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(true)
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
+
+      assignment.update!(expires_at: 1.minute.ago)
+      client_user.reload
+
+      get "/api/v1/auth/me"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("user")).to include(
+        "company_id" => nil,
+        "company_name" => nil,
+        "home_company_id" => nil,
+        "assigned_company_ids" => []
+      )
+      expect(response.parsed_body.fetch("features")).to be_nil
+    end
+
     it "sets a new client user's company_id to their first assigned client company on create" do
       allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
       allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(admin_user.id)
@@ -75,6 +103,57 @@ RSpec.describe "Security client access & API hardening", type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(client_user.reload.active?).to be(false)
       expect(client_user.company_assignments.reload).to be_empty
+    end
+
+    it "refuses POST /admin/users/:id/activate when a deactivated client has no effective grant" do
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(admin_user.id)
+
+      post "/api/v1/admin/users/#{client_user.id}/deactivate"
+      expect(response).to have_http_status(:ok)
+
+      assignment.destroy!
+      post "/api/v1/admin/users/#{client_user.id}/activate"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["code"]).to eq("client_required")
+      expect(client_user.reload.active?).to be(false)
+
+      # Also refuse when the only remaining assignment is expired
+      create(:company_assignment, user: client_user, company: assigned_company, expires_at: 1.minute.ago)
+      post "/api/v1/admin/users/#{client_user.id}/activate"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(client_user.reload.active?).to be(false)
+    end
+
+    it "uses the same effective-grant predicate for demo client readiness on activate and assignment removal" do
+      allow(DemoOutbound).to receive(:allowlist).and_return(Set["demo.client@example.test"])
+      ready_demo = create_demo_company(organization: organization, name: "Ready Demo", fixture_key: "ready-demo")
+      unready_demo = create_demo_company(organization: organization, name: "Unready Demo", fixture_key: "unready-demo")
+      unready_demo.update!(migration_rehearsal_status: "failed")
+
+      demo_client = create(:user, organization: organization, company: ready_demo, role: "client",
+        email: "demo.client@example.test", active: true)
+      ready_grant = create(:company_assignment, user: demo_client, company: ready_demo)
+      create(:company_assignment, user: demo_client, company: unready_demo)
+
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user).and_return(admin_user)
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user_id).and_return(admin_user.id)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(admin_user.id)
+
+      # Removing the only ready demo grant while leaving an unready demo grant must be refused
+      delete "/api/v1/admin/company_assignments/#{ready_grant.id}"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(CompanyAssignment.exists?(ready_grant.id)).to be(true)
+
+      # Deactivating, removing the ready grant, then attempting Activate must also be refused
+      post "/api/v1/admin/users/#{demo_client.id}/deactivate"
+      expect(response).to have_http_status(:ok)
+      ready_grant.destroy!
+
+      post "/api/v1/admin/users/#{demo_client.id}/activate"
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(demo_client.reload.active?).to be(false)
     end
 
     it "refuses deleting an active client's last assignment via DELETE /admin/company_assignments/:id" do
@@ -202,10 +281,86 @@ RSpec.describe "Security client access & API hardening", type: :request do
       }, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
     end
+
+    it "rejects the entire batch before any write when any row has a stale or missing SSN token, even with incomplete intake enabled" do
+      company_a.update!(
+        employee_intake_expires_at: 1.hour.from_now,
+        employee_intake_reason: "Testing incomplete intake"
+      )
+      stub_actor(admin_a, company_a)
+
+      post "/api/v1/admin/employee_bulk_imports/preview", params: { file: csv_upload }
+      expect(response).to have_http_status(:ok)
+      preview_id = response.parsed_body.fetch("preview_id")
+      valid_row = response.parsed_body.fetch("rows").first.fetch("data").compact
+      stale_row = valid_row.merge(
+        "first_name" => "Stale",
+        "email" => "stale.worker@example.test",
+        "_ssn_token" => "deadbeef" * 4
+      )
+
+      expect {
+        post "/api/v1/admin/employee_bulk_imports/apply_json", params: {
+          preview_id: preview_id,
+          employees: [ valid_row, stale_row ]
+        }, as: :json
+      }.not_to change(Employee, :count)
+
+      expect(response).to have_http_status(:unprocessable_entity)
+    end
+
+    it "purges legacy plaintext Solid Cache entries without touching v2 encrypted or unrelated keys" do
+      conn = ActiveRecord::Base.connection
+      conn.execute(<<~SQL)
+        CREATE TEMP TABLE temp_solid_cache_entries (
+          id bigserial PRIMARY KEY,
+          key bytea NOT NULL,
+          value bytea NOT NULL,
+          created_at timestamp NOT NULL DEFAULT NOW(),
+          key_hash bigint NOT NULL,
+          byte_size integer NOT NULL DEFAULT 10
+        )
+      SQL
+
+      entry_model = Class.new(ActiveRecord::Base) do
+        self.table_name = "temp_solid_cache_entries"
+      end
+
+      insert_entry = lambda do |key_bytes, idx|
+        entry_model.create!(
+          key: key_bytes,
+          value: "payload-#{idx}",
+          key_hash: idx,
+          byte_size: 16
+        )
+      end
+
+      insert_entry.call("production:bulk_import_ssn:11111111-1111-1111-1111-111111111111", 1)
+      insert_entry.call("bulk_import_ssn:22222222-2222-2222-2222-222222222222", 2)
+      insert_entry.call("production:bulk_import_ssn:v2:1:2:33333333-3333-3333-3333-333333333333", 3)
+      insert_entry.call("bulk_import_ssn:v2:1:2:44444444-4444-4444-4444-444444444444", 4)
+      insert_entry.call("production:unrelated_key", 5)
+      insert_entry.call("\xFF\xFE\x00\x01".b, 6)
+
+      deleted_first = EmployeeBulkImport::SsnPreviewCache.purge_legacy_entries!(
+        entry_class: entry_model,
+        namespaces: [ "production" ]
+      )
+      expect(deleted_first).to eq(2)
+      expect(entry_model.order(:key_hash).pluck(:key_hash)).to eq([ 3, 4, 5, 6 ])
+
+      deleted_second = EmployeeBulkImport::SsnPreviewCache.purge_legacy_entries!(
+        entry_class: entry_model,
+        namespaces: [ "production" ]
+      )
+      expect(deleted_second).to eq(0)
+    ensure
+      conn.execute("DROP TABLE IF EXISTS temp_solid_cache_entries")
+    end
   end
 
   describe "M3: request log parameter filtering covers PII and pay fields" do
-    it "filters phone, address, personal names, pay rates/amounts, emergency contact fields, and company EIN while leaving harmless params readable" do
+    it "filters real PII/pay form fields while keeping non-PII debugging names, rates, and amounts readable" do
       filter = ActiveSupport::ParameterFilter.new(Rails.application.config.filter_parameters)
 
       input = {
@@ -219,21 +374,51 @@ RSpec.describe "Security client access & API hardening", type: :request do
         "first_name" => "Sample",
         "last_name" => "Worker",
         "middle_name" => "M",
-        "name" => "Sample Worker",
+        "name" => "Pat Kin",
+        "relationship" => "Sibling",
         "pay_rate" => "25.50",
         "salary" => "65000",
-        "amount" => "500.00",
+        "salary_override" => "2500.00",
+        "reported_tips" => "140.25",
+        "tips_paid_out" => "95.00",
+        "service_charge_wages" => "88.00",
+        "non_taxable_pay" => "50.00",
+        "qualified_overtime_compensation" => "120.00",
         "hourly_rate" => "22.00",
         "gross_pay" => "1200.00",
         "net_pay" => "980.00",
+        "employer_identification_number" => "98-7654321",
+        "company_address_line1" => "456 Chalan San Antonio",
+        "company_address_line2" => "Floor 2",
+        "company_city" => "Tamuning",
+        "company_state" => "GU",
+        "company_zip" => "96913",
+        "income_tax_withholding_on_wages" => "1234.56",
+        "total_taxes_dollars" => "1234",
         "emergency_contact_name" => "Pat Kin",
         "emergency_contact_phone" => "671-555-0100",
         "emergency_contact" => { "name" => "Pat Kin", "phone" => "671-555-0100", "relationship" => "Sibling" },
+        "user" => { "name" => "Jane Doe" },
+        "employee_wage_rate" => { "rate" => "24.00", "label" => "Line Cook" },
+        "payroll_item" => {
+          "salary_override" => "2500.00",
+          "reported_tips" => "140.25",
+          "wage_rate_hours" => [ { "rate" => "25.00", "label" => "Regular" } ],
+          "custom_earnings" => [ { "amount" => "300.00", "label" => "Allowance" } ]
+        },
         "ein" => "98-7654321",
         "company_ein" => "98-7654321",
         "employee[phone]" => "671-555-0199",
         "employee%5Bpay_rate%5D" => "25.50",
         "company[ein]" => "98-7654321",
+        "form_500[employer_identification_number]" => "98-7654321",
+        "form_500[company_address_line1]" => "456 Chalan San Antonio",
+        "payroll_item[salary_override]" => "2500.00",
+        "payroll_item[reported_tips]" => "140.25",
+        "department" => { "name" => "Kitchen" },
+        "company" => { "name" => "Example Bakery" },
+        "tax_config" => { "rate" => "0.062" },
+        "invoice" => { "amount" => "100.00" },
         "company_name" => "Example Bakery",
         "department_name" => "Kitchen",
         "status" => "active",
@@ -244,22 +429,85 @@ RSpec.describe "Security client access & API hardening", type: :request do
 
       %w[
         phone mobile_phone address_line1 address_line2 city zip postal_code
-        first_name last_name middle_name name pay_rate salary amount hourly_rate
-        gross_pay net_pay emergency_contact_name emergency_contact_phone
+        first_name last_name middle_name name relationship pay_rate salary
+        salary_override reported_tips tips_paid_out service_charge_wages
+        non_taxable_pay qualified_overtime_compensation hourly_rate
+        gross_pay net_pay employer_identification_number company_address_line1
+        company_address_line2 company_city company_state company_zip
+        income_tax_withholding_on_wages total_taxes_dollars
+        emergency_contact_name emergency_contact_phone
         ein company_ein employee[phone] employee%5Bpay_rate%5D company[ein]
+        form_500[employer_identification_number] form_500[company_address_line1]
+        payroll_item[salary_override] payroll_item[reported_tips]
       ].each do |key|
         expect(filtered[key]).to eq("[FILTERED]"), "expected #{key} to be [FILTERED], got #{filtered[key].inspect}"
       end
       expect(filtered["emergency_contact"]).to eq("[FILTERED]")
+      expect(filtered.dig("user", "name")).to eq("[FILTERED]")
+      expect(filtered.dig("employee_wage_rate", "rate")).to eq("[FILTERED]")
+      expect(filtered.dig("employee_wage_rate", "label")).to eq("Line Cook")
+      expect(filtered.dig("payroll_item", "salary_override")).to eq("[FILTERED]")
+      expect(filtered.dig("payroll_item", "reported_tips")).to eq("[FILTERED]")
+      expect(filtered.dig("payroll_item", "wage_rate_hours", 0, "rate")).to eq("[FILTERED]")
+      expect(filtered.dig("payroll_item", "custom_earnings", 0, "amount")).to eq("[FILTERED]")
 
+      # Scoped name/rate/amount must not hide non-PII debugging fields
+      expect(filtered.dig("department", "name")).to eq("Kitchen")
+      expect(filtered.dig("company", "name")).to eq("Example Bakery")
+      expect(filtered.dig("tax_config", "rate")).to eq("0.062")
+      expect(filtered.dig("invoice", "amount")).to eq("100.00")
       expect(filtered["company_name"]).to eq("Example Bakery")
       expect(filtered["department_name"]).to eq("Kitchen")
       expect(filtered["status"]).to eq("active")
       expect(filtered["settings"]).to eq("enabled" => true)
     end
+
+    it "filters parsed JSON bodies and query strings in real request logs for Form 500, payroll items, and emergency contacts" do
+      company = create(:company)
+      admin = create(:user, company: company, organization: company.organization, role: "admin")
+      allow_any_instance_of(Api::V1::Form500sController).to receive(:current_user).and_return(admin)
+      allow_any_instance_of(Api::V1::Form500sController).to receive(:current_company_id).and_return(company.id)
+
+      reported = []
+      callback = ->(*, payload) { reported << payload[:params] }
+      ActiveSupport::Notifications.subscribed(callback, "start_processing.action_controller") do
+        post "/api/v1/form_500s/save",
+          params: {
+            pay_period_id: 999_999,
+            form_500: {
+              employer_identification_number: "98-1112222",
+              company_address_line1: "777 Marine Corps Dr",
+              income_tax_withholding_on_wages: "4321.00"
+            },
+            department: { name: "PayrollOps" }
+          },
+          as: :json
+      end
+
+      logged_params = reported.last
+      expect(logged_params.dig("form_500", "employer_identification_number")).to eq("[FILTERED]")
+      expect(logged_params.dig("form_500", "company_address_line1")).to eq("[FILTERED]")
+      expect(logged_params.dig("form_500", "income_tax_withholding_on_wages")).to eq("[FILTERED]")
+      expect(logged_params.dig("department", "name")).to eq("PayrollOps")
+
+      # Query string filtering on ActionDispatch::Request#filtered_path
+      env = Rails.application.env_config.merge(
+        Rack::MockRequest.env_for(
+          "/api/v1/employee/profile/emergency_contacts?name=Pat+Kin&relationship=Spouse&phone=671-555-0100" \
+          "&payroll_item[salary_override]=2500&payroll_item%5Breported_tips%5D=140" \
+          "&form_500[employer_identification_number]=98-1112222&form_500[company_address_line1]=777+Main" \
+          "&department[name]=Kitchen&tax_config[rate]=0.062"
+        )
+      )
+      filtered_path = ActionDispatch::Request.new(env).filtered_path
+      expect(filtered_path).not_to include("Pat", "Kin", "Spouse", "671-555-0100", "2500", "140", "98-1112222", "777")
+      expect(filtered_path).to include("department[name]=Kitchen", "tax_config[rate]=0.062")
+    end
   end
 
   describe "M1: employee link activation sends notice to email on file before change and shows printed code issuer" do
+    include ActiveJob::TestHelper
+
     let!(:organization) { create(:organization) }
     let!(:company) { create(:company, organization: organization, name: "Island Bakery", subdomain_slug: "island-bakery") }
     let!(:staff_user) { create(:user, organization: organization, company: company, role: "admin", name: "Pat Issuer", active: true) }
@@ -280,10 +528,12 @@ RSpec.describe "Security client access & API hardening", type: :request do
       allow(PortalNotifications::Transport).to receive(:from_email).and_return("noreply@example.test")
     end
 
-    it "emails the employee's email on file (before any change) on activation with Guam-time date" do
-      sent_payloads = []
-      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, **_opts|
-        sent_payloads << payload
+    it "persists the pre-change email on activation, dispatches after commit, and retries with the same idempotency key" do
+      attempts = []
+      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
+        attempts << { payload: payload, idempotency_key: idempotency_key }
+        raise StandardError, "transient Resend timeout" if attempts.size == 1
+
         { "id" => "msg_123" }
       end
 
@@ -298,18 +548,47 @@ RSpec.describe "Security client access & API hardening", type: :request do
 
       # 2026-11-26 20:00 UTC is 2026-11-27 06:00 Pacific/Guam (+10)
       travel_to Time.utc(2026, 11, 26, 20, 0, 0) do
-        EmployeeLinks::Bind.activate!(
-          link, pending_user, request: request_double,
-          identity: { primary_email: "new.signup@example.test", primary_verified: true, verification_strategies: {} }
-        )
+        expect {
+          EmployeeLinks::Bind.activate!(
+            link, pending_user, request: request_double,
+            identity: { primary_email: "new.signup@example.test", primary_verified: true, verification_strategies: {} }
+          )
+        }.to have_enqueued_job(SendEmployeeActivationNoticeJob).with(link.id)
       end
 
       expect(employee.reload.email).to eq("new.signup@example.test")
-      expect(sent_payloads.size).to eq(1)
-      payload = sent_payloads.first
+      expect(link.reload).to have_attributes(
+        activation_notice_email: "onfile.worker@example.test",
+        activation_notice_status: "pending"
+      )
+      expect(attempts).to be_empty
+
+      # First job attempt fails -> records failed state and raises for retry
+      expect {
+        SendEmployeeActivationNoticeJob.new.perform(link.id)
+      }.to raise_error(EmployeeLinks::ActivationNoticeEmail::DeliveryError)
+      expect(link.reload).to have_attributes(
+        activation_notice_status: "failed",
+        activation_notice_attempts: 1
+      )
+
+      # Retry succeeds with the exact same pre-change email and idempotency key
+      SendEmployeeActivationNoticeJob.new.perform(link.id)
+      expect(link.reload).to have_attributes(
+        activation_notice_status: "sent",
+        activation_notice_attempts: 2
+      )
+      expect(link.activation_notice_sent_at).to be_present
+      expect(attempts.size).to eq(2)
+      expect(attempts[0][:idempotency_key]).to eq(attempts[1][:idempotency_key])
+      payload = attempts.last[:payload]
       expect(payload[:to]).to eq("onfile.worker@example.test")
       expect(payload[:text]).to include("Your Island Bakery employee app account was set up on November 27, 2026")
       expect(payload[:text]).to include("If this wasn't you, contact Island Bakery/Cornerstone.")
+
+      # Subsequent run is a no-op (never sends twice)
+      SendEmployeeActivationNoticeJob.new.perform(link.id)
+      expect(attempts.size).to eq(2)
     end
 
     it "respects DemoOutbound allowlist for activation notices on demo companies" do
@@ -327,11 +606,14 @@ RSpec.describe "Security client access & API hardening", type: :request do
       sent = []
       allow(PortalNotifications::Transport).to receive(:deliver) { |payload, **| sent << payload; { "id" => "msg_demo" } }
 
-      EmployeeLinks::Bind.activate!(
-        link, pending_user, request: request_double,
-        identity: { primary_email: "allowed@example.test", primary_verified: true, verification_strategies: {} }
-      )
+      perform_enqueued_jobs do
+        EmployeeLinks::Bind.activate!(
+          link, pending_user, request: request_double,
+          identity: { primary_email: "allowed@example.test", primary_verified: true, verification_strategies: {} }
+        )
+      end
       expect(sent).to be_empty
+      expect(link.reload.activation_notice_status).to eq("skipped")
 
       # And an allowlisted email on file DOES receive the notice when the demo employee app is open
       allowed_emp = create(:employee, company: demo_company, email: "allowed2@example.test")
@@ -343,12 +625,15 @@ RSpec.describe "Security client access & API hardening", type: :request do
       )
       allow(DemoOutbound).to receive(:employee_app_open?).with(demo_company).and_return(true)
 
-      EmployeeLinks::Bind.activate!(
-        link2, pending_user2, request: request_double,
-        identity: { primary_email: "allowed2@example.test", primary_verified: true, verification_strategies: {} }
-      )
+      perform_enqueued_jobs do
+        EmployeeLinks::Bind.activate!(
+          link2, pending_user2, request: request_double,
+          identity: { primary_email: "allowed2@example.test", primary_verified: true, verification_strategies: {} }
+        )
+      end
       expect(sent.size).to eq(1)
       expect(sent.first[:to]).to eq("allowed2@example.test")
+      expect(link2.reload.activation_notice_status).to eq("sent")
     end
 
     it "records who issued a resent printed code and exposes invited_by_name and activated_at to staff" do

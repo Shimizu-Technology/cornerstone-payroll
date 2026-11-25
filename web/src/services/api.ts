@@ -4392,7 +4392,7 @@ interface AuthApiUser {
   organization_name?: string;
   company_id: number | null;
   company_name: string | null;
-  home_company_id: number;
+  home_company_id: number | null;
   assigned_company_ids: number[];
   capabilities: string[];
   company_capabilities?: Record<string, string[]>;

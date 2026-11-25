@@ -1,13 +1,14 @@
-# Staff surface headers. Vite copies this file into dist/_headers for the
-# Payroll site; employee builds overwrite dist/_headers via
-# scripts/finalize-surface-dist.mjs.
+# Staff surface default headers. scripts/finalize-surface-dist.mjs overwrites
+# dist/_headers on postbuild with API and Clerk origins derived from build
+# environment variables (VITE_API_URL, VITE_CLERK_PUBLISHABLE_KEY); employee
+# builds overwrite dist/_headers with their enforcing employee CSP.
 #
 # Enforcing headers protect against clickjacking, MIME sniffing, referrer
 # leakage, and unneeded browser features. Full CSP runs in Report-Only mode so
 # any unexpected source surfaces before enforcement is enabled.
 /*
   Content-Security-Policy: frame-ancestors 'none'
-  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' https://clerk.shimizu-technology.com https://challenges.cloudflare.com https://*.protect.clerk.com https://us-assets.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://img.clerk.com https://*.r2.cloudflarestorage.com https://cornerstone-payroll-api.onrender.com; connect-src 'self' https://cornerstone-payroll-api.onrender.com wss://cornerstone-payroll-api.onrender.com https://clerk.shimizu-technology.com https://*.protect.clerk.com:* https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.r2.cloudflarestorage.com https://us.i.posthog.com https://us-assets.i.posthog.com; frame-src 'self' blob: https://challenges.cloudflare.com https://*.protect.clerk.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' https://clerk.shimizu-technology.com https://challenges.cloudflare.com https://*.protect.clerk.com https://us-assets.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://img.clerk.com https://*.r2.cloudflarestorage.com https://cornerstone-payroll.onrender.com https:; connect-src 'self' https://cornerstone-payroll.onrender.com wss://cornerstone-payroll.onrender.com https://clerk.shimizu-technology.com https://*.protect.clerk.com:* https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.r2.cloudflarestorage.com https://us.i.posthog.com https://us-assets.i.posthog.com; frame-src 'self' blob: https://challenges.cloudflare.com https://*.protect.clerk.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
