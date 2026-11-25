@@ -54,6 +54,10 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+# Container runs as the `zap` user (UID 1000), while CI runners (e.g. GitHub Actions
+# ubuntu-24.04) run as UID 1001. Make the mounted report directory writable by the
+# container user so ZAP can write HTML, JSON, and Markdown reports to /zap/wrk.
+chmod 0777 "$OUTPUT_DIR"
 
 PIDS=()
 CREATED_DB=""
@@ -132,6 +136,14 @@ run_zap_baseline() {
     echo "OWASP ZAP baseline FAILED for ${prefix} (exit ${status}). See ${OUTPUT_DIR}/${prefix}-report.md" >&2
     return "$status"
   fi
+
+  local ext
+  for ext in html json md; do
+    if [[ ! -s "${OUTPUT_DIR}/${prefix}-report.${ext}" ]]; then
+      echo "OWASP ZAP baseline did not write expected report ${OUTPUT_DIR}/${prefix}-report.${ext}" >&2
+      return 1
+    fi
+  done
   echo "==> PASS: ${prefix} (reports saved under ${OUTPUT_DIR}/${prefix}-report.{html,json,md})"
 }
 

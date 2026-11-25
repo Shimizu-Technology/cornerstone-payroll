@@ -8,6 +8,8 @@ on:
     paths:
       - "api/app/controllers/api/v1/employee_portal/**"
       - "api/app/controllers/concerns/view_as_enforcement.rb"
+      - "api/config/application.rb"
+      - "api/config/environments/production.rb"
       - "api/config/initializers/cors.rb"
       - "api/config/initializers/rack_attack.rb"
       - "web/deploy/employee/**"
