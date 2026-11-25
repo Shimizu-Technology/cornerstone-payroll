@@ -55,8 +55,11 @@ module EmployeeContactHygiene
         inactive = total - active
         scoped_entry = accessible_stats[email] || { total_count: total, companies_count: 1 }
 
-        is_db_marked = db_marked_placeholders.include?(email)
-        is_configured = configured_placeholders.include?(email)
+        # A demo company's rows never consult the organization's private
+        # placeholder list, so they can't reveal which addresses are marked.
+        private_hidden = DemoOutbound.demo_target?(company_by_id.fetch(cid), @actor)
+        is_db_marked = !private_hidden && db_marked_placeholders.include?(email)
+        is_configured = !private_hidden && configured_placeholders.include?(email)
         is_structural = EmployeeContactValidator.structural_placeholder_email?(email)
         # Only explicitly marked or configured addresses may be bulk-cleared.
         # Structural address patterns surface as candidates to review and mark.

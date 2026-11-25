@@ -181,6 +181,68 @@ body {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
+}
+
+.emp-header-account-wrap {
+  position: relative;
+  flex: none;
+  margin-left: auto;
+}
+
+.emp-header-account {
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 0.92rem;
+  gap: 6px;
+}
+
+.emp-account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 35;
+  min-width: 210px;
+  max-width: calc(100vw - 32px);
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.emp-account-name {
+  margin: 0 0 4px;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid #eef2f6;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
+.emp-account-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: #0f172a;
+  font-size: 0.98rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  background: none;
+  cursor: pointer;
+}
+
+.emp-account-item:active {
+  background: #f1f5f9;
 }
 
 .emp-brand-text {
@@ -359,6 +421,14 @@ body {
     margin: 0 auto;
     padding: 0 24px;
     gap: 24px;
+  }
+
+  .emp-brand {
+    flex: 0 1 auto;
+  }
+
+  .emp-header-account-wrap {
+    display: none;
   }
 
   .emp-brand-sub {
@@ -1327,6 +1397,38 @@ select.emp-input {
 }
 
 /* ---------- Electronic delivery consent (M4-6) ---------- */
+.emp-disclosure-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 4px;
+  color: var(--action);
+  font-weight: 700;
+  background: none;
+  cursor: pointer;
+}
+
+.emp-disclosure-toggle::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-left: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 150ms var(--ease-out);
+}
+
+.emp-disclosure-toggle[aria-expanded="true"]::after {
+  transform: rotate(225deg) translateY(-2px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .emp-disclosure-toggle:hover {
+    text-decoration: underline;
+  }
+}
+
 .emp-disclosure-box {
   display: flex;
   flex-direction: column;
@@ -1417,6 +1519,10 @@ select.emp-input {
     overflow: visible !important;
     background: #fff !important;
     padding: 0 !important;
+  }
+
+  .emp-disclosure-panel[hidden] {
+    display: block !important;
   }
 
   .emp-disclosure-box {

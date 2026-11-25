@@ -7,6 +7,7 @@ import { PayrollCalculationIssues } from '@/components/payroll/PayrollCalculatio
 import { Button } from '@/components/ui/button';
 
 import type { PayRunSectionProps } from './usePayRunController';
+import { NewHireDocumentLinks } from './NewHireDocumentsNotice';
 
 export function PayRunFeedback({
   calculationFailures,
@@ -14,6 +15,7 @@ export function PayRunFeedback({
   calendarRefreshError,
   companyId,
   currentPath,
+  documentBlockedEmployees,
   employees,
   error,
   payPeriod,
@@ -26,7 +28,10 @@ export function PayRunFeedback({
 }: PayRunSectionProps<'feedback'>) {
   return (<>
 {error && <Alert tone="error">
-        <p>{error}</p>
+        {documentBlockedEmployees.length > 0 ? <>
+          <p className="font-semibold">Payroll can't be approved until these new-hire documents are verified or waived.</p>
+          <NewHireDocumentLinks gaps={documentBlockedEmployees} companyId={companyId} returnTo={currentPath} />
+        </> : <p>{error}</p>}
         {calculationFailures.length > 0 && <Button variant="outline" className="mt-3" onClick={() => {
           const section = document.getElementById('payroll-calculation-issues');
           section?.scrollIntoView({ block: 'start' });

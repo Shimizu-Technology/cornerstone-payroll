@@ -90,6 +90,37 @@ RSpec.describe PayrollExpectedEntries do
     expect(data[:outstanding]).to be_empty
   end
 
+  context "salaried recent regulars" do
+    let(:salaried) { create(:employee, :salary, company: company, pay_rate: 52_000) }
+    let(:draft) { create(:pay_period, company: company, start_date: "2024-06-01", end_date: "2024-06-14", pay_date: "2024-06-19") }
+
+    before do
+      4.times do |index|
+        past = create(:pay_period, company: company, start_date: Date.new(2024, 1, 1) + index * 14,
+          end_date: Date.new(2024, 1, 14) + index * 14, pay_date: Date.new(2024, 1, 19) + index * 14)
+        if index < 3
+          create(:payroll_item, pay_period: past, employee: employee, gross_pay: 200)
+          create(:payroll_item, :salary, pay_period: past, employee: salaried, gross_pay: 2000)
+        end
+        past.update!(status: "committed", committed_at: Time.current)
+      end
+    end
+
+    it "does not call a salaried regular missing before the first calculation" do
+      payload = described_class.new(draft).payload
+      expect(payload[:missing_regulars].pluck(:employee_id)).to eq([ employee.id ])
+      expect(payload[:outstanding]).to eq([ employee.full_name ])
+    end
+
+    it "still lists a salaried regular left off this run" do
+      draft.pay_period_excluded_employees.create!(employee: salaried, reason: "Unpaid leave")
+      expect(described_class.new(draft).payload[:missing_regulars]).to include(include(employee_id: salaried.id, excluded: true))
+      draft.pay_period_excluded_employees.destroy_all
+      draft.update!(status: "calculated", calculated_at: Time.current)
+      expect(described_class.new(draft).payload[:missing_regulars].pluck(:employee_id)).to contain_exactly(employee.id, salaried.id)
+    end
+  end
+
   context "recent regulars" do
     before do
       4.times do |index|

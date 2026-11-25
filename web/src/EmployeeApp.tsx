@@ -26,6 +26,7 @@ import { SECURITY_PATH, SecurityScreen } from './employee/security';
 import { TaxesTab } from './employee/taxes';
 import type { ViewOnlyGrant } from './employee/ViewOnlyBanner';
 import { parseLinks } from './employee/api';
+import { PostHogPageView } from './providers/PostHogProvider';
 import { supportToken } from './support/grant';
 import { useSupportView } from './support/useSupportView';
 import './employee/employee.css';
@@ -213,6 +214,7 @@ export default function EmployeeApp({ viewAs }: { viewAs?: ViewOnlyGrant | null 
     <BrandContext.Provider value={brand}>
       <div className="employee-app" style={style}>
         <BrowserRouter>
+          {!supportToken && !grant && <PostHogPageView surface="employee" />}
           <AuthProvider brand={brand}>
             <SignOutProvider>
               <HideAmountsProvider>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PayPeriod } from '@/types';
-import { payRunSteps } from './payRunWorkflow';
+import { payRunNextStep, payRunSteps } from './payRunWorkflow';
 
 describe('saved payroll steps', () => {
   it.each([['draft', 'hours'], ['calculated', 'results'], ['approved', 'commit'], ['committed', 'results']] as const)('derives %s from saved status', (status, current) => {
@@ -14,5 +14,13 @@ describe('saved payroll steps', () => {
   });
   it('makes a committed run a results review with completed commitment', () => {
     expect(payRunSteps({ status: 'committed', run_purpose: 'regular' } as PayPeriod)).toMatchObject({ current: 'results', committed: true });
+  });
+});
+
+describe('header next step', () => {
+  it('moves on to commit once the run is approved', () => {
+    expect(payRunNextStep('calculated')).toEqual({ text: 'Review employee pay, then approve', hash: '#payroll-results' });
+    expect(payRunNextStep('approved')).toEqual({ text: "Approved. Commit when you're ready.", hash: '#payroll-commit' });
+    expect(payRunNextStep('draft').text).toBe('Enter or review pay, then calculate');
   });
 });
