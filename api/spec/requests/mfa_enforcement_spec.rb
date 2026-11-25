@@ -113,7 +113,15 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
       get "/api/v1/auth/me", headers: headers(fva: [ 5, -1 ], enrollment: true)
     end.to change(denials, :count).by(1)
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body).to eq("mfa_required" => true, "mfa_verified" => false)
+    expect(response.parsed_body).to eq("mfa_required" => true, "mfa_verified" => false,
+      "code" => "mfa_required", "error" => MfaPolicy::ERROR_MESSAGE)
+
+    expect do
+      get "/api/v1/auth/me", headers: headers(fva: [ 5, 0 ])
+    end.to change(denials, :count).by(1)
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to eq("mfa_required" => true, "mfa_verified" => false,
+      "code" => "mfa_enrollment_required", "error" => MfaPolicy::ENROLLMENT_REQUIRED_MESSAGE)
 
     get "/api/v1/auth/me", headers: headers(fva: [ 5, 0 ], enrollment: true)
     verified_body = response.parsed_body
