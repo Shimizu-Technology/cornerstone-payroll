@@ -6997,8 +6997,9 @@ export function clearPriorProviderDrafts(): void {
 }
 
 type AuthMeResponse =
-  | { user: AuthApiUser; mfa_required?: boolean; mfa_verified?: boolean }
-  | { user?: never; mfa_required: true; mfa_verified: false };
+  | { user: AuthApiUser; mfa_required?: boolean; mfa_verified?: boolean; code?: never; error?: never }
+  /** The 200 bootstrap for a session MFA turns away: code says what to do next, as on every MFA 403. */
+  | { user?: never; mfa_required: true; mfa_verified: false; code?: 'mfa_required' | 'mfa_enrollment_required'; error?: string };
 
 export const authApi = {
   me: (authToken?: string | null) => api.get<AuthMeResponse>('/auth/me', undefined, { notifyMaintenance: false, authToken }),

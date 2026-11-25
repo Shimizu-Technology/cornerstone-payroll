@@ -22,6 +22,7 @@ import { HomeTab, PayTab } from './employee/pay';
 import { EmployerPicker } from './employee/picker';
 import { SignInScreen, WelcomeScreen } from './employee/screens';
 import { ActivateScreen, FinishSignUpScreen, LinkCheckScreen, SignedInInvite, SignInFirst, SignUpAccountScreen } from './employee/signup';
+import { SECURITY_PATH, SecurityScreen } from './employee/security';
 import { TaxesTab } from './employee/taxes';
 import type { ViewOnlyGrant } from './employee/ViewOnlyBanner';
 import { parseLinks } from './employee/api';
@@ -139,6 +140,10 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
   if (path === '/sign-in') return <Navigate to={redirectTarget(location.state)} replace />;
   // A view-only "Sign in as" never signs anyone up or adds access to a login.
   if (viewAs && SIGN_UP_PATHS.has(path)) return <Navigate to="/" replace />;
+  // Before the employee session, which the API refuses until two-step sign-in
+  // is set up once REQUIRE_MFA is on. Never in a view-only support view: those
+  // would be the staff member's own account settings.
+  if (path === SECURITY_PATH) return viewAs ? <Navigate to="/" replace /> : <SecurityScreen />;
   // Signed in, before the employee session: sign-up's last step, and invites for a login that already exists.
   if (path === '/activate') return <SignedInInvite />;
   if (path === '/sign-up') return <Navigate to="/sign-up/done" replace />;

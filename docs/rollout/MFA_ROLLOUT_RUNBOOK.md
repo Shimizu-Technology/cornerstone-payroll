@@ -1,43 +1,63 @@
 # Two-step sign-in rollout runbook (gate G3)
 
 **Who does this:** the owner (Clerk, Render and Netlify logins) with one recovery admin as the second pair of eyes.
-**Planned window:** weekend of November 28–29, 2026 (ChST). Not on a payroll cutoff day, and not while anyone is mid-entry on a pay period.
-**What it does:** turns on `REQUIRE_MFA=true` so Cornerstone staff and client users must sign in with a second factor (authenticator app or backup code). Employee-only users are not required to enroll.
-**Gate:** G3 in [the M4 build plan](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md) (line 184). Clerk Pro is bought at this gate.
-**Cost:** Clerk Pro $25/month, or $20/month billed annually (M4 plan line 22; [Clerk pricing](https://clerk.com/pricing), checked 2026-11-25).
+**When:** after Clerk Pro is bought (owner decision, Nov 25, 2026: not yet; MFA stays off for the next few weeks). Pick a weekend, not a payroll cutoff day, and not while anyone is mid-entry on a pay period.
+**What it does:** turns on `REQUIRE_MFA=true` so **every** user must sign in with a second factor (authenticator app or backup code): Cornerstone staff, client users and employees. This reverses the earlier decision (D9) that employee-only users were exempt.
+**Gate:** G3 in [the M4 build plan](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md). Clerk Pro is bought at this gate.
+**Cost:** Clerk Pro $25/month, or $20/month billed annually ([Clerk pricing](https://clerk.com/pricing), checked 2026-11-25).
 
-This repo is public. Do not write names, emails, tokens, instance secrets or backup codes into this file, a PR, a ticket or a chat. Record them in the access-controlled evidence location and refer to them by role.
+This repo is public. Do not write names, emails, tokens, instance secrets or backup codes into this file, a PR, a ticket or a chat. Record names, results and screenshots in the access-controlled evidence location and refer to people by role. Backup codes are a second factor, so they never go in the evidence location either: they stay with the account holder (for a test account, in its custodian's credential vault), and the evidence records only that recovery was verified.
+
+**Turning it on is configuration only:** Clerk dashboard settings (Steps 1–3), then `REQUIRE_MFA=true` with the two evidence variables on every API service (Step 6). No code change or deploy of new code.
 
 ---
 
-## 0. What the system does today (read this first)
+## 0. What the system does
+
+### 0.1 While `REQUIRE_MFA` is off (MFA-ready mode, today)
+
+Clerk's free plan has no second factor, so nobody can have one. Everything else works as intended:
+
+| Area | Behavior with `REQUIRE_MFA` unset or false | Code |
+|---|---|---|
+| Sign-in | First factor only (password, Google or email code) for everyone. No MFA prompt, no `mfa_required` denials. | `MfaPolicy.required_for?` (`api/app/services/mfa_policy.rb`) |
+| Step-up before sensitive actions | A fresh **first** factor within 10 minutes. The API's 403 says `level: "first_factor"`, so Clerk asks the person to re-enter their password or an emailed code. Nobody is sent to enrollment. | `MfaPolicy.recently_step_up_verified?`, `step_up_level`; `api/app/controllers/concerns/recent_verification.rb` |
+| Which actions step up | Turning on any part of a company's employee app, setting demo early access, starting a view-only "Sign in as" (view-as), and the employee app's protected changes (profile edits, electronic-delivery consent, claiming or reactivating a link). Turning things off, ending early access and the demo kill switch never step up. | `employee_app_switch/update.rb`, `admin/employee_app_switches_controller.rb`, `view_as_grants_controller.rb`, `employee_portal/*` |
+| View-as | Available (it no longer waits for `REQUIRE_MFA`); still needs `VIEW_AS_READY=true`, the RLS guard in `raise` and `CLERK_AUTHORIZED_PARTIES`. | `api/app/models/view_as_grant.rb` |
+| Employee app switch readiness | The check "Two-step sign-in is required" shows **Not required yet** (status `waived`) for **every company, demo and live**, with the detail "Two-step sign-in isn't required yet; it will be turned on for everyone before real employees use the app." It doesn't block turning on. | `employee_app_switch/readiness.rb` (`mfa_check`) |
+| `production:readiness` | The MFA lines below report **WARN** (advisory), not FAIL, with a detail saying MFA is intentionally off pending the Clerk Pro rollout. The run passes on them. The Clerk key itself must still be accepted. | `api/app/services/production_readiness.rb` (`mfa_check`, `clerk_backend_check`) |
+| Employee service attestation | Its signed `service_checks_passed` covers only the four `employee_web:` checks, so intentionally-off MFA (and the payroll tax-table checks) never mark the employee service unhealthy. | `ProductionReadiness#employee_service_checks`, `employee_app_switch/service_attestation.rb` |
+
+Because the switch doesn't block real companies while MFA is off, **turning MFA on before real employees use the app is a process step, not a system gate.** Schedule the flip before any live company's employee app is opened to its employees.
+
+### 0.2 When `REQUIRE_MFA=true`
 
 | Fact | Where |
 |---|---|
-| `REQUIRE_MFA` is parsed as a boolean (`1/true/t/yes/y/on`). Default is off. | `api/app/services/mfa_policy.rb:13-15` |
-| MFA is required for every user except employee-only users (`employee` and `portal_employee` roles). Dual-role users (staff or client who also have an employee link) are required. | `mfa_policy.rb:17-23` |
-| A session counts as verified only if the token has the claim `two_factor_enabled == true` **and** `fva[1] >= 0`. A new-device email code alone (`fva` like `[1,0]` with no claim) is refused. | `mfa_policy.rb:25-31`; spec `api/spec/requests/mfa_enforcement_spec.rb:102-109` |
-| Every Clerk-authenticated request runs `enforce_mfa!` (not tied to URL prefix). A route-enumeration spec fails if any Clerk route lacks it. | `api/app/controllers/concerns/clerk_authenticatable.rb:12`, `api/app/controllers/concerns/mfa_enforceable.rb:12-14`, `api/spec/routing/clerk_mfa_coverage_spec.rb` |
-| The employee API controller also enforces it. | `api/app/controllers/api/v1/employee_portal/base_controller.rb:9` |
-| First sign-in by an invited user is also checked before the account is bound. | `clerk_authenticatable.rb:56-61` |
-| A denial returns `403 {code: "mfa_required"}` and writes a `security` audit event `authentication#mfa_required_denied`. | `mfa_enforceable.rb:20-30`; `mfa_policy.rb:53-71` |
-| `GET /api/v1/auth/me` returns `200 {mfa_required: true, mfa_verified: false}` (not a 403) so the web app can show the enrollment prompt. | `api/app/controllers/api/v1/auth_controller.rb:38-41,51-55` |
-| WebSocket tickets are refused without a verified second factor, and the socket re-checks a server-side marker. | `api/app/services/cable_ticket_service.rb:8-22`; `api/app/channels/application_cable/connection.rb:28-35` |
-| Session step-up for sensitive changes (`require_recent_verification!`) exists with specs but has **no callers yet**. It is not part of this rollout. | `api/app/controllers/concerns/recent_verification.rb:8-31` |
+| `REQUIRE_MFA` is parsed as a boolean (`1/true/t/yes/y/on`). Default is off. | `MfaPolicy.enabled?` |
+| MFA is required for **every** user, every role, employees included. | `MfaPolicy.required_for?` |
+| A session counts as verified only if the token has the claim `two_factor_enabled == true` **and** `fva[1] >= 0`. A new-device email code alone (`fva` like `[1,0]` with no claim) is refused. | `MfaPolicy.verified_second_factor?`; spec `api/spec/requests/mfa_enforcement_spec.rb` |
+| Every Clerk-authenticated request runs `enforce_mfa!`, and so does the employee API. A route-enumeration spec fails if any Clerk route lacks it. | `concerns/clerk_authenticatable.rb`, `concerns/mfa_enforceable.rb`, `employee_portal/base_controller.rb`, `api/spec/routing/clerk_mfa_coverage_spec.rb` |
+| A denial returns 403 and writes a `security` audit event `authentication#mfa_required_denied`. The code says what to do next: `mfa_enrollment_required` when the login has no second factor yet (the apps send it to set one up), `mfa_required` when it has one but this session didn't use it (sign in again). | `mfa_enforceable.rb`, `MfaPolicy.denial_body`, `MfaPolicy.record_denial!` |
+| `GET /api/v1/auth/me` returns `200 {mfa_required: true, mfa_verified: false}` (not a 403) so the staff app can show its prompt. | `auth_controller.rb` |
+| Step-up needs a fresh **second** factor (`level: "second_factor"`); an unenrolled session gets `mfa_enrollment_required`. "Fresh" is measured when the request arrives: `fva` plus the time since the token was issued (`iat`), rounded up, strictly under 10 minutes. A token without a usable `iat` doesn't count. | `recent_verification.rb`, `MfaPolicy.factor_age_minutes` |
+| The switch readiness MFA check is a hard check again: Payroll web **and** the employee service must both report `REQUIRE_MFA` with recorded evidence. | `readiness.rb` (`mfa_check`) |
+| WebSocket tickets are refused without a verified second factor. | `cable_ticket_service.rb`; `application_cable/connection.rb` |
 
-### Readiness checks that touch MFA
+### 0.3 Readiness lines that touch MFA
 
-`bundle exec rails production:readiness` (`api/lib/tasks/production_readiness.rake`) has three MFA lines:
+`bundle exec rails production:readiness` (`api/lib/tasks/production_readiness.rake`):
 
-| Check | Passes when | Code |
+| Check | MFA off | MFA on: passes when |
 |---|---|---|
-| `MFA enforcement has instance-bound evidence` | `REQUIRE_MFA` is on, `CLERK_MFA_ATTESTED_INSTANCE_ID` looks like `ins_…`, and `CLERK_MFA_EVIDENCE_REF` is present (≤ 500 bytes, one line) | `production_readiness.rb:191,314-325` |
-| `Clerk Backend API accepts the configured key and matches MFA evidence` | `GET https://api.clerk.com/v1/instance` returns 200 and its `id` equals `CLERK_MFA_ATTESTED_INSTANCE_ID` | `production_readiness.rb:250,397-402` |
-| `Clerk session token includes the MFA enrollment claim` | With `REQUIRE_MFA` on: `CLERK_MFA_SAMPLE_TOKEN_FILE` points to a correctly signed session token issued in the last 15 minutes whose `two_factor_enabled` is a JSON boolean (`true` or `false`) | `production_readiness.rb:251,404-419` |
+| `MFA enforcement has instance-bound evidence` | WARN | `CLERK_MFA_ATTESTED_INSTANCE_ID` looks like `ins_…` and `CLERK_MFA_EVIDENCE_REF` is present (one line, ≤ 500 bytes) |
+| `Clerk Backend API accepts the configured key and matches MFA evidence` | PASS if the key works and the instance matches; WARN if the key works but the instance doesn't match yet; **FAIL if Clerk rejects the key** | `GET https://api.clerk.com/v1/instance` returns 200 and its `id` equals `CLERK_MFA_ATTESTED_INSTANCE_ID` |
+| `Clerk session token includes the MFA enrollment claim` | PASS (not checked) | `CLERK_MFA_SAMPLE_TOKEN_FILE` points to a correctly signed session token issued in the last 15 minutes whose `two_factor_enabled` is a JSON boolean |
+| `Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim` | WARN until a valid sample token is supplied (then PASS) | Same sample-token test, run whether or not the flag is on, so the claim can be proved before the flip |
 
-Before the flip, the first two fail and the third passes trivially (it returns `true` while `REQUIRE_MFA` is off). As of November 24 the baseline was 31 of 34 with the two MFA-evidence lines and the 2027 tax tables failing (M3 plan line 874); the M4 runbook expects the same two MFA lines to fail before G3 (`docs/rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md:98-103`). Judge by line, not exit code.
+Judge by line, not exit code. The `2027 payroll tax tables are verified` line is a payroll-calendar check and is unrelated to MFA.
 
-What the checks **cannot** see: whether Clerk actually has authenticator and backup codes enabled, or who has enrolled. `docs/PRODUCTION_READINESS_CHECKLIST.md:38` says so directly: the evidence reference is a human attestation of the Clerk dashboard state. Step 6 below produces that evidence.
+What the checks **cannot** see: whether Clerk actually has authenticator and backup codes enabled, or who has enrolled. `docs/PRODUCTION_READINESS_CHECKLIST.md` says so directly: the evidence reference is a human attestation of the Clerk dashboard state. Step 4 produces that evidence.
 
 ---
 
@@ -45,16 +65,15 @@ What the checks **cannot** see: whether Clerk actually has authenticator and bac
 
 Do not start until every box is checked.
 
-- [ ] **M4-1 code is deployed** on Payroll web and worker (the claim-aware `MfaPolicy` above). Confirm the deployed commit includes it.
-- [ ] **Rehearsal done** on the separate Clerk development instance (never the instance serving production): enrolled user passes, unenrolled user gets `mfa_required`, new-device email code alone is refused, backup-code sign-in passes. Record where the evidence is. (M3 plan §2.2 item 5, line 358; M4-1 acceptance, M4 plan line 226.)
-- [ ] **Clerk production is live** (M3-0b, done November 24, 2026; M3 plan §4.9) and the owner can sign in.
-- [ ] **Two recovery admins** exist for Payroll, each with: a Clerk dashboard login that has its own two-step sign-in, a Payroll staff account that works today, and the ability to reach the Render dashboard or a named person who can. (`docs/OPERATOR_AND_RECOVERY_ACCEPTANCE.md:57-60`; `docs/PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md:41,60`.)
-- [ ] **Roster written down**, by role not name: every active staff user, every active client user, and every user with both a staff/client role and an employee link (dual-role). The Payroll user list is the source; Clerk shows who has signed in. Employee-only users are listed separately because they are not affected.
-- [ ] **Notice sent** at least 48 hours before the flip using [MFA_ROLLOUT_NOTICE_TEMPLATE.md](MFA_ROLLOUT_NOTICE_TEMPLATE.md), with a named support contact who is reachable all weekend.
-- [ ] **Rollback values written** in the access-controlled record: current `REQUIRE_MFA`, `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` (all empty or unset today), and the two services they live on.
+- [ ] **The MFA-ready code is deployed** on Payroll web, worker and the employee service (`MfaPolicy.recently_step_up_verified?` exists in the deployed commit).
+- [ ] **Rehearsal done** on the separate Clerk development instance (never the instance serving production), with Clerk's **Require multi-factor authentication** on: an enrolled staff user passes; an unenrolled staff user and an unenrolled employee each get Clerk's set-up-two-step step during sign-in (or the app's prompt); a new-device email code alone is refused; backup-code sign-in passes; the employee app's **My info → Sign-in & security** page shows Clerk's Security section. Record where the evidence is.
+- [ ] **Clerk production is live** and the owner can sign in.
+- [ ] **Two recovery admins** exist for Payroll, each with: a Clerk dashboard login that has its own two-step sign-in, a Payroll staff account that works today, and the ability to reach the Render dashboard or a named person who can. (`docs/OPERATOR_AND_RECOVERY_ACCEPTANCE.md`; `docs/PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md`.)
+- [ ] **Roster written down**, by role not name: active staff users, active client users, and employee logins by company. The Payroll user list is the source; Clerk shows who has signed in.
+- [ ] **Notices sent** at least 48 hours before the flip using [MFA_ROLLOUT_NOTICE_TEMPLATE.md](MFA_ROLLOUT_NOTICE_TEMPLATE.md): the staff and client version, and the employee version for every company whose employee app is on. Name a support contact who is reachable all weekend, and tell each client's managers so they can help their employees.
+- [ ] **Rollback values written** in the access-controlled record: current `REQUIRE_MFA`, `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` (all empty or unset today) on each of the three services, and the Clerk **Require multi-factor authentication** setting (off today).
 - [ ] **Quiet period agreed:** no payroll run, check printing or import in progress, no one mid-edit. Anyone signed in when the flag flips is shown the enrollment prompt on their next request and loses unsaved form changes.
-- [ ] **Baseline readiness saved:** run `bundle exec rails production:readiness` in a Render shell on Payroll web and keep the output. Expect exactly the known failures above (and nothing new).
-- [ ] **Employee site (if live):** you know which of the employee API's variables must match (`REQUIRE_MFA`, `CLERK_MFA_ATTESTED_INSTANCE_ID`, `CLERK_MFA_EVIDENCE_REF`; `ops/render/employee-web.render.yaml:63-78`). It is set in step 8.
+- [ ] **Baseline readiness saved:** run `bundle exec rails production:readiness` in a Render shell on Payroll web and keep the output. Expect the MFA lines as WARN (§0.3) and nothing new failing.
 
 ---
 
@@ -69,7 +88,7 @@ Why first: Clerk's MFA "requires a paid plan for production use, but you can try
 1. Clerk Dashboard → the **production** application → **Billing** → upgrade to **Pro**. Choose monthly or annual.
 2. Confirm the plan shows Pro. Do this at least a day before the flip so enrollment can happen (Step 5).
 
-Buying Pro changes nothing for users by itself. Nobody is asked to do anything until Step 3 turns strategies on.
+Buying Pro changes nothing for users by itself.
 
 ### Step 2: Check the session token claim (owner)
 
@@ -82,11 +101,11 @@ Buying Pro changes nothing for users by itself. Nobody is asked to do anything u
    }
    ```
 
-   This is the template from `docs/PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md:151-157`. Clerk's shortcode table lists `{{user.two_factor_enabled}}` as a boolean, and a standalone shortcode keeps its type in the token, so it arrives as a JSON `true` or `false` ([Clerk JWT templates: shortcodes](https://clerk.com/docs/guides/sessions/jwt-templates#available-shortcodes); [customize session tokens](https://clerk.com/docs/guides/sessions/customize-session-tokens)). Do **not** wrap it in other text; an interpolated shortcode becomes a string and the app treats only a boolean `true` as enrolled (`mfa_policy.rb:29-31`).
+   This is the template from `docs/PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md`. Clerk's shortcode table lists `{{user.two_factor_enabled}}` as a boolean, and a standalone shortcode keeps its type in the token, so it arrives as a JSON `true` or `false` ([Clerk JWT templates: shortcodes](https://clerk.com/docs/guides/sessions/jwt-templates#available-shortcodes); [customize session tokens](https://clerk.com/docs/guides/sessions/customize-session-tokens)). Do **not** wrap it in other text; an interpolated shortcode becomes a string and the app treats only a boolean `true` as enrolled.
 3. Keep custom claims under about 1.2 KB (Clerk's guidance).
 4. Clerk refreshes the session token about every 60 seconds, so the claim can lag a change by up to a minute.
 
-**This step must be finished and verified (Step 4) before the flip.** If the claim is missing, nobody is "enrolled" as far as the API is concerned, and every staff and client user, including enrolled ones, is refused after the flip.
+**This step must be finished and verified (Step 4) before the flip.** If the claim is missing, nobody is "enrolled" as far as the API is concerned, and every user, including enrolled ones, is refused after the flip.
 
 ### Step 3: Enable strategies in Clerk (owner)
 
@@ -97,77 +116,88 @@ Dashboard → **User & authentication** → **Multi-factor** ([Clerk docs](https
 | Authenticator application (TOTP) | **On** | Primary second factor. |
 | Backup codes | **On** | Single-use recovery. Clerk requires another strategy first; it is generated at the end of authenticator enrollment ([MFA recovery](https://clerk.com/docs/guides/secure/mfa-recovery)). |
 | SMS verification code | **Off** | Decided: no SMS. It also costs $0.01 per message on Pro. |
-| **Require multi-factor authentication** | **Off. Do not turn this on.** | This Clerk toggle is instance-wide. It would force every user, including employee-only users, to enroll before sign-in finishes, which contradicts decision D9 (employees are not required). The app enforces by role through `REQUIRE_MFA` instead. |
+| **Require multi-factor authentication** | **Off for now; turn it On in Step 6** | Everyone is required now, so this instance-wide toggle matches the app's rule and is wanted: Clerk then walks an unenrolled user through setting up the second step during sign-in, on the staff and employee sites alike. (The earlier advice to keep it off existed only because employees were exempt.) Turn it on at the flip, not before, so the enrollment window (Step 5) happens on people's own time. |
 | Passkeys satisfy multi-factor authentication | **Off** (leave as is) | The app requires the `two_factor_enabled` claim; a passkey sign-in on its own would not satisfy it. |
 
-Also confirm, under the same Clerk instance, that **User & authentication → Email → Sign-in with email → Email verification code** is on (cutover runbook lines 159-160). Employees who sign in with Google need it for first-factor step-up later.
+Also confirm, under the same Clerk instance, that **User & authentication → Email → Sign-in with email → Email verification code** is on (cutover runbook). It is how people who sign in with Google pass the first-factor step-up while MFA is off.
 
-**Device Trust (formerly Client Trust):** this Clerk setting emails a code on a new device for password sign-ins by users with no second factor. It is on by default for apps created after November 14, 2025 and is included on every plan ([Clerk Device Trust](https://clerk.com/docs/guides/protect/device-trust)). Leave it as it is. The API does not accept that email code as a second factor (spec `mfa_enforcement_spec.rb:102-109`), so it neither helps nor hurts staff enforcement. Expect staff on new devices to see two prompts after enrolling in some cases; see [§5 gaps](#5-gaps-in-the-code-that-affect-this-rollout).
+**Device Trust (formerly Client Trust):** this Clerk setting emails a code on a new device for password sign-ins by users with no second factor ([Clerk Device Trust](https://clerk.com/docs/guides/protect/device-trust)). Leave it as it is. The API does not accept that email code as a second factor (spec `mfa_enforcement_spec.rb`), so it neither helps nor hurts enforcement. Expect some people on new devices to see two prompts after enrolling; see [§5](#5-known-gaps).
 
-### Step 4: Verify on a test account (owner or recovery admin)
+### Step 4: Verify on test accounts (owner or recovery admin)
 
-Use one dedicated test staff account that is not a real person's login and that is not an employee-only user. It must exist in Payroll with a role that is required (for example a manager or accountant) so that `required_for?` is true.
+Use dedicated test accounts that are not a real person's login: one staff account (for example a manager or accountant) and one employee login on a demo company (Harbor Finch).
 
 1. Sign in on the production site. The app still lets you in (the flag is off).
-2. Open the account settings (see Step 5 for how), **Security → Two-step verification → Authenticator app**. Scan the QR code, enter the code, and **save the backup codes** in the evidence location.
-3. Get a fresh session token for this account and decode it **locally**. Do not paste it into a website. In the browser console on the Payroll site: `await window.Clerk.session.getToken({skipCache: true})`. Check:
+2. Open the account settings: on Payroll, **Account & security** (`/app/account-security`); on the employee app, **My info → Sign-in & security** (`/security`). Go to **Security → Two-step verification → Authenticator app**. Scan the QR code, enter the code, and **save the backup codes in the test-account custodian's credential vault** (the password manager entry that holds that test account's login). Backup codes are a second factor: never put them in the evidence location, a screenshot, a ticket or a chat. The evidence records only that recovery was verified (for example "backup-code sign-in passed on <date>", Step 8 row 2).
+3. Get a fresh session token and decode it **locally**. Do not paste it into a website. In the browser console on that site: `await window.Clerk.session.getToken({skipCache: true})`. Check:
    - `two_factor_enabled` is the JSON boolean `true`;
    - `fva` has two integers, for example `[3, -1]` right after a password sign-in.
 4. Sign out, sign in again with the password **and** the authenticator code. Fetch a token again: `fva[1]` must now be `>= 0` (for example `[1, 0]`).
-5. Repeat on a second test account with **no** second factor: the claim must be the JSON boolean `false` (not missing, not the string `"false"`).
-6. Do a **dry run of readiness with the flag on, for this shell only**, on Payroll web. Nothing is changed on Render, because the variables exist only for this one command:
+5. Repeat on a test account with **no** second factor: the claim must be the JSON boolean `false` (not missing, not the string `"false"`).
+6. Run readiness with a sample token. The pre-flip line works with the flag off, so no Render variable changes yet:
 
    ```bash
    umask 077
-   # put the token from step 4 into a private file, then:
+   # put the token from item 4 into a private file, then:
+   CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file bundle exec rails production:readiness
+   rm -f /path/to/private-file
+   ```
+
+   `Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim` must say `PASS`. For the full set, run once more with the flag on **for this shell only** (nothing changes on Render):
+
+   ```bash
    REQUIRE_MFA=true \
    CLERK_MFA_ATTESTED_INSTANCE_ID=ins_xxxxxxxx \
    CLERK_MFA_EVIDENCE_REF=<non-secret reference> \
    CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file \
    bundle exec rails production:readiness
-   rm -f /path/to/private-file
    ```
 
-   The three MFA lines must say `PASS`. Fetch the token no more than 15 minutes before running (it only has to be correctly signed and recently issued; it does not need to be unexpired). To read the instance ID without printing the key: `curl -s -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/instance | ruby -rjson -e 'puts JSON.parse(STDIN.read)["id"]'`. Keep tokens out of shell history, logs and retained evidence (cutover runbook line 167).
+   All four MFA lines must say `PASS`. Fetch the token no more than 15 minutes before running. To read the instance ID without printing the key: `curl -s -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/instance | ruby -rjson -e 'puts JSON.parse(STDIN.read)["id"]'`. Keep tokens out of shell history, logs and retained evidence.
 
-   This dry run is the only pre-flip proof that the claim reaches the API in the shape it expects. If any line fails, stop and fix the Clerk setting. Do not proceed.
+   If any line fails, stop and fix the Clerk setting. Do not proceed.
 
 ### Step 5: Enrollment window (everyone, before the flip)
 
-Goal: every required user has enrolled and saved backup codes **before** `REQUIRE_MFA=true`. Enrolling early costs a user two minutes. Enrolling after the flip works too, but it happens while they are blocked and the support contact is the only help.
+Goal: as many people as possible enroll and save backup codes **before** `REQUIRE_MFA=true`. Enrolling early takes a few minutes. Enrolling after the flip works too: Clerk's set-up step (Step 6 turns it on) or the app's prompt walks them through it, but they are blocked until they finish.
 
-**Where people enroll.** The signed-in Payroll app has no account-settings link. The only in-app route to Clerk's account screen is the prompt shown after the flip (`web/src/pages/Login.tsx:30-62`, which opens Clerk's user profile with `openUserProfile()`). So before the flip, use Clerk's hosted Account Portal: `https://accounts.shimizu-technology.com/user` (the Account Portal host from the cutover records, M3 plan line 748). **Open this URL yourself on the test account during Step 4 and confirm it loads the profile screen with a Security section before you send it to anyone.** If it does not, fall back to the post-flip prompt for everyone and shorten the window, and note it in the evidence log.
+**Where people enroll:**
+
+- **Staff and client users:** Payroll → **Account & security** (`/app/account-security`), which embeds Clerk's account settings. Clerk's hosted Account Portal (`https://accounts.shimizu-technology.com/user`) also works; check it loads the Security section on a test account first.
+- **Employees:** the employee app → **My info → Sign-in & security** (`/security`), which embeds the same Clerk settings with the company's branding. After the flip, an employee who hasn't enrolled sees **Set up two-step sign-in**, which opens the same page.
 
 Order of enrollment:
 
-1. **Recovery admins first.** Each enrolls, saves backup codes in separate storage (a password manager entry or printed copy kept apart from the phone), signs out, signs back in with the authenticator code, and confirms `fva[1] >= 0` as in Step 4. Each then removes and re-adds their own factor once (or has the other admin reset it, §3.3) to prove recovery works. This is the acceptance row "Recovery administrator signs in with MFA" (cutover runbook lines 135-136).
+1. **Recovery admins first.** Each enrolls, saves backup codes in separate storage (a password manager entry or printed copy kept apart from the phone), signs out, signs back in with the authenticator code, and confirms `fva[1] >= 0` as in Step 4. Each then removes and re-adds their own factor once (or has the other admin reset it, §3.3) to prove recovery works.
 2. **Cornerstone staff.**
-3. **Client users** (for example the active client's admins). Send the notice and offer a 10-minute call.
-4. **Dual-role users.** They are required, even if they mainly use the employee site. Treat them as staff.
-5. Track a simple table by role: invited, enrolled, signed in with second factor. Clerk shows each user's enrolled methods under **Users → the user → Two step verifications**.
+3. **Client users.** Send the notice and offer a 10-minute call.
+4. **Employees**, company by company, with the employee notice. Their manager is the first line of help.
+5. Track a simple table by role and company: notified, enrolled, signed in with second factor. Clerk shows each user's enrolled methods under **Users → the user → Two step verifications**.
 
-**Go/no-go for the flip:** both recovery admins verified, plus every staff user who runs payroll. Client users who have not enrolled are not a blocker; they enroll at first sign-in after the flip, with support on call. Anyone without a smartphone is a blocker for that person only. They can use a desktop authenticator, such as a password manager's one-time-code feature, or wait for support.
+**Go/no-go for the flip:** both recovery admins verified, plus every staff user who runs payroll. Client users and employees who have not enrolled are not a blocker; they enroll at their next sign-in, with support on call. Anyone without a smartphone can use a desktop authenticator, such as a password manager's one-time-code feature, or wait for support.
 
-### Step 6: Flip `REQUIRE_MFA=true` on Render web and worker (owner)
+### Step 6: Flip (owner)
 
-In the Render dashboard, for **Payroll web** and **Payroll worker** (same values on both):
+Do these together, within a few minutes:
 
-| Variable | Value |
-|---|---|
-| `REQUIRE_MFA` | `true` |
-| `CLERK_MFA_ATTESTED_INSTANCE_ID` | the production instance ID (`ins_…`) read from Clerk in Step 4 |
-| `CLERK_MFA_EVIDENCE_REF` | a non-secret pointer to the access-controlled evidence (for example a folder and date): the dashboard screenshots of Step 3, the Step 4 results and the Step 5 recovery-admin checks |
+1. In the Render dashboard, set the same values on **Payroll web**, **Payroll worker** and **the employee API** (`cornerstone-payroll-employee-api`, when it exists):
 
-Notes:
+   | Variable | Value |
+   |---|---|
+   | `REQUIRE_MFA` | `true` |
+   | `CLERK_MFA_ATTESTED_INSTANCE_ID` | the production instance ID (`ins_…`) read from Clerk in Step 4 |
+   | `CLERK_MFA_EVIDENCE_REF` | a non-secret pointer to the access-controlled evidence (for example a folder and date): the dashboard screenshots of Step 3, the Step 4 results and the Step 5 recovery-admin checks |
 
-- Cutover runbook lines 116 and 167 define these two values. The evidence ref must be one line and at most 500 bytes.
-- Save both services, then **Manual Deploy → Deploy latest commit** (or restart) on both so the new environment is loaded. Render also restarts on an env change; confirm the deploy finishes and `/up` returns 200 with HSTS.
-- Do the flip on both services within a few minutes of each other. Web enforces sign-in; the worker needs the same values so a readiness run there agrees.
-- The Clerk instance does not change in this rollout, so no JWKS cache clear is needed.
+   The evidence ref must be one line and at most 500 bytes. Save each service, then **Manual Deploy → Deploy latest commit** (or restart) so the new environment loads; confirm `/up` returns 200 with HSTS.
+2. In Clerk: **User & authentication → Multi-factor → Require multi-factor authentication → On**. Save.
 
-### Step 7: Readiness run (owner or recovery admin)
+The employee API must get the values at the same time as Payroll web: it enforces sign-in for employees itself, and the switch readiness MFA check stays failed until both services report `REQUIRE_MFA` with evidence. The Clerk instance does not change in this rollout, so no JWKS cache clear is needed.
 
-In a Render shell on Payroll web, with a fresh token from the enrolled test account (as in Step 4 item 6):
+**Between item 1 and item 2** (Render is on, Clerk's toggle isn't yet), Clerk doesn't ask anyone to set up a second step at sign-in, so the app does. An unenrolled employee who signs in, or is already signed in, gets `403 mfa_enrollment_required` from the employee API and sees **Set up two-step sign-in**, which opens **Sign-in & security** (`/security`). That page works without the employee session, so they can enroll there, then select **Done** and **I've set it up, try again**; if the app then shows **Complete two-step sign-in**, they sign out and back in with the new code. Unenrolled staff and client users get the staff prompt on the login page, which links to account settings. An enrolled person whose session predates their second factor gets `mfa_required` (**Complete two-step sign-in**, or the staff prompt's **Sign out and sign back in**). Nobody is stuck on a screen with no way to enroll, so the gap is safe, but keep it to minutes.
+
+### Step 7: Readiness runs (owner or recovery admin)
+
+In a Render shell on Payroll web, and again on the employee API, with a fresh token from the enrolled test account (as in Step 4 item 6):
 
 ```bash
 umask 077
@@ -176,13 +206,11 @@ CLERK_MFA_SAMPLE_TOKEN_FILE=/path/to/private-file bundle exec rails production:r
 rm -f /path/to/private-file
 ```
 
-Expected: every line `PASS`, including all three MFA lines. If only the 2027 tax-table line still fails, that is the known unrelated failure. Save the final `EVIDENCE {...}` line with the release evidence (it is safe to retain, per `docs/PRODUCTION_READINESS_CHECKLIST.md:36`).
+Expected: every MFA line `PASS`; they are hard FAILs now, no longer WARNs. On the employee API all four `employee_web:` lines must still pass. The `2027 payroll tax tables are verified` line is unrelated. Save the final `EVIDENCE {...}` line with the release evidence (it is safe to retain, per `docs/PRODUCTION_READINESS_CHECKLIST.md`).
 
-### Step 8: Employee API (when live), same values
+Then open **Employee app switch** for a company in Payroll: "Two-step sign-in is required" must show **Passed**.
 
-On `cornerstone-payroll-employee-api` set the same three variables, redeploy, and re-run readiness there. All four `employee_web:` lines must still pass, and now the MFA lines pass as well (`docs/rollout/M4_EMPLOYEE_PLATFORM_RUNBOOK.md:98-103`). Dual-role users are required there; employee-only users are not. Skip this step if the employee service has not been created yet, and do it as part of creating it.
-
-### Step 9: Verify allowed and denied sessions
+### Step 8: Verify allowed and denied sessions
 
 Use real browsers (a private window each). Record the result of each row in the evidence location.
 
@@ -190,22 +218,21 @@ Use real browsers (a private window each). Record the result of each row in the 
 |---|---|---|
 | 1 | Test staff account, enrolled, signed in with password + authenticator | App loads; `GET /api/v1/auth/me` has `mfa_required: true, mfa_verified: true`. |
 | 2 | Same account, sign in with a backup code instead of the authenticator | App loads. (Burns that code; regenerate afterwards.) |
-| 3 | Test staff account with **no** second factor, signed in | After sign-in, the app shows "Multi-factor authentication required" with **Open account settings**; every other API route returns 403 `mfa_required`; there is one `authentication#mfa_required_denied` audit event. |
-| 4 | Row 3 user enrolls from that prompt, signs out, signs in again with the authenticator | App loads. Expect to need the sign-out and sign-in: the existing session was created with `fva[1] = -1` (see §5 gap 3; confirm in the rehearsal whether enrolling alone refreshes it). |
-| 5 | Staff account that was signed in before the flip, with a new device email code but no authenticator | Denied (`mfa_required`). The email code is not accepted as a second factor. |
-| 6 | A client user, enrolled | Loads on its client subdomain; company scope unchanged. |
-| 7 | A client user, not enrolled | Same prompt as row 3, in the app's style. |
-| 8 | An employee-only user (or the employee test account) | **Allowed** with only a first factor on `/api/v1/employee/*` and `/auth/me`. No MFA prompt. |
-| 9 | A dual-role user with no second factor | Denied on `/api/v1/employee/*` as well as staff routes (`employee_portal/base_controller.rb:9`). |
-| 10 | Live updates (WebSocket) for an enrolled user | Connects; for a non-enrolled user the ticket request returns 403 (`cable_ticket_service.rb:10-16`). |
-| 11 | A deactivated user | Still refused (`Account inactive` or unbound), unchanged. |
+| 3 | Test staff account with **no** second factor, signs in fresh | Clerk asks it to set up the second step during sign-in. If a session somehow reaches the app, it shows "Multi-factor authentication required" with the set-up steps; every other API route returns 403 `mfa_enrollment_required`, with one `authentication#mfa_required_denied` audit event. |
+| 4 | Staff account that was signed in before the flip, with a new-device email code but no authenticator | Denied (`mfa_enrollment_required`). The email code is not accepted as a second factor. |
+| 5 | A client user, enrolled | Loads on its client subdomain; company scope unchanged. |
+| 6 | Employee test account (demo company), enrolled | Pay screens load after password + authenticator. |
+| 7 | Employee test account with **no** second factor | Clerk's set-up step at sign-in; a pre-flip session sees **Set up two-step sign-in** (→ Sign-in & security), and `/api/v1/employee/*` returns 403 `mfa_enrollment_required`. After enrolling there, **Try again** shows **Complete two-step sign-in** (403 `mfa_required`) until it signs out and back in with the code. |
+| 8 | Step-up: turn on a switch, start a view-as, or edit a phone number on the employee app | Clerk asks for the **second** factor (`level: "second_factor"`), not a password. |
+| 9 | Live updates (WebSocket) for an enrolled staff user | Connects; for a non-enrolled user the ticket request returns 403. |
+| 10 | A deactivated user | Still refused, unchanged. |
 
-Roll back (§3.4) if rows 1, 2 or 8 fail, or if a recovery admin cannot sign in.
+Roll back (§3.4) if rows 1, 2 or 6 fail, or if a recovery admin cannot sign in.
 
-### Step 10: After the flip
+### Step 9: After the flip
 
-- [ ] Watch the support contact for the first day. Check `authentication#mfa_required_denied` events once at the end of the first day; a person denied repeatedly after enrolling is probably still on an old session.
-- [ ] Fill in the "Clerk production identity and MFA" row of `docs/OPERATOR_AND_RECOVERY_ACCEPTANCE.md:113` with the date, operator, reviewer and evidence location (no secrets).
+- [ ] Watch the support contact for the first day. Check `authentication#mfa_required_denied` events at the end of the first day; a person denied repeatedly after enrolling is probably still on an old session (sign out and in again).
+- [ ] Fill in the "Clerk production identity and MFA" row of `docs/OPERATOR_AND_RECOVERY_ACCEPTANCE.md` with the date, operator, reviewer and evidence location (no secrets).
 - [ ] Add a short line to the production-readiness evidence set noting the date, the commit, and the readiness result.
 - [ ] Reset the Step 4 test accounts or keep them documented as test accounts. Do not leave test tokens on disk.
 
@@ -215,9 +242,11 @@ Roll back (§3.4) if rows 1, 2 or 8 fail, or if a recovery admin cannot sign in.
 
 ### 3.1 Someone lost or replaced their phone
 
-1. **They have backup codes:** sign in with password, choose "Use another method", enter one backup code. Then, in account settings, re-enroll the new phone and **regenerate backup codes** (Security tab; [Clerk MFA recovery](https://clerk.com/docs/guides/secure/mfa-recovery)). Each code works once.
-2. **They have no backup codes:** a recovery admin resets their two-step sign-in (3.3). They then sign in with the password only, hit the app's "Multi-factor authentication required" prompt, and enroll the new phone.
+1. **They have backup codes:** sign in with password, choose "Use another method", enter one backup code. Then, in account settings (Payroll **Account & security**, or the employee app's **Sign-in & security**), add the new phone and **regenerate backup codes** ([Clerk MFA recovery](https://clerk.com/docs/guides/secure/mfa-recovery)). Each code works once.
+2. **They have no backup codes:** a recovery admin resets their two-step sign-in (3.3). At their next sign-in Clerk asks them to set it up again on the new phone.
 3. **They are still signed in on another device** (a session with `fva[1]` still fresh): they can add a new authenticator from account settings there before they lose that session.
+
+Employees ask their manager first; the manager contacts Cornerstone support, who confirms identity before a recovery admin resets anything.
 
 ### 3.2 Backup codes
 
@@ -237,13 +266,14 @@ Clerk has no self-service reset in the sign-in flow. A reset happens in the Cler
 
 ### 3.4 Rollback and break-glass (no data is lost)
 
-`REQUIRE_MFA` only changes whether the API checks the second factor. It writes nothing to payroll data, and enrolled factors stay in Clerk.
+Neither setting writes payroll data, and enrolled factors stay in Clerk. Undo **both**: Clerk's toggle alone would still force enrollment at sign-in, and `REQUIRE_MFA` alone would still refuse unverified sessions.
 
-1. Render → Payroll web and worker (and the employee API if set): set `REQUIRE_MFA=false`.
-2. Redeploy or restart each. Within a couple of minutes everyone signs in with their first factor again, as before the flip.
-3. Leave `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` in place or clear them; either is safe. Expect the two MFA readiness lines to fail again (the known pre-G3 state).
-4. Fix the cause (3.3 for a locked user, Step 2 for a missing claim, Step 3 for strategy settings), then repeat from Step 4.
-5. Do not downgrade Clerk Pro or delete the instance during an incident. Cutover runbook lines 174-179 keep the production instance intact for investigation.
+1. Clerk: **Require multi-factor authentication → Off**. Save.
+2. Render → Payroll web, worker and the employee API: set `REQUIRE_MFA=false`.
+3. Redeploy or restart each. Within a couple of minutes everyone signs in with their first factor again, and the system is back in MFA-ready mode (§0.1): step-up asks for a password or email code, the switch shows two-step sign-in as **Not required yet**, and the readiness MFA lines are WARNs.
+4. Leave `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` in place or clear them; either is safe.
+5. Fix the cause (3.3 for a locked user, Step 2 for a missing claim, Step 3 for strategy settings), then repeat from Step 4.
+6. Do not downgrade Clerk Pro or delete the instance during an incident. The cutover runbook keeps the production instance intact for investigation.
 
 Roll back immediately if: a recovery admin cannot sign in; enrolled users are refused (probably a missing or string-typed `two_factor_enabled` claim); or the readiness MFA lines fail after the flip.
 
@@ -253,50 +283,46 @@ Roll back immediately if: a recovery admin cannot sign in; enrolled users are re
 
 | Group | Required? | Before the flip | After the flip | What they do |
 |---|---|---|---|---|
-| **Cornerstone staff** (super admin, org admin, admin, manager, accountant) | Yes | Enroll authenticator + backup codes in the window. | Sign in with password or Google, then the authenticator code. | Follow the notice. Recovery admins go first. |
-| **Current client users** (role client) | Yes | Enroll from the notice. | Same as staff, on their client address. | Notice plus a short call. |
-| **Employee-only users** (`employee`, `portal_employee`) | **No** | Nothing. | Nothing. They sign in as now. Later, sensitive changes ask for a fresh first-factor check (password or emailed code), per decision D9. | No action. Do not send them the staff notice. |
-| **Dual-role users** (staff or client + an employee link) | **Yes**, on all routes including the employee site | Enroll like staff. | Treated as staff everywhere. | Send them the staff notice. |
-| **New invited users** after the flip | Yes | n/a | Must enroll before the first successful bind. | Add one line to invitation emails (§5 gap 5). |
+| **Cornerstone staff** (super admin, org admin, admin, manager, accountant) | Yes | Enroll authenticator + backup codes in the window (Account & security). | Sign in with password or Google, then the authenticator code. Step-up asks for the code again. | Follow the staff notice. Recovery admins go first. |
+| **Client users** (role client) | Yes | Enroll from the notice. | Same as staff, on their client address. | Notice plus a short call. |
+| **Employees** (`employee`, `portal_employee`) | **Yes** | Enroll from the employee notice (My info → Sign-in & security). | Sign in with password, Google or email code, then the authenticator code. Protected changes ask for the code again. | Employee notice; their manager helps first. |
+| **Dual-role users** (staff or client with an employee link) | Yes, everywhere | Enroll like staff. One enrollment covers both sites. | Same as staff. | Staff notice. |
+| **New invited users** after the flip | Yes | n/a | Clerk asks them to set up the second step during their first sign-in. | Add one line to invitation emails. |
 
 Notes:
 
-- Google sign-in does not skip the second factor for required users. Only users with the claim `two_factor_enabled == true` and a verified second factor pass.
-- Practice-company and other special accounts: the policy decides by role only (`mfa_policy.rb:17-23`). A practice or demo login in a staff role is required too. List them in the roster.
-- Existing browser sessions are not cut off by the env flip alone, but their next API request returns 403 and the app shows the enrollment prompt.
+- Google sign-in does not skip the second factor. Only sessions with the claim `two_factor_enabled == true` and a verified second factor pass.
+- Practice-company, demo and other special accounts are required too. List them in the roster.
+- Existing browser sessions are not cut off by the flip alone, but their next API request returns 403 and the app shows its prompt.
 
 ---
 
-## 5. Gaps in the code that affect this rollout
-
-None of these are fixed in this PR. Severity is for the rollout, not for the product overall.
+## 5. Known gaps
 
 | # | Gap | Severity | Effect | Suggested follow-up |
 |---|---|---|---|---|
-| 1 | **No readiness check for the claim before the flip.** The sample-token check returns `true` when `REQUIRE_MFA` is off (`production_readiness.rb:404-405`), so a missing claim is first detected after the flip, by which time every required user is refused. | **High for the rollout** (mitigated by Step 4 dry run) | A skipped Step 2 or 4 locks out all staff and clients until `REQUIRE_MFA=false`. | Let readiness accept an explicit `CHECK_MFA_CLAIM=true`, or run the sample check whenever a token file is supplied, regardless of the flag. |
-| 2 | **No in-app account-settings or enrollment entry point while signed in.** `openUserProfile()` appears only in the post-flip prompt (`web/src/pages/Login.tsx:31,55`); there is no user menu link. The Account Portal URL in Step 5 is the stand-in. | **Medium** | The enrollment window depends on a URL outside the app; people will ask where to go. | Add an "Account and security" link in the staff app's user menu that calls `openUserProfile()`. |
-| 3 | **Enrolling probably does not refresh the session.** The app's own prompt tells the user to sign out and back in after adding a factor (`Login.tsx:49-52`), and the check needs `fva[1] >= 0`, which Clerk sets when a second factor is used. "Check verification" only re-reads the token. Confirm in the Step 4 rehearsal whether enrolling alone ever clears the prompt; if it does, drop this gap. | **Medium** | A new enrollee is blocked and confused after doing everything right. | Trigger Clerk's second-factor reverification (`useReverification`, `useStepUpRequest.ts`) or sign the user out automatically after enrollment. Reword the prompt to say "sign out, then sign in and enter your code". |
-| 4 | **Prompt wording.** "Add a second factor under Security" does not say authenticator app, does not mention backup codes, and gives no support contact (`Login.tsx:47-52`). | **Low–medium** | More support calls. | Rewrite using the notice template's wording; add the support contact. |
-| 5 | **Invited users who have not enrolled can't reach the bind step.** The first sign-in is denied before binding (`clerk_authenticatable.rb:56-61`). They see the same prompt. | **Low** | They must enroll first; invitation emails do not say so. | Add a line to invitation emails and the notice. |
-| 6 | **`mfa_enrollment_required` is unhandled in the web app.** The step-up path returns it (`recent_verification.rb:33-37`) but no web code reads that code. Step-up has no callers yet, so it is dormant. | **Low now, high once step-up ships** | A step-up call from an unenrolled staff user would show a generic 403 message. | Handle `mfa_enrollment_required` like `mfa_required` before wiring `require_recent_verification!` to any route. |
-| 7 | **Readiness checks the attestation, not the provider.** It cannot tell whether TOTP/backup codes are on in Clerk or who has enrolled (`PRODUCTION_READINESS_CHECKLIST.md:38`). Nothing in Payroll shows enrollment status per user. | **Low–medium** | The roster in Step 5 is manual; a "Require MFA" Clerk toggle left on by mistake would not be caught. | Show enrolled/not enrolled in the staff user list from `two_factor_enabled`, and note the Clerk toggle in the evidence checklist. |
-| 8 | **Mid-session flip drops unsaved work.** The first 403 swaps the whole app to the login prompt (`AuthContext.tsx:167-173`, `App.tsx:92`). | **Low** | Anyone mid-form loses it. | Procedural: quiet period (Step 1 precondition). |
-| 9 | **Two-prompt experience on new devices.** Device Trust's email code and the authenticator code can both appear for staff on a new device; the app ignores the email code for enforcement. | **Low** | Confusing but safe. | Mention in the notice. Revisit after launch. |
-| 10 | **AIRE is out of scope.** This runbook covers Payroll only; AIRE uses its own Clerk setup and `REQUIRE_MFA` (cutover runbook lines 24, 118-123). | **Info** | No change to AIRE. | Separate runbook when AIRE is scheduled. |
+| 1 | **Enrolling probably does not refresh an existing session.** The check needs `fva[1] >= 0`, which Clerk sets when a second factor is used. Someone who enrolls from inside a pre-flip session may need to sign out and in. Confirm in the rehearsal. | Medium | A new enrollee is blocked and confused after doing everything right. | The staff prompt, the employee **Set up two-step sign-in** screen and **Sign-in & security** all say they may need to sign out and back in with the new code; the API then answers `mfa_required`, which shows **Complete two-step sign-in**. |
+| 2 | **Clerk's set-up step on our sign-in forms.** With Clerk's Require MFA on, the embedded `<SignIn>` (staff `Login.tsx`, employee `ClerkAuth.tsx`, both `routing="hash"`) must show Clerk's set-up step for an unenrolled user. | Medium | If it doesn't, unenrolled users land on the app's own prompt instead, which still works. | Rehearse on the development instance (precondition). |
+| 3 | **Invited users who have not enrolled can't reach the bind step until they do.** | Low | Their first visit includes the set-up step. | Add a line to invitation emails and the notice. |
+| 4 | **Readiness checks the attestation, not the provider.** It cannot tell whether TOTP/backup codes are on in Clerk or who has enrolled. | Low–medium | The roster in Step 5 is manual. | Show enrolled/not enrolled in the staff user list from `two_factor_enabled`. |
+| 5 | **Mid-session flip drops unsaved work.** The first 403 swaps the app to the prompt. | Low | Anyone mid-form loses it. | Procedural: quiet period. |
+| 6 | **Two-prompt experience on new devices.** Device Trust's email code and the authenticator code can both appear; the app ignores the email code for enforcement. | Low | Confusing but safe. | Mention in the notices. |
+| 7 | **No system gate on real employees before the flip.** While MFA is off, a live company's employee app can be turned on (owner decision, Nov 25, 2026: MFA behaves the same for every company). | Process | Real employees could use the app before two-step sign-in is on. | Flip before opening a live company's employee app to its employees. |
+| 8 | **AIRE is out of scope.** This runbook covers Payroll only; AIRE uses its own Clerk setup and `REQUIRE_MFA`. | Info | No change to AIRE. | Separate runbook when AIRE is scheduled. |
 
 ---
 
 ## 6. Evidence to keep (private location, referenced by `CLERK_MFA_EVIDENCE_REF`)
 
-- Clerk plan page showing Pro, and the Multi-factor page showing authenticator and backup codes on, SMS off, **Require multi-factor authentication** off.
+- Clerk plan page showing Pro, and the Multi-factor page showing authenticator and backup codes on, SMS off, **Require multi-factor authentication** on (after Step 6).
 - The Customize session token claims page.
-- Step 4 results for the enrolled and not-enrolled test accounts (decoded claim values only, no tokens).
-- The Step 5 table (counts by role: enrolled, signed in with second factor).
-- Final `EVIDENCE {...}` line from Step 7 and the Step 9 result table.
+- Step 4 results for the enrolled and not-enrolled test accounts, staff and employee (decoded claim values only, no tokens).
+- The Step 5 table (counts by role and company: enrolled, signed in with second factor).
+- Final `EVIDENCE {...}` lines from Step 7 (Payroll web and the employee API) and the Step 8 result table.
 - The recovery-admin exercises (3.3).
 
 ## Sources
 
-- Repo: [M3 plan §2.2 and §4.9](../MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md), [M4 plan G3, D9, M4-1](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md), [identity cutover runbook](../PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md), [operator and recovery acceptance](../OPERATOR_AND_RECOVERY_ACCEPTANCE.md), [production readiness checklist](../PRODUCTION_READINESS_CHECKLIST.md), [M4 employee platform runbook](M4_EMPLOYEE_PLATFORM_RUNBOOK.md).
+- Repo: [M3 plan](../MILESTONE_3_FOUNDATIONS_BUILD_PLAN_2026-11-22.md), [M4 plan](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md), [identity cutover runbook](../PRODUCTION_IDENTITY_CUTOVER_RUNBOOK.md), [operator and recovery acceptance](../OPERATOR_AND_RECOVERY_ACCEPTANCE.md), [production readiness checklist](../PRODUCTION_READINESS_CHECKLIST.md), [M4 employee platform runbook](M4_EMPLOYEE_PLATFORM_RUNBOOK.md), [employee app switch](M4_EMPLOYEE_APP_SWITCH.md).
 - Clerk (checked 2026-11-25): [pricing](https://clerk.com/pricing), [sign-up and sign-in options](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options), [MFA recovery](https://clerk.com/docs/guides/secure/mfa-recovery), [customize session tokens](https://clerk.com/docs/guides/sessions/customize-session-tokens), [JWT template shortcodes](https://clerk.com/docs/guides/sessions/jwt-templates), [session tokens (`fva`)](https://clerk.com/docs/guides/sessions/session-tokens), [reverification](https://clerk.com/docs/guides/secure/reverification), [Device Trust](https://clerk.com/docs/guides/protect/device-trust).
-- Clerk's docs do not say whether a Device Trust email code writes `fva[1] = 0` for a user with no second factor. M4 plan line 103 records that it does; the API refuses that case regardless (spec `mfa_enforcement_spec.rb:102-109`). Re-check on the development instance in the Step 4 rehearsal.
+- Clerk's docs do not say whether a Device Trust email code writes `fva[1] = 0` for a user with no second factor. The API refuses that case regardless (spec `mfa_enforcement_spec.rb`). Re-check on the development instance in the rehearsal.

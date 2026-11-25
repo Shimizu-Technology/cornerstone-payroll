@@ -72,7 +72,7 @@ function CompanySwitch({ companyId }: { companyId: number }) {
       if (response.ok) return null;
       return body ?? { error: 'Could not save the change. Try again.' };
     } catch (failure) {
-      if (isReverificationCancelledError(failure)) return { error: 'Two-step check cancelled. Nothing was changed.' };
+      if (isReverificationCancelledError(failure)) return { error: 'Sign-in check cancelled. Nothing was changed.' };
       return { error: 'Could not save the change. Check your connection and try again.' };
     }
   }, [send]);
@@ -190,13 +190,19 @@ function scopeOf(key: string): string | null {
   return null;
 }
 
+// Two-step sign-in is waived for every company while REQUIRE_MFA is off; the
+// database check is waived only for a demo under early access.
+function waivedLabel(key: string): string {
+  return key === 'mfa' ? 'Not required yet' : 'Waived for demo';
+}
+
 function CheckRow({ check, scope }: { check: ReadinessCheck; scope: string | null }) {
   const icon = check.status === 'passed'
     ? <CheckCircle2 className="h-5 w-5 text-success-700" aria-hidden="true" />
     : check.status === 'waived'
       ? <ShieldAlert className="h-5 w-5 text-warning-700" aria-hidden="true" />
       : <XCircle className="h-5 w-5 text-danger-700" aria-hidden="true" />;
-  const label = check.status === 'passed' ? 'Passed' : check.status === 'waived' ? 'Waived for demo' : 'Not ready';
+  const label = check.status === 'passed' ? 'Passed' : check.status === 'waived' ? waivedLabel(check.key) : 'Not ready';
   return (
     <li className="flex gap-3 py-3">
       <span className="mt-0.5 shrink-0">{icon}</span>
