@@ -739,7 +739,8 @@ module Api
             disposition: "inline",
             filename: "test_check_#{sample_type}_#{PayrollBusinessClock.today}.pdf"
         rescue StandardError => e
-          render json: { error: "Failed to generate test check: #{e.message}" }, status: :unprocessable_entity
+          Rails.logger.error("[ChecksController#test_check_pdf] #{e.class}: #{e.message}")
+          render json: { error: "Failed to generate test check" }, status: :unprocessable_entity
         end
 
         # -----------------------------------------------------------------------

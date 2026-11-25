@@ -12,6 +12,13 @@ module Api
         end
 
         company_ids = Current.view_as_grant ? [ current_company_id ] : current_user.accessible_company_ids
+        home_company_id = if Current.view_as_grant
+          current_company_id
+        elsif current_user.client?
+          company_ids.include?(current_user.company_id) ? current_user.company_id : nil
+        else
+          current_user.company_id
+        end
         payload = {
           user: {
             id: current_user.id,
@@ -22,7 +29,7 @@ module Api
             organization_name: current_user.organization&.name,
             company_id: current_company_id,
             company_name: current_company&.name,
-            home_company_id: Current.view_as_grant ? current_company_id : current_user.company_id,
+            home_company_id: home_company_id,
             assigned_company_ids: company_ids,
             capabilities: StaffRolePolicy.capabilities_for(current_user),
             company_capabilities: Company.where(id: company_ids).order(:id).to_h do |company|

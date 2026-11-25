@@ -8,8 +8,8 @@ RSpec.describe "Portal personal reads and activity", type: :request do
   %w[client manager].each do |role|
     context "as #{role}" do
       let(:company) { create(:company) }
-      let!(:actor) { create(:user, company: company, role: role) }
-      let!(:peer) { create(:user, company: company, role: role) }
+      let!(:actor) { create(:user, :with_client_assignment, company: company, role: role) }
+      let!(:peer) { create(:user, :with_client_assignment, company: company, role: role) }
       let(:namespace) { role == "client" ? "client" : "admin" }
       let(:threads_path) { "/api/v1/#{namespace}/portal_threads" }
       let(:documents_path) { "/api/v1/#{namespace}/#{role == 'client' ? 'documents' : 'client_documents'}" }

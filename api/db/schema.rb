@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_080000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1022,6 +1022,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_070000) do
     t.integer "profile_email_daily_codes", default: 0, null: false
     t.integer "profile_email_daily_failures", default: 0, null: false
     t.datetime "former_profile_access_until"
+    t.string "activation_notice_email"
+    t.string "activation_notice_status"
+    t.integer "activation_notice_attempts", default: 0, null: false
+    t.datetime "activation_notice_sent_at"
+    t.index [ "activation_notice_status" ], name: "idx_employee_account_links_unsent_activation_notice", where: "((activation_notice_status)::text = ANY (ARRAY[('pending'::character varying)::text, ('failed'::character varying)::text]))"
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"

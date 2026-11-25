@@ -158,6 +158,19 @@ describe('Employee app panel', () => {
     expect(screen.getByText('Invited')).toBeTruthy();
   });
 
+  it('shows staff who issued the printed code next to an active employee link', async () => {
+    openPanel({
+      ...employee,
+      status: 'active',
+      staff_actions: true,
+      invite_delivery: 'code',
+      activated_at: '2026-11-26T20:00:00Z',
+      invited_by_name: 'Pat Issuer',
+    } as EmployeeAppAccess, 'admin');
+
+    expect(await screen.findByText(/Printed code issued by Pat Issuer/)).toBeTruthy();
+  });
+
   it('sends the explicit company and employee IDs in its read and wave requests', async () => {
     const api = employeeAppRolloutApi(7, 'client');
     await api.get();
