@@ -3752,7 +3752,6 @@ export interface ClientQuickbooksPaycheck {
   gross_pay: number | string | null;
   net_pay: number | string | null;
   hours_total?: number | string | null;
-  payment_method?: string | null;
   source_label?: string;
   adjustment_note?: string | null;
 }

@@ -191,10 +191,12 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
             <h2 id="period-conversation-link" className="text-base font-semibold text-neutral-950">Messages</h2>
             <p className="text-sm text-neutral-600">Questions, replies, and file requests for this pay period live in Messages.</p>
             <Link
-              to={period.thread_id ? `/messages?thread_id=${period.thread_id}` : '/messages'}
+              to={period.thread_id
+                ? `/messages?thread_id=${period.thread_id}`
+                : `/messages?period_ref=${encodeURIComponent(period.id ? String(period.id) : period.ref)}`}
               className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline"
             >
-              {period.thread_id ? 'Open this period’s conversation in Messages' : 'Open Messages'}
+              {period.thread_id ? 'Open this period’s conversation in Messages' : 'Start this period’s conversation in Messages'}
             </Link>
           </section>
         )}
