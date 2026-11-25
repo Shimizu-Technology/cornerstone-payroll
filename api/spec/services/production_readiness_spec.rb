@@ -275,9 +275,10 @@ RSpec.describe ProductionReadiness do
           env["REQUIRE_MFA"] = flag
         end
 
+        # Intentionally-off MFA reports the probe as an advisory WARN, not a FAIL.
         report_without_sample = readiness.run(live: true)
-        expect(report_without_sample.failures.map(&:name)).to include(pre_flip_check_name)
-        expect(report_without_sample.failures.map(&:name)).not_to include(existing_check_name)
+        expect(report_without_sample.warnings.map(&:name)).to include(pre_flip_check_name)
+        expect(report_without_sample.failures.map(&:name)).not_to include(pre_flip_check_name, existing_check_name)
 
         with_sample_token(claims: sample_claims.merge(two_factor_enabled: true)) do
           report = readiness.run(live: true)
@@ -303,8 +304,8 @@ RSpec.describe ProductionReadiness do
       ].each do |claims|
         with_sample_token(claims: claims) do
           report = readiness.run(live: true)
-          expect(report.failures.map(&:name)).to include(pre_flip_check_name)
-          expect(report.failures.map(&:name)).not_to include(existing_check_name)
+          expect(report.warnings.map(&:name)).to include(pre_flip_check_name)
+          expect(report.failures.map(&:name)).not_to include(pre_flip_check_name, existing_check_name)
         end
       end
     end
@@ -313,19 +314,19 @@ RSpec.describe ProductionReadiness do
       env["REQUIRE_MFA"] = "false"
 
       with_sample_token(claims: sample_claims.merge(iat: 20.minutes.ago.to_i, exp: 19.minutes.ago.to_i)) do
-        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+        expect(readiness.run(live: true).warnings.map(&:name)).to include(pre_flip_check_name)
       end
 
       with_sample_token(claims: sample_claims.except(:iat)) do
-        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+        expect(readiness.run(live: true).warnings.map(&:name)).to include(pre_flip_check_name)
       end
 
       with_sample_token(claims: sample_claims.except(:sid)) do
-        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+        expect(readiness.run(live: true).warnings.map(&:name)).to include(pre_flip_check_name)
       end
 
       with_sample_token(key: OpenSSL::PKey::RSA.generate(2048)) do
-        expect(readiness.run(live: true).failures.map(&:name)).to include(pre_flip_check_name)
+        expect(readiness.run(live: true).warnings.map(&:name)).to include(pre_flip_check_name)
       end
     end
 
@@ -333,7 +334,8 @@ RSpec.describe ProductionReadiness do
       env["REQUIRE_MFA"] = "false"
 
       with_sample_token(claims: sample_claims.merge(iat: 2.minutes.ago.to_i, exp: 1.minute.ago.to_i)) do
-        expect(readiness.run(live: true).failures.map(&:name)).not_to include(pre_flip_check_name)
+        report = readiness.run(live: true)
+        expect(report.checks.find { |check| check.name == pre_flip_check_name }.status).to eq("PASS")
       end
     end
 
@@ -478,22 +480,72 @@ RSpec.describe ProductionReadiness do
     expect(report).to be_passed
   end
 
-  it "reports live production Clerk keys and authorized parties passing when REQUIRE_MFA is false while keeping MFA attestation failing" do
+  it "reports live production Clerk keys and authorized parties passing when REQUIRE_MFA is false, with MFA attestation an advisory WARN" do
     env["REQUIRE_MFA"] = "false"
 
     report = readiness.run(live: false)
 
     expect(report.checks.find { |check| check.name == "production Clerk keys are configured" }.passed).to be(true)
     expect(report.checks.find { |check| check.name == "Clerk authorized parties are explicit production HTTPS origins" }.passed).to be(true)
-    expect(report.failures.map(&:name)).to contain_exactly("MFA enforcement has instance-bound evidence")
+    expect(report).to be_passed
+    expect(report.warnings.map(&:name).grep(/MFA/)).to contain_exactly("MFA enforcement has instance-bound evidence")
   end
 
-  it "shares runtime MFA switch parsing while retaining the attestation requirement" do
+  it "shares runtime MFA switch parsing: attestation is a FAIL when on and a WARN when off" do
     env["REQUIRE_MFA"] = "on"
     expect(readiness.run(live: false)).to be_passed
+    env.delete("CLERK_MFA_EVIDENCE_REF")
+    expect(readiness.run(live: false).failures.map(&:name)).to contain_exactly("MFA enforcement has instance-bound evidence")
 
     env.delete("REQUIRE_MFA")
-    expect(readiness.run(live: false).failures.map(&:name)).to contain_exactly("MFA enforcement has instance-bound evidence")
+    report = readiness.run(live: false)
+    expect(report).to be_passed
+    expect(report.warnings.map(&:name).grep(/MFA/)).to contain_exactly("MFA enforcement has instance-bound evidence")
+  end
+
+  describe "while MFA is intentionally off (REQUIRE_MFA unset, pending the Clerk Pro rollout)" do
+    let(:mfa_check_names) do
+      [ "MFA enforcement has instance-bound evidence", "Clerk Backend API accepts the configured key and matches MFA evidence",
+        "Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim" ]
+    end
+
+    before do
+      %w[REQUIRE_MFA CLERK_MFA_ATTESTED_INSTANCE_ID CLERK_MFA_EVIDENCE_REF].each { |key| env.delete(key) }
+    end
+
+    it "reports the MFA checks as advisory WARNs that say why, and passes" do
+      report = readiness.run(live: true)
+
+      expect(report).to be_passed
+      mfa_warnings = report.warnings.select { |check| check.name.include?("MFA") }
+      expect(mfa_warnings.map(&:name)).to match_array(mfa_check_names)
+      mfa_warnings.each do |check|
+        expect(check.status).to eq("WARN")
+        expect(check.detail).to include("MFA is intentionally off", "pending the Clerk Pro rollout", "REQUIRE_MFA=true")
+      end
+      expect(report.checks.find { |check| check.name == "Clerk session token includes the MFA enrollment claim" }.status).to eq("PASS")
+    end
+
+    it "still fails when Clerk doesn't accept the configured key" do
+      allow(http_get).to receive(:call).and_wrap_original do |original, uri, token|
+        next [ 401, { "errors" => [] } ] if uri.host == "api.clerk.com"
+
+        original.call(uri, token)
+      end
+
+      report = readiness.run(live: true)
+      expect(report.failures.map(&:name)).to eq([ "Clerk Backend API accepts the configured key and matches MFA evidence" ])
+      expect(report.failures.sole.detail).to eq("not verified")
+    end
+
+    it "makes every MFA check a hard FAIL again once REQUIRE_MFA=true, until it's evidenced" do
+      env["REQUIRE_MFA"] = "true"
+      report = readiness.run(live: true)
+
+      expect(report.warnings.map(&:name).grep(/MFA/)).to be_empty
+      expect(report.failures.map(&:name)).to include(*mfa_check_names, "Clerk session token includes the MFA enrollment claim")
+      expect(report.failures.map(&:detail).uniq).to eq([ "not verified" ])
+    end
   end
 
   it "requires instance-bound MFA evidence in addition to the attestation flag" do

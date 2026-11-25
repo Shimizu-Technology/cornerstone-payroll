@@ -1,5 +1,5 @@
 import { useCallback, useMemo, type ComponentProps, type ReactNode, type ReactElement } from 'react';
-import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, useReverification } from '@clerk/react';
+import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, UserProfile, useReverification } from '@clerk/react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
 import { ui as clerkUi } from '@clerk/ui';
@@ -58,13 +58,27 @@ function ClerkSignUpForm({ redirectTo }: { redirectTo: string }): ReactElement {
   return <SignUp routing="hash" forceRedirectUrl={redirectTo} fallbackRedirectUrl={redirectTo} signInUrl="/sign-in" />;
 }
 
+// Clerk's account settings, where two-step sign-in is set up (Security →
+// Two-step verification), embedded on the Sign-in & security page.
+function ClerkAccountSecurityPanel(): ReactElement {
+  return (
+    <UserProfile
+      routing="hash"
+      appearance={{ elements: { rootBox: 'w-full max-w-full', cardBox: 'w-full max-w-full shadow-none border border-neutral-200 rounded-2xl' } }}
+    />
+  );
+}
+
 type Attempt = () => Promise<unknown>;
 
-function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
+/** Exported for tests. */
+export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
   const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
   const { openUserProfile } = useClerk();
   // Clerk shows its "confirm it's you" prompt when the fetcher returns the
-  // API's reverification hint, then runs the same attempt again.
+  // API's reverification hint, at the level the hint names (first_factor
+  // while REQUIRE_MFA is off, second_factor once it's on), then runs the
+  // same attempt again.
   const reverify = useReverification(async (attempt: Attempt) => {
     try {
       return { result: await attempt() };
@@ -93,6 +107,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
     SignUpForm: ClerkSignUpForm,
     stepUp,
     openAccountSettings: () => openUserProfile(),
+    AccountSecurityPanel: ClerkAccountSecurityPanel,
   }), [isLoaded, isSignedIn, getToken, signOut, stepUp, openUserProfile]);
   return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
 }

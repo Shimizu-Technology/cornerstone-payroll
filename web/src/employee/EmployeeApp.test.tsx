@@ -113,6 +113,62 @@ describe('employee app shell', () => {
     expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
   });
 
+  it('sends a login that needs two-step sign-in to the Sign-in & security page, and back', async () => {
+    signedIn();
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({ error: 'Set up two-step sign-in.', code: 'mfa_enrollment_required' }, { status: 403 }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up two-step sign-in' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('link', { name: 'Set up two-step sign-in' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Sign-in & security' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/security');
+    expect(document.title).toBe('Sign-in & security · Cornerstone Payroll');
+    expect(screen.getByText('Two-step verification', { exact: false })).toBeTruthy();
+    expect(screen.getByTestId('dev-preview-account-settings')).toBeTruthy();
+    // The page opens without the employee session the API is refusing.
+    expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull();
+
+    await userEvent.click(screen.getByRole('link', { name: 'Done' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up two-step sign-in' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/');
+  });
+
+  it('asks an enrolled login that skipped the second step to sign in again, not to set it up', async () => {
+    signedIn();
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({ error: 'Multi-factor authentication is required.', code: 'mfa_required' }, { status: 403 }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Complete two-step sign-in' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign out and sign in again' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Set up two-step sign-in' })).toBeNull();
+  });
+
+  it('links My info to Sign-in & security', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => new Response(null, { status: 204 }),
+    }));
+    render(<EmployeeApp />);
+
+    const link = await within(await screen.findByRole('main')).findByRole('link', { name: 'Sign-in & security' });
+    expect(link.getAttribute('href')).toBe('/security');
+  });
+
+  it('sends a signed-out visit to Sign-in & security through sign-in', async () => {
+    window.history.pushState({}, '', '/security');
+    vi.stubGlobal('fetch', respond({}));
+    render(<EmployeeApp />);
+    await screen.findByRole('heading', { level: 1 });
+    expect(window.location.pathname).toBe('/sign-in');
+  });
+
   it('shows "access ended" when former access has run out', async () => {
     signedIn();
     vi.stubGlobal('fetch', respond({

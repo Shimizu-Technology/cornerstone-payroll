@@ -80,7 +80,7 @@ Step 7  Wave 1: everyone else, or a group the client picks   all nine gates + G7
   ✅ `OK    demo:seed companies=…` and two `OK` lines from `demo:invite_clients` (it prints domains only). A rerun is safe: a finished seed is a no-op, and a delivered, still-open invite is left alone.
 - [ ] For the QuickBooks original-stub cases, generate the sample files on the lead's machine and keep them in the private evidence location: `OUTPUT_DIR=… bundle exec rails demo:quickbooks_sample`.
 - [ ] The persona mailbox aliases, passwords and backup codes are in the access-logged vault, with one reviewer assigned per script run (demo plan §3).
-- [ ] View-only Sign in as is ready: `VIEW_AS_READY=true` on Payroll web and the employee service, and the Cornerstone principal's and owner's staff logins have the support-view permission. It only works in production once two-step sign-in is on, the RLS guard is in `raise` and `CLERK_AUTHORIZED_PARTIES` is set (`api/app/models/view_as_grant.rb:17-28`), so expect it from step 2 on.
+- [ ] View-only Sign in as is ready: `VIEW_AS_READY=true` on Payroll web and the employee service, and the Cornerstone principal's and owner's staff logins have the support-view permission. It works in production once the RLS guard is in `raise` and `CLERK_AUTHORIZED_PARTIES` is set (`ViewAsGrant.ready?` in `api/app/models/view_as_grant.rb`). It doesn't wait for two-step sign-in: while `REQUIRE_MFA` is off, starting a view asks for a fresh password or email code instead.
 
 **Verify:** the go-live record lists the deployed commits and the seed output.
 **Rollback:** nothing to roll back. A failed seed is rerun after the fix.

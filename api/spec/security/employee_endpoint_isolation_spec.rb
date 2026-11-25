@@ -269,13 +269,14 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     end
   end
 
-  def link_headers(link, subject: link.user.clerk_id, azp: alpha_origin, fva: [ 0, -1 ], **claims)
-    extra = claims
-    if link.user && !link.user.portal_employee? && !claims.key?(:two_factor_enabled)
-      extra = { two_factor_enabled: true }.merge(claims)
-      fva = [ 0, 0 ] if fva == [ 0, -1 ]
-    end
-    bearer(subject, azp: azp, fva: fva, **extra).merge("X-Employee-Link-Id" => link.id.to_s)
+  # REQUIRE_MFA is on here, so every login, employee-only ones included, has
+  # an enrolled, freshly verified second factor unless a test says otherwise.
+  def bearer(subject, **options)
+    super(subject, fva: [ 0, 0 ], two_factor_enabled: true, **options)
+  end
+
+  def link_headers(link, subject: link.user.clerk_id, azp: alpha_origin, **claims)
+    bearer(subject, azp: azp, **claims).merge("X-Employee-Link-Id" => link.id.to_s)
   end
 
   def link_routes
@@ -407,7 +408,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       actor: create(:user, role: :admin, company: bravo, organization: organization), delivery: "code")
     post "/api/v1/employee/links/claim",
       params: activation_params(bravo_invite.link.employee, code: bravo_invite.code).except(:email).to_json,
-      headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     expect(bravo_invite.link.reload).to be_invited
 
@@ -417,7 +418,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     other_org_invite = invite!(other_org_emp, actor: create(:user, role: :admin, company: other_org_company), delivery: "code")
     post "/api/v1/employee/links/claim",
       params: activation_params(other_org_emp, code: other_org_invite.code).except(:email).to_json,
-      headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a").merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     expect(other_org_invite.link.reload).to be_invited
 
@@ -428,7 +429,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     clerk_session!("sess_user_iso_rehire", user_id: "user_iso_rehire", created_at: 10.minutes.ago)
     post "/api/v1/employee/links/reactivate",
       params: activation_params(bravo_invite.link.employee, code: bravo_invite.code).except(:email).to_json,
-      headers: bearer("user_iso_rehire", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_rehire", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     expect(rehire_user.reload).not_to be_active
 
@@ -533,7 +534,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     post "/api/v1/employee/links/claim",
       params: activation_params(stranger_emp, code: stranger_invite.code).except(:email).to_json,
-      headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     expect(stranger_invite.link.reload).to be_invited
 
@@ -542,7 +543,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     clerk_session!("sess_user_iso_deact_a", user_id: "user_iso_deact_a", created_at: 10.minutes.ago)
     post "/api/v1/employee/links/reactivate",
       params: activation_params(stranger_emp, code: stranger_invite.code).except(:email).to_json,
-      headers: bearer("user_iso_deact_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_deact_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     expect(deactivated_a.reload).not_to be_active
 
@@ -658,12 +659,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     post "/api/v1/employee/links/claim",
       params: activation_params(routed_emp, token: routed_invite.token).except(:email).to_json,
-      headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a").merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
 
     post "/api/v1/employee/links/reactivate",
       params: activation_params(routed_emp, token: routed_invite.token).except(:email).to_json,
-      headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a").merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
 
     post_activation(activation_params(routed_emp, token: routed_invite.token, email: "hijack@example.net"))
@@ -748,11 +749,11 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
       post "/api/v1/employee/links/claim",
         params: activation_params(emp_a, token: "terminated-token").except(:email).to_json,
-        headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+        headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
       expect(response).to have_http_status(:not_found)
       post "/api/v1/employee/links/reactivate",
         params: activation_params(emp_a, token: "terminated-token").except(:email).to_json,
-        headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+        headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
       expect(response).to have_http_status(:not_found)
       expect(stale_invite.reload).to be_invited
     end
@@ -785,11 +786,11 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     expect(response).to have_http_status(:unprocessable_content)
     post "/api/v1/employee/links/claim",
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
-      headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     post "/api/v1/employee/links/reactivate",
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
-      headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     end
   end
@@ -820,11 +821,11 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     expect(response).to have_http_status(:unprocessable_content)
     post "/api/v1/employee/links/claim",
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
-      headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     post "/api/v1/employee/links/reactivate",
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
-      headers: bearer("user_iso_a", azp: alpha_origin, fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a", azp: alpha_origin).merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
     end
   end
@@ -924,12 +925,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     post "/api/v1/employee/links/claim",
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
-      headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a").merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
 
     post "/api/v1/employee/links/reactivate",
       params: activation_params(inv.link.employee, code: inv.code).except(:email).to_json,
-      headers: bearer("user_iso_a", fva: [ 0, -1 ]).merge("CONTENT_TYPE" => "application/json")
+      headers: bearer("user_iso_a").merge("CONTENT_TYPE" => "application/json")
     expect(response).to have_http_status(:not_found)
 
     post_activation(activation_params(inv.link.employee, code: inv.code))
