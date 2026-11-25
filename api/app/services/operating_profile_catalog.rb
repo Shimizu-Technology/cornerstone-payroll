@@ -60,7 +60,7 @@ class OperatingProfileCatalog
   ALWAYS_REVIEWED_GROUPS = %w[bank w4 identity].freeze
   ALL_REVIEW_FIRST_GROUPS = (CONFIGURABLE_REVIEW_FIRST_GROUPS + ALWAYS_REVIEWED_GROUPS).freeze
   EMPLOYEE_PORTAL_FEATURES = %w[
-    stubs tax_forms profile_requests documents pto bank_requests w4_requests
+    stubs tax_forms profile_requests delivery_consent documents pto bank_requests w4_requests
   ].freeze
   KIND_OF_EMPLOYER_VALUES = %w[N F S T Y].freeze
   FORMER_ACCESS_YEARS_RANGE = (1..10).freeze
@@ -70,6 +70,7 @@ class OperatingProfileCatalog
     "employee_portal.features.stubs" => 4,
     "employee_portal.features.tax_forms" => 4,
     "employee_portal.features.profile_requests" => 4,
+    "employee_portal.features.delivery_consent" => 4,
     "employee_portal.features.documents" => 5,
     "employee_portal.features.pto" => 5,
     "employee_portal.features.bank_requests" => 4,
@@ -350,6 +351,20 @@ class OperatingProfileCatalog
       what: "Allows employees to submit verified contact and address update requests through the employee portal (Milestone 4).",
       example: "false during Milestone 3; true once Milestone 4 change requests are enabled.",
       effect: "Gates employee-submitted contact and address change requests.",
+      requires: [ "employee_portal_enabled" ].freeze
+    ),
+    Entry.new(
+      id: "employee_portal.features.delivery_consent",
+      label: "Employee portal: electronic delivery consent",
+      section: "employee_portal",
+      storage: :option,
+      type: "boolean",
+      default: false,
+      allowed: [ true, false ].freeze,
+      capability: :manage_client_administration,
+      what: "Shows electronic-delivery consent screens for pay statements and Form W-2GU and records employee consent and withdrawals (Milestone 4).",
+      example: "false during Milestone 3 and the initial pilot; true once consent screens are turned on for a client.",
+      effect: "Gates /api/v1/employee/delivery_consents endpoints and employee consent UI; paper delivery continues during the pilot regardless of consent.",
       requires: [ "employee_portal_enabled" ].freeze
     ),
     Entry.new(

@@ -412,12 +412,31 @@ export interface Employee {
   contact_source?: EmployeeContactSource | null;
   contact_revision?: string;
   contact_details_status?: EmployeeContactDetailsStatus;
+  delivery_consents?: EmployeeDeliveryConsentsSummary;
   wage_rates?: EmployeeWageRate[];
   default_custom_earnings?: CustomEarning[];
   default_payroll_adjustments?: PayrollAdjustment[];
   employee_payroll_fields?: EmployeePayrollField[];
   created_at: string;
   updated_at: string;
+}
+
+export interface EmployeeDeliveryConsentItem {
+  kind: 'pay_statements' | 'w2gu';
+  status: 'not_consented' | 'consented' | 'withdrawn';
+  disclosure_version: string | null;
+  disclosure_status: 'draft' | 'approved' | null;
+  given_at: string | null;
+  withdrawn_at: string | null;
+  method: string | null;
+  electronic_only_ready: boolean;
+  paper_continues: boolean;
+}
+
+export interface EmployeeDeliveryConsentsSummary {
+  feature_enabled: boolean;
+  paper_delivery_continues: boolean;
+  items: EmployeeDeliveryConsentItem[];
 }
 
 export type EmployeeW4ElectionSource = 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
