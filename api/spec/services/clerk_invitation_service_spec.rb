@@ -269,6 +269,11 @@ RSpec.describe ClerkInvitationService do
 
       stub_request(:post, "https://api.clerk.com/v1/invitations/inv_big/revoke").to_return(status: 400, body: big)
       expect(described_class.new.revoke_invitation("inv_big")).to include(success: false)
+
+      # One that declares an oversized body is refused before any of it is read.
+      stub_request(:get, "https://api.clerk.com/v1/users/user_big")
+        .to_return(status: 200, body: { id: "user_big" }.to_json, headers: { "Content-Length" => "65" })
+      expect(described_class.new.fetch_user("user_big")).to be_nil
     end
 
     it "still reads an ordinary answer in full" do
