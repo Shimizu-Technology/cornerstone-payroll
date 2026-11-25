@@ -1023,6 +1023,9 @@ class IssueCorrectivePaycheckService
   end
 
   def create_supplemental_fit_check!(supplemental)
+    # A demo company's corrections never create a FIT deposit check.
+    return if supplemental.company.demo?
+
     fit_total = supplemental.payroll_items
       .where(employment_type: %w[hourly salary])
       .financially_reportable

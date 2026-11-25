@@ -287,11 +287,6 @@ module Api
         # Download a single check PDF.
         # -----------------------------------------------------------------------
         def show
-          # Demo checks are not printable yet; D4 adds plain-paper demo checks.
-          if @payroll_item.pay_period.company.demo?
-            return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE }, status: :forbidden
-          end
-
           @payroll_item.ensure_financial_source_payment_ready! unless @payroll_item.voided?
           unless @payroll_item.pay_period.committed?
             return render json: { error: "Check PDF is only available for committed pay periods" }, status: :unprocessable_entity
