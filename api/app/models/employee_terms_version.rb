@@ -4,6 +4,9 @@
 # item 1). Rows are immutable: counsel's approval inserts a new approved
 # version. The switch readiness check reads the current version's status.
 class EmployeeTermsVersion < ApplicationRecord
+  TITLE = "Employee App Terms"
+  validates :text_digest, format: { with: /\A[0-9a-f]{64}\z/ }, allow_nil: true
+
   STATUSES = %w[draft approved].freeze
 
   validates :version, presence: true, uniqueness: true, length: { maximum: 80 }

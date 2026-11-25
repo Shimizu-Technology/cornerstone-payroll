@@ -1563,6 +1563,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060800) do
     t.string "terms_url", limit: 500, null: false
     t.datetime "updated_at", null: false
     t.string "version", limit: 80, null: false
+    t.string "text_digest", limit: 64
     t.index [ "status", "published_at", "id" ], name: "idx_employee_terms_versions_current"
     t.index [ "version" ], name: "idx_employee_terms_versions_version", unique: true
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'approved'::character varying]::text[])", name: "employee_terms_versions_status_check"
