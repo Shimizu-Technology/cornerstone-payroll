@@ -83,7 +83,7 @@ RSpec.describe DemoOutbound, :portal_notifications do
     let(:staff) { create(:user, company: live, organization: organization, role: "accountant", email: "staff@firm.example") }
 
     it "identifies demo logins but leaves firm staff working on a demo alone" do
-      CompanyAssignment.create!(user: staff, company: demo, workspace_access_level: "operator")
+      CompanyAssignment.create!(user: staff, company: demo)
       expect(described_class.demo_company_for(demo_client)).to eq(demo)
       expect(described_class.demo_company_for(staff)).to be_nil
     end
@@ -195,7 +195,7 @@ RSpec.describe DemoOutbound, :portal_notifications do
       with_portal_email do
         staff = create(:user, company: live, organization: organization, role: "accountant", email: allowed)
         [ live, demo ].each do |company|
-          CompanyAssignment.create!(user: staff, company: company, workspace_access_level: (company.demo? ? "operator" : nil))
+          CompanyAssignment.create!(user: staff, company: company)
           list_portal_recipient!(company, user: staff)
           thread = create(:client_portal_thread, company: company, created_by: create(:user, company: live, organization: organization, role: "client"))
           PortalNotifications.record!(event_type: "client_message", company: company, actor: nil, subject: thread, dedupe_key: "mixed-#{company.id}")

@@ -169,7 +169,7 @@ class User < ApplicationRecord
         end
         assigned_ids &= organization_company_ids
 
-        assigned_ids.presence || Array(company_id)
+        client_company_boundary(assigned_ids).presence || client_company_boundary(Array(company_id))
       end
     end
   end
@@ -271,8 +271,20 @@ class User < ApplicationRecord
     errors.add(:company, "must belong to the user's organization")
   end
 
+  # A demo client login sees only demo companies, and a live client login
+  # never sees one, whatever its assignments or home company say.
+  def client_company_boundary(ids)
+    return ids unless client? && ids.any?
+
+    demo_ids = Company.demo.where(id: ids).ids
+    company&.demo? ? ids & demo_ids : ids - demo_ids
+  end
+
   def migration_rehearsal_company_requires_staff_role
     return if company.blank? || !company.test_workspace? || staff_member? || (client? && practice_company_id == company_id)
+    # A demo company's client logins are its own: only allow-listed addresses
+    # (private configuration), never a practice login.
+    return if client? && company.demo? && practice_company_id.nil? && DemoOutbound.allowed?(email)
 
     errors.add(:company, "requires a practice-only client login or payroll staff")
   end

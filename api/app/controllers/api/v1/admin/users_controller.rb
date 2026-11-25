@@ -50,7 +50,14 @@ module Api
 
           if user.client? && company_ids_provided
             selected = Company.where(id: normalize_company_ids(company_ids))
-            if selected.any?(&:test_workspace?)
+            if selected.any?(&:demo?)
+              # A demo client login belongs to its demo companies only.
+              unless selected.all?(&:demo?) && (selected.map(&:id) - assignable_company_ids).empty?
+                user.errors.add(:base, "These clients can't share one login. Create a separate login for each.")
+                raise ActiveRecord::RecordInvalid, user
+              end
+              user.company = selected.first
+            elsif selected.any?(&:test_workspace?)
               unless selected.one? && assignable_company_ids.include?(selected.first.id) && selected.first.sandbox?
                 user.errors.add(:base, "Choose one practice copy for a separate practice-only login")
                 raise ActiveRecord::RecordInvalid, user
@@ -406,7 +413,7 @@ module Api
             normalized_company_ids.include?(assignment.company_id) ||
               # The Users payload lists active grants only. A name edit must
               # not erase hidden expired grants or renew their access.
-              (assignment.expired? && (user.staff_member? || !assignment.company.test_workspace?))
+              (assignment.expired? && (user.staff_member? || !assignment.company.practice_copy?))
           end
           retained_assignments.each do |assignment|
             # Retention must not bypass role/organization validation after a
@@ -420,7 +427,7 @@ module Api
             company = Company.find(company_id)
             user.company_assignments.create!(
               company: company,
-              workspace_access_level: company.test_workspace? ? "operator" : nil,
+              workspace_access_level: company.practice_copy? ? "operator" : nil,
               granted_by: current_user
             )
           end
