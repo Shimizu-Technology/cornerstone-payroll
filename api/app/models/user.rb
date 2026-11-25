@@ -121,7 +121,14 @@ class User < ApplicationRecord
         TestWorkspace::PortalAccess.deactivate_if_closed!(self)
       end
     end
-    active? && (super_admin? || organization&.active?) && (!demo_client? || demo_client_access_open?)
+    active? && (super_admin? || organization&.active?) && (!demo_client? || demo_client_access_open?) &&
+      (!demo_employee? || DemoOutbound.allowed?(email))
+  end
+
+  # An employee-app login whose home company is a demo (D6): it works only
+  # while its address is on the current allow-list.
+  def demo_employee?
+    portal_employee? && company&.demo? == true
   end
 
   # A client login whose home company is a demo (D5).
@@ -304,10 +311,12 @@ class User < ApplicationRecord
 
   def migration_rehearsal_company_requires_staff_role
     return if company.blank? || !company.test_workspace? || staff_member? || (client? && practice_company_id == company_id)
-    # A demo company's client logins are its own: only allow-listed addresses
-    # (private configuration), never a practice login. Deactivating one is
-    # always allowed, even after its address left the allow-list.
-    return if client? && company.demo? && practice_company_id.nil? && ((persisted? && !active?) || DemoOutbound.allowed?(email))
+    # A demo company's client and employee-app logins are its own: only
+    # allow-listed addresses (private configuration), never a practice login.
+    # Deactivating one is always allowed, even after its address left the
+    # allow-list.
+    return if (client? || portal_employee?) && company.demo? && practice_company_id.nil? &&
+      ((persisted? && !active?) || DemoOutbound.allowed?(email))
 
     errors.add(:company, "requires a practice-only client login or payroll staff")
   end
