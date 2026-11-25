@@ -11,6 +11,7 @@ import {
   CalendarDays,
   Clock3,
   CheckCircle2,
+  FileText,
   Pencil,
   ReceiptText,
   RefreshCw,
@@ -44,6 +45,7 @@ import {
 } from '@/lib/utils';
 import {
   currentAppPath,
+  employeeDocumentsPath,
   employeeEditPath,
   employeePath,
   employeesPath,
@@ -409,8 +411,24 @@ function EmployeeOverview({
   returnTo,
 }: EmployeeOverviewProps): ReactElement {
   const variableSalary = employee.employment_type === 'salary' && employee.salary_type === 'variable';
+  const documents = employee.document_readiness;
+  const missingDocuments = documents && !documents.ready_for_payroll ? documents.missing || [] : [];
   return (
     <>
+      {missingDocuments.length > 0 && (
+        <section aria-labelledby="employee-documents-needed" className="flex flex-col gap-3 rounded-2xl border border-warning-200 bg-warning-50 px-4 py-4 text-sm text-warning-950 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="flex min-w-0 gap-3">
+            <FileText className="mt-0.5 h-5 w-5 shrink-0 text-warning-800" aria-hidden="true" />
+            <div className="min-w-0">
+              <h2 id="employee-documents-needed" className="font-semibold">Before this employee's first payroll</h2>
+              <p className="mt-1 break-words leading-6">Upload and verify: {missingDocuments.join(', ')}. Payroll can't be approved until these are verified or waived.</p>
+            </div>
+          </div>
+          <Link className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1 rounded-full bg-primary-700 px-4 font-semibold text-white hover:bg-primary-800" to={employeeDocumentsPath(companyId, employee.id, { returnTo })}>
+            Upload or verify <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </Link>
+        </section>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Metric icon={BadgeDollarSign} label="Current pay rate" value={variableSalary ? 'Set each pay period' : formatCurrency(Number(employee.pay_rate) || 0)} detail={variableSalary ? 'Variable salary' : employee.employment_type === 'hourly' || (employee.employment_type === 'contractor' && employee.contractor_pay_type === 'hourly') ? 'per hour' : employee.salary_type === 'per_period' || employee.employment_type === 'contractor' ? 'per pay period' : 'annual salary'} />
         <Metric icon={Banknote} label="Recent gross" value={latestPay ? formatCurrency(latestPay.gross_pay) : 'No payroll yet'} detail={latestPay ? `Pay date ${formatDate(latestPay.pay_date)}` : 'No committed payroll records'} />

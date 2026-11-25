@@ -652,7 +652,7 @@ module Api
           guidance = if PriorProviderHistory::Discovery.available?(current_company, period: @pay_period)
             " Were these already paid by a previous provider? Record them as prior-provider history from this client's pay runs."
           end
-          render json: { error: "#{e.message}#{guidance}" }, status: :unprocessable_entity
+          render json: { error: "#{e.message}#{guidance}", **document_block_json(e) }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/unapprove
@@ -683,7 +683,7 @@ module Api
         rescue ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue PayPeriodLifecycleService::Error => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render json: { error: e.message, **document_block_json(e) }, status: :unprocessable_entity
         end
 
         # GET /api/v1/admin/pay_periods/:id/promoted_payment_preview
@@ -1540,9 +1540,22 @@ module Api
               payroll_item_json(item, print_activity: print_activity, payment_lookup: payment_lookup)
             end
             json[:default_employee_ids] = PayPeriodDefaultRoster.new(pay_period).employee_ids(excluded_employee_ids: json[:excluded_employee_ids])
+            # Shown before Approve so a new hire's missing documents aren't a surprise.
+            json[:new_hire_document_gaps] = if pay_period.status.in?(%w[draft calculated approved]) && pay_period.correction_status != "voided"
+              EmployeeDocumentReadiness.gaps_by_employee(employees: Employee.where(company_id: pay_period.company_id,
+                id: items.map(&:employee_id) | json[:default_employee_ids], document_readiness_required: true).order(:last_name, :first_name, :id))
+            else
+              []
+            end
           end
 
           json
+        end
+
+        def document_block_json(error)
+          return {} unless error.is_a?(PayPeriodLifecycleService::DocumentsBlockedError) && error.employees.any?
+
+          { code: "new_hire_documents_required", blocked_employees: error.employees }
         end
 
         def authorized_client_approvers
