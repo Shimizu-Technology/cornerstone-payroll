@@ -1325,3 +1325,89 @@ select.emp-input {
   line-height: 1.35;
   color: #475569;
 }
+
+/* ---------- Electronic delivery consent (M4-6) ---------- */
+.emp-disclosure-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.emp-disclosure-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emp-disclosure-heading {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.emp-disclosure-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.48;
+  color: #334155;
+}
+
+.emp-proof-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.emp-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 4px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.emp-checkbox {
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--action);
+}
+
+@media print {
+  .emp-header,
+  .emp-nav,
+  .emp-no-print {
+    display: none !important;
+  }
+
+  .emp-shell,
+  .emp-main {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+    padding: 0 !important;
+  }
+
+  .emp-disclosure-box {
+    max-height: none !important;
+    overflow: visible !important;
+    border-color: #cbd5e1 !important;
+    background: #fff !important;
+  }
+}

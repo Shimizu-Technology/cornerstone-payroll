@@ -127,9 +127,9 @@ const tones: Record<Tone, string> = {
 };
 
 /** A small status label. Text always says the status; color only backs it up. */
-export function Chip({ tone = 'neutral', icon: Icon, children }: { tone?: Tone; icon?: LucideIcon; children: ReactNode }): ReactElement {
+export function Chip({ tone = 'neutral', icon: Icon, children, ...props }: { tone?: Tone; icon?: LucideIcon; children: ReactNode; 'data-testid'?: string }): ReactElement {
   return (
-    <span className={cn('emp-chip', tones[tone])}>
+    <span className={cn('emp-chip', tones[tone])} {...props}>
       {Icon && <Icon aria-hidden="true" className="size-4 shrink-0" />}
       {children}
     </span>

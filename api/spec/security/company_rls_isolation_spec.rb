@@ -650,6 +650,58 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "isolates delivery consents and enforces employee and link ownership" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company, other_company = create(:company), create(:company)
+          own, foreign = TenantScope.as_system(reason: "Create delivery consent RLS fixtures") do
+            disclosure = DeliveryDisclosures::DraftSeeds.seed!.find { |d| d.kind == "pay_statements" }
+            consents = [ company, other_company ].map do |owner|
+              employee = create(:employee, company: owner)
+              user = create(:user, company: owner, role: "portal_employee")
+              link = EmployeeAccountLink.create!(company: owner, employee: employee, user: user, status: "active")
+              DeliveryConsent.create!(
+                company: owner, user: user, employee: employee, employee_account_link: link,
+                delivery_disclosure: disclosure, kind: "pay_statements",
+                disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
+                given_at: Time.current, method: "employee_portal_checkbox"
+              )
+            end
+            expect do
+              connection.transaction(requires_new: true) do
+                DeliveryConsent.create!(
+                  company: company, user: consents.first.user, employee: consents.last.employee,
+                  employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
+                  kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
+                  given_at: Time.current, method: "employee_portal_checkbox"
+                )
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[delivery_consents], read_tables: %w[delivery_disclosures])
+            consents
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(DeliveryConsent.order(:id).pluck(:id)).to eq([ own.id ])
+            expect(DeliveryConsent.where(id: foreign.id).update_all(withdrawn_at: Time.current)).to eq(0)
+            expect(DeliveryConsent.where(id: foreign.id).delete_all).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                DeliveryConsent.insert_all!([
+                  foreign.attributes.except("id", "withdrawn_at").merge(
+                    "kind" => "w2gu",
+                    "access_proof_verified_at" => Time.current,
+                    "method" => "employee_portal_pdf_verified"
+                  )
+                ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     [ [ true, "SELECT" ], [ false, "SELECT, UPDATE" ] ].each do |bypass, privileges|
       it "rejects runtime role capabilities bypass=#{bypass} and grants=#{privileges}" do
         pool.with_connection do |connection|

@@ -94,7 +94,7 @@ export interface EmployeeContextInfo {
   /** Per-company W-2 setting (§8a). Null when the company hasn't set it. */
   w2Delivery: W2Delivery | null;
   /** The company's employee_portal.features switches. A missing switch counts as off. */
-  features: { stubs: boolean; taxForms: boolean; profileRequests: boolean };
+  features: { stubs: boolean; taxForms: boolean; profileRequests: boolean; deliveryConsent: boolean };
 }
 
 export function parseContext(data: unknown): EmployeeContextInfo {
@@ -106,7 +106,12 @@ export function parseContext(data: unknown): EmployeeContextInfo {
     formerAccessUntil: accessDay(body.former_access_until),
     nextPayday: isoDate(body.next_payday),
     w2Delivery: oneOf(body.w2_delivery, ['mailed', 'handed_out'] as const),
-    features: { stubs: bool(features.stubs), taxForms: bool(features.tax_forms), profileRequests: bool(features.profile_requests) },
+    features: {
+      stubs: bool(features.stubs),
+      taxForms: bool(features.tax_forms),
+      profileRequests: bool(features.profile_requests),
+      deliveryConsent: bool(features.delivery_consent),
+    },
   };
 }
 
@@ -583,4 +588,127 @@ export function parseActivation(data: unknown, pageOrigin: string): ActivationOu
   if (next !== 'sign_up') return null;
   const signUpUrl = signUpUrlFrom(data, pageOrigin);
   return signUpUrl ? { next: 'sign_up', signUpUrl } : null;
+}
+
+// ---------- Electronic-delivery consent (M4-6) ----------
+// Served by DeliveryConsentsController:
+//   GET  /employee/delivery_consents
+//   POST /employee/delivery_consents                  (step-up; W-2GU also needs PDF access proof)
+//   POST /employee/delivery_consents/withdraw         (one tap, no step-up)
+//   POST /employee/delivery_consents/w2gu_access_proof/pdf
+
+export type DeliveryConsentKind = 'pay_statements' | 'w2gu';
+export type DeliveryConsentStatus = 'not_consented' | 'consented' | 'withdrawn';
+
+export interface DeliveryDisclosure {
+  version: string;
+  title: string;
+  text: string;
+  digest: string;
+  publishedAt: string | null;
+  /** True only for staff/dev when disclosure status is draft; false for regular employees. */
+  draftMarker: boolean;
+}
+
+export interface ActiveDeliveryConsent {
+  id: string;
+  disclosureVersion: string;
+  disclosureDigest: string;
+  givenAt: string;
+  method: string;
+  matchesCurrentDisclosure: boolean;
+}
+
+export interface DeliveryConsentItem {
+  kind: DeliveryConsentKind;
+  status: DeliveryConsentStatus;
+  activeConsent: ActiveDeliveryConsent | null;
+  lastWithdrawnAt: string | null;
+  disclosure: DeliveryDisclosure | null;
+  requiresAccessProof: boolean;
+  emailNoticeLockedOn: boolean;
+  paperContinues: boolean;
+  electronicOnlyReady: boolean;
+}
+
+export interface DeliveryConsentsState {
+  paperDeliveryContinues: boolean;
+  consents: DeliveryConsentItem[];
+}
+
+export interface W2GuAccessProofChallenge {
+  accessProofToken: string;
+  expiresAt: string;
+  filename: string;
+  pdfBase64: string;
+}
+
+function parseDisclosure(value: unknown): DeliveryDisclosure | null {
+  const row = record(value);
+  const version = text(row?.version);
+  const title = text(row?.title);
+  const body = typeof row?.text === 'string' && row.text.trim() !== '' ? row.text : null;
+  const digest = text(row?.digest);
+  if (!row || !version || !title || !body || !digest) return null;
+  return {
+    version,
+    title,
+    text: body,
+    digest,
+    publishedAt: text(row.published_at),
+    draftMarker: bool(row.draft_marker),
+  };
+}
+
+function parseActiveConsent(value: unknown): ActiveDeliveryConsent | null {
+  const row = record(value);
+  const consentId = id(row?.id);
+  const disclosureVersion = text(row?.disclosure_version);
+  const disclosureDigest = text(row?.disclosure_digest);
+  const givenAt = text(row?.given_at);
+  const method = text(row?.method);
+  if (!row || !consentId || !disclosureVersion || !disclosureDigest || !givenAt || !method) return null;
+  return {
+    id: consentId,
+    disclosureVersion,
+    disclosureDigest,
+    givenAt,
+    method,
+    matchesCurrentDisclosure: bool(row.matches_current_disclosure),
+  };
+}
+
+export function parseDeliveryConsents(data: unknown): DeliveryConsentsState {
+  const body = record(data) ?? {};
+  const consents = list(body, 'consents').flatMap((item): DeliveryConsentItem[] => {
+    const row = record(item);
+    const kind = oneOf(row?.kind, ['pay_statements', 'w2gu'] as const);
+    if (!row || !kind) return [];
+    const status = oneOf(row.status, ['not_consented', 'consented', 'withdrawn'] as const) ?? 'not_consented';
+    return [{
+      kind,
+      status,
+      activeConsent: parseActiveConsent(row.active_consent),
+      lastWithdrawnAt: text(row.last_withdrawn_at),
+      disclosure: parseDisclosure(row.disclosure),
+      requiresAccessProof: kind === 'w2gu' || bool(row.requires_access_proof),
+      emailNoticeLockedOn: bool(row.email_notice_locked_on),
+      paperContinues: row.paper_continues !== false,
+      electronicOnlyReady: bool(row.electronic_only_ready),
+    }];
+  });
+  return {
+    paperDeliveryContinues: body.paper_delivery_continues !== false,
+    consents,
+  };
+}
+
+export function parseW2GuAccessProof(data: unknown): W2GuAccessProofChallenge | null {
+  const body = record(data);
+  const accessProofToken = text(body?.access_proof_token);
+  const expiresAt = text(body?.expires_at);
+  const filename = text(body?.filename) ?? 'w2gu-pdf-access-check.pdf';
+  const pdfBase64 = text(body?.pdf_base64);
+  if (!body || !accessProofToken || !expiresAt || !pdfBase64) return null;
+  return { accessProofToken, expiresAt, filename, pdfBase64 };
 }
