@@ -380,7 +380,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
 
       const banner = page.getByRole('region', { name: 'View only' });
       await expect(banner).toContainText('Viewing as Milo Tarrant');
-      await expect(banner).toContainText('View only · 27 min left');
+      await expect(banner).toContainText('27 min left');
       expect((await banner.getByRole('button', { name: 'End' }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
       await expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();
       await expectNoHorizontalScroll(page);

@@ -22,6 +22,11 @@ module EmployeeDocuments
       available_through(year) if year
     end
 
+    # The retention floor extends tax forms and pay stubs beyond the profile cutoff.
+    def access_until(employee, profile_until:)
+      [ profile_until, floor_for(employee) ].compact.max
+    end
+
     # Lengthens the employee's open former links whose access would end before
     # the copy's retention date. A link whose access already ended is left
     # closed. Only former_access_until moves (tax forms and pay stubs);

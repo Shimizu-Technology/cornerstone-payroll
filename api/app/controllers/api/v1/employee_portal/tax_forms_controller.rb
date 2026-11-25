@@ -4,7 +4,7 @@ module Api
   module V1
     module EmployeePortal
       # The employee's own W-2GU copies (M4-5): the frozen Copy B and C posted
-      # for each tax year, read through the link only. Behind the company's
+      # for each tax year, scoped to the employee. Behind the company's
       # employee_portal.features.tax_forms switch. A copy staff withdrew is
       # listed without a PDF, so the app can say a corrected form is being
       # prepared. A former link sees every copy posted for that employee, so
@@ -21,7 +21,7 @@ module Api
         # GET /api/v1/employee/tax_forms
         def index
           forms = visible_documents.to_a
-          audit!("listed", record: @employee_link, metadata: { count: forms.size })
+          audit!("listed", record: @employee_link || @view_as_employee_context&.link || employee_access_context.employee, metadata: { count: forms.size })
           render json: { tax_forms: forms.map { |document| summary(document) } }
         end
 
@@ -41,8 +41,8 @@ module Api
 
           bytes = stored_bytes(document)
           return head :service_unavailable unless bytes
-          return head :not_found unless still_servable?(document, feature: :tax_forms) do |link, current|
-            current.tax_form? && current.posted? && current.employee_id == link.employee_id
+          return head :not_found unless still_servable?(document, feature: :tax_forms) do |context, current|
+            current.tax_form? && current.posted? && current.employee_id == context.employee_id
           end
 
           audit!("pdf_downloaded", record: document,
@@ -55,13 +55,13 @@ module Api
         private
 
         def require_tax_forms!
-          head :not_found unless CompanyFeatures.for(@employee_link.company).employee_portal_feature?(:tax_forms)
+          head :not_found unless CompanyFeatures.for(employee_access_context.company).employee_portal_feature?(:tax_forms)
         end
 
         # This employee's current copy for each year: posted, or withdrawn
         # while a corrected form is prepared. A replaced revision isn't listed.
         def visible_documents
-          EmployeeDocument.tax_forms.where(company_id: @employee_link.company_id, employee_id: @employee_link.employee_id,
+          EmployeeDocument.tax_forms.where(company_id: employee_access_context.company_id, employee_id: employee_access_context.employee_id,
             status: %w[posted withdrawn]).order(tax_year: :desc, revision: :desc, id: :desc)
         end
 
@@ -86,10 +86,10 @@ module Api
         def audit!(event, record:, metadata: {})
           AuditLog.record!(
             actor: Current.actor, user: @current_user,
-            organization_id: @employee_link.company.organization_id, company_id: @employee_link.company_id,
+            organization_id: employee_access_context.company.organization_id, company_id: employee_access_context.company_id,
             action: "#{AUDIT_ACTION}##{event}", record_type: record.class.name, record_id: record.id,
-            subject_name: @employee_link.employee.display_name, event_category: "employee_portal",
-            metadata: metadata.merge(employee_account_link_id: @employee_link.id, employee_id: @employee_link.employee_id).compact
+            subject_name: employee_access_context.employee.display_name, event_category: "employee_portal",
+            metadata: metadata.merge(employee_account_link_id: employee_access_context.id, employee_id: employee_access_context.employee_id).compact
           )
           skip_default_audit_log!
         end

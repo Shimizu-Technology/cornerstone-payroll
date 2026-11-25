@@ -48,11 +48,8 @@ module EmployeeLinks
       return link unless link.active?
 
       years = former_access_years(link.company)
-      profile_until = (termination_date + years.years).in_time_zone(PayrollBusinessClock::TIME_ZONE).end_of_day
-      # A posted W-2GU copy stays available through October 15 of the next
-      # year (M4-5). That longer window covers tax forms and pay stubs only;
-      # profile reads keep the client's own cutoff.
-      access_until = [ profile_until, EmployeeDocuments::TaxFormRetention.floor_for(link.employee) ].compact.max
+      profile_until = former_access_deadline(link.company, termination_date, years: years)
+      access_until = EmployeeDocuments::TaxFormRetention.access_until(link.employee, profile_until: profile_until)
       link.update!(status: "former", former_at: now, former_access_until: access_until, former_profile_access_until: profile_until)
       EmployeeLinks.side_effect_audit do
         EmployeeLinks.audit!(link, "made_former", user: actor, actor: audit_actor, request: request,
@@ -61,6 +58,10 @@ module EmployeeLinks
       end
       deactivate_if_last!(link.user, closed_link: link, now: now) if access_until <= now
       link
+    end
+
+    def former_access_deadline(company, termination_date, years: former_access_years(company))
+      (termination_date + years.years).in_time_zone(PayrollBusinessClock::TIME_ZONE).end_of_day
     end
 
     def former_access_years(company)
