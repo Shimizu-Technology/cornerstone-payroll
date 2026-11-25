@@ -4747,7 +4747,7 @@ export interface EmployeeChangeRequest {
   can_review?: boolean;
   proposed_compensation_effective_on?: string | null;
   id: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   request_kind: 'create' | 'update';
   employee_id: number;
   employee_name: string;

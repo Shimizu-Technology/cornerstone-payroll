@@ -31,14 +31,15 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     link
   end
 
-  it "reads only its own profile with verification marks, masked identity and no cache" do
+  it "reads only its own profile with verification marks, no SSN fields and no cache" do
     get "#{base}/profile", headers: employee_headers
     expect(response).to have_http_status(:ok)
     expect(response.headers.fetch("Cache-Control")).to include("no-store")
     expect(response.parsed_body).to include(
-      "legal_name" => "Example Worker", "ssn_last4" => "0001", "email" => employee.email, "email_verified" => true,
+      "legal_name" => "Example Worker", "email" => employee.email, "email_verified" => true,
       "phone_confirmed" => false, "payment_method" => "paper_check", "emergency_contacts" => [], "address_request" => nil
     )
+    expect(response.parsed_body).not_to have_key("ssn_last4")
     expect(response.body).not_to include("999-00-0001")
   end
 
@@ -123,7 +124,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body).to include("phone" => "+16715550100", "phone_confirmed" => true,
-      "legal_name" => "Example Worker", "ssn_last4" => "0001")
+      "legal_name" => "Example Worker")
     expect(employee.reload).to have_attributes(phone: "+16715550100", contact_source: "employee")
     entry = EmployeeContactChangeToConfirm.where(employee: employee).sole
     expect(entry.after_values).to eq("phone" => "+16715550100")
@@ -148,6 +149,158 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       .to eq([ [ contact.stringify_keys.merge("id" => id, "phone" => "+16715550100") ],
         [ contact.stringify_keys.merge("id" => id, "phone" => "+16715550100", "relationship" => "Friend") ], nil ])
     expect(%w[create update destroy].map { |action| audits("emergency_contacts##{action}").sole.record_id }).to eq([ id.to_i ] * 3)
+  end
+
+  it "caps emergency contacts at five and frees a slot when an employee removes one" do
+    5.times do
+      post "#{base}/emergency_contacts", params: contact, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:created), response.body
+    end
+    first_id = response.parsed_body.fetch("emergency_contacts").first.fetch("id")
+
+    post "#{base}/emergency_contacts", params: contact, headers: employee_headers, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("You can save up to five emergency contacts.")
+    expect(EmployeeEmergencyContact.where(employee: employee).count).to eq(5)
+
+    delete "#{base}/emergency_contacts/#{first_id}", headers: employee_headers
+    expect(response).to have_http_status(:ok)
+    post "#{base}/emergency_contacts", params: contact, headers: employee_headers, as: :json
+    expect(response).to have_http_status(:created)
+  end
+
+  it "keeps emergency contact changes in client activity and the audit without adding staff work or alerts" do
+    reviewer
+    staff = create(:user, company: company, role: "admin", clerk_id: "user_profile_staff")
+    list_portal_recipient!(company, user: staff)
+    with_portal_email do
+      post "#{base}/emergency_contacts", params: contact, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:created), response.body
+      entry = EmployeeContactChangeToConfirm.where(employee: employee).sole
+      expect(audits("emergency_contacts#create")).to exist
+      event = PortalNotificationEvent.where(subject: entry).sole
+      expect(event).to have_attributes(category: "contact_changes", audience: "client")
+      expect(event.deliveries.pluck(:user_id)).to eq([ reviewer.id ])
+      legacy_staff_event = PortalNotificationEvent.new(
+        company: company, subject: entry, event_type: "employee_contact_confirmation_requested"
+      )
+      expect(PortalNotifications::Recipients).not_to be_subject_available(legacy_staff_event)
+      expect(EmployeeContactChangeToConfirm.unconfirmed_count(company)).to eq(0)
+
+      get "/api/v1/admin/employee_contact_changes_to_confirm", headers: client_headers(staff)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("data")).to be_empty
+      patch "/api/v1/admin/employee_contact_changes_to_confirm/#{entry.id}/confirm", headers: client_headers(staff)
+      expect_not_found
+
+      get "/api/v1/client/employee_change_requests/contact_changes", headers: client_headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("data").pluck("id")).to eq([ entry.id ])
+    end
+  end
+
+  it "persists the challenge before delivery, then clears it in a separate transaction after a timeout" do
+    transport = PortalNotifications::Transport
+    connection = ActiveRecord::Base.connection
+    transaction_depth = connection.open_transactions
+    allow(transport).to receive(:configured?).and_return(true)
+    allow(Timeout).to receive(:timeout).and_call_original
+    expect(Timeout).to receive(:timeout).with(10.seconds, Timeout::Error).and_call_original
+    expect(transport).to receive(:deliver) do |_, idempotency_key:|
+      expect(connection.open_transactions).to eq(transaction_depth)
+      saved_id = JSON.parse(link.reload.profile_email_challenge).fetch("id")
+      expect(idempotency_key).to eq("employee-profile-email:#{saved_id}")
+      raise Net::ReadTimeout
+    end
+
+    post "#{base}/profile/email", headers: employee_headers, params: { email: "new@example.test" }, as: :json
+    expect(response).to have_http_status(:service_unavailable)
+    expect(link.reload.profile_email_challenge).to be_nil
+    expect(link.profile_email_daily_codes).to eq(1)
+  end
+
+  it "allows five codes per link per Guam day, including confirmation of the fifth code" do
+    travel_to Time.iso8601("2026-11-25T23:50:00+10:00")
+    other_link = link_to(worker, create(:employee, company: company))
+    with_portal_email do
+      4.times do
+        start_email
+        travel 1.minute + 1.second
+      end
+      id, code = start_email
+      travel 1.minute + 1.second
+      [ "another@example.test", "invalid address" ].each do |email|
+        post "#{base}/profile/email", headers: employee_headers, params: { email: email }, as: :json
+        expect_daily_limit
+      end
+      expect(captured_portal_emails.size).to eq(5)
+      confirm_email(id, code)
+      expect(response).to have_http_status(:ok), response.body
+
+      post "#{base}/profile/email", headers: employee_headers(other_link), params: { email: "other-link@example.test" }, as: :json
+      expect(response).to have_http_status(:accepted), response.body
+
+      travel_to Time.iso8601("2026-11-26T00:00:00+10:00")
+      start_email("tomorrow@example.test")
+    end
+  end
+
+  it "caps wrong attempts across codes without revealing whether an ID is active" do
+    travel_to Time.iso8601("2026-11-25T23:50:00+10:00")
+    with_portal_email do
+      2.times do
+        id, code = start_email
+        5.times do
+          confirm_email(id, wrong_code(code))
+          expect(response).to have_http_status(:unprocessable_entity)
+        end
+        travel 1.minute + 1.second
+      end
+      id, code = start_email
+      4.times do
+        confirm_email("unknown-id", wrong_code(code))
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("error")).to eq("The verification code is invalid or expired.")
+      end
+      confirm_email(id, wrong_code(code))
+      expect_daily_limit
+      [ id, "unknown-id" ].each do |verification_id|
+        confirm_email(verification_id, code)
+        expect_daily_limit
+      end
+      post "#{base}/profile/email", headers: employee_headers, params: { email: "new@example.test" }, as: :json
+      expect_daily_limit
+      expect(employee.reload.email).to eq("original@example.test")
+
+      travel_to Time.iso8601("2026-11-26T00:00:00+10:00")
+      id, code = start_email
+      confirm_email(id, code)
+      expect(response).to have_http_status(:ok), response.body
+    end
+  end
+
+  it "refuses shared and generic inboxes without sending a code or identifying the other employee" do
+    create(:employee, company: company, email: "shared@example.test")
+    with_portal_email do
+      [ "shared@example.test", "noreply@example.test" ].each do |email|
+        post "#{base}/profile/email", headers: employee_headers, params: { email: email }, as: :json
+        expect(response).to have_http_status(:unprocessable_entity), response.body
+        expect(response.parsed_body).to eq("error" => "Use a personal email address that only you can access.",
+          "code" => "personal_email_required")
+      end
+      expect(captured_portal_emails).to be_empty
+    end
+  end
+
+  it "rechecks shared inboxes before applying a verified email" do
+    with_portal_email do
+      id, code = start_email
+      create(:employee, company: company, email: "new@example.test")
+      confirm_email(id, code)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("code")).to eq("personal_email_required")
+      expect(employee.reload.email).to eq("original@example.test")
+    end
   end
 
   it "requires the emailed code, prevents resend during cooldown, consumes success and leaves the Clerk login alone" do
@@ -238,18 +391,67 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(existing.reload).to be_pending
   end
 
-  it "lets the owner edit and cancel their pending address request, freeing the single pending slot" do
+  it "replaces an edited address, sends fresh notices, and refuses stale decisions from client and staff reviewers" do
+    staff = create(:user, company: company, role: "admin", clerk_id: "user_profile_staff")
+    list_portal_recipient!(company, user: staff)
+    reviewer
+    with_portal_email do
+      id = submit_address
+      admin_path = "/api/v1/admin/employee_change_requests"
+      client_path = "/api/v1/client/employee_change_requests"
+      reviewers = { admin_path => staff, client_path => reviewer }
+      reviewers.each do |path, actor|
+        get "#{path}/#{id}", headers: client_headers(actor)
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.fetch("data")).to include("can_review" => true, "status" => "pending")
+      end
+
+      patch "#{base}/address_requests/#{id}", params: { address: address.merge(address_line2: "Unit 2") },
+        headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      replacement = response.parsed_body.fetch("address_request")
+      new_id = replacement.fetch("id")
+      expect(new_id).not_to eq(id)
+      expect(replacement.dig("requested", "address_line2")).to eq("Unit 2")
+      expect(EmployeeChangeRequest.find(id)).to be_cancelled
+      expect(EmployeeChangeRequest.find(id).proposed_changes.fetch("address_line2")).to be_nil
+      expect(audits("address_requests#update").sole.record_id).to eq(new_id.to_i)
+      replacement_events = PortalNotificationEvent.where(subject_type: "EmployeeChangeRequest", subject_id: new_id)
+      expect(replacement_events.pluck(:event_type)).to contain_exactly("employee_change_submitted", "address_approval_requested")
+      PortalNotifications::Dispatcher.run!(now: 2.days.from_now)
+      expect(replacement_events.flat_map { |event| event.deliveries.pluck(:status, :user_id) })
+        .to contain_exactly([ "sent", staff.id ], [ "sent", reviewer.id ])
+      original_events = PortalNotificationEvent.where(subject_type: "EmployeeChangeRequest", subject_id: id)
+      expect(original_events.flat_map { |event| event.deliveries.pluck(:skip_reason) }).to eq([ "resource_unavailable" ] * 2)
+
+      reviewers.each do |path, actor|
+        %w[approve reject].each do |decision|
+          patch "#{path}/#{id}/#{decision}", headers: client_headers(actor)
+          expect(response).to have_http_status(:conflict), response.body
+        end
+        get "#{path}/#{id}", headers: client_headers(actor)
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.fetch("data")).to include("status" => "cancelled", "can_review" => false)
+      end
+      expect(employee.reload.address_line1).to eq("100 Example Lane")
+      expect(EmployeeChangeRequest.pending.where(employee: employee).sole.id).to eq(new_id.to_i)
+
+      patch "#{client_path}/#{new_id}/approve", headers: client_headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload.address_line2).to eq("Unit 2")
+    end
+  end
+
+  it "keeps a cancelled address request in review history and frees the pending slot" do
     id = submit_address
-    patch "#{base}/address_requests/#{id}", params: { address: address.merge(address_line2: "Unit 2") },
-      headers: employee_headers, as: :json
-    expect(response).to have_http_status(:ok), response.body
-    expect(response.parsed_body.dig("address_request", "requested", "address_line2")).to eq("Unit 2")
-    expect(employee.reload.address_line1).to eq("100 Example Lane")
     delete "#{base}/address_requests/#{id}", headers: employee_headers
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body).to include("address_request" => nil, "other_request_pending" => false)
-    expect(EmployeeChangeRequest.exists?(id)).to be(false)
-    expect(%w[create update destroy].map { |action| audits("address_requests##{action}").sole.record_id }).to eq([ id.to_i ] * 3)
+    expect(EmployeeChangeRequest.find(id)).to be_cancelled
+    expect(audits("address_requests#destroy").sole.record_id).to eq(id.to_i)
+
+    get "/api/v1/client/employee_change_requests", params: { status: "cancelled" }, headers: client_headers
+    expect(response.parsed_body.fetch("data").pluck("id")).to eq([ id.to_i ])
     expect(submit_address).not_to eq(id)
   end
 
@@ -367,6 +569,12 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
 
   def confirm_email(id, code, headers: employee_headers)
     post "#{base}/profile/email/confirm", headers: headers, params: { verification_id: id, code: code }, as: :json
+  end
+
+  def expect_daily_limit
+    expect(response).to have_http_status(:too_many_requests)
+    expect(response.parsed_body).to eq("error" => "Too many verification tries today. Try again tomorrow.",
+      "code" => "email_code_daily_limit")
   end
 
   def wrong_code(code)

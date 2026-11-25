@@ -13,29 +13,33 @@ module Api
         def create
           return render_pending_request if profile.requests.pending.exists?
 
-          address = proposed_address!
-          @audit_record = profile.requests.create!(
-            requested_by: current_user, requested_by_link: @employee_link, request_kind: "update",
-            status: :pending, proposed_changes: address, original_values: @employee.slice(*address.keys)
-          )
-          PortalNotifications.employee_change_submitted!(@audit_record)
+          submit_address!(proposed_address!)
           render_profile(status: :created)
         end
 
         def update
-          @audit_record = change_request = profile.own_requests.pending.find(resource_id)
+          change_request = profile.own_requests.pending.find(resource_id)
           address = proposed_address!
-          change_request.update!(proposed_changes: address, original_values: @employee.slice(*address.keys))
+          change_request.cancelled!
+          submit_address!(address)
           render_profile
         end
 
         def destroy
           @audit_record = profile.own_requests.pending.find(resource_id)
-          @audit_record.destroy!
+          @audit_record.cancelled!
           render_profile
         end
 
         private
+
+        def submit_address!(address)
+          @audit_record = profile.requests.create!(
+            requested_by: current_user, requested_by_link: @employee_link, request_kind: "update",
+            status: :pending, proposed_changes: address, original_values: @employee.slice(*address.keys)
+          )
+          PortalNotifications.employee_change_submitted!(@audit_record)
+        end
 
         def lock_profile_company!
           # The client submission and both review paths take this same lock

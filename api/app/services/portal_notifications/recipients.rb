@@ -58,9 +58,14 @@ module PortalNotifications
         subject = event.subject
         employee_submission = event.event_type == "employee_change_submitted" && subject.is_a?(EmployeeChangeRequest) &&
           subject.requested_by_link_id.present?
+        return false if employee_submission && subject.cancelled?
+
         if employee_submission || %w[address_approvals contact_changes employee_address_decisions].include?(event.category) ||
             event.event_type == "employee_contact_confirmation_requested"
           return false unless CompanyFeatures.for(event.company).employee_portal_feature?(:profile_requests)
+        end
+        if event.event_type == "employee_contact_confirmation_requested" && subject.is_a?(EmployeeContactChangeToConfirm)
+          return false if subject.after_values.key?("emergency_contacts")
         end
         if event.category == "address_approvals"
           return subject.is_a?(EmployeeChangeRequest) && subject.company_id == event.company_id &&

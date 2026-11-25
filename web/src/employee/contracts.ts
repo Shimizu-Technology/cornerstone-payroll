@@ -320,7 +320,7 @@ export function parseHelpContacts(data: unknown): HelpContact[] {
 
 // ---------- GET /employee/profile ----------
 // Served by ProfileController (M4-7):
-// { legal_name, ssn_last4, email, email_verified, phone, phone_confirmed,
+// { legal_name, email, email_verified, phone, phone_confirmed,
 //   address: { address_line1, address_line2, city, state, zip },
 //   payment_method, emergency_contacts: [{ id, name, relationship, phone }],
 //   address_request: { id, status, requested: {...}, submitted_at, decided_at, decision_note } | null,
@@ -354,7 +354,6 @@ export interface AddressRequest {
 
 export interface EmployeeProfile {
   legalName: string | null;
-  ssnLast4: string | null;
   email: string | null;
   emailVerified: boolean;
   phone: string | null;
@@ -389,7 +388,6 @@ export function parseProfile(data: unknown): EmployeeProfile {
   const status = oneOf(request?.status, ['pending', 'approved', 'rejected'] as const);
   return {
     legalName: text(body.legal_name),
-    ssnLast4: typeof body.ssn_last4 === 'string' && /^\d{4}$/.test(body.ssn_last4) ? body.ssn_last4 : null,
     email: text(body.email),
     emailVerified: bool(body.email_verified),
     phone: text(body.phone),

@@ -106,7 +106,7 @@ it('consumes the inbox deep link once so a new status filter selects its own req
   expect(screen.queryByText('Request #1')).toBeNull();
 });
 
-it.each(['approved', 'rejected'] as const)('shows a handled %s deep link in its initial all-status list', async status => {
+it.each(['approved', 'rejected', 'cancelled'] as const)('shows a handled %s deep link in its initial all-status list', async status => {
   vi.clearAllMocks();
   const handled = request(8, 'Handled employee', 'Handled notes', status);
   apiMocks.list.mockImplementation(({ status: filter }: { status?: string }) => Promise.resolve({ data: filter === 'pending' ? [] : [handled] }));
@@ -133,4 +133,18 @@ it('labels address requests and prevents review when the server says it is the r
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reject' }).disabled).toBe(true);
   fireEvent.click(approve);
   expect(apiMocks.approve).not.toHaveBeenCalled();
+});
+
+it('explains who sees the optional note when staff review an address request', async () => {
+  vi.clearAllMocks();
+  const address = { ...request(8, 'Example Worker', ''), profile_address: true, can_review: true };
+  apiMocks.list.mockResolvedValue({ data: [address] });
+  apiMocks.get.mockResolvedValue({ data: address });
+  apiMocks.approve.mockResolvedValue({ data: { ...address, status: 'approved' } });
+
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  const note = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: "Note to the employee (they'll see this)" });
+  expect(note.required).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  await waitFor(() => expect(apiMocks.approve).toHaveBeenCalledWith(address.id, '', undefined));
 });

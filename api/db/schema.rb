@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_200100) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_25_200200) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -946,6 +946,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_200100) do
     t.string "sign_up_reset_reason", limit: 500
     t.text "profile_email_challenge"
     t.datetime "profile_email_sent_at"
+    t.date "profile_email_usage_date"
+    t.integer "profile_email_daily_codes", default: 0, null: false
+    t.integer "profile_email_daily_failures", default: 0, null: false
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"

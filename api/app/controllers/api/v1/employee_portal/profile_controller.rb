@@ -6,8 +6,15 @@ module Api
       class ProfileController < ProfileBaseController
         include EmployeeContactLoginRejectionGuard
 
+        skip_around_action :with_profile_write, only: :start_email
+
         rescue_from EmployeeContactValidator::ValidationError do |error|
-          render_contact_validation_error!(error, employee: @employee)
+          if error.result.errors[:email]&.include?(EmployeeContactValidator::EMPLOYEE_PERSONAL_EMAIL_ERROR)
+            render json: { error: EmployeeContactValidator::EMPLOYEE_PERSONAL_EMAIL_ERROR, code: "personal_email_required" },
+              status: :unprocessable_entity
+          else
+            render_contact_validation_error!(error, employee: @employee)
+          end
         end
 
         def show
@@ -26,27 +33,26 @@ module Api
         end
 
         def start_email
-          return render_login_email_cooldown! if login_email_cooldown_active?
+          delivery = nil
+          with_profile_write { delivery = prepare_email_challenge }
+          return if performed?
 
-          retry_after = email_challenge.retry_after
-          if retry_after.positive?
-            response.set_header("Retry-After", retry_after.to_s)
-            return render json: { error: "Wait before requesting another code." }, status: :too_many_requests
-          end
-
-          email = validated_email!(email_params[:email])
-          render json: { verification_id: email_challenge.issue!(email) }, status: :accepted
+          email_challenge.deliver!(delivery)
+          render json: { verification_id: delivery.id }, status: :accepted
         rescue EmployeeProfiles::EmailChallenge::DeliveryUnavailable
-          email_challenge.consume!
+          email_challenge.clear_failed_delivery!(delivery.id)
           render json: { error: "The verification code could not be sent." }, status: :service_unavailable
         end
 
         def confirm_email
+          return render_email_daily_limit! if email_challenge.failure_limit_reached?
           return render_login_email_cooldown! if login_email_cooldown_active?
 
           credentials = email_params
           email = email_challenge.verify!(credentials[:verification_id].to_s, credentials[:code].to_s.strip)
           unless email
+            return render_email_daily_limit! if email_challenge.failure_limit_reached?
+
             return render json: { error: "The verification code is invalid or expired." }, status: :unprocessable_entity
           end
 
@@ -60,6 +66,38 @@ module Api
         end
 
         private
+
+        def prepare_email_challenge
+          return render_email_daily_limit! if email_challenge.issuance_limit_reached?
+          return render_login_email_cooldown! if login_email_cooldown_active?
+
+          retry_after = email_challenge.retry_after
+          if retry_after.positive?
+            response.set_header("Retry-After", retry_after.to_s)
+            return render json: { error: "Wait before requesting another code." }, status: :too_many_requests
+          end
+
+          email_challenge.issue!(validated_email!(email_params[:email]))
+        end
+
+        def render_email_daily_limit!
+          render json: { error: "Too many verification tries today. Try again tomorrow.", code: "email_code_daily_limit" },
+            status: :too_many_requests
+        end
+
+        def lock_profile_company!
+          # Serialize email saves so two employees can't verify the same inbox concurrently.
+          return super unless action_name == "confirm_email"
+
+          Company.lock.find(current_company_id)
+        end
+
+        def record_contact_change!(before_values, after_values)
+          EmployeeContactChangeToConfirm.record!(
+            employee: @employee, actor: current_user, before_values: before_values, after_values: after_values,
+            notify_staff: true
+          )
+        end
 
         def email_params
           ActionController::Parameters.new(request.request_parameters).permit(:email, :verification_id, :code)

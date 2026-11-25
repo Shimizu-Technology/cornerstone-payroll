@@ -9,6 +9,10 @@ module Api
         before_action :require_admin_or_manager!
         before_action :set_change_request, only: [ :show, :approve, :reject ]
 
+        rescue_from EmployeeChangeRequest::Cancelled do |error|
+          render json: { error: error.message }, status: :conflict
+        end
+
         rescue_from EmployeeProfileIdentity::LinkCheckUnavailable do |error|
           render json: { error: error.message }, status: :service_unavailable
         end
