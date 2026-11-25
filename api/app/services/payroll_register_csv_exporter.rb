@@ -124,7 +124,7 @@ class PayrollRegisterCsvExporter
     matching = active_payroll_field_entries(emp).select { |entry| payroll_field_key(entry) == column[:key] }
     return nil if matching.empty?
 
-    matching.sum { |entry| entry[:amount].to_f }
+    matching.sum(0.to_d) { |entry| entry[:amount].to_d }
   end
 
   def active_payroll_field_entries(employee)
@@ -210,7 +210,7 @@ class PayrollRegisterCsvExporter
       sanitize_csv_field(emp[:check_number]),
       rate_basis(emp),
       format_currency(emp[:withholding_tax].to_d + emp[:additional_withholding].to_d),
-      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| emp[key].to_f },
+      %i[hours_worked overtime_hours holiday_hours pto_hours].sum(0.to_d) { |key| emp[key].to_d }.to_s("F"),
       format_currency(PayrollRegisterReconciliation.non_taxable_additions(emp))
     ]
     (provisional? ? [ sanitize_csv_field(report.dig(:meta, :payroll_status_note)) ] : []) + base_row + (historical_loans_column? ? [ format_currency(emp[:historical_loan_deductions_unclassified]) ] : []) + payroll_adjustment_export.values_for(emp).map do |amount|
@@ -231,10 +231,10 @@ class PayrollRegisterCsvExporter
       "",
       "",
       "",
-      total_for(:hours_worked),
-      total_for(:overtime_hours),
-      total_for(:holiday_hours),
-      total_for(:pto_hours),
+      total_for(:hours_worked).to_s("F"),
+      total_for(:overtime_hours).to_s("F"),
+      total_for(:holiday_hours).to_s("F"),
+      total_for(:pto_hours).to_s("F"),
       format_currency(total_for(:reported_tips)),
       format_currency(total_for(:tips_paid_out)),
       format_currency(total_for(:bonus)),
@@ -261,10 +261,10 @@ class PayrollRegisterCsvExporter
       format_currency(total_for(:net_pay)),
       "", "",
       format_currency(total_for(:withholding_tax) + total_for(:additional_withholding)),
-      %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| total_for(key) },
+      %i[hours_worked overtime_hours holiday_hours pto_hours].sum(0.to_d) { |key| total_for(key) }.to_s("F"),
       format_currency(payroll_rows.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) })
     ] + (historical_loans_column? ? [ format_currency(total_for(:historical_loan_deductions_unclassified)) ] : []) + payroll_adjustment_export.column_totals.map { |total| format_currency(total) } +
-      payroll_field_columns.map { |column| format_currency(payroll_rows.sum { |emp| payroll_field_amount(emp, column).to_f }) }
+      payroll_field_columns.map { |column| format_currency(payroll_rows.sum(0.to_d) { |emp| payroll_field_amount(emp, column).to_d }) }
   end
 
   def rate_basis(employee)
@@ -280,11 +280,11 @@ class PayrollRegisterCsvExporter
   end
 
   def total_for(key)
-    payroll_rows.sum { |row| row[key].to_f }
+    payroll_rows.sum(0.to_d) { |row| row[key].to_d }
   end
 
   def format_currency(value)
-    format("%.2f", value.to_f)
+    format("%.2f", value.to_d)
   end
 
   # Mitigates CSV formula injection when opened in spreadsheet apps.

@@ -148,7 +148,7 @@ class PayrollRegisterPdfGenerator
       [ "1099 Contractor Count", s[:contractor_count].to_s ],
       [ "Regular Hours",        decimal(s[:total_hours]) ],
       [ "Overtime Hours",       decimal(s[:total_overtime_hours]) ],
-      [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(Array(report[:employees]).sum { |worker| %i[hours_worked overtime_hours holiday_hours pto_hours].sum { |key| worker[key].to_f } }) ],
+      [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(Array(report[:employees]).sum(0.to_d) { |worker| %i[hours_worked overtime_hours holiday_hours pto_hours].sum(0.to_d) { |key| worker[key].to_d } }) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
       [ "Non-Taxable Additions", fmt(payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) }) ],
       [ "Bonus",                fmt(s[:total_bonus]) ],
@@ -724,6 +724,6 @@ class PayrollRegisterPdfGenerator
   end
 
   def decimal(value)
-    format("%.2f", value.to_f)
+    format("%.2f", value.to_d)
   end
 end
