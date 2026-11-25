@@ -2,7 +2,7 @@
 // Hidden unless the company's employee_portal.features.delivery_consent switch is on.
 // Regular employees see disclosure text plainly; staff and dev see a small "Draft wording" marker
 // while a disclosure is in draft status. Paper delivery continues during the pilot (D5).
-import { useState, type FormEvent, type ReactElement } from 'react';
+import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { CheckCircle2, FileText, Mail, Printer, ShieldCheck } from 'lucide-react';
 import { EmployeeApiError, StepUpCancelledError } from './api';
 import type {
@@ -105,12 +105,18 @@ function statusChip(item: DeliveryConsentItem): ReactElement {
 
 function ConsentCard({
   item,
-  editable,
+  canConsent,
+  canWithdraw,
+  isPrintTarget,
+  onPrint,
   onUpdated,
   onReload,
 }: {
   item: DeliveryConsentItem;
-  editable: boolean;
+  canConsent: boolean;
+  canWithdraw: boolean;
+  isPrintTarget: boolean;
+  onPrint: () => void;
   onUpdated: (next: DeliveryConsentsState, message: string) => void;
   onReload: () => void;
 }): ReactElement {
@@ -131,7 +137,7 @@ function ConsentCard({
 
   const isConsented = item.status === 'consented' && item.activeConsent !== null;
   const needsReconsent = isConsented && item.activeConsent && !item.activeConsent.matchesCurrentDisclosure;
-  const showConsentForm = editable && disclosure !== null && (!isConsented || Boolean(needsReconsent));
+  const showConsentForm = canConsent && disclosure !== null && (!isConsented || Boolean(needsReconsent));
 
   const openTestPdf = async (): Promise<void> => {
     setLoadingPdf(true);
@@ -212,7 +218,7 @@ function ConsentCard({
     try {
       const next = await api.withdrawDeliveryConsent(state.link.id, item.kind);
       setConfirmingWithdraw(false);
-      onUpdated(next, `Consent withdrawn for ${copy.shortLabel}. You'll receive paper copies, and Cornerstone Payroll has been notified.`);
+      onUpdated(next, "Saved. You'll get paper copies.");
     } catch (failure) {
       if (isSessionError(failure)) {
         reportError(failure);
@@ -230,6 +236,7 @@ function ConsentCard({
     <Card
       title={copy.heading}
       className="emp-consent-card"
+      data-print-target={isPrintTarget ? 'true' : undefined}
       action={(
         <div className="flex flex-wrap items-center justify-end gap-2">
           {disclosure?.draftMarker && (
@@ -280,7 +287,7 @@ function ConsentCard({
               <EmpButton
                 variant="quiet"
                 className="emp-btn-small emp-no-print"
-                onClick={() => window.print()}
+                onClick={onPrint}
               >
                 <Printer aria-hidden="true" className="size-4" />
                 Print
@@ -369,13 +376,13 @@ function ConsentCard({
           </form>
         )}
 
-        {editable && isConsented && (
+        {canWithdraw && isConsented && (
           <div className="emp-no-print space-y-3 border-t border-neutral-200 pt-4">
             {confirmingWithdraw ? (
               <div className="emp-notice-inline emp-notice-warn space-y-3" role="region" aria-label="Confirm paper delivery">
                 <p className="font-bold text-neutral-900">Switch back to paper {copy.shortLabel}?</p>
                 <p className="text-neutral-700">
-                  We'll record your withdrawal right away, notify Cornerstone Payroll, and add it to the payroll confirmation list so you receive paper copies.
+                  You'll get paper copies for future {copy.shortLabel}.
                 </p>
                 <div className="emp-form-buttons">
                   <EmpButton
@@ -413,12 +420,28 @@ function ConsentCard({
 }
 
 function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[] }): ReactElement | null {
-  const { readOnly } = useReadySession();
+  const { isFormer, isViewOnly } = useReadySession();
   const { state, reload, update } = useEmployeeData<DeliveryConsentsState>(
     'delivery-consents',
     (api, linkId, signal) => api.deliveryConsents(linkId, signal),
   );
   const [notice, setNotice] = useState<string | null>(null);
+  const [printingKind, setPrintingKind] = useState<DeliveryConsentKind | null>(null);
+
+  useEffect(() => {
+    if (!printingKind) return undefined;
+    document.body.classList.add('emp-printing-disclosure');
+    const clear = (): void => {
+      document.body.classList.remove('emp-printing-disclosure');
+      setPrintingKind(null);
+    };
+    window.addEventListener('afterprint', clear);
+    window.print();
+    return () => {
+      window.removeEventListener('afterprint', clear);
+      document.body.classList.remove('emp-printing-disclosure');
+    };
+  }, [printingKind]);
 
   if (state.status === 'loading') return <Card><SkeletonRows rows={3} label="Loading electronic delivery preferences" /></Card>;
   if (state.status === 'error') return <Card><LoadProblem kind={state.kind} onRetry={reload} what="electronic delivery preferences" /></Card>;
@@ -429,10 +452,13 @@ function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[]
 
   if (visible.length === 0) return null;
 
+  const canConsent = !isFormer && !isViewOnly;
+  const canWithdraw = !isViewOnly;
+
   return (
     <>
       {notice && (
-        <div className="emp-span-all">
+        <div className="emp-span-all emp-no-print">
           <FormMessage tone="good">{notice}</FormMessage>
         </div>
       )}
@@ -440,7 +466,10 @@ function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[]
         <ConsentCard
           key={item.kind}
           item={item}
-          editable={!readOnly}
+          canConsent={canConsent}
+          canWithdraw={canWithdraw}
+          isPrintTarget={printingKind === item.kind}
+          onPrint={() => setPrintingKind(item.kind)}
           onReload={reload}
           onUpdated={(next, message) => {
             update(next);

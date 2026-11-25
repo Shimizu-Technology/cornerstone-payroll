@@ -5,16 +5,18 @@ module Api
     module EmployeePortal
       # Electronic-delivery consent records for pay statements and Form W-2GU (M4-6).
       # Gated by employee_portal.features.delivery_consent (defaults to off).
-      # Giving consent requires step-up verification (and PDF access-proof for W-2GU).
-      # Withdrawal is one-tap, triggers paper delivery, notifies Cornerstone staff,
-      # and adds an entry to Changes to confirm.
+      # Giving consent requires step-up verification (and PDF access-proof for W-2GU)
+      # and an active employee link.
+      # Withdrawal is intentionally one-tap without step-up (owner decision per §8a):
+      # it can only move an employee back to paper delivery, and is permitted on
+      # eligible former links as well as active links.
       class DeliveryConsentsController < BaseController
         include RecentVerification
 
         AUDIT_ACTION = "employee_delivery_consents"
 
         before_action :no_store, :require_delivery_consent!, :load_employee
-        before_action :require_active_link!, only: %i[create withdraw w2gu_access_proof]
+        before_action :require_active_link!, only: %i[create w2gu_access_proof]
 
         # GET /api/v1/employee/delivery_consents
         def show
@@ -148,7 +150,10 @@ module Api
         end
 
         # POST /api/v1/employee/delivery_consents/withdraw
-        # One-tap withdrawal: no step-up required so returning to paper is effortless.
+        # Accepted one-tap withdrawal without step-up (§8a): withdrawal can only
+        # move the employee back to paper delivery. Permitted on both active links
+        # and eligible former links (while former_access_until has not expired).
+        # Repeating withdraw when no active consent exists is an idempotent 200.
         def withdraw
           kind = params[:kind].to_s
           unless DeliveryDisclosure::KINDS.include?(kind)
@@ -158,11 +163,10 @@ module Api
 
           consent_record = nil
           change_entry = nil
-          error_response = nil
 
           Employee.transaction(requires_new: true) do
             lock_consent_context!
-            unless writable_link?
+            unless withdrawable_link?
               head :not_found
               next
             end
@@ -172,10 +176,7 @@ module Api
               .order(given_at: :desc, id: :desc)
               .first
 
-            unless active_consent
-              error_response = [ { error: "No active electronic delivery consent to withdraw.", code: "no_active_consent" }, :unprocessable_entity ]
-              next
-            end
+            next unless active_consent
 
             now = Time.current
             active_consent.update!(
@@ -192,14 +193,17 @@ module Api
           end
 
           return if performed?
-          return render json: error_response.first, status: error_response.last if error_response
 
-          audit!("withdraw", record: consent_record, metadata: {
-            kind: consent_record.kind,
-            disclosure_version: consent_record.disclosure_version,
-            disclosure_digest: consent_record.disclosure_digest,
-            change_to_confirm_id: change_entry.id
-          })
+          if consent_record
+            audit!("withdraw", record: consent_record, metadata: {
+              kind: consent_record.kind,
+              disclosure_version: consent_record.disclosure_version,
+              disclosure_digest: consent_record.disclosure_digest,
+              change_to_confirm_id: change_entry.id
+            })
+          else
+            skip_default_audit_log!
+          end
           render json: status_payload, status: :ok
         end
 
@@ -234,6 +238,15 @@ module Api
 
         def writable_link?
           @current_user.payroll_access_allowed? && @employee_link.active? &&
+            @employee_link.user_id == @current_user.id &&
+            @employee_link.employee_id == @employee.id &&
+            @employee_link.company_id == @employee.company_id
+        end
+
+        def withdrawable_link?
+          link_eligible = @employee_link.active? ||
+            (@employee_link.former? && @employee_link.former_access_until.present? && @employee_link.former_access_until > Time.current)
+          @current_user.payroll_access_allowed? && link_eligible &&
             @employee_link.user_id == @current_user.id &&
             @employee_link.employee_id == @employee.id &&
             @employee_link.company_id == @employee.company_id

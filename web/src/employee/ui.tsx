@@ -102,9 +102,21 @@ export function Placeholder({ icon: Icon, title, children }: { icon: LucideIcon;
 }
 
 /** A white card. `title` adds a small heading at the top, and `action` sits to its right. */
-export function Card({ title, action, className, children }: { title?: string; action?: ReactNode; className?: string; children: ReactNode }): ReactElement {
+export function Card({
+  title,
+  action,
+  className,
+  children,
+  ...props
+}: {
+  title?: string;
+  action?: ReactNode;
+  className?: string;
+  children: ReactNode;
+  'data-print-target'?: 'true';
+}): ReactElement {
   return (
-    <section className={cn('emp-card', className)} aria-label={title}>
+    <section className={cn('emp-card', className)} aria-label={title} {...props}>
       {(title || action) && (
         <div className="emp-card-head">
           {title && <h2 className="emp-h2">{title}</h2>}

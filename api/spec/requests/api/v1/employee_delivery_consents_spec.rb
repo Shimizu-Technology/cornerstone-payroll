@@ -136,7 +136,17 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       expect(pay_item["status"]).to eq("not_consented")
     end
 
-    it "allows a former link to read status and returns empty 404 on every write" do
+    it "allows a former link to read status and withdraw active consent, while blocking opt-in and access proof with 404" do
+      PortalNotificationRecipient.create!(company: company, user: staff_user)
+      disclosure = DeliveryDisclosure.current_for("pay_statements")
+      post base, params: {
+        kind: "pay_statements",
+        acknowledged: true,
+        disclosure_version: disclosure.version,
+        disclosure_digest: disclosure.digest
+      }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:created)
+
       link.update!(status: "former", former_access_until: 1.year.from_now)
 
       get base, headers: employee_headers
@@ -145,10 +155,18 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       post base, params: { kind: "pay_statements" }, headers: employee_headers, as: :json
       expect_not_found
 
-      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      post "#{base}/w2gu_access_proof/pdf", headers: employee_headers, as: :json
       expect_not_found
 
-      post "#{base}/w2gu_access_proof/pdf", headers: employee_headers, as: :json
+      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, -1 ]), as: :json
+      expect(response).to have_http_status(:ok)
+      pay_item = response.parsed_body.fetch("consents").find { |c| c["kind"] == "pay_statements" }
+      expect(pay_item["status"]).to eq("withdrawn")
+      expect(pay_item["active_consent"]).to be_nil
+
+      # Expired former links are still blocked on withdraw with empty 404.
+      link.update!(former_access_until: 1.day.ago)
+      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
       expect_not_found
     end
   end
@@ -405,10 +423,15 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body).to eq("confirmed_count" => 1)
 
-      # Second withdraw returns 422 no_active_consent
-      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["code"]).to eq("no_active_consent")
+      # Repeat withdraw is idempotent: returns 200 with current status and no duplicate notice/queue row
+      expect do
+        post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      end.not_to change {
+        TenantScope.as_system(reason: "Check no duplicate withdrawal row") { EmployeeContactChangeToConfirm.count }
+      }
+      expect(response).to have_http_status(:ok)
+      repeated_item = response.parsed_body.fetch("consents").find { |c| c["kind"] == "pay_statements" }
+      expect(repeated_item["status"]).to eq("withdrawn")
     end
   end
 

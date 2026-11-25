@@ -1396,6 +1396,21 @@ select.emp-input {
     display: none !important;
   }
 
+  body.emp-printing-disclosure .emp-page-head,
+  body.emp-printing-disclosure .emp-form-buttons,
+  body.emp-printing-disclosure .emp-cards-grid > :not([data-print-target="true"]) {
+    display: none !important;
+  }
+
+  body.emp-printing-disclosure .emp-cards-grid {
+    display: block !important;
+  }
+
+  body.emp-printing-disclosure .emp-card[data-print-target="true"] {
+    border: none !important;
+    box-shadow: none !important;
+  }
+
   .emp-shell,
   .emp-main {
     height: auto !important;

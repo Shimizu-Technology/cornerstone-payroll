@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_000300) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_000400) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -899,8 +899,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000300) do
     t.index [ "withdrawn_by_user_id" ], name: "index_delivery_consents_on_withdrawn_by_user_id"
     t.check_constraint "disclosure_digest::text ~ '^[0-9a-f]{64}$'::text", name: "delivery_consents_digest_check"
     t.check_constraint "kind::text <> 'w2gu'::text OR access_proof_verified_at IS NOT NULL", name: "delivery_consents_w2gu_access_proof_check"
-    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying, 'w2gu'::character varying]::text[])", name: "delivery_consents_kind_check"
-    t.check_constraint "method::text = ANY (ARRAY['employee_portal_checkbox'::character varying, 'employee_portal_pdf_verified'::character varying]::text[])", name: "delivery_consents_method_check"
+    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying::text, 'w2gu'::character varying::text])", name: "delivery_consents_kind_check"
+    t.check_constraint "method::text = ANY (ARRAY['employee_portal_checkbox'::character varying::text, 'employee_portal_pdf_verified'::character varying::text])", name: "delivery_consents_method_check"
     t.check_constraint "withdrawn_at IS NULL OR withdrawn_at >= given_at", name: "delivery_consents_withdrawn_after_given_check"
   end
 
@@ -917,8 +917,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000300) do
     t.index [ "kind", "status", "published_at", "id" ], name: "idx_delivery_disclosures_current"
     t.index [ "kind", "version" ], name: "idx_delivery_disclosures_kind_version", unique: true
     t.check_constraint "digest::text ~ '^[0-9a-f]{64}$'::text", name: "delivery_disclosures_digest_check"
-    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying, 'w2gu'::character varying]::text[])", name: "delivery_disclosures_kind_check"
-    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'approved'::character varying]::text[])", name: "delivery_disclosures_status_check"
+    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying::text, 'w2gu'::character varying::text])", name: "delivery_disclosures_kind_check"
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'approved'::character varying::text])", name: "delivery_disclosures_status_check"
   end
 
   create_table "department_ytd_totals", force: :cascade do |t|
@@ -1113,7 +1113,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_000300) do
     t.index [ "company_id", "confirmed_at", "id" ], name: "idx_contact_changes_confirmation"
     t.index [ "confirmed_by_id" ], name: "index_employee_contact_changes_to_confirm_on_confirmed_by_id"
     t.index [ "employee_id", "company_id" ], name: "idx_contact_changes_employee"
-    t.check_constraint "change_kind::text = ANY (ARRAY['contact'::character varying, 'address'::character varying, 'delivery_consent'::character varying]::text[])", name: "employee_contact_changes_kind_check"
+    t.check_constraint "change_kind::text = ANY (ARRAY['contact'::character varying::text, 'address'::character varying::text, 'delivery_consent'::character varying::text])", name: "employee_contact_changes_kind_check"
   end
 
   create_table "employee_deductions", force: :cascade do |t|

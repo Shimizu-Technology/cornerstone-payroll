@@ -19,7 +19,7 @@ class DeliveryConsent < ApplicationRecord
   validates :method, presence: true, inclusion: { in: METHODS }
   validates :access_proof_verified_at, presence: true, if: :w2gu?
   validate :associations_match_company_and_employee
-  validate :disclosure_snapshot_matches_record
+  validate :disclosure_snapshot_matches_record, on: :create
   validate :withdrawn_not_before_given
 
   scope :for_kind, ->(kind) { where(kind: kind.to_s) }

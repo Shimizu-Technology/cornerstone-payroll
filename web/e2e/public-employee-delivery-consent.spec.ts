@@ -190,7 +190,7 @@ for (const viewport of [
     // One-tap withdraw with confirmation
     await w2Card.getByRole('button', { name: 'Switch back to paper (withdraw consent)' }).click();
     await w2Card.getByRole('button', { name: 'Confirm paper delivery' }).click();
-    await expect(page.getByText(/Consent withdrawn for Form W-2GU/)).toBeVisible();
+    await expect(page.getByText("Saved. You'll get paper copies.")).toBeVisible();
     await expect(w2Card.getByText('Paper delivery (withdrawn)')).toBeVisible();
     await expectNoHorizontalScroll(page);
 
