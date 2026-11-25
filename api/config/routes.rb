@@ -16,6 +16,7 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       namespace :public do
+        get :employee_terms, to: "employee_terms#show", format: false if employee_routes
         get :tenant_branding, to: "tenant_branding#show", format: false
         get "tenant_branding/logo/:slug/:file", to: "tenant_branding#logo", format: false,
             constraints: { slug: /[a-z0-9-]+/, file: /[0-9a-f]{16}\.(?:png|webp)/ }
@@ -410,6 +411,7 @@ Rails.application.routes.draw do
         resources :employee_tax_forms, only: [ :index ], format: false do
           post :post_copies, on: :collection
           post :withdraw, on: :member
+          post :mark_paper_mailed, on: :member
         end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do

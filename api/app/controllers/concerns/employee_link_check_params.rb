@@ -42,6 +42,21 @@ module EmployeeLinkCheckParams
     render json: { error: INVALID }, status: :bad_request
   end
 
+  def require_current_employee_terms
+    response.headers["Cache-Control"] = "no-store"
+    terms = EmployeeTermsVersion.current
+    unless terms
+      render json: { error: "Sign-up is unavailable because the Employee App Terms have not been published." },
+        status: :service_unavailable
+      return
+    end
+    return terms.version if link_body_param(:terms_version) == terms.version
+
+    render json: { error: "The terms were updated. Please review them again.", code: "terms_updated" },
+      status: :conflict
+    false
+  end
+
   def link_check_started!
     @link_check_started_at = EmployeeLinks::ResponseFloor.now
   end

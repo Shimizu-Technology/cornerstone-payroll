@@ -269,6 +269,18 @@ class ProductionReadiness
       check("Cross-company login link decision is a restricted SECURITY DEFINER function") do
         primary_record.connection_pool.with_connection { |connection| RlsDatabase.login_link_decision_ready?(connection) }
       end
+    ] + rls_enforced_checks
+  end
+
+  # Enforced tables under an active bypass enforce nothing, so the enforced
+  # phase also needs the kill switch known and off.
+  def rls_enforced_checks
+    return [] unless env["RLS_EXPECT_ENFORCED"] == "true"
+
+    [
+      check("RLS kill switch is off") do
+        primary_record.connection_pool.with_connection { |connection| RlsDatabase.kill_switch(connection) == false }
+      end
     ]
   end
 

@@ -75,10 +75,57 @@ RSpec.describe "Employee tax form notices", type: :request do
 
       deliver_event("email.delivered")
       expect(reload_notice(notice).delivery_status).to eq("bounced")
+      expect(notice.paper_due_on).to be_nil
 
       audit = TenantScope.as_system(reason: "Spec reads audits") { AuditLog.where(action: "employee_tax_forms#notice_bounced").sole }
       expect(audit).to have_attributes(company_id: company.id, record_id: notice.id, event_category: "employee_portal")
       expect(audit.to_json).not_to include("worker.own@example.net")
+    end
+
+    it "opens one paper follow-up and dispatches a staff alert when a hard bounce is reconciled" do
+      consent = nil
+      notice = TenantScope.as_system(reason: "Spec fixture") do
+        company.client_operating_profiles.create!(
+          effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service", hours_source: "manual",
+          employee_portal_enabled: true, options: { employee_portal: { features: { tax_forms: true } } }
+        )
+        activate_employee_app!(company)
+        user = create(:user, company: company, role: :portal_employee)
+        link = EmployeeAccountLink.create!(user: user, company: company, employee: employee,
+          status: "active", activated_at: 2.days.ago)
+        disclosure = DeliveryDisclosure.create!(kind: "w2gu", version: "test", title: "Test disclosure",
+          text: "Test disclosure text", status: "approved", published_at: 3.days.ago)
+        consent = DeliveryConsent.create!(company: company, employee: employee, user: user, employee_account_link: link,
+          delivery_disclosure: disclosure, kind: "w2gu", disclosure_version: disclosure.version,
+          disclosure_digest: disclosure.digest, given_at: 1.day.ago, access_proof_verified_at: 1.day.ago,
+          method: "employee_portal_pdf_verified")
+        PortalNotificationRecipient.create!(company: company, email: "staff@example.test")
+        notice_for(employee, message_id: nil)
+      end
+      allow(PortalNotifications).to receive(:delivery_enabled?).and_return(true)
+      allow(PortalNotifications::Transport).to receive(:configured?).and_return(true)
+      allow(PortalNotifications::Transport).to receive(:deliver).and_return({ "id" => "test-staff-alert" })
+
+      deliver_event("email.bounced", bounce: { type: "Transient" })
+      deliver_event("email.bounced", bounce: { type: "Permanent" }, id: "msg_paper", created_at: Time.current.iso8601)
+      expect(response).to have_http_status(:no_content)
+      expect(reload_notice(notice).paper_due_on).to be_nil
+      TenantScope.as_system(reason: "Spec: the notice records its provider ID") do
+        notice.update_columns(provider_message_id: "re_msg_1")
+      end
+
+      DispatchEmployeeTaxFormNoticesJob.perform_now
+      deliver_event("email.bounced", bounce: { type: "Permanent" }, id: "msg_paper", created_at: Time.current.iso8601)
+      expect(reload_notice(notice)).to have_attributes(
+        paper_bounced_on: PayrollBusinessClock.today, paper_due_on: PayrollBusinessClock.today + 30)
+      TenantScope.as_system(reason: "Spec checks consent and staff alert") do
+        expect(consent.reload).to be_active
+        event = PortalNotificationEvent.where(event_type: "tax_form_paper_required").sole
+        expect(event.deliveries.count).to eq(1)
+        PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+      end
+      expect(PortalNotifications::Transport).to have_received(:deliver).with(
+        hash_including(subject: "Paper tax form follow-up required"), idempotency_key: anything).once
     end
 
     it "records delivery, and ignores events for other email" do

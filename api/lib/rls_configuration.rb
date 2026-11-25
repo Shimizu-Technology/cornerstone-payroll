@@ -4,6 +4,9 @@ require "uri"
 
 module RlsConfiguration
   MODES = %w[off log raise].freeze
+  # Session advisory lock shared by rls:enforce and rls:disable, so a
+  # rollback waits for a running enforcement to stop instead of racing it.
+  OWNER_TASK_LOCK = 7_301_337
 
   def self.mode(env = ENV)
     env.fetch("RLS_CONTEXT_GUARD_MODE", "off")

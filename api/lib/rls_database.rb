@@ -43,14 +43,73 @@ module RlsDatabase
       connection.execute(File.read(POLICY_FILE))
     end
     RlsTables::PROTECTED_TABLES.each do |table|
-      parent, foreign_key = RlsTables::RLS_PARENT_PROTECTED_TABLES[table]
-      shared_read = RlsTables::RLS_SHARED_READ_TABLES.include?(table)
-      args = [ schema, table, parent, foreign_key, shared_read ].map { |value| connection.quote(value) }.join(", ")
       connection.transaction do
         connection.execute("SET LOCAL lock_timeout = '3s'")
-        connection.execute("SELECT pg_temp.install_company_policy(#{args})")
+        connection.execute(install_policy_sql(connection, schema, table))
       end
     end
+  end
+
+  def self.install_policy_sql(connection, schema, table, policy_schema: nil)
+    parent, foreign_key = RlsTables::RLS_PARENT_PROTECTED_TABLES[table]
+    shared_read = RlsTables::RLS_SHARED_READ_TABLES.include?(table)
+    args = [ schema, table, parent, foreign_key, shared_read, policy_schema ].map { |value| connection.quote(value) }.join(", ")
+    "SELECT pg_temp.install_company_policy(#{args})"
+  end
+
+  # Every policy on a relation as Postgres stores it: name, command,
+  # permissive, roles and the deparsed USING and WITH CHECK expressions.
+  def self.policy_definitions(connection, relation)
+    connection.select_all(<<~SQL).to_a
+      SELECT polname::text AS name, polcmd::text AS cmd, polpermissive AS permissive,
+             (SELECT string_agg(CASE WHEN r = 0 THEN 'public' ELSE pg_get_userbyid(r)::text END, ',' ORDER BY 1)
+              FROM unnest(polroles) AS r) AS roles,
+             pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS with_check
+      FROM pg_policy WHERE polrelid = to_regclass(#{connection.quote(relation)})
+      ORDER BY polname
+    SQL
+  end
+
+  COMPARE_LOCK_TIMEOUT = "2s"
+
+  # The protected tables whose policies differ from what rls:install would
+  # create now. The installer builds the expected policies on a same-named
+  # pg_temp copy of each table, so Postgres normalizes both sides the same
+  # way. Each table compares in its own short transaction that rolls back at
+  # once, so any lock it takes (pg_get_expr on the live table, a policy that
+  # reads a parent table) is held only for that table and never queues
+  # behind DDL such as rls:disable for longer than COMPARE_LOCK_TIMEOUT. The
+  # copy's columns come from the catalog rather than LIKE, which would lock
+  # the live table. Reads the live definitions before the copy exists, while
+  # the table name still resolves to the real table.
+  def self.policy_mismatches(connection, tables = RlsTables::PROTECTED_TABLES.to_a)
+    schema = connection.select_value("SELECT current_schema()")
+    function = File.read(POLICY_FILE)[/^-- BEGIN install_company_policy\n(.*)^-- END install_company_policy$/m, 1]
+    raise "install_company_policy markers are missing from #{POLICY_FILE}" unless function
+
+    tables.select do |table|
+      differs = false
+      connection.transaction(requires_new: true) do
+        connection.execute("SET LOCAL lock_timeout = '#{COMPARE_LOCK_TIMEOUT}'")
+        connection.execute(function)
+        actual = policy_definitions(connection, "#{schema}.#{table}")
+        connection.execute("CREATE TEMP TABLE #{connection.quote_table_name(table)} (#{column_definitions(connection, schema, table)})")
+        connection.execute(install_policy_sql(connection, schema, table, policy_schema: "pg_temp"))
+        differs = actual != policy_definitions(connection, "pg_temp.#{table}")
+        raise ActiveRecord::Rollback
+      end
+      differs
+    end
+  end
+
+  # The live table's columns and types, read from the catalog without
+  # locking the table.
+  def self.column_definitions(connection, schema, table)
+    connection.select_value(<<~SQL)
+      SELECT string_agg(format('%I %s', attname, format_type(atttypid, atttypmod)), ', ' ORDER BY attnum)
+      FROM pg_attribute
+      WHERE attrelid = to_regclass(#{connection.quote("#{schema}.#{table}")}) AND attnum > 0 AND NOT attisdropped
+    SQL
   end
 
   def self.verify_runtime!(connection)
@@ -81,6 +140,35 @@ module RlsDatabase
     tables.size == RlsTables::PROTECTED_TABLES.size && tables.all? do |row|
       row.fetch("policy") && row.fetch("enabled") == enforced && row.fetch("forced") == enforced
     end
+  end
+
+  # Counts by phase, with the tables that differ from the majority, so a
+  # partial enforcement window reads at a glance.
+  def self.enforcement_summary(connection)
+    rows = table_status(connection)
+    enforced = rows.select { |row| row.fetch("enabled") && row.fetch("forced") }.map { |row| row.fetch("table") }
+    untouched = rows.reject { |row| row.fetch("enabled") || row.fetch("forced") }.map { |row| row.fetch("table") }
+    mixed = rows.map { |row| row.fetch("table") } - enforced - untouched
+    phase = if rows.size != RlsTables::PROTECTED_TABLES.size || rows.any? { |row| !row.fetch("policy") } then "not_installed"
+    elsif enforced.size == rows.size then "enforced"
+    elsif untouched.size == rows.size then "shadow"
+    else "partial"
+    end
+    {
+      "phase" => phase, "protected_tables" => RlsTables::PROTECTED_TABLES.size, "enforced_tables" => enforced.size,
+      "not_enforced" => (phase == "partial" ? untouched : []), "enabled_xor_forced" => mixed
+    }
+  end
+
+  # Fresh read of the kill switch: true, false, or nil when it is missing or
+  # unreadable. Operators and readiness use this; the guard uses bypass_state.
+  def self.kill_switch(connection)
+    return nil unless connection.select_value("SELECT to_regclass('#{SWITCH}') IS NOT NULL") == true
+
+    value = connection.select_value("SELECT bypass_enabled FROM #{SWITCH} WHERE singleton")
+    [ true, false ].include?(value) ? value : nil
+  rescue ActiveRecord::StatementInvalid
+    nil
   end
 
   def self.login_link_decision_status(connection)

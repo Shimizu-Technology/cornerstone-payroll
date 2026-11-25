@@ -7,7 +7,7 @@ RSpec.describe "employee_terms:publish" do
   let(:task) { Rake::Task["employee_terms:publish"] }
   let(:settings) do
     { "VERSION" => "2026-12-01-draft", "STATUS" => "draft", "TERMS_URL" => "https://example.com/terms",
-      "PRIVACY_URL" => "/legal/privacy" }
+      "PRIVACY_URL" => "/legal/privacy", "TERMS_FILE" => __FILE__ }
   end
 
   before do

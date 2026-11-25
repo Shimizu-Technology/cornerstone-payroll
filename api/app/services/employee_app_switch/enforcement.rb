@@ -57,12 +57,7 @@ module EmployeeAppSwitch
     # true, false, or nil when the switch can't be read (not installed,
     # no row, no privilege).
     def kill_switch_bypass(connection)
-      return nil unless connection.select_value("SELECT to_regclass('#{RlsDatabase::SWITCH}') IS NOT NULL") == true
-
-      value = connection.select_value("SELECT bypass_enabled FROM #{RlsDatabase::SWITCH} WHERE singleton")
-      [ true, false ].include?(value) ? value : nil
-    rescue ActiveRecord::StatementInvalid
-      nil
+      RlsDatabase.kill_switch(connection)
     end
 
     # The demo early-access waiver accepts only the intended shadow state:

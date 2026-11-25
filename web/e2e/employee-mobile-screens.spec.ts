@@ -454,13 +454,14 @@ test.describe('signing up on a phone', () => {
     await page.getByLabel('Send my pay stub notices to this email').check();
     await expectPhoneBasics(page);
     await snap(page, '21-sign-up-step-2', true);
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page.getByTestId('dev-preview-sign-up')).toBeVisible();
     await expect(page).toHaveURL(/\/sign-up\?__clerk_ticket=preview/);
     const activations = log.requests.filter((r) => r.path === '/employee/activation');
     expect(activations).toHaveLength(1);
-    expect(activations[0].body).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234', email: 'tala.reyes@example.com', use_for_notices: true });
+    expect(activations[0].body).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234', email: 'tala.reyes@example.com', use_for_notices: true, terms_version: 'test-v1' });
     expect(activations[0].headers.authorization).toBeUndefined();
     await page.getByRole('button', { name: 'Finish preview sign-up' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Hi, Tala' })).toBeVisible();
@@ -476,11 +477,34 @@ test.describe('signing up on a phone', () => {
     await fillDetails(page);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('Your email').fill('tala.reyes@example.com');
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Create account' }).click();
     await expect(page.getByTestId('dev-preview-sign-up')).toBeVisible();
     expect(log.requests.find((r) => r.path === '/employee/activation')?.body).toMatchObject({ token: TOKEN, use_for_notices: false });
     // Used: it isn't kept for this tab any longer.
     expect(await page.evaluate(() => sessionStorage.getItem('employee-invite-token'))).toBeNull();
+  });
+
+  test('new terms require another acceptance before retrying', async ({ page }) => {
+    let version = 'first';
+    const log = await mockEmployeeApi(page, { activation: () => {
+      version = 'second';
+      return { status: 409, body: { code: 'terms_updated' } };
+    } });
+    await page.route('**/api/v1/public/employee_terms', (route) => route.fulfill({ json: {
+      version, title: 'Employee App Terms', terms_url: '/terms', privacy_url: '/privacy',
+    } }));
+    await page.goto(`/activate?${tenantQuery}#token=${TOKEN}`);
+    await fillDetails(page);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByLabel('Your email').fill('worker@example.test');
+    await page.getByRole('checkbox', { name: /Employee App Terms.*first/ }).check();
+    await page.getByRole('button', { name: 'Create account' }).click();
+
+    await expect(page.getByText('The terms were updated. Please review them again.')).toBeVisible();
+    await expect(page.getByRole('checkbox', { name: /Employee App Terms.*second/ })).not.toBeChecked();
+    expect(log.requests.find((request) => request.path === '/employee/activation')?.body)
+      .toMatchObject({ terms_version: 'first' });
   });
 
   test('every failed check comes back to step 1 with the same message, which mentions the 24-hour pause', async ({ page }) => {
@@ -489,6 +513,7 @@ test.describe('signing up on a phone', () => {
     await fillDetails(page, { code: 'ABCDEFGHJK', ssn: '9999' });
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('Your email').fill('tala.reyes@example.com');
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page.getByRole('heading', { level: 1, name: 'Set up your account' })).toBeVisible();
@@ -508,6 +533,7 @@ test.describe('signing up on a phone', () => {
     await fillDetails(page);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('Your email').fill('tala.reyes@example.com');
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page.getByRole('heading', { level: 1, name: "We couldn't start a new account with that email" })).toBeVisible();
@@ -521,10 +547,11 @@ test.describe('signing up on a phone', () => {
     await expect(page).toHaveURL(/\/claim/);
     await expect(page.getByText('Your invite link is ready.')).toBeVisible();
     await fillDetails(page);
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Add access' }).click();
     await page.getByRole('dialog', { name: "Confirm it's you" }).getByRole('button', { name: 'Confirm' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Hi, Tala' })).toBeVisible();
-    expect(log.requests.filter((r) => r.path === '/employee/links/claim').at(-1)?.body).toEqual({ token: TOKEN, date_of_birth: '1990-04-07', ssn_last4: '1234' });
+    expect(log.requests.filter((r) => r.path === '/employee/links/claim').at(-1)?.body).toEqual({ token: TOKEN, date_of_birth: '1990-04-07', ssn_last4: '1234', terms_version: 'test-v1' });
   });
 
   test('a /claim link keeps its token through sign-in, even a full-page redirect, and Back drops it', async ({ page }) => {
@@ -555,12 +582,13 @@ test.describe('signing up on a phone', () => {
     await fillDetails(page, { code: 'ABCDEFGHJK' });
     await expectPhoneBasics(page);
     await snap(page, '24-add-access', true);
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Add access' }).click();
     await page.getByRole('dialog', { name: "Confirm it's you" }).getByRole('button', { name: 'Confirm' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Hi, Tala' })).toBeVisible();
     const claims = log.requests.filter((r) => r.path === '/employee/links/claim');
     expect(claims.at(-1)?.headers.authorization).toBe('Bearer dev-preview-token-verified');
-    expect(claims.at(-1)?.body).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234' });
+    expect(claims.at(-1)?.body).toEqual({ code: 'ABCDEFGHJK', date_of_birth: '1990-04-07', ssn_last4: '1234', terms_version: 'test-v1' });
   });
 
   test('a failed claim is the generic message; two-step sign-in has its own', async ({ page }) => {
@@ -569,11 +597,13 @@ test.describe('signing up on a phone', () => {
     await mockEmployeeApi(page, { claim: () => answer });
     await page.goto(`/claim?${tenantQuery}#token=${TOKEN}`);
     await fillDetails(page);
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Add access' }).click();
     await page.getByRole('dialog', { name: "Confirm it's you" }).getByRole('button', { name: 'Confirm' }).click();
     await expect(page.getByText("We couldn't match those details")).toBeVisible();
 
     answer = { status: 403, body: { error: 'Set up two-step sign-in to make this change.', code: 'mfa_enrollment_required' } };
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Add access' }).click();
     await expect(page.getByText('Set up two-step sign-in first')).toBeVisible();
     await expect(page.getByText("We couldn't match those details")).toHaveCount(0);
@@ -588,11 +618,12 @@ test.describe('signing up on a phone', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Welcome back' })).toBeVisible();
     await fillDetails(page);
     await expectPhoneBasics(page);
+    await page.getByRole('checkbox', { name: /Employee App Terms/ }).check();
     await page.getByRole('button', { name: 'Turn my account back on' }).click();
     await page.getByRole('dialog', { name: "Confirm it's you" }).getByRole('button', { name: 'Confirm' }).click();
     await expect(page.getByRole('heading', { level: 1, name: 'Hi, Tala' })).toBeVisible();
     const reactivation = log.requests.filter((r) => r.path === '/employee/links/reactivate').at(-1);
-    expect(reactivation?.body).toEqual({ token: TOKEN, date_of_birth: '1990-04-07', ssn_last4: '1234' });
+    expect(reactivation?.body).toEqual({ token: TOKEN, date_of_birth: '1990-04-07', ssn_last4: '1234', terms_version: 'test-v1' });
     expect(reactivation?.headers.authorization).toBe('Bearer dev-preview-token-verified');
   });
 

@@ -128,6 +128,14 @@ export function EmployeeW2Copies({ companyId, companyName, year, canWrite, check
     }, 'Could not save paper delivery. Try again.');
   }
 
+  function markPaperMailed(copy: EmployeeTaxFormCopy) {
+    void act(async () => {
+      await api.markPaperMailed(copy.id);
+      reloadList();
+      setMessage('Paper copy marked mailed.');
+    }, 'Could not mark the paper copy mailed. Try again.');
+  }
+
   function withdrawCopy(event: FormEvent) {
     event.preventDefault();
     if (!withdrawing || !reason.trim()) return;
@@ -188,9 +196,22 @@ export function EmployeeW2Copies({ companyId, companyName, year, canWrite, check
                       {(copiesPerEmployee.get(copy.employee_id) ?? 0) > 1 && <span className="font-normal text-neutral-700"> · Revision {copy.revision}</span>}
                     </p>
                     <p className="text-neutral-700">{copyStatus(copy)} · Email notice: {noticeLabel(copy.notice)}</p>
+                    {copy.paper_follow_up && (
+                      <p className={copy.paper_follow_up.status === 'overdue' ? 'font-medium text-danger-700' : 'text-neutral-700'}>
+                        {copy.paper_follow_up.status === 'mailed'
+                          ? `Paper copy mailed ${formatGuamDate(copy.paper_follow_up.mailed_on)}${copy.paper_follow_up.mailed_by ? ` by ${copy.paper_follow_up.mailed_by}` : ''}`
+                          : `${copy.paper_follow_up.status === 'overdue' ? 'Paper copy overdue' : 'Paper copy required'}. Due ${formatGuamDate(copy.paper_follow_up.due_on)}.`}
+                        {' '}Notice undeliverable {formatGuamDate(copy.paper_follow_up.bounced_on)}.
+                      </p>
+                    )}
                     {copy.inputs_changed_since_posting && <p className="font-medium text-warning-800">W-2 figures changed since posting.</p>}
                     {copy.withdrawal_note && <p className="text-neutral-700">Withdrawal reason: {copy.withdrawal_note}</p>}
                   </div>
+                  {canWrite && copy.paper_follow_up && copy.paper_follow_up.status !== 'mailed' && (
+                    <Button type="button" variant="outline" disabled={!canChange}
+                      aria-label={`Mark paper copy mailed for ${copy.employee_name ?? `employee #${copy.employee_id}`}`}
+                      onClick={() => markPaperMailed(copy)}>Mark mailed</Button>
+                  )}
                   {canWrite && copy.status === 'posted' && <Button type="button" variant="outline" disabled={!canChange}
                     aria-label={`Withdraw copy for ${copy.employee_name ?? `employee #${copy.employee_id}`}`}
                     onClick={() => { setReason(''); setWithdrawError(''); setWithdrawing(copy); }}>Withdraw</Button>}
