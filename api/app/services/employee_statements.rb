@@ -19,6 +19,11 @@ class EmployeeStatements
   QUICKBOOKS_ID = /\Aqb-([1-9]\d{0,18})\z/
   DOCUMENT_ID = /\A[1-9]\d{0,18}\z/
   ITEM_ASSOCIATIONS = (EmployeePayStatements::LIST_ASSOCIATIONS + [ :employee ]).freeze
+  # The detail view's rows, preloaded as EmployeePayStatements#find does.
+  DETAIL_ASSOCIATIONS = ((EmployeePayStatements::LIST_ASSOCIATIONS - [ :pay_period ]) + [
+    :payroll_item_earnings, :payroll_item_field_entries,
+    { payroll_item_deductions: :deduction_type, employee: :department, pay_period: :company }
+  ]).freeze
 
   Page = Struct.new(:statements, :years, :next_page, keyword_init: true)
   # kind: :payroll (document is the posted revision) or :quickbooks (check,
@@ -53,7 +58,7 @@ class EmployeeStatements
     elsif DOCUMENT_ID.match?(id.to_s)
       document = visible_document(id.to_i)
       document = current_successor(document) if document&.replaced?
-      return load_statements([ [ "payroll", document.id ] ]).first if document&.posted? && listed_documents.exists?(id: document.id)
+      return load_statements([ [ "payroll", document.id ] ], detail: true).first if document&.posted? && listed_documents.exists?(id: document.id)
     end
     nil
   end
@@ -75,14 +80,17 @@ class EmployeeStatements
   end
 
   # Earlier revisions this posted document replaced, newest first. A delta
-  # correction points at an original that stays posted: that one is listed on
-  # its own, so it isn't repeated here.
+  # correction is a separate payment that points at the check it corrects;
+  # that check is never an earlier version of the delta (it's listed on its
+  # own while it stands, and a void+redo replaces it, not the delta), so the
+  # chain stops at a delta's link to a different payroll item.
   def earlier_versions(document)
     versions = []
     current = document
     MAX_CHAIN.times do
       previous = current.replaces_document_id && visible_document(current.replaces_document_id)
       break unless previous&.replaced?
+      break if delta_link?(current, previous)
 
       versions << previous
       current = previous
@@ -123,6 +131,12 @@ class EmployeeStatements
     document.payroll_item.pay_period.run_purpose == "regular"
   end
 
+  # True when current is a delta check whose link points at another payroll
+  # item's document (the check it corrects).
+  def delta_link?(current, previous)
+    current.payroll_item_id != previous.payroll_item_id && current.payroll_item.correction_entry?
+  end
+
   PAYROLL_ORDER = [
     Arel.sql("pay_periods.pay_date DESC"), Arel.sql("pay_periods.id DESC"),
     Arel.sql("payroll_items.id DESC"), Arel.sql("employee_documents.id DESC")
@@ -138,9 +152,12 @@ class EmployeeStatements
     @access_until ? scope.where(pay_periods: { pay_date: ..@access_until }) : scope
   end
 
+  # Memoized: the scope's cutover date is a query of its own.
   def quickbooks_checks
-    scope = EmployeeDocuments::QuickbooksHistory.scope(@company_id).where(employee_id: @employee_id)
-    @access_until ? scope.where(pay_date: ..@access_until) : scope
+    @quickbooks_checks ||= begin
+      scope = EmployeeDocuments::QuickbooksHistory.scope(@company_id).where(employee_id: @employee_id)
+      @access_until ? scope.where(pay_date: ..@access_until) : scope
+    end
   end
 
   # Any of this employee's pay stub documents in this company, whatever their
@@ -152,6 +169,10 @@ class EmployeeStatements
   end
 
   # The newest revision that replaced this one, following the chain forward.
+  # A later revision of the same payroll item, or a check on another item
+  # that isn't a delta correction (a void+redo replacement), replaces it. A
+  # delta check also points at the check it corrects, but it's a separate
+  # payment, never that check's replacement.
   def current_successor(document)
     current = document
     MAX_CHAIN.times do
@@ -160,6 +181,8 @@ class EmployeeStatements
       successor = EmployeeDocument.joins(:payroll_item)
         .where(company_id: @company_id, replaces_document_id: current.id,
           payroll_items: { company_id: @company_id, employee_id: @employee_id })
+        .where("payroll_items.correction_for_payroll_item_id IS NULL OR employee_documents.payroll_item_id = ?",
+          current.payroll_item_id)
         .where.not(status: "withdrawn")
         .order(revision: :desc, id: :desc).first
       return unless successor
@@ -207,12 +230,12 @@ class EmployeeStatements
   end
 
   # Rows are [source, id] pairs in list order.
-  def load_statements(rows)
+  def load_statements(rows, detail: false)
     document_ids = rows.filter_map { |source, id| id.to_i if source == "payroll" }
     check_ids = rows.filter_map { |source, id| id.to_i if source == "quickbooks" }
-    documents = EmployeeDocument.where(company_id: @company_id, id: document_ids)
-      .includes(payroll_item: ITEM_ASSOCIATIONS).order(:id).index_by(&:id)
-    checks = quickbooks_checks.where(id: check_ids).includes(:historical_paycheck_adjustments).order(:id).index_by(&:id)
+    documents = document_ids.empty? ? {} : EmployeeDocument.where(company_id: @company_id, id: document_ids)
+      .includes(payroll_item: detail ? DETAIL_ASSOCIATIONS : ITEM_ASSOCIATIONS).order(:id).index_by(&:id)
+    checks = check_ids.empty? ? {} : quickbooks_checks.where(id: check_ids).includes(:historical_paycheck_adjustments).order(:id).index_by(&:id)
     pdfs = original_pdfs(check_ids)
 
     rows.filter_map do |source, id|

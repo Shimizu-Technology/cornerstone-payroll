@@ -129,7 +129,8 @@ export type PaymentStatus = 'issued' | 'prepared' | 'pending' | 'voided';
 
 export interface StatementPayment {
   method: PaymentMethod | null;
-  status: PaymentStatus;
+  /** null: no payment evidence is recorded (QuickBooks checks), or an unknown value. */
+  status: PaymentStatus | null;
   issuedOn: string | null;
   checkNumberLast4: string | null;
 }
@@ -179,7 +180,7 @@ function parsePayment(value: unknown): StatementPayment {
   const payment = record(value) ?? {};
   return {
     method: oneOf(payment.method, ['direct_deposit', 'paper_check'] as const),
-    status: oneOf(payment.status, ['issued', 'prepared', 'pending', 'voided'] as const) ?? 'pending',
+    status: oneOf(payment.status, ['issued', 'prepared', 'pending', 'voided'] as const),
     issuedOn: isoDate(payment.issued_on),
     checkNumberLast4: text(payment.check_number_last4),
   };
@@ -257,15 +258,60 @@ export interface AmountLine {
   ytd: Money | null;
 }
 
+export type TaxKind = 'guam_income_tax' | 'additional_guam_income_tax' | 'social_security' | 'medicare';
+
+export interface TaxLine extends AmountLine {
+  /** null for a tax the presenter doesn't name (shown by its printed label). */
+  kind: TaxKind | null;
+  /** The plain label, e.g. "Guam income tax" for "Federal/Guam Income Tax". */
+  displayLabel: string | null;
+}
+
+/** A revision a Corrected stub replaced, downloadable as it was issued. */
+export interface EarlierVersion {
+  id: string;
+  status: 'replaced';
+  postedAt: string | null;
+  paymentLine: string | null;
+}
+
 export interface StatementDetail extends StatementSummary {
   earnings: EarningLine[];
-  taxes: AmountLine[];
+  taxes: TaxLine[];
   deductions: AmountLine[];
   otherPay: AmountLine[];
   ytdGross: Money | null;
   ytdNet: Money | null;
   /** QuickBooks checks with recorded adjustments: "Includes recorded payroll adjustments." */
   note: string | null;
+  /** Newest first; empty unless this stub is a corrected revision. */
+  earlierVersions: EarlierVersion[];
+}
+
+function taxLines(value: unknown): TaxLine[] {
+  return (Array.isArray(value) ? value : []).flatMap((item) => {
+    const line = record(item);
+    const label = text(line?.label);
+    return line && label ? [{
+      label, amount: money(line.amount), ytd: money(line.ytd),
+      kind: oneOf(line.kind, ['guam_income_tax', 'additional_guam_income_tax', 'social_security', 'medicare'] as const),
+      displayLabel: text(line.display_label),
+    }] : [];
+  });
+}
+
+function earlierVersions(value: unknown): EarlierVersion[] {
+  return (Array.isArray(value) ? value : []).flatMap((item) => {
+    const version = record(item);
+    const versionId = id(version?.id);
+    if (!version || !versionId || version.status !== 'replaced') return [];
+    const postedAt = text(version.posted_at);
+    return [{
+      id: versionId, status: 'replaced' as const,
+      postedAt: postedAt && !Number.isNaN(Date.parse(postedAt)) ? postedAt : null,
+      paymentLine: text(version.payment_line),
+    }];
+  });
 }
 
 function amountLines(value: unknown): AmountLine[] {
@@ -289,12 +335,13 @@ export function parseStatementDetail(data: unknown): StatementDetail | null {
   return {
     ...summary,
     earnings,
-    taxes: amountLines(body.taxes),
+    taxes: taxLines(body.taxes),
     deductions: amountLines(body.deductions),
     otherPay: amountLines(body.other_pay),
     ytdGross: money(ytd.gross),
     ytdNet: money(ytd.net),
     note: text(body.adjustment_note) ?? text(body.note),
+    earlierVersions: earlierVersions(body.earlier_versions),
   };
 }
 

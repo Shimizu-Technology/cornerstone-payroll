@@ -35,21 +35,23 @@ module Api
 
         # §8a: only from the company's next real regular pay run, and only
         # when its date is settled: a committed run, or a run created on a
-        # confirmed pay schedule. If the next run's date isn't settled, the
-        # app shows nothing rather than skip to a later one. Former
-        # employees never get one.
+        # confirmed pay schedule that sets its own dates (a manual-dates
+        # draft's date is tentative). A void+redo correction run stands in
+        # for the run it replaced, as in PayPeriod.reportable_periods. If the
+        # next run's date isn't settled, the app shows nothing rather than
+        # skip to a later one. Former employees never get one.
         def next_payday
           return if @employee_link.former?
 
           period = PayPeriod.where(company_id: @employee_link.company_id, status: OPEN_STATUSES, cycle: "regular",
-            run_purpose: "regular", correction_status: nil, test_workspace_role: nil, parallel_run: false)
+            run_purpose: "regular", correction_status: [ nil, "correction" ], test_workspace_role: nil, parallel_run: false)
             .where(pay_date: PayrollBusinessClock.today..)
             .order(pay_date: :asc, id: :asc).first
           return unless period
           return period.pay_date if period.status == "committed"
 
           schedule = CompanyPaySchedule.find_by(id: period.company_pay_schedule_id, company_id: period.company_id)
-          period.pay_date if schedule&.confirmed?
+          period.pay_date if schedule&.confirmed? && !schedule.manual_dates?
         end
       end
     end

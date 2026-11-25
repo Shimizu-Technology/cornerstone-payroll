@@ -64,7 +64,39 @@ describe('employee API contracts', () => {
     });
     expect(detail?.earnings).toEqual([{ label: 'Regular', hours: '38.50', rate: '15.00', amount: '577.50', ytd: '12000.00', kind: 'regular' }]);
     expect(detail?.ytdNet).toBe('11000.00');
+    expect(detail?.taxes).toEqual([{ label: 'Federal/Guam Income Tax', amount: '20.00', ytd: '400.00', kind: null, displayLabel: null }]);
+    expect(detail?.earlierVersions).toEqual([]);
     expect(parseStatementDetail({})).toBeNull();
+  });
+
+  it('reads tax kinds and earlier versions from the employee presenter', () => {
+    const detail = parseStatementDetail({
+      ...summary,
+      taxes: [
+        { label: 'Federal/Guam Income Tax', amount: '20.00', ytd: null, kind: 'guam_income_tax', display_label: 'Guam income tax' },
+        { label: 'Territory surcharge', amount: '1.00', ytd: null, kind: 'something_new', display_label: 'Territory surcharge' },
+      ],
+      earlier_versions: [
+        { id: '880', status: 'replaced', posted_at: '2026-11-20T08:00:00Z', payment_line: 'Check #4012' },
+        { id: '881', status: 'withdrawn', posted_at: '2026-11-21T08:00:00Z', payment_line: null },
+        { id: 'bad id!', status: 'replaced' },
+        { id: '879', status: 'replaced', posted_at: 'not a time' },
+      ],
+    });
+    expect(detail?.taxes.map((tax) => [tax.kind, tax.displayLabel])).toEqual([
+      ['guam_income_tax', 'Guam income tax'], [null, 'Territory surcharge'],
+    ]);
+    expect(detail?.earlierVersions).toEqual([
+      { id: '880', status: 'replaced', postedAt: '2026-11-20T08:00:00Z', paymentLine: 'Check #4012' },
+      { id: '879', status: 'replaced', postedAt: null, paymentLine: null },
+    ]);
+  });
+
+  it('keeps a QuickBooks check\'s payment status unknown instead of pending', () => {
+    const row = parseStatementSummary({ id: 'qb-77', source: 'quickbooks', pay_date: '2026-08-14',
+      payment: { method: 'paper_check', status: null, issued_on: null, check_number_last4: '1088' } });
+    expect(row?.payment).toEqual({ method: 'paper_check', status: null, issuedOn: null, checkNumberLast4: '1088' });
+    expect(row && paymentStatus(row.payment)).toBeNull();
   });
 
   it('reads tax forms, Help contacts and the profile defensively', () => {
