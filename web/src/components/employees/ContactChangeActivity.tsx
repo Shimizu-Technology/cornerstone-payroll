@@ -6,12 +6,14 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { ChangeComparison } from '@/components/employees/ChangeComparison';
+import { EmployeeAppTurnOnStep } from '@/components/employee-app/EmployeeAppTurnOnStep';
+import { apiErrorCode } from '@/lib/api-error-code';
 import { clientEmployeeChangeRequestsApi, staffEmployeeContactChangesApi } from '@/services/api';
 import type { BoundedListMeta, ContactActivityFilters, EmployeeContactActivity } from '@/services/api';
 
 type ActivityMeta = BoundedListMeta & { through_id?: number | null };
 
-export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: number }) {
+export function ContactChangeActivity({ staffCompanyId, companyName }: { staffCompanyId?: number; companyName?: string }) {
   const [rows, setRows] = useState<EmployeeContactActivity[]>([]);
   const [meta, setMeta] = useState<ActivityMeta>();
   const [page, setPage] = useState(1);
@@ -19,6 +21,8 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
   const [kind, setKind] = useState<ContactActivityFilters['kind']>();
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  // The API answers feature_off while contact and address updates are off.
+  const [featureOff, setFeatureOff] = useState(false);
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,7 +51,11 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
       if (!current) return;
       setRows([]);
       setMeta(undefined);
-      setError(err instanceof Error ? err.message : 'Could not load contact changes.');
+      if (staffCompanyId && apiErrorCode(err) === 'feature_off') {
+        setFeatureOff(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not load contact changes.');
+      }
       setLoading(false);
     });
     return () => { current = false; };
@@ -69,12 +77,32 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
       setReload((value) => value + 1);
       setConfirmAllOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm these changes.');
       setConfirmAllOpen(false);
+      // Updates were switched off after this list loaded: show the same
+      // turned-off message and drop the stale rows and controls.
+      if (apiErrorCode(err) === 'feature_off') {
+        setRows([]);
+        setMeta(undefined);
+        setFeatureOff(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not confirm these changes.');
+      }
     } finally {
       setSaving(false);
     }
   };
+
+  if (staffCompanyId && featureOff) {
+    return (
+      <div role="status" className="space-y-1 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-800">
+        <p className="font-semibold text-neutral-900 [overflow-wrap:anywhere]">
+          Employee contact and address updates aren't turned on for {companyName || 'this company'}.
+        </p>
+        <p>When they are, changes employees make in the employee app appear here for you to confirm on payroll.</p>
+        <p><EmployeeAppTurnOnStep companyId={staffCompanyId} audience="admin" /></p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

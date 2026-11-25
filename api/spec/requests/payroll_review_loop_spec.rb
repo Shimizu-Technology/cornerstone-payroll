@@ -38,6 +38,22 @@ RSpec.describe "Published payroll review loop", type: :request do
     post "#{base}/approve_review", params: { revision_id: id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, notes: "Reviewed preview" }
   end
 
+  it "exposes decision access on the list and detail and denies a preparer deciding their own preview" do
+    staff_approve
+    @actor = client
+    get "/api/v1/client/pay_periods", params: { status: "approved" }
+    expect(response.parsed_body.fetch("pay_periods")).to contain_exactly(
+      include("id" => period.id, "client_review_status" => "pending", "can_decide_payroll_review" => true)
+    )
+
+    review.update_column(:generated_by_id, client.id)
+    get base
+    expect(response.parsed_body.fetch("pay_period")).to include("can_decide_payroll_review" => false)
+    client_approve
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(review).to be_pending
+  end
+
   it "filters each client preview part and audits the exact selection" do
     deposit = create(:payroll_item, company: company, pay_period: period,
       employee: create(:employee, company: company, first_name: "Dina", last_name: "Deposit"),

@@ -13,6 +13,11 @@ const serviceProviders = [
     purpose: 'Handles "Sign in with Google" if you choose to use it, and serves the web fonts your browser loads (Google Fonts).',
   },
   {
+    name: 'PostHog',
+    purpose:
+      'Collects anonymous device-level usage events (page route templates with IDs removed, app surface, staff account role on the staff site only, named product events with no amounts, names, or IDs, and basic clicks without text or form contents) when enabled, with IP addresses discarded and no session recordings, names, emails, company or user IDs, or payroll data.',
+  },
+  {
     name: 'OpenRouter and the AI model provider it connects to',
     purpose:
       'Reads timecard images (including employee names and hours), pulls payroll details from emails that staff paste in or files they upload, and helps staff draft invoices (including client billing contacts and attachments). This happens only when staff use those optional AI-assisted tools and we have turned the AI service on.',
@@ -140,9 +145,16 @@ export function PrivacyPolicy() {
           browser to remember workspace settings, such as the selected company, and to keep unsent message drafts. We do
           not use advertising cookies.
         </p>
+        <h3 className="font-display text-base font-bold text-primary-950">Analytics</h3>
         <p>
-          The software includes a product-analytics tool, PostHog, which is turned off. If we turn it on, we will update
-          this policy first. It is set up without session recording and without automatically capturing what you type.
+          When analytics are enabled, we collect anonymous device-level usage events through PostHog to understand how
+          the software is used and improve it. Events include only basic device and browser details, app surface (staff
+          or employee), account role (on the staff site only), page route templates with IDs removed, named product
+          events (such as payroll or report actions, carrying no amounts, names, or IDs), and basic click events
+          (element tag names only). We do not send names, email addresses, company or user IDs, payroll or tax details,
+          on-screen text, or form contents; we do not use session recordings; IP addresses are discarded; and we honor
+          Do Not Track and Global Privacy Control browser settings.{' '}
+          <span className="text-neutral-600">(Draft wording — pending counsel review.)</span>
         </p>
       </LegalSection>
 
@@ -163,8 +175,9 @@ export function PrivacyPolicy() {
       <LegalSection id="location" title="Where it is stored">
         <p>
           The application servers and database are in Singapore. Other service providers, such as Clerk, Cloudflare,
-          Netlify, Resend, Google, and OpenRouter when it is turned on, may process or store information in the United
-          States or other countries. Information may therefore be stored and processed outside Guam.
+          Netlify, Resend, Google, PostHog when it is turned on, and OpenRouter when it is turned on, may process or
+          store information in the United States or other countries. Information may therefore be stored and processed
+          outside Guam.
         </p>
       </LegalSection>
 

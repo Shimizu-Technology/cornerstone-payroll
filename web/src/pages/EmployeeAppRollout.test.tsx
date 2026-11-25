@@ -9,8 +9,12 @@ import { EmployeeAppRollout } from './EmployeeAppRollout';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock('@/services/api', () => ({ apiClient: mocks }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Example Bakery' } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Example Bakery' }, companies: [] }) }));
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => false }));
+const auth = vi.hoisted(() => ({ capabilities: [] as string[] }));
+vi.mock('@/contexts/AuthContext', () => ({
+  useOptionalAuth: () => ({ hasCapability: (capability: string) => auth.capabilities.includes(capability) }),
+}));
 
 const rollout: Rollout = {
   enabled: true,
@@ -26,7 +30,32 @@ const rollout: Rollout = {
 };
 
 describe('Employee app rollout', () => {
-  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); auth.capabilities = []; });
+
+  it('tells a client who turns the app on and what to do meanwhile', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, enabled: false } });
+    render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
+
+    const notice = (await screen.findByText("The employee app isn't turned on for this company yet.")).closest('[role="status"]') as HTMLElement;
+    expect(notice.textContent).toContain("The employee app isn't turned on for this company yet.");
+    expect(notice.textContent).toContain('Cornerstone turns the app on. You can add missing emails and mobile numbers now so invites are ready.');
+    expect(within(notice).queryByRole('link')).toBeNull();
+    expect(screen.getByText('You can invite employees once Cornerstone turns the app on.')).toBeTruthy();
+  });
+
+  it('links staff who can change the switch to it, and tells other staff who can', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, enabled: false } });
+    auth.capabilities = ['manage_employee_app_switch'];
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+    expect((await screen.findByRole('link', { name: 'Turn it on in the employee app switch' })).getAttribute('href'))
+      .toBe('/companies/7/employee-app/switch');
+    cleanup();
+
+    auth.capabilities = [];
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+    expect(await screen.findByText('Ask an admin with access to the employee app switch to turn it on.')).toBeTruthy();
+    expect(screen.queryByText(/Cornerstone turns the app on/)).toBeNull();
+  });
 
   it('keeps selected employees across searches and shows the outcome for each employee', async () => {
     mocks.get.mockResolvedValue({ data: rollout });

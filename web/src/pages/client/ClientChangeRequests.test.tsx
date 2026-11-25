@@ -105,3 +105,24 @@ it.each([
   fireEvent.click(screen.getByRole('button', { name: confirmation }));
   await waitFor(() => expect(api.decide).toHaveBeenCalledWith(pendingAddress.id, decision, undefined));
 });
+
+it('explains what change requests are and how to ask for one when there are none', async () => {
+  api.list.mockResolvedValue({ data: [], meta: { ...meta, profile_requests_enabled: false, total_count: 0 } });
+  open('/change-requests');
+
+  expect(await screen.findByText('No change requests yet.')).toBeTruthy();
+  expect(screen.getByText(/Cornerstone reviews the change before payroll uses it/)).toBeTruthy();
+  expect(screen.queryByText(/Address changes employees ask for/)).toBeNull();
+  expect(screen.getByRole('link', { name: 'Employees' }).getAttribute('href')).toBe('/employees');
+  expect(screen.queryByText('No change requests found.')).toBeNull();
+});
+
+it('says no requests match when filters hide them', async () => {
+  api.list.mockResolvedValue({ data: [], meta: { ...meta, total_count: 0 } });
+  open('/change-requests');
+  await screen.findByText('No change requests yet.');
+  expect(screen.getByText(/Address changes employees ask for in the employee app appear here too/)).toBeTruthy();
+
+  fireEvent.change(screen.getByRole('combobox', { name: 'Request status' }), { target: { value: 'approved' } });
+  expect(await screen.findByText('No change requests match these filters.')).toBeTruthy();
+});

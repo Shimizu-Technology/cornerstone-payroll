@@ -1,5 +1,5 @@
 // Staff surface entry. Vite resolves the employee surface to EmployeeApp.tsx.
-import { Component, lazy, Suspense, useEffect, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, useRef, type ErrorInfo, type ReactElement, type ReactNode } from 'react';
 import { createBrowserRouter, RouterProvider, Routes, Route, Navigate, useLocation } from 'react-router';
 import { ClerkProvider } from '@clerk/react';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookGate } from '@/contexts/FinanceBookContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
+import { registerAnalyticsContext, resetAnalytics } from '@/lib/analytics';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
@@ -274,21 +275,25 @@ function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function PostHogIdentify() {
+export function PostHogSessionSync(): null {
   const { user } = useAuth();
   const posthog = usePostHog();
+  const lastUserId = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isPostHogEnabled || !posthog) return;
     if (user) {
-      posthog.identify(String(user.id), {
-        email: user.email,
-        name: user.name,
+      if (lastUserId.current !== null && lastUserId.current !== user.id) {
+        resetAnalytics(posthog, { surface: 'staff', keepRole: false });
+      }
+      registerAnalyticsContext(posthog, {
         role: user.role,
-        company_id: user.company_id,
+        surface: 'staff',
       });
-    } else {
-      posthog.reset();
+      lastUserId.current = user.id;
+    } else if (lastUserId.current !== null) {
+      resetAnalytics(posthog, { surface: 'staff', keepRole: false });
+      lastUserId.current = null;
     }
   }, [user, posthog]);
 
@@ -484,7 +489,7 @@ const developmentToken = async () => null;
 function AppContents() {
   const workspace = (
     <AuthProvider>
-      {!supportToken && <PostHogIdentify />}
+      {!supportToken && <PostHogSessionSync />}
       <CompanyProvider>
         <AppFeedback><AppRoutes /></AppFeedback>
       </CompanyProvider>
@@ -492,7 +497,7 @@ function AppContents() {
   );
   return (
     <>
-      {!supportToken && <PostHogPageView />}
+      {!supportToken && <PostHogPageView surface="staff" />}
       <AppWithClerk>
         {supportToken
           ? clerkPubKey

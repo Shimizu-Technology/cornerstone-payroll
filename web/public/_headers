@@ -1,0 +1,8 @@
+# Staff surface headers. Vite copies this file into dist/_headers for the
+# Payroll site; employee builds overwrite dist/_headers via
+# scripts/finalize-surface-dist.mjs.
+#
+# Prevent the browser from sending Referer (including origin) to third-party
+# endpoints such as PostHog ingestion. Matches the API and employee surface.
+/*
+  Referrer-Policy: no-referrer
