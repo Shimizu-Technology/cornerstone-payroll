@@ -52,7 +52,7 @@ RSpec.describe "View-only support sessions", type: :request do
     target.client_operating_profiles.create!(
       effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service", hours_source: "manual",
       employee_portal_enabled: true, options: {
-        subdomain_enabled: true, employee_portal: { features: { stubs: true, profile_requests: true } }
+        subdomain_enabled: true, employee_portal: { features: { stubs: true, profile_requests: true, delivery_consent: true } }
       }
     )
     TenantSubdomainRegistry.invalidate!
@@ -265,6 +265,25 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(response).to have_http_status(:no_content)
     get "/api/v1/employee/context", headers: headers
     expect(response).to have_http_status(:not_found)
+  end
+
+  it "reads an unlinked employee's delivery consent status without changing it" do
+    enable_employee_surface!
+    token = token_for(employee, type: "employee")
+    headers = viewing(token, azp: employee_origin)
+    consent_path = "/api/v1/employee/delivery_consents"
+
+    get consent_path, headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("consents").pluck("status")).to eq(%w[not_consented not_consented])
+    expect(AuditLog.find_by!(action: "employee_delivery_consents#show")).to have_attributes(
+      user_id: staff.id, real_user_id: staff.id, view_as_grant_id: ViewAsGrant.last.id, record_id: employee.id
+    )
+
+    post consent_path, params: { kind: "pay_statements" }, headers: headers, as: :json
+    expect(response).to have_http_status(:forbidden)
+    expect(DeliveryConsent.count).to eq(0)
+    expect(EmployeeAccountLink.count).to eq(0)
   end
 
   it "stamps the real actor on auditable reads even for a linked employee" do

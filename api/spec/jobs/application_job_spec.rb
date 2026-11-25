@@ -43,6 +43,7 @@ RSpec.describe ApplicationJob do
     ApplicationRecord.transaction(requires_new: true) do
       Current.set(view_as_grant: ViewAsGrant.new) do
         expect { DeferredAuditProbeJob.perform_later }.to raise_error(ActiveRecord::ReadOnlyError)
+        expect { ActiveJob.perform_all_later(DeferredAuditProbeJob.new) }.to raise_error(ActiveRecord::ReadOnlyError)
       end
     end
     expect(DeferredAuditProbeJob).not_to have_been_enqueued
