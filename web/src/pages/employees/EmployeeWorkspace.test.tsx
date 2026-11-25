@@ -139,6 +139,32 @@ describe('EmployeeWorkspace imported setup certification', () => {
     expect(screen.getAllByText('Direct deposit').length).toBeGreaterThan(0);
   });
 
+  it('tells staff which new-hire documents are needed and links straight to them', async () => {
+    apiMocks.get.mockResolvedValue({ data: { ...employee, document_readiness: { total: 2, required: 2, satisfied: 1, ready_for_payroll: false, missing: ['Signed withholding election'] } } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    const card = (await screen.findByRole('heading', { name: "Before this employee's first payroll" })).closest('section')!;
+    expect(within(card).getByText(/Upload and verify: Signed withholding election\./)).toBeTruthy();
+    expect(within(card).getByRole('link', { name: /Upload or verify/ }).getAttribute('href'))
+      .toBe('/companies/1/employees/2/edit?return_to=%2Fcompanies%2F1%2Femployees%2F2%2Foverview#employee-documents');
+  });
+
+  it('shows no documents card once the new hire is payroll ready', async () => {
+    apiMocks.get.mockResolvedValue({ data: { ...employee, document_readiness: { total: 2, required: 2, satisfied: 2, ready_for_payroll: true, missing: [] } } });
+    render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Employment context');
+    expect(screen.queryByRole('heading', { name: "Before this employee's first payroll" })).toBeNull();
+  });
+
   it('identifies an unreviewed payment method as a paper check default', async () => {
     render(
       <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
