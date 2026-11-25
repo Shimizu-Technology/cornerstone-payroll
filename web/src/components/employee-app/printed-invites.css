@@ -1,0 +1,41 @@
+@media print {
+  body:has(.employee-code-dialog) > :not([data-dialog-portal]:has(.employee-code-dialog)) {
+    display: none !important;
+  }
+
+  [data-dialog-portal]:has(.employee-code-dialog) {
+    display: contents !important;
+  }
+
+  [data-dialog-portal]:has(.employee-code-dialog) > div:not([data-dialog-backdrop]),
+  [data-dialog-portal]:has(.employee-code-dialog) > div > div,
+  [data-dialog-portal]:has(.employee-code-dialog) > div > div > div {
+    position: static !important;
+    display: block !important;
+    background: white !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  [data-dialog-portal]:has(.employee-code-dialog) > [data-dialog-backdrop] {
+    display: none !important;
+  }
+
+  .employee-code-dialog {
+    position: static !important;
+    width: auto !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  .employee-code-sheet + .employee-code-sheet {
+    break-before: page;
+  }
+}

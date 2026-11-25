@@ -1,3 +1,4 @@
+import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
@@ -345,6 +346,7 @@ export function EmployeeWorkspace(): ReactElement {
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <>
+            <EmployeeAppPanel key={`${companyId}:${employee.id}`} companyId={companyId} companyName={activeCompany?.name || ""} employeeId={employee.id} audience="admin" />
             <EmployeeOverview
               companyId={companyId}
               employee={employee}

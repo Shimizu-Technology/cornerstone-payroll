@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClientEmployeeOverview } from './ClientEmployeeOverview';
 
 const apiMocks = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock('@/services/api', () => ({ clientEmployeesApi: { get: apiMocks.get }, clientPayStubsApi: { history: async () => ({ pay_stubs: [] }) } }));
+vi.mock('@/services/api', () => ({ apiClient: { get: async () => ({ data: { enabled: false, status: 'not_invited' } }) }, clientEmployeesApi: { get: apiMocks.get }, clientPayStubsApi: { history: async () => ({ pay_stubs: [] }) } }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1,
   activeCompany: { id: 1, test_workspace: true, practice_portal: true, workspace_can_write: false },
 }) }));
@@ -27,6 +27,7 @@ describe('ClientEmployeeOverview', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'How this employee is paid' })).toBeTruthy();
+    expect(await screen.findByText(/employee app isn't turned on/)).toBeTruthy();
     expect(screen.getAllByText('Direct deposit').length).toBeGreaterThan(0);
     expect(screen.getByText(/bank transfer is handled and confirmed outside the app/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Edit employee' }).getAttribute('href')).toContain('/employees/2/edit');

@@ -27,7 +27,7 @@ module EmployeeLinks
       raise Error, "Choose email or a printed sign-up code" unless %w[email code].include?(@delivery)
 
       company = @employee.company
-      EmployeeLinks.require_staff!(@actor, company)
+      EmployeeLinks.require_invitation_management!(@actor, company)
 
       result = ApplicationRecord.transaction do
         @employee.lock!
