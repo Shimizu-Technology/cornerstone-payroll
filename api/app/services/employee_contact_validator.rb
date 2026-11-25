@@ -357,6 +357,10 @@ class EmployeeContactValidator
     if @raw_email != :unchanged && normalized_email.present?
       if !valid_email_format?(normalized_email)
         add_error(errors, :email, "must be a valid email address")
+      elsif !DemoOutbound.contact_email_allowed?(@company, normalized_email)
+        # A demo contact may only be replaced with an allow-listed or
+        # non-delivering address, so a later notice can't leave the firm.
+        add_error(errors, :email, Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
       elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
         add_error(errors, :email, @source == "employee" ? EMPLOYEE_PERSONAL_EMAIL_ERROR :
           "cannot be a placeholder or generic inbox address; enter the employee's own email")

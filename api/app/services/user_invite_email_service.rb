@@ -6,7 +6,13 @@ class UserInviteEmailService
   BRAND_NAME = "Cornerstone Payroll"
 
   class << self
+    # Returns true, :captured, :refused (a demo login's address is not on the
+    # allow-list, so nothing is sent) or false.
     def send_invite(user:, invited_by:, invitation_url: nil)
+      demo_company = DemoOutbound.demo_company_for(user)
+      if demo_company && !DemoOutbound.permit?(company: demo_company, email: user.email, channel: "user_invite_email", user: user)
+        return :refused
+      end
       return false unless configured?
 
       # Always link to the app's login page, not Clerk's hosted invitation URL.
@@ -15,14 +21,17 @@ class UserInviteEmailService
       button_link = "#{frontend_url}/login"
       display_url = frontend_url
 
-      response = StagingMailTransport.deliver(
-        {
-          from: from_email,
-          to: user.email,
-          subject: "You're invited to #{BRAND_NAME}",
-          html: invite_html(user: user, invited_by: invited_by, button_link: button_link, display_url: display_url)
-        }
-      )
+      response = DemoOutbound.scoped(demo_company) do
+        StagingMailTransport.deliver(
+          {
+            from: from_email,
+            to: user.email,
+            subject: "You're invited to #{BRAND_NAME}",
+            html: invite_html(user: user, invited_by: invited_by, button_link: button_link, display_url: display_url)
+          }
+        )
+      end
+      return :refused if response["suppressed"]
 
       if StagingOutboundPolicy.staging? && response["staging_captured"]
         Rails.logger.info("[InviteEmail] STAGING captured invite user_id=#{user.id}; no email was sent")

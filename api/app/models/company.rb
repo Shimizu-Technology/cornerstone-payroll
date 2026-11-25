@@ -26,6 +26,7 @@ class Company < ApplicationRecord
   # unavailable state so the demo never announces itself to clients or staff.
   DEMO_UNAVAILABLE_MESSAGE = "This option isn't available for this client yet."
   DEMO_ACCESS_DENIED_MESSAGE = "Your access does not allow this action for this client."
+  DEMO_RECIPIENT_REFUSED_MESSAGE = "This email address can't be used for this client."
   # Mirrors the database check on a demo's fixture key.
   DEMO_FIXTURE_KEY_PATTERN = /\A[a-z0-9][a-z0-9-]{2,62}\z/
 

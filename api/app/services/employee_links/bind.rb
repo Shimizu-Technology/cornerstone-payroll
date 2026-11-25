@@ -27,6 +27,9 @@ module EmployeeLinks
       return unless link&.invite_open?(now) && link.invite_generation == generation
       return unless !link.activation_locked?(now) && link.claim_user_id.nil? && link.employee.active?
       return unless link.portal_enabled? && EmployeeLinks.origin_allows_company?(azp, link.company_id)
+      # A demo login binds only with an allow-listed sign-in address, which
+      # also covers printed-code sign-ups.
+      return unless DemoOutbound.permit?(company: link.company, email: user.email, channel: "employee_link_bind", user: user)
 
       link
     end
