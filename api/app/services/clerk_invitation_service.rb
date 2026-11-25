@@ -335,32 +335,42 @@ class ClerkInvitationService
   # own budget, or an oversized body, is a request failure.
   def request_json(path, method, body = nil)
     deadline = Thread.current[DEADLINE_KEY]
-    started = Time.current
-    raise DeadlineReached, "Clerk pass deadline reached" if deadline && started >= deadline
-
-    budget = REQUEST_BUDGET.to_f
-    pass_bound = deadline && (deadline - started) <= budget
-    budget = (deadline - started).to_f if pass_bound
+    raise DeadlineReached, "Clerk pass deadline reached" if deadline && Time.current >= deadline
 
     uri = URI("#{BASE_URL}#{path}")
     http = Net::HTTP.new(uri.hostname, uri.port)
     http.use_ssl = true
-    http.open_timeout = http.read_timeout = http.write_timeout = [ SOCKET_TIMEOUT, budget ].min
 
     req = method.new(uri)
     req["Authorization"] = "Bearer #{@secret_key}"
     req["Content-Type"] = "application/json"
     req.body = body.to_json if body
 
-    # The same shape as TimeTracking::Client#read_response: per-read timeouts
-    # reset on each chunk, so the whole call is capped too, with a
-    # Timeout::Error subclass the callers already rescue.
-    Timeout.timeout(budget, RequestBudgetExceeded, "Clerk request budget exceeded") do
-      http.request(req) do |response|
-        declared = response["Content-Length"].presence&.to_i
-        raise ResponseTooLarge, "Clerk response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared&.>(MAX_RESPONSE_BYTES)
+    pass_bound = false
+    # Validate staging Clerk policy (which runs User.find_by queries in staging)
+    # before entering Timeout.timeout so an async timeout cannot interrupt
+    # ActiveRecord I/O. StagingHttpGuard still runs http_host! on every request
+    # and connect, and skips only the duplicate clerk_request! DB query for
+    # this exact request object.
+    StagingOutboundPolicy.with_preauthorized_clerk_request(req) do
+      started = Time.current
+      raise DeadlineReached, "Clerk pass deadline reached" if deadline && started >= deadline
 
-        response.read_body(BoundedBody.new(MAX_RESPONSE_BYTES))
+      budget = REQUEST_BUDGET.to_f
+      pass_bound = deadline && (deadline - started) <= budget
+      budget = (deadline - started).to_f if pass_bound
+      http.open_timeout = http.read_timeout = http.write_timeout = [ SOCKET_TIMEOUT, budget ].min
+
+      # The same shape as TimeTracking::Client#read_response: per-read timeouts
+      # reset on each chunk, so the whole call is capped too, with a
+      # Timeout::Error subclass the callers already rescue.
+      Timeout.timeout(budget, RequestBudgetExceeded, "Clerk request budget exceeded") do
+        http.request(req) do |response|
+          declared = response["Content-Length"].presence&.to_i
+          raise ResponseTooLarge, "Clerk response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared&.>(MAX_RESPONSE_BYTES)
+
+          response.read_body(BoundedBody.new(MAX_RESPONSE_BYTES))
+        end
       end
     end
   rescue Timeout::Error => e
