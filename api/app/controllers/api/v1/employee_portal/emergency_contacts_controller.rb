@@ -28,7 +28,7 @@ module Api
         def destroy
           @audit_record = contact = profile.contacts.find(resource_id)
           before = [ contact.as_profile_json ]
-          contact.destroy!
+          contact.update!(deleted_at: Time.current)
           record_emergency_change!(before, [])
           render_profile
         end

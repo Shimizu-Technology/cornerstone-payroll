@@ -23,7 +23,7 @@ module EmployeeProfiles
     end
 
     def contacts
-      EmployeeEmergencyContact.where(company_id: @link.company_id, employee_id: @link.employee_id)
+      EmployeeEmergencyContact.active.where(company_id: @link.company_id, employee_id: @link.employee_id)
     end
 
     def requests

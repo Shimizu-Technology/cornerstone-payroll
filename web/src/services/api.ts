@@ -4746,6 +4746,7 @@ export interface ClientPortalThread {
 
 export interface EmployeeChangeRequest {
   profile_address?: boolean;
+  note_visible_to_employee?: boolean;
   can_review?: boolean;
   proposed_compensation_effective_on?: string | null;
   id: number;

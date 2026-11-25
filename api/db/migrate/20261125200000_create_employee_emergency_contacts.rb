@@ -8,6 +8,7 @@ class CreateEmployeeEmergencyContacts < ActiveRecord::Migration[8.1]
       t.string :name, null: false
       t.string :relationship
       t.string :phone, null: false
+      t.datetime :deleted_at
       t.timestamps
 
       t.index %i[company_id employee_id id], name: "idx_emergency_contacts_employee"
