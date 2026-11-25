@@ -48,6 +48,7 @@ import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage 
 import { formatPhone, toContactRecord } from '@/lib/employee-contact';
 import { employeesPath } from '@/lib/routes';
 import { cn, getInitials } from '@/lib/utils';
+import { contactEmailErrorMessage } from '@/lib/contact-email-errors';
 import { ApiError, clientEmployeesApi, employeesApi } from '@/services/api';
 import type {
   ContactEmployee,
@@ -218,6 +219,8 @@ function extractContactValidation(error: unknown): {
         }
       }
     }
+    const emailReason = contactEmailErrorMessage(raw);
+    if (emailReason && fieldErrors.email) fieldErrors.email = [emailReason];
     return {
       fieldErrors,
       samePersonRequired: Boolean(contactValidation?.same_person_confirmation_required),

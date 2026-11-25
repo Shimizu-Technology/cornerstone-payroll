@@ -101,6 +101,13 @@ describe('safeInternalReturnPath', (): void => {
     ['https://example.com/payroll'],
     ['//example.com/payroll'],
     ['/\\example.com/payroll'],
+    ['/\\evil.com'],
+    ['/..//evil.com'],
+    ['/.//evil.com'],
+    ['/a/../..//evil.com/payroll'],
+    ['/./%2F/evil.com'],
+    ['/%2F%2Fevil.com'],
+    ['/%5Cevil.com'],
     ['pay-periods'],
     [null],
   ])('rejects unsafe or invalid return destinations: %s', (value): void => {

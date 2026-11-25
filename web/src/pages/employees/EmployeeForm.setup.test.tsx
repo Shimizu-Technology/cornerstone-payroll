@@ -19,8 +19,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     departmentsApi: { list: mocks.departments }, payrollFieldsApi: { list: mocks.fields } };
 });
 
-function form() {
-  return <MemoryRouter initialEntries={['/companies/1/employees/new']}><Routes>
+function form(path = '/companies/1/employees/new') {
+  return <MemoryRouter initialEntries={[path]}><Routes>
     <Route path="/companies/:companyId/employees/new" element={<EmployeeForm />} />
   </Routes></MemoryRouter>;
 }
@@ -80,4 +80,10 @@ it('guards a direct reviewer form route and retains an opened draft through temp
   mocks.company = { ...mocks.company, workspace_can_write: true };
   view.rerender(form());
   expect((screen.getByLabelText(/First Name/) as HTMLInputElement).value).toBe('Retained draft');
+});
+
+it.each(['/..//evil.example/payroll', '/./%2F/evil.example', '/%5Cevil.example'])('keeps the read-only fallback link internal for return_to %s', (returnTo) => {
+  mocks.company = { id: 1, pay_frequency: 'semimonthly', test_workspace: true, workspace_can_write: false };
+  render(form(`/companies/1/employees/new?return_to=${encodeURIComponent(returnTo)}`));
+  expect(screen.getByRole('link', { name: 'Back to employee records' }).getAttribute('href')).toBe('/companies/1/employees');
 });

@@ -11,11 +11,13 @@ module Api
           result = PayrollHistoryQuery.new(
             company_id: current_company_id,
             params: params,
-            audience: :client
+            audience: :client,
+            client_actor: current_user
           ).call
           render json: {
             pay_periods: result.data,
-            meta: result.meta
+            meta: result.meta,
+            open_period: open_period
           }
         end
 
@@ -89,6 +91,23 @@ module Api
 
         private
 
+        def open_period
+          catalog = PayrollSubmissions::Catalog.new(company: Company.find(current_company_id))
+          entries = catalog.entries.select { |entry| entry.start_date <= catalog.today }
+          catalog.preload_live_pay_periods(entries)
+          open_entries = entries.select do |candidate|
+            next false if catalog.voided_pay_period?(candidate)
+
+            date = catalog.pay_date_for(candidate) || candidate.end_date
+            date >= catalog.today && !catalog.live_pay_period(candidate)&.client_finished?
+          end
+          entry = open_entries.find { |candidate| catalog.open_for_files?(candidate) } || open_entries.first
+          return unless entry
+
+          PayrollSubmissions::Serializer.new(current_user: current_user, catalog: catalog).summary(entry)
+            .slice(:ref, :start_date, :end_date, :pay_date, :review_pay_period_id, :client_payroll_status)
+        end
+
         def current_preview_package!
           unless Company.find(@pay_period.company_id).client_payroll_approval_required?
             raise PayrollReview::RevisionService::Error, "Client payroll review is disabled for this company."
@@ -134,9 +153,13 @@ module Api
           }
 
           json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
-          json[:payroll_review] = pay_period.company.client_payroll_approval_required? ? PayrollReview::PackagePresenter.call(
-            pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
-          ) : nil
+          review = if pay_period.company.client_payroll_approval_required?
+            pay_period.payroll_review_packages.summary.current.where.not(published_at: nil)
+              .includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
+          end
+          json[:payroll_review] = PayrollReview::PackagePresenter.call(review)
+          json[:can_decide_payroll_review] = pay_period.approved? &&
+            PayrollReview::RevisionService.client_can_decide?(review, current_user) == true
 
           if include_items
             json[:payroll_review_history] = pay_period.payroll_review_packages.where.not(published_at: nil)

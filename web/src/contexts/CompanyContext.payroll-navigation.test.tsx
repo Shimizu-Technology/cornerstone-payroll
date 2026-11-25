@@ -9,13 +9,38 @@ import { CompanySwitcher } from '@/components/layout/CompanySwitcher';
 import { OrganizationSwitcher } from '@/components/layout/OrganizationSwitcher';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 
-const mocks = vi.hoisted(() => ({ switchCompany: vi.fn() }));
+const mocks = vi.hoisted(() => {
+  const defaultCompaniesResponse = {
+    companies: [
+      { id: 1, organization_id: 1, name: 'First', payroll_environment: 'production' },
+      { id: 2, organization_id: 1, name: 'Second', payroll_environment: 'production' },
+      { id: 3, organization_id: 2, name: 'Other firm', payroll_environment: 'production' },
+    ],
+    current_company_id: 1,
+    can_manage_clients: true,
+    can_switch_company: true,
+  };
+  return {
+    defaultCompaniesResponse,
+    getActiveCompanyId: vi.fn<() => number | null>(() => 1),
+    switchCompany: vi.fn(),
+    listCompanies: vi.fn(async () => defaultCompaniesResponse),
+    companySwitchAnalytics: vi.fn(),
+  };
+});
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAuthenticated: true, isLoading: false, user: { id: 1, organization_id: 1, role: 'super_admin' } }) }));
+vi.mock('@/lib/analytics', () => ({ analytics: { companySwitch: mocks.companySwitchAnalytics } }));
 vi.mock('@/services/api', () => ({ companiesApi: {
-  getActiveCompanyId: () => 1, clearActiveCompanyId: vi.fn(), switchCompany: mocks.switchCompany,
-  list: async () => ({ companies: [{ id: 1, organization_id: 1, name: 'First', payroll_environment: 'production' }, { id: 2, organization_id: 1, name: 'Second', payroll_environment: 'production' }, { id: 3, organization_id: 2, name: 'Other firm', payroll_environment: 'production' }], current_company_id: 1, can_manage_clients: true, can_switch_company: true }),
+  getActiveCompanyId: mocks.getActiveCompanyId, clearActiveCompanyId: vi.fn(), switchCompany: mocks.switchCompany,
+  list: mocks.listCompanies,
 } }));
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => {
+  cleanup();
+  mocks.companySwitchAnalytics.mockClear();
+  mocks.getActiveCompanyId.mockReset().mockReturnValue(1);
+  mocks.listCompanies.mockReset().mockImplementation(async () => mocks.defaultCompaniesResponse);
+  vi.restoreAllMocks();
+});
 function Worksheet() {
   const [hours, setHours] = useState('');
   return <><UnsavedPayrollChangesGuard dirty={hours !== ''} /><input aria-label="Hours" value={hours} onChange={e => setHours(e.target.value)} /></>;
@@ -148,4 +173,93 @@ it('opens the client in the URL on Back and Forward after a switch, without gett
   await expectOpen('1');
   await act(async () => { await router.navigate(1); });
   await expectOpen('2');
+});
+
+it('resets analytics identity on every company switch path (picker, organization switch, and company-scoped navigation) and skips cancelled or no-op switches', async () => {
+  // 1. Cancelled switch and no-op same-company switch do not reset analytics.
+  await setup();
+  mocks.companySwitchAnalytics.mockClear();
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByText('Change client'));
+  fireEvent.click(screen.getByText('Change organization'));
+  expect(mocks.companySwitchAnalytics).not.toHaveBeenCalled();
+
+  // 2. Confirmed organization switch resets analytics via CompanyContext.
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByText('Change organization'));
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe('3'));
+  expect(mocks.companySwitchAnalytics).toHaveBeenCalledTimes(1);
+
+  // 3. Re-selecting the same organization is a no-op and does not reset again.
+  fireEvent.click(screen.getByText('Change organization'));
+  expect(mocks.companySwitchAnalytics).toHaveBeenCalledTimes(1);
+
+  cleanup();
+  mocks.companySwitchAnalytics.mockClear();
+
+  // 4. CompanyScopedRoute navigation (deep-link and Back/Forward) resets analytics on each company change.
+  const router = createMemoryRouter(
+    [{ path: '*', element: <CompanyProvider><ScopedApplication /></CompanyProvider> }],
+    { initialEntries: ['/companies/2/pay-runs'] },
+  );
+  render(<RouterProvider router={router} />);
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe('2'));
+  await screen.findByText('Pay runs');
+  expect(mocks.companySwitchAnalytics).toHaveBeenCalledTimes(1);
+
+  mocks.companySwitchAnalytics.mockClear();
+  await act(async () => { await router.navigate('/companies/1/pay-runs'); });
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe('1'));
+  expect(mocks.companySwitchAnalytics).toHaveBeenCalledTimes(1);
+
+  mocks.companySwitchAnalytics.mockClear();
+  await act(async () => { await router.navigate(-1); });
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe('2'));
+  expect(mocks.companySwitchAnalytics).toHaveBeenCalledTimes(1);
+});
+
+it('resets analytics identity when refreshCompanies falls back from an unavailable active company to the server default', async () => {
+  function RefreshHost() {
+    const { activeCompanyId, loading, refreshCompanies } = useCompany();
+    if (loading) return <p>Loading</p>;
+    return (
+      <>
+        <span data-testid="scope">{activeCompanyId}</span>
+        <button onClick={() => void refreshCompanies()}>Refresh companies</button>
+      </>
+    );
+  }
+
+  // Initial load with no stored company does not trigger a company-switch reset.
+  mocks.getActiveCompanyId.mockReturnValue(null);
+  render(
+    <RouterProvider
+      router={createMemoryRouter([{ path: '*', element: <CompanyProvider><RefreshHost /></CompanyProvider> }], { initialEntries: ['/work'] })}
+    />,
+  );
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe('1'));
+  expect(mocks.companySwitchAnalytics).not.toHaveBeenCalled();
+
+  // Refresh while stored company 1 is still available does not reset.
+  mocks.getActiveCompanyId.mockReturnValue(1);
+  fireEvent.click(screen.getByText('Refresh companies'));
+  await waitFor(() => expect(mocks.listCompanies).toHaveBeenCalledTimes(2));
+  expect(screen.getByTestId('scope').textContent).toBe('1');
+  expect(mocks.companySwitchAnalytics).not.toHaveBeenCalled();
+
+  // Refresh when stored company 1 is no longer available falls back to server default 2 and resets analytics.
+  mocks.switchCompany.mockClear();
+  mocks.listCompanies.mockResolvedValueOnce({
+    companies: [
+      { id: 2, organization_id: 1, name: 'Second', payroll_environment: 'production' },
+      { id: 3, organization_id: 2, name: 'Other firm', payroll_environment: 'production' },
+    ],
+    current_company_id: 2,
+    can_manage_clients: true,
+    can_switch_company: true,
+  });
+  fireEvent.click(screen.getByText('Refresh companies'));
+  await waitFor(() => expect(screen.getByTestId('scope').textContent).toBe('2'));
+  expect(mocks.switchCompany).toHaveBeenCalledWith(2, 1);
+  expect(mocks.companySwitchAnalytics).toHaveBeenCalledTimes(1);
 });

@@ -1,7 +1,15 @@
 # frozen_string_literal: true
 
 class EmployeeDocumentReadiness
-  class BlockedError < StandardError; end
+  class BlockedError < StandardError
+    # Employees with missing new-hire documents, so staff can open each one.
+    attr_reader :employees
+
+    def initialize(message = nil, employees: [])
+      @employees = employees
+      super(message)
+    end
+  end
 
   DEFAULT_REQUIREMENTS = {
     "w2" => %w[identity_and_work_authorization withholding_election],
@@ -69,8 +77,21 @@ class EmployeeDocumentReadiness
 
     details = gaps.map { |gap| "#{gap.fetch(:employee_name)}: #{gap.fetch(:label)} (#{gap.fetch(:status).tr('_', ' ')})" }
 
-    raise BlockedError,
-      "Resolve required new-hire documents before approving or committing payroll: #{details.join('; ')}."
+    raise BlockedError.new(
+      "Resolve required new-hire documents before approving or committing payroll: #{details.join('; ')}.",
+      employees: group_gaps(gaps)
+    )
+  end
+
+  # One row per employee with the labels still needed, in roster order.
+  def self.gaps_by_employee(employees:)
+    group_gaps(gaps_for(employees: employees))
+  end
+
+  def self.group_gaps(gaps)
+    gaps.group_by { |gap| gap.fetch(:employee_id) }.map do |employee_id, rows|
+      { employee_id: employee_id, employee_name: rows.first.fetch(:employee_name), missing: rows.map { |row| row.fetch(:label) } }
+    end
   end
 
   def self.gap_count(employees:)
@@ -91,6 +112,7 @@ class EmployeeDocumentReadiness
     requirements_by_employee = requirements.group_by(&:employee_id)
     gaps = requirements.reject(&:satisfied?).map do |requirement|
       {
+        employee_id: requirement.employee_id,
         employee_name: requirement.employee.full_name,
         label: requirement.label,
         status: requirement.status
@@ -100,6 +122,7 @@ class EmployeeDocumentReadiness
       present_types = Array(requirements_by_employee[employee.id]).map(&:requirement_type)
       (DEFAULT_REQUIREMENTS.fetch(employee.tax_classification) - present_types).each do |requirement_type|
         gaps << {
+          employee_id: employee.id,
           employee_name: employee.full_name,
           label: EmployeeDocumentRequirement::REQUIREMENT_TYPES.fetch(requirement_type),
           status: "checklist_missing"
@@ -114,11 +137,13 @@ class EmployeeDocumentReadiness
     required = requirements.select(&:required_for_payroll?)
     expected_types = employee.document_readiness_required? ? DEFAULT_REQUIREMENTS.fetch(employee.tax_classification) : []
     missing_types = expected_types - required.map(&:requirement_type)
+    missing = required.reject(&:satisfied?).map(&:label) + missing_types.map { |type| EmployeeDocumentRequirement::REQUIREMENT_TYPES.fetch(type) }
     {
       total: requirements.size,
       required: required.size + missing_types.size,
       satisfied: required.count(&:satisfied?),
-      ready_for_payroll: missing_types.empty? && required.all?(&:satisfied?)
+      ready_for_payroll: missing_types.empty? && required.all?(&:satisfied?),
+      missing: missing
     }
   end
 end

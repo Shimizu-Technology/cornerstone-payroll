@@ -29,6 +29,7 @@ export interface EmployeeTaxFormCopy {
 
 export interface EmployeeTaxForms {
   can_post: boolean;
+  blocker?: 'feature_off' | 'unsupported_year' | 'not_filed' | 'not_final' | null;
   blocker_message: string | null;
   w2_delivery: W2Delivery | null;
   documents: EmployeeTaxFormCopy[];

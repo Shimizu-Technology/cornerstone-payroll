@@ -86,7 +86,7 @@ it('keeps earlier drafts readable and directs decisions to the pay run preview',
   const draft = { id: 4, revision: 1, current: true, superseded: false, posted: true, paycheck_document: doc(201, 'MHI paychecks.pdf') };
   mocks.get.mockResolvedValue({ data: period({ review_pay_period_id: 12, drafts: [draft] }) });
   renderAt('client');
-  expect(await screen.findByRole('link', { name: 'Open payroll preview review' })).toHaveProperty('href', 'http://localhost:3000/companies/2/pay-runs/12');
+  expect(await screen.findByRole('link', { name: 'Open payroll preview' })).toHaveProperty('href', 'http://localhost:3000/companies/2/pay-runs/12/overview');
   expect(screen.getByText('MHI paychecks.pdf')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Approve draft/ })).toBeNull();
 });
@@ -190,4 +190,15 @@ it('orders the six staff sections and hides the single-revision picker', async (
     'Status', 'What the client sent', 'Next step', 'Payroll preview review', 'Messages', 'History',
   ]);
   expect(screen.queryByLabelText('Client’s revision')).toBeNull();
+});
+
+it('warns staff, and only staff, when the linked pay run is voided or ambiguous', async () => {
+  const warning = 'The linked pay run was voided. Link the replacement run before review.';
+  mocks.get.mockResolvedValue({ data: period({ pay_period_link_error: warning }) });
+  renderAt('staff');
+  expect((await screen.findByRole('alert')).textContent).toBe(warning);
+  cleanup();
+  renderAt('client');
+  await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' });
+  expect(screen.queryByText(warning)).toBeNull();
 });

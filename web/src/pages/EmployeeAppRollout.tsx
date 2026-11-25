@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Header } from '@/components/layout/Header';
+import { EmployeeAppTurnOnStep } from '@/components/employee-app/EmployeeAppTurnOnStep';
 import { InviteDeliveryField } from '@/components/employee-app/InviteDeliveryField';
 import { PrintedInvites } from '@/components/employee-app/PrintedInvites';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
@@ -67,7 +68,16 @@ function CompanyRollout({ companyId, companyName, audience, showSettings }: {
         {loadError && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-sm text-danger-700">{loadError}</p><Button type="button" variant="outline" onClick={() => setAttempt((value) => value + 1)}>Try again</Button></div>}
         {!rollout && !loadError && <WorkspaceLoader label="Loading rollout" />}
         {rollout && <>
-          {!rollout.enabled && <p className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-800">{employeeAppOff} You can review the list and update contact details now.</p>}
+          {!rollout.enabled && (
+            <div role="status" className="space-y-1 rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-800">
+              <p className="font-semibold text-neutral-900">{employeeAppOff}</p>
+              <p>
+                {audience === 'client' && 'Cornerstone turns the app on. '}
+                You can add missing emails and mobile numbers now so invites are ready.
+              </p>
+              {audience === 'admin' && <p><EmployeeAppTurnOnStep companyId={companyId} audience="admin" /></p>}
+            </div>
+          )}
           <dl aria-label="Rollout counts" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
             {counts.map(([key, label]) => (
               <div key={key} className="flex flex-col gap-1 rounded-xl border border-neutral-200 bg-white p-3 sm:p-4">
@@ -189,7 +199,9 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
         <CardDescription>
           {rollout.enabled
             ? `Choose up to ${rollout.max_wave_size} employees. Use printed codes for employees without a personal email.`
-            : 'Group invites will be available when the app is turned on.'}
+            : audience === 'client'
+              ? 'You can invite employees once Cornerstone turns the app on.'
+              : 'You can invite employees once the app is turned on.'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
