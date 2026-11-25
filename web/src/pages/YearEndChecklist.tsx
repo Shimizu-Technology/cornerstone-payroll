@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select } from '@/components/ui/select';
 import { FilingEvidencePanel } from '@/components/reports/FilingEvidencePanel';
+import { EmployeeW2Copies } from '@/components/year-end/EmployeeW2Copies';
 import { EmployerStep } from '@/components/year-end/EmployerStep';
 import { FilingDecisionStep } from '@/components/year-end/FilingDecisionStep';
 import { Form1099ReadyStep } from '@/components/year-end/Form1099ReadyStep';
@@ -17,6 +18,9 @@ import { ReconciliationStep } from '@/components/year-end/ReconciliationStep';
 import { ReviewWarningsStep } from '@/components/year-end/ReviewWarningsStep';
 import { IssueList, StepCard } from '@/components/year-end/StepCard';
 import { PayrollHistoryReview } from '@/components/year-end/PayrollHistoryReview';
+import { useCompany } from '@/contexts/CompanyContext';
+import { useOptionalSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { canWriteCompany } from '@/lib/company-write-access';
 import { yearEndApi } from '@/services/api';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { yearEndPath } from '@/lib/routes';
@@ -108,6 +112,8 @@ function StatusPanel({ checklist }: { checklist: Checklist }): ReactElement {
 export function YearEndChecklist(): ReactElement {
   const { companyId: companyIdParam } = useParams<{ companyId: string }>();
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
+  const { activeCompany } = useCompany();
+  const canManageCopies = useOptionalSelectedCompanyCapability('manage_client_administration', companyId);
   const [searchParams, setSearchParams] = useSearchParams();
   const year = parseYearEndTaxYear(searchParams.get('year'));
   const [loaded, setChecklist] = useState<Checklist | null>(null);
@@ -223,6 +229,11 @@ export function YearEndChecklist(): ReactElement {
                 </li>
               ))}
             </ol>
+
+            {canManageCopies && (
+              <EmployeeW2Copies key={scope} companyId={companyId} companyName={checklist.company.name} year={year}
+                canWrite={canWriteCompany(activeCompany, 'manage_client_administration')} checklistLoading={loading} />
+            )}
 
             <PayrollHistoryReview key={scope} companyId={companyId} year={year} onSaved={onSaved} onRefresh={onRefresh} />
 

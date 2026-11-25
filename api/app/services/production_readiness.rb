@@ -22,7 +22,14 @@ class ProductionReadiness
     IPAddr.new("fe80::/10")
   ].freeze
 
-  Check = Data.define(:name, :passed, :detail)
+  Check = Data.define(:name, :passed, :detail) do
+    # An advisory uses nil because it was not verified and does not block release.
+    def status
+      return "WARN" if passed.nil?
+
+      passed ? "PASS" : "FAIL"
+    end
+  end
 
   class Report
     attr_reader :checks, :generated_at, :revision
@@ -35,11 +42,11 @@ class ProductionReadiness
     end
 
     def passed?
-      checks.all?(&:passed)
+      failures.empty?
     end
 
     def failures
-      checks.reject(&:passed)
+      checks.select { |check| check.passed == false }
     end
 
     def as_json(*)
@@ -47,7 +54,7 @@ class ProductionReadiness
         generated_at: generated_at.iso8601,
         revision: revision,
         passed: passed?,
-        checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } },
+        checks: checks.map { |check| check.to_h.merge(status: check.status) },
         connected_payroll: @connected_payroll
       }
     end
@@ -126,7 +133,18 @@ class ProductionReadiness
     :process_role, :route_paths, :cable_mount_path, :primary_pool_size, :rate_limit_store, :rate_limit_probe
 
   def configuration_checks
-    base_configuration_checks + employee_web_checks
+    checks = base_configuration_checks + employee_web_checks
+    checks << resend_webhook_check unless employee_web?
+    checks
+  end
+
+  def resend_webhook_check
+    configured = env["RESEND_WEBHOOK_SECRET"].present?
+    Check.new(
+      name: "Resend webhook signing secret is configured",
+      passed: configured ? true : nil,
+      detail: configured ? "configured" : "Set RESEND_WEBHOOK_SECRET to receive W-2 notice delivery and bounce updates"
+    )
   end
 
   def employee_web?

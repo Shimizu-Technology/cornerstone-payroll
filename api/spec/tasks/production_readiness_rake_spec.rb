@@ -15,7 +15,10 @@ RSpec.describe "production:readiness" do
 
   it "prints safe machine-readable evidence and succeeds when every check passes" do
     report = ProductionReadiness::Report.new(
-      checks: [ ProductionReadiness::Check.new(name: "safe probe", passed: true, detail: "verified") ],
+      checks: [
+        ProductionReadiness::Check.new(name: "safe probe", passed: true, detail: "verified"),
+        ProductionReadiness::Check.new(name: "optional probe", passed: nil, detail: "not configured")
+      ],
       generated_at: Time.zone.parse("2026-08-23 12:00:00"),
       revision: "abc123"
     )
@@ -24,6 +27,7 @@ RSpec.describe "production:readiness" do
     expect { task.invoke }.to output(
       a_string_including(
         "PASS  safe probe (verified)",
+        "WARN  optional probe (not configured)",
         'EVIDENCE {"generated_at":"2026-08-23T12:00:00Z","revision":"abc123","passed":true',
         "Production configuration and live dependency probes passed"
       )
