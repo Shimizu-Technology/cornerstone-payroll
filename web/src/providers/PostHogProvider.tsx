@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type ReactElement, type ReactNode } from 'react';
 import posthog from 'posthog-js';
 import { PostHogProvider as PHProvider, usePostHog } from 'posthog-js/react';
 import { useLocation } from 'react-router';
@@ -15,7 +15,7 @@ interface PostHogPageViewProps {
   surface?: AnalyticsSurface;
 }
 
-export function PostHogPageView({ surface = currentSurface() }: PostHogPageViewProps) {
+export function PostHogPageView({ surface = currentSurface() }: PostHogPageViewProps): null {
   const location = useLocation();
   const ph = usePostHog();
 
@@ -33,7 +33,7 @@ interface PostHogProviderProps {
   surface?: AnalyticsSurface;
 }
 
-export function PostHogProvider({ children, surface = currentSurface() }: PostHogProviderProps) {
+export function PostHogProvider({ children, surface = currentSurface() }: PostHogProviderProps): ReactElement {
   if (!isPostHogEnabled) {
     if (import.meta.env.DEV) {
       console.info('PostHog not configured — analytics disabled');
