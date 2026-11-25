@@ -50,6 +50,17 @@ module Api
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
 
+    # ActionDispatch::Static bypasses ActionController default response headers,
+    # so static files under public/ (such as robots.txt) need explicit security
+    # headers configured on public_file_server.
+    PUBLIC_FILE_SECURITY_HEADERS = {
+      "x-content-type-options" => "nosniff",
+      "x-frame-options" => "DENY",
+      "x-permitted-cross-domain-policies" => "none",
+      "referrer-policy" => "no-referrer"
+    }.freeze
+    config.public_file_server.headers = PUBLIC_FILE_SECURITY_HEADERS.dup
+
     # Framework routes are part of the legacy `all` surface.
     config.active_storage.draw_routes = false if ProcessRole.current != ProcessRole::ALL
     config.action_cable.mount_path = nil if ProcessRole.current == ProcessRole::EMPLOYEE_WEB
