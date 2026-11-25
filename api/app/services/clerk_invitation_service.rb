@@ -29,7 +29,7 @@ class ClerkInvitationService
     body[:redirect_url] = redirect_url if redirect_url.present?
     body[:public_metadata] = public_metadata if public_metadata.present?
 
-    Rails.logger.info("[ClerkInvitation] Creating invitation for #{email}")
+    Rails.logger.info("[ClerkInvitation] Creating invitation for #{LogRedaction.email(email)}")
 
     response = post_json("/invitations", body)
 
@@ -37,14 +37,16 @@ class ClerkInvitationService
       parsed = parse_body(response)
       return { success: false, error: "Clerk did not return an invitation ID" } if parsed["id"].blank?
 
-      Rails.logger.info("[ClerkInvitation] Created for #{email}: id=#{parsed['id']} status=#{parsed['status']}")
+      Rails.logger.info("[ClerkInvitation] Created for #{LogRedaction.email(email)}: id=#{parsed['id']} status=#{parsed['status']}")
       { success: true, invitation_id: parsed["id"], status: parsed["status"], url: parsed["url"] }
     else
       error_message = extract_error_message(response)
       nonce = public_metadata[:payroll_invite_nonce]
       error_message = error_message.gsub(nonce, "[FILTERED]") if nonce.present?
-      Rails.logger.error("[ClerkInvitation] Failed for #{email}: #{error_message}")
-      { success: false, error: error_message, status_code: response.code.to_i }
+      error_code = extract_error_code(response)
+      # Clerk's text can repeat the address, so the log keeps only its code.
+      Rails.logger.error("[ClerkInvitation] Failed for #{LogRedaction.email(email)}: status=#{response.code} code=#{error_code || 'none'}")
+      { success: false, error: error_message, status_code: response.code.to_i, error_code: error_code }
     end
   rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
     Rails.logger.error("[ClerkInvitation] Clerk request failed: #{e.class}")
@@ -310,6 +312,12 @@ class ClerkInvitationService
     parsed.is_a?(Hash) ? parsed : {}
   rescue JSON::ParserError
     {}
+  end
+
+  def extract_error_code(response)
+    errors = parse_body(response)["errors"]
+    code = errors.first["code"] if errors.is_a?(Array) && errors.first.is_a?(Hash)
+    code if code.is_a?(String) && code.match?(/\A[a-z0-9_]{1,64}\z/)
   end
 
   def extract_error_message(response)

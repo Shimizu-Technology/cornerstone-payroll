@@ -44,14 +44,12 @@ module Api
             return head :not_found
           end
 
+          azp = @clerk_token_payload["azp"]
           @employee_link = TenantScope.as_system(reason: "Resolve employee link for verified Clerk user") do
             link = @current_user.employee_account_links.portal_eligible.find_by(id: link_id)
-            link if link&.portal_enabled?
+            link if link && EmployeeLinks.openable?(@current_user, link, azp: azp)
           end
           return head :not_found unless @employee_link
-
-          azp = @clerk_token_payload["azp"]
-          return head :not_found unless EmployeeLinks.origin_allows_company?(azp, @employee_link.company_id)
 
           Current.company_id = @employee_link.company_id
         end
