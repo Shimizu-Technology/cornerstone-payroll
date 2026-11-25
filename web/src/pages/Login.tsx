@@ -390,9 +390,8 @@ export function Login() {
         </section>
 
         <section className="cornerstone-sign-in order-1 min-w-0 overflow-hidden rounded-3xl border border-neutral-200/80 bg-white/90 px-3 py-4 shadow-xl shadow-neutral-200/50 backdrop-blur-sm sm:p-6 lg:order-2 lg:p-8">
-          {!hasTicket && accessNotice}
+          {accessNotice}
           <Show when="signed-out" fallback={hasTicket && <SignedInInvitation returnTo={`/login${search}`} />}>
-            {hasTicket && accessNotice}
             {needsInviteSignUp ? <SignUp {...clerkFormProps} signInUrl="/login" /> : <SignIn {...clerkFormProps} />}
             {hasTicket && (
               <p className="mt-3 text-sm text-neutral-700">
