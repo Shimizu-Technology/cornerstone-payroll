@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import {
-  parseContext, parseHelpContacts, parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, signUpUrlFrom,
+  parseContext, parseHelpContacts, parseProfile, parseStatementDetail, parseStatementPage, parseStatementSummary, parseTaxForms, signUpUrlFrom,
 } from './contracts';
 import { addressLines, comparisonLine, formatHours, formatMoney, paymentStatus, periodLabel, taxLabel } from './format';
 import { birthDate, normalizeCode } from './signupState';
@@ -19,14 +19,14 @@ const summary = {
 };
 
 describe('employee API contracts', () => {
-  it('reads today\'s 204 context as everything off', () => {
+  it('reads an empty context as everything off', () => {
     expect(parseContext(null)).toEqual({
       firstName: null, status: 'active', formerAccessUntil: null, nextPayday: null, w2Delivery: null,
       features: { stubs: false, taxForms: false, profileRequests: false },
     });
   });
 
-  it('reads the assumed context shape', () => {
+  it('reads the served context shape', () => {
     const info = parseContext({
       first_name: 'Tala', status: 'former', former_access_until: '2028-03-01', next_payday: '2026-12-04', w2_delivery: 'handed_out',
       features: { stubs: true, tax_forms: true, profile_requests: false },
@@ -64,7 +64,39 @@ describe('employee API contracts', () => {
     });
     expect(detail?.earnings).toEqual([{ label: 'Regular', hours: '38.50', rate: '15.00', amount: '577.50', ytd: '12000.00', kind: 'regular' }]);
     expect(detail?.ytdNet).toBe('11000.00');
+    expect(detail?.taxes).toEqual([{ label: 'Federal/Guam Income Tax', amount: '20.00', ytd: '400.00', kind: null, displayLabel: null }]);
+    expect(detail?.earlierVersions).toEqual([]);
     expect(parseStatementDetail({})).toBeNull();
+  });
+
+  it('reads tax kinds and earlier versions from the employee presenter', () => {
+    const detail = parseStatementDetail({
+      ...summary,
+      taxes: [
+        { label: 'Federal/Guam Income Tax', amount: '20.00', ytd: null, kind: 'guam_income_tax', display_label: 'Guam income tax' },
+        { label: 'Territory surcharge', amount: '1.00', ytd: null, kind: 'something_new', display_label: 'Territory surcharge' },
+      ],
+      earlier_versions: [
+        { id: '880', status: 'replaced', posted_at: '2026-11-20T08:00:00Z', payment_line: 'Check #4012' },
+        { id: '881', status: 'withdrawn', posted_at: '2026-11-21T08:00:00Z', payment_line: null },
+        { id: 'bad id!', status: 'replaced' },
+        { id: '879', status: 'replaced', posted_at: 'not a time' },
+      ],
+    });
+    expect(detail?.taxes.map((tax) => [tax.kind, tax.displayLabel])).toEqual([
+      ['guam_income_tax', 'Guam income tax'], [null, 'Territory surcharge'],
+    ]);
+    expect(detail?.earlierVersions).toEqual([
+      { id: '880', status: 'replaced', postedAt: '2026-11-20T08:00:00Z', paymentLine: 'Check #4012' },
+      { id: '879', status: 'replaced', postedAt: null, paymentLine: null },
+    ]);
+  });
+
+  it('keeps a QuickBooks check\'s payment status unknown instead of pending', () => {
+    const row = parseStatementSummary({ id: 'qb-77', source: 'quickbooks', pay_date: '2026-08-14',
+      payment: { method: 'paper_check', status: null, issued_on: null, check_number_last4: '1088' } });
+    expect(row?.payment).toEqual({ method: 'paper_check', status: null, issuedOn: null, checkNumberLast4: '1088' });
+    expect(row && paymentStatus(row.payment)).toBeNull();
   });
 
   it('reads tax forms, Help contacts and the profile defensively', () => {
@@ -134,6 +166,19 @@ describe('employee formatting', () => {
     expect(comparisonLine(bonus, page.statements)).toBeNull();
     expect(comparisonLine(first, page.statements)).toBeNull();
     expect(comparisonLine({ ...latest, totalHours: null }, page.statements)).toBe('$36.45 less than Nov 6.');
+  });
+
+  it('uses the API\'s previous check, even from another page, and hides when the API says there is none', () => {
+    const page = parseStatementPage({ statements: [
+      { ...summary, id: 3, check_date: '2026-11-20', net_pay: '534.18', total_hours: '38.50',
+        previous: { id: '1', pay_date: '2026-11-06', check_date: '2026-11-06', net_pay: '570.63', total_hours: '42.00' } },
+      { ...summary, id: 1, check_date: '2026-11-06', net_pay: '570.63', total_hours: '42.00', previous: null },
+    ] });
+    const [latest, first] = page.statements;
+    expect(latest.previous).toEqual({ id: '1', payDate: '2026-11-06', netPay: '570.63', totalHours: '42.00' });
+    expect(comparisonLine(latest, [latest])).toBe('$36.45 less than Nov 6. You worked 3.5 fewer hours.');
+    expect(comparisonLine(first, [first, { ...latest, id: '0' }])).toBeNull();
+    expect(parseStatementSummary({ ...summary, previous: { id: 'bad id!', pay_date: '2026-11-06' } })?.previous).toBeNull();
   });
 
   it('writes an address on as few lines as it needs', () => {
