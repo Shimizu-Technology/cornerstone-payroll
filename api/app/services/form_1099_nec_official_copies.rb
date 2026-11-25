@@ -141,12 +141,12 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
   # Everything that would stop the copies printing, one line each, without
   # drawing them. Mark 1099s ready refuses on the same list.
   def problems
-    pdf = PdfUnicodeFont.document(page_size: PAGE_SIZE, margin: 0)
+    pdf = PdfUnicodeFont.document(cjk: false, page_size: PAGE_SIZE, margin: 0)
     pdf.font("Helvetica")
     found = []
     begin
-      PdfUnicodeFont.ensure_printable!(company.name, label: "Payer")
-      [ company.address_line1, company.address_line2, company.city ].each { |value| PdfUnicodeFont.ensure_printable!(value, label: "Payer") }
+      PdfUnicodeFont.ensure_printable!(company.name, label: "Payer", cjk: false)
+      [ company.address_line1, company.address_line2, company.city ].each { |value| PdfUnicodeFont.ensure_printable!(value, label: "Payer", cjk: false) }
     rescue PdfUnicodeFont::UnprintableName => e
       found << e.message
     end
@@ -158,7 +158,7 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
       employee = payee[:employee]
       name = employee.full_name
       begin
-        [ name, employee.business_name, employee.address_line1, employee.address_line2, employee.city ].each { |value| PdfUnicodeFont.ensure_printable!(value, label: "Contractor") }
+        [ name, employee.business_name, employee.address_line1, employee.address_line2, employee.city ].each { |value| PdfUnicodeFont.ensure_printable!(value, label: "Contractor", cjk: false) }
       rescue PdfUnicodeFont::UnprintableName => e
         found << "#{name}: #{e.message}"
       end
