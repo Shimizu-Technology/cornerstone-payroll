@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -105,6 +105,57 @@ describe('Employee app panel', () => {
     expect(await screen.findByText('App access revoked.')).toBeTruthy();
     expect(mocks.post).toHaveBeenCalledWith('/admin/employees/5/employee_app/revoke',
       { access_id: 10, delivery: undefined, confirm_same_person_email: false, reason: 'Employee request' }, { companyId: 1 });
+  });
+
+  it.each(['resolves', 'rejects'] as const)('ignores an older access refresh that %s after a successful retry', async (outcome) => {
+    const access = { ...employee, staff_actions: true };
+    const user = openPanel(access, 'admin');
+    await user.click(await screen.findByRole('button', { name: 'Revoke access' }));
+    const dialog = within(screen.getByRole('dialog', { name: 'Revoke access' }));
+
+    let resolveRefresh!: (value: { data: EmployeeAppAccess }) => void;
+    let rejectRefresh!: (error: Error) => void;
+    mocks.get.mockReturnValueOnce(new Promise((resolve, reject) => {
+      resolveRefresh = resolve;
+      rejectRefresh = reject;
+    }));
+    mocks.post.mockRejectedValueOnce(new Error('Could not revoke access.')).mockResolvedValueOnce({
+      data: { ...access, status: 'revoked' },
+    });
+    await user.type(dialog.getByRole('textbox', { name: 'Reason' }), 'Employee request');
+    const revoke = dialog.getByRole('button', { name: 'Revoke access' });
+    await user.click(revoke);
+    expect(await dialog.findByRole('alert')).toHaveProperty('textContent', 'Could not revoke access.');
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2));
+
+    await user.click(revoke);
+    expect(await screen.findByText('Revoked')).toBeTruthy();
+    await act(async () => {
+      if (outcome === 'resolves') resolveRefresh({ data: access });
+      else rejectRefresh(new Error('The old status request failed.'));
+    });
+    expect(screen.getByText('Revoked')).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps a rejected action and its reason in the same dialog when the refresh fails', async () => {
+    const user = openPanel({ ...employee, staff_actions: true }, 'admin');
+    await user.click(await screen.findByRole('button', { name: 'Revoke access' }));
+    const dialog = screen.getByRole('dialog', { name: 'Revoke access' });
+    const form = within(dialog);
+    const reason = form.getByRole('textbox', { name: 'Reason' });
+    mocks.post.mockRejectedValueOnce(new Error('Could not revoke access.'));
+    mocks.get.mockRejectedValueOnce(new Error('The status request failed.'));
+
+    await user.type(reason, 'Employee request');
+    await user.click(form.getByRole('button', { name: 'Revoke access' }));
+
+    expect(await screen.findByText(/Could not refresh employee app status/)).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Revoke access' })).toBe(dialog);
+    expect(form.getByRole('alert')).toHaveProperty('textContent', 'Could not revoke access.');
+    expect(form.getByRole('textbox', { name: 'Reason' })).toHaveProperty('value', 'Employee request');
+    await user.click(form.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByText('Invited')).toBeTruthy();
   });
 
   it('sends the explicit company and employee IDs in its read and wave requests', async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +26,7 @@ const rollout: Rollout = {
 };
 
 describe('Employee app rollout', () => {
-  afterEach(() => { cleanup(); vi.resetAllMocks(); });
+  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); });
 
   it('keeps selected employees across searches and shows the outcome for each employee', async () => {
     mocks.get.mockResolvedValue({ data: rollout });
@@ -73,20 +73,45 @@ describe('Employee app rollout', () => {
     }
   });
 
-  it('offers a record-level email hint and keeps printed codes available for an employee with a login to review', async () => {
-    mocks.get.mockResolvedValue({ data: {
+  it('keeps wave codes visible through a rollout refresh for an employee with a login to review', async () => {
+    let resolveRefresh!: (value: { data: Rollout }) => void;
+    const refresh = new Promise<{ data: Rollout }>((resolve) => { resolveRefresh = resolve; });
+    mocks.get.mockResolvedValueOnce({ data: {
       ...rollout,
       candidates: [...rollout.candidates, {
         id: 23, name: 'Existing Login', email: 'login@example.test', email_ready: false, email_review_required: true,
       }],
-    } });
+    } }).mockReturnValueOnce(refresh);
+    mocks.post.mockResolvedValueOnce({ data: [{
+      id: 23,
+      print: {
+        name: 'Existing Login', code: 'ABCDEFGHJK', url: 'https://employees.example.test/activate',
+        expires_at: '2099-06-30T09:00:00Z',
+      },
+    }] });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const user = userEvent.setup();
     render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
 
     const hint = await screen.findByText(/send the email invite from their employee record/);
     expect(screen.queryByRole('checkbox', { name: /Existing Login/ })).toBeNull();
     await user.click(screen.getByRole('radio', { name: 'Printed code' }));
-    expect(screen.getByRole('checkbox', { name: /Existing Login/ })).toBeTruthy();
     expect(document.body.contains(hint)).toBe(false);
+    await user.click(screen.getByRole('checkbox', { name: /Existing Login/ }));
+    await user.click(screen.getByRole('button', { name: 'Create printed codes' }));
+    expect(mocks.post).toHaveBeenCalledWith('/admin/employee_app_rollout/7/invite',
+      { employee_ids: [23], delivery: 'code' }, { companyId: 7 });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Print sign-up code' });
+    expect(within(dialog).getByText('ABCDE-FGHJK')).toBeTruthy();
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      resolveRefresh({ data: { ...rollout, counts: { ...rollout.counts, invited: 1 } } });
+    });
+    expect(screen.getByText('Invited').nextElementSibling?.textContent).toBe('1');
+    expect(within(screen.getByRole('dialog', { name: 'Print sign-up code' })).getByText('ABCDE-FGHJK')).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+    expect(screen.queryByRole('dialog', { name: 'Print sign-up code' })).toBeNull();
+    expect(screen.queryByText('ABCDE-FGHJK')).toBeNull();
   });
 });
