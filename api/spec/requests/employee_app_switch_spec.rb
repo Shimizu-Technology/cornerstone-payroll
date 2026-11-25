@@ -19,7 +19,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
   let(:ready_env) do
     {
       "REQUIRE_MFA" => "true", "CLERK_MFA_ATTESTED_INSTANCE_ID" => "ins_example", "CLERK_MFA_EVIDENCE_REF" => "evidence-ref",
-      "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com"
+      "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com",
+      DemoOutbound::ENV_KEY => "demo.worker@demo-mail.example,demo.pending@demo-mail.example"
     }
   end
 
@@ -682,7 +683,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "records Clerk revocations durably, retries them until confirmed, and a repeat stop queues no duplicates" do
       employee = create(:employee, company: demo)
-      login = build(:user, company: demo, organization: organization, role: :portal_employee, clerk_id: "user_demo_employee")
+      login = build(:user, company: demo, organization: organization, role: :portal_employee, clerk_id: "user_demo_employee",
+        email: "demo.worker@demo-mail.example")
       skip "Needs demo employee logins and links (demo D6, PR #585)" unless login.valid?
 
       login.save!
@@ -720,10 +722,13 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       probe = EmployeeAccountLink.new(company: demo, employee: employee, status: "invited")
       skip "Needs demo employee links (demo D6, PR #585)" unless probe.valid?
 
+      # In shadow mode a demo's app is open only under an early-access window.
+      EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ demo.id ], expires_on: PayrollBusinessClock.today + 5,
+        reason: "Owner approved", set_by: owner)
       turn_on_directly!(demo, %w[employee_portal_enabled])
       invited = invite!(employee, actor: org_admin, delivery: "code").link
       pending = create(:user, company: demo, organization: organization, role: :portal_employee, invitation_status: "pending",
-        clerk_id: nil, clerk_invitation_id: "inv_demo_pending")
+        clerk_id: nil, clerk_invitation_id: "inv_demo_pending", email: "demo.pending@demo-mail.example")
       invited.update_columns(user_id: pending.id)
       expect(invited.reload).to be_invited
 
