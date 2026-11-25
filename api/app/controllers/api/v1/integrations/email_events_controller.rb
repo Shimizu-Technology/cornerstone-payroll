@@ -23,6 +23,8 @@ module Api
           "email.delivered" => "delivered",
           "email.delivery_delayed" => "delayed",
           "email.bounced" => "bounced",
+          "email.failed" => "bounced",
+          "email.suppressed" => "bounced",
           "email.complained" => "complained"
         }.freeze
         # Masks every parameter key, so the log line shows no value at all.

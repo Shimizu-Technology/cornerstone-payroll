@@ -13,6 +13,13 @@ export interface EmployeeTaxFormCopy {
   withdrawn_by: string | null;
   withdrawal_note: string | null;
   inputs_changed_since_posting: boolean;
+  paper_follow_up?: {
+    status: 'required' | 'overdue' | 'mailed';
+    bounced_on: string;
+    due_on: string;
+    mailed_on: string | null;
+    mailed_by: string | null;
+  } | null;
   notice: {
     status: 'pending' | 'sent' | 'skipped' | 'failed';
     skip_reason?: string | null;
@@ -34,6 +41,8 @@ export function employeeTaxFormsApi(companyId: number, year: number) {
   return {
     list: (signal: AbortSignal) => apiClient.get<EmployeeTaxForms>(path, { year }, { ...options, signal }),
     postCopies: () => apiClient.post(`${path}/post_copies`, { year }, options),
+    markPaperMailed: (id: number) =>
+      apiClient.post<{ document: EmployeeTaxFormCopy }>(`${path}/${id}/mark_paper_mailed`, {}, options),
     withdraw: (id: number, reason: string) =>
       apiClient.post<{ document: EmployeeTaxFormCopy }>(`${path}/${id}/withdraw`, { reason }, options),
     setDelivery: (delivery: W2Delivery | null) =>
