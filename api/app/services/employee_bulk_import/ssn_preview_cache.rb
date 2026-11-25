@@ -71,16 +71,15 @@ module EmployeeBulkImport
       return 0 unless klass
       return 0 unless entry_class || klass.table_exists?
 
-      prefixes = [ "" ] + resolved_namespaces(namespaces).map { |ns| "#{ns}:" }
-      legacy_clause = prefixes.map { "key LIKE ?" }.join(" OR ")
-      v2_clause = prefixes.map { "key LIKE ?" }.join(" OR ")
-      legacy_binds = prefixes.map { |prefix| binary_pattern("#{prefix}#{LEGACY_KEY_PREFIX}%") }
-      v2_binds = prefixes.map { |prefix| binary_pattern("#{prefix}#{V2_KEY_PREFIX}%") }
+      prefixes = [ "" ] + resolved_namespaces(namespaces).map { |ns| "#{ActiveRecord::Base.sanitize_sql_like(ns)}:" }
+      escaped_legacy = ActiveRecord::Base.sanitize_sql_like(LEGACY_KEY_PREFIX)
+      escaped_v2 = ActiveRecord::Base.sanitize_sql_like(V2_KEY_PREFIX)
+      legacy_binds = prefixes.map { |prefix| binary_pattern("#{prefix}#{escaped_legacy}%") }
+      v2_binds = prefixes.map { |prefix| binary_pattern("#{prefix}#{escaped_v2}%") }
 
-      klass
-        .where(legacy_clause, *legacy_binds)
-        .where("NOT (#{v2_clause})", *v2_binds)
-        .delete_all
+      relation = legacy_binds.map { |bind| klass.where("key LIKE ?", bind) }.reduce(:or)
+      v2_binds.each { |bind| relation = relation.where("key NOT LIKE ?", bind) }
+      relation.delete_all
     rescue ActiveRecord::NoDatabaseError, ActiveRecord::StatementInvalid => e
       raise if entry_class
 
