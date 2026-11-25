@@ -319,8 +319,8 @@ export function parseHelpContacts(data: unknown): HelpContact[] {
 }
 
 // ---------- GET /employee/profile ----------
-// ASSUMED (M4-3, M4-7):
-// { legal_name, email, email_verified, phone, phone_confirmed,
+// Served by ProfileController (M4-7):
+// { legal_name, ssn_last4, email, email_verified, phone, phone_confirmed,
 //   address: { address_line1, address_line2, city, state, zip },
 //   payment_method, emergency_contacts: [{ id, name, relationship, phone }],
 //   address_request: { id, status, requested: {...}, submitted_at, decided_at, decision_note } | null,
@@ -354,6 +354,7 @@ export interface AddressRequest {
 
 export interface EmployeeProfile {
   legalName: string | null;
+  ssnLast4: string | null;
   email: string | null;
   emailVerified: boolean;
   phone: string | null;
@@ -388,6 +389,7 @@ export function parseProfile(data: unknown): EmployeeProfile {
   const status = oneOf(request?.status, ['pending', 'approved', 'rejected'] as const);
   return {
     legalName: text(body.legal_name),
+    ssnLast4: typeof body.ssn_last4 === 'string' && /^\d{4}$/.test(body.ssn_last4) ? body.ssn_last4 : null,
     email: text(body.email),
     emailVerified: bool(body.email_verified),
     phone: text(body.phone),
@@ -419,7 +421,7 @@ export function addressBody(address: Address): Record<string, string> {
 }
 
 // ---------- Changes (M4-7), all behind step-up (M4-1) ----------
-// ASSUMED routes. Each returns the updated profile, except where noted:
+// Each returns the updated profile, except where noted:
 //   PATCH  /employee/profile/phone            { phone }
 //   POST   /employee/profile/email            { email }  -> 202 { verification_id }; the API emails a code
 //   POST   /employee/profile/email/confirm    { verification_id, code }

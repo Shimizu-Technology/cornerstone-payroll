@@ -141,7 +141,7 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
-      PortalNotifications.employee_change_decided!(self, actor: actor)
+      notify_decision!(actor)
     end
   end
 
@@ -157,11 +157,19 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
-      PortalNotifications.employee_change_decided!(self, actor: actor)
+      notify_decision!(actor)
     end
   end
 
   private
+
+  def notify_decision!(actor)
+    if requested_by_link_id.present?
+      PortalNotifications.employee_address_decided!(self, actor: actor)
+    else
+      PortalNotifications.employee_change_decided!(self, actor: actor)
+    end
+  end
 
   def authorized_review_actor!(actor)
     actor = User.lock.find_by(id: actor&.id)
@@ -202,7 +210,7 @@ class EmployeeChangeRequest < ApplicationRecord
     employee.update!(proposed_changes)
     EmployeeContactChangeToConfirm.record!(
       employee: employee, actor: requested_by, before_values: before_values,
-      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer
+      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer, notify_staff: requested_by_link_id.present?
     )
   end
 
