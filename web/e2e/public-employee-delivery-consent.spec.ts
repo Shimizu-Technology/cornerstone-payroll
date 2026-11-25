@@ -170,8 +170,8 @@ for (const viewport of [
     await expect(w2Card).toBeVisible();
     await expect(page.getByTestId('draft-wording-marker')).toHaveCount(0);
     await expect(w2Card).not.toContainText(/\bpilot\b/i);
-    await expect(w2Card.getByText('Paper Form W-2GU continues unless you consent.')).toBeHidden();
-    await w2Card.getByRole('button', { name: 'Read the disclosure' }).click();
+    // The disclosure is in full view while consent can be given.
+    await expect(w2Card.getByRole('button', { name: 'Read the disclosure' })).toHaveCount(0);
     await expect(w2Card.getByText('Paper Form W-2GU continues unless you consent.')).toBeVisible();
     await expectNoHorizontalScroll(page);
 

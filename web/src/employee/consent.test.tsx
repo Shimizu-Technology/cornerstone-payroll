@@ -140,7 +140,32 @@ describe('employee electronic-delivery consent screens', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/delivery_consents'))).toBe(false);
   });
 
-  it('collapses disclosure text behind "Read the disclosure", omits "pilot", and shows draft marker only for staff/dev', async () => {
+  it('folds the disclosure away once consent is recorded', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({ links: [{ id: 3, company_name: 'Harbor Finch', status: 'active' }] }),
+      '/employee/context': () => Response.json({
+        first_name: 'Jordan',
+        status: 'active',
+        features: { profile_requests: false, delivery_consent: true },
+      }),
+      'GET /employee/delivery_consents': () => Response.json(makeConsentsPayload({ payStatus: 'consented' })),
+    }));
+    render(<EmployeeApp />);
+
+    const payCard = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    const toggle = within(payCard).getByRole('button', { name: 'Read the disclosure' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(within(payCard).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).not.toBeNull();
+
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(within(payCard).getByRole('button', { name: 'Hide the disclosure' })).toBe(toggle);
+    expect(within(payCard).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).toBeNull();
+  });
+
+  it('shows the full disclosure before consent, omits "pilot", and shows draft marker only for staff/dev', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');
     vi.stubGlobal('fetch', respond({
@@ -158,13 +183,10 @@ describe('employee electronic-delivery consent screens', () => {
     expect(within(payCard).getByText('Paper delivery')).toBeTruthy();
     expect(payCard.textContent).not.toMatch(/\bpilot\b/i);
     expect(within(payCard).getByText(/Paper copies continue for everyone for now\./)).toBeTruthy();
-    const toggle = within(payCard).getByRole('button', { name: 'Read the disclosure' });
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(within(payCard).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).not.toBeNull();
-
-    await userEvent.click(toggle);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    // Consent can't be given with the disclosure folded away.
+    expect(within(payCard).queryByRole('button', { name: 'Read the disclosure' })).toBeNull();
     expect(within(payCard).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).toBeNull();
+    expect(within(payCard).getByRole('checkbox')).toBeTruthy();
     expect(screen.queryByTestId('draft-wording-marker')).toBeNull();
     expect(screen.queryByText('Draft wording')).toBeNull();
     first.unmount();

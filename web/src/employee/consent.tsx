@@ -238,7 +238,8 @@ function ConsentCard({
   };
 
   const canSubmit = acknowledged && (!item.requiresAccessProof || (challenge !== null && proofCode.trim().length >= 6));
-  const showDisclosure = disclosureOpen || isPrintTarget;
+  // Consent is given only with the disclosure in view; it folds away after.
+  const showDisclosure = showConsentForm || disclosureOpen || isPrintTarget;
   const disclosureId = `emp-disclosure-${item.kind}`;
 
   return (
@@ -292,15 +293,17 @@ function ConsentCard({
         {disclosure ? (
           <div className="space-y-3">
             <div className="emp-no-print flex flex-wrap items-center justify-between gap-2">
-              <button
-                type="button"
-                className="emp-disclosure-toggle"
-                aria-expanded={showDisclosure}
-                aria-controls={disclosureId}
-                onClick={() => setDisclosureOpen((open) => !open)}
-              >
-                Read the disclosure
-              </button>
+              {showConsentForm ? <span /> : (
+                <button
+                  type="button"
+                  className="emp-disclosure-toggle"
+                  aria-expanded={showDisclosure}
+                  aria-controls={disclosureId}
+                  onClick={() => setDisclosureOpen((open) => !open)}
+                >
+                  {showDisclosure ? 'Hide the disclosure' : 'Read the disclosure'}
+                </button>
+              )}
               <EmpButton
                 variant="quiet"
                 className="emp-btn-small"
