@@ -6,25 +6,30 @@ require "tmpdir"
 RSpec.describe DemoCompany::QuickbooksSample do
   around { |example| Dir.mktmpdir("hfk-quickbooks") { |dir| @dir = dir; example.run } }
 
+  let!(:annual_config) { create(:annual_tax_config, tax_year: 2026, ss_wage_base: 184_500) }
   let(:result) { described_class.new(output_dir: @dir).call }
 
   def uploads
     result.files.map { |path| Rack::Test::UploadedFile.new(path, "application/vnd.ms-excel", true, original_filename: File.basename(path)) }
   end
 
-  it "writes a bundle the real QuickBooks history parser accepts without errors" do
+  it "writes January–July history the real parser accepts and reconciles to its Tax and Wage Summaries" do
     adapter = HistoricalPayrollImports::Registry.default.fetch!(HistoricalPayrollImports::Registry::DEFAULT_SOURCE_SYSTEM)
     parsed = adapter.parse(files: uploads)
 
     expect(Array(parsed.errors)).to be_empty
-    expect(parsed.paychecks.size).to eq(6)
-    expect(parsed.paychecks.map { |paycheck| paycheck.respond_to?(:pay_date) ? paycheck.pay_date : paycheck[:pay_date] }.uniq.size).to eq(2)
+    expect(parsed.paychecks.size).to eq(DemoCompany::Roster.quickbooks_people.size * 14)
+    expect(parsed.tax_wage_reports.size).to eq(3)
+    expect(parsed.tax_wage_reconciliation).to include("passed" => true)
   end
 
-  it "writes one matchable text page per stub with no SSN, bank or MICR details" do
-    pages = PDF::Reader.new(result.stub_pdf).pages.map(&:text)
-    expect(pages.size).to eq(6)
-    check_page = pages.find { |text| text.include?("Check no. 901") }
+  it "writes one matchable text page per paycheck, a month per PDF, with no SSN, bank or MICR details" do
+    expect(result.stub_pdfs.size).to eq(7)
+    readers = result.stub_pdfs.map { |path| PDF::Reader.new(path) }
+    expect(readers.map(&:page_count)).to all(be <= EmployeeDocuments::QuickbooksStubPdf::MAX_PAGES)
+    pages = readers.flat_map { |reader| reader.pages.map(&:text) }
+    expect(pages.size).to eq(described_class.paychecks.size)
+    check_page = pages.find { |text| text.include?("Check no. #{described_class::FIRST_CHECK_NUMBER}") }
     expect(check_page).to match(EmployeeDocuments::QuickbooksStubMatches::DATE)
     expect(check_page).to match(EmployeeDocuments::QuickbooksStubMatches::NET)
     expect(check_page).to match(EmployeeDocuments::QuickbooksStubMatches::CHECK_NUMBER)
@@ -34,8 +39,8 @@ RSpec.describe DemoCompany::QuickbooksSample do
     end
   end
 
-  it "dates every paycheck before the first seeded native payday" do
-    dates = described_class.stub_pages.map { |page| Date.strptime(page[:pay_date], "%m/%d/%Y") }
-    expect(dates.max).to be < DemoCompany::Seed::FIRST_PERIOD_START
+  it "ends the history before the first native payday" do
+    expect(described_class.paychecks.map { |paycheck| paycheck[:pay_date] }.max).to be < DemoCompany::Roster.native_periods.first[:pay_date]
+    expect(described_class.paychecks.map { |paycheck| paycheck[:pay_date] }.max).to be <= Date.new(2026, 7, 31)
   end
 end
