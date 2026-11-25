@@ -117,7 +117,7 @@ RSpec.describe "Employee link retirement hardening", type: :request do
       expect(response.parsed_body["code"]).to eq("session_predates_reactivation")
 
       get "/api/v1/employee/context", headers: bearer("user_riley").merge("X-Employee-Link-Id" => invite.link.id.to_s)
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
     end
 
     it "routes a printed-code rehire to the earlier login, so sign-up can't make a second identity" do

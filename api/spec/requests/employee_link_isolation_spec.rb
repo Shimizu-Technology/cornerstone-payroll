@@ -46,10 +46,10 @@ RSpec.describe "Employee link isolation", type: :request do
   end
 
   it "opens a link only on its own company's subdomain or the main origin" do
-    expect(context_status(alpha_link, origin: alpha_origin)).to eq(204)
+    expect(context_status(alpha_link, origin: alpha_origin)).to eq(200)
     expect(context_status(bravo_link, origin: alpha_origin)).to eq(404)
-    expect(context_status(bravo_link, origin: bravo_origin)).to eq(204)
-    expect(context_status(bravo_link)).to eq(204)
+    expect(context_status(bravo_link, origin: bravo_origin)).to eq(200)
+    expect(context_status(bravo_link)).to eq(200)
   end
 
   it "hides invited, revoked, expired-former links and companies with the app off, and never another user's link" do
@@ -66,7 +66,7 @@ RSpec.describe "Employee link isolation", type: :request do
     [ others_link, invited, revoked, former_closed, off_link ].each do |link|
       expect(context_status(link)).to eq(404), "link #{link.status} opened"
     end
-    expect(context_status(former_open)).to eq(204)
+    expect(context_status(former_open)).to eq(200)
   end
 
   it "returns the same empty 404 for missing, malformed and unverifiable credentials" do
