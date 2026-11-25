@@ -16,10 +16,7 @@ class SendUserInviteEmailJob < ApplicationJob
     # Rechecked at send time: a stale job for a refused address sends nothing.
     return :refused if success == :refused
 
-    if StagingOutboundPolicy.staging?
-      raise "Failed to send invite email for user_id=#{user.id}" unless success
-    else
-      raise "Failed to send invite email to #{user.email}" unless success
-    end
+    # The error names the login, never its address.
+    raise "Failed to send invite email for user_id=#{user.id}" unless success
   end
 end

@@ -22,8 +22,9 @@ module EmployeeLinks
   # (unlocked). They are locked before the link (EmployeeLinks lock order);
   # if the link's login changed in between, the check fails generically.
   #
-  # admit: whether the caller could ever use the link, given its first,
-  # unlocked read. A link it can't is treated like no match: nothing is
+  # admit: whether the caller could ever use the link. It is asked about the
+  # first, unlocked read and again about the locked row, before anything on
+  # the link changes; a link it refuses is treated like no match: nothing is
   # locked, counted or written on it.
   class Verify
     ALERT_LOCKS = 3
@@ -102,7 +103,7 @@ module EmployeeLinks
 
       EmployeeLinks.lock_users!(Array(@lock_users.call(first_read)).map(&:id)) if @lock_users
       link = EmployeeAccountLink.lock.find_by(lookup.merge(id: first_read.id))
-      link if link&.user_id == first_read.user_id
+      link if link&.user_id == first_read.user_id && (@admit.nil? || @admit.call(link))
     end
 
     def supplied_secret

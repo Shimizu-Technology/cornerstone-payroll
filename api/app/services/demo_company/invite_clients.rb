@@ -9,10 +9,12 @@ module DemoCompany
   #
   # The Clerk invitation and the email are tracked separately: an email is
   # recorded as delivered (an audit row naming the invitation) only once it
-  # sends. A rerun leaves a bound login, or an invitation already delivered, as
-  # it is; it emails again against a still-open invitation that wasn't
-  # delivered, and issues a new invitation when the old one closed. Outcomes
-  # carry stable codes only, never provider text.
+  # sends, and it links to that invitation's own acceptance URL. A rerun
+  # checks Clerk first: a bound login or an accepted invitation is left
+  # alone, and a still-open invitation that was delivered stays as it is.
+  # Anything else (undelivered, expired, revoked or unknown) gets a new
+  # invitation, which closes the old one, and a new email. Outcomes carry
+  # stable codes only, never provider text.
   class InviteClients
     class Refused < StandardError; end
 
@@ -70,23 +72,19 @@ module DemoCompany
       return Outcome.new(email: email, status: "already_active") unless user.awaiting_clerk_binding?
 
       if user.clerk_invitation_id.present?
-        return Outcome.new(email: email, status: "already_invited") if delivered?(user)
-
-        case @clerk.invitation_status(user.clerk_invitation_id)
-        when "pending" then return deliver!(user, email, "invited")
-        when "accepted" then return Outcome.new(email: email, status: "already_accepted")
-        end
-        # Closed or unknown: send_invite closes the old one before a new one.
+        status = @clerk.invitation_status(user.clerk_invitation_id)
+        return Outcome.new(email: email, status: "already_accepted") if status == "accepted"
+        return Outcome.new(email: email, status: "already_invited") if status == "pending" && delivered?(user)
       end
 
       result = @invitation.send_invite(user, redirect_url: @redirect_url)
       return Outcome.new(email: email, status: "failed_invitation:#{failure_code(result)}") unless result[:success]
 
-      deliver!(user.reload, email, "invited")
+      deliver!(user.reload, email, result[:url], "invited")
     end
 
-    def deliver!(user, email, status)
-      sent = UserInviteEmailService.send_invite(user: user, invited_by: actor)
+    def deliver!(user, email, invitation_url, status)
+      sent = UserInviteEmailService.send_invite(user: user, invited_by: actor, invitation_url: invitation_url)
       return Outcome.new(email: email, status: "failed_email:#{sent == :refused ? 'recipient_not_allowed' : 'not_sent'}") unless [ true, :captured ].include?(sent)
 
       TenantScope.as_system(reason: "Record a demo client invite email") do

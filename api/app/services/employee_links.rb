@@ -127,13 +127,26 @@ module EmployeeLinks
     scope.exists?
   end
 
-  # Demo and live never mix in one login (D5): a demo company's links are
-  # open only to a login whose home company is a demo, and a live company's
-  # only to a login with no demo ties (DemoOutbound.demo_user?).
+  # Demo and live never mix in one login (D5), decided by the login's home
+  # company: a demo company's links are open only to a login whose home is a
+  # demo, and a live company's only to a login whose home is live. A leftover
+  # assignment (say, from before a role change) never decides it.
   def self.demo_boundary_allows?(user, company)
-    return false unless user && company
+    home = user&.company
+    return false unless home && company
 
-    company.demo? ? user.company&.demo? == true : !DemoOutbound.demo_user?(user)
+    company.demo? ? home.demo? : !home.demo?
+  end
+
+  # The links a login can open from this origin: the employee app's list,
+  # the link it opens and the /auth/me count all use this.
+  def self.openable_links(user, azp:)
+    user.employee_account_links.portal_eligible.includes(company: :organization).order(:id)
+      .select { |link| openable?(user, link, azp: azp) }
+  end
+
+  def self.openable?(user, link, azp:)
+    link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company)
   end
 
   # A link to a client subdomain belongs to that subdomain's company only.
