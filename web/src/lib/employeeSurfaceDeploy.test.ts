@@ -254,8 +254,9 @@ describe('shared Netlify configuration', () => {
     expect(scripts.postbuild).toBe('node scripts/finalize-surface-dist.mjs');
   });
 
-  it('leaves the Payroll site rules alone', () => {
+  it('keeps Payroll site redirects and sets Referrer-Policy: no-referrer without affecting employee output', () => {
     expect(read('public', '_redirects')).toContain('/*    /index.html   200');
-    expect(existsSync(path.join(webDir, 'public', '_headers'))).toBe(false);
+    const staffHeaders = read('public', '_headers');
+    expect(staffHeaders).toContain('Referrer-Policy: no-referrer');
   });
 });

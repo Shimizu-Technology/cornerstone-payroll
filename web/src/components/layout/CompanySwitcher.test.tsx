@@ -6,17 +6,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompanySwitcher } from './CompanySwitcher';
 
-const { companyContext, companySwitchAnalytics } = vi.hoisted(() => ({
+const { companyContext } = vi.hoisted(() => ({
   companyContext: vi.fn(),
-  companySwitchAnalytics: vi.fn(),
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => companyContext(),
-}));
-
-vi.mock('@/lib/analytics', () => ({
-  analytics: { companySwitch: companySwitchAnalytics },
 }));
 
 vi.mock('@/lib/keyboard-shortcuts', () => ({
@@ -117,10 +112,8 @@ describe('CompanySwitcher', () => {
     expect(screen.getByRole('button', { name: 'MOSA’S HOTBOX, INC. · Client #6' }).getAttribute('aria-current')).toBe('true');
     expect(screen.getByRole('button', { name: 'Distinct employer' })).toBeTruthy();
     const olderClient = screen.getByRole('button', { name: "MoSa's Hotbox Inc. · Client #4" });
-    companySwitchAnalytics.mockClear();
     await user.click(olderClient);
     expect(context.switchCompany).toHaveBeenCalledWith(4);
-    expect(companySwitchAnalytics).toHaveBeenCalledWith();
     expect(screen.queryByRole('group', { name: 'Payroll clients' })).toBeNull();
     expect(companies.map(company => company.name)).toEqual(["MoSa's Hotbox Inc.", 'MOSA’S HOTBOX, INC.', 'Distinct employer']);
   });

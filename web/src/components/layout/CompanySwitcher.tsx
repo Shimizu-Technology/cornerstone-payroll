@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
 import { canWriteCompany } from '@/lib/company-write-access';
-import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
 
@@ -53,7 +52,6 @@ export function CompanySwitcher() {
     const redirect = getCompanySwitchRedirect(location.pathname, companyId, location.search);
 
     if (switchCompany(companyId) === false) return;
-    analytics.companySwitch();
 
     if (redirect) {
       navigate(redirect.to, {

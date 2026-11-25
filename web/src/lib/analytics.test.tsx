@@ -4,25 +4,44 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PostHog, type CaptureResult } from 'posthog-js';
 import {
+  ANALYTICS_PERSISTENCE_NAME,
   DEFAULT_POSTHOG_HOST,
   DROPPED_EVENT_TYPES,
+  UNKNOWN_ROUTE_TEMPLATE,
   analytics,
   buildPostHogConfig,
   capturePageView,
+  clearLegacyPostHogPersistence,
   createBeforeSend,
   hasPrivacyOptOutSignal,
   initAnalytics,
+  isAnonymousDistinctId,
+  legacyPostHogPersistenceKey,
   registerAnalyticsContext,
   resetAnalytics,
+  resolveRouteTemplate,
   scrubPathname,
   scrubUrl,
   shouldEnableAnalytics,
 } from './analytics';
+import { EMPLOYEE_ROUTE_OBJECTS, STAFF_ROUTE_OBJECTS } from './analytics-routes';
+
+const VALID_UUID_V7 = '01936a1b-7c4d-7e8f-9a1b-2c3d4e5f6a7b';
+
+function clearDocumentCookies(): void {
+  for (const cookie of document.cookie.split(';')) {
+    const name = cookie.split('=', 1)[0]?.trim();
+    if (name) {
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; path=/`;
+    }
+  }
+}
 
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
   window.sessionStorage.clear();
+  clearDocumentCookies();
   window.history.replaceState({}, '', '/');
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -55,7 +74,7 @@ describe('analytics strict allowlist before_send', () => {
         $lib_version: '1.399.2',
         $insert_id: 'ins-123',
         $time: 1764115200,
-        distinct_id: 'anon-device-uuid-1',
+        distinct_id: VALID_UUID_V7,
         $session_id: 'sess-uuid-1',
         $window_id: 'win-uuid-1',
         $process_person_profile: false,
@@ -129,8 +148,8 @@ describe('analytics strict allowlist before_send', () => {
       timestamp: new Date('2026-11-26T00:00:00Z'),
       properties: {
         token: 'phc_live_key',
-        $pathname: '/companies/:id/employees/:id',
-        $current_url: 'https://payroll.shimizu-technology.com/companies/:id/employees/:id',
+        $pathname: '/companies/:companyId/employees/:id',
+        $current_url: 'https://payroll.shimizu-technology.com/companies/:companyId/employees/:id',
         $host: 'payroll.shimizu-technology.com',
         $browser: 'Chrome',
         $browser_version: 130,
@@ -144,7 +163,7 @@ describe('analytics strict allowlist before_send', () => {
         $lib_version: '1.399.2',
         $insert_id: 'ins-123',
         $time: 1764115200,
-        distinct_id: 'anon-device-uuid-1',
+        distinct_id: VALID_UUID_V7,
         $session_id: 'sess-uuid-1',
         $window_id: 'win-uuid-1',
         $process_person_profile: false,
@@ -160,15 +179,125 @@ describe('analytics strict allowlist before_send', () => {
       uuid: 'evt-foreign-token',
       event: 'company_switched',
       properties: {
+        distinct_id: VALID_UUID_V7,
         token: 'not-the-project-key',
         $process_person_profile: true,
         surface: 'staff',
       },
     });
-    expect(foreignTokenScrubbed?.properties).toEqual({ surface: 'staff' });
+    expect(foreignTokenScrubbed?.properties).toEqual({
+      distinct_id: VALID_UUID_V7,
+      surface: 'staff',
+    });
   });
 
-  it('scrubs URLs with __clerk_ticket, __clerk_status, fragments, IDs, tenant hosts, and drops blob: URLs', () => {
+  it('drops events with non-UUIDv7 distinct_id (such as legacy staff user IDs) and calls reset', () => {
+    expect(isAnonymousDistinctId(VALID_UUID_V7)).toBe(true);
+    expect(isAnonymousDistinctId('01936A1B-7C4D-7E8F-AB12-2C3D4E5F6A7B')).toBe(true);
+
+    const invalidIds: unknown[] = [
+      '42',
+      '12345',
+      'user_2abcDEF12345678',
+      'ada@example.com',
+      '550e8400-e29b-41d4-a716-446655440000', // UUIDv4, not UUIDv7
+      '01936a1b-7c4d-7e8f-1a1b-2c3d4e5f6a7b', // invalid RFC 9562 variant nibble
+      'anon-device-uuid-1',
+      '',
+      undefined,
+      null,
+      42,
+    ];
+
+    for (const badId of invalidIds) {
+      expect(isAnonymousDistinctId(badId), `expected ${String(badId)} to be rejected`).toBe(false);
+      const onInvalidDistinctId = vi.fn();
+      const beforeSend = createBeforeSend({
+        projectKey: 'phc_live_key',
+        surface: 'staff',
+        onInvalidDistinctId,
+      });
+
+      const result = beforeSend({
+        uuid: 'evt-bad-id',
+        event: '$pageview',
+        properties: {
+          token: 'phc_live_key',
+          distinct_id: badId,
+          $pathname: '/app',
+          surface: 'staff',
+        },
+      });
+      expect(result).toBeNull();
+      expect(onInvalidDistinctId).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('resolves matched route templates for staff and employee surfaces, handles tricky short mixed-character IDs, and falls back to /unknown', () => {
+    // Staff surface: tricky short mixed-character IDs that defeat heuristic redaction
+    expect(resolveRouteTemplate('/companies/ab12/employees/x9', 'staff')).toBe(
+      '/companies/:companyId/employees/:id',
+    );
+    expect(resolveRouteTemplate('/companies/c7/employees/k3m/taxes', 'staff')).toBe(
+      '/companies/:companyId/employees/:id/:tab',
+    );
+    expect(resolveRouteTemplate('/companies/a1/employees/b2/edit', 'staff')).toBe(
+      '/companies/:companyId/employees/:id/edit',
+    );
+    expect(resolveRouteTemplate('/companies/a1/employees/new', 'staff')).toBe(
+      '/companies/:companyId/employees/new',
+    );
+    expect(resolveRouteTemplate('/companies/ab12/pay-runs/pr7', 'staff')).toBe(
+      '/companies/:companyId/pay-runs/:id',
+    );
+    expect(resolveRouteTemplate('/companies/ab12/pay-runs/pr7/review', 'staff')).toBe(
+      '/companies/:companyId/pay-runs/:id/:tab',
+    );
+    expect(resolveRouteTemplate('/companies/ab12/pay-runs/imported/q1', 'staff')).toBe(
+      '/companies/:companyId/pay-runs/imported/:id',
+    );
+    expect(resolveRouteTemplate('/companies/ab12/pay-runs/pr7/payroll-items/i9x', 'staff')).toBe(
+      '/companies/:companyId/pay-runs/:id/payroll-items/:payrollItemId',
+    );
+    expect(resolveRouteTemplate('/companies/ab12/payroll-submissions/q1-26', 'staff')).toBe(
+      '/companies/:companyId/payroll-submissions/:ref',
+    );
+    expect(resolveRouteTemplate('/payroll-files/p4x', 'staff')).toBe('/payroll-files/:ref');
+    expect(resolveRouteTemplate('/employees/Ada_1', 'staff')).toBe('/employees/:id');
+    expect(resolveRouteTemplate('/pay-periods/pp2/form-500', 'staff')).toBe('/pay-periods/:id/form-500');
+    expect(resolveRouteTemplate('/tools/invoices/billing-profiles/bp9/style', 'staff')).toBe(
+      '/tools/invoices/billing-profiles/:profileId/style',
+    );
+    expect(resolveRouteTemplate('/settings/payroll-submissions/s7b', 'staff')).toBe(
+      '/settings/payroll-submissions/:ref',
+    );
+    expect(resolveRouteTemplate('/app/aire-account-connection', 'staff')).toBe('/app/aire-account-connection');
+    expect(resolveRouteTemplate('/', 'staff')).toBe('/');
+
+    // Unmatched staff paths and layout-only parent routes return /unknown (never leaking arbitrary segments)
+    expect(resolveRouteTemplate('/companies/ab12', 'staff')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate('/companies/ab12/secret-slug', 'staff')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate('/a1b2/c3d4', 'staff')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate('/users/ada@example.com/profile', 'staff')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate('/pay/stmt-9', 'staff')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+
+    // Employee surface: tricky short mixed-character statement IDs vs static /pay/all
+    expect(resolveRouteTemplate('/pay/x9', 'employee')).toBe('/pay/:statementId');
+    expect(resolveRouteTemplate('/pay/a1b', 'employee')).toBe('/pay/:statementId');
+    expect(resolveRouteTemplate('/pay/stmt-9?year=2026#/top', 'employee')).toBe('/pay/:statementId');
+    expect(resolveRouteTemplate('/pay/all', 'employee')).toBe('/pay/all');
+    expect(resolveRouteTemplate('/pay', 'employee')).toBe('/pay');
+    expect(resolveRouteTemplate('/sign-up/done', 'employee')).toBe('/sign-up/done');
+    expect(resolveRouteTemplate('/my-info', 'employee')).toBe('/my-info');
+    expect(resolveRouteTemplate('/', 'employee')).toBe('/');
+
+    // Unmatched employee paths return /unknown
+    expect(resolveRouteTemplate('/pay/x9/extra', 'employee')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate('/companies/42/employees/99', 'employee')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate('/secret-k3m', 'employee')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+
+    // URL scrubbing combines origin (with employee tenant host redaction) + route template,
+    // drops query strings, fragments, credentials, and non-HTTP(S) URLs.
     expect(
       scrubUrl('https://payroll.shimizu-technology.com/invite?__clerk_ticket=tok_secret&__clerk_status=sign_up#/step/2'),
     ).toBe('https://payroll.shimizu-technology.com/invite');
@@ -176,28 +305,49 @@ describe('analytics strict allowlist before_send', () => {
       scrubUrl('https://payroll.shimizu-technology.com/#/companies/42/employees/99?__clerk_ticket=secret'),
     ).toBe('https://payroll.shimizu-technology.com/');
     expect(
-      scrubUrl('https://user:pass@payroll.shimizu-technology.com/companies/42/employees/9876543210/edit?x=1#frag'),
-    ).toBe('https://payroll.shimizu-technology.com/companies/:id/employees/:id/edit');
+      scrubUrl('https://user:pass@payroll.shimizu-technology.com/companies/ab12/employees/x9k2/edit?x=1#frag'),
+    ).toBe('https://payroll.shimizu-technology.com/companies/:companyId/employees/:id/edit');
     expect(
-      scrubUrl('https://mosas.shimizu-technology.com/pay/stmt-9?__clerk_ticket=abc#/details', { surface: 'employee' }),
-    ).toBe('https://tenant.shimizu-technology.com/pay/:id');
+      scrubUrl('https://payroll.shimizu-technology.com/not-a-real-route/a1b2?x=1#frag'),
+    ).toBe('https://payroll.shimizu-technology.com/unknown');
+    expect(
+      scrubUrl('https://mosas.shimizu-technology.com/pay/x9k2?__clerk_ticket=abc#/details', { surface: 'employee' }),
+    ).toBe('https://tenant.shimizu-technology.com/pay/:statementId');
+    expect(
+      scrubUrl('https://mosas.shimizu-technology.com/unknown-x9', { surface: 'employee' }),
+    ).toBe('https://tenant.shimizu-technology.com/unknown');
     expect(scrubUrl('blob:https://mosas.shimizu-technology.com/550e8400-e29b-41d4-a716-446655440000')).toBeUndefined();
     expect(scrubUrl('javascript:alert(1)')).toBeUndefined();
+    expect(scrubPathname('/companies/ab12/employees/x9')).toBe('/companies/:companyId/employees/:id');
+    expect(scrubPathname('/pay/x9', { surface: 'employee' })).toBe('/pay/:statementId');
+  });
 
-    expect(scrubPathname('/companies/42/employees/9876543210/edit')).toBe('/companies/:id/employees/:id/edit');
-    expect(scrubPathname('/pay-runs/550e8400-e29b-41d4-a716-446655440000/payroll-items/123')).toBe(
-      '/pay-runs/:id/payroll-items/:id',
-    );
-    expect(scrubPathname('/invite/a1b2c3d4e5f6a7b8c9d0e1f2')).toBe('/invite/:id');
-    expect(scrubPathname('/users/user_2abcDEF12345678')).toBe('/users/:id');
-    expect(scrubPathname('/callback/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.sig12345')).toBe(
-      '/callback/:id',
-    );
-    expect(scrubPathname('/invite/LongOpaqueTokenValue12345')).toBe('/invite/:id');
-    expect(scrubPathname('/users/ada@example.com/profile')).toBe('/users/:id/profile');
-    expect(scrubPathname('/app/aire-account-connection')).toBe('/app/aire-account-connection');
-    expect(scrubPathname('/pay/all', { surface: 'employee' })).toBe('/pay/all');
-    expect(scrubPathname('/pay/stmt-9?year=2026#/top', { surface: 'employee' })).toBe('/pay/:id');
+  it('is idempotent for every declared staff and employee route template', () => {
+    const collectTemplates = (
+      routes: typeof STAFF_ROUTE_OBJECTS,
+      prefix = '',
+    ): string[] => {
+      const templates: string[] = [];
+      for (const route of routes) {
+        const segment = (route.path ?? '').replace(/^\/+|\/+$/g, '');
+        const full = segment ? `${prefix}/${segment}` : prefix || '/';
+        if (route.children?.length) {
+          templates.push(...collectTemplates(route.children, full));
+        } else {
+          templates.push(full);
+        }
+      }
+      return templates;
+    };
+
+    for (const template of collectTemplates(STAFF_ROUTE_OBJECTS)) {
+      expect(resolveRouteTemplate(template, 'staff')).toBe(template);
+    }
+    for (const template of collectTemplates(EMPLOYEE_ROUTE_OBJECTS)) {
+      expect(resolveRouteTemplate(template, 'employee')).toBe(template);
+    }
+    expect(resolveRouteTemplate(UNKNOWN_ROUTE_TEMPLATE, 'staff')).toBe(UNKNOWN_ROUTE_TEMPLATE);
+    expect(resolveRouteTemplate(UNKNOWN_ROUTE_TEMPLATE, 'employee')).toBe(UNKNOWN_ROUTE_TEMPLATE);
   });
 
   it('keeps only element tag names and explicit data-ph-name on autocapture and strips href (including blob:) and $el_text', () => {
@@ -207,8 +357,9 @@ describe('analytics strict allowlist before_send', () => {
       event: '$autocapture',
       properties: {
         token: 'phc_live_key',
-        $current_url: 'https://mosas.shimizu-technology.com/pay/stmt-9?year=2026#download',
-        $pathname: '/pay/stmt-9',
+        distinct_id: VALID_UUID_V7,
+        $current_url: 'https://mosas.shimizu-technology.com/pay/x9k2?year=2026#download',
+        $pathname: '/pay/x9k2',
         $host: 'mosas.shimizu-technology.com',
         $el_text: 'Download pay stub for Ada Lovelace ($1,450.00)',
         $external_click_url: 'blob:https://mosas.shimizu-technology.com/550e8400-e29b-41d4-a716-446655440000',
@@ -237,8 +388,9 @@ describe('analytics strict allowlist before_send', () => {
 
     expect(scrubbed?.properties).toEqual({
       token: 'phc_live_key',
-      $current_url: 'https://tenant.shimizu-technology.com/pay/:id',
-      $pathname: '/pay/:id',
+      distinct_id: VALID_UUID_V7,
+      $current_url: 'https://tenant.shimizu-technology.com/pay/:statementId',
+      $pathname: '/pay/:statementId',
       $host: 'tenant.shimizu-technology.com',
       surface: 'employee',
       $elements: [
@@ -259,6 +411,7 @@ describe('analytics strict allowlist before_send', () => {
       event: '$autocapture',
       properties: {
         token: 'phc_live_key',
+        distinct_id: VALID_UUID_V7,
         $elements_chain:
           'button.primary:attr__data-ph-name="submit-run"href="blob:https://example.test/123"text="Approve $50,000";section.payroll:attr_id="company-42"',
         surface: 'employee',
@@ -279,6 +432,7 @@ describe('analytics strict allowlist before_send', () => {
           event: eventName,
           properties: {
             token: 'phc_live_key',
+            distinct_id: VALID_UUID_V7,
             $exception_list: [{ value: 'SSN 123-45-6789 failed validation' }],
             surface: 'staff',
           },
@@ -291,12 +445,41 @@ describe('analytics strict allowlist before_send', () => {
   });
 });
 
-describe('analytics SDK runtime traffic & privacy guarantees (real PostHog 1.399.2)', () => {
-  it('sends zero requests to /flags, /decide, /array/, or external scripts, persists no initial person URLs, and only sends allowlisted keys', () => {
+describe('analytics legacy persistence cleanup and real SDK identity isolation (PostHog 1.399.2)', () => {
+  it('clears legacy ph_<token>_posthog localStorage/cookie and session keys without touching unrelated storage', () => {
+    const token = 'phc_legacy_test_key';
+    const legacyKey = legacyPostHogPersistenceKey(token);
+    expect(legacyKey).toBe('ph_phc_legacy_test_key_posthog');
+
+    window.localStorage.setItem(legacyKey, JSON.stringify({ distinct_id: '42', $user_id: '42' }));
+    window.localStorage.setItem('unrelated_app_key', 'keep-me');
+    window.sessionStorage.setItem(`ph_${token}_window_id`, 'old-win');
+    window.sessionStorage.setItem(`ph_${token}_primary_window_exists`, 'true');
+    document.cookie = `${legacyKey}=${encodeURIComponent(JSON.stringify({ distinct_id: '42' }))}; path=/`;
+    document.cookie = 'unrelated_cookie=keep-me; path=/';
+
+    clearLegacyPostHogPersistence(token);
+
+    expect(window.localStorage.getItem(legacyKey)).toBeNull();
+    expect(window.localStorage.getItem('unrelated_app_key')).toBe('keep-me');
+    expect(window.sessionStorage.getItem(`ph_${token}_window_id`)).toBeNull();
+    expect(window.sessionStorage.getItem(`ph_${token}_primary_window_exists`)).toBeNull();
+    expect(document.cookie).not.toContain(`${legacyKey}=`);
+    expect(document.cookie).toContain('unrelated_cookie=keep-me');
+  });
+
+  it('ignores and removes legacy persisted staff user IDs, sends zero /flags or /decide requests, and resets if distinct_id is ever tainted', () => {
+    const projectKey = 'phc_real_sdk_test_key';
+    const legacyKey = legacyPostHogPersistenceKey(projectKey);
+
+    // Pre-seed legacy PostHog persistence from an older build that called identify("42").
+    window.localStorage.setItem(legacyKey, JSON.stringify({ distinct_id: '42', $user_id: '42' }));
+    document.cookie = `${legacyKey}=${encodeURIComponent(JSON.stringify({ distinct_id: '42', $user_id: '42' }))}; path=/`;
+
     window.history.replaceState(
       {},
       '',
-      '/invite?__clerk_ticket=secret_clerk_ticket&__clerk_status=sign_up#/companies/42/secret',
+      '/companies/ab12/employees/x9k2?__clerk_ticket=secret_clerk_ticket&__clerk_status=sign_up#/companies/42/secret',
     );
 
     const requestUrls: string[] = [];
@@ -353,27 +536,45 @@ describe('analytics SDK runtime traffic & privacy guarantees (real PostHog 1.399
     const capturedPayloads: CaptureResult[] = [];
     const env = {
       VITE_PUBLIC_POSTHOG_ENABLED: 'true',
-      VITE_PUBLIC_POSTHOG_KEY: 'phc_real_sdk_test_key',
+      VITE_PUBLIC_POSTHOG_KEY: projectKey,
       VITE_DEPLOYMENT_ENV: 'production',
       DEV: false,
     };
 
     const instance = new PostHog();
-    const baseConfig = buildPostHogConfig({ env, surface: 'staff' });
-    const origBeforeSend = baseConfig.before_send as (event: CaptureResult | null) => CaptureResult | null;
-
-    instance.init('phc_real_sdk_test_key', {
-      ...baseConfig,
-      name: `ph_test_${Date.now()}`,
-      request_batching: false,
-      before_send: (event) => {
-        const result = origBeforeSend(event);
-        if (result) capturedPayloads.push(result);
-        return result;
-      },
+    const origInit = instance.init.bind(instance);
+    vi.spyOn(instance, 'init').mockImplementation((token, config) => {
+      const origBeforeSend = config?.before_send as (event: CaptureResult | null) => CaptureResult | null;
+      return origInit(token, {
+        ...config,
+        request_batching: false,
+        before_send: (event) => {
+          const result = origBeforeSend(event);
+          if (result) capturedPayloads.push(result);
+          return result;
+        },
+      });
     });
 
-    // Trigger pageview, custom event, and explicit reloadFeatureFlags (must stay disabled).
+    const started = initAnalytics({
+      env,
+      isStagingEnv: false,
+      hasSupportToken: false,
+      navigatorObj: {},
+      windowObj: {},
+      surface: 'staff',
+      client: instance,
+    });
+    expect(started).toBe(true);
+
+    // Legacy persistence must be removed and the new v2 anonymous persistence key used instead.
+    expect(window.localStorage.getItem(legacyKey)).toBeNull();
+    expect(document.cookie).not.toContain(`${legacyKey}=`);
+    expect(window.localStorage.getItem(`ph_${ANALYTICS_PERSISTENCE_NAME}`)).not.toBeNull();
+    expect(instance.get_distinct_id()).not.toBe('42');
+    expect(isAnonymousDistinctId(instance.get_distinct_id())).toBe(true);
+
+    // Trigger pageview, blocked events, and explicit reloadFeatureFlags (must stay disabled).
     capturePageView(instance, window.location.pathname + window.location.search + window.location.hash, 'staff');
     instance.capture('$exception', { $exception_message: 'SSN 123-45-6789' });
     instance.capture('$web_vitals', { $web_vitals_LCP_value: 1200 });
@@ -396,14 +597,17 @@ describe('analytics SDK runtime traffic & privacy guarantees (real PostHog 1.399
       expect(storageVal).not.toContain('$initial_referrer');
     }
 
-    // Real SDK produced the $pageview (not dropped by PostHog's required `token` check)
-    // and dropped $exception and $web_vitals.
+    // Real SDK produced the $pageview with matched route template and valid UUIDv7 distinct_id.
     expect(capturedPayloads.map((e) => e.event)).toEqual(['$pageview']);
     const payload = capturedPayloads[0];
-    expect(payload.properties.$pathname).toBe('/invite');
-    expect(payload.properties.$current_url).toBe(`${window.location.origin}/invite`);
+    expect(payload.properties.$pathname).toBe('/companies/:companyId/employees/:id');
+    expect(payload.properties.$current_url).toBe(
+      `${window.location.origin}/companies/:companyId/employees/:id`,
+    );
+    expect(isAnonymousDistinctId(payload.properties.distinct_id)).toBe(true);
+    expect(payload.properties.distinct_id).not.toBe('42');
     expect(payload.properties.surface).toBe('staff');
-    expect(payload.properties.token).toBe('phc_real_sdk_test_key');
+    expect(payload.properties.token).toBe(projectKey);
     expect(payload.properties).not.toHaveProperty('$session_entry_url');
     expect(payload.properties).not.toHaveProperty('$session_entry_referrer');
     expect(payload.properties).not.toHaveProperty('$initial_current_url');
@@ -413,7 +617,24 @@ describe('analytics SDK runtime traffic & privacy guarantees (real PostHog 1.399
     expect(payload).not.toHaveProperty('$set_once');
     expect(JSON.stringify(payload)).not.toContain('__clerk_ticket');
     expect(JSON.stringify(payload)).not.toContain('__clerk_status');
-    expect(JSON.stringify(payload)).not.toContain('/companies/42/secret');
+    expect(JSON.stringify(payload)).not.toContain('ab12');
+    expect(JSON.stringify(payload)).not.toContain('x9k2');
+
+    // Defense-in-depth: if distinct_id is ever tainted with a non-UUIDv7 value,
+    // before_send drops the event and triggers reset(), regenerating a fresh UUIDv7.
+    const resetSpy = vi.spyOn(instance, 'reset');
+    instance.register({ distinct_id: '42' });
+    instance.capture('payroll_calculated');
+    expect(resetSpy).toHaveBeenCalledTimes(1);
+    expect(capturedPayloads).toHaveLength(1); // tainted event was dropped
+    expect(isAnonymousDistinctId(instance.get_distinct_id())).toBe(true);
+    expect(instance.get_distinct_id()).not.toBe('42');
+
+    // Subsequent event after reset succeeds with the new anonymous UUIDv7.
+    instance.capture('payroll_approved');
+    expect(capturedPayloads).toHaveLength(2);
+    expect(capturedPayloads[1].event).toBe('payroll_approved');
+    expect(isAnonymousDistinctId(capturedPayloads[1].properties.distinct_id)).toBe(true);
   });
 });
 
@@ -465,13 +686,37 @@ describe('analytics anonymous device context, reset, and no-identify policy', ()
     expect(analytics.companySwitch.length).toBe(0);
   });
 
-  it('captures scrubbed page views without query strings or fragments', () => {
+  it('captures matched route templates (and /unknown for unmatched paths) in both $pathname and $current_url', () => {
     const capture = vi.fn();
-    capturePageView({ capture }, '/companies/42/employees/123?__clerk_ticket=secret#/hash', 'staff');
+    capturePageView({ capture }, '/companies/ab12/employees/x9k2?__clerk_ticket=secret#/hash', 'staff');
     expect(capture).toHaveBeenCalledWith('$pageview', {
-      $current_url: `${window.location.origin}/companies/:id/employees/:id`,
-      $pathname: '/companies/:id/employees/:id',
+      $current_url: `${window.location.origin}/companies/:companyId/employees/:id`,
+      $pathname: '/companies/:companyId/employees/:id',
       surface: 'staff',
+    });
+
+    capture.mockClear();
+    capturePageView({ capture }, '/arbitrary-secret/a1b2', 'staff');
+    expect(capture).toHaveBeenCalledWith('$pageview', {
+      $current_url: `${window.location.origin}/unknown`,
+      $pathname: '/unknown',
+      surface: 'staff',
+    });
+
+    capture.mockClear();
+    capturePageView({ capture }, '/pay/x9k2?year=2026#dl', 'employee');
+    expect(capture).toHaveBeenCalledWith('$pageview', {
+      $current_url: `${window.location.origin}/pay/:statementId`,
+      $pathname: '/pay/:statementId',
+      surface: 'employee',
+    });
+
+    capture.mockClear();
+    capturePageView({ capture }, '/not-an-employee-route/k3m', 'employee');
+    expect(capture).toHaveBeenCalledWith('$pageview', {
+      $current_url: `${window.location.origin}/unknown`,
+      $pathname: '/unknown',
+      surface: 'employee',
     });
   });
 });
@@ -504,7 +749,7 @@ describe('analytics initialization gating and config', () => {
     expect(hasPrivacyOptOutSignal({ doNotTrack: '0', globalPrivacyControl: false }, {})).toBe(false);
   });
 
-  it('initializes with strict privacy options (no flags, no remote config, no exceptions/performance/heatmaps/dead clicks, no referrer/campaign persistence)', () => {
+  it('initializes with strict privacy options, v2 anonymous persistence, and no dead ip: false option', () => {
     const init = vi.fn();
     expect(shouldEnableAnalytics({ env: enabledEnv, isStagingEnv: false, hasSupportToken: false, navigatorObj: {}, windowObj: {} })).toBe(true);
 
@@ -552,18 +797,23 @@ describe('analytics initialization gating and config', () => {
       mask_all_text: true,
       mask_all_element_attributes: true,
       mask_personal_data_properties: true,
-      ip: false,
       persistence: 'localStorage+cookie',
+      persistence_name: ANALYTICS_PERSISTENCE_NAME,
+      cross_subdomain_cookie: false,
       respect_dnt: true,
     });
+    expect(config).not.toHaveProperty('ip');
     expect(config.autocapture).toEqual({
       css_selector_ignorelist: expect.arrayContaining(['input', 'textarea', 'select', '[data-ph-no-capture]']),
     });
     expect(typeof config.before_send).toBe('function');
     expect(typeof config.get_current_url).toBe('function');
     expect(
-      config.get_current_url?.('https://payroll.shimizu-technology.com/companies/42?__clerk_ticket=abc#/frag'),
-    ).toBe('https://payroll.shimizu-technology.com/companies/:id');
+      config.get_current_url?.('https://payroll.shimizu-technology.com/companies/ab12/employees/x9?__clerk_ticket=abc#/frag'),
+    ).toBe('https://payroll.shimizu-technology.com/companies/:companyId/employees/:id');
+    expect(
+      config.get_current_url?.('https://payroll.shimizu-technology.com/companies/ab12?__clerk_ticket=abc#/frag'),
+    ).toBe('https://payroll.shimizu-technology.com/unknown');
   });
 
   it('uses EU PostHog api_host from env when provided', () => {
