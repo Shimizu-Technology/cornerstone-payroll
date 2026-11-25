@@ -1,6 +1,7 @@
 /** @vitest-environment node */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { build } from 'vite';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -122,9 +123,24 @@ describe('employee site deploy files', () => {
     expect(rendered).not.toContain('{{');
   });
 
-  it('serves only the app shell for unknown paths', () => {
-    const rules = read('deploy', 'employee', '_redirects').split('\n').filter((line) => line.trim() && !line.startsWith('#'));
-    expect(rules).toEqual(['/*    /index.html   200']);
+  it('serves the versioned legal documents before the app shell rewrite', () => {
+    const dist = tempDir();
+    writeFileSync(path.join(dist, 'index.html'), 'app shell');
+    finalizeEmployeeDist({ distDir: dist, deployDir, env });
+
+    const rules = readFileSync(path.join(dist, '_redirects'), 'utf8').split('\n')
+      .filter((line) => line.trim() && !line.startsWith('#'));
+    expect(rules.map((rule) => rule.split(/\s+/))).toEqual([
+      ['/terms', '/legal/employee-terms-2026-12-01-draft.html', '200'],
+      ['/privacy', '/legal/employee-privacy-2026-12-01-draft.html', '200'],
+      ['/*', '/index.html', '200'],
+    ]);
+
+    for (const rule of rules.slice(0, 2)) {
+      const [, target] = rule.split(/\s+/);
+      const hash = (dir: string) => createHash('sha256').update(readFileSync(path.join(dir, target))).digest('hex');
+      expect(hash(dist)).toBe(hash(deployDir));
+    }
   });
 
   it('writes headers and redirects and drops staff-only files from the output', () => {
