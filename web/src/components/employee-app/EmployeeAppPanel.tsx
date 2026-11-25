@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation } from 'react-router';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,22 +33,25 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
   audience: 'admin' | 'client';
 }) {
   const [access, setAccess] = useState<EmployeeAppAccess | null>(null);
-  const [loadError, setLoadError] = useState('');
+  const [accessReadFailed, setAccessReadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [operation, setOperation] = useState<EmployeeAppOperation | null>(null);
   const [feedback, setFeedback] = useState('');
   const [printed, setPrinted] = useState<PrintedInvite[]>([]);
+  const accessReadGeneration = useRef(0);
   const location = useLocation();
   const getAccess = useCallback(() => employeeAppRolloutApi(companyId, audience).employee(employeeId), [companyId, audience, employeeId]);
 
   useEffect(() => {
-    let current = true;
+    const generation = ++accessReadGeneration.current;
     void getAccess().then(({ data }) => {
-      if (current) { setAccess(data); setLoadError(''); }
+      if (generation !== accessReadGeneration.current) return;
+      setAccess(data);
+      setAccessReadFailed(false);
     }).catch(() => {
-      if (current) setLoadError('Could not load employee app status.');
+      if (generation === accessReadGeneration.current) setAccessReadFailed(true);
     });
-    return () => { current = false; };
+    return () => { accessReadGeneration.current += 1; };
   }, [getAccess, loadAttempt]);
 
   const open = access?.status === 'invited' || access?.status === 'locked';
@@ -67,9 +70,18 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
         <Link className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline" to={employeeAppRolloutPath(companyId)}>Company rollout</Link>
       </CardHeader>
       <CardContent className="space-y-3">
-        {loadError ? (
-          <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-sm text-danger-700">{loadError}</p><Button type="button" variant="outline" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Try again</Button></div>
-        ) : !access ? <p role="status" className="text-sm text-neutral-600">Loading app status…</p> : (
+        {accessReadFailed && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="alert" className="text-sm text-danger-700">
+              {access ? 'Could not refresh employee app status. Showing the last loaded status.' : 'Could not load employee app status.'}
+            </p>
+            <Button type="button" variant="outline" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+              {access ? 'Refresh status' : 'Try again'}
+            </Button>
+          </div>
+        )}
+        {!access && !accessReadFailed && <p role="status" className="text-sm text-neutral-600">Loading app status…</p>}
+        {access && (
           <>
             <Badge variant={access.status === 'active' ? 'success' : access.status === 'locked' ? 'warning' : 'default'}>{labels[access.status]}</Badge>
             {!access.enabled && <p className="text-sm text-neutral-700">{employeeAppOff}</p>}
@@ -102,7 +114,9 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
               submit={(payload) => employeeAppRolloutApi(companyId, audience).change(employeeId, operation, payload)}
               refresh={() => setLoadAttempt((attempt) => attempt + 1)}
               onSuccess={(result) => {
+                accessReadGeneration.current += 1;
                 setAccess(result.data);
+                setAccessReadFailed(false);
                 setOperation(null);
                 if (result.print) setPrinted([result.print]);
                 else if (result.email_status) setFeedback(inviteEmailMessages[result.email_status]);
