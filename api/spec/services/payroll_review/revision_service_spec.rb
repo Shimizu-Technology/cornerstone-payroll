@@ -64,6 +64,8 @@ RSpec.describe PayrollReview::RevisionService do
     deduction = payroll_item.payroll_item_deductions.create!(
       deduction_type: type, category: "post_tax", label: "Test deduction", amount: 20
     )
+    # Legacy rows predate the contract migration that requires company_id.
+    ActiveRecord::Base.connection.change_column_null :payroll_item_deductions, :company_id, true
     deduction.update_column(:company_id, nil)
     revision = service.issue!
     snapshot = revision.calculation_snapshot.dig("payroll_items", 0, "payroll_item_deductions", 0)

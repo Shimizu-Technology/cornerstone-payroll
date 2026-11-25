@@ -10,6 +10,13 @@ RSpec.describe PayrollChildCompanyBackfill do
     { payroll_item_id: payroll_item.id, event_type: "printed", check_number: "100", effective_on: Date.current }
   end
 
+  # Legacy rows predate the expand migration. The contract migration has
+  # since required company_id, so rebuild that state inside the example.
+  def allow_legacy_null_company!
+    connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
+    connection.change_column_null :check_events, :company_id, true
+  end
+
   it "fills an omitted company ID from the parent for old bulk inserts" do
     result = CheckEvent.insert_all!([ event_attributes, event_attributes ], returning: %w[company_id])
     expect(result.rows.flatten).to eq([ payroll_item.company_id, payroll_item.company_id ])
@@ -25,7 +32,7 @@ RSpec.describe PayrollChildCompanyBackfill do
   end
 
   it "backfills legacy evidence in batches, preserving its fields and rejecting later edits" do
-    connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
+    allow_legacy_null_company!
     ids = CheckEvent.insert_all!([ event_attributes, event_attributes ], returning: %w[id]).rows.flatten
     events = CheckEvent.where(id: ids).order(:id)
     original = events.map { |row| row.attributes.except("company_id") }
@@ -62,7 +69,7 @@ RSpec.describe PayrollChildCompanyBackfill do
   end
 
   it "retries the same batch after a deadlock or lock timeout and returns counts without a block" do
-    connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
+    allow_legacy_null_company!
     ids = CheckEvent.insert_all!([ event_attributes, event_attributes ], returning: %w[id]).rows.flatten
     errors = [ ActiveRecord::Deadlocked.new, ActiveRecord::LockWaitTimeout.new ]
     failed_batches = []
@@ -83,7 +90,7 @@ RSpec.describe PayrollChildCompanyBackfill do
   end
 
   it "raises after two retries and leaves the failed batch for a later run" do
-    connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
+    allow_legacy_null_company!
     id = CheckEvent.insert_all!([ event_attributes ], returning: %w[id]).rows.sole.sole
     attempts = 0
     allow(connection).to receive(:exec_query).and_wrap_original do |original, sql, *args|
@@ -102,7 +109,7 @@ RSpec.describe PayrollChildCompanyBackfill do
   end
 
   it "skips an orphaned row, fills the next batch and reports the remaining null" do
-    connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
+    allow_legacy_null_company!
     connection.remove_foreign_key :check_events, column: :payroll_item_id
     rows = [ event_attributes.merge(payroll_item_id: -1), event_attributes ]
     orphan_id, valid_id = CheckEvent.insert_all!(rows, returning: %w[id]).rows.flatten
@@ -132,7 +139,7 @@ RSpec.describe PayrollChildCompanyBackfill do
   end
 
   M3_7ChildCompanies::CHILDREN.each do |table, (parent_key, parent_table)|
-    it "sets #{table}.company_id in the model's save callback with a validated parent FK" do
+    it "sets #{table}.company_id in the model's save callback with a validated parent FK and requires it" do
       model = table == :payroll_imports ? PayrollImportRecord : table.to_s.classify.constantize
       association = parent_key.to_s.delete_suffix("_id")
       company = create(:company)
@@ -143,7 +150,7 @@ RSpec.describe PayrollChildCompanyBackfill do
       foreign_key = connection.foreign_keys(table).find { |fk| fk.name == M3_7ChildCompanies.foreign_key_name(table) }
       expect(foreign_key).to have_attributes(to_table: parent_table.to_s, column: [ parent_key.to_s, "company_id" ],
         primary_key: %w[id company_id], validate?: true)
-      expect(model.columns_hash.fetch("company_id").null).to be(true)
+      expect(model.columns_hash.fetch("company_id").null).to be(false)
     end
   end
 end
