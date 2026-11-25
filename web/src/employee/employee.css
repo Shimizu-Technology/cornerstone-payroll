@@ -1426,3 +1426,8 @@ select.emp-input {
     background: #fff !important;
   }
 }
+
+/* Sign-in & security: Clerk's account panel needs more room than a sign-in form. */
+.emp-auth-wide {
+  max-width: 56rem;
+}

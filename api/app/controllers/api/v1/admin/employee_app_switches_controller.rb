@@ -7,8 +7,9 @@ module Api
       # checklist, the organization's demo early-access window and the demo
       # kill switch. Org admins only (manage_employee_app_switch); setting or
       # extending early access is for a super_admin (the owner) only.
-      # Turning anything on, or setting early access, needs a fresh second
-      # factor; turning off, ending early access and the kill switch never do.
+      # Turning anything on, or setting early access, needs a fresh step-up
+      # (MfaPolicy: a second factor with REQUIRE_MFA on, a first factor while
+      # it's off); turning off, ending early access and the kill switch never do.
       class EmployeeAppSwitchesController < BaseController
         include RecentVerification
 
@@ -24,7 +25,7 @@ module Api
           skip_default_audit_log!
           update = EmployeeAppSwitch::Update.new(company: current_company, actor: current_user,
             changes: params[:changes].try(:to_unsafe_h), reason: params[:reason], session_claims: @clerk_token_payload)
-          # Failing checks are listed before a fresh second factor is asked for.
+          # Failing checks are listed before a fresh step-up is asked for.
           update.preflight! if update.turning_on?
           result = update.call
           render json: { data: payload(EmployeeAppSwitch::Readiness.new(company: current_company)), saved: result.except(:values) }

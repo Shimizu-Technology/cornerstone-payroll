@@ -54,10 +54,14 @@ module Api
         "Resolve linked employee accounts for authenticated user"
       end
 
+      # The bootstrap call answers 200 so the apps can show the recovery
+      # screen, and carries the same code and message as every other MFA 403:
+      # mfa_enrollment_required (set up a second factor) or mfa_required
+      # (enrolled; sign in again and finish the second step).
       def render_mfa_required
         return super unless action_name == "me" && (request.get? || request.head?)
 
-        render json: { mfa_required: true, mfa_verified: false }
+        render json: { mfa_required: true, mfa_verified: false }.merge(MfaPolicy.denial_body(@clerk_token_payload))
       end
 
       def allow_client_subdomain_token?
