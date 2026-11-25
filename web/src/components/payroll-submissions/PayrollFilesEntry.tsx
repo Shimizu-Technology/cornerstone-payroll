@@ -1,3 +1,4 @@
+import { formatDateRange } from '@/lib/display-date';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -51,12 +52,12 @@ function EnabledPayrollFilesEntry(): ReactElement {
             </p>
             <h2 id="send-payroll-files-heading" className="mt-2 text-xl font-semibold tracking-tight text-neutral-900">Send payroll files for this pay period</h2>
             {!rows && !error && <p role="status" className="mt-2 text-sm text-neutral-600">Checking your current pay period…</p>}
-            {error && <p role="alert" className="mt-2 text-sm text-danger-700">We could not load your current pay period. You can still open Pay Period Files.</p>}
+            {error && <p role="alert" className="mt-2 text-sm text-danger-700">We could not load your current pay period. You can still open Pay period files.</p>}
             {rows && !period && <p className="mt-2 text-sm text-neutral-700">No pay period is open for files yet. Cornerstone will set up the next one.</p>}
             {period && (
               <div className="mt-2 space-y-1">
                 <p className="flex flex-wrap items-center gap-2 text-base font-semibold text-neutral-900">
-                  <span>Payroll {period.label}</span>
+                  <span>Payroll {formatDateRange(period.start_date, period.end_date) || period.label}</span>
                   <Badge variant={statusVariant(period.status)}>{period.client_payroll_status && period.client_payroll_status !== 'preparing' ? clientPayrollStatus(period.client_payroll_status) : period.status_label}</Badge>
                   {period.unread && <Badge variant="warning">New</Badge>}
                 </p>
@@ -64,14 +65,14 @@ function EnabledPayrollFilesEntry(): ReactElement {
               </div>
             )}
             <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-700">
-              <span className="font-semibold">Pay Period Files</span> is where you send Cornerstone the Revel payroll and report changes for a pay period.
-              {' '}<span className="font-semibold">Pay Periods</span> shows open payrolls, published previews and payroll history.
+              <span className="font-semibold">Pay period files</span> is where you send Cornerstone the Revel payroll and report changes for a pay period.
+              {' '}<span className="font-semibold">Pay periods</span> shows open payrolls, published previews and payroll history.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row lg:flex-col lg:items-stretch">
             {error ? <Button type="button" variant="outline" onClick={() => void load()}>Try again</Button> : null}
             <Link to={target} className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-full bg-primary-700 px-5 py-2.5 text-sm font-semibold tracking-[-0.01em] text-white hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2">
-              {period ? actionLabel(period) : 'Open Pay Period Files'}
+              {period ? actionLabel(period) : 'Open pay period files'}
             </Link>
             {period && <Link to="/payroll-files" className="inline-flex min-h-11 items-center justify-center text-sm font-medium text-primary-800 underline">See all pay periods for files</Link>}
           </div>

@@ -46,6 +46,7 @@ describe('Guam instant formatting', (): void => {
   });
   it('retains missing-instant messages', (): void => {
     expect(formatGuamDateTime(null)).toBe('Not recorded');
+    expect(formatGuamDateTime('invalid timestamp')).toBe('Not recorded');
     expect(formatGuamDateTimeShort(null)).toBe('Not processed');
   });
 });

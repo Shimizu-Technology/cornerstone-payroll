@@ -67,13 +67,16 @@ it('highlights only Client Inbox when visiting its route', () => {
   expect(screen.getByRole('link', { name: 'Client Inbox' }).getAttribute('aria-current')).toBe('page');
 });
 
-it('shows Pay Period Files to every portal client', () => {
+it('shows sentence-case client navigation including Pay period files to every portal client', () => {
   actor.role = 'client';
   const view = render(<MemoryRouter><Sidebar /></MemoryRouter>);
-  expect(screen.getByRole('link', { name: 'Pay Period Files' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Pay period files' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Contact details' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Pay periods' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Change requests' })).toBeTruthy();
   actor.mosa = true;
   view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
-  expect(screen.getByRole('link', { name: 'Pay Period Files' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Pay period files' })).toBeTruthy();
 });
 
 it('highlights only Contact Details when visiting its route', () => {

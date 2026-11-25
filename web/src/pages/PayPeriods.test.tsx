@@ -133,10 +133,10 @@ describe('PayPeriods test workspaces', () => {
     expect(screen.queryByRole('button', { name: 'New Pay Period' })).toBeNull();
     expect(screen.getAllByText('Locked reference history')).toHaveLength(2);
     expect(screen.getAllByText('Practice payroll')).toHaveLength(2);
-    const baselineRow = screen.getByRole('row', { name: /Aug 10 - 23, 2026/ });
-    const practiceRow = screen.getByRole('row', { name: /Aug 24 - Sep 6, 2026/ });
-    const baselineCard = screen.getByRole('group', { name: 'Pay period Aug 10 - 23, 2026' });
-    const practiceCard = screen.getByRole('group', { name: 'Pay period Aug 24 - Sep 6, 2026' });
+    const baselineRow = screen.getByRole('row', { name: /Aug 10 – 23, 2026/ });
+    const practiceRow = screen.getByRole('row', { name: /Aug 24 – Sep 6, 2026/ });
+    const baselineCard = screen.getByRole('group', { name: 'Pay period Aug 10 – 23, 2026' });
+    const practiceCard = screen.getByRole('group', { name: 'Pay period Aug 24 – Sep 6, 2026' });
 
     for (const container of [baselineRow, baselineCard]) {
       expect(within(container).getByRole('button', { name: 'View' })).toBeTruthy();
@@ -276,7 +276,7 @@ it.each(['desktop', 'phone'])('opens the source acknowledgement worksheet instea
     <Route path="/companies/11/pay-runs" element={<PayPeriods />} />
     <Route path="/companies/11/pay-runs/12/work" element={<p>Review hours and acknowledge source coverage</p>} />
   </Routes></MemoryRouter>);
-  const container = await screen.findByRole(layout === 'desktop' ? 'row' : 'group', { name: layout === 'desktop' ? /Aug 24 - Sep 6, 2026/ : 'Pay period Aug 24 - Sep 6, 2026' });
+  const container = await screen.findByRole(layout === 'desktop' ? 'row' : 'group', { name: layout === 'desktop' ? /Aug 24 – Sep 6, 2026/ : 'Pay period Aug 24 – Sep 6, 2026' });
   fireEvent.click(within(container).getByRole('button', { name: /Recalculate/ }));
   expect(await screen.findByText('Review hours and acknowledge source coverage')).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
@@ -304,7 +304,7 @@ describe('PayPeriods delete confirmation', () => {
   it.each([[10, 0], [2, 0.25]])('requires acknowledgement for %s employees and %s hours, then names the deleted run', async (count, hours) => {
     const dialog = await openDelete(count, hours);
     expect(dialog.textContent).toContain('Local Payroll QA');
-    expect(dialog.textContent).toContain('Aug 24 - Sep 6, 2026');
+    expect(dialog.textContent).toContain('Aug 24 – Sep 6, 2026');
     expect(dialog.textContent).toContain('Sep 10, 2026');
     expect(dialog.textContent).toContain('Calculated');
     expect(dialog.textContent).toContain('$3,086.25');
@@ -317,7 +317,7 @@ describe('PayPeriods delete confirmation', () => {
     apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
     fireEvent.click(submit);
     await waitFor(() => expect(apiMocks.payPeriodDelete).toHaveBeenCalledExactlyOnceWith(12));
-    expect(await screen.findByText(/Deleted Local Payroll QA — Aug 24 - Sep 6, 2026/)).toBeTruthy();
+    expect(await screen.findByText(/Deleted Local Payroll QA — Aug 24 – Sep 6, 2026/)).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
   });

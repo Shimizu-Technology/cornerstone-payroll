@@ -1,6 +1,6 @@
 import { UnsavedPayrollChangesGuard } from '@/components/routing/UnsavedPayrollChangesGuard';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { useEffect, useMemo, useRef } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useCompany } from '@/contexts/CompanyContext';
 import { payRunPath } from '@/lib/routes';
 import { exclusionCountMessages, payRunExclusionCounts, payRunUnclassifiedExclusionCount } from '@/lib/time-tracking-exclusions';
@@ -14,25 +14,37 @@ import { SourceCoverageDialog } from './pay-periods/pay-run/SourceCoverageDialog
 import { PayRunReviewDialogs } from './pay-periods/pay-run/PayRunReviewDialogs';
 import { PayRunSummary } from './pay-periods/pay-run/PayRunSummary';
 import { PayRunProcessingActions } from './pay-periods/pay-run/PayRunProcessingActions';
-import { PayRunMetadata } from './pay-periods/pay-run/PayRunMetadata';
 import { RefreshSetupDialog } from './pay-periods/pay-run/RefreshSetupDialog';
-import { PayRunLiabilities } from './pay-periods/pay-run/PayRunLiabilities';
-import { PayRunLinkedCorrections } from './pay-periods/pay-run/PayRunLinkedCorrections';
-import { PayRunChecks } from './pay-periods/pay-run/PayRunChecks';
-import { PayRunSupportingDetails } from './pay-periods/pay-run/PayRunSupportingDetails';
-import { PayRunNonEmployeeChecks } from './pay-periods/pay-run/PayRunNonEmployeeChecks';
-import { PayRunCheckPrintDialog } from './pay-periods/pay-run/PayRunCheckPrintDialog';
-import { PayRunReports } from './pay-periods/pay-run/PayRunReports';
-import { PayRunTimecardHistory } from './pay-periods/pay-run/PayRunTimecardHistory';
-import { PayRunCorrections } from './pay-periods/pay-run/PayRunCorrections';
 import { PayRunDialogs } from './pay-periods/pay-run/PayRunDialogs';
+import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
+import type { PayRunWorkspaceTab } from '@/lib/routes';
+
+// Checks, Reports and Activity load their code and data the first time they are opened.
+const PayRunMetadata = lazy(() => import('./pay-periods/pay-run/PayRunMetadata').then((module) => ({ default: module.PayRunMetadata })));
+const PayRunLiabilities = lazy(() => import('./pay-periods/pay-run/PayRunLiabilities').then((module) => ({ default: module.PayRunLiabilities })));
+const PayRunLinkedCorrections = lazy(() => import('./pay-periods/pay-run/PayRunLinkedCorrections').then((module) => ({ default: module.PayRunLinkedCorrections })));
+const PayRunChecks = lazy(() => import('./pay-periods/pay-run/PayRunChecks').then((module) => ({ default: module.PayRunChecks })));
+const PayRunSupportingDetails = lazy(() => import('./pay-periods/pay-run/PayRunSupportingDetails').then((module) => ({ default: module.PayRunSupportingDetails })));
+const PayRunNonEmployeeChecks = lazy(() => import('./pay-periods/pay-run/PayRunNonEmployeeChecks').then((module) => ({ default: module.PayRunNonEmployeeChecks })));
+const PayRunCheckPrintDialog = lazy(() => import('./pay-periods/pay-run/PayRunCheckPrintDialog').then((module) => ({ default: module.PayRunCheckPrintDialog })));
+const PayRunReports = lazy(() => import('./pay-periods/pay-run/PayRunReports').then((module) => ({ default: module.PayRunReports })));
+const PayRunTimecardHistory = lazy(() => import('./pay-periods/pay-run/PayRunTimecardHistory').then((module) => ({ default: module.PayRunTimecardHistory })));
+const PayRunCorrections = lazy(() => import('./pay-periods/pay-run/PayRunCorrections').then((module) => ({ default: module.PayRunCorrections })));
+
+function DeferredTab({ opened, label, children }: { opened: boolean; label: string; children: ReactNode }) {
+  return opened ? <Suspense fallback={<WorkspaceLoader label={label} minHeightClassName="min-h-[12rem]" />}>{children}</Suspense> : null;
+}
 
 export function PayPeriodDetail(props: PayPeriodDetailProps) {
-  const state = usePayRunController(props);
+  const activeTab = props.activeTab ?? 'work';
+  // A tab stays mounted once opened so returning to it keeps its state.
+  const [openedTabs, setOpenedTabs] = useState<ReadonlySet<PayRunWorkspaceTab>>(() => new Set([activeTab]));
+  if (!openedTabs.has(activeTab)) setOpenedTabs(new Set([...openedTabs, activeTab]));
+  const opened = (tab: PayRunWorkspaceTab) => openedTabs.has(tab);
+  const state = usePayRunController({ ...props, loadsNonEmployeeChecks: !opened('checks') });
   const { activeCompany } = useCompany();
   const location = useLocation();
   const navigate = useNavigate();
-  const activeTab = props.activeTab ?? 'work';
   const feedbackRoute = state.status === 'ready' ? payRunPath(state.sections.processing.companyId, state.sections.processing.payPeriod.id, 'work', { returnTo: state.sections.processing.returnTo }) : null;
   const feedback = state.status === 'ready' ? state.sections.feedback : null;
   const hasFeedback = Boolean(feedback && (feedback.error || feedback.calculationNotice || feedback.calendarRefreshError || feedback.worksheetRefreshWarning || feedback.savedImportReloadRequired || feedback.calculationFailures.length));
@@ -88,6 +100,21 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     if (target instanceof HTMLDetailsElement) target.open = true;
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });
+    // Lazy panels above the target can still be loading and push it down, so
+    // keep it aligned until they settle or the user starts scrolling.
+    const section = target?.closest('section');
+    if (!target || !section || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => target.scrollIntoView?.({ block: 'start' }));
+    const stop = () => observer.disconnect();
+    observer.observe(section);
+    const timer = window.setTimeout(stop, 3000);
+    const userEvents = ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const;
+    userEvents.forEach((type) => window.addEventListener(type, stop, { passive: true, once: true }));
+    return () => {
+      window.clearTimeout(timer);
+      stop();
+      userEvents.forEach((type) => window.removeEventListener(type, stop));
+    };
   }, [activeTab, location.hash, state.status]);
   if (state.status !== 'ready') return state.fallback;
   const sections = state.sections;
@@ -133,21 +160,27 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
         {(payPeriod.notes || payPeriod.correction_status || payPeriod.run_purpose === 'correction') && <p className="text-sm text-neutral-700">Run notes, history and corrections: <Link className="font-semibold text-primary-700 underline" to={route('activity')}>Activity</Link></p>}
       </section>
       <section hidden={activeTab !== 'checks'} aria-label="Checks and payments workspace" className="space-y-6">
-        {props.checksContent?.({ refreshToken: sections.checks.checkPrintRefreshToken, searchTerm: sections.checks.searchTerm, onChecksLoaded: sections.nonEmployeeChecks.handleNonEmployeeChecksLoaded }) ?? <><PayRunChecks {...sections.checks} /><PayRunNonEmployeeChecks {...sections.nonEmployeeChecks} /><PayRunCheckPrintDialog {...sections.printDialog} /></>}
-        <PayRunSupportingDetails {...sections.supporting} section="checks" />
+        <DeferredTab opened={opened('checks')} label="Loading checks and payments">
+          {props.checksContent?.({ refreshToken: sections.checks.checkPrintRefreshToken, searchTerm: sections.checks.searchTerm, onChecksLoaded: sections.nonEmployeeChecks.handleNonEmployeeChecksLoaded }) ?? <><PayRunChecks {...sections.checks} /><PayRunNonEmployeeChecks {...sections.nonEmployeeChecks} /><PayRunCheckPrintDialog {...sections.printDialog} /></>}
+          <PayRunSupportingDetails {...sections.supporting} section="checks" />
+        </DeferredTab>
       </section>
       <section hidden={activeTab !== 'reports'} aria-label="Reports workspace" className="space-y-6">
-        <PayRunReports {...sections.reports} />
-        <PayRunLiabilities {...sections.liabilities} />
+        <DeferredTab opened={opened('reports')} label="Loading reports">
+          <PayRunReports {...sections.reports} />
+          <PayRunLiabilities {...sections.liabilities} />
+        </DeferredTab>
         {payPeriod.status === 'draft' && <p className="text-sm text-neutral-600">Reports are available after payroll is calculated.</p>}
       </section>
       <section hidden={activeTab !== 'activity'} aria-label="Activity workspace" className="space-y-6">
-        <PayRunMetadata {...sections.metadata} />
-        <PayRunSupportingDetails {...sections.supporting} section="activity" />
-        {activeTab === 'activity' && props.activityContent}
-        <PayRunLinkedCorrections {...sections.linkedCorrections} />
-        <PayRunTimecardHistory {...sections.timecardHistory} />
-        <div id="payroll-corrections" tabIndex={-1} className="scroll-mt-4"><PayRunCorrections {...sections.corrections} /></div>
+        <DeferredTab opened={opened('activity')} label="Loading activity">
+          <PayRunMetadata {...sections.metadata} />
+          <PayRunSupportingDetails {...sections.supporting} section="activity" />
+          {activeTab === 'activity' && props.activityContent}
+          <PayRunLinkedCorrections {...sections.linkedCorrections} />
+          <PayRunTimecardHistory {...sections.timecardHistory} />
+        </DeferredTab>
+        <div id="payroll-corrections" tabIndex={-1} className="scroll-mt-4"><DeferredTab opened={opened('activity')} label="Loading corrections"><PayRunCorrections {...sections.corrections} /></DeferredTab></div>
       </section>
     </div>
     <PayRunDialogs {...sections.dialogs} />

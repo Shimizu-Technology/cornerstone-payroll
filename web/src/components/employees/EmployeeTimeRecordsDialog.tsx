@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarDays, Clock3, PencilLine, Plus } from 'lucide-react';
@@ -137,7 +138,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
 
           {editorVisible && (
             <div className="rounded-2xl border border-primary-200 bg-primary-50/40 p-4">
-              <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-primary-950"><PencilLine className="h-4 w-4" />{editing ? `Correct ${editing.work_date}` : 'Add a daily record'}</div>
+              <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-primary-950"><PencilLine className="h-4 w-4" />{editing ? `Correct ${formatDate(editing.work_date)}` : 'Add a daily record'}</div>
               <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
                 {!editing && <div><label className="mb-1 block text-xs font-medium text-neutral-700">Work date *</label><Input type="date" value={draft.work_date || ''} onChange={(event) => setDraft({ ...draft, work_date: event.target.value })} /></div>}
                 <div><label className="mb-1 block text-xs font-medium text-neutral-700">Scheduled</label><NumericInput min={0} max={24} value={draft.scheduled_hours} onValueChange={(value) => setDraft({ ...draft, scheduled_hours: value || 0 })} /></div>
@@ -160,7 +161,7 @@ export function EmployeeTimeRecordsDialog({ employee, open, onOpenChange }: Prop
               <div className="divide-y divide-neutral-200">
                 {records.map((record) => (
                   <button type="button" key={record.id} onClick={() => beginEdit(record)} className="grid w-full gap-2 bg-white p-4 text-left hover:bg-primary-50/50 sm:grid-cols-[1.2fr_repeat(4,0.75fr)_1fr] sm:items-center">
-                    <div><p className="text-sm font-semibold text-neutral-900">{record.work_date}</p><p className="text-xs text-neutral-500">{record.source.replaceAll('_', ' ')} · revision {record.revision}</p></div>
+                    <div><p className="text-sm font-semibold text-neutral-900">{formatDate(record.work_date)}</p><p className="text-xs text-neutral-500">{record.source.replaceAll('_', ' ')} · revision {record.revision}</p></div>
                     <p className="text-xs text-neutral-600"><span className="font-semibold text-neutral-900">{Number(record.scheduled_hours)}</span> scheduled</p>
                     <p className="text-xs text-neutral-600"><span className="font-semibold text-neutral-900">{record.actual_worked_hours == null ? '—' : Number(record.actual_worked_hours)}</span> actual</p>
                     <p className="text-xs text-neutral-600"><span className="font-semibold text-neutral-900">{Number(record.pto_hours)}</span> PTO</p>

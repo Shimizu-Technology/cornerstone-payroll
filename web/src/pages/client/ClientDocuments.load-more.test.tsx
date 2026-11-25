@@ -6,14 +6,12 @@ import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import { ClientDocuments } from './ClientDocuments';
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), employees: vi.fn(), upload: vi.fn(), delete: vi.fn() }));
-vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
-vi.mock('@/components/client-portal/PortalMessagesPanel', () => ({ PortalMessagesPanel: () => null }));
+vi.mock('@/components/layout/Header', () => ({ Header: ({ title, description }: { title: string; description?: string }) => <header><h1>{title}</h1><p>{description}</p></header> }));
 vi.mock('@/components/documents/DocumentPreviewModal', () => ({ DocumentPreviewModal: () => null }));
 vi.mock('@/services/api', () => ({
   getActiveCompanyId: () => 1,
   clientDocumentsApi: { list: mocks.list, upload: mocks.upload, delete: mocks.delete },
   clientEmployeesApi: { list: mocks.employees },
-  clientPortalThreadsApi: {},
 }));
 
 const doc = (id: number, employeeId: number | null = 7): ClientDocument => ({
@@ -158,4 +156,12 @@ it('keeps a revision grouped across loaded pages', async () => {
   expect(screen.getAllByText(group.label)).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Preview w4-1.pdf' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Download w4-2.pdf' })).toBeTruthy();
+});
+
+it('focuses on files only without rendering a message composer', async () => {
+  render(<ClientDocuments />);
+  await screen.findAllByText('Onboarding 3');
+  expect(screen.getByText(/Upload and store company or employee files/)).toBeTruthy();
+  expect(screen.queryByText('Portal Messages')).toBeNull();
+  expect(screen.queryByRole('button', { name: /Start Conversation/i })).toBeNull();
 });

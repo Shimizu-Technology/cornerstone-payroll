@@ -1,3 +1,4 @@
+import { formatGuamDateTimeShort } from '@/lib/utils';
 import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
@@ -54,12 +55,7 @@ function formatCurrency(amount: number) {
 
 function formatEventTime(value?: string | null) {
   if (!value) return null;
-  return new Date(value).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return formatGuamDateTimeShort(value);
 }
 
 function eventLabel(eventType: string): string {

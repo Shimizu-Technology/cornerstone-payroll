@@ -602,9 +602,9 @@ describe("Prior-provider history", () => {
       fireEvent.click(links[1]);
       expect(expandedPeriods().length).toBe(1);
       // The second row (Oct 8 – Oct 28) is the one that opened, not the first (Sep 24 – Oct 7).
-      expect(expandedPeriods()[0].textContent).toContain("Oct 8, 2026");
+      expect(expandedPeriods()[0].textContent).toContain("Oct 8 – 28, 2026");
       fireEvent.click(links[0]);
-      expect(expandedPeriods()[0].textContent).toContain("Sep 24, 2026");
+      expect(expandedPeriods()[0].textContent).toContain("Sep 24 – Oct 7, 2026");
     });
 
     it("keeps Confirm all disabled while an edit is waiting to autosave", async () => {

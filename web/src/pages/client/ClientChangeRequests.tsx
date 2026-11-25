@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
@@ -161,7 +162,7 @@ export function ClientChangeRequests() {
 
   return (
     <div>
-      <Header title={profileRequestsEnabled ? 'Employee changes' : 'Change Requests'}
+      <Header title="Change requests"
         description={profileRequestsEnabled ? 'Review address requests and see applied contact changes.' : 'Track payroll-sensitive updates submitted for payroll team approval.'} />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
@@ -220,7 +221,7 @@ export function ClientChangeRequests() {
                         <p className="min-w-0 font-semibold text-neutral-950">{request.employee_name}</p>
                         <StatusBadge status={request.status} />
                       </div>
-                      <p className="mt-2 text-sm text-neutral-600">{requestLabel(request)} · {new Date(request.created_at).toLocaleDateString()}</p>
+                      <p className="mt-2 text-sm text-neutral-600">{requestLabel(request)} · {formatGuamDateTime(request.created_at)}</p>
                       <p className="mt-1 text-xs text-neutral-500">Requested by {request.requested_by_name || '—'}</p>
                       <Button className="mt-4 w-full" variant="outline" onClick={() => void loadRequest(request.id)}>View request</Button>
                     </MobileRecordCard>
@@ -233,18 +234,18 @@ export function ClientChangeRequests() {
                       <TableHead>Employee</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Requested By</TableHead>
+                      <TableHead>Requested by</TableHead>
                       <TableHead>Submitted</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody striped>
                     {requests.map((request) => (
                       <TableRow key={request.id}>
-                        <TableCell className="font-medium text-gray-900"><button type="button" className="text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
+                        <TableCell className="font-medium text-gray-900"><button type="button" className="inline-flex min-h-11 items-center text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
-                        <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
+                        <TableCell>{formatGuamDateTime(request.created_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -266,7 +267,7 @@ export function ClientChangeRequests() {
 
           <Card ref={detailsRef} className="min-w-0 scroll-mt-4">
             <CardHeader>
-              <CardTitle>{selected ? `Request #${selected.id}` : 'Request Details'}</CardTitle>
+              <CardTitle>{selected ? `Request #${selected.id}` : 'Request details'}</CardTitle>
             </CardHeader>
             <CardContent>
               {selected ? (
@@ -274,16 +275,16 @@ export function ClientChangeRequests() {
                   <div className="flex items-center gap-3">
                     <StatusBadge status={selected.status} />
                     <span className="text-sm text-gray-500">
-                      Submitted {new Date(selected.created_at).toLocaleString()}
+                      Submitted {formatGuamDateTime(selected.created_at)}
                     </span>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <p className="text-sm font-medium text-gray-900">Employee</p>
                     <p className="text-sm text-gray-600">{selected.employee_name}</p>
                   </div>
-                  <DetailBlock title="Request Type" value={requestLabel(selected)} />
-                  <DetailBlock title="Request Notes" value={selected.request_notes} />
-                  <DetailBlock title="Review Notes" value={selected.review_notes} />
+                  <DetailBlock title="Request type" value={requestLabel(selected)} />
+                  <DetailBlock title="Request notes" value={selected.request_notes} />
+                  <DetailBlock title="Review notes" value={selected.review_notes} />
                   <ChangeComparison
                     before={selected.original_values}
                     after={selected.proposed_changes}

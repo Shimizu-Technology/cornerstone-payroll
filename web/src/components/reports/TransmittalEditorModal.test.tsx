@@ -23,10 +23,14 @@ it('shows the actual fixed package inventory while preserving intentionally empt
   expect(generate.mock.calls[0][0].notes).toEqual([]);
   expect(generate.mock.calls[0][0].reportList).toHaveLength(5);
 });
-it('keeps standalone cover enclosures editable', async () => {
-  api.preview.mockResolvedValue(preview);
+it('keeps standalone cover enclosures editable and shows when the saved cover was generated', async () => {
+  api.preview.mockResolvedValue({
+    ...preview,
+    saved_transmittal: { ...preview.saved_transmittal, generated_at: '2026-11-20T14:38:52Z' },
+  });
   render(<TransmittalEditorModal open onClose={vi.fn()} onGenerate={vi.fn()} targetLabel="Transmittal Log" payPeriodId={2} onOpenForm500={vi.fn()} />);
   await screen.findByDisplayValue('Saved preparer');
+  expect(screen.getByText('Last generated: Nov 21, 2026, 12:38 AM ChST')).toBeTruthy();
   const report = await screen.findByRole('textbox', { name: 'Included report 1' });
   expect((report as HTMLInputElement).value).toBe('Custom standalone enclosure');
   expect((report as HTMLInputElement).readOnly).toBe(false);

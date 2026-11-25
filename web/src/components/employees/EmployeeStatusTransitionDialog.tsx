@@ -1,3 +1,4 @@
+import { formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
@@ -151,7 +152,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
           {checkingRuns && <p role="status">{runCheckError ? 'Unable to check open pay runs. Close and reopen to retry.' : 'Checking open pay runs...'}</p>}
           {mode !== 'reactivate' && ([{ title: 'Remove from these runs', runs: removeRuns, remove: true }, { title: 'Check these runs', runs: checkRuns, remove: false }].map(group => group.runs.length > 0 && <div key={group.title} className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm">
             <p className="font-semibold">{group.title}</p>
-            <ul>{group.runs.map(run => <li key={run.id}><Link className="underline" to={payRunPath(employee.company_id, run.id, 'work')}>Pay run #{run.id}: {run.start_date} – {run.end_date} ({run.status})</Link></li>)}</ul>
+            <ul>{group.runs.map(run => <li key={run.id}><Link className="underline" to={payRunPath(employee.company_id, run.id, 'work')}>Pay run #{run.id}: {formatDateRange(run.start_date, run.end_date)} ({run.status})</Link></li>)}</ul>
             {group.remove ? <>
               {approvedRun && <p role="alert">Unapprove pay run #{approvedRun.id} first</p>}
               <p>Remove {employee.first_name} from these runs before approving them. No paychecks are removed automatically.</p>
