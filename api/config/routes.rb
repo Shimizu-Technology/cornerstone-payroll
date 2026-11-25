@@ -99,6 +99,11 @@ Rails.application.routes.draw do
       namespace :client do
         resources :support_access_logs, only: :index
         resource :employee_intake_settings, only: :show
+        get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
+        post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
+        get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
+        post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",
+          constraints: { operation: /invite|resend|unlock|revoke|reset_sign_up/ }
         resource :employee_app_settings, only: [ :show ] do
           patch :branding, action: :update_branding
           put :help_contacts, action: :update_help_contacts
@@ -383,6 +388,11 @@ Rails.application.routes.draw do
           end
         end
         resource :portal_notification_recipients, only: [ :show, :update ]
+        get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
+        post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
+        get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
+        post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",
+          constraints: { operation: /invite|resend|unlock|revoke|reset_sign_up/ }
         resource :employee_app_settings, only: [ :show ] do
           patch :branding, action: :update_branding
           put :help_contacts, action: :update_help_contacts

@@ -37,7 +37,8 @@ module EmployeeLinks
     def call
       raise Error, "Choose email or a printed sign-up code" unless %w[email code].include?(@delivery)
 
-      EmployeeLinks.require_staff!(@actor, @link.company)
+      EmployeeLinks.require_invitation_management!(@actor, @link.company)
+      raise Error, "The employee app isn't turned on for this company" unless @link.portal_enabled?
       raise Error, RESET_PENDING if EmployeeAccountLink.where(id: @link.id).pick(:sign_up_reset_requested_at)
 
       employee = @link.employee

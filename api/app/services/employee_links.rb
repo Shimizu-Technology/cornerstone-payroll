@@ -27,13 +27,25 @@ module EmployeeLinks
 
   AUDIT_RECORD_TYPE = "employee_account_links"
 
-  # Inviting, resending and unlocking stay with Cornerstone staff who can
-  # change client configuration until M4-9 adds the client admin path.
-  def self.require_staff!(actor, company)
-    allowed = actor.is_a?(User) && actor.payroll_access_allowed? && actor.staff_member? &&
+  def self.staff_management_allowed?(actor, company)
+    actor.is_a?(User) && actor.staff_member? && actor.payroll_access_allowed? &&
       actor.can_access_company?(company.id) &&
       StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: company)
-    raise Forbidden, "Client configuration access required" unless allowed
+  end
+
+  def self.require_staff!(actor, company)
+    raise Forbidden, "Cornerstone staff access required" unless staff_management_allowed?(actor, company)
+  end
+
+  # Pilot capability: the client's own company users can manage invitations.
+  # Unlocking, revoking and resetting sign-up still require staff management.
+  def self.manage_invitations_allowed?(actor, company)
+    staff_management_allowed?(actor, company) ||
+      (actor.is_a?(User) && actor.client? && actor.payroll_access_allowed? && actor.can_access_company?(company.id))
+  end
+
+  def self.require_invitation_management!(actor, company)
+    raise Forbidden, "Employee invitation access required" unless manage_invitations_allowed?(actor, company)
   end
 
   def self.audit!(link, action, user: nil, actor: nil, metadata: {}, request: nil)
