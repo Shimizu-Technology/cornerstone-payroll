@@ -174,8 +174,8 @@ RSpec.describe DemoCompany::Seed do
     expect(kitchen.pay_periods.where(start_date: period.start_date).count).to eq(1)
   end
 
-  it "refuses a concurrent run for the same organization" do
-    key = Zlib.crc32("#{described_class::LOCK_NAMESPACE}:#{organization.id}")
+  it "refuses a concurrent run for the same organization and releases its lock after an error" do
+    key = described_class::LOCK_KEY_BASE + organization.id
     # A separate database session, as a second seed process would have.
     config = ActiveRecord::Base.connection_db_config.configuration_hash
     holder = PG.connect({ host: config[:host], port: config[:port], dbname: config[:database],
@@ -183,8 +183,26 @@ RSpec.describe DemoCompany::Seed do
     holder.exec("SELECT pg_advisory_lock(#{key})")
     expect { seed! }.to raise_error(described_class::Refused, /in progress/)
     expect(Company.demo).to be_empty
+    holder.exec("SELECT pg_advisory_unlock(#{key})")
+
+    allow_any_instance_of(described_class).to receive(:seed_quickbooks_history!).and_raise("Storage unavailable")
+    expect { seed! }.to raise_error("Storage unavailable")
+    expect(holder.exec("SELECT pg_try_advisory_lock(#{key}) AS locked").first["locked"]).to eq("t")
   ensure
+    holder&.exec("SELECT pg_advisory_unlock_all()")
     holder&.close
+  end
+
+  it "keeps a tester's later termination when reseeding" do
+    seed!
+    quinn = person(kitchen, "Quinn", "Sable")
+    open_period = kitchen.pay_periods.find_by!(status: "draft")
+    EmployeeStatusTransitionService.terminate!(employee: quinn, actor: admin, attributes: {
+      effective_date: open_period.start_date - 1, reason_category: "voluntary", source: "operator"
+    })
+    expect { seed! }.not_to raise_error
+    expect(quinn.reload.status).to eq("terminated")
+    expect(quinn.employee_status_events.where(event_type: "reactivated").count).to eq(1)
   end
 
   it "uses the company a concurrent run created first" do

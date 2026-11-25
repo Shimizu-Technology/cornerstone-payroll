@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-require_relative "../rls_task"
-
 namespace :demo do
+  # Not RlsTask.system: the seed enters its own scopes (system for the
+  # organization, each company's own scope for its writes), which can't nest.
   desc "Seed the two demo employers with fictional people and committed payroll (ORGANIZATION_ID, ACTOR_ID). Safe to rerun."
-  RlsTask.system seed: :environment do
-    organization = Organization.find(ENV.fetch("ORGANIZATION_ID"))
-    actor = User.find(ENV.fetch("ACTOR_ID"))
+  task seed: :environment do
+    organization, actor = TenantScope.as_system(reason: "Find the demo seed organization and actor") do
+      [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
+    end
     result = Current.set(user: actor) { DemoCompany::Seed.new(organization: organization, actor: actor).call }
     puts "OK    demo:seed companies=#{result.companies.map(&:id).join(',')} employees_created=#{result.employees_created} " \
          "periods_committed=#{result.periods_committed} periods_skipped=#{result.periods_skipped}"
@@ -14,7 +15,7 @@ namespace :demo do
     abort "FAIL  demo:seed #{e.message}"
   end
 
-  desc "Write the fictional QuickBooks export bundle and matching pay-stub PDF to OUTPUT_DIR for the import and stub upload screens"
+  desc "Write the fictional QuickBooks export bundle and matching pay-stub PDFs to OUTPUT_DIR for the import and stub upload screens"
   task quickbooks_sample: :environment do
     result = DemoCompany::QuickbooksSample.new(output_dir: ENV.fetch("OUTPUT_DIR")).call
     puts "OK    demo:quickbooks_sample files=#{result.files.size} stub_pdfs=#{result.stub_pdfs.size}"
