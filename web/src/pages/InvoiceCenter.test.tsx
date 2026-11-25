@@ -30,9 +30,14 @@ vi.mock('@/components/layout/Header', () => ({
   Header: ({ title, actions }: { title: string; actions?: ReactNode }) => <div><h1>{title}</h1>{actions}</div>,
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 1, organization_id: 1, role: 'admin', organization_name: 'Cornerstone' } }) }));
-vi.mock('@/contexts/CompanyContext', () => ({
-  useCompany: () => ({ activeCompany: { id: 1, name: 'Cornerstone', organization_id: 1 }, activeOrganizationId: 1, activeOrganizationName: 'Cornerstone', companies: [] }),
+const companyContext = vi.hoisted(() => ({
+  activeCompany: { id: 1, name: 'Cornerstone', organization_id: 1 },
+  activeOrganizationId: 1,
+  activeOrganizationName: 'Cornerstone',
+  companies: [] as Array<{ id: number; name: string; organization_id: number }>,
+  billingCompanyIds: null as number[] | null,
 }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => companyContext }));
 vi.mock('@/contexts/FinanceBookContext', () => ({
   useFinanceBook: () => ({ activeBook: { id: 1, name: 'Cornerstone' } }),
   FinanceBookSelector: () => null,
@@ -92,6 +97,38 @@ describe('InvoiceCenter', () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    companyContext.companies = [];
+    companyContext.billingCompanyIds = null;
+  });
+
+  it('never copies a customer\'s non-billable payroll client into the draft', async () => {
+    companyContext.companies = [
+      { id: 2, name: 'Live Client', organization_id: 1 },
+      { id: 5, name: 'Harbor Finch Kitchen', organization_id: 1 },
+    ];
+    companyContext.billingCompanyIds = [ 2 ];
+    api.recipients.list.mockResolvedValue({ invoice_recipients: [
+      { id: 3, name: 'Kitchen customer', payment_terms: 'Net 15', active: true, company_id: 5 },
+      { id: 4, name: 'Live customer', payment_terms: 'Net 15', active: true, company_id: 2 },
+    ] });
+    api.invoices.create.mockResolvedValue({ invoice: issuedInvoice({ id: 9, invoice_number: 'DRAFT-c', status: 'draft', base_status: 'draft' }) });
+    const user = userEvent.setup();
+    render(<MemoryRouter><InvoiceCenter /></MemoryRouter>);
+
+    await user.click(await screen.findByRole('button', { name: 'New invoice' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New invoice' });
+    const payrollClient = within(dialog).getByLabelText('Payroll client (optional)') as HTMLSelectElement;
+    expect(within(payrollClient).queryByRole('option', { name: 'Harbor Finch Kitchen' })).toBeNull();
+
+    await user.selectOptions(within(dialog).getByLabelText('Bill to'), '4');
+    expect(payrollClient.value).toBe('2');
+    await user.selectOptions(within(dialog).getByLabelText('Bill to'), '3');
+    expect(payrollClient.value).toBe('');
+
+    await user.type(within(dialog).getByRole('textbox', { name: 'Line 1 description' }), 'Payroll services');
+    await user.click(within(dialog).getByRole('button', { name: 'Save draft' }));
+    await waitFor(() => expect(api.invoices.create).toHaveBeenCalled());
+    expect(api.invoices.create.mock.calls[0][0]).toMatchObject({ invoice_recipient_id: 3, company_id: null });
   });
 
   it('prefills the send panel with the default email and sends the edited subject', async () => {

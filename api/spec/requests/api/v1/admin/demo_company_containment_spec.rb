@@ -110,6 +110,12 @@ RSpec.describe "Demo company containment", type: :request do
         responsible_party: "cornerstone", imported_payroll_inclusion: "included", prior_provider_through: nil).call
     end
 
+    def expect_pdf_download
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.media_type).to eq("application/pdf")
+      expect(response.body).to start_with("%PDF")
+    end
+
     def expect_neutral_refusal
       expect(response).to have_http_status(:forbidden).or have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_UNAVAILABLE_MESSAGE)
@@ -160,8 +166,7 @@ RSpec.describe "Demo company containment", type: :request do
       create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000)
       expect(FilingSubmitter.where(organization_id: organization.id)).to be_empty
       get "/api/v1/admin/reports/form_1096_totals", params: { year: 2026, mode: "draft" }
-      expect(response.media_type).to eq("application/pdf"), response.body
-      expect(response.body).to start_with("%PDF")
+      expect_pdf_download
     end
 
     it "lists only live clients as billing choices while navigation stays neutral" do
@@ -182,11 +187,13 @@ RSpec.describe "Demo company containment", type: :request do
 
     it "lets review downloads and checklist steps through like a live client" do
       get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }
-      expect(response).to have_http_status(:ok), response.body
-      expect(response.media_type).to eq("application/pdf")
+      expect_pdf_download
 
       get "/api/v1/admin/reports/w2_gu_employee_copies", params: { year: 2026 }
-      expect(response).not_to have_http_status(:forbidden)
+      expect_pdf_download
+
+      get "/api/v1/admin/reports/w2_gu_copy_1_drt", params: { year: 2026 }
+      expect_pdf_download
 
       get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: period.id }
       expect(response).to have_http_status(:ok), response.body
@@ -219,7 +226,9 @@ RSpec.describe "Demo company containment", type: :request do
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_ACCESS_DENIED_MESSAGE)
       post "/api/v1/form_500s/download", params: { form_500: { pay_period_id: period.id } }
-      expect(response).not_to have_http_status(:forbidden)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.media_type).to eq("application/pdf")
+      expect(response.body).to start_with("%PDF")
 
       act_as(operator)
       post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "filed", payment_amount: "125.00",

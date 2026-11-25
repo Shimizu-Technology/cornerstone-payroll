@@ -46,15 +46,26 @@ RSpec.describe "Demo company containment guards" do
 
     it "records preparation only for a demo" do
       expect(filing).to be_valid
-      { status: "filed" }.merge(status: "paid").each do |attribute, value|
-        filing.assign_attributes(attribute => value)
-        expect(filing).not_to be_valid
+      %w[filed paid].each do |status|
+        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: status)
+        expect(candidate).not_to be_valid, "accepted status #{status}"
+        expect(candidate.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
       end
       [ { payment_amount: 10 }, { payment_date: Date.current }, { confirmation_number: "DRT-1" }, { receipt_attached: true } ].each do |change|
         candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: "prepared", **change)
         expect(candidate).not_to be_valid, "accepted #{change.inspect}"
         expect(candidate.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
       end
+    end
+
+    it "requires the filing's company to match its pay period and applies the demo rule to the pay period's company" do
+      mismatched = Form500Filing.new(company: live, pay_period: period, fields: { "x" => 1 }, status: "filed", confirmation_number: "DRT-1")
+      expect(mismatched).not_to be_valid
+      expect(mismatched.errors[:company]).to include("must match the pay period's company")
+      expect(mismatched.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+
+      live_period = create(:pay_period, :committed, company: live)
+      expect(Form500Filing.new(company: live, pay_period: live_period, fields: { "x" => 1 }, status: "filed", confirmation_number: "DRT-1")).to be_valid
     end
   end
 
@@ -67,6 +78,32 @@ RSpec.describe "Demo company containment guards" do
         raw_insert("payroll_liability_postings", company_id: demo.id, pay_period_id: period.id, posting_type: "commit",
           idempotency_key: "raw-demo", liability_date: Date.current, posted_at: Time.current)
       end.to raise_error(ActiveRecord::StatementInvalid, /cannot belong to a demo company/)
+    end
+
+    # D4 opens a contained demo commit; until then the model refuses to save a
+    # committed demo period, so these examples stand in for that one rule.
+    def allow_committed_demo_periods
+      allow_any_instance_of(PayPeriod).to receive(:test_workspace_cannot_be_committed)
+    end
+
+    it "voids a committed demo period without creating any liability posting" do
+      allow_committed_demo_periods
+      expect(PayrollLiabilityPostingService.reverse!(pay_period: period, actor: admin, reason: "Demo void")).to eq([])
+      PayPeriodCorrectionService.void!(pay_period: period, actor: admin, reason: "Demo void")
+
+      expect(period.reload.correction_status).to eq("voided")
+      expect(PayrollLiabilityPosting.where(company: demo)).to be_empty
+    end
+
+    it "corrects a committed demo period's pay date without creating any liability posting" do
+      allow_committed_demo_periods
+      new_date = period.pay_date + 1.day
+      expect(PayrollLiabilityPostingService.restate_for_pay_date!(pay_period: period, actor: admin, reason: "Demo",
+        old_pay_date: period.pay_date, new_pay_date: new_date)).to be_nil
+      PayPeriodPayDateCorrectionService.call(pay_period: period, new_pay_date: new_date, reason: "Demo pay date moved", actor: admin)
+
+      expect(period.reload.pay_date).to eq(new_date)
+      expect(PayrollLiabilityPosting.where(company: demo)).to be_empty
     end
 
     it "never creates a FIT deposit check or AIRE acknowledgements for a demo" do

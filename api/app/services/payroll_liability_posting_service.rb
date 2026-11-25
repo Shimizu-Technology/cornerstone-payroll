@@ -115,7 +115,11 @@ class PayrollLiabilityPostingService
     raise InvalidStateError, e.message
   end
 
+  # A demo period never posted liabilities, so a void has nothing to reverse
+  # and must not capture a legacy backfill first.
   def reverse!
+    return [] if pay_period.company.demo?
+
     PayPeriod.transaction do
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       ensure_committed!(locked)
@@ -151,7 +155,10 @@ class PayrollLiabilityPostingService
     end
   end
 
+  # Likewise, a demo pay-date correction moves no liabilities.
   def restate_for_pay_date!(old_pay_date:, new_pay_date:)
+    return nil if pay_period.company.demo?
+
     PayPeriod.transaction do
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       ensure_committed!(locked)
