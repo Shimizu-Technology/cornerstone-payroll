@@ -551,7 +551,7 @@ export function verificationIdFrom(data: unknown): string | null {
 //   -> 404 { code: "claim_failed" } for every failed check, including a locked invite
 // 5 failed checks lock the invite for 24 hours, but the answer stays the same
 // 422 or 404 (no 423), so a lock never says the details were close.
-// terms_version is sent when the build has it; the API ignores it until M4-6.
+// The API requires the current server-published terms version for acceptance.
 
 export interface IdentityCheck {
   token?: string;

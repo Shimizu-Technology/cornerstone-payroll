@@ -14,6 +14,10 @@ module PortalNotifications
   BATCH_WINDOW = 2.minutes
 
   CATEGORIES = {
+    "tax_form_paper_copies" => {
+      audience: "staff", default_mode: "immediate", label: "Paper tax form follow-ups",
+      description: "An employee tax form email could not be delivered and a paper copy is due."
+    },
     "client_messages" => {
       audience: "staff", default_mode: "immediate", label: "Client messages",
       description: "A client sends a message or starts a conversation."
@@ -57,6 +61,7 @@ module PortalNotifications
   }.freeze
 
   EVENT_TYPES = {
+    "tax_form_paper_required" => { category: "tax_form_paper_copies" },
     "client_message" => { category: "client_messages", message: true },
     "client_upload" => { category: "client_uploads" },
     "employee_change_submitted" => { category: "employee_changes" },

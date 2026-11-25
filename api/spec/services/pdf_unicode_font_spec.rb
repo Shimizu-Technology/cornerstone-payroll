@@ -49,16 +49,57 @@ RSpec.describe PdfUnicodeFont do
     expect(unicode_pdf_text(pdf.render)).to include("Wiśniewska", "Nguyễn", "Mañibusan", "Żółć")
   end
 
-  it "builds the PDF instead of failing when a name has no glyph in the font" do
-    pdf.text "王小明 김민수"
-    expect(pdf.render).to start_with("%PDF")
+  it "never opens the CJK font for repeated multiline Latin PDFs" do
+    allow(TTFunk::File).to receive(:open).and_call_original
+    expect(TTFunk::File).not_to receive(:open).with(described_class::CJK_FILE)
+    expect(described_class::CjkTTF).not_to receive(:new)
+
+    10.times do
+      document = described_class.document
+      document.text "Payroll register\nAna Cruz"
+      document.text_box "Check address\nHagåtña, GU", at: [ 0, 100 ], width: 200
+      document.draw_text "Ana Cruz — Guam", at: [ 0, 40 ]
+      expect(described_class.unprintable_characters("Hagåtña, GU")).to be_empty
+      document.render
+    end
+  end
+
+  it "embeds CJK glyphs in regular, bold, table and positioned text" do
+    pdf.text "王小明 𠮷", style: :bold
+    pdf.table([ [ "さくら" ] ], cell_style: { font_style: :italic })
+    pdf.text_box "김민수", at: [ 0, 100 ], width: 200
+    pdf.draw_text "Suite 東京都 12", at: [ 0, 40 ], style: :bold
+
+    expect(unicode_pdf_text(pdf.render)).to include("王小明", "𠮷", "さくら", "김민수", "Suite 東京都 12")
+  end
+
+  it "validates and renders katakana names with kana marks" do
+    name = "ターナー・サトウ"
+    expect(described_class.unprintable_characters("#{name} カ\u3099ハ\u309A")).to be_empty
+    pdf.draw_text name, at: [ 0, 40 ]
+
+    expect(unicode_pdf_text(pdf.render)).to include(name)
+  end
+
+  it "refuses katakana names when the official copy disables CJK" do
+    expect { described_class.ensure_printable!("ターナー", label: "Employee", cjk: false) }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /ターナー/)
+  end
+
+  it "measures spacing within and between mixed font runs" do
+    sample = "AB東京C"
+    unspaced_width = pdf.width_of(sample)
+
+    pdf.character_spacing(10) do
+      expect(pdf.width_of(sample)).to be_within(0.001).of(unspaced_width + 40)
+    end
   end
 
   it "lists only the characters the font has no glyph for" do
     expect(described_class.unprintable_characters("Wiśniewska Nguyễn Шевченко Keʻala")).to be_empty
-    expect(described_class.unprintable_characters("王小明 Kim 王")).to eq(%w[王 小 明])
+    expect(described_class.unprintable_characters("王小明 김민수 さくら")).to be_empty
     expect(described_class.unprintable_characters(nil)).to be_empty
-    expect(described_class.unprintable_characters("Taro\u3000Yamada")).to eq([ "\u3000" ])
+    expect(described_class.unprintable_characters("Taro\u3000Yamada")).to be_empty
     expect(described_class.unprintable_characters("12 Chalan\nHagåtña, GU\r\n")).to be_empty
     expect(described_class.unprintable_characters("Ana\tCruz")).to eq([ "\t" ])
   end

@@ -33,6 +33,8 @@ RSpec.describe PunchEntry, type: :model do
     entry = described_class.create!(timecard: timecard, card_day: 26, date: Date.new(2026, 4, 26),
       clock_in: "08:25", lunch_out: "12:02")
     timecard.update!(ocr_status: :reviewed, reviewed_by_name: "Reviewer", reviewed_at: Time.current)
+    # Legacy rows predate the contract migration that requires company_id.
+    ActiveRecord::Base.connection.change_column_null :punch_entries, :company_id, true
     entry.update_column(:company_id, nil)
 
     entry.save!

@@ -21,10 +21,60 @@ namespace :rls do
         direct_runtime_configured: RlsConfiguration.runtime_url.present?,
         role: connection.select_one("SELECT rolname, rolbypassrls, rolsuper FROM pg_roles WHERE rolname = current_user"),
         kill_switch: installed && connection.select_value("SELECT bypass_enabled FROM rls_admin.rls_kill_switch WHERE singleton"),
+        enforcement: RlsDatabase.enforcement_summary(connection),
         tables: RlsDatabase.table_status(connection),
         login_link_decision: RlsDatabase.login_link_decision_status(connection)
       )
     end
+  end
+
+  desc "Enable and force company policies in batches using the direct owner connection " \
+       "(TABLES=a,b for a subset, DRY_RUN=1 to list, BATCH_SIZE=, BATCH_PAUSE= seconds)"
+  task enforce: :environment do
+    require Rails.root.join("lib/rls_enforcement")
+
+    abort "Boot with RLS_CONTEXT_GUARD_MODE=off for owner maintenance" if RlsContextGuard.enabled?
+    tables = begin
+      RlsEnforcement.select_tables(ENV.key?("TABLES") ? ENV["TABLES"] : nil)
+    rescue ArgumentError => error
+      abort error.message
+    end
+    dry_run = case ENV["DRY_RUN"]
+    when nil, "0" then false
+    when "1" then true
+    else abort "DRY_RUN must be 1 (list only) or 0"
+    end
+    url = RlsConfiguration.direct_url!(ENV.fetch("MIGRATION_DATABASE_URL"), "MIGRATION_DATABASE_URL")
+    record = RlsMaintenanceRecord
+    record.establish_connection(url)
+    record.connection_pool.with_connection do |connection|
+      abort "Another rls:enforce or rls:disable holds the enforcement lock" unless dry_run || RlsEnforcement.lock!(connection)
+      failures = RlsEnforcement.preflight_failures(connection)
+      abort "Refusing to enforce RLS:\n- #{failures.join("\n- ")}" if failures.any?
+
+      pending = RlsEnforcement.pending(connection, tables)
+      batch_size = Integer(ENV.fetch("BATCH_SIZE", RlsEnforcement::BATCH_SIZE))
+      if dry_run
+        puts "Dry run: #{pending.size} of #{tables.size} selected tables need ENABLE and FORCE"
+        pending.each_slice(batch_size).with_index(1) { |batch, index| puts "Batch #{index}: #{batch.join(', ')}" }
+        next
+      end
+
+      failed, stopped = begin
+        [ RlsEnforcement.enforce!(connection, pending, batch_size: batch_size, pause: Float(ENV.fetch("BATCH_PAUSE", "5"))), nil ]
+      rescue RlsEnforcement::Stopped => error
+        [ [], error.message ]
+      end
+      result = RlsEnforcement.verification(connection, tables)
+      puts JSON.pretty_generate(result)
+      abort stopped if stopped
+      abort "Failed to lock: #{failed.join(', ')}. Rerun to resume." if failed.any?
+      abort "Not enforced: #{result['selected_not_enforced'].join(', ')}" if result["selected_not_enforced"].any?
+      abort "The kill switch changed during the run" unless result["kill_switch_bypass"] == false
+      puts(result["all_enforced"] ? "All protected tables are enabled and forced" : "Selected tables are enabled and forced")
+    end
+  ensure
+    record&.remove_connection
   end
 
   desc "Summarize structured RLS warnings from an exported JSON-lines log on standard input"
@@ -54,8 +104,20 @@ namespace :rls do
     require_relative "../rls_configuration"
     require_relative "../rls_tables"
 
+    # Waits a bounded time for a running rls:enforce, which stops before its
+    # next table once the kill switch is set. 0 would turn lock_timeout off
+    # and wait forever, so it is refused like any value outside the bound.
+    wait = Integer(ENV.fetch("LOCK_WAIT", "60"), 10, exception: false)
+    abort "LOCK_WAIT must be a whole number of seconds from 1 to 600" unless wait&.between?(1, 600)
     url = RlsConfiguration.direct_url!(ENV.fetch("MIGRATION_DATABASE_URL"), "MIGRATION_DATABASE_URL")
     PG.connect(url) do |connection|
+      begin
+        connection.exec("SET lock_timeout = '#{wait}s'")
+        connection.exec("SELECT pg_advisory_lock(#{RlsConfiguration::OWNER_TASK_LOCK})")
+      rescue PG::LockNotAvailable
+        abort "An rls:enforce still holds the enforcement lock after #{wait}s. Set the kill switch first; " \
+              "enforce stops before its next table. Then rerun rls:disable (LOCK_WAIT= seconds to wait longer)."
+      end
       connection.exec("SET lock_timeout = '3s'")
       enforced = connection.exec(<<~SQL).column_values(0)
         SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace

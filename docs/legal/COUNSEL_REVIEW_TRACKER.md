@@ -6,7 +6,7 @@ The demo company uses the same draft wording, so it can be tested end to end bef
 
 | # | Item | Where it lives | Status | Blocks |
 |---|---|---|---|---|
-| 1 | Employee App Terms of Use and Privacy Notice | Employee sign-up and claim clickwrap checkbox (`web/src/employee/signup.tsx`) and the **Terms and privacy** links on Help (`web/src/employee/help.tsx`). The checkbox and links stay hidden until the employee site's three build settings are set: `VITE_EMPLOYEE_TERMS_VERSION`, `VITE_EMPLOYEE_TERMS_URL` and `VITE_EMPLOYEE_PRIVACY_URL` (`web/src/employee/config.ts`). The API doesn't record the accepted version yet; that moves to the server when final text arrives. | Draft wording; awaiting counsel | Real-employee go-live |
+| 1 | Employee App Terms of Use and Privacy Notice | Employee sign-up and claim clickwrap checkbox (`web/src/employee/signup.tsx`) and the **Terms and privacy** links on Help (`web/src/employee/help.tsx`). The checkbox and Help links use the server-published version. The API requires that version and records it in the sign-up or claim audit. | Draft wording; awaiting counsel | Real-employee go-live |
 | 2 | Electronic pay statement consent (Guam UETA) | Draft text: `api/db/migrate/20261126000300_seed_draft_delivery_disclosures.rb` and `api/app/services/delivery_disclosures/draft_seeds.rb`. Screen: **Electronic pay statements** on My info (`web/src/employee/consent.tsx`), behind `employee_portal.features.delivery_consent`. Approved text goes in as a **new** disclosure version; existing rows can't be edited. | Draft wording; awaiting counsel | Electronic-only pay statements (paper continues in the pilot) |
 | 3 | Electronic W-2GU consent disclosure (26 CFR 31.6051-1(j)) | Same files as item 2. Screen: **Electronic Form W-2GU** on My info and Tax forms (`web/src/employee/consent.tsx`), with the test-PDF step. M4-5 W-2GU copies: `docs/EMPLOYEE_APP_W2GU_COPIES.md`. | Draft wording; awaiting counsel | Electronic-only W-2GU (paper continues in the pilot) |
 | 4 | W-2GU "tax document available" notice email | M4-5 notice email: `api/app/services/employee_documents/tax_form_notice.rb`, sent by `DispatchEmployeeTaxFormNoticesJob` | Wording follows the regulation; counsel to confirm | Real-employee W-2GU posting |
@@ -29,3 +29,12 @@ The demo company uses the same draft wording, so it can be tested end to end bef
 - Build plan: `docs/MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md` (§3 gates, §4 M4-6, M4-8, §8a)
 - Demo company plan: `docs/DEMO_COMPANY_PLAN_2026-11-25.md`
 - Go-live runbook (where each item gates a step): `docs/rollout/M4_GO_LIVE_RUNBOOK.md` §1 and G1
+
+## Paper follow-up after an undeliverable tax form notice
+
+Confirm the Guam-specific requirements for Form W-2GU, including whether a
+mailed availability notice alone suffices and how a verified corrected address
+affects the obligation. Pending counsel review, staff should mail the paper
+form and its availability notice within 30 calendar days of the
+undeliverable event. The app keeps the employee's consent and records mailing
+through the Year-end checklist. See [26 CFR 31.6051-1(j)(5)(ii)](https://www.govinfo.gov/content/pkg/CFR-2025-title26-vol17/pdf/CFR-2025-title26-vol17-sec31-6051-1.pdf).
