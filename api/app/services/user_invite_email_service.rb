@@ -45,7 +45,10 @@ class UserInviteEmailService
         return :captured
       end
 
-      Rails.logger.info("[InviteEmail] Sent invite user_id=#{user.id} to #{LogRedaction.email(user.email)} id=#{response['id']}") unless StagingOutboundPolicy.staging?
+      # Resend's Ruby client returns an HTTParty::Response whose parsed keys are
+      # symbols (:id), while internal stubs/captures may use string keys ("id").
+      message_id = response[:id].presence || response["id"].presence
+      Rails.logger.info("[InviteEmail] Sent invite user_id=#{user.id} to #{LogRedaction.email(user.email)} id=#{message_id}") unless StagingOutboundPolicy.staging?
       true
     rescue StandardError => e
       if StagingOutboundPolicy.staging?
