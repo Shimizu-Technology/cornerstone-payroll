@@ -19,6 +19,7 @@ function auth(overrides: Partial<EmployeeAuthValue> = {}): EmployeeAuthValue {
     SignUpForm: () => null,
     stepUp: (attempt) => attempt(),
     openAccountSettings: () => undefined,
+    AccountSecurityPanel: () => null,
     ...overrides,
   };
 }
