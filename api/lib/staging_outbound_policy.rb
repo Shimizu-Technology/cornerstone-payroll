@@ -238,7 +238,33 @@ class StagingOutboundPolicy
       StagingStoragePolicy.hosts(env)
     end
 
-    def http_request!(http, request, env: ENV)
+    # Pre-validates a Clerk Backend API Net::HTTPRequest before entering a timed
+    # block (such as Timeout.timeout), so StagingHttpGuard does not execute
+    # User.find_by queries inside Timeout.timeout where an async timeout could
+    # interrupt ActiveRecord I/O. Host/port/SSL validation (http_host!) still
+    # runs on every request and connect; only the Clerk policy decision is
+    # reused, strictly for this exact request object, env, method, path, and
+    # body within this thread and block.
+    def with_preauthorized_clerk_request(request, env: ENV)
+      return yield unless staging?(env)
+
+      path = URI.parse(request.path).path
+      clerk_request!(request, path, env)
+      previous = Thread.current[:staging_preauthorized_clerk_request]
+      stored = true
+      Thread.current[:staging_preauthorized_clerk_request] = {
+        request: request,
+        env: env,
+        method: request.method.to_s.dup.freeze,
+        path: request.path.to_s.dup.freeze,
+        body: request.body&.dup&.freeze
+      }
+      yield
+    ensure
+      Thread.current[:staging_preauthorized_clerk_request] = previous if stored
+    end
+
+    def http_request!(http, request, env: ENV, body: nil)
       return true unless staging?(env)
       http_host!(http.address, http.port, http.use_ssl?, env: env)
       host = http.address.downcase
@@ -246,7 +272,7 @@ class StagingOutboundPolicy
       if host == "api.resend.com"
         raise Blocked, "Mail must use StagingMailTransport" unless Thread.current[:staging_mail_transport] && request.method == "POST" && path == "/emails"
       elsif host == "api.clerk.com"
-        clerk_request!(request, path, env)
+        clerk_request!(request, path, env) unless preauthorized_clerk_request?(request, env: env, body: body)
       elsif host == URI(env.fetch("CLERK_ISSUER")).host
         raise Blocked, "Only staging Clerk JWKS reads are allowed" unless request.method == "GET" && path == "/.well-known/jwks.json"
       elsif storage_hosts(env).include?(host)
@@ -293,6 +319,18 @@ class StagingOutboundPolicy
       end
     rescue JSON::ParserError, ArgumentError
       raise Blocked, "Invalid staging Clerk operation"
+    end
+
+    def preauthorized_clerk_request?(request, env:, body: nil)
+      token = Thread.current[:staging_preauthorized_clerk_request]
+      return false unless token
+
+      effective_body = body.nil? ? request.body : body
+      token[:request].equal?(request) &&
+        token[:env].equal?(env) &&
+        token[:method] == request.method.to_s &&
+        token[:path] == request.path.to_s &&
+        token[:body] == effective_body
     end
 
     def clerk_invitation_lookup_param?(key, value)
