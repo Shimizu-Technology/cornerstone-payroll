@@ -9,7 +9,10 @@
 # Only the job that owns the row (the one its claim queued) does anything,
 # and each attempt holds the row's lease (EmployeeAppClerkRevocation), so a
 # duplicate job, or a second run of this one, never races an attempt or an
-# outcome.
+# outcome. An attempt records its outcome and releases its lease only under
+# the lease token it took, so a run that somehow outlived its lease writes
+# nothing; and a pass stops at PASS_DEADLINE, well inside the lease, and is
+# rescheduled to carry on from where Clerk now stands.
 #
 # An invitation someone already accepted can't be revoked: the person has a
 # Clerk account. The job ends that account's sessions instead (the login's
@@ -25,6 +28,10 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
   CONFIRMED_ACTION = "employee_app_switch#clerk_revocation_confirmed"
   GAVE_UP_ACTION = "employee_app_switch#clerk_revocation_failed"
   FOLLOW_UP_ACTION = "employee_app_switch#clerk_revocation_needs_follow_up"
+  # How long one pass may call Clerk. Each call has its own short timeouts,
+  # so a pass ends well before its lease (ATTEMPT_LEASE) runs out.
+  PASS_DEADLINE = 10.minutes
+  DEADLINE_ERROR = "Clerk pass deadline reached; rescheduled"
 
   self.rls_mode = :system
 
@@ -34,39 +41,60 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
     Rails.logger.error("[RevokeEmployeeAppClerkJob] GAVE UP on revocation #{job.arguments.first}: #{error.class}")
     TenantScope.as_system(reason: "Record an abandoned Clerk revocation") { job.give_up!(error) }
   end
+  # Declared after the general retry so it handles a pass that ran out of
+  # time: rescheduled soon, on its own count, not as a failed attempt.
+  retry_on ClerkInvitationService::DeadlineReached, wait: 1.minute, attempts: 20 do |job, error|
+    Rails.logger.error("[RevokeEmployeeAppClerkJob] GAVE UP on revocation #{job.arguments.first} after repeated deadlines")
+    TenantScope.as_system(reason: "Record an abandoned Clerk revocation") { job.give_up!(error) }
+  end
 
   def perform(revocation_id, clerk: ClerkInvitationService.new)
     revocation = EmployeeAppClerkRevocation.start_attempt!(revocation_id, job_id: job_id)
     return unless revocation
 
+    lease = revocation.lease_token
     begin
-      record_result!(revocation, call_clerk(revocation, clerk))
+      result = ClerkInvitationService.within_deadline(Time.current + PASS_DEADLINE) { call_clerk(revocation, clerk) }
+      record_result!(revocation, lease, result)
+    rescue ClerkInvitationService::DeadlineReached
+      still_ours = revocation.finish!(job_id: job_id, lease_token: lease) { |row| row.update!(last_error: DEADLINE_ERROR) }
+      # Rescheduled only while the row is still this attempt's.
+      raise if still_ours
     ensure
-      revocation.release_lease!
+      revocation.release_lease!(lease)
     end
   end
 
+  # Takes the lease to record giving up, so a run that holds it (a newer
+  # attempt) is never overruled; that run decides the outcome instead.
   def give_up!(error)
-    revocation = EmployeeAppClerkRevocation.find_by(id: arguments.first)
-    revocation&.finish!(job_id: job_id) do |row|
-      row.update!(gave_up_at: Time.current, last_error: error.class.name.first(200))
-      audit!(row, GAVE_UP_ACTION)
+    revocation = EmployeeAppClerkRevocation.take_lease!(arguments.first, job_id: job_id)
+    return unless revocation
+
+    lease = revocation.lease_token
+    begin
+      revocation.finish!(job_id: job_id, lease_token: lease) do |row|
+        row.update!(gave_up_at: Time.current, last_error: error.class.name.first(200))
+        audit!(row, GAVE_UP_ACTION)
+      end
+    ensure
+      revocation.release_lease!(lease)
     end
   end
 
   private
 
-  def record_result!(revocation, result)
+  def record_result!(revocation, lease, result)
     unless result[:follow_up] || result[:success]
-      still_ours = revocation.finish!(job_id: job_id) do |row|
+      still_ours = revocation.finish!(job_id: job_id, lease_token: lease) do |row|
         row.update!(last_error: result[:error].to_s.first(200).presence || "Clerk didn't confirm")
       end
-      # Retried only while the row is still this job's to finish.
+      # Retried only while the row is still this attempt's to finish.
       raise RevocationFailed, result[:error].to_s if still_ours
       return
     end
 
-    revocation.finish!(job_id: job_id) do |row|
+    revocation.finish!(job_id: job_id, lease_token: lease) do |row|
       if result[:follow_up]
         row.update!(follow_up_at: Time.current, outcome: result[:outcome], last_error: result[:error].to_s.first(200).presence)
         audit!(row, FOLLOW_UP_ACTION, sessions_ended: result[:revoked])

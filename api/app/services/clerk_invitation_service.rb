@@ -4,6 +4,24 @@ class ClerkInvitationService
   BASE_URL = "https://api.clerk.com/v1"
   INVITATION_LOOKUP_OFFSET_LIMIT = 100
   SUBJECT_PATTERN = /\Auser_[a-zA-Z0-9_-]+\z/
+  DEADLINE_KEY = :clerk_pass_deadline
+
+  # A pass ran out of time: raised instead of starting a Clerk call after
+  # the deadline set by within_deadline. Deliberately not one of the network
+  # errors the calls below rescue, so it ends the whole pass.
+  class DeadlineReached < StandardError; end
+
+  # Runs the block with a deadline for this thread's Clerk calls (the
+  # earlier one, when nested): a call that would start after it raises
+  # DeadlineReached instead. Each call is bounded by its own timeouts, so a
+  # pass ends within one call of the deadline.
+  def self.within_deadline(deadline)
+    previous = Thread.current[DEADLINE_KEY]
+    Thread.current[DEADLINE_KEY] = [ previous, deadline ].compact.min
+    yield
+  ensure
+    Thread.current[DEADLINE_KEY] = previous
+  end
 
   def initialize
     @secret_key = ENV["CLERK_SECRET_KEY"]
@@ -293,11 +311,15 @@ class ClerkInvitationService
   end
 
   def request_json(path, method, body = nil)
+    deadline = Thread.current[DEADLINE_KEY]
+    raise DeadlineReached, "Clerk pass deadline reached" if deadline && Time.current >= deadline
+
     uri = URI("#{BASE_URL}#{path}")
     http = Net::HTTP.new(uri.hostname, uri.port)
     http.use_ssl = true
     http.open_timeout = 5
     http.read_timeout = 5
+    http.write_timeout = 5
 
     req = method.new(uri)
     req["Authorization"] = "Bearer #{@secret_key}"
