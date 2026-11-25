@@ -174,6 +174,41 @@ RSpec.describe DemoCompany::Seed do
     expect(kitchen.pay_periods.where(start_date: period.start_date).count).to eq(1)
   end
 
+  it "never commits a draft that sits beside a committed period in the same window" do
+    seed!
+    committed = kitchen.pay_periods.order(:start_date).first
+    stray = PayPeriod.new(committed.attributes.slice("company_id", "company_pay_schedule_id", "company_workweek_id", "start_date", "end_date",
+      "pay_date", "run_purpose", "run_purpose_source", "includes_base_salary").merge("status" => "draft"))
+    stray.save!(validate: false)
+
+    expect(seed!.periods_committed).to eq(0)
+    expect(stray.reload.status).to eq("draft")
+    expect(stray.payroll_items).to be_empty
+  end
+
+  it "saves a native employee and its initial W-4 election together, and repairs a missing election on rerun" do
+    calls = 0
+    allow_any_instance_of(EmployeeW4ElectionChangeService).to receive(:call!).and_wrap_original do |original, *args|
+      calls += 1
+      raise "Election write failed" if calls == 1
+
+      original.call(*args)
+    end
+    expect { seed! }.to raise_error("Election write failed")
+    expect(Employee.where(first_name: "Ellis", last_name: "Quill")).to be_empty
+
+    allow_any_instance_of(EmployeeW4ElectionChangeService).to receive(:call!).and_call_original
+    seed!
+    ellis = person(kitchen, "Ellis", "Quill")
+    expect(ellis.employee_w4_elections.count).to eq(1)
+
+    # A record left without its election (an older partial run) is repaired.
+    maren = person(kitchen, "Maren", "Fable")
+    EmployeeW4Election.where(employee_id: maren.id).delete_all
+    seed!
+    expect(maren.reload.employee_w4_elections.count).to eq(1)
+  end
+
   it "refuses a concurrent run for the same organization and releases its lock after an error" do
     key = described_class::LOCK_KEY_BASE + organization.id
     # A separate database session, as a second seed process would have.

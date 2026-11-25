@@ -255,10 +255,16 @@ module DemoCompany
 
     def ensure_native_employee!(company, department, person)
       existing = Employee.find_by(company: company, first_name: person[:first], last_name: person[:last])
-      return existing if existing
+      if existing
+        # Repairs a run that stopped between the employee and its election.
+        create_initial_w4_election!(existing) unless existing.employee_w4_elections.exists?
+        return existing
+      end
 
       salary = person[:type] == "salary"
-      employee = Employee.create!(
+      # The employee and its initial W-4 election are saved together.
+      employee = ApplicationRecord.transaction do
+        Employee.create!(
         company: company, department: department, first_name: person[:first], last_name: person[:last],
         email: nil, ssn_encrypted: person[:ssn], employment_type: salary ? "salary" : "hourly",
         salary_type: "annual", pay_rate: person[:rate], pay_frequency: "biweekly", status: "active",
@@ -266,14 +272,18 @@ module DemoCompany
         date_of_birth: person[:dob], phone: person[:phone], payment_delivery_method: person[:delivery],
         bank_routing_number_encrypted: person[:routing], bank_account_number_encrypted: person[:account],
         address_line1: "#{100 + Roster::PEOPLE.index(person)} Chalan Pasaheru", city: "Hagåtña", state: "GU", zip: "96910"
-      )
+        ).tap { |created| create_initial_w4_election!(created) }
+      end
+      @employees_created += 1
+      employee
+    end
+
+    def create_initial_w4_election!(employee)
       EmployeeW4ElectionChangeService.new(
         employee: employee,
         attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) },
         actor: actor, source: "employee_creation", reason: "Initial W-4 election"
       ).call!
-      @employees_created += 1
-      employee
     end
 
     # A fixed uniform deduction for one tipped server, set up once.
@@ -340,8 +350,11 @@ module DemoCompany
     # including a voided one with its correction) means the window is done.
     def period_for_window!(company, schedule, workweek, period_spec)
       existing = PayPeriod.where(company: company, start_date: period_spec[:start_date], end_date: period_spec[:end_date]).order(:id).to_a
+      # A committed or voided period means the window is done, so a draft
+      # beside it is never committed as a second regular payroll.
+      return nil if existing.any? { |period| period.committed? || period.voided? }
       if existing.any?
-        return existing.find { |period| period.status.in?(%w[draft calculated approved]) && !period.voided? && period.correction_status.nil? }
+        return existing.find { |period| period.status.in?(%w[draft calculated approved]) && period.correction_status.nil? }
       end
 
       PayPeriod.create!(company: company, company_pay_schedule: schedule, company_workweek: workweek,

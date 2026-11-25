@@ -128,7 +128,11 @@ module DemoCompany
       path = File.join(@output_dir, name)
       workbook = Spreadsheet::Workbook.new
       sheet = workbook.create_worksheet
-      rows.each_with_index { |row, row_index| row.each_with_index { |value, column| sheet[row_index, column] = value } }
+      # The output boundary: exact two-decimal BigDecimal money becomes a
+      # spreadsheet number here.
+      rows.each_with_index do |row, row_index|
+        row.each_with_index { |value, column| sheet[row_index, column] = value.is_a?(BigDecimal) ? value.to_f : value }
+      end
       workbook.write(path)
       path
     end
