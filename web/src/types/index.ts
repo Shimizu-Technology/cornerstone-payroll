@@ -1748,6 +1748,7 @@ export interface PayrollItem {
   employee_last_name?: string | null;
   employee_name?: string;
   employment_type: EmploymentType;
+  salary_type?: 'annual' | 'per_period' | 'variable' | null;
   contractor_pay_type?: ContractorPayType | null;
   pay_rate: number;
   // Hours (for hourly employees)
@@ -1781,6 +1782,7 @@ export interface PayrollItem {
     notes?: string | null;
   } | null;
   non_taxable_pay?: number;
+  non_taxable_additions_total?: number | string;
   // Calculated pay
   gross_pay?: number;
   net_pay?: number;
@@ -1809,6 +1811,7 @@ export interface PayrollItem {
   roth_retirement_payment?: number;
   loan_payment?: number;
   insurance_payment?: number;
+  other_deductions?: number;
   total_deductions?: number;
   custom_deductions?: CustomDeduction[];
   custom_deductions_total?: number;

@@ -30,10 +30,10 @@ export function ClientPayStubButton({ itemId }: { itemId: number }) {
       setBusy(false);
     }
   };
-  return <div className="space-y-2">
-    <Button variant="outline" size="sm" disabled={busy} onClick={() => void download(true)}>View pay stub</Button>
-    <Button variant="outline" size="sm" disabled={busy} onClick={() => void download()}>{busy ? 'Preparing…' : 'Download pay stub'}</Button>
+  return <div className="flex flex-wrap gap-2">
+    <Button variant="outline" size="sm" className="min-h-11 sm:min-h-11" disabled={busy} onClick={() => void download(true)}>View pay stub</Button>
+    <Button variant="outline" size="sm" className="min-h-11 sm:min-h-11" disabled={busy} onClick={() => void download()}>{busy ? 'Preparing…' : 'Download pay stub'}</Button>
     <PdfPreview artifact={artifact} onClose={() => setArtifact(null)} />
-    {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+    {error && <p role="alert" className="w-full text-sm text-red-700">{error}</p>}
   </div>;
 }

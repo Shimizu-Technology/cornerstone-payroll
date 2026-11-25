@@ -4,15 +4,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ClientReports } from './ClientReports';
 import { clientReportCatalog } from './clientReportCatalog';
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
-const api = vi.hoisted(() => ({ periods: vi.fn(), employees: vi.fn(), register: vi.fn(), taxSummary: vi.fn() }));
+const api = vi.hoisted(() => ({ periods: vi.fn(), employees: vi.fn(), register: vi.fn(), taxSummary: vi.fn(), annual: vi.fn(), ytd: vi.fn() }));
 vi.mock('@/services/api', () => ({
   clientPayPeriodsApi: { list: api.periods },
   clientEmployeesApi: { list: api.employees },
   clientReportsApi: {
     payrollRegister: api.register,
     taxSummary: api.taxSummary,
-    ytdSummary: async () => ({ report: null }),
-    annualPayrollSummary: async () => ({ report: null }),
+    ytdSummary: api.ytd,
+    annualPayrollSummary: api.annual,
   },
 }));
 beforeEach(() => {
@@ -21,6 +21,8 @@ beforeEach(() => {
   api.employees.mockResolvedValue({ data: [] });
   api.register.mockResolvedValue({ report: null });
   api.taxSummary.mockResolvedValue({ report: { source: { label: 'Cornerstone' } } });
+  api.annual.mockResolvedValue({ report: null });
+  api.ytd.mockResolvedValue({ report: null });
 });
 afterEach(cleanup);
 it('lists every client report in three groups and guards missing selections', async () => {
@@ -92,4 +94,18 @@ it('keeps reading past fifty pages until the last page the server reports', asyn
   render(<ClientReports />);
   await waitFor(() => expect(api.register).toHaveBeenCalledWith(60));
   expect(api.periods).toHaveBeenCalledTimes(60);
+});
+
+it('replaces accountant QuickBooks snapshot jargon with plain client copy', async () => {
+  const accountantText = 'QuickBooks source values remain authoritative locked snapshots and were not recalculated. Recorded ledger adjustments are shown separately and never rewrite the source.';
+  api.annual.mockResolvedValue({
+    report: {
+      source_statement: accountantText,
+      totals: { gross_pay: 1000, net_pay: 800, employer_taxes: 76.5, employer_contributions: 0, total_payroll_cost: 1076.5 },
+      years: [],
+    },
+  });
+  render(<ClientReports />);
+  expect(await screen.findByText('Payroll from before Cornerstone is shown exactly as it was in QuickBooks. Any corrections are listed separately.')).toBeTruthy();
+  expect(screen.queryByText(/authoritative locked snapshots/)).toBeNull();
 });

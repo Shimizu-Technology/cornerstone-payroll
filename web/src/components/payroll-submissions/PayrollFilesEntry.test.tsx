@@ -54,7 +54,7 @@ it('still links to Pay Period Files and offers a retry when the status cannot lo
   mocks.list.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ data: [period({})], meta: { derives_from_schedule: true } });
   renderEntry();
   expect((await screen.findByRole('alert')).textContent).toMatch(/could not load your current pay period/);
-  expect(screen.getByRole('link', { name: 'Open Pay Period Files' }).getAttribute('href')).toBe('/payroll-files');
+  expect(screen.getByRole('link', { name: 'Open pay period files' }).getAttribute('href')).toBe('/payroll-files');
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   await waitFor(() => expect(screen.getByRole('link', { name: 'Send payroll files' })).toBeTruthy());
 });

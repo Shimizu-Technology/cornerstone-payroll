@@ -99,7 +99,7 @@ export function StaffEmployeeContactDetails(): ReactElement {
         }
       />
 
-      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
+      <div className="relative z-0 space-y-8 p-4 sm:p-6 lg:p-8">
         {canViewSharedInboxReport && (
           <div role="tablist" aria-label="Contact details sections" className="flex flex-wrap gap-2 border-b border-neutral-200 pb-4">
             <button

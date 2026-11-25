@@ -3751,8 +3751,19 @@ export interface ClientPayStub {
   period_description: string;
   net_pay: number | string;
 }
+export interface ClientQuickbooksPaycheck {
+  id: number;
+  pay_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  gross_pay: number | string | null;
+  net_pay: number | string | null;
+  hours_total?: number | string | null;
+  source_label?: string;
+  adjustment_note?: string | null;
+}
 export const clientPayStubsApi = {
-  history: (employeeId: number) => api.get<{ pay_stubs: ClientPayStub[] }>(`/client/pay_stubs/employee/${employeeId}`),
+  history: (employeeId: number) => api.get<{ pay_stubs: ClientPayStub[]; quickbooks_paychecks?: ClientQuickbooksPaycheck[] }>(`/client/pay_stubs/employee/${employeeId}`),
   download: (itemId: number) => api.getBlobWithParams(`/client/pay_stubs/${itemId}/download`),
 };
 

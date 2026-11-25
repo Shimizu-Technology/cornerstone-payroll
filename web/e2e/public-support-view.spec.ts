@@ -82,7 +82,7 @@ for (const width of [390, 1280]) {
       });
 
       await page.goto(`/app${handoff}`);
-      await expect(page.getByRole('heading', { name: 'Client Portal', exact: true, level: 1 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Dashboard', exact: true, level: 1 })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Needs your attention', exact: true, level: 2 })).toBeVisible();
       await expect(page.getByText('No payroll needs your approval right now.')).toBeVisible();
       await expect(page).toHaveURL(/\/app$/);
