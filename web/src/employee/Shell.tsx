@@ -68,14 +68,18 @@ function PhoneAccountMenu(): ReactElement {
   const showSecurityLink = Boolean(ready && !isViewOnly);
 
   return (
-    <div ref={wrapRef} className="emp-header-account-wrap">
+    <div
+      ref={wrapRef}
+      className="emp-header-account-wrap"
+      // A disclosure, not a menu: it closes once focus moves past its last link.
+      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}
+    >
       <button
         ref={buttonRef}
         type="button"
         className="emp-btn emp-btn-quiet emp-header-account"
         aria-expanded={open}
-        aria-haspopup="menu"
-        aria-controls="emp-account-menu"
+        aria-controls={open ? 'emp-account-menu' : undefined}
         aria-label={firstName ? `Account, ${firstName}` : 'Account'}
         onClick={() => setOpen((current) => !current)}
       >
@@ -83,12 +87,11 @@ function PhoneAccountMenu(): ReactElement {
         <span>Account</span>
       </button>
       {open && (
-        <div id="emp-account-menu" className="emp-account-menu" role="menu" aria-label="Account">
+        <nav id="emp-account-menu" className="emp-account-menu" aria-label="Account">
           {firstName && <p className="emp-account-name">{firstName}</p>}
           {canSwitchEmployer && (
             <button
               type="button"
-              role="menuitem"
               className="emp-account-item"
               onClick={() => {
                 setOpen(false);
@@ -102,7 +105,6 @@ function PhoneAccountMenu(): ReactElement {
           {showSecurityLink && (
             <Link
               to={SECURITY_PATH}
-              role="menuitem"
               className="emp-account-item"
               onClick={() => setOpen(false)}
             >
@@ -112,7 +114,6 @@ function PhoneAccountMenu(): ReactElement {
           )}
           <button
             type="button"
-            role="menuitem"
             className="emp-account-item"
             onClick={() => {
               setOpen(false);
@@ -122,7 +123,7 @@ function PhoneAccountMenu(): ReactElement {
             <LogOut aria-hidden="true" className="size-5 shrink-0 text-neutral-600" />
             Sign out
           </button>
-        </div>
+        </nav>
       )}
     </div>
   );

@@ -376,11 +376,11 @@ describe('employee app shell', () => {
     // Header Account menu exposes Switch employer, Sign-in & security, and Sign out (E2).
     const accountButton = screen.getByRole('button', { name: 'Account, Maren' });
     await userEvent.click(accountButton);
-    const menu = screen.getByRole('menu', { name: 'Account' });
+    const menu = screen.getByRole('navigation', { name: 'Account' });
     expect(within(menu).getByText('Maren')).toBeTruthy();
-    expect(within(menu).getByRole('menuitem', { name: 'Switch employer' })).toBeTruthy();
-    expect(within(menu).getByRole('menuitem', { name: 'Sign-in & security' })).toBeTruthy();
-    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Sign out' }));
+    expect(within(menu).getByRole('button', { name: 'Switch employer' })).toBeTruthy();
+    expect(within(menu).getByRole('link', { name: 'Sign-in & security' })).toBeTruthy();
+    await userEvent.click(within(menu).getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
   });
 

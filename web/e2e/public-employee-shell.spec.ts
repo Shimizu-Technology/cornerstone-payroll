@@ -340,9 +340,9 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
         await expect(signOut).toBeHidden();
         await expect(account).toBeVisible();
         await account.click();
-        await expect(page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Sign out' })).toBeVisible();
+        await expect(page.getByRole('navigation', { name: 'Account' }).getByRole('button', { name: 'Sign out' })).toBeVisible();
         await page.keyboard.press('Escape');
-        await expect(page.getByRole('menu', { name: 'Account' })).toHaveCount(0);
+        await expect(page.getByRole('navigation', { name: 'Account' })).toHaveCount(0);
       } else {
         expect(navBox.y).toBeLessThan(80);
         await expect(signOut).toBeVisible();
