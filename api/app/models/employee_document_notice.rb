@@ -17,6 +17,14 @@ class EmployeeDocumentNotice < ApplicationRecord
   belongs_to :company
   belongs_to :employee_document
   belongs_to :employee
+  belongs_to :paper_mailed_by, class_name: "User", optional: true
+
+  def paper_follow_up_state(today: PayrollBusinessClock.today)
+    return unless paper_due_on
+    return "mailed" if paper_mailed_on
+
+    paper_due_on < today ? "overdue" : "required"
+  end
 
   validates :kind, inclusion: { in: KINDS }
   validates :status, inclusion: { in: STATUSES }
