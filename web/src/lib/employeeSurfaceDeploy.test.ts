@@ -121,18 +121,15 @@ describe('employee site deploy files', () => {
       assetsOrigin: 'https://eu-assets.i.posthog.com',
     });
 
-    expect(
-      posthogOrigins({
-        VITE_PUBLIC_POSTHOG_ENABLED: 'true',
-        VITE_PUBLIC_POSTHOG_KEY: 'phc_test',
-        VITE_PUBLIC_POSTHOG_HOST: 'https://analytics.shimizu-technology.com/ingest',
-      }),
-    ).toEqual({
-      apiOrigin: 'https://analytics.shimizu-technology.com',
-      assetsOrigin: 'https://analytics.shimizu-technology.com',
-    });
-
-    for (const badHost of ['http://us.i.posthog.com', 'not-a-url', 'https://user:pw@us.i.posthog.com']) {
+    for (const badHost of [
+      'http://us.i.posthog.com',
+      'not-a-url',
+      'https://user:pw@us.i.posthog.com',
+      'https://us.i.posthog.com:8443',
+      'https://analytics.shimizu-technology.com/ingest',
+      'https://evil.example.com',
+      'https://us.i.posthog.com.evil.example',
+    ]) {
       expect(() =>
         posthogOrigins({
           VITE_PUBLIC_POSTHOG_ENABLED: 'true',

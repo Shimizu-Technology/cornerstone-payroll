@@ -4,7 +4,6 @@ import { clientSubdomainHost } from '@/lib/tenant-subdomain';
 import { supportToken } from '@/support/grant';
 
 export const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
-export const DEFAULT_POSTHOG_ID_SALT = 'cornerstone-payroll:posthog-v1';
 
 export type AnalyticsSurface = 'staff' | 'employee';
 
@@ -12,7 +11,6 @@ export interface AnalyticsEnv {
   VITE_PUBLIC_POSTHOG_ENABLED?: string;
   VITE_PUBLIC_POSTHOG_KEY?: string;
   VITE_PUBLIC_POSTHOG_HOST?: string;
-  VITE_PUBLIC_POSTHOG_ID_SALT?: string;
   VITE_APP_SURFACE?: string;
   VITE_DEPLOYMENT_ENV?: string;
   DEV?: boolean;
@@ -26,84 +24,51 @@ export interface AnalyticsGateOptions {
   windowObj?: Partial<Window & { doNotTrack?: string }> | null;
 }
 
-const SENSITIVE_KEY_TOKENS = new Set([
-  'ssn',
-  'taxid',
-  'bank',
-  'routing',
-  'account',
-  'accounts',
-  'password',
-  'passwd',
-  'token',
-  'tokens',
-  'email',
-  'emails',
-  'phone',
-  'phones',
-  'dob',
-  'birth',
-  'birthdate',
-  'birthday',
-  'salary',
-  'salaries',
-  'wage',
-  'wages',
-  'rate',
-  'rates',
-  'amount',
-  'amounts',
+/**
+ * Event types dropped unconditionally in before_send so free-text stack traces,
+ * performance/URL payloads, person-profile mutations, and survey/heatmap traffic
+ * can never leave the browser.
+ */
+export const DROPPED_EVENT_TYPES = new Set([
+  '$exception',
+  '$web_vitals',
+  '$identify',
+  '$set',
+  '$groupidentify',
+  '$create_alias',
+  '$dead_click',
+  '$heatmap_data',
+  '$snapshot',
+  '$performance_event',
+  '$feature_flag_called',
+  'survey shown',
+  'survey sent',
+  'survey dismissed',
 ]);
 
-const SENSITIVE_TOKEN_PREFIX_PATTERN =
-  /^(?:ssn|taxid|bank|routing|account|password|passwd|token|email|phone|dob|birth|salary|wage|rate|amount)\d*$/;
+const AUTOCAPTURE_EVENT_TYPES = new Set(['$autocapture', '$rageclick']);
 
-const EMPLOYEE_IDENTIFIER_KEYS = new Set([
-  'company_id',
-  'companyid',
-  'company_name',
-  'companyname',
-  'employer',
-  'employer_id',
-  'employerid',
-  'employer_name',
-  'employername',
-  'employee_id',
-  'employeeid',
-  'employee_name',
-  'employeename',
-  'link_id',
-  'linkid',
-  'statement_id',
-  'statementid',
-  'pay_period_id',
-  'payperiodid',
-  'payroll_item_id',
-  'payrollitemid',
-  'tenant_slug',
-  'tenantslug',
-  'title',
+const STRING_ALLOWLIST_KEYS = new Set([
+  '$browser',
+  '$os',
+  '$device_type',
+  '$lib',
+  '$lib_version',
+  '$insert_id',
+  'distinct_id',
+  '$session_id',
+  '$window_id',
 ]);
 
-const URL_PROPERTY_KEYS = new Set([
-  '$current_url',
-  '$referrer',
-  '$initial_referrer',
-  '$initial_current_url',
-  '$external_click_url',
+const NUMBER_ALLOWLIST_KEYS = new Set([
+  '$screen_height',
+  '$screen_width',
+  '$time',
 ]);
 
-const PATHNAME_PROPERTY_KEYS = new Set([
-  '$pathname',
-  '$initial_pathname',
-  '$prev_pageview_pathname',
-]);
-
-const HOST_PROPERTY_KEYS = new Set([
-  '$host',
-  '$referring_domain',
-  '$initial_referring_domain',
-]);
+const VIEWPORT_KEY_PATTERN = /^\$viewport_[a-z0-9_]+$/;
+const SAFE_TAG_NAME_PATTERN = /^[a-z][a-z0-9-]*$/i;
+const SAFE_PH_NAME_PATTERN = /^[a-z0-9._ -]{1,80}$/i;
 
 const AUTOCAPTURE_IGNORE_SELECTORS = [
   'input',
@@ -130,105 +95,6 @@ const NUMERIC_ID_PATTERN = /^\d+$/;
 const PREFIXED_ID_PATTERN = /^[a-z]{2,10}_[A-Za-z0-9_-]{8,}$/i;
 const JWT_LIKE_PATTERN = /^[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?$/;
 const LOWERCASE_SLUG_PATTERN = /^[a-z]+(?:-[a-z]+)*$/;
-
-// FIPS 180-4 SHA-256 constants (first 32 bits of the fractional parts of the cube roots of the first 64 primes).
-const SHA256_K = [
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-];
-
-function sha256Hex(input: string): string {
-  const bytes = new TextEncoder().encode(input);
-  const bitLen = bytes.length * 8;
-  const paddedLen = Math.ceil((bytes.length + 9) / 64) * 64;
-  const padded = new Uint8Array(paddedLen);
-  padded.set(bytes);
-  padded[bytes.length] = 0x80;
-  const view = new DataView(padded.buffer);
-  view.setUint32(paddedLen - 8, Math.floor(bitLen / 0x100000000), false);
-  view.setUint32(paddedLen - 4, bitLen >>> 0, false);
-
-  let h0 = 0x6a09e667;
-  let h1 = 0xbb67ae85;
-  let h2 = 0x3c6ef372;
-  let h3 = 0xa54ff53a;
-  let h4 = 0x510e527f;
-  let h5 = 0x9b05688c;
-  let h6 = 0x1f83d9ab;
-  let h7 = 0x5be0cd19;
-
-  const w = new Uint32Array(64);
-  for (let offset = 0; offset < paddedLen; offset += 64) {
-    for (let i = 0; i < 16; i += 1) {
-      w[i] = view.getUint32(offset + i * 4, false);
-    }
-    for (let i = 16; i < 64; i += 1) {
-      const s0 = ((w[i - 15] >>> 7) | (w[i - 15] << 25)) ^ ((w[i - 15] >>> 18) | (w[i - 15] << 14)) ^ (w[i - 15] >>> 3);
-      const s1 = ((w[i - 2] >>> 17) | (w[i - 2] << 15)) ^ ((w[i - 2] >>> 19) | (w[i - 2] << 13)) ^ (w[i - 2] >>> 10);
-      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
-    }
-
-    let a = h0;
-    let b = h1;
-    let c = h2;
-    let d = h3;
-    let e = h4;
-    let f = h5;
-    let g = h6;
-    let h = h7;
-
-    for (let i = 0; i < 64; i += 1) {
-      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-      const ch = (e & f) ^ (~e & g);
-      const temp1 = (h + S1 + ch + SHA256_K[i] + w[i]) >>> 0;
-      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
-      const maj = (a & b) ^ (a & c) ^ (b & c);
-      const temp2 = (S0 + maj) >>> 0;
-
-      h = g;
-      g = f;
-      f = e;
-      e = (d + temp1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (temp1 + temp2) >>> 0;
-    }
-
-    h0 = (h0 + a) >>> 0;
-    h1 = (h1 + b) >>> 0;
-    h2 = (h2 + c) >>> 0;
-    h3 = (h3 + d) >>> 0;
-    h4 = (h4 + e) >>> 0;
-    h5 = (h5 + f) >>> 0;
-    h6 = (h6 + g) >>> 0;
-    h7 = (h7 + h) >>> 0;
-  }
-
-  return [h0, h1, h2, h3, h4, h5, h6, h7]
-    .map((word) => word.toString(16).padStart(8, '0'))
-    .join('');
-}
-
-/**
- * Stable, non-reversible pseudonymous identifier derived from the internal user ID
- * plus a build-time salt (VITE_PUBLIC_POSTHOG_ID_SALT). Prevents PostHog events from
- * exposing raw database IDs, account counts, emails, or names.
- */
-export function pseudonymousUserId(
-  userId: string | number,
-  salt: string = import.meta.env.VITE_PUBLIC_POSTHOG_ID_SALT || DEFAULT_POSTHOG_ID_SALT,
-): string {
-  const effectiveSalt = salt.trim() || DEFAULT_POSTHOG_ID_SALT;
-  const digest = sha256Hex(`${effectiveSalt}:${String(userId)}`);
-  return `usr_${digest.slice(0, 32)}`;
-}
 
 export function currentSurface(env: AnalyticsEnv = import.meta.env): AnalyticsSurface {
   return env.VITE_APP_SURFACE === 'employee' ? 'employee' : 'staff';
@@ -271,37 +137,6 @@ export function shouldEnableAnalytics(options: AnalyticsGateOptions = {}): boole
   }
 
   return !hasPrivacyOptOutSignal(options.navigatorObj, options.windowObj);
-}
-
-function splitKeyTokens(key: string): string[] {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
-
-export function isSensitivePropertyKey(key: string): boolean {
-  const tokens = splitKeyTokens(key);
-  if (tokens.length === 0) return false;
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (SENSITIVE_KEY_TOKENS.has(token) || SENSITIVE_TOKEN_PREFIX_PATTERN.test(token)) {
-      return true;
-    }
-    if (token === 'tax' && tokens[i + 1] === 'id') {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isEmployeeIdentifierKey(key: string): boolean {
-  const normalized = key
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .toLowerCase();
-  return EMPLOYEE_IDENTIFIER_KEYS.has(normalized);
 }
 
 function decodeSegmentSafely(segment: string): string {
@@ -357,118 +192,291 @@ export function scrubPathname(
   return leadingSlash ? joined || '/' : joined;
 }
 
-function redactHost(hostname: string, surface?: AnalyticsSurface): string {
+export function redactHost(hostname: string, surface?: AnalyticsSurface): string {
   if (surface !== 'employee') return hostname;
   const tenant = clientSubdomainHost({ hostname, search: '' }, false);
   return tenant ? 'tenant.shimizu-technology.com' : hostname;
 }
 
+/**
+ * Returns origin + scrubbed pathname for HTTP(S) URLs, stripping query strings,
+ * fragments (including `#/` routes and `#token=...`), and credentials. Non-HTTP(S)
+ * URLs (such as `blob:` PDF downloads) return `undefined` so they are dropped.
+ */
 export function scrubUrl(
   rawUrl: string,
   options: { surface?: AnalyticsSurface } = {},
-): string {
+): string | undefined {
   const trimmed = rawUrl.trim();
-  if (!trimmed || trimmed === '$direct') return trimmed;
+  if (!trimmed) return undefined;
 
   if (trimmed.startsWith('/')) {
     return scrubPathname(trimmed, options);
   }
 
+  let parsed: URL;
   try {
-    const parsed = new URL(trimmed);
-    const host = redactHost(parsed.hostname, options.surface);
-    const port = parsed.port ? `:${parsed.port}` : '';
-    const pathname = scrubPathname(parsed.pathname, options);
-    return `${parsed.protocol}//${host}${port}${pathname}`;
+    parsed = new URL(trimmed);
   } catch {
-    return scrubPathname(trimmed, options);
+    return undefined;
   }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return undefined;
+  }
+
+  const host = redactHost(parsed.hostname, options.surface);
+  const port = parsed.port ? `:${parsed.port}` : '';
+  const pathname = scrubPathname(parsed.pathname, options);
+  return `${parsed.protocol}//${host}${port}${pathname}`;
 }
 
-function scrubElementsChain(chain: string, options: { surface?: AnalyticsSurface }): string {
-  return chain.replace(/attr__href="([^"]*)"/g, (_match, href: string) => {
-    return `attr__href="${scrubUrl(href, options)}"`;
-  });
+interface SanitizedElement {
+  tag_name: string;
+  'attr__data-ph-name'?: string;
 }
 
-function scrubValue(
-  value: unknown,
-  options: { projectKey?: string; surface?: AnalyticsSurface },
-  isTopLevelProperties: boolean,
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => scrubValue(item, options, false));
+function sanitizePhName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes('@') || trimmed.includes('://') || /^blob:/i.test(trimmed)) {
+    return undefined;
   }
-  if (value && typeof value === 'object') {
-    const input = value as Record<string, unknown>;
-    const output: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(input)) {
-      // Preserve PostHog's own top-level ingestion project token so events are not rejected with 401.
-      const isPostHogProjectToken =
-        isTopLevelProperties &&
-        key === 'token' &&
-        typeof entry === 'string' &&
-        Boolean(options.projectKey) &&
-        entry === options.projectKey;
+  return SAFE_PH_NAME_PATTERN.test(trimmed) ? trimmed : undefined;
+}
 
-      if (!isPostHogProjectToken && isSensitivePropertyKey(key)) {
-        continue;
-      }
-
-      if (options.surface === 'employee' && isEmployeeIdentifierKey(key)) {
-        continue;
-      }
-
-      if (URL_PROPERTY_KEYS.has(key) && typeof entry === 'string') {
-        output[key] = scrubUrl(entry, options);
-        continue;
-      }
-
-      if (PATHNAME_PROPERTY_KEYS.has(key) && typeof entry === 'string') {
-        output[key] = scrubPathname(entry, options);
-        continue;
-      }
-
-      if (HOST_PROPERTY_KEYS.has(key) && typeof entry === 'string') {
-        output[key] = entry === '$direct' ? entry : redactHost(entry, options.surface);
-        continue;
-      }
-
-      if (key === 'attr__href' && typeof entry === 'string') {
-        output[key] = scrubUrl(entry, options);
-        continue;
-      }
-
-      if (key === '$elements_chain' && typeof entry === 'string') {
-        output[key] = scrubElementsChain(entry, options);
-        continue;
-      }
-
-      output[key] = scrubValue(entry, options, false);
+function sanitizeElementsArray(rawElements: unknown): SanitizedElement[] | undefined {
+  if (!Array.isArray(rawElements)) return undefined;
+  const result: SanitizedElement[] = [];
+  for (const item of rawElements) {
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const rawTag = typeof record.tag_name === 'string' ? record.tag_name.trim() : '';
+    if (!SAFE_TAG_NAME_PATTERN.test(rawTag)) continue;
+    const nestedAttrs =
+      record.attributes && typeof record.attributes === 'object'
+        ? (record.attributes as Record<string, unknown>)
+        : undefined;
+    const phName = sanitizePhName(
+      record['attr__data-ph-name'] ??
+        record['data-ph-name'] ??
+        nestedAttrs?.['attr__data-ph-name'] ??
+        nestedAttrs?.['data-ph-name'],
+    );
+    const cleaned: SanitizedElement = { tag_name: rawTag.toLowerCase() };
+    if (phName) {
+      cleaned['attr__data-ph-name'] = phName;
     }
-    return output;
+    result.push(cleaned);
   }
-  return value;
+  return result.length > 0 ? result : undefined;
 }
 
+function formatElementsChain(elements: SanitizedElement[]): string {
+  return elements
+    .map((el) => {
+      const phName = el['attr__data-ph-name'];
+      return phName ? `${el.tag_name}:attr__data-ph-name="${phName}"` : `${el.tag_name}:`;
+    })
+    .join(';');
+}
+
+function splitElementsChainSegments(chain: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let escaped = false;
+  for (let i = 0; i < chain.length; i += 1) {
+    const ch = chain[i];
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      current += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      current += ch;
+      continue;
+    }
+    if (ch === ';' && !inQuotes) {
+      segments.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current) segments.push(current);
+  return segments;
+}
+
+function sanitizeElementsChainString(rawChain: unknown): string | undefined {
+  if (typeof rawChain !== 'string' || !rawChain.trim()) return undefined;
+  const parsed: SanitizedElement[] = [];
+  for (const segment of splitElementsChainSegments(rawChain)) {
+    const tagMatch = /^([a-z][a-z0-9-]*)(?:[.:]|$)/i.exec(segment.trim());
+    if (!tagMatch) continue;
+    const tagName = tagMatch[1].toLowerCase();
+    const attrMatch = /(?:^|[^a-z0-9_-])attr__data-ph-name="([^"]*)"/.exec(segment);
+    const phName = attrMatch ? sanitizePhName(attrMatch[1]) : undefined;
+    const cleaned: SanitizedElement = { tag_name: tagName };
+    if (phName) {
+      cleaned['attr__data-ph-name'] = phName;
+    }
+    parsed.push(cleaned);
+  }
+  return parsed.length > 0 ? formatElementsChain(parsed) : undefined;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Strict allowlist `before_send` hook. Rebuilds `properties` from an explicit
+ * list of safe keys, scrubs `$pathname`/`$current_url`/`$host`, drops blocked
+ * event types (`$exception`, `$web_vitals`, `$identify`, etc.), strips `$set`
+ * and `$set_once`, and strips all autocapture attributes/text/hrefs except
+ * element tag names and explicit `data-ph-name` labels.
+ */
 export function createBeforeSend(options: {
   projectKey?: string;
   surface?: AnalyticsSurface;
 } = {}): (event: CaptureResult | null) => CaptureResult | null {
   return (event) => {
     if (!event) return null;
-    const next: CaptureResult = {
-      ...event,
-      properties: scrubValue(event.properties ?? {}, options, true) as CaptureResult['properties'],
-    };
-    if (event.$set) {
-      next.$set = scrubValue(event.$set, options, false) as CaptureResult['$set'];
+    if (DROPPED_EVENT_TYPES.has(event.event)) {
+      return null;
     }
-    if (event.$set_once) {
-      next.$set_once = scrubValue(event.$set_once, options, false) as CaptureResult['$set_once'];
+
+    const rawProps = (event.properties ?? {}) as Record<string, unknown>;
+    const surface: AnalyticsSurface | undefined =
+      options.surface ??
+      (rawProps.surface === 'employee' || rawProps.surface === 'staff' ? rawProps.surface : undefined);
+
+    const out: Record<string, unknown> = {};
+
+    // Preserve PostHog's own top-level ingestion project token so posthog-js 1.399.2
+    // does not drop the event (`k = ["token"]` ingestion requirement).
+    if (
+      typeof rawProps.token === 'string' &&
+      Boolean(options.projectKey) &&
+      rawProps.token === options.projectKey
+    ) {
+      out.token = rawProps.token;
+    }
+
+    if (typeof rawProps.$pathname === 'string') {
+      out.$pathname = scrubPathname(rawProps.$pathname, { surface });
+    }
+
+    if (typeof rawProps.$current_url === 'string') {
+      const scrubbedCurrentUrl = scrubUrl(rawProps.$current_url, { surface });
+      if (scrubbedCurrentUrl) {
+        out.$current_url = scrubbedCurrentUrl;
+      }
+    }
+
+    if (typeof rawProps.$host === 'string' && rawProps.$host.trim()) {
+      out.$host = redactHost(rawProps.$host.trim(), surface);
+    }
+
+    for (const key of STRING_ALLOWLIST_KEYS) {
+      const val = rawProps[key];
+      if (typeof val === 'string' && val.length > 0) {
+        out[key] = val;
+      }
+    }
+
+    const browserVersion = rawProps.$browser_version;
+    if (
+      (typeof browserVersion === 'string' && browserVersion.length > 0) ||
+      isFiniteNumber(browserVersion)
+    ) {
+      out.$browser_version = browserVersion;
+    }
+
+    for (const key of NUMBER_ALLOWLIST_KEYS) {
+      const val = rawProps[key];
+      if (isFiniteNumber(val)) {
+        out[key] = val;
+      }
+    }
+
+    for (const [key, val] of Object.entries(rawProps)) {
+      if (VIEWPORT_KEY_PATTERN.test(key) && isFiniteNumber(val)) {
+        out[key] = val;
+      }
+    }
+
+    // Preserve personless flag (`false` only) so PostHog never creates person profiles.
+    if (rawProps.$process_person_profile === false) {
+      out.$process_person_profile = false;
+    }
+
+    // Our own super properties: `surface` and (on staff only) `role`.
+    if (rawProps.surface === 'staff' || rawProps.surface === 'employee') {
+      out.surface = rawProps.surface;
+    } else if (options.surface) {
+      out.surface = options.surface;
+    }
+
+    if (surface !== 'employee' && typeof rawProps.role === 'string' && rawProps.role.trim()) {
+      out.role = rawProps.role.trim();
+    }
+
+    // Autocapture: keep ONLY element tag names and explicit `data-ph-name` labels.
+    // Never keep `href`, `$el_text`, classes, IDs, or any other attributes.
+    if (AUTOCAPTURE_EVENT_TYPES.has(event.event)) {
+      const sanitizedElements = sanitizeElementsArray(rawProps.$elements);
+      if (sanitizedElements) {
+        out.$elements = sanitizedElements;
+        out.$elements_chain = formatElementsChain(sanitizedElements);
+      } else {
+        const sanitizedChain = sanitizeElementsChainString(rawProps.$elements_chain);
+        if (sanitizedChain) {
+          out.$elements_chain = sanitizedChain;
+        }
+      }
+    }
+
+    const next: CaptureResult = {
+      uuid: event.uuid,
+      event: event.event,
+      properties: out,
+    };
+    if (event.timestamp !== undefined) {
+      next.timestamp = event.timestamp;
     }
     return next;
   };
+}
+
+let activeSurface: AnalyticsSurface = currentSurface();
+let activeRole: string | null = null;
+
+export function registerAnalyticsContext(
+  client: Pick<PostHog, 'register' | 'unregister'> | null | undefined,
+  params: { surface: AnalyticsSurface; role?: string | null },
+): void {
+  activeSurface = params.surface;
+  activeRole = params.surface === 'staff' && params.role ? params.role : null;
+
+  if (!client) return;
+  if (typeof client.register === 'function') {
+    if (activeRole) {
+      client.register({ surface: activeSurface, role: activeRole });
+    } else {
+      client.register({ surface: activeSurface });
+    }
+  }
+  if (!activeRole && typeof client.unregister === 'function') {
+    client.unregister('role');
+  }
 }
 
 export function buildPostHogConfig(options: {
@@ -483,11 +491,31 @@ export function buildPostHogConfig(options: {
 
   return {
     api_host: apiHost,
-    person_profiles: 'identified_only',
+    person_profiles: 'never',
     capture_pageview: false,
     capture_pageleave: true,
+    capture_exceptions: false,
+    capture_performance: false,
+    capture_dead_clicks: false,
+    capture_heatmaps: false,
+    enable_heatmaps: false,
     disable_session_recording: true,
     disable_surveys: true,
+    disable_surveys_automatic_display: true,
+    disable_product_tours: true,
+    disable_conversations: true,
+    disable_web_experiments: true,
+    disable_external_dependency_loading: true,
+    disable_capture_url_hashes: true,
+    disable_scroll_properties: true,
+    opt_in_site_apps: false,
+    advanced_disable_flags: true,
+    advanced_disable_feature_flags: true,
+    advanced_disable_feature_flags_on_first_load: true,
+    advanced_disable_toolbar_metrics: true,
+    remote_config_refresh_interval_ms: 0,
+    save_referrer: false,
+    save_campaign_params: false,
     autocapture: {
       css_selector_ignorelist: AUTOCAPTURE_IGNORE_SELECTORS,
     },
@@ -496,15 +524,37 @@ export function buildPostHogConfig(options: {
     },
     mask_all_text: true,
     mask_all_element_attributes: true,
+    mask_personal_data_properties: true,
+    custom_personal_data_properties: [
+      '__clerk_ticket',
+      '__clerk_status',
+      '__clerk_created_session',
+      '__clerk_db_jwt',
+      'token',
+      'code',
+      'state',
+      'email',
+      'redirect_url',
+      'redirect',
+      'invite',
+      'ticket',
+      'signature',
+      'sig',
+      'key',
+    ],
     ip: false,
     persistence: 'localStorage+cookie',
     respect_dnt: true,
-    save_campaign_params: false,
+    get_current_url: (defaultUrl: string) =>
+      scrubUrl(defaultUrl, { surface }) ??
+      (typeof window !== 'undefined' && window.location?.origin ? `${window.location.origin}/` : '/'),
     before_send: createBeforeSend({ projectKey, surface }),
     loaded: (ph) => {
       if (isDev || hasPrivacyOptOutSignal()) {
         ph.opt_out_capturing();
+        return;
       }
+      registerAnalyticsContext(ph, { surface, role: surface === 'staff' ? activeRole : null });
     },
   };
 }
@@ -532,31 +582,38 @@ export function initAnalytics(options: AnalyticsGateOptions & {
   const key = env.VITE_PUBLIC_POSTHOG_KEY?.trim();
   if (!key) return false;
 
-  targetClient.init(key, buildPostHogConfig({ env, surface: options.surface }));
+  const surface = options.surface ?? currentSurface(env);
+  if (!isCustomCall) {
+    activeSurface = surface;
+  }
+
+  targetClient.init(key, buildPostHogConfig({ env, surface }));
   if (!isCustomCall) {
     initialized = true;
   }
   return true;
 }
 
-export function identifyUser(
-  client: Pick<PostHog, 'identify'> | null | undefined,
-  params: { userId: string | number; role: string; surface: AnalyticsSurface },
-  salt?: string,
+export function resetAnalytics(
+  client: Partial<Pick<PostHog, 'reset' | 'register' | 'unregister'>> | null | undefined = posthog,
+  options: { surface?: AnalyticsSurface; keepRole?: boolean } = {},
 ): void {
-  // Never identify employees or send employer/employee/pay identifiers from the employee surface.
-  if (!client || params.surface !== 'staff') return;
-  client.identify(pseudonymousUserId(params.userId, salt), {
-    role: params.role,
-    surface: params.surface,
-  });
-}
+  const isCustomClient = client !== posthog;
+  if ((!isCustomClient && !isPostHogEnabled) || !client) return;
 
-export function resetAnalytics(client: Pick<PostHog, 'reset'> | null | undefined = posthog): void {
-  if (!isPostHogEnabled || !client) return;
+  const nextSurface = options.surface ?? activeSurface;
+  const nextRole = options.keepRole && nextSurface === 'staff' ? activeRole : null;
+  if (!options.keepRole) {
+    activeRole = null;
+  }
+
   if (typeof client.reset === 'function') {
     client.reset();
   }
+  registerAnalyticsContext(
+    client as Pick<PostHog, 'register' | 'unregister'>,
+    { surface: nextSurface, role: nextRole },
+  );
 }
 
 export function capturePageView(
@@ -568,45 +625,39 @@ export function capturePageView(
   const scrubbedPath = scrubPathname(pathname, { surface });
   const scrubbedCurrentUrl = scrubUrl(`${window.location.origin}${pathname}`, { surface });
   client.capture('$pageview', {
-    $current_url: scrubbedCurrentUrl,
+    ...(scrubbedCurrentUrl ? { $current_url: scrubbedCurrentUrl } : {}),
     $pathname: scrubbedPath,
     surface,
   });
 }
 
-function capture(event: string, properties?: Record<string, unknown>): void {
+function capture(event: string): void {
   if (isPostHogEnabled && !import.meta.env.DEV) {
-    posthog.capture(event, properties);
+    posthog.capture(event);
   }
 }
 
 export const analytics = {
-  payrollCalculated: (payPeriodId: number, employeeCount: number) =>
-    capture('payroll_calculated', { pay_period_id: payPeriodId, employee_count: employeeCount }),
+  payrollCalculated: () => capture('payroll_calculated'),
 
-  payrollApproved: (payPeriodId: number) =>
-    capture('payroll_approved', { pay_period_id: payPeriodId }),
+  payrollApproved: () => capture('payroll_approved'),
 
-  payrollCommitted: (payPeriodId: number) =>
-    capture('payroll_committed', { pay_period_id: payPeriodId }),
+  payrollCommitted: () => capture('payroll_committed'),
 
-  checksDownloaded: (payPeriodId: number, count: number) =>
-    capture('checks_downloaded', { pay_period_id: payPeriodId, check_count: count }),
+  checksDownloaded: () => capture('checks_downloaded'),
 
-  checksPrinted: (payPeriodId: number, count: number) =>
-    capture('checks_printed', { pay_period_id: payPeriodId, check_count: count }),
+  checksPrinted: () => capture('checks_printed'),
 
-  reportGenerated: (reportType: string, payPeriodId?: number) =>
-    capture('report_generated', { report_type: reportType, pay_period_id: payPeriodId }),
+  reportGenerated: () => capture('report_generated'),
 
   employeeCreated: () => capture('employee_created'),
 
-  timecardUploaded: (fileType: string) =>
-    capture('timecard_uploaded', { file_type: fileType }),
+  timecardUploaded: () => capture('timecard_uploaded'),
 
-  timecardOcrApplied: (payPeriodId: number, entryCount: number) =>
-    capture('timecard_ocr_applied', { pay_period_id: payPeriodId, entry_count: entryCount }),
+  timecardOcrApplied: () => capture('timecard_ocr_applied'),
 
-  companySwitch: (companyId: number) =>
-    capture('company_switched', { company_id: companyId }),
+  companySwitch: () => {
+    resetAnalytics(posthog, { keepRole: true });
+    capture('company_switched');
+  },
 };

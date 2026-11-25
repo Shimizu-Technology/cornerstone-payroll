@@ -11,8 +11,6 @@ import {
   type AnalyticsSurface,
 } from '@/lib/analytics';
 
-initAnalytics();
-
 interface PostHogPageViewProps {
   surface?: AnalyticsSurface;
 }

@@ -42,8 +42,8 @@ export function posthogOrigins(env = {}) {
   } catch {
     throw new Error('VITE_PUBLIC_POSTHOG_HOST must be an absolute https URL when PostHog is enabled')
   }
-  if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new Error('VITE_PUBLIC_POSTHOG_HOST must be an absolute https URL when PostHog is enabled')
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) {
+    throw new Error('VITE_PUBLIC_POSTHOG_HOST must be an official PostHog HTTPS host when PostHog is enabled')
   }
 
   const hostname = url.hostname.toLowerCase()
@@ -59,7 +59,9 @@ export function posthogOrigins(env = {}) {
       assetsOrigin: 'https://eu-assets.i.posthog.com',
     }
   }
-  return { apiOrigin: url.origin, assetsOrigin: url.origin }
+  throw new Error(
+    'VITE_PUBLIC_POSTHOG_HOST must be an official PostHog US or EU host (e.g. https://us.i.posthog.com or https://eu.i.posthog.com)',
+  )
 }
 
 // Same host rule as ClerkTokenVerifier::HOSTNAME_PATTERN (api/app/services/clerk_token_verifier.rb),
@@ -89,8 +91,9 @@ export function clerkFrontendOrigin(publishableKey, { production = false } = {})
 //   img-src     https://img.clerk.com
 //   worker-src  'self' blob:      style-src 'self' 'unsafe-inline'      form-action 'self'
 // Beyond that guide: the employee API, Clerk telemetry, Google Fonts, tenant logo hosts, and
-// (only when PostHog is enabled in the build) the exact PostHog ingestion and assets origins
-// (PostHog loads extra scripts and remote config from e.g. https://us-assets.i.posthog.com).
+// (only when PostHog is enabled in the build) the exact official PostHog ingestion and assets
+// origins (e.g. https://us.i.posthog.com and https://us-assets.i.posthog.com). Custom hosts
+// are rejected so script-src is never opened to arbitrary third-party domains.
 // The only wildcards allowed are the documented Clerk ones (employeeSurfaceDeploy.test.ts enforces that).
 export function contentSecurityPolicy({ apiOrigin: api, clerkOrigin, posthog = null }) {
   const posthogScriptSources = posthog ? [posthog.assetsOrigin] : []

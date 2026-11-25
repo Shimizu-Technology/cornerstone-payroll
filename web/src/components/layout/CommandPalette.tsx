@@ -521,7 +521,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
 
       const redirect = getCompanySwitchRedirect(location.pathname, command.companyId, location.search);
       if (switchCompany(command.companyId) === false) return;
-      analytics.companySwitch(command.companyId);
+      analytics.companySwitch();
 
       if (redirect) {
         navigate(redirect.to, {

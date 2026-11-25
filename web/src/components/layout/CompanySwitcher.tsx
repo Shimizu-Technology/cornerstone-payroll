@@ -53,7 +53,7 @@ export function CompanySwitcher() {
     const redirect = getCompanySwitchRedirect(location.pathname, companyId, location.search);
 
     if (switchCompany(companyId) === false) return;
-    analytics.companySwitch(companyId);
+    analytics.companySwitch();
 
     if (redirect) {
       navigate(redirect.to, {

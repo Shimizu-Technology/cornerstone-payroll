@@ -41,11 +41,15 @@ describe('PrivacyPolicy', () => {
 
     expect(screen.getByText(/We do not sell personal information/)).toBeTruthy();
     expect(screen.getByText(/Social Security numbers, contractor EINs, and bank account details are encrypted in the database/)).toBeTruthy();
-    expect(screen.getByRole('heading', { level: 3, name: 'Analytics' })).toBeTruthy();
-    expect(screen.getByText(/pseudonymous usage analytics.*through PostHog/i)).toBeTruthy();
-    expect(screen.getByText(/do not use session recordings, do not store IP addresses/i)).toBeTruthy();
-    expect(screen.getByText(/honor Do Not Track and Global Privacy Control/i)).toBeTruthy();
-    expect(screen.getByText(/pending counsel review/i)).toBeTruthy();
+    const analyticsHeading = screen.getByRole('heading', { level: 3, name: 'Analytics' });
+    const analyticsSection = within(analyticsHeading.closest('section')!);
+    expect(analyticsSection.getByText(/anonymous device-level usage events through PostHog/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/page paths with IDs removed/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/do not send names, email addresses, company or user IDs/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/on-screen text, or form contents/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/do not use session recordings; IP addresses are discarded/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/honor Do Not Track and Global Privacy Control/i)).toBeTruthy();
+    expect(analyticsSection.getByText(/pending counsel review/i)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'shimizutechnology@gmail.com' }).getAttribute('href')).toBe('mailto:shimizutechnology@gmail.com');
   });
 
