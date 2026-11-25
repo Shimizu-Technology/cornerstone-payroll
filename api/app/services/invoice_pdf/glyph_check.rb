@@ -2,9 +2,8 @@
 
 module InvoicePdf
   # Finds characters an invoice PDF can't print. Every renderer falls back to
-  # the embedded Liberation Sans for characters its own font lacks, so any
-  # character outside Liberation Sans prints as an empty box: CJK and Hangul
-  # names, emoji, and tabs. Drafts show the problem in the editor and the
+  # Liberation Sans and Payroll CJK. Unsupported characters such as emoji
+  # and tabs print as boxes. Drafts show the problem in the editor and the
   # preview; issuing refuses it, so no issued PDF contains boxes.
   module GlyphCheck
     INVOICE_FIELDS = {
@@ -32,7 +31,7 @@ module InvoicePdf
 
     module_function
 
-    # [{ "field" => "Customer name", "characters" => ["東", "京"] }, ...]
+    # [{ "field" => "Customer name", "characters" => ["😀"] }, ...]
     def problems(snapshot)
       return [] unless snapshot.is_a?(Hash)
 

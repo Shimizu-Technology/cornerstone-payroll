@@ -100,31 +100,31 @@ RSpec.describe "PDF generators with accented and non-Latin names" do
   end
 
   it "refuses checks and tax summaries whose names would print as empty boxes" do
-    primary_item.employee.update!(first_name: "小明", last_name: "王")
-    unprintable = [ PdfUnicodeFont::UnprintableName, /Employee "小明 王".*\(小 明 王\).*Latin letters/ ]
+    primary_item.employee.update!(first_name: "😀", last_name: "🦄")
+    unprintable = [ PdfUnicodeFont::UnprintableName, /Employee "😀 🦄".*\(😀 🦄\).*Latin letters/ ]
 
     expect { CheckGenerator.new(primary_item.reload).generate }.to raise_error(*unprintable)
     expect { FirstHawaiianFourUpCheckGenerator.new(company: company, payroll_items: [ primary_item ]).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Payee "小明 王"/)
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Payee "😀 🦄"/)
 
-    check = create(:non_employee_check, :with_check_number, company: company, payable_to: "김민수 Builders")
-    expect { NonEmployeeCheckGenerator.new(check).generate }.to raise_error(PdfUnicodeFont::UnprintableName, /\(김 민 수\)/)
+    check = create(:non_employee_check, :with_check_number, company: company, payable_to: "😀 Builders")
+    expect { NonEmployeeCheckGenerator.new(check).generate }.to raise_error(PdfUnicodeFont::UnprintableName, /\(😀\)/)
     expect { NonEmployeeCheckVoucherGenerator.new(check).generate }.to raise_error(PdfUnicodeFont::UnprintableName)
 
-    primary_item.employee.update!(first_name: "Aleksandra", last_name: "Wiśniewska", address_line1: "12 마을 Rd")
+    primary_item.employee.update!(first_name: "Aleksandra", last_name: "Wiśniewska", address_line1: "12 😀 Rd")
     expect { CheckGenerator.new(primary_item.reload).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address .*\(마 을\)/)
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address .*\(😀\)/)
 
-    expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "王小明" } ] }).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "王小明"/)
-    expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "Kim Lee", employee_address: "1-2 東京都" } ] }).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address "1-2 東京都"/)
-    expect { W2GuPdfGenerator.new({ employer: { name: "王商事" }, employees: [] }).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Employer "王商事"/)
-    expect { Form1099NecPdfGenerator.new({ payer: { name: "王商事" }, reportable_contractors: [] }).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Payer "王商事"/)
-    expect { Form1099NecPdfGenerator.new({ reportable_contractors: [ { name: "Kim", business_name: "김 Trading" } ] }).generate }
-      .to raise_error(PdfUnicodeFont::UnprintableName, /Contractor business "김 Trading"/)
+    expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "😀" } ] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "😀"/)
+    expect { W2GuPdfGenerator.new({ employees: [ { employee_name: "Kim Lee", employee_address: "1-2 😀" } ] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address "1-2 😀"/)
+    expect { W2GuPdfGenerator.new({ employer: { name: "🦄" }, employees: [] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Employer "🦄"/)
+    expect { Form1099NecPdfGenerator.new({ payer: { name: "🦄" }, reportable_contractors: [] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Payer "🦄"/)
+    expect { Form1099NecPdfGenerator.new({ reportable_contractors: [ { name: "Kim", business_name: "😀 Trading" } ] }).generate }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /Contractor business "😀 Trading"/)
   end
 
   it "prints CJK and Hangul names without failing the document" do
@@ -132,7 +132,7 @@ RSpec.describe "PDF generators with accented and non-Latin names" do
     other = payroll_items.last.employee
     other.update!(first_name: "민수", last_name: "김")
 
-    expect(PayStubGenerator.new(primary_item.reload).generate).to start_with("%PDF")
-    expect(PayrollSummaryByEmployeePdfGenerator.new(pay_period).generate).to start_with("%PDF")
+    expect_names(PayStubGenerator.new(primary_item.reload).generate, %w[小明 王])
+    expect_names(PayrollSummaryByEmployeePdfGenerator.new(pay_period).generate, %w[민수 김])
   end
 end

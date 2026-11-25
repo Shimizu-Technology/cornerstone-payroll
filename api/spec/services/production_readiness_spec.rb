@@ -182,6 +182,24 @@ RSpec.describe ProductionReadiness do
     expect(readiness.run(live: true).failures.map(&:name)).to include("RLS policy installation matches the selected phase")
   end
 
+  it "accepts the enforced phase only with every table forced and the kill switch off" do
+    env["RLS_CONTEXT_GUARD_MODE"] = "raise"
+    env["RLS_DATABASE_URL"] = "postgres://payroll_app@localhost/test"
+    env["RLS_EXPECT_ENFORCED"] = "true"
+    allow(record_class).to receive(:connection_pool).and_return(ActiveRecord::Base.connection_pool)
+    connection = ActiveRecord::Base.connection
+    RlsEnforcement.enforce!(connection, RlsEnforcement.ordered_tables, out: StringIO.new)
+    rls_results = -> { readiness.run(live: true).checks.to_h { |check| [ check.name, check.passed ] }.slice(
+      "RLS policy installation matches the selected phase", "RLS kill switch is off"
+    ) }
+
+    expect(rls_results.call).to eq("RLS policy installation matches the selected phase" => true, "RLS kill switch is off" => true)
+    connection.execute("UPDATE #{RlsDatabase::SWITCH} SET bypass_enabled = true WHERE singleton")
+    expect(rls_results.call).to include("RLS kill switch is off" => false)
+    connection.execute("ALTER TABLE employees NO FORCE ROW LEVEL SECURITY")
+    expect(rls_results.call).to include("RLS policy installation matches the selected phase" => false)
+  end
+
   it "passes effective configuration and every safe live dependency probe" do
     report = with_sample_token { readiness.run(live: true) }
 

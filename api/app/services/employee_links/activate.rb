@@ -27,19 +27,22 @@ module EmployeeLinks
       new(...).call
     end
 
-    def initialize(token:, code:, date_of_birth:, ssn_last4:, email:, use_for_notices: false, request: nil,
+    def initialize(token:, code:, date_of_birth:, ssn_last4:, email:, use_for_notices: false, request: nil, terms_version: nil,
       invitations: PayrollInvitation.new)
       @check = { token: token, code: code, date_of_birth: date_of_birth, ssn_last4: ssn_last4 }
       @email = EmployeeLinks.normalized_email(email)
       @use_for_notices = ActiveModel::Type::Boolean.new.cast(use_for_notices) == true
       @request = request
+      @terms_version = terms_version
       @invitations = invitations
     end
 
     def call
       return Result.new(outcome: :failed, url: nil) unless EmployeeLinks.email_format?(@email)
 
-      prepared = Verify.call(**@check, request: @request) { |link| prepare(link) }
+      origin = @request&.headers&.[]("Origin")
+      admit = ->(link) { EmployeeLinks.activation_origin_allowed?(link.company, origin) }
+      prepared = Verify.call(**@check, request: @request, admit: admit) { |link| prepare(link) }
       return Result.new(outcome: :failed, url: nil) unless prepared
       return Result.new(outcome: :sign_in, url: nil) if prepared == :sign_in
 
@@ -89,7 +92,7 @@ module EmployeeLinks
         end
       end
       EmployeeLinks.audit!(link, "sign_up_started", actor: AuditActor.employee(link.employee), request: @request,
-        metadata: { retry: retried, via: link.invite_delivery })
+        metadata: { retry: retried, via: link.invite_delivery, terms_version: @terms_version }.compact)
       Prepared.new(link: link, user: pending, generation: link.invite_generation, changes: changes, attach: false)
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
       :sign_in
@@ -100,7 +103,7 @@ module EmployeeLinks
     # which first confirms the old one closed. Nothing changes here.
     def reuse_closed_sign_up(link, user)
       EmployeeLinks.audit!(link, "sign_up_started", actor: AuditActor.employee(link.employee), request: @request,
-        metadata: { retry: false, reused_login: true, via: link.invite_delivery })
+        metadata: { retry: false, reused_login: true, via: link.invite_delivery, terms_version: @terms_version }.compact)
       Prepared.new(link: link, user: user, generation: link.invite_generation, attach: true,
         # It never had a session, so no fence date carries over.
         changes: { email: @email, name: link.employee.display_name, active: true, deactivated_at: nil })

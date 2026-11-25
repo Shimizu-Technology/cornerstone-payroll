@@ -30,6 +30,86 @@ WHERE singleton;
 
 New scopes pick up the switch within five seconds per process and enter system mode. In-flight scopes retain their original settings. A protected statement that arrives without a scope logs a warning and uses system mode for that statement during bypass. Clear the switch with the same owner connection when the incident is resolved. With enforcement disabled, application authorization is the active tenant boundary. Even with enforcement enabled, system mode is intended to contain application scoping errors and is available to trusted callers within the runtime DB session.
 
+## Enforcement window (phase 3)
+
+Phase 3 turns the staged policies on. Hold it in its own window during low traffic, at least one full pay cycle apart from the Clerk production cutover (`M3-0b`), and never while a payroll is being calculated or checks are printing. The lead runs every production command. Run the owner commands from `api/` the same way as `rls:install`, with the direct migration-owner URL in `MIGRATION_DATABASE_URL`. Never use the runtime or pooled URL.
+
+`OWNER` below stands for `RLS_CONTEXT_GUARD_MODE=off MIGRATION_DATABASE_URL=<direct owner URL>`.
+
+### Pre-checks
+
+Complete these before the window opens. Any failure postpones it.
+
+1. **Shadow report.** Export the JSON-lines application logs from web, worker and the employee API for at least the last full pay cycle. `bundle exec rails rls:shadow_report < exported.log` must print `[]`. Scope any caller it reports before going further.
+2. **Status.** `bundle exec rails rls:status` on web and on worker must show:
+   - `guard_mode` of `log`;
+   - `role.rolname` of `payroll_app`, with `rolbypassrls` and `rolsuper` both false;
+   - `kill_switch` of `false`;
+   - `enforcement.phase` of `shadow`, with `enforced_tables` at 0 of `protected_tables` and an empty `enabled_xor_forced`;
+   - `policy: true` on every table;
+   - `login_link_decision` as listed under "Before turning on enforcement".
+3. **Readiness.** Production readiness passes with `RLS_EXPECT_ENFORCED` unset.
+4. **Child companies.** The contract migration deploys whenever this PR merges, so check this against production before merging: `bundle exec rails payroll_child_companies:verify` prints `nulls=0 parent_fk=valid` for all 26 promoted children. Merge at low traffic.
+5. **Kill-switch drill.** Hold an owner `psql` session open for the whole window. Set the switch with the SQL above and confirm `rls:status` reports `kill_switch: true`. Clear it and confirm `false`. Record how long each step took.
+6. **Postgres version.** The contract migration's `SET NOT NULL` relies on the validated `CHECK` to skip a full table scan, and CI runs Postgres 16. From the owner session, `SELECT current_setting('server_version_num')::int >= 160000 AS ok, version();` must return `ok = t`. On an older server, postpone and upgrade first.
+7. **Demo employee access.** List the demo companies with an open early-access window and their active employee logins (the employee app switch screen shows both). Pick one active demo account to check during the window. Tell its users that demo employee access pauses from the first enforced table until enforcement is verified (see "Demo employee access during the window").
+
+### Order
+
+1. **Deploy the contract migration.** `ContractPayrollChildCompanies` makes `company_id` NOT NULL on the 26 promoted children. It does not depend on the window and normally ships before it, with the deploy that follows this PR's merge. For each table it adds a `CHECK (company_id IS NOT NULL) NOT VALID`, validates the check without blocking writes, then sets NOT NULL and drops the check. Each step uses a five-second lock timeout and three attempts. If any NULL remains, it refuses and names the tables. In that case, run `payroll_child_companies:backfill` and deploy again. A rerun skips the tables already contracted. Afterwards, `OWNER bundle exec rails rls:enforce DRY_RUN=1` must not mention a nullable `company_id`.
+2. **Guard to `raise` on web and worker.** Set `RLS_CONTEXT_GUARD_MODE=raise` on both services and restart them. The employee API service already uses `raise`. `rls:status` then reports `guard_mode: raise`. An unscoped protected query now fails its request or job. Run the smoke tests below and watch the logs for 15 minutes. If anything fails, set the guard back to `log` and stop.
+3. **Enforce in batches.**
+   1. `OWNER bundle exec rails rls:enforce DRY_RUN=1` lists the tables that still need ENABLE and FORCE, in batches of 10. It does not take the enforcement lock, so it never delays a rollback. It refuses if the kill switch is not readable and off, if any policy is unstaged, if any policy's USING, WITH CHECK, roles or command differ from what `rls:install` would create now (it names the tables; run `OWNER bundle exec rails rls:install` to reinstall them, then dry-run again), if the login link decision is not restricted, if `payroll_app` can bypass RLS or write the switch, if the owner does not bypass RLS, or if a promoted `company_id` is still nullable.
+   2. Pilot one batch: `OWNER bundle exec rails rls:enforce TABLES="<the dry run's batch 1>"`. Run the smoke tests and watch the logs for five minutes.
+   3. Run the rest: `OWNER bundle exec rails rls:enforce`. The busiest payroll tables (`timecards` through `employees` and `audit_logs`) go last. Each table commits separately with a three-second lock timeout and three attempts. Five seconds separate each batch; change that with `BATCH_PAUSE` and the batch size with `BATCH_SIZE`. A table that cannot be locked is reported. Rerun the same command to resume: tables already enforced are skipped. The task checks the kill switch before every table and stops once it is set. Only one live `rls:enforce` runs at a time, and `rls:disable` waits up to 60 seconds for a running one to stop. Any other error stops the run without a summary. The tables already enforced stay enforced, so read `rls:status` and rerun.
+4. **Verify.**
+   - The task prints `all_enforced: true` and `All protected tables are enabled and forced`.
+   - `rls:status` shows `enforcement.phase` of `enforced`, with `enforced_tables` equal to `protected_tables`.
+   - Set `RLS_EXPECT_ENFORCED=true` on web, worker and the employee API and restart them. Production readiness then passes, including "RLS policy installation matches the selected phase" and "RLS kill switch is off".
+   - The employee app switch's database check reports `enforced`. Demo early-access windows retire on the next demo read or expiry sweep, which ends the waiver.
+   - The active demo account from pre-check 7 signs in and opens its pay stubs again. Verified enforcement needs no waiver.
+
+### Demo employee access during the window
+
+A demo company's employee app opens under its early-access waiver only while the database is in shadow mode with the kill switch off. Expect it to pause:
+
+- **From the first enforced table until verification.** The pilot batch moves the database to `partial`, which closes the waiver. Each demo's window and stored switches stay as they are, so nobody has to act: once every table is enforced and the kill switch is off, the database check reports `enforced` and the demo opens again without a waiver (within five seconds per process).
+- **Up to five seconds late.** Each process caches the database state for five seconds, so for up to five seconds after the pilot batch starts, or after the kill switch is set, a process that read shadow mode just before can still open a demo under its waiver. That is acceptable: demo companies hold only fake data, and under the waiver the employee API still runs the guard in raise mode as the restricted role, so a request without company context fails instead of reading across companies.
+- **While the kill switch is set.** A bypassed database also closes the waiver. If the switch is set and cleared before full enforcement, the waiver applies again once the database is back in shadow mode with the switch off, provided the window hasn't expired.
+
+Verified enforcement retires every open window for good. If enforcement is then rolled back with `rls:disable`, the expiry sweep turns the demo's stored switches off and revokes their switch activations, because no window covers it. To reopen demo access after that rollback:
+
+1. Confirm `rls:status` shows `enforcement.phase` of `shadow` with `kill_switch: false`.
+2. A super_admin sets a new early-access window on the employee app switch screen, with a reason that names the rollback. Retired windows never apply again, but a new one can be set while the database is not enforcing.
+3. A switch admin turns the demo's employee app back on from the same screen. That re-runs its readiness checks and records new switch activations. The sweep leaves employee logins alone, so demo employees then sign in as before.
+
+### Smoke tests
+
+Run these after the guard change, after the pilot batch and after the full run. Use the test workspace or a test employee in company 1, as in the earlier enforced contact check.
+
+- **Payroll staff.** Open the dashboard, a client's employee list, an employee profile and a pay period's payroll items. Save a draft change on a test employee.
+- **Cross-company.** A staff user assigned to one client gets "not found" for another client's employee or pay period.
+- **Client portal.** Open documents, messages and payroll submissions. Upload a test file.
+- **Employee app.** Open pay stubs and W-2GU documents. A same-person email confirmation saves. A login linked to another client's employee is refused.
+- **Demo employee app.** With the active demo account from pre-check 7: after the guard change it still opens; after the pilot batch it is paused; after the full run and verification it opens again.
+- **AIRE.** A worker statement (My Pay) request and an event post succeed.
+- **Worker.** Recurring jobs run. The count of Solid Queue failed executions does not grow, and the worker heartbeat stays current.
+
+### What to watch
+
+- `TenantScope::MissingContextError`, `rls_missing_context` and `rls_unclassified_sql`.
+- `RLS context missing` (SQLSTATE 42501) and `new row violates row-level security policy`, both `PG::InsufficientPrivilege`.
+- The 5xx rate on web and the employee API, and new Solid Queue failed executions.
+- Lists that come back unexpectedly empty. A missing context fails loudly, but a wrong company context returns no rows.
+
+### Instant rollback
+
+1. **Kill switch.** Takes seconds and needs no deploy. Set it with the SQL above from the owner session. Each process enters system mode for new scopes within five seconds, and unscoped statements log instead of raising. While the switch is on, readiness fails "RLS kill switch is off", which is expected.
+2. **Disable.** `MIGRATION_DATABASE_URL=<direct owner URL> bundle exec rails rls:disable` disables RLS table by table. It waits up to 60 seconds (`LOCK_WAIT=` whole seconds from 1 to 600 to change) for a live `rls:enforce`, which stops before its next table once the kill switch is set. If the wait runs out it stops and says so: confirm the switch is set, then rerun. `rls:status` then shows `enforcement.phase` of `shadow`.
+3. **Settle.** Unset `RLS_EXPECT_ENFORCED` on web, worker and the employee API. Set the guard back to `log` if the guard caused the incident, and restart. Confirm `rls:status` shows `enforcement.phase` of `shadow` before clearing the kill switch, with a reason. If the run had already reached full enforcement, reopen demo employee access as described under "Demo employee access during the window".
+
+The contract migration does not need rolling back. NOT NULL is independent of enforcement, and the fill triggers keep supplying `company_id` on insert.
+
 ## Nullable company IDs
 
 The schema audit reconciled every nullable `company_id` against the expand migration and the policy registry.
@@ -39,9 +119,8 @@ The schema audit reconciled every nullable `company_id` against the expand migra
 | `pay_component_tax_rules` | A shared reference rule available to all company scopes. The staged SELECT policy exposes shared and same-company rules. Separate INSERT, UPDATE and DELETE policies require company ownership or explicit system mode. |
 | `audit_logs` | An organization or authentication event. These records remain visible only in system mode. |
 | `finance_books`, `invoice_chat_sessions`, `invoice_recipients`, `invoices`, `work_hour_client_links` | Optional company links to organization-scoped data. These tables remain exempt and keep their organization or finance book authorization. |
-| The 26 [promoted children](../api/db/migrate/support/m3_7_child_companies.rb) | A transitional ownership gap during expand and backfill. These rows do not represent shared data. The staged policies require company ownership. |
 
-The global reference and framework tables in the registry carry no `company_id`. The parent-protected tables derive ownership from their declared relationships.
+The 26 [promoted children](../api/db/migrate/support/m3_7_child_companies.rb) no longer allow NULL. The contract migration requires `company_id` after the backfill. The global reference and framework tables in the registry carry no `company_id`. The parent-protected tables derive ownership from their declared relationships.
 
 ## HTTP controllers
 
@@ -316,6 +395,7 @@ Paths are relative to `api/app/jobs/`. The scope covers Active Job deserializati
 | `production:readiness` | `system` |
 | `quickbooks_history:import` | `system` |
 | `rls:disable` | `exempt_tables_only` |
+| `rls:enforce` | `exempt_tables_only` |
 | `rls:install` | `exempt_tables_only` |
 | `rls:shadow_report` | `exempt_tables_only` |
 | `rls:status` | `exempt_tables_only` |
@@ -327,7 +407,7 @@ Paths are relative to `api/app/jobs/`. The scope covers Active Job deserializati
 | `timekeeping:aire_salary_backfill` | `system` |
 | `year_end:wage_impact` | `system` |
 
-Rails schema tasks and `rls:install` / `rls:disable` operate on catalog or DDL through the owner connection. The status and shadow report tasks inspect metadata or exported events. Operational scripts accessing protected data use their matching scoped Rake entry point.
+Rails schema tasks and `rls:install`, `rls:enforce` and `rls:disable` operate on catalog or DDL through the owner connection. The status and shadow report tasks inspect metadata or exported events. Operational scripts accessing protected data use their matching scoped Rake entry point.
 
 The Rake re-audit traced task calls into their services. `mosa:rebuild` scopes tenant payroll and compensation writes including employees, deduction types and employee deductions. `production:readiness` enters system scope for the open pay-period scan and the other readiness probes that span companies. Clerk inventory and dry-run use identity tables, and the import builder only reads files. Clerk apply and rollback retain system mode for audit writes. Queue probes use operational and Solid Queue tables. Staging readiness and containment open scopes in their services. Owner schema tasks run with the guard off.
 

@@ -28,16 +28,17 @@ RSpec.describe "Company RLS", :rls do
     end
   end
 
-  it "accounts for every nullable company ID without treating ownership gaps as shared rows" do
+  it "accounts for every nullable company ID and requires it on every promoted child" do
     pool.with_connection do |connection|
       nullable = connection.select_values(<<~SQL)
         SELECT table_name FROM information_schema.columns
         WHERE table_schema = current_schema() AND column_name = 'company_id' AND is_nullable = 'YES'
       SQL
       expect(nullable).to match_array(
-        M3_7ChildCompanies::CHILDREN.keys.map(&:to_s) + RlsTables::RLS_SHARED_READ_TABLES +
+        RlsTables::RLS_SHARED_READ_TABLES +
           %w[audit_logs finance_books invoice_chat_sessions invoice_recipients invoices work_hour_client_links]
       )
+      expect(RlsEnforcement.nullable_child_companies(connection)).to be_empty
     end
   end
 
