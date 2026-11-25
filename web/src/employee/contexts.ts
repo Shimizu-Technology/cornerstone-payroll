@@ -21,13 +21,19 @@ export interface EmployeeAuthValue {
   SignUpForm: ComponentType<{ redirectTo: string }>;
   /**
    * Runs a change behind step-up. When `attempt` throws StepUpRequiredError,
-   * this asks the person to confirm it's them (Clerk reverification, first
-   * factor for employees), then runs `attempt` again. Throws
-   * StepUpCancelledError if they close the prompt.
+   * this asks the person to confirm it's them (Clerk reverification at the
+   * level the API names: a password or email code while two-step sign-in is
+   * off, the second step once REQUIRE_MFA is on), then runs `attempt` again.
+   * Throws StepUpCancelledError if they close the prompt.
    */
   stepUp: <T>(attempt: () => Promise<T>) => Promise<T>;
-  /** Opens the account settings where two-step sign-in is set up (Clerk's user profile). */
+  /**
+   * Opens the account settings where two-step sign-in is set up (Clerk's user
+   * profile) over the current screen, so a form in progress keeps its input.
+   */
   openAccountSettings: () => void;
+  /** The account settings themselves, embedded on the Sign-in & security page (/security). */
+  AccountSecurityPanel: ComponentType;
   /** Development preview only: signs in without Clerk. */
   previewSignIn?: () => void;
 }

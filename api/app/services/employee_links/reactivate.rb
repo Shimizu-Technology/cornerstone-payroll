@@ -5,7 +5,8 @@ module EmployeeLinks
   # (POST /api/v1/employee/links/reactivate): a rehired person whose
   # portal_employee login closed with their last link. The same check as
   # sign-up (token or code, DOB, SSN-4) plus a fresh sign-in to their existing
-  # Clerk account (the M4-1 step-up, enforced by the controller). Only then
+  # Clerk account (the M4-1 step-up, MfaPolicy.recently_step_up_verified?,
+  # checked by the controller and again here). Only then
   # are the same login reactivated and the new link bound, in one
   # transaction; any failed check leaves both inactive. The old link stays
   # closed. Staff and client logins were never deactivated and use Claim.
@@ -29,7 +30,7 @@ module EmployeeLinks
     def user_allowed?
       @user.is_a?(User) && @user.portal_employee? && !@user.active? &&
         @user.deactivation_reason == "last_employee_link_closed" && @user.deactivated_at.present? &&
-        !SessionFence.fenced?(@user, @session) && MfaPolicy.recently_verified_any_factor?(@session)
+        !SessionFence.fenced?(@user, @session) && MfaPolicy.recently_step_up_verified?(@session)
     end
 
     # The earlier link to this same employee record (or the record it

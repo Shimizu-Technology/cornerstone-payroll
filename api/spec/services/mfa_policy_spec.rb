@@ -4,18 +4,19 @@ require "rails_helper"
 
 RSpec.describe MfaPolicy do
   describe ".required_for?" do
-    it "preserves the MFA requirement for all eight current roles" do
+    it "requires MFA for every role, employees included, only when enabled" do
       enabled = { "REQUIRE_MFA" => "on" }
-      requirements = {
-        super_admin: true, admin: true, org_admin: true, manager: true, accountant: true, client: true,
-        employee: false, portal_employee: false
-      }
-      expect(User.roles.keys).to match_array(requirements.keys.map(&:to_s))
-      requirements.each do |role, required|
+      expect(User.roles.keys).to match_array(%w[super_admin admin org_admin manager accountant client employee portal_employee])
+      User.roles.each_key do |role|
         user = User.new(role: role)
-        expect(described_class.required_for?(user: user, env: enabled)).to eq(required), role.to_s
-        expect(described_class.required_for?(user: user, env: {})).to be(false)
+        expect(described_class.required_for?(user: user, env: enabled)).to be(true), role
+        expect(described_class.required_for?(user: user, env: {})).to be(false), role
+        expect(described_class.required_for?(user: user, env: { "REQUIRE_MFA" => "false" })).to be(false), role
       end
+    end
+
+    it "never requires MFA for a missing user" do
+      expect(described_class.required_for?(user: nil, env: { "REQUIRE_MFA" => "true" })).to be(false)
     end
 
     it "requires MFA if the user's role is unrecognized" do
@@ -79,14 +80,45 @@ RSpec.describe MfaPolicy do
     end
   end
 
-  describe ".recently_verified_any_factor?" do
+  describe ".recently_verified_first_factor?" do
     it "requires a fresh first factor regardless of the second factor age" do
       [ [ 3, -1 ], [ 10, -1 ], [ 3, 25 ] ].each do |ages|
-        expect(described_class.recently_verified_any_factor?("fva" => ages)).to be(true)
+        expect(described_class.recently_verified_first_factor?({ "fva" => ages })).to be(true)
       end
       [ nil, [ 25, -1 ], [ -1, 0 ], [ "3", -1 ], [ 3 ], [ 3, nil ] ].each do |ages|
-        expect(described_class.recently_verified_any_factor?("fva" => ages)).to be(false)
+        expect(described_class.recently_verified_first_factor?({ "fva" => ages })).to be(false)
       end
+      expect(described_class.recently_verified_first_factor?(nil)).to be(false)
+      expect(described_class.recently_verified_first_factor?({ "fva" => [ 3, -1 ] }, max_age_minutes: -1)).to be(false)
+    end
+  end
+
+  describe ".step_up_level" do
+    it "asks for a second factor with MFA on and a first factor while it's off" do
+      expect(described_class.step_up_level(env: { "REQUIRE_MFA" => "true" })).to eq("second_factor")
+      expect(described_class.step_up_level(env: { "REQUIRE_MFA" => "false" })).to eq("first_factor")
+      expect(described_class.step_up_level(env: {})).to eq("first_factor")
+    end
+  end
+
+  describe ".recently_step_up_verified?" do
+    let(:on) { { "REQUIRE_MFA" => "true" } }
+    let(:off) { {} }
+
+    it "accepts a fresh first factor while MFA is off, with or without enrollment" do
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 2, -1 ] }, env: off)).to be(true)
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 10, -1 ], "two_factor_enabled" => false }, env: off)).to be(true)
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 11, -1 ] }, env: off)).to be(false)
+      # A fresh second factor alone isn't the first-factor reverification Clerk prompts for.
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 30, 0 ], "two_factor_enabled" => true }, env: off)).to be(false)
+      expect(described_class.recently_step_up_verified?(nil, env: off)).to be(false)
+    end
+
+    it "requires an enrolled, fresh second factor when MFA is on" do
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 30, 4 ], "two_factor_enabled" => true }, env: on)).to be(true)
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 0, -1 ], "two_factor_enabled" => false }, env: on)).to be(false)
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 0, 0 ] }, env: on)).to be(false)
+      expect(described_class.recently_step_up_verified?({ "fva" => [ 0, 11 ], "two_factor_enabled" => true }, env: on)).to be(false)
     end
   end
 end

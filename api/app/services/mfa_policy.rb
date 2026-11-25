@@ -10,16 +10,34 @@ class MfaPolicy
   ENROLLMENT_CLAIM = "two_factor_enabled"
   TRUTHY_VALUES = %w[1 true t yes y on].freeze
 
+  # REQUIRE_MFA is the one switch. Off (unset or false), nobody needs a second
+  # factor and step-up actions ask for a fresh password or email code instead;
+  # on, every user (staff, client and employee logins alike) needs one, and
+  # step-up asks for it again. Turning it on needs no code change
+  # (docs/rollout/MFA_ROLLOUT_RUNBOOK.md).
   def self.enabled?(env: ENV)
     TRUTHY_VALUES.include?(env.fetch("REQUIRE_MFA", "false").to_s.strip.downcase)
   end
 
   def self.required_for?(user:, env: ENV)
-    enabled?(env: env) && user.present? && !employee_only?(user)
+    enabled?(env: env) && user.present?
   end
 
-  def self.employee_only?(user)
-    user.employee? || user.portal_employee?
+  # The Clerk reverification level a step-up action asks for.
+  def self.step_up_level(env: ENV)
+    enabled?(env: env) ? "second_factor" : "first_factor"
+  end
+
+  # The one step-up check (employee app switch, early access, view-as and the
+  # employee portal's protected changes). With MFA on, a second factor
+  # verified within the window; with it off, a first factor (password or
+  # email code) re-verified through Clerk within the window.
+  def self.recently_step_up_verified?(payload, env: ENV, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
+    if enabled?(env: env)
+      recently_verified_second_factor?(payload, max_age_minutes: max_age_minutes)
+    else
+      recently_verified_first_factor?(payload, max_age_minutes: max_age_minutes)
+    end
   end
 
   def self.verified_second_factor?(payload)
@@ -34,15 +52,24 @@ class MfaPolicy
   # about a minute older than Clerk's own afterMinutes check. That only makes the
   # server slightly more lenient than the prompt; it never asks for a factor twice.
   def self.recently_verified_second_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
-    return false unless max_age_minutes.is_a?(Integer) && max_age_minutes >= 0
+    return false unless valid_window?(max_age_minutes)
 
     verified_second_factor?(payload) && payload["fva"][1] <= max_age_minutes
   end
 
-  def self.recently_verified_any_factor?(payload)
+  # fva[0]: minutes since the first factor (password, email code) was last
+  # verified, which Clerk's first_factor reverification resets.
+  def self.recently_verified_first_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
+    return false unless valid_window?(max_age_minutes)
+
     age = factor_ages(payload)&.first || -1
-    age.between?(0, STEP_UP_MAX_AGE_MINUTES)
+    age.between?(0, max_age_minutes)
   end
+
+  def self.valid_window?(max_age_minutes)
+    max_age_minutes.is_a?(Integer) && max_age_minutes >= 0
+  end
+  private_class_method :valid_window?
 
   def self.factor_ages(payload)
     ages = payload["fva"] if payload.is_a?(Hash)

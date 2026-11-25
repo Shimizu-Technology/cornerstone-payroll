@@ -19,7 +19,9 @@ class ViewAsGrant < ApplicationRecord
 
     # Enable on both processes after the employee rollout readiness checks
     # pass, including the employee web health and published terms checks.
-    ENV["VIEW_AS_READY"] == "true" && MfaPolicy.enabled? &&
+    # It doesn't wait for REQUIRE_MFA: starting a view needs a fresh step-up
+    # either way (RecentVerification), a first factor while MFA is off.
+    ENV["VIEW_AS_READY"] == "true" &&
       RlsContextGuard.mode == "raise" && ENV["CLERK_AUTHORIZED_PARTIES"].present?
   end
 

@@ -43,9 +43,26 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(response.body).not_to include("999-00-0001")
   end
 
-  it "requires step-up on every write and uses the Clerk first-factor hint for an employee-only login" do
+  it "requires a second-factor step-up on every write for an employee-only login when MFA is on" do
     writes.each do |verb, path|
-      public_send(verb, "#{base}/#{path}", headers: employee_headers(fva: [ 11, -1 ]))
+      public_send(verb, "#{base}/#{path}", headers: employee_headers(fva: [ 0, 11 ]))
+      expect(response).to have_http_status(:forbidden), "#{verb} #{path}"
+      expect(response.parsed_body.dig("clerk_error", "metadata", "reverification")).to eq(
+        "level" => "second_factor", "afterMinutes" => 10
+      )
+    end
+  end
+
+  it "refuses an employee-only login with no second factor when MFA is on" do
+    get "#{base}/profile", headers: employee_headers(fva: [ 0, -1 ], two_factor_enabled: false)
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("code")).to eq("mfa_required")
+  end
+
+  it "uses the Clerk first-factor hint on every write while MFA is off" do
+    ENV["REQUIRE_MFA"] = "false"
+    writes.each do |verb, path|
+      public_send(verb, "#{base}/#{path}", headers: employee_headers(fva: [ 11, -1 ], two_factor_enabled: false))
       expect(response).to have_http_status(:forbidden), "#{verb} #{path}"
       expect(response.parsed_body.dig("clerk_error", "metadata", "reverification")).to eq(
         "level" => "first_factor", "afterMinutes" => 10
@@ -64,10 +81,11 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body.fetch("code")).to eq("mfa_required")
 
+    # With MFA off nobody is sent to enrollment; a fresh password is the step-up.
     ENV["REQUIRE_MFA"] = "false"
-    patch "#{base}/profile/phone", headers: headers
+    patch "#{base}/profile/phone", headers: bearer(reviewer.clerk_id, fva: [ 11, -1 ]).merge("X-Employee-Link-Id" => dual_link.id.to_s)
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("code")).to eq("mfa_enrollment_required")
+    expect(response.parsed_body.dig("clerk_error", "metadata", "reverification", "level")).to eq("first_factor")
   end
 
   it "returns the same empty 404 for all actions when the profile switch is off" do
@@ -574,9 +592,10 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     EmployeeAccountLink.create!(user: user, company: employee.company, employee: employee, status: "active")
   end
 
-  def employee_headers(selected_link = link, subject: selected_link.user.clerk_id, fva: nil)
-    employee_only = selected_link.user.portal_employee?
-    bearer(subject, fva: fva || (employee_only ? [ 0, -1 ] : [ 0, 0 ]), two_factor_enabled: !employee_only)
+  # REQUIRE_MFA is on here, so every login, employee-only ones included, has
+  # an enrolled, freshly verified second factor.
+  def employee_headers(selected_link = link, subject: selected_link.user.clerk_id, fva: nil, two_factor_enabled: true)
+    bearer(subject, fva: fva || [ 0, 0 ], two_factor_enabled: two_factor_enabled)
       .merge("X-Employee-Link-Id" => selected_link.id.to_s)
   end
 
