@@ -259,7 +259,7 @@ function ContactCard({ profile, onSaved, editable, notice }: ProfileProps): Reac
           <DetailRow
             label="Mobile phone"
             value={profile.phone ? formatPhone(profile.phone) : null}
-            badge={profile.phone && profile.phoneConfirmed ? <Chip tone="good" icon={BadgeCheck}>Confirmed by you</Chip> : undefined}
+            badge={profile.phone && profile.phoneConfirmed ? <Chip tone="neutral">Added by you</Chip> : undefined}
             action={editable && !editing ? <ChangeButton label="Change mobile phone" onClick={() => setEditing('phone')} /> : undefined}
           />
         )}
@@ -520,11 +520,10 @@ function LegalCard({ profile }: { profile: EmployeeProfile }): ReactElement {
     <Card title="Name and Social Security number">
       <div className="space-y-4">
         <DetailRow label="Legal name" value={profile.legalName} />
-        <DetailRow label="Social Security number" value="Contact Cornerstone" />
         <div className="emp-notice-inline" role="note">
-          <p className="font-bold">To change these, ask your manager</p>
+          <p className="font-bold">To change these, ask your manager to put you in touch with Cornerstone.</p>
           <p className="text-neutral-700">
-            Cornerstone runs payroll and keeps these on your tax records. Ask your manager to put you in touch with Cornerstone, and have these ready:
+            Cornerstone runs payroll and keeps your legal name and Social Security number on your tax records. Have these ready:
           </p>
           <ul className="emp-bullets">
             <li>Your Social Security card showing the new name or number</li>

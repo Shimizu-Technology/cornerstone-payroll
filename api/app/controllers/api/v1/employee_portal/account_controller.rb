@@ -64,8 +64,15 @@ module Api
             company_name: link.company.name,
             subdomain_slug: link.company.subdomain_slug,
             status: link.status,
-            former_access_until: link.former_access_until&.iso8601
+            former_access_until: link.former_access_until&.iso8601,
+            latest_pay_date: latest_pay_date_for(link)&.iso8601
           }
+        end
+
+        def latest_pay_date_for(link)
+          return unless CompanyFeatures.for(link.company).employee_portal_feature?(:stubs)
+
+          EmployeeStatements.new(context: link).latest_pay_date
         end
 
         def render_write_maintenance

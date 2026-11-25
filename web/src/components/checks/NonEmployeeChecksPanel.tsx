@@ -195,10 +195,12 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
 
   // Notify the parent whenever the local checks array changes (initial load,
   // reloads, or single-check updates). Done in an effect so it stays out of
-  // any render-phase setState updater.
+  // any render-phase setState updater. The empty list before the first load
+  // finishes isn't saved state, so it isn't reported.
   useEffect(() => {
+    if (loadedScope !== listScope) return;
     onChecksLoadedRef.current?.(checks);
-  }, [checks]);
+  }, [checks, loadedScope, listScope]);
 
   useEffect(() => {
     if (companyId) {

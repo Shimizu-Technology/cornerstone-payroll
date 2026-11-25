@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
-import { CheckCircle2, CircleAlert, Lock, ShieldAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, ChevronDown, CircleAlert, Lock, ShieldAlert, XCircle } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Alert } from '@/components/ui/alert';
@@ -91,7 +91,8 @@ function CompanySwitch({ companyId }: { companyId: number }) {
   if (!state) return <WorkspaceLoader label="Checking readiness" />;
 
   const checks = [...state.readiness.checks, state.readiness.counsel_checks.terms, state.readiness.counsel_checks.consent];
-  const names = Object.fromEntries(checks.map((check) => [check.key, check.name]));
+  const names = Object.fromEntries(checks.map((check) => [check.key, plainName(check)]));
+  const master = state.switches.find((item) => item.key === MASTER);
 
   return (
     <>
@@ -106,6 +107,8 @@ function CompanySwitch({ companyId }: { companyId: number }) {
             <strong>Demo company.</strong> Until the database enforces row-level security, a demo can turn on only through the demo early-access rule below. Real companies always need every check.
           </Alert>
         )}
+
+        {master && <ReadinessSummary master={master} checks={checks} names={names} />}
 
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -133,7 +136,7 @@ function CompanySwitch({ companyId }: { companyId: number }) {
             <ul className="divide-y divide-neutral-100">
               {state.switches.map((row) => (
                 <SwitchItem key={row.key} row={row} names={names}
-                  masterOn={state.switches.find((item) => item.key === MASTER)?.on ?? false}
+                  masterOn={master?.on ?? false}
                   onChange={(on) => { setNotice(''); setChange({ row, on }); }} />
               ))}
               {state.stays_off.map((row) => (
@@ -184,6 +187,73 @@ function CompanySwitch({ companyId }: { companyId: number }) {
   );
 }
 
+type Owner = 'Cornerstone' | 'Shimizu Technology';
+
+// Plain names for the server's checks. The server's own wording, with its
+// setting names, stays under Technical details for whoever fixes it.
+const CHECK_COPY: Record<string, { label: string; owner: Owner }> = {
+  company: { label: 'This is an active client or a demo company', owner: 'Cornerstone' },
+  mfa: { label: 'Two-step sign-in is turned on', owner: 'Shimizu Technology' },
+  rls_guard: { label: "The employee app reads only this company's records", owner: 'Shimizu Technology' },
+  rls_database: { label: "The database keeps each company's records apart", owner: 'Shimizu Technology' },
+  authorized_parties: { label: 'Sign-in works only from our own web addresses', owner: 'Shimizu Technology' },
+  subdomain: { label: "The company's web address is set", owner: 'Cornerstone' },
+  employee_service: { label: "The employee app's server is running", owner: 'Shimizu Technology' },
+  terms: { label: 'The employee app terms and privacy notice are ready', owner: 'Cornerstone' },
+  consent: { label: 'The electronic delivery consent wording is ready', owner: 'Cornerstone' },
+};
+
+function plainName(check: ReadinessCheck): string {
+  return CHECK_COPY[check.key]?.label ?? check.name;
+}
+
+function ReadinessSummary({ master, checks, names }: { master: SwitchRow; checks: ReadinessCheck[]; names: Record<string, string> }) {
+  const failing = checks.filter((check) => check.status === 'failed').length;
+  const blocking = master.blocked_by;
+  const ready = master.on || blocking.length === 0;
+  const title = master.on ? 'The employee app is on'
+    : ready ? 'Ready to turn on'
+      : `Not ready yet: ${blocking.length} ${blocking.length === 1 ? 'thing' : 'things'} to fix`;
+  // A waived check doesn't pass, so "every check passes" would overstate it.
+  // Only a demo in an early-access window waives the database check; two-step
+  // sign-in is waived for every company until it's turned on for everyone.
+  const waived = checks.filter((check) => check.status === 'waived');
+  const earlyAccess = waived.some((check) => check.key === 'rls_database') ? ' under demo early access (database check waived)' : '';
+  const notes = waived.filter((check) => check.key !== 'rls_database')
+    .map((check) => check.key === 'mfa' ? "Two-step sign-in isn't required yet." : `${names[check.key] ?? check.key} is waived.`).join(' ');
+  const noteText = notes ? ` ${notes}` : '';
+  const summary = master.on
+    ? failing ? `${failing} ${failing === 1 ? 'check needs' : 'checks need'} attention. Parts that depend on ${failing === 1 ? 'it' : 'them'} can't turn on.`
+      : earlyAccess ? `On${earlyAccess}.${noteText}` : notes ? `Every other check passes.${noteText}` : 'Every check passes.'
+    // Scoped to the app's own checks: a feature's failing check (consent, say)
+    // doesn't block the app and stays listed in the checklist below.
+    : ready ? `${earlyAccess ? `Ready to turn on${earlyAccess}.` : notes ? 'Every other check the employee app needs passes.' : 'Every check the employee app needs passes.'}${noteText} Turn it on under Switches below.`
+      : 'These checks must pass before the employee app can turn on:';
+  return (
+    <section aria-labelledby="readiness-summary" className={`rounded-xl border p-4 ${ready ? 'border-success-200 bg-success-50' : 'border-warning-200 bg-warning-50'}`}>
+      <div className="flex gap-3">
+        {ready
+          ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success-700" aria-hidden="true" />
+          : <CircleAlert className="mt-0.5 h-5 w-5 shrink-0 text-warning-700" aria-hidden="true" />}
+        <div className="min-w-0">
+          <h2 id="readiness-summary" className="font-semibold text-neutral-950">{title}</h2>
+          <p className="mt-1 text-sm text-neutral-700">{summary}</p>
+          {!ready && (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-neutral-800">
+              {blocking.map((key) => (
+                <li key={key} className="[overflow-wrap:anywhere]">
+                  {names[key] ?? key}
+                  {CHECK_COPY[key] && <span className="text-neutral-600"> · {CHECK_COPY[key].owner} fixes this</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function scopeOf(key: string): string | null {
   if (key === 'terms') return 'Needed for the employee app';
   if (key === 'consent') return 'Needed for electronic delivery consent';
@@ -197,6 +267,10 @@ function waivedLabel(key: string): string {
 }
 
 function CheckRow({ check, scope }: { check: ReadinessCheck; scope: string | null }) {
+  const owner = CHECK_COPY[check.key]?.owner;
+  // Cornerstone's own checks and waivers explain themselves in plain words;
+  // the platform checks name server settings, so they stay in the details.
+  const plainDetail = owner === 'Cornerstone' || check.status === 'waived';
   const icon = check.status === 'passed'
     ? <CheckCircle2 className="h-5 w-5 text-success-700" aria-hidden="true" />
     : check.status === 'waived'
@@ -208,11 +282,21 @@ function CheckRow({ check, scope }: { check: ReadinessCheck; scope: string | nul
       <span className="mt-0.5 shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <p className="font-medium text-neutral-900 [overflow-wrap:anywhere]">{check.name}</p>
+          <p className="font-medium text-neutral-900 [overflow-wrap:anywhere]">{plainName(check)}</p>
           <Badge variant={check.status === 'passed' ? 'success' : check.status === 'waived' ? 'warning' : 'danger'}>{label}</Badge>
         </div>
         {scope && <p className="text-xs font-medium text-neutral-500">{scope}</p>}
-        {check.detail && <p className="mt-1 text-sm text-neutral-700 [overflow-wrap:anywhere]">{check.detail}</p>}
+        {check.status === 'failed' && owner && <p className="mt-1 text-xs font-semibold text-neutral-600">{owner} fixes this</p>}
+        {check.detail && plainDetail && <p className="mt-1 text-sm text-neutral-700 [overflow-wrap:anywhere]">{check.detail}</p>}
+        {check.status !== 'passed' && (check.name !== plainName(check) || (check.detail && !plainDetail)) && (
+          <details className="mt-1 text-sm">
+            <summary className="cursor-pointer text-neutral-600 hover:text-neutral-900">Technical details</summary>
+            <div className="mt-1 space-y-1 rounded-lg bg-neutral-50 p-2 text-neutral-700 [overflow-wrap:anywhere]">
+              <p>{check.name}</p>
+              {check.detail && !plainDetail && <p>{check.detail}</p>}
+            </div>
+          </details>
+        )}
       </div>
     </li>
   );
@@ -231,29 +315,36 @@ function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
   const killSwitch = database.kill_switch_bypass === false ? 'Off' : database.kill_switch_bypass ? 'Bypassing' : 'Unknown';
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>What the system sees</CardTitle>
-        <CardDescription>The employee service's guard and the database are separate. The employee service's settings come from its signed answer to this check.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
-        <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-service">
-          <h3 id="observed-service" className="font-semibold text-neutral-900">Employee service</h3>
-          <dl className="mt-2 space-y-2 text-sm">
-            <Fact term="RLS guard" value={guard} good={observed.rls_guard_mode === 'raise'} />
-            <Fact term="Database role" value={observed.rls_runtime_role_verified ? 'Restricted role verified' : 'Not verified'} good={observed.rls_runtime_role_verified} />
-            <Fact term="Health check" value={!observed.health_check_configured ? 'Not set up on Payroll' : observed.answered_health_check ? 'Answered' : 'No answer'} good={observed.answered_health_check} />
-            <Fact term="Signed answer" value={observed.verified ? `Verified${observed.revision ? ` (revision ${observed.revision.slice(0, 12)})` : ''}` : 'Not verified'} good={observed.verified} />
-          </dl>
-        </section>
-        <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-database">
-          <h3 id="observed-database" className="font-semibold text-neutral-900">Database</h3>
-          <dl className="mt-2 space-y-2 text-sm">
-            <Fact term="Row-level security" value={phase} good={database.enforced} />
-            <Fact term="Protected tables enforced" value={`${database.enforced_tables} of ${database.protected_tables}`} good={database.enforced} />
-            <Fact term="RLS kill switch" value={killSwitch} good={database.kill_switch_bypass === false} />
-          </dl>
-        </section>
-      </CardContent>
+      <details className="group">
+        <summary className="cursor-pointer list-none px-4 py-4 sm:px-6 sm:py-5 [&::-webkit-details-marker]:hidden">
+          <span className="flex items-center justify-between gap-3">
+            <span>
+              <CardTitle>Technical details: what the system sees</CardTitle>
+              <CardDescription className="mt-1">For Shimizu Technology. The employee service's guard and the database are separate. The employee service's settings come from its signed answer to this check.</CardDescription>
+            </span>
+            <ChevronDown className="h-5 w-5 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" aria-hidden="true" />
+          </span>
+        </summary>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-service">
+            <h3 id="observed-service" className="font-semibold text-neutral-900">Employee service</h3>
+            <dl className="mt-2 space-y-2 text-sm">
+              <Fact term="RLS guard" value={guard} good={observed.rls_guard_mode === 'raise'} />
+              <Fact term="Database role" value={observed.rls_runtime_role_verified ? 'Restricted role verified' : 'Not verified'} good={observed.rls_runtime_role_verified} />
+              <Fact term="Health check" value={!observed.health_check_configured ? 'Not set up on Payroll' : observed.answered_health_check ? 'Answered' : 'No answer'} good={observed.answered_health_check} />
+              <Fact term="Signed answer" value={observed.verified ? `Verified${observed.revision ? ` (revision ${observed.revision.slice(0, 12)})` : ''}` : 'Not verified'} good={observed.verified} />
+            </dl>
+          </section>
+          <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-database">
+            <h3 id="observed-database" className="font-semibold text-neutral-900">Database</h3>
+            <dl className="mt-2 space-y-2 text-sm">
+              <Fact term="Row-level security" value={phase} good={database.enforced} />
+              <Fact term="Protected tables enforced" value={`${database.enforced_tables} of ${database.protected_tables}`} good={database.enforced} />
+              <Fact term="RLS kill switch" value={killSwitch} good={database.kill_switch_bypass === false} />
+            </dl>
+          </section>
+        </CardContent>
+      </details>
     </Card>
   );
 }
@@ -285,7 +376,10 @@ function SwitchItem({ row, names, masterOn, onChange }: {
         {!row.on && !needsMaster && blocked && (
           <p className="mt-1 flex gap-1.5 text-sm text-danger-800">
             <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>Can't turn on yet: {row.blocked_by.map((key) => names[key] ?? key).join('; ')}.</span>
+            <span>
+              Can't turn on yet: {row.blocked_by.length} {row.blocked_by.length === 1 ? 'check' : 'checks'} to finish
+              {row.blocked_by.length === 1 ? ` (${names[row.blocked_by[0]] ?? row.blocked_by[0]})` : ''}. See the readiness checklist above.
+            </span>
           </p>
         )}
       </div>

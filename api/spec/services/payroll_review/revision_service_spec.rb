@@ -245,6 +245,36 @@ RSpec.describe PayrollReview::RevisionService do
     expect(pay_period.reload).to be_committed
   end
 
+  it "rejects a change request from the client who prepared the preview" do
+    client_service = described_class.new(pay_period: pay_period, actor: client)
+    package = client_service.issue!
+    PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff).approve!
+
+    expect { client_service.request_changes!(revision_id: package.id, note: "Correct hours") }
+      .to raise_error(described_class::Error, /cannot decide a payroll preview you prepared/)
+    expect(package.reload.changes_requested_at).to be_nil
+  end
+
+  describe ".client_can_decide?" do
+    let(:package) do
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff).approve!
+      pay_period.payroll_review_packages.current.first!
+    end
+
+    it "withholds decision access from view-as viewers" do
+      expect(described_class.client_can_decide?(package, client)).to be(true)
+      Current.set(view_as_grant: ViewAsGrant.new) do
+        expect(described_class.client_can_decide?(package, client)).to be(false)
+      end
+    end
+
+    it "withholds decision access from staff and inactive clients" do
+      expect(described_class.client_can_decide?(package, staff)).to be(false)
+      client.update!(active: false)
+      expect(described_class.client_can_decide?(package, client)).to be(false)
+    end
+  end
+
   it "retains a requested change and requires a newly published revision after unapprove and recalculate" do
     lifecycle = PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff)
     lifecycle.approve!

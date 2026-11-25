@@ -5,10 +5,12 @@ import { FileSpreadsheet } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { clientPayrollStatus } from '@/lib/clientPayrollStatus';
 import { currentSubmissionPeriod, formatDate, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { clientPayrollSubmissionsApi, type PeriodSummary } from '@/services/payrollSubmissions';
 
 function actionLabel(period: PeriodSummary): string {
+  if (period.review_pay_period_id) return 'Open pay period files';
   if (period.status === 'draft_ready') return 'Review the draft';
   if (period.status === 'waiting_for_files') return period.open_for_files ? 'Send payroll files' : 'Open pay period files';
   if (period.status === 'changes_requested') return 'Send updated payroll files';
@@ -55,15 +57,15 @@ function EnabledPayrollFilesEntry(): ReactElement {
               <div className="mt-2 space-y-1">
                 <p className="flex flex-wrap items-center gap-2 text-base font-semibold text-neutral-900">
                   <span>Payroll {period.label}</span>
-                  <Badge variant={statusVariant(period.status)}>{period.status_label}</Badge>
+                  <Badge variant={statusVariant(period.status)}>{period.client_payroll_status && period.client_payroll_status !== 'preparing' ? clientPayrollStatus(period.client_payroll_status) : period.status_label}</Badge>
                   {period.unread && <Badge variant="warning">New</Badge>}
                 </p>
                 <p className="text-sm text-neutral-600">{detailLine(period)}</p>
               </div>
             )}
             <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-700">
-              <span className="font-semibold">Pay Period Files</span> is where you send Cornerstone the Revel payroll and any changes for a pay period, then review the draft.
-              {' '}<span className="font-semibold">Pay Periods</span> shows payrolls Cornerstone has already processed, with each employee’s pay.
+              <span className="font-semibold">Pay Period Files</span> is where you send Cornerstone the Revel payroll and report changes for a pay period.
+              {' '}<span className="font-semibold">Pay Periods</span> shows open payrolls, published previews and payroll history.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row lg:flex-col lg:items-stretch">

@@ -31,7 +31,6 @@ import {
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { analytics } from '@/lib/analytics';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
 import { employeeContactDetailsPath, employeesPath, newEmployeePath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
@@ -521,7 +520,6 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
 
       const redirect = getCompanySwitchRedirect(location.pathname, command.companyId, location.search);
       if (switchCompany(command.companyId) === false) return;
-      analytics.companySwitch(command.companyId);
 
       if (redirect) {
         navigate(redirect.to, {

@@ -261,6 +261,20 @@ RSpec.describe "Employee statements", type: :request do
       get "/api/v1/employee/statements/#{inside.id}/pdf", headers: headers_for
       expect(response).to have_http_status(:ok)
     end
+
+    it "reports the link's latest_pay_date on GET /api/v1/employee/links when stubs are on, and nil when off" do
+      stub_on(Date.new(2026, 11, 6))
+      stub_on(Date.new(2026, 11, 20))
+
+      get "/api/v1/employee/links", headers: bearer("user_jordan")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("links").sole["latest_pay_date"]).to eq("2026-11-20")
+
+      company.client_operating_profiles.update_all(options: { "employee_portal" => { "features" => { "stubs" => false } } })
+      get "/api/v1/employee/links", headers: bearer("user_jordan")
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("links").sole["latest_pay_date"]).to be_nil
+    end
   end
 
   describe "corrected revisions" do

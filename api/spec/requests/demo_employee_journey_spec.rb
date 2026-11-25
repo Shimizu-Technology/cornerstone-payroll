@@ -455,6 +455,15 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
       end.to raise_error(ActiveRecord::StatementInvalid, /live or demo company/)
     end
 
+    it "signs up an allow-listed address the organization marked as a placeholder, like any other" do
+      EmployeePlaceholderEmail.create!(organization: organization, email: robin_email, marked_by: staff)
+      with_portal_email do
+        link = invite_by_email!(robin)
+        worker = sign_up!(robin, invite_token, robin_email, "user_robin")
+        expect(link.reload).to have_attributes(status: "active", user_id: worker.id)
+      end
+    end
+
     it "never sends invites or sign-ups outside the allow-list" do
       outsider = create(:employee, company: kitchen, first_name: "Avery", last_name: "Sprig", email: outside_email,
         date_of_birth: Date.new(2003, 5, 27))

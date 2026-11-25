@@ -1,6 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { roleLabel } from '@/lib/role-labels';
 import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
-import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -68,14 +69,44 @@ function inviteFailureReason(response: InvitationDeliveryResponse): string {
   return invitationOutcomeMessage(response);
 }
 
+// The account list keeps the editor's "(legacy)" marker for older admin accounts.
+function accountRoleLabel(role: UserRole): string {
+  return allRoleOptions.find((option) => option.value === role)?.label ?? roleLabel(role);
+}
+
+type InviteFieldErrors = { email?: string; clients?: string };
+const CLIENT_REQUIRED_MESSAGE = 'Choose at least one client for a client portal user.';
+
+function inviteFieldErrors(email: string, role: UserRole, companyIds: number[]): InviteFieldErrors {
+  const errors: InviteFieldErrors = {};
+  const trimmed = email.trim();
+  if (!trimmed) errors.email = 'Enter the email address to send the invitation to.';
+  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) errors.email = 'Enter a full email address, like name@example.com.';
+  if (role === 'client' && companyIds.length === 0) errors.clients = CLIENT_REQUIRED_MESSAGE;
+  return errors;
+}
+
+// Server refusals that name one field go under that field.
+function inviteServerFieldErrors(err: ApiError): InviteFieldErrors {
+  if (errorCode(err) === 'client_required') return { clients: CLIENT_REQUIRED_MESSAGE };
+  const raw = err.data && typeof err.data === 'object' ? (err.data as { error?: unknown }).error : undefined;
+  const messages = (Array.isArray(raw) ? raw : [raw]).filter((value): value is string => typeof value === 'string');
+  if (messages.length === 0 || !messages.every((message) => /^Email\b/.test(message))) return {};
+  if (messages.some((message) => /already been taken/i.test(message))) {
+    return { email: 'This email already has an account. Find it in the list below.' };
+  }
+  return { email: messages.join(' ') };
+}
+
 export function Users() {
   const { user: currentUser } = useAuth();
+  const inviteEmailId = useId();
+  const inviteClientsId = useId();
   const roleOptions = currentUser?.role === 'super_admin'
     ? allRoleOptions
     : allRoleOptions.filter((role) => role.value !== 'super_admin');
   const invitationRoleOptions = roleOptions.filter((role) => !role.legacy && role.value !== 'employee');
   const roleGuideOptions = roleOptions.filter((role) => !role.legacy);
-  const roleLabel = (role: UserRole) => allRoleOptions.find((option) => option.value === role)?.label || role;
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -97,6 +128,8 @@ export function Users() {
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('accountant');
   const [newError, setNewError, newErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
+  // Errors that belong to one field are shown under that field, not as a notice.
+  const [newFieldErrors, setNewFieldErrors] = useState<InviteFieldErrors>({});
   const [isSavingNew, setIsSavingNew] = useState(false);
   const [newClientIds, setNewClientIds] = useState<number[]>([]);
   const [availableCompanies, setAvailableCompanies] = useState<CompanyListItem[]>([]);
@@ -193,6 +226,7 @@ export function Users() {
   const handleStartAddNew = async () => {
     setIsAddingNew(true);
     setNewError(null);
+    setNewFieldErrors({});
     setNewClientIds([]);
     // Practice copies finish preparing in the background, so a list loaded
     // earlier can be stale. Refresh whenever the picker opens.
@@ -205,22 +239,26 @@ export function Users() {
     setNewEmail('');
     setNewRole('accountant');
     setNewError(null);
+    setNewFieldErrors({});
     setNewClientIds([]);
   };
 
   const handleAddNew = async (): Promise<void> => {
-    if (!newEmail.trim()) {
-      setNewError('Email is required');
+    const companyIds = assignmentCompanyIdsForRole(newRole, newClientIds, availableCompanies);
+    const fieldErrors = inviteFieldErrors(newEmail, newRole, companyIds);
+    setNewFieldErrors(fieldErrors);
+    setNewError(null);
+    if (Object.keys(fieldErrors).length > 0) {
+      document.getElementById(fieldErrors.email ? inviteEmailId : inviteClientsId)?.focus();
       return;
     }
     setIsSavingNew(true);
-    setNewError(null);
     try {
       const payload = {
         email: newEmail.trim(),
         name: newName.trim() || newEmail.trim().split('@')[0],
         role: newRole,
-        company_ids: assignmentCompanyIdsForRole(newRole, newClientIds, availableCompanies),
+        company_ids: companyIds,
       };
       const response = await usersApi.create(payload);
       setInviteWarning(null);
@@ -234,7 +272,9 @@ export function Users() {
       handleCancelAddNew();
       await fetchUsers();
     } catch (err) {
-      setNewError(err instanceof ApiError ? err.message : 'Failed to create user');
+      const serverFieldErrors = err instanceof ApiError ? inviteServerFieldErrors(err) : {};
+      if (Object.keys(serverFieldErrors).length > 0) setNewFieldErrors(serverFieldErrors);
+      else setNewError(err instanceof ApiError ? err.message : 'Could not create the user. Try again.');
     } finally {
       setIsSavingNew(false);
     }
@@ -366,6 +406,7 @@ export function Users() {
 
   const handleNewRoleChange = (role: UserRole): void => {
     setNewRole(role);
+    setNewFieldErrors((current) => ({ email: current.email }));
     setNewClientIds(selectedIds => assignmentCompanyIdsForRole(role, selectedIds, availableCompanies));
     if (role === 'client') void loadCompanies();
   };
@@ -581,6 +622,7 @@ export function Users() {
     <div>
       <Header
         title="User Management"
+        organizationWide
         description="Manage staff accounts, roles, and payroll client access"
         actions={
           !isAddingNew && (
@@ -643,10 +685,12 @@ export function Users() {
             {newError && (
               <ActionFeedback retryKey={newErrorFeedbackAttempt} tone="error" message={newError}><p className="text-sm text-danger-600">{newError}</p></ActionFeedback>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <Input placeholder="Email address *" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
-              <Input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <Select aria-label="Role" value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:items-start">
+              <Input id={inviteEmailId} label="Email address" type="email" autoComplete="off" required aria-required="true"
+                value={newEmail} error={newFieldErrors.email}
+                onChange={(e) => { setNewEmail(e.target.value); setNewFieldErrors((current) => ({ ...current, email: undefined })); }} />
+              <Input label="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Select label="Role" value={newRole} onChange={(e) => handleNewRoleChange(e.target.value as UserRole)}>
                 {invitationRoleOptions.map((role) => (
                   <option key={role.value} value={role.value}>{role.label}</option>
                 ))}
@@ -656,13 +700,16 @@ export function Users() {
 
             {needsClientAssignment(newRole) && (
               <div className="mt-4 pt-4 border-t border-neutral-200">
-                <p className="text-sm font-medium text-neutral-700 mb-2">
+                <p id={inviteClientsId} tabIndex={-1} className="text-sm font-medium text-neutral-700 mb-2">
                   Assign Payroll Clients
-                  <span className="text-xs font-normal text-neutral-600 ml-2">(can also be changed later)</span>
+                  <span className="text-xs font-normal text-neutral-600 ml-2">
+                    {newRole === 'client' ? '(choose at least one)' : '(can also be changed later)'}
+                  </span>
                 </p>
+                {newFieldErrors.clients && <p role="alert" className="mb-2 text-sm text-danger-600">{newFieldErrors.clients}</p>}
                 {renderClientAssignmentPicker(
                   newClientIds,
-                  setNewClientIds,
+                  (next) => { setNewClientIds(next); setNewFieldErrors((current) => ({ ...current, clients: undefined })); },
                   newRole,
                   newClientIds.length > 0 ? `${newClientIds.length} client${newClientIds.length !== 1 ? 's' : ''} selected` : undefined
                 )}
@@ -732,7 +779,7 @@ export function Users() {
                             <StatusBadges user={user} />
                           </div>
                           <div className="mt-4 grid grid-cols-2 gap-3">
-                            <MobileField label="Role" value={roleLabel(user.role)} />
+                            <MobileField label="Role" value={accountRoleLabel(user.role)} />
                             <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
@@ -802,7 +849,7 @@ export function Users() {
                         ) : (
                           <div>
                             <span className="inline-flex items-center gap-1.5">
-                              {roleLabel(user.role)}
+                              {accountRoleLabel(user.role)}
                             </span>
                             {renderAssignedCompanies(user)}
                           </div>

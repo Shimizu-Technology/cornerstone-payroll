@@ -55,7 +55,7 @@ function IdentityFields({ draft, setDraft, problems, token }: { draft: IdentityD
   return (
     <>
       {token ? (
-        <p className="emp-message emp-message-info">Your invite link is ready. Confirm two details to continue.</p>
+        <p className="emp-message emp-message-info">Your invite link is ready. Enter two details to continue.</p>
       ) : (
         <Field
           label="Sign-up code"
@@ -118,7 +118,7 @@ function TermsCheckbox({ terms, loadFailed, reload, checked, onChange, error }: 
         <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} aria-invalid={error ? true : undefined} aria-describedby={error ? 'emp-terms-error' : undefined} />
         <span>
           I agree to the{' '}
-          <a className="emp-link-inline" href={terms.termsUrl} target="_blank" rel="noreferrer">{terms.title} ({terms.version})</a>
+          <a className="emp-link-inline" href={terms.termsUrl} target="_blank" rel="noreferrer">{terms.title}</a>
           {' '}and{' '}
           <a className="emp-link-inline" href={terms.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a>.
         </span>
@@ -368,7 +368,7 @@ export function ActivateScreen(): ReactElement {
         <div className="space-y-2">
           <p className="emp-step">Step 1 of 2</p>
           <h1 className="emp-h1">Set up your account</h1>
-          <p className="emp-lead">First, let's check it's you. We use these to match you to your pay at {company}.</p>
+          <p className="emp-lead">First, tell us who you are. We'll check everything when you create your account.</p>
         </div>
         <IdentityFields draft={draft} setDraft={setDraft} problems={problems} token={token} />
         <FailureMessage failure={failure} />

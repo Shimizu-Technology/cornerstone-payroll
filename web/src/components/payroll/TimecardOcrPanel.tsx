@@ -348,7 +348,7 @@ function TimecardListItem({ tc, onSelect, onReprocess, onDelete, isDeleting, emp
             <Spinner size="sm" />
           </div>
           <div className="flex-1">
-            <span className="font-medium text-sm">Processing with GPT...</span>
+            <span className="font-medium text-sm">Reading punch times...</span>
             <p className="text-xs text-neutral-600 mt-0.5">OCR is running in the background. This takes 60-90 seconds per card.</p>
           </div>
           <Button size="sm" variant="outline" className="text-red-600 shrink-0" onClick={onDelete} disabled={isDeleting}>
@@ -1503,7 +1503,7 @@ export function TimecardOcrPanel({ payPeriodId, onPayrollUpdated }: {
       <div className="p-4 border-b bg-indigo-50">
         <h3 className="font-semibold text-indigo-900">Timecard OCR</h3>
         <p className="text-sm text-indigo-700 mt-1">
-          Upload timecard images or PDFs. GPT will extract punch times for review.
+          Upload timecard images or PDFs. We'll read the punch times for you to review.
         </p>
       </div>
 

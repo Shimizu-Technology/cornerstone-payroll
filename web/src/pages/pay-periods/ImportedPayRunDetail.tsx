@@ -1,3 +1,4 @@
+import { clientPayrollStatus } from '@/lib/clientPayrollStatus';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactElement } from 'react';
 import { ArrowLeft, FileLock2, FilePenLine, LockKeyhole } from 'lucide-react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -105,7 +106,7 @@ export function ImportedPayRunDetail({ audience }: { audience: 'staff' | 'client
               <div className="flex items-start gap-3">
                 <LockKeyhole className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" />
                 <div>
-                  <p className="font-semibold">Locked source record</p>
+                  <p className="font-semibold">{audience === 'client' ? clientPayrollStatus('locked') : 'Locked source record'}</p>
                   <p className="mt-1 text-sm leading-6 text-amber-800">{audience === 'client'
                     ? (record.source.system === 'prior_provider' ? 'This finalized payroll came from the prior provider. You can review it here, but it cannot be changed or recalculated in Cornerstone.' : 'This finalized payroll came from QuickBooks. You can review it here, but it cannot be changed or recalculated in Cornerstone.')
                     : (record.source.system === 'prior_provider' ? 'These values were accepted from the prior provider and are shown alongside Cornerstone payroll for continuity. They cannot be edited here. Before the first live payroll is committed, undo the history in Prior-provider history and record it again; after that, Cornerstone has no in-app correction for it.' : 'These values were accepted from QuickBooks and are shown alongside Cornerstone payroll for continuity. Corrections use the migration workflow, not native payroll actions.')}</p>

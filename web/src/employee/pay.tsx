@@ -1,7 +1,7 @@
 // Home and Pay: the latest check, the list by year, and the stub.
 // Desktop (1024px+): Pay is the list on the left and the stub on the right,
-// with Previous and Next. Phone: the latest check, the three before it, then
-// "View all"; a stub opens as its own screen.
+// with Older and Newer. Phone: Pay opens directly on the full list by year,
+// with the latest stub on top; a stub opens as its own screen.
 import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Banknote, CalendarDays, ChevronLeft, ChevronRight, Download, FileText, House } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
@@ -80,7 +80,7 @@ function useStatement(id: string | null): { state: DataState<StatementDetail>; r
   return useEmployeeData<StatementDetail>(id ? `statement:${id}` : null, (api, linkId, signal) => api.statement(linkId, id!, signal));
 }
 
-/** Payroll checks first, then "From QuickBooks records": the order the list shows and Previous/Next walk. */
+/** Payroll checks first, then "From QuickBooks records": the order the list shows and Older/Newer walk. */
 function inListOrder(statements: StatementSummary[]): StatementSummary[] {
   return [...statements.filter((s) => s.source === 'payroll'), ...statements.filter((s) => s.source === 'quickbooks')];
 }
@@ -327,7 +327,7 @@ function HomeWithPay(): ReactElement {
             {body(() => (
               <div className="space-y-2">
                 <StatementList statements={recent} linkTo={(s) => `/pay/${s.id}`} />
-                <Link to="/pay/all" className="emp-link" onClick={focusHeadingOnNextScreen}>See all pay stubs</Link>
+                <Link to="/pay" className="emp-link" onClick={focusHeadingOnNextScreen}>See all pay stubs</Link>
               </div>
             ), null)}
           </Card>
@@ -369,7 +369,7 @@ function PayHistory({ selectedId, linkTo, year, onYear }: { selectedId?: string 
 
   return (
     <div className="space-y-4">
-      <YearPicker years={years} year={year} onChange={onYear} />
+      {years.length >= 2 ? <YearPicker years={years} year={year} onChange={onYear} /> : <p className="emp-h3">{year}</p>}
       {state.status === 'loading' && <SkeletonRows rows={5} label="Loading your pay stubs" />}
       {state.status === 'error' && <LoadProblem kind={state.kind} onRetry={reload} what="your pay stubs" />}
       {state.status === 'ready' && (state.data.statements.length === 0
@@ -469,35 +469,9 @@ function PayDesktop(): ReactElement {
 
 function PayPhone(): ReactElement {
   const { statementId } = useParams();
-  const location = useLocation();
   // Keyed, so each stub opens as a new screen: scrolled to the top, focus on its heading.
   if (statementId) return <StubScreen key={statementId} id={statementId} />;
-  if (location.pathname === '/pay/all') return <PayAllPhone />;
-  return <PayOverviewPhone />;
-}
-
-function PayOverviewPhone(): ReactElement {
-  const { state, reload } = useStatements(null);
-  const statements = state.status === 'ready' ? inListOrder(state.data.statements) : [];
-  const [latest, ...rest] = statements;
-  return (
-    <Page title="Pay stubs" actions={<HideAmountsToggle />}>
-      {state.status === 'loading' && <Card><SkeletonRows label="Loading your pay" /></Card>}
-      {state.status === 'error' && <Card><LoadProblem kind={state.kind} onRetry={reload} what="your pay" /></Card>}
-      {state.status === 'ready' && !latest && <Card><NoPayYet /></Card>}
-      {latest && (
-        <>
-          <Card title="Latest pay"><LatestPay statement={latest} statements={statements} /></Card>
-          {rest.length > 0 && (
-            <Card title="Recent pay">
-              <StatementList statements={rest.slice(0, 3)} linkTo={(s) => `/pay/${s.id}`} />
-            </Card>
-          )}
-          <EmpButtonLink to="/pay/all" variant="secondary" block onClick={focusHeadingOnNextScreen}>View all pay stubs</EmpButtonLink>
-        </>
-      )}
-    </Page>
-  );
+  return <PayListPhone />;
 }
 
 function BackLink({ to, children }: { to: string; children: ReactNode }): ReactElement {
@@ -509,22 +483,24 @@ function BackLink({ to, children }: { to: string; children: ReactNode }): ReactE
   );
 }
 
-function PayAllPhone(): ReactElement {
+function PayListPhone(): ReactElement {
   const { year: defaultYear, newest } = useDefaultYear();
   const location = useLocation();
   const navigate = useNavigate();
   // The year lives in the address so Back from a stub returns to it.
   const year = yearParam(location.search) ?? defaultYear;
   let body: ReactNode;
-  if (year !== null) {
-    body = <PayHistory year={year} onYear={(y) => navigate(`/pay/all?year=${y}`, { replace: true })} linkTo={(s) => `/pay/${s.id}?from=all&year=${year}`} />;
+  if (newest.state.status === 'ready' && newest.state.data.statements.length === 0) {
+    body = <NoPayYet />;
+  } else if (year !== null) {
+    body = <PayHistory year={year} onYear={(y) => navigate(`/pay?year=${y}`, { replace: true })} linkTo={(s) => `/pay/${s.id}?year=${year}`} />;
   } else if (newest.state.status === 'error') {
     body = <LoadProblem kind={newest.state.kind} onRetry={newest.reload} what="your pay stubs" />;
   } else {
     body = <SkeletonRows rows={5} label="Loading your pay stubs" />;
   }
   return (
-    <Page title="All pay stubs" actions={<HideAmountsToggle />} before={<BackLink to="/pay">Pay</BackLink>}>
+    <Page title="Pay stubs" actions={<HideAmountsToggle />}>
       <Card>{body}</Card>
     </Page>
   );
@@ -532,16 +508,15 @@ function PayAllPhone(): ReactElement {
 
 function StubScreen({ id }: { id: string }): ReactElement {
   const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  const fromAll = params.get('from') === 'all';
   const year = yearParam(location.search);
-  const back = fromAll ? `/pay/all${year ? `?year=${year}` : ''}` : '/pay';
-  const list = useStatements(fromAll ? year : null);
+  const suffix = year ? `?year=${year}` : '';
+  const back = `/pay${suffix}`;
+  const list = useStatements(year);
   const siblings = list.state.status === 'ready' ? inListOrder(list.state.data.statements) : [];
   return (
-    <Page title="Pay stub" actions={<HideAmountsToggle />} before={<BackLink to={back}>{fromAll ? 'All pay stubs' : 'Pay'}</BackLink>}>
+    <Page title="Pay stub" actions={<HideAmountsToggle />} before={<BackLink to={back}>Pay</BackLink>}>
       <Card>
-        <StubDetail id={id} siblings={siblings} linkSuffix={fromAll ? `?from=all${year ? `&year=${year}` : ''}` : ''} newScreen />
+        <StubDetail id={id} siblings={siblings} linkSuffix={suffix} newScreen />
       </Card>
     </Page>
   );
@@ -652,9 +627,9 @@ function sum(lines: AmountLine[]): string | null {
 function PrevNext({ siblings, id, linkSuffix, className, newScreen }: { siblings: StatementSummary[]; id: string; linkSuffix: string; className: string; newScreen: boolean }): ReactElement | null {
   const index = siblings.findIndex((s) => s.id === id);
   if (index < 0 || siblings.length < 2) return null;
-  // The list is newest first: "Previous" is the older check.
-  const previous = siblings[index + 1];
-  const next = siblings[index - 1];
+  // The list is newest first: "Older" is the earlier check, "Newer" the later one.
+  const older = siblings[index + 1];
+  const newer = siblings[index - 1];
   const link = (target: StatementSummary | undefined, label: string, icon: ReactNode, after = false): ReactElement => (target
     ? (
       <Link
@@ -669,13 +644,13 @@ function PrevNext({ siblings, id, linkSuffix, className, newScreen }: { siblings
     : <span className="emp-btn emp-btn-secondary emp-btn-small" aria-disabled="true">{!after && icon}{label}{after && icon}</span>);
   return (
     <nav className={`emp-prevnext ${className}`} aria-label="Other pay stubs">
-      {link(previous, 'Previous', <ArrowLeft aria-hidden="true" className="size-5" />)}
-      {link(next, 'Next', <ArrowRight aria-hidden="true" className="size-5" />, true)}
+      {link(older, 'Older', <ArrowLeft aria-hidden="true" className="size-5" />)}
+      {link(newer, 'Newer', <ArrowRight aria-hidden="true" className="size-5" />, true)}
     </nav>
   );
 }
 
-/** `newScreen`: on a phone each stub is its own screen, so Previous and Next move focus to its heading. */
+/** `newScreen`: on a phone each stub is its own screen, so Older and Newer move focus to its heading. */
 function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: string; siblings: StatementSummary[]; linkSuffix?: string; newScreen?: boolean }): ReactElement {
   const { state, reload } = useStatement(id);
   if (state.status === 'loading') return <SkeletonRows rows={6} label="Loading the pay stub" />;
@@ -688,13 +663,13 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
     <article className="emp-stub" aria-labelledby={`emp-stub-${stub.id}`}>
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <h2 id={`emp-stub-${stub.id}`} className="emp-stub-title">{longDate(stub.payDate)}</h2>
-          {/* Desktop: beside the date. Phone: at the end of the stub, where the thumb is. */}
+          <h2 id={`emp-stub-${stub.id}`} className="emp-stub-title">{period ?? longDate(stub.payDate)}</h2>
+          {/* Desktop: beside the heading. Phone: at the end of the stub, where the thumb is. */}
           <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-top" newScreen={newScreen} />
         </div>
         {quickbooks && <Chip tone="neutral">From QuickBooks records</Chip>}
         <PaidLine statement={stub} />
-        {(period || hours) && <p className="text-neutral-700">{[period && `Pay period ${period}`, hours].filter(Boolean).join(' · ')}</p>}
+        {hours && <p className="text-neutral-700">{hours}</p>}
       </header>
 
       {stub.earlierVersions.length > 0 && <EarlierStubs key={stub.id} versions={stub.earlierVersions} payDate={stub.payDate} />}

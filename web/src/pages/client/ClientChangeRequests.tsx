@@ -197,7 +197,20 @@ export function ClientChangeRequests() {
               {loading ? (
                 <div className="py-12 text-center text-sm text-gray-500">Loading change requests...</div>
               ) : requests.length === 0 ? (
-                <div className="py-12 text-center text-sm text-gray-500">No change requests found.</div>
+                search.trim() || status ? (
+                  <div className="py-12 text-center text-sm text-gray-600">No change requests match these filters.</div>
+                ) : (
+                  <div className="mx-auto max-w-xl space-y-2 px-4 py-10 text-sm text-neutral-700">
+                    <p className="font-semibold text-neutral-900">No change requests yet.</p>
+                    <p>
+                      When you add an employee, or change an employee&apos;s pay, tax withholding, SSN or retirement details, Cornerstone reviews the change before payroll uses it. Each request appears here with its status.
+                      {profileRequestsEnabled && ' Address changes employees ask for in the employee app appear here too.'}
+                    </p>
+                    <p>
+                      To ask for a change, open <Link className="font-semibold text-primary-800 underline underline-offset-2" to="/employees">Employees</Link>, choose the employee and select <strong>Edit employee</strong>.
+                    </p>
+                  </div>
+                )
               ) : (
                 <>
                 <div className="space-y-3 p-3 lg:hidden">
