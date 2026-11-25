@@ -959,11 +959,11 @@ export function EmployeeContactDetails({
       ) : (
         <>
           {isDesktop ? (
-            <Card className="overflow-hidden">
+            <Card className="relative z-0 overflow-hidden">
               <Table stickyHeader>
                 <TableHeader>
                   <TableRow>
-                    <TableHead stickyLeft className="w-[200px] px-4">Employee</TableHead>
+                    <TableHead stickyLeft className="z-[2] w-[200px] px-4">Employee</TableHead>
                     <TableHead className="px-4">Email</TableHead>
                     <TableHead className="w-[168px] px-4">Mobile</TableHead>
                     <TableHead className="px-4">Mailing address</TableHead>
@@ -980,7 +980,7 @@ export function EmployeeContactDetails({
                     return (
                       <Fragment key={employee.id}>
                         <TableRow className={cn(rowBg, 'align-top')}>
-                          <TableCell stickyLeft className={cn(rowBg, 'whitespace-normal px-4 py-4')}>
+                          <TableCell stickyLeft className={cn(rowBg, 'z-[1] whitespace-normal px-4 py-4')}>
                             <EmployeeNameBlock employee={employee} />
                           </TableCell>
                           <TableCell className="whitespace-normal px-4 py-4 text-sm">
@@ -1129,7 +1129,7 @@ export function EmployeeContactDetails({
   return (
     <div>
       <Header
-        title="Contact Details"
+        title="Contact details"
         description="Set and update every employee's own email, mobile number, and mailing address in one place."
         actions={
           <Link
