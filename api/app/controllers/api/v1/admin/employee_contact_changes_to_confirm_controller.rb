@@ -62,7 +62,8 @@ module Api
         end
 
         def require_profile_requests!
-          return if CompanyFeatures.for(current_company).employee_portal_feature?(:profile_requests)
+          features = CompanyFeatures.for(current_company)
+          return if features.employee_portal_feature?(:profile_requests) || features.employee_portal_feature?(:delivery_consent)
 
           head :not_found
         end
