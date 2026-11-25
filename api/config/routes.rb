@@ -65,6 +65,12 @@ Rails.application.routes.draw do
 
       namespace :employee, module: :employee_portal do
         get :context, to: "context#show"
+        get :profile, to: "profile#show", format: false
+        patch "profile/phone", to: "profile#update_phone", format: false
+        post "profile/email", to: "profile#start_email", format: false
+        post "profile/email/confirm", to: "profile#confirm_email", format: false
+        resources :emergency_contacts, only: %i[create update destroy], format: false
+        resources :address_requests, only: %i[create update destroy], format: false
         get :help, to: "help#show", format: false
         resources :statements, only: [ :index, :show ], format: false do
           get :pdf, on: :member

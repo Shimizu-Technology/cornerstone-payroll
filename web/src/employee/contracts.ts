@@ -412,7 +412,7 @@ export function parseHelpContacts(data: unknown): HelpContact[] {
 }
 
 // ---------- GET /employee/profile ----------
-// ASSUMED (M4-3, M4-7):
+// Served by ProfileController (M4-7):
 // { legal_name, email, email_verified, phone, phone_confirmed,
 //   address: { address_line1, address_line2, city, state, zip },
 //   payment_method, emergency_contacts: [{ id, name, relationship, phone }],
@@ -512,7 +512,7 @@ export function addressBody(address: Address): Record<string, string> {
 }
 
 // ---------- Changes (M4-7), all behind step-up (M4-1) ----------
-// ASSUMED routes. Each returns the updated profile, except where noted:
+// Each returns the updated profile, except where noted:
 //   PATCH  /employee/profile/phone            { phone }
 //   POST   /employee/profile/email            { email }  -> 202 { verification_id }; the API emails a code
 //   POST   /employee/profile/email/confirm    { verification_id, code }

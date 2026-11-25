@@ -48,7 +48,7 @@ module Api
         end
 
         def company_changes
-          EmployeeContactChangeToConfirm.where(company_id: current_company_id)
+          EmployeeContactChangeToConfirm.payroll_changes.where(company_id: current_company_id)
         end
 
         def filtered_changes

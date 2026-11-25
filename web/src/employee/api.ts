@@ -21,7 +21,8 @@ import {
  */
 export type EmployeeApiErrorKind =
   | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
-  | 'mfa_enrollment_required' | 'mfa_required';
+  | 'mfa_enrollment_required' | 'mfa_required'
+  | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -109,15 +110,17 @@ function retryAfter(header: string | null): number | null {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
-/** `code` is the JSON body's `code`, read only for a 403. */
+/** Only known codes affect the user-facing error. */
 export function errorForStatus(status: number, retryAfterHeader: string | null = null, code: unknown = null): EmployeeApiError {
   if (status === 401) return new EmployeeApiError('unauthorized', status);
   if (status === 403 && code === 'mfa_enrollment_required') return new EmployeeApiError('mfa_enrollment_required', status);
   if (status === 403 && code === 'mfa_required') return new EmployeeApiError('mfa_required', status);
   // Any other 403 is treated like 404 so nothing leaks.
   if (status === 403 || status === 404) return new EmployeeApiError('not_found', status);
+  if (status === 429 && code === 'email_code_daily_limit') return new EmployeeApiError(code, status);
+  if (status === 422 && (code === 'emergency_contact_limit' || code === 'personal_email_required')) return new EmployeeApiError(code, status);
   if (status === 429) return new EmployeeApiError('rate_limited', status, retryAfter(retryAfterHeader));
-  if (status === 409) return new EmployeeApiError('conflict', status);
+  if (status === 409) return new EmployeeApiError(code === 'address_on_file_changed' ? code : 'conflict', status);
   if (status === 422 || status === 400) return new EmployeeApiError('invalid', status);
   return new EmployeeApiError('server', status);
 }
@@ -248,9 +251,9 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
 
     if (!response.ok) {
       let code: unknown = null;
-      if (response.status === 403) {
+      if (response.status === 403 || (stepUp && [409, 422, 429].includes(response.status))) {
         const body: unknown = await response.json().catch(() => null);
-        const hint = stepUp ? reverificationHint(body) : null;
+        const hint = stepUp && response.status === 403 ? reverificationHint(body) : null;
         if (hint) throw new StepUpRequiredError(hint);
         code = record(body)?.code ?? null;
       }
