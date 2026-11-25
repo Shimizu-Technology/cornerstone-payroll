@@ -25,7 +25,9 @@ class PayrollReminderService
 
     def process_company(config)
       company = config.company
-      return if company.test_workspace?
+      # Practice copies never send reminders; a demo sends to allow-listed
+      # recipients only (deliver_to_recipients).
+      return if company.practice_copy?
       return if config.recipients.blank?
 
       today = PayrollBusinessClock.today
@@ -173,13 +175,16 @@ class PayrollReminderService
     end
 
     def deliver_to_recipients(config, subject, html, log:)
-      config.recipients.map do |email|
-        response = StagingMailTransport.deliver({
-          from: from_email,
-          to: email,
-          subject: subject,
-          html: html
-        })
+      company = config.company
+      DemoOutbound.filter(company: company, emails: config.recipients, channel: "payroll_reminder").map do |email|
+        response = DemoOutbound.scoped(company) do
+          StagingMailTransport.deliver({
+            from: from_email,
+            to: email,
+            subject: subject,
+            html: html
+          })
+        end
         [ email, response ]
       rescue StandardError => e
         raise unless StagingOutboundPolicy.staging?
@@ -192,7 +197,7 @@ class PayrollReminderService
     def record_delivery_outcome(log, outcomes)
       return unless StagingOutboundPolicy.staging?
 
-      sent = outcomes.flat_map { |_email, response| response["staging_captured"] || response["staging_failed"] ? [] : response.fetch("staging_recipients") }.uniq
+      sent = outcomes.flat_map { |_email, response| response["staging_captured"] || response["staging_failed"] || response["suppressed"] ? [] : response.fetch("staging_recipients") }.uniq
       captured = outcomes.count { |_email, response| response["staging_captured"] }
       failed = outcomes.count { |_email, response| response["staging_failed"] }
       if sent.empty?
