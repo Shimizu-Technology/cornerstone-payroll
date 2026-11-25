@@ -1,3 +1,9 @@
+# Old Netlify address: send it to the real domain. Clerk production sign-in
+# only works on shimizu-technology.com, so the old host can't sign anyone in.
+# Payroll's custom domain CNAMEs to this site but arrives with its own Host
+# header, so this rule never matches it.
+https://cornerstone-payroll.netlify.app/*  https://payroll.shimizu-technology.com/:splat  301!
+
 # SEO & PWA files — serve directly
 /robots.txt       /robots.txt       200
 /sitemap.xml      /sitemap.xml      200
