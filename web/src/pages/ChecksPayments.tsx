@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { stagingCsv, stagingFilename } from '../lib/staging';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -351,12 +352,12 @@ export function ChecksPayments() {
       check_type: liabilityPaymentType(obligations),
       payment_period_type: obligations.length === 1 ? 'pay_period' : 'none',
       memo: obligations.length === 1
-        ? `Payroll liabilities · PPE ${formatDate(obligations[0].period_end)}`
+        ? `Payroll liabilities · PPE ${formatVoucherDate(obligations[0].period_end)}`
         : `Combined payroll liabilities · ${obligations.length} pay periods`,
       description: `Prepared from committed payroll liability journal for ${authority}.`,
       liability_entry_ids: obligations.flatMap((obligation) => obligation.entry_ids),
       line_items: obligations.map((obligation) => ({
-        description: `${authority} · PPE ${formatDate(obligation.period_end)}`,
+        description: `${authority} · PPE ${formatVoucherDate(obligation.period_end)}`,
         reference_number: '',
         service_period: formatDateRange(obligation.period_start, obligation.period_end),
         amount: Math.max(obligation.unreserved_amount, 0).toFixed(2),
@@ -987,7 +988,7 @@ function formatCurrency(value: number) {
   return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
-function formatDate(value: string) {
+function formatVoucherDate(value: string) {
   const date = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00`);
   return date.toLocaleDateString();
 }

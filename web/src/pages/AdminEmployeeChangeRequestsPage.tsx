@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useSearchParams } from 'react-router';
 import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -167,7 +168,7 @@ export function AdminEmployeeChangeRequestsPage() {
                         <StatusBadge status={request.status} />
                       </span>
                       <span className="mt-3 block text-sm text-neutral-600">{requestLabel(request)} · {request.requested_by_name || 'Unknown requester'}</span>
-                      <span className="mt-1 block text-xs text-neutral-500">Submitted {new Date(request.created_at).toLocaleString()}</span>
+                      <span className="mt-1 block text-xs text-neutral-500">Submitted {formatGuamDateTime(request.created_at)}</span>
                       <span className="mt-3 block text-sm font-semibold text-primary-700">Review request</span>
                     </button>
                   ))}
@@ -190,7 +191,7 @@ export function AdminEmployeeChangeRequestsPage() {
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
-                        <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
+                        <TableCell>{formatGuamDateTime(request.created_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

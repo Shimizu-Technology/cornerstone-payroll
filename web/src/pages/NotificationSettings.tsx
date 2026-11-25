@@ -124,7 +124,7 @@ export function NotificationSettings(): ReactElement {
                 <CardTitle>Email alerts</CardTitle>
                 <CardDescription>
                   Emails never include names, messages or file details, only a link to sign in.
-                  Daily digests arrive at {settings.digest_time_label}. Unread counts in the app stay on either way.
+                  Daily digests arrive at {settings.digest_time_label.replace(/Chamorro Time$/i, 'Guam time')}. Unread counts in the app stay on either way.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

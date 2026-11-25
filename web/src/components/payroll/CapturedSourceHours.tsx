@@ -1,9 +1,10 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { payPeriodsApi } from '@/services/api';
 import { capturedSourceContext } from '@/lib/captured-source-worksheet';
-import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import type { AirePayrollTimeEntry, PayPeriod, PayrollItem } from '@/types';
 import type { PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
 import { overtimeMultiplier } from '@/lib/overtime';

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { nonEmployeeChecksApi } from '@/services/api';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import type { NonEmployeeCheckEdit } from '@/types';
 
 interface NonEmployeeCheckHistoryProps {
@@ -75,7 +75,7 @@ export function NonEmployeeCheckHistory({ checkId }: NonEmployeeCheckHistoryProp
               {edit.edited_by_name || 'System'}
             </span>
             <span className="text-gray-500">
-              {new Date(edit.created_at).toLocaleString()}
+              {formatGuamDateTime(edit.created_at)}
             </span>
           </div>
           {edit.reason && (

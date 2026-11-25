@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { needsTimeTrackingAccount, TIME_TRACKING_CONNECTION_MESSAGE } from '@/lib/time-tracking-account';
 import { lockScheduleCopy } from '@/lib/aire-payroll-calendar';
 import type { ReactNode } from 'react';
@@ -37,7 +38,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ApiError, payPeriodsApi } from '@/services/api';
-import { formatDate, formatDateRange, formatGuamDateTime } from '@/lib/utils';
+import { formatGuamDateTime } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { aireAccountConnectionPath, currentAppPath, newEmployeePath } from '@/lib/routes';
 import { useAuth } from '@/contexts/AuthContext';

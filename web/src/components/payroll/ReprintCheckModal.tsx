@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { ACTION_OVERLAY_LAYERS, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-66: ReprintCheckModal
@@ -95,7 +96,7 @@ export function ReprintCheckModal({ item, readOnly = false, onClose, onComplete 
         {previousReissue && (
           <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-600">
             Last reissue event: check #{previousReissue.check_number} by {previousReissue.user_name || 'Unknown user'} on{' '}
-            {new Date(previousReissue.created_at).toLocaleString()}.
+            {formatGuamDateTime(previousReissue.created_at)}.
           </div>
         )}
 

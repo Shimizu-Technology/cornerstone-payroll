@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
@@ -220,7 +221,7 @@ export function ClientChangeRequests() {
                         <p className="min-w-0 font-semibold text-neutral-950">{request.employee_name}</p>
                         <StatusBadge status={request.status} />
                       </div>
-                      <p className="mt-2 text-sm text-neutral-600">{requestLabel(request)} · {new Date(request.created_at).toLocaleDateString()}</p>
+                      <p className="mt-2 text-sm text-neutral-600">{requestLabel(request)} · {formatGuamDateTime(request.created_at)}</p>
                       <p className="mt-1 text-xs text-neutral-500">Requested by {request.requested_by_name || '—'}</p>
                       <Button className="mt-4 w-full" variant="outline" onClick={() => void loadRequest(request.id)}>View request</Button>
                     </MobileRecordCard>
@@ -244,7 +245,7 @@ export function ClientChangeRequests() {
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
-                        <TableCell>{new Date(request.created_at).toLocaleString()}</TableCell>
+                        <TableCell>{formatGuamDateTime(request.created_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -274,7 +275,7 @@ export function ClientChangeRequests() {
                   <div className="flex items-center gap-3">
                     <StatusBadge status={selected.status} />
                     <span className="text-sm text-gray-500">
-                      Submitted {new Date(selected.created_at).toLocaleString()}
+                      Submitted {formatGuamDateTime(selected.created_at)}
                     </span>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
