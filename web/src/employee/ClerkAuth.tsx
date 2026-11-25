@@ -115,13 +115,15 @@ export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactEle
 
 function ClerkBoot({ children }: { children: ReactNode }): ReactElement {
   const clerk = useClerk();
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded } = useAuth();
   const subscribe = useCallback((onChange: () => void) => {
     clerk.on('status', onChange);
     return () => clerk.off('status', onChange);
   }, [clerk]);
-  const status = useSyncExternalStore(subscribe, () => clerk.status);
-  const loadFailed = status === 'error' || (status === 'degraded' && !isSignedIn);
+  // Status only describes this gate while Clerk is starting up. Keep the app
+  // mounted when a loaded session sees a later service interruption.
+  const status = useSyncExternalStore(subscribe, () => isLoaded ? undefined : clerk.status);
+  const loadFailed = status === 'error' || status === 'degraded';
   const [timedOut, setTimedOut] = useState(false);
 
   useEffect(() => {
@@ -130,9 +132,10 @@ function ClerkBoot({ children }: { children: ReactNode }): ReactElement {
     return () => window.clearTimeout(timer);
   }, [isLoaded, loadFailed]);
 
-  if (loadFailed || timedOut) return <SignInLoadErrorScreen />;
-  if (!isLoaded) return <BootScreen />;
-  return <ClerkAuthBridge>{children}</ClerkAuthBridge>;
+  if (loadFailed) return <SignInLoadErrorScreen />;
+  if (isLoaded) return <ClerkAuthBridge>{children}</ClerkAuthBridge>;
+  if (timedOut) return <SignInLoadErrorScreen />;
+  return <BootScreen />;
 }
 
 export function ClerkAuthProvider({ publishableKey, brand, children }: { publishableKey: string; brand: EmployeeBrand; children: ReactNode }): ReactElement {

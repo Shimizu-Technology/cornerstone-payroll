@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -11,7 +11,8 @@ vi.mock('@clerk/react', () => ({
     const { search } = useLocation();
     return <div data-testid="clerk-sign-up" data-redirect={forceRedirectUrl} data-search={search} />;
   },
-  Show: ({ when, children }: { when: string; children: ReactNode }) => (when === 'signed-out' && !clerk.isSignedIn ? <>{children}</> : null),
+  Show: ({ children, fallback }: { children: ReactNode; fallback?: ReactNode }) => clerk.isSignedIn ? fallback : children,
+  useUser: () => ({ user: { primaryEmailAddress: { emailAddress: 'other-account@example.test' } } }),
   useClerk: () => ({ openUserProfile: () => undefined }),
 }));
 
@@ -31,6 +32,7 @@ beforeEach(() => {
   clerk.isSignedIn = false;
   auth.isAuthenticated = false;
   auth.authProblem = null;
+  auth.signOut.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -69,6 +71,7 @@ it.each([
   await renderLogin(search);
   expect(screen.getByTestId('clerk-sign-in')).toBeTruthy();
   expect(screen.queryByTestId('clerk-sign-up')).toBeNull();
+  expect(Boolean(screen.queryByText(/Invitation links work once and expire/))).toBe(search.includes('__clerk_ticket'));
 });
 
 it('opens Clerk sign-up in place for a new invitee and preserves the ticket', async () => {
@@ -79,6 +82,7 @@ it('opens Clerk sign-up in place for a new invitee and preserves the ticket', as
   expect(form.getAttribute('data-search')).toBe(search);
   expect(form.getAttribute('data-redirect')).toBe('/app');
   expect(screen.queryByTestId('clerk-sign-in')).toBeNull();
+  expect(screen.getByText(/ask Cornerstone to resend your invitation/)).toBeTruthy();
 });
 
 it('opens the workspace when the invitation has already produced an authenticated session', async () => {
@@ -88,6 +92,26 @@ it('opens the workspace when the invitation has already produced an authenticate
 
   expect(screen.getByRole('heading', { name: 'Payroll workspace' })).toBeTruthy();
   expect(screen.queryByTestId('clerk-sign-in')).toBeNull();
+});
+
+it('asks the signed-in Clerk user to sign out and keeps the invitation URL', async () => {
+  clerk.isSignedIn = true;
+  auth.isAuthenticated = true;
+  auth.signOut.mockRejectedValueOnce(new Error('Synthetic sign-out failure'));
+  const search = '?__clerk_status=sign_up&__clerk_ticket=fake-ticket';
+  await renderLogin(search);
+
+  expect(screen.getByRole('heading', { name: 'You’re signed in as other-account@example.test.' })).toBeTruthy();
+  expect(screen.getByText('Sign out to accept this invitation.')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Payroll workspace' })).toBeNull();
+  expect(screen.queryByTestId('clerk-sign-up')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+  expect(await screen.findByText('Could not sign out. Try again.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+
+  await waitFor(() => expect(screen.queryByText('Could not sign out. Try again.')).toBeNull());
+  expect(auth.signOut.mock.calls).toEqual([[{ redirectUrl: `/login${search}` }], [{ redirectUrl: `/login${search}` }]]);
 });
 
 it('links to the privacy policy and terms from the sign-in card', async () => {

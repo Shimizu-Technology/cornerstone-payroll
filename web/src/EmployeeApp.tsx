@@ -2,7 +2,7 @@
 // to this file, so none of the staff app is in this bundle.
 import { useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
-import { brandFrom, brandStyle, employerBrand, fetchTenantBranding, type EmployeeBrand } from './employee/brand';
+import { brandFrom, brandStyle, employerBrand, fetchTenantBranding, type EmployeeBrand, type TenantBrandingResult } from './employee/brand';
 import { ClerkAuthProvider } from './employee/ClerkAuth';
 import { API_BASE_URL, CLERK_PUBLISHABLE_KEY, TENANT_HOST } from './employee/config';
 import { BrandContext, useBrand, useEmployeeAuth, useEmployeeSession } from './employee/contexts';
@@ -14,7 +14,7 @@ import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
 import { SignOutProvider } from './employee/SignOut';
 import {
-  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, TenantUnavailableScreen, TwoStepScreen, UnavailableScreen,
+  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, TenantConnectionErrorScreen, TenantUnavailableScreen, TwoStepScreen, UnavailableScreen,
 } from './employee/StateScreens';
 import { HelpTab } from './employee/help';
 import { MyInfoTab } from './employee/myinfo';
@@ -31,28 +31,25 @@ import { supportToken } from './support/grant';
 import { useSupportView } from './support/useSupportView';
 import './employee/employee.css';
 
-const BRANDING_TIMEOUT_MS = 6000;
+function useTenantBranding() {
+  const [branding, setBranding] = useState<TenantBrandingResult>();
+  const [attempt, setAttempt] = useState(0);
 
-function useTenantBrand(): EmployeeBrand | null | undefined {
-  const [brand, setBrand] = useState<EmployeeBrand | null | undefined>(() => TENANT_HOST ? undefined : brandFrom(null));
   useEffect(() => {
     if (!TENANT_HOST) return;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => {
-      controller.abort();
-      setBrand(null);
-    }, BRANDING_TIMEOUT_MS);
-    void fetchTenantBranding(TENANT_HOST, { baseUrl: API_BASE_URL, signal: controller.signal })
-      .then((branding) => {
-        if (!controller.signal.aborted) setBrand(branding ? brandFrom(branding) : null);
-      })
-      .finally(() => window.clearTimeout(timer));
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, []);
-  return brand;
+    void fetchTenantBranding(TENANT_HOST, { baseUrl: API_BASE_URL, signal: controller.signal }).then((result) => {
+      if (!controller.signal.aborted) setBranding(result);
+    });
+    return () => controller.abort();
+  }, [attempt]);
+
+  function retry() {
+    setBranding(undefined);
+    setAttempt(current => current + 1);
+  }
+
+  return { branding, retry };
 }
 
 function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
@@ -204,11 +201,15 @@ const PREVIEW_VIEW_AS = import.meta.env.DEV && typeof window !== 'undefined'
   ? new URLSearchParams(window.location.search).get('previewViewAs') : null;
 
 export default function EmployeeApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
-  const brand = useTenantBrand();
+  const { branding, retry } = useTenantBranding();
+  const brand = useMemo(() => brandFrom(branding?.status === 'enabled' ? branding.branding : null), [branding]);
   const grant = viewAs ?? (PREVIEW_VIEW_AS ? { name: PREVIEW_VIEW_AS, minutesLeft: 27, onEnd: () => window.location.assign('/') } : null);
-  if (brand === undefined) return <BootScreen />;
-  if (brand === null) {
-    return <div className="employee-app"><TenantUnavailableScreen /></div>;
+  if (TENANT_HOST && !branding) return <BootScreen />;
+  if (branding?.status === 'disabled') {
+    return <div className="employee-app"><TenantUnavailableScreen onRetry={retry} /></div>;
+  }
+  if (branding?.status === 'error') {
+    return <div className="employee-app"><TenantConnectionErrorScreen onRetry={retry} /></div>;
   }
   const style = brandStyle(brand) as CSSProperties;
   return (

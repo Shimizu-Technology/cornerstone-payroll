@@ -113,19 +113,25 @@ describe('fetchTenantBranding', () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(String(url)).toBe('https://api.example.test/api/v1/public/tenant_branding?host=mosas.shimizu-technology.com');
     expect(init).toMatchObject({ credentials: 'omit', cache: 'no-store' });
-    expect(branding?.name).toBe("MoSa's");
+    expect(branding).toMatchObject({ status: 'enabled', branding: { name: "MoSa's" } });
   });
 
   it.each([
-    ['a 404', async () => new Response(null, { status: 404 })],
-    ['a server error', async () => new Response(null, { status: 500 })],
+    ['a readable 404', async () => new Response(null, { status: 404 })],
+    ['a disabled flag', async () => Response.json({ subdomain_enabled: false })],
+  ])('returns disabled for %s', async (_label, fetchImpl) => {
+    expect(await fetchTenantBranding('example-employer.shimizu-technology.com', { baseUrl, fetchImpl })).toEqual({ status: 'disabled' });
+  });
+
+  it.each([
+    ['a 503', async () => new Response(null, { status: 503 })],
     ['a network failure', async () => { throw new TypeError('Failed to fetch'); }],
     ['a body without a name', async () => Response.json({ logo_url: null })],
     ['a color that isn\'t a string', async () => Response.json({ name: 'Acme', logo_url: null, primary_color: ['#1898cf'], accent_color: null })],
     ['a logo that isn\'t a string', async () => Response.json({ name: 'Acme', logo_url: { href: 'https://x' }, primary_color: null, accent_color: null })],
     ['an array body', async () => Response.json([{ name: 'Acme' }])],
-  ])('returns null when branding is unavailable for %s', async (_label, impl) => {
-    expect(await fetchTenantBranding('mosas.shimizu-technology.com', { baseUrl, fetchImpl: vi.fn<typeof fetch>(impl) })).toBeNull();
+  ])('returns error for %s', async (_label, fetchImpl) => {
+    expect(await fetchTenantBranding('example-employer.shimizu-technology.com', { baseUrl, fetchImpl })).toEqual({ status: 'error' });
   });
 });
 

@@ -75,3 +75,32 @@ it('keeps the Clerk sign-in intact and allows a retry when invitation binding is
   expect(clerk.signOut).not.toHaveBeenCalled();
   expect(me).toHaveBeenCalledTimes(2);
 });
+
+it('preserves the invitation URL and the account on a failed sign-out so it can be retried', async () => {
+  clerk.signOut.mockReset().mockRejectedValueOnce(new Error('Synthetic sign-out failure')).mockResolvedValue(undefined);
+  vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
+  const { AuthProvider, useAuth } = await import('./AuthContext');
+  vi.spyOn(authApi, 'me').mockResolvedValue({
+    user: { id: 1, name: 'Payroll User', email: 'payroll@example.test', role: 'admin', organization_id: 1, company_id: 1, company_name: 'Payroll QA', home_company_id: 1, assigned_company_ids: [1], capabilities: [] },
+  });
+  const logout = vi.spyOn(authApi, 'logout');
+  const redirectUrl = '/login?__clerk_status=sign_up&__clerk_ticket=fake-ticket';
+
+  function SignOutProbe() {
+    const { isAuthenticated, signOut } = useAuth();
+    return isAuthenticated && (
+      <button onClick={() => { void signOut({ redirectUrl }).catch(() => undefined); }}>Sign out to accept invitation</button>
+    );
+  }
+
+  render(<AuthProvider><SignOutProbe /></AuthProvider>);
+  const signOut = await screen.findByRole('button', { name: 'Sign out to accept invitation' });
+  fireEvent.click(signOut);
+  await waitFor(() => expect(clerk.signOut).toHaveBeenCalledExactlyOnceWith({ redirectUrl }));
+  expect(screen.getByRole('button', { name: 'Sign out to accept invitation' })).toBe(signOut);
+
+  fireEvent.click(signOut);
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Sign out to accept invitation' })).toBeNull());
+  expect(logout).toHaveBeenCalledTimes(2);
+  expect(clerk.signOut.mock.calls).toEqual([[{ redirectUrl }], [{ redirectUrl }]]);
+});
