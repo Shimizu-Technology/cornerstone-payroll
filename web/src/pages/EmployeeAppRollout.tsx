@@ -87,7 +87,9 @@ function CompanyRollout({ companyId, companyName, audience, showSettings }: {
               <div className="grid gap-3 lg:grid-cols-3">
                 <EmployeeTasks title="Locked sign-ups" rows={rollout.todo.locked} recordPath={recordPath} detail={(row) => `Locked until ${formatEmployeeAppDate(row.locked_until, true)} (Guam time)`} />
                 <EmployeeTasks title="Missing contact details" rows={rollout.todo.needs_contact_details} recordPath={recordPath} />
-                <EmployeeTasks title="Invites expiring in 3 days" rows={rollout.todo.expiring} recordPath={recordPath} detail={(row) => formatEmployeeAppDate(row.invite_expires_at, true) + ' (Guam time)'} />
+                <EmployeeTasks title="Expiring or expired invites" rows={rollout.todo.expiring} recordPath={recordPath}
+                  detail={(row) => `${row.expired ? 'Expired' : 'Expires'} ${formatEmployeeAppDate(row.invite_expires_at, true)} (Guam time)`} />
+                {audience === 'admin' && <EmployeeTasks title="Sign-up resets to finish" rows={rollout.todo.reset_pending} recordPath={recordPath} />}
               </div>
               <div className="flex flex-wrap gap-x-4">
                 <Link className={textLink} to={employeeContactDetailsPath(companyId)}>Open contact details</Link>
@@ -194,6 +196,9 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
         {rollout.enabled && (
           <form className="space-y-3" onSubmit={(event) => void inviteWave(event)}>
             <InviteDeliveryField value={delivery} onChange={(value) => { setDelivery(value); setSelected([]); }} disabled={busy} />
+            {delivery === 'email' && rollout.candidates.some((candidate) => candidate.email_review_required) && (
+              <p className="text-sm text-neutral-600">For employees with an existing payroll login, review and send the email invite from their employee record.</p>
+            )}
             <div className="space-y-1">
               <label htmlFor={searchId} className="text-sm font-semibold">Find employees</label>
               <Input id={searchId} type="search" className="max-w-md text-base" value={query} onChange={(event) => setQuery(event.target.value)} />

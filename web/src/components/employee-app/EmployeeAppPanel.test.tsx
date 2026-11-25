@@ -28,7 +28,7 @@ function openPanel(access: EmployeeAppAccess, audience: 'client' | 'admin' = 'cl
 }
 
 describe('Employee app panel', () => {
-  afterEach(() => { cleanup(); vi.resetAllMocks(); });
+  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); });
 
   it('explains why an invite cannot be sent while the company is off', async () => {
     openPanel({ ...employee, enabled: false, status: 'not_invited', can_invite: true });
@@ -36,7 +36,9 @@ describe('Employee app panel', () => {
     expect(screen.queryByRole('button', { name: 'Invite' })).toBeNull();
   });
 
-  it('shows a replacement code only in the current print view', async () => {
+  it('keeps the code until Done, confirms closing before Print, and clears it after printing', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {});
     const user = openPanel(employee);
     mocks.post.mockResolvedValue({
       data: employee,
@@ -50,9 +52,32 @@ describe('Employee app panel', () => {
     expect(within(printView).getByText('ABCDE-FGHJK')).toBeTruthy();
     expect(mocks.post).toHaveBeenCalledWith('/client/employees/5/employee_app/resend',
       { access_id: 10, delivery: 'code', confirm_same_person_email: false, reason: undefined }, { companyId: 1 });
-    await user.click(within(printView).getByRole('button', { name: 'Done' }));
+
+    const backdrop = printView.closest('[data-dialog-portal]')?.querySelector('[data-dialog-backdrop]');
+    expect(backdrop).toBeInstanceOf(HTMLElement);
+    await user.click(backdrop as HTMLElement);
+    await user.keyboard('{Escape}');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(within(printView).getByText('ABCDE-FGHJK')).toBeTruthy();
+
+    const done = within(printView).getByRole('button', { name: 'Done' });
+    await user.click(done);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Close without printing?'));
+    expect(within(printView).getByText('ABCDE-FGHJK')).toBeTruthy();
+
+    await user.click(within(printView).getByRole('button', { name: 'Print code' }));
+    expect(print).toHaveBeenCalledOnce();
+    await user.click(done);
+    expect(confirm).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('ABCDE-FGHJK')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Revoke access' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reset sign-up' })).toBeNull();
+  });
+
+  it('shows a pending reset without offering an unavailable action while the app is off', async () => {
+    openPanel({ ...employee, staff_actions: true, enabled: false, reset_pending: true }, 'admin');
+    expect(await screen.findByText('Sign-up reset is waiting to finish.')).toBeTruthy();
+    expect(screen.queryByText(/Choose Reset sign-up/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Reset sign-up' })).toBeNull();
   });
 
