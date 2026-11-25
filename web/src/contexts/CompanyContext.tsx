@@ -2,6 +2,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 import { confirmPayrollScopeChange } from '@/lib/payroll-scope-change';
+import { isBillingClient } from '@/lib/company-write-access';
 import { companiesApi, type CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -15,6 +16,7 @@ interface CompanyContextValue {
   canManageClients: boolean;
   canViewClientManagement: boolean;
   canSwitchCompany: boolean;
+  billingCompanyIds: number[] | null;
   loading: boolean;
   scopeChangePending: boolean;
   switchCompany: (companyId: number) => boolean;
@@ -32,6 +34,7 @@ const CompanyContext = createContext<CompanyContextValue>({
   canManageClients: false,
   canViewClientManagement: false,
   canSwitchCompany: false,
+  billingCompanyIds: null,
   loading: true,
   scopeChangePending: false,
   switchCompany: () => false,
@@ -44,8 +47,9 @@ export function useCompany() {
 }
 
 function applyCompanyResponse(
-  res: { companies: CompanyListItem[]; can_manage_clients: boolean; can_view_client_management?: boolean; can_switch_company: boolean; current_company_id: number },
+  res: { companies: CompanyListItem[]; can_manage_clients: boolean; can_view_client_management?: boolean; can_switch_company: boolean; current_company_id: number; billing_company_ids?: number[] },
   setCompanies: (c: CompanyListItem[]) => void,
+  setBillingCompanyIds: (ids: number[] | null) => void,
   setCanManageClients: (v: boolean) => void,
   setCanViewClientManagement: (v: boolean) => void,
   setCanSwitchCompany: (v: boolean) => void,
@@ -53,6 +57,7 @@ function applyCompanyResponse(
   setFetched: (v: boolean) => void,
 ) {
   setCompanies(res.companies);
+  setBillingCompanyIds(res.billing_company_ids ?? null);
   setCanManageClients(res.can_manage_clients);
   setCanViewClientManagement(res.can_view_client_management ?? res.can_manage_clients);
   setCanSwitchCompany(res.can_switch_company ?? res.can_manage_clients);
@@ -74,6 +79,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading: authLoading, user } = useAuth();
   const userId = user?.id ?? null;
   const [companies, setCompanies] = useState<CompanyListItem[]>([]);
+  const [billingCompanyIds, setBillingCompanyIds] = useState<number[] | null>(null);
   const [activeCompanyId, setActiveCompanyId] = useState<number | null>(
     companiesApi.getActiveCompanyId()
   );
@@ -92,6 +98,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const resetCompanyState = useCallback(() => {
     companiesApi.clearActiveCompanyId();
     setCompanies([]);
+    setBillingCompanyIds(null);
     setActiveCompanyId(null);
     setScopeChangeLocationKey(null);
     setCanManageClients(false);
@@ -105,14 +112,14 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     try {
       const res = await companiesApi.list();
       if (!mountedRef.current) return;
-      applyCompanyResponse(res, setCompanies, setCanManageClients, setCanViewClientManagement, setCanSwitchCompany, setActiveCompanyId, setFetched);
+      applyCompanyResponse(res, setCompanies, setBillingCompanyIds, setCanManageClients, setCanViewClientManagement, setCanSwitchCompany, setActiveCompanyId, setFetched);
     } catch {
       // Retry once after a short delay (handles race with auth/server startup)
       setTimeout(async () => {
         try {
           const res = await companiesApi.list();
           if (!mountedRef.current) return;
-          applyCompanyResponse(res, setCompanies, setCanManageClients, setCanViewClientManagement, setCanSwitchCompany, setActiveCompanyId, setFetched);
+          applyCompanyResponse(res, setCompanies, setBillingCompanyIds, setCanManageClients, setCanViewClientManagement, setCanSwitchCompany, setActiveCompanyId, setFetched);
         } catch { /* give up */ }
         if (mountedRef.current) setLoading(false);
       }, 1500);
@@ -191,7 +198,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   ])).values()).sort((left, right) => left.name.localeCompare(right.name));
   const switchOrganization = (organizationId: number) => {
     if (organizationId === activeOrganizationId) return true;
-    const destination = companies.find((company) => company.organization_id === organizationId && !company.test_workspace)
+    const destination = companies.find((company) => company.organization_id === organizationId && isBillingClient(company, billingCompanyIds))
       || companies.find((company) => company.organization_id === organizationId);
     return destination ? switchCompany(destination.id) : false;
   };
@@ -208,6 +215,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
         canManageClients,
         canViewClientManagement,
         canSwitchCompany,
+        billingCompanyIds,
         loading,
         scopeChangePending: scopeChangeLocationKey === location.key,
         switchCompany,

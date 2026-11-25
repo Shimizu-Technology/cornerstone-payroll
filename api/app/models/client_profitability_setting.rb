@@ -32,7 +32,8 @@ class ClientProfitabilitySetting < ApplicationRecord
   # organization (a company can be transferred to another organization).
   # Every read of practice payroll or employees goes through this.
   def effective_practice_company
-    practice_company if practice_company&.organization_id == organization_id
+    # A stored setting that later points at a non-live company carries no cost.
+    practice_company if practice_company&.organization_id == organization_id && practice_company.live_payroll?
   end
 
   # When the practice company changes, employee links to the old company's
@@ -46,11 +47,18 @@ class ClientProfitabilitySetting < ApplicationRecord
 
   # The book whose invoices supply fees: the saved choice, otherwise the
   # organization's default (or only) shared book.
+  # A book tied to a non-live company (a stale demo or practice-copy link) is
+  # never read, whether saved or found as the fallback.
   def effective_finance_book
-    return finance_book if finance_book&.active?
+    return finance_book if finance_book&.active? && firm_report_book?(finance_book)
 
     books = FinanceBook.active.where(organization_id: organization_id).where.not(kind: "personal")
+                       .where("finance_books.company_id IS NULL OR finance_books.company_id IN (?)", Company.live_payroll.select(:id))
     books.find_by(is_default: true) || (books.one? ? books.first : nil)
+  end
+
+  def firm_report_book?(book)
+    book.company_id.nil? || Company.live_payroll.exists?(id: book.company_id)
   end
 
   def tax_prep_service_key_set

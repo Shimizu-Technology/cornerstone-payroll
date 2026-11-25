@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CompanyListItem } from '@/services/api';
-import { canWriteClientEmployeeProfile, canWriteCompany } from './company-write-access';
+import { canWriteClientEmployeeProfile, canWriteCompany, isBillingClient } from './company-write-access';
 const live = { id: 1, payroll_environment: 'live' } as CompanyListItem;
 const sandbox = { ...live, payroll_environment: 'migration_rehearsal', test_workspace: true, test_workspace_purpose: 'sandbox' } as CompanyListItem;
 describe('effective company write access', () => {
@@ -38,5 +38,20 @@ describe('capability-specific workspace writes', () => {
   it('fails closed for missing non-payroll permissions in known workspaces while preserving ordinary compatibility', () => {
     expect(canWriteCompany({ ...sandbox, workspace_can_write: true }, 'manage_client_configuration')).toBe(false);
     expect(canWriteCompany(live, 'manage_client_configuration')).toBe(true);
+  });
+});
+
+describe('billing client choices', () => {
+  // A demo company serializes with the live shape; only the server list tells finance it can't be billed.
+  const demo = { id: 3, payroll_environment: 'live', test_workspace: false } as CompanyListItem;
+  it('uses the server list of billable clients when present', () => {
+    expect(isBillingClient(live, [ 1 ])).toBe(true);
+    expect(isBillingClient(demo, [ 1 ])).toBe(false);
+    expect(isBillingClient({ ...sandbox, id: 2 }, [ 1 ])).toBe(false);
+  });
+  it('falls back to the workspace flag without a server list', () => {
+    expect(isBillingClient(live, null)).toBe(true);
+    expect(isBillingClient(sandbox, undefined)).toBe(false);
+    expect(isBillingClient(null, [ 1 ])).toBe(false);
   });
 });

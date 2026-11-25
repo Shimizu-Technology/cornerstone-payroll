@@ -10,6 +10,7 @@ module Api
       before_action :enforce_company_access!
       before_action :set_pay_period!
       before_action :forbid_migration_rehearsal_official_action!, only: %i[save download]
+      before_action :enforce_workspace_access!, only: %i[save preview download]
 
       def defaults
         render json: {
@@ -147,6 +148,20 @@ module Api
           :receipt_attached,
           :tracking_notes
         )
+      end
+
+      # A demo company's Form 500 follows its workspace grants: a reviewer may
+      # preview and download it, and only an operator or admin may save.
+      def enforce_workspace_access!
+        return unless current_company&.test_workspace?
+
+        request_method = action_name == "save" ? "POST" : "GET"
+        return if TestWorkspaceAccessPolicy.allowed?(user: current_user, company: current_company, request_method: request_method,
+          capability: StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name),
+          controller_path: controller_path, action_name: action_name)
+
+        render json: { error: current_company.demo? ? Company::DEMO_ACCESS_DENIED_MESSAGE : "Your test workspace access does not allow this action" },
+          status: :forbidden
       end
 
       def require_staff_access!

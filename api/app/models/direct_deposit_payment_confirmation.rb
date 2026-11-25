@@ -57,7 +57,11 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
     throw :abort
   end
 
+  # A demo's confirmation is internal evidence on simulated payroll. It is
+  # shown as status only and never reaches AIRE.
   def record_aire_entry_lifecycle
+    return @aire_entry_acknowledgement_ids = [] if payroll_item.company.demo?
+
     @aire_entry_acknowledgement_ids = payroll_item.time_tracking_entry_allocations
       .includes(:time_tracking_import)
       .select { |row| row.time_tracking_import.finalized_batch? }
@@ -84,6 +88,8 @@ class DirectDepositPaymentConfirmation < ApplicationRecord
   end
 
   def dispatch_aire_manual_allocations
+    return if payroll_item.company.demo?
+
     payroll_item.time_tracking_manual_allocations.where.not(status: "voided").find_each do |allocation|
       AireManualAllocationSyncJob.perform_later(allocation.id)
     end
