@@ -2,10 +2,10 @@
 // to this file, so none of the staff app is in this bundle.
 import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
-import { brandFrom, brandStyle, fetchTenantBranding, type EmployeeBrand } from './employee/brand';
+import { brandFrom, brandStyle, employerBrand, fetchTenantBranding, type EmployeeBrand } from './employee/brand';
 import { ClerkAuthProvider } from './employee/ClerkAuth';
 import { API_BASE_URL, CLERK_PUBLISHABLE_KEY, TENANT_HOST } from './employee/config';
-import { BrandContext, useEmployeeAuth, useEmployeeSession } from './employee/contexts';
+import { BrandContext, useBrand, useEmployeeAuth, useEmployeeSession } from './employee/contexts';
 import { DevPreviewAuthProvider } from './employee/DevPreviewAuth';
 import { HideAmountsProvider } from './employee/HideAmounts';
 import { useSignOut } from './employee/hooks';
@@ -14,9 +14,15 @@ import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
 import { SignOutProvider } from './employee/SignOut';
 import {
-  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, UnavailableScreen,
+  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, TwoStepScreen, UnavailableScreen,
 } from './employee/StateScreens';
-import { HelpTab, HomeTab, MyInfoTab, PayTab, SignInScreen, TaxesTab, WelcomeScreen } from './employee/screens';
+import { HelpTab } from './employee/help';
+import { MyInfoTab } from './employee/myinfo';
+import { HomeTab, PayTab } from './employee/pay';
+import { EmployerPicker } from './employee/picker';
+import { SignInScreen, WelcomeScreen } from './employee/screens';
+import { ActivateScreen, FinishSignUpScreen, LinkCheckScreen, SignedInInvite, SignInFirst, SignUpAccountScreen } from './employee/signup';
+import { TaxesTab } from './employee/taxes';
 import type { ViewOnlyGrant } from './employee/ViewOnlyBanner';
 import './employee/employee.css';
 
@@ -46,13 +52,28 @@ function useTenantBrand(): EmployeeBrand | null {
 }
 
 function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
-  const { state, retry } = useEmployeeSession();
+  const { state } = useEmployeeSession();
+  const brand = useBrand();
+  // On the shared host, the chosen employer's name stands in for client branding.
+  const shown = state.status === 'ready' ? employerBrand(brand, state.link.companyName) : brand;
+  return (
+    <BrandContext.Provider value={shown}>
+      <SignedInScreens viewAs={viewAs} />
+    </BrandContext.Provider>
+  );
+}
+
+function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
+  const { state, retry, chooseLink } = useEmployeeSession();
   const signOutAsync = useSignOut();
   const signOut = (): void => { void signOutAsync(); };
 
   if (state.status === 'problem' && state.problem === 'unavailable') return <UnavailableScreen onRetry={retry} onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'ended') return <AccessEndedScreen onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'signed_out') return <BootScreen />;
+  if (state.status === 'problem' && state.problem === 'mfa_setup') return <TwoStepScreen kind="setup" onRetry={retry} onSignOut={signOut} />;
+  if (state.status === 'problem' && state.problem === 'mfa_required') return <TwoStepScreen kind="verify" onRetry={retry} onSignOut={signOut} />;
+  if (state.status === 'choose') return <EmployerPicker links={state.links} onChoose={chooseLink} onSignOut={signOut} />;
 
   if (state.status === 'problem') {
     const actions = { onRetry: retry, onSignOut: signOut };
@@ -69,6 +90,8 @@ function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElemen
         <Routes>
           <Route index element={<HomeTab />} />
           <Route path="pay" element={<PayTab />} />
+          <Route path="pay/all" element={<PayTab />} />
+          <Route path="pay/:statementId" element={<PayTab />} />
           <Route path="taxes" element={<TaxesTab />} />
           <Route path="my-info" element={<MyInfoTab />} />
           <Route path="help" element={<HelpTab />} />
@@ -79,21 +102,40 @@ function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElemen
   );
 }
 
+const SIGN_UP_PATHS = new Set(['/activate', '/sign-up', '/sign-up/done', '/claim', '/add-access', '/reactivate']);
+
 function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
   const { isLoaded, isSignedIn } = useEmployeeAuth();
   const location = useLocation();
   if (!isLoaded) return <BootScreen />;
 
+  const path = location.pathname.replace(/\/+$/, '') || '/';
+
+  // The invite links (EmployeeLinks::AppUrl) are /activate, /claim and
+  // /reactivate, each with #token=…; Clerk's invitation lands on /sign-up.
   if (!isSignedIn) {
-    if (location.pathname === '/sign-in') return <SignInScreen />;
-    if (location.pathname === '/') return <WelcomeScreen />;
+    if (path === '/sign-in') return <SignInScreen />;
+    if (path === '/') return <WelcomeScreen />;
+    if (path === '/activate') return <ActivateScreen />;
+    if (path === '/sign-up') return <SignUpAccountScreen />;
+    // Both need the person's existing login: keep the token, sign in, come back.
+    if (path === '/claim' || path === '/add-access') return <SignInFirst to="/claim" />;
+    if (path === '/reactivate') return <SignInFirst to="/reactivate" />;
     if (isSigningOut()) return <Navigate to="/" replace />;
     // A deep link (for example from a "pay stub ready" email) signs in first, then opens.
     return <Navigate to="/sign-in" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
-  if (location.pathname === '/sign-in') return <Navigate to={redirectTarget(location.state)} replace />;
+  if (path === '/sign-in') return <Navigate to={redirectTarget(location.state)} replace />;
+  // A view-only "Sign in as" never signs anyone up or adds access to a login.
+  if (viewAs && SIGN_UP_PATHS.has(path)) return <Navigate to="/" replace />;
+  // Signed in, before the employee session: sign-up's last step, and invites for a login that already exists.
+  if (path === '/activate') return <SignedInInvite />;
+  if (path === '/sign-up') return <Navigate to="/sign-up/done" replace />;
+  if (path === '/sign-up/done') return <FinishSignUpScreen />;
+  if (path === '/claim' || path === '/add-access') return <LinkCheckScreen mode="claim" />;
+  if (path === '/reactivate') return <LinkCheckScreen mode="reactivate" />;
   return (
-    <EmployeeSessionProvider>
+    <EmployeeSessionProvider viewOnly={Boolean(viewAs)}>
       <SignedInApp viewAs={viewAs} />
     </EmployeeSessionProvider>
   );
