@@ -274,12 +274,123 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
     expect(CompanyFeatures.for(sandbox)).to have_attributes(subdomain_enabled?: false, employee_portal_enabled?: false)
   end
 
+  describe "a demo employee login" do
+    let(:worker) do
+      create(:user, role: :portal_employee, company: kitchen, organization: organization, email: robin_email, clerk_id: "user_robin")
+    end
+    let(:link) { EmployeeAccountLink.create!(user: worker, company: kitchen, employee: robin, status: "active", activated_at: 1.day.ago) }
+
+    def sign_in_admin
+      allow_any_instance_of(ApplicationController).to receive(:current_user) { User.find(staff.id) }
+      allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(staff.id)
+      allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(true)
+    end
+
+    it "can't be turned into staff, a client or a live employee login on the Users screen" do
+      worker
+      sign_in_admin
+      %w[org_admin admin accountant manager client].each do |role|
+        patch "/api/v1/admin/users/#{worker.id}", params: { user: { role: role } }
+        expect(response).to have_http_status(:unprocessable_entity), "#{role}: #{response.body}"
+        expect(response.body).to include("can't be changed for this login")
+        expect(response.body).not_to match(/demo/i)
+      end
+      expect(worker.reload).to have_attributes(role: "portal_employee", company_id: kitchen.id)
+      expect(worker.tap { |user| user.company = live }).not_to be_valid
+    end
+
+    it "sends an email-change code only to an allow-listed address" do
+      with_portal_email do
+        post "/api/v1/employee/profile/email", headers: employee_headers(link), params: { email: "robin.new@inbox.example" }, as: :json
+        expect(response).to have_http_status(:unprocessable_entity), response.body
+        expect(response.parsed_body).to include("code" => "recipient_not_allowed", "error" => Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
+        expect(captured_portal_emails).to be_empty
+        expect(link.reload.profile_email_challenge).to be_nil
+
+        ENV[DemoOutbound::ENV_KEY] = [ robin_email, kit_email ].join(",")
+        post "/api/v1/employee/profile/email", headers: employee_headers(link), params: { email: kit_email }, as: :json
+        expect(response).to have_http_status(:accepted), response.body
+        expect(captured_portal_emails.flat_map { |email| email[:to] }).to eq([ kit_email ])
+
+        # Rechecked at delivery: an address that left the allow-list gets nothing.
+        challenge = EmployeeProfiles::EmailChallenge.new(link.reload, robin)
+        stale = EmployeeProfiles::EmailChallenge::Delivery.new("stale", "robin.new@inbox.example", "123456")
+        expect { challenge.deliver!(stale) }.to raise_error(EmployeeProfiles::EmailChallenge::DeliveryUnavailable)
+        expect(captured_portal_emails.size).to eq(1)
+      end
+    end
+
+    it "lets staff resend and reset a pending sign-up whose address left the allow-list" do
+      pending_link = nil
+      with_portal_email do
+        pending_link = invite_by_email!(robin)
+        post_activation(activation_params(robin, token: invite_token, email: robin_email))
+        expect_sign_up_started
+      end
+      pending = pending_link.reload.user
+      expect(pending).to have_attributes(role: "portal_employee", invitation_status: "pending")
+      expect(pending.invite_nonce_digest).to be_present
+      ENV[DemoOutbound::ENV_KEY] = kit_email
+
+      post "/api/v1/admin/employees/#{robin.id}/employee_app/resend", headers: staff_headers,
+        params: { access_id: pending_link.id, delivery: "code" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(pending.reload.invite_nonce_digest).to be_nil
+
+      post "/api/v1/admin/employees/#{robin.id}/employee_app/reset_sign_up", headers: staff_headers,
+        params: { access_id: pending_link.id, delivery: "code", reason: "Address changed" }, as: :json
+      expect(response.status).to be < 500, response.body
+      expect(pending.reload).to have_attributes(email: robin_email, invite_nonce_digest: nil)
+      expect(pending.payroll_access_allowed?).to be(false)
+      # Turning it back on still needs the allow-list.
+      expect(pending.tap { |user| user.assign_attributes(active: false) }.save).to be(true)
+      expect(pending.tap { |user| user.active = true }).not_to be_valid
+    end
+
+    it "can't reactivate or be viewed once its address left the allow-list" do
+      link.update_columns(status: "former", former_at: 1.day.ago)
+      worker.update_columns(active: false, deactivation_reason: "last_employee_link_closed", deactivated_at: 1.day.ago)
+      expect(EmployeeLinks::Reactivate.eligible_login?(worker.reload, robin)).to be(true)
+      ENV[DemoOutbound::ENV_KEY] = kit_email
+      expect(EmployeeLinks::Reactivate.eligible_login?(worker.reload, robin)).to be(false)
+      expect(EmployeeLinks.demo_login_allowed?(worker)).to be(false)
+      expect(EmployeeLinks.demo_login_allowed?(staff)).to be(true)
+
+      worker.update_columns(active: true, deactivation_reason: nil)
+      link.update_columns(status: "active")
+      expect(ViewAsEmployeeContext.resolve(robin, kitchen)).to be_nil
+      ENV[DemoOutbound::ENV_KEY] = robin_email
+      expect(ViewAsEmployeeContext.resolve(robin, kitchen)&.link).to eq(link)
+    end
+  end
+
   describe "the demo boundary" do
+    it "reports a demo's real employee-app switches to staff" do
+      kitchen.client_operating_profiles.update_all(options: { "subdomain_enabled" => true, "employee_portal" => { "features" => { "stubs" => true } } })
+      get "/api/v1/admin/companies/#{kitchen.id}/operating_profile", headers: staff_headers
+      expect(response).to have_http_status(:ok), response.body
+      effective = response.parsed_body.fetch("effective")
+      expect(effective).to include("employee_portal_enabled" => true)
+      expect(effective.dig("options", "subdomain_enabled")).to be(true)
+      expect(response.parsed_body.fetch("history").first).to include("employee_portal_enabled" => true)
+    end
+
+    it "never binds a demo link to a live login, even with a valid invitation" do
+      live_worker = create(:user, role: :portal_employee, company: live, organization: organization, email: "robin@live-grill.example")
+      link = EmployeeAccountLink.create!(company: kitchen, employee: robin, status: "invited", user: live_worker,
+        invite_expires_at: 1.day.from_now, invite_token_digest: EmployeeAccountLink.token_digest("token-#{SecureRandom.hex(8)}"))
+      metadata = { "payroll_employee_link_id" => link.id, "payroll_invite_generation" => link.invite_generation }
+      allow(DemoOutbound).to receive(:permit?).and_return(true)
+      expect(EmployeeLinks::Bind.lock_link(live_worker, metadata, azp: nil)).to be_nil
+    end
+
     it "refuses crossing in both directions" do
       live_worker = create(:user, role: :portal_employee, company: live, organization: organization, name: "Robin Lantern",
         email: "robin@live-grill.example", clerk_id: "user_live_robin")
       post "/api/v1/admin/employees/#{robin.id}/employee_app/invite", headers: staff_headers, params: { delivery: "code" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
       demo_code = response.parsed_body.dig("print", "code")
+      expect(demo_code).to be_present
       post "/api/v1/employee/links/claim", headers: bearer("user_live_robin").merge("CONTENT_TYPE" => "application/json"),
         params: activation_params(robin, code: demo_code).except(:email).to_json
       expect(response).to have_http_status(:not_found)
@@ -288,7 +399,9 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
         email: robin_email, clerk_id: "user_robin")
       live_robin = create(:employee, company: live, first_name: "Robin", last_name: "Lantern", date_of_birth: Date.new(1994, 3, 14))
       post "/api/v1/admin/employees/#{live_robin.id}/employee_app/invite", headers: staff_headers(live), params: { delivery: "code" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
       live_code = response.parsed_body.dig("print", "code")
+      expect(live_code).to be_present
       post "/api/v1/employee/links/claim", headers: bearer("user_robin").merge("CONTENT_TYPE" => "application/json"),
         params: activation_params(live_robin, code: live_code).except(:email).to_json
       expect(response).to have_http_status(:not_found)
@@ -316,7 +429,9 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
         expect(captured_portal_emails).to be_empty
 
         post "/api/v1/admin/employees/#{outsider.id}/employee_app/invite", headers: staff_headers, params: { delivery: "code" }, as: :json
+        expect(response).to have_http_status(:ok), response.body
         code = response.parsed_body.dig("print", "code")
+        expect(code).to be_present
         post_activation(activation_params(outsider, code: code, email: outside_email))
         expect(clerk_invitations).to be_empty
         expect(captured_portal_emails).to be_empty

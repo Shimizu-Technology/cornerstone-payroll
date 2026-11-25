@@ -38,19 +38,23 @@ namespace :demo do
       puts "#{outcome.complete? ? 'OK  ' : 'FAIL'}  demo:invite_clients #{outcome.email.split('@').last} #{outcome.status}"
     end
     abort "FAIL  demo:invite_clients #{outcomes.count { |outcome| !outcome.complete? }} invite(s) not delivered; rerun to retry" unless outcomes.all?(&:complete?)
-  rescue DemoCompany::InviteClients::Refused, ActiveRecord::RecordInvalid, KeyError => e
+  rescue DemoCompany::InviteClients::Refused, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, KeyError => e
     abort "FAIL  demo:invite_clients #{e.message}"
   end
 end
 
 namespace :demo do
-  desc "Give the demo employees their allow-listed email aliases in roster order (ORGANIZATION_ID, EMAILS comma separated). Safe to rerun."
+  desc "Give the demo employees their allow-listed email aliases in roster order (ORGANIZATION_ID, ACTOR_ID, EMAILS comma separated). Safe to rerun."
   task assign_employee_emails: :environment do
-    organization = TenantScope.as_system(reason: "Find the demo employee email organization") { Organization.find(ENV.fetch("ORGANIZATION_ID")) }
-    outcomes = DemoCompany::AssignEmployeeEmails.new(organization: organization, emails: ENV.fetch("EMAILS")).call
+    organization, actor = TenantScope.as_system(reason: "Find the demo employee email organization and actor") do
+      [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
+    end
+    outcomes = Current.set(user: actor) do
+      DemoCompany::AssignEmployeeEmails.new(organization: organization, actor: actor, emails: ENV.fetch("EMAILS")).call
+    end
     # Addresses are printed by domain only.
     outcomes.each { |outcome| puts "OK    demo:assign_employee_emails #{outcome.name} #{outcome.email.split('@').last} #{outcome.status}" }
-  rescue DemoCompany::AssignEmployeeEmails::Refused, ActiveRecord::RecordInvalid, KeyError => e
+  rescue DemoCompany::AssignEmployeeEmails::Refused, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, KeyError => e
     abort "FAIL  demo:assign_employee_emails #{e.message}"
   end
 end
