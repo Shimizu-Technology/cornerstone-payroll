@@ -23,6 +23,7 @@ vi.mock('@/contexts/CompanyContext', () => ({
 }));
 
 vi.mock('@/services/api', () => ({
+  apiClient: { get: async () => ({ data: { enabled: false, status: 'not_invited' } }) },
   employeesApi: {
     get: apiMocks.get,
     resolveConfigurationReviewItem: apiMocks.resolveConfigurationReviewItem,

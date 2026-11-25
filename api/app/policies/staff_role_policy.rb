@@ -212,6 +212,8 @@ class StaffRolePolicy
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#reject" => :manage_client_configuration,
+    "api/v1/admin/employee_app_rollouts#change" => :manage_client_configuration,
+    "api/v1/admin/employee_app_rollouts#bulk_invite" => :manage_client_configuration,
     "api/v1/admin/employee_intake_settings#update" => :manage_client_administration,
     "api/v1/admin/reports#w2_gu_mark_ready" => :manage_client_administration,
     # Full SSNs: the same access as the W-2 sign-off.

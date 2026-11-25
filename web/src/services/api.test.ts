@@ -551,6 +551,13 @@ describe('actionable API errors', () => {
     expect(apiErrorMessage({ code: 'mfa_enrollment_required', error: 'Set up two-step sign-in to make this change.' }, 403))
       .toBe('Set up two-step sign-in to make this change.');
   });
+  it.each([
+    'This person already created their account. Ask them to sign in to finish.',
+    'This person already created their account, but that sign-up can no longer finish. Reset their sign-up to send a new invite.',
+    'This person already created their account, but that sign-up can no longer finish. Ask Cornerstone to reset it.',
+  ])('preserves the accepted sign-up next step: %s', (message) => {
+    expect(apiErrorMessage({ code: 'sign_up_accepted', error: message }, 409)).toBe(message);
+  });
   it('gives specific payroll next steps without treating unknown wages as zero', () => {
     expect(errorRecovery('Verify prior-year employer wages before catch-up payroll')).toContain('Do not enter zero');
     expect(errorRecovery('Review the applied historical 401(k) classification')).toContain('Yearly retirement checks');

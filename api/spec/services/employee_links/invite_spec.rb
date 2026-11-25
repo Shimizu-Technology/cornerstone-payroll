@@ -18,10 +18,11 @@ RSpec.describe EmployeeLinks::Invite, type: :request do
     expect(EmployeeAccountLink.count).to eq(0)
   end
 
-  it "refuses client users, staff without client configuration access, and staff outside the company" do
+  it "refuses users outside the company and staff without client configuration access" do
     outsider = create(:user, role: :admin)
-    client = create(:user, role: :client, company: company)
-    [ outsider, client ].each do |actor|
+    client = create(:user, role: :client, company: outsider.company)
+    accountant = create(:user, role: :accountant, company: company)
+    [ outsider, client, accountant ].each do |actor|
       expect { invite!(employee, actor: actor) }.to raise_error(EmployeeLinks::Forbidden)
     end
   end
