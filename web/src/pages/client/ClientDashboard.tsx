@@ -20,7 +20,41 @@ interface ClientDashboardPayload {
   companyId: number | null;
   stats: ClientDashboardStats;
   documentCount: number;
-  payroll: ClientPayrollHistoryResponse;
+}
+
+type PayrollResult = {
+  companyId: number | null;
+  attempt: number;
+  payroll: ClientPayrollHistoryResponse | null;
+};
+
+function isPayrollDate(value: unknown): boolean {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
+}
+
+function isPayrollId(value: unknown): boolean {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function hasRenderablePayroll(payroll: ClientPayrollHistoryResponse): boolean {
+  if (!Array.isArray(payroll?.pay_periods)) return false;
+  if (!payroll.pay_periods.every(period => period && (
+    period.can_decide_payroll_review !== true || (
+      isPayrollId(period.id) && isPayrollDate(period.start_date) &&
+      isPayrollDate(period.end_date) && isPayrollDate(period.pay_date) &&
+      typeof (period.client_review_status ?? period.status) === 'string'
+    )
+  ))) return false;
+
+  const open = payroll.open_period;
+  return open == null || (
+    isPayrollDate(open.start_date) && isPayrollDate(open.end_date) &&
+    (open.pay_date == null || isPayrollDate(open.pay_date)) &&
+    typeof open.client_payroll_status === 'string' &&
+    (open.review_pay_period_id == null
+      ? typeof open.ref === 'string' && /^(?:\d+|\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2})$/.test(open.ref)
+      : isPayrollId(open.review_pay_period_id))
+  );
 }
 
 export function ClientDashboard(): ReactElement {
@@ -31,8 +65,13 @@ export function ClientDashboard(): ReactElement {
   const [dashboardPayload, setDashboardPayload] = useState<ClientDashboardPayload | null>(null);
   const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
   const documentCount = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.documentCount : 0;
-  const payroll = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.payroll : null;
-  const attention = payroll?.pay_periods.filter(period => period.can_decide_payroll_review) ?? [];
+  const [payrollAttempt, setPayrollAttempt] = useState(0);
+  const [payrollResult, setPayrollResult] = useState<PayrollResult | null>(null);
+  const currentPayroll = payrollResult?.companyId === activeCompanyId && payrollResult.attempt === payrollAttempt
+    ? payrollResult
+    : null;
+  const payroll = currentPayroll?.payroll;
+  const attention = payroll?.pay_periods.filter(period => period.can_decide_payroll_review === true) ?? [];
   const open = payroll?.open_period;
   const openReview = payroll?.pay_periods.find(period => period.id === open?.review_pay_period_id);
   const employeeListHref = activeCompanyId ? employeesPath(activeCompanyId) : '/employees';
@@ -51,16 +90,14 @@ export function ClientDashboard(): ReactElement {
       setError(null);
       setDashboardPayload(null);
       try {
-        const [dashboard, documents, payroll] = await Promise.all([
+        const [dashboard, documents] = await Promise.all([
           clientReportsApi.dashboard(),
           clientDocumentsApi.list({ per_page: 1 }),
-          clientPayPeriodsApi.list({ status: 'approved', per_page: 100 }, requestedCompanyId ?? undefined),
         ]);
         if (cancelled) return;
         setDashboardPayload({
           companyId: requestedCompanyId,
           stats: dashboard.stats,
-          payroll,
           documentCount: documents.meta.total_count,
         });
       } catch (err) {
@@ -75,6 +112,25 @@ export function ClientDashboard(): ReactElement {
     void load();
     return (): void => { cancelled = true; };
   }, [activeCompanyId, setError]);
+
+  useEffect((): (() => void) => {
+    let cancelled = false;
+
+    const loadPayroll = async (): Promise<void> => {
+      let payroll: ClientPayrollHistoryResponse | null = null;
+      try {
+        const response = await clientPayPeriodsApi.list({ status: 'approved', per_page: 100 }, activeCompanyId ?? undefined);
+        if (hasRenderablePayroll(response)) payroll = response;
+      } catch {
+        // Keep approval failures local to the attention card.
+      }
+
+      if (!cancelled) setPayrollResult({ companyId: activeCompanyId, attempt: payrollAttempt, payroll });
+    };
+
+    void loadPayroll();
+    return (): void => { cancelled = true; };
+  }, [activeCompanyId, payrollAttempt]);
 
   return (
     <div>
@@ -94,11 +150,20 @@ export function ClientDashboard(): ReactElement {
             <h2 className="font-display text-lg font-bold tracking-tight text-neutral-950">Needs your attention</h2>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
-            {loading ? <p role="status">Checking for payroll approvals…</p> : payroll && (
+            {!currentPayroll && <p role="status">Checking for payroll approvals…</p>}
+            {currentPayroll && !payroll && (
+              <div>
+                <p role="alert">Couldn't check for payroll approvals.</p>
+                <Button variant="outline" size="sm" className="mt-2" onClick={() => setPayrollAttempt(attempt => attempt + 1)}>
+                  Try again
+                </Button>
+              </div>
+            )}
+            {payroll && (
               attention.length ? (
                 <ul className="space-y-3">
                   {attention.map(period => (
-                    <li key={period.key}>
+                    <li key={period.id}>
                       <p className="font-medium">Payroll for {formatDateRange(period.start_date, period.end_date)} is ready for your approval.</p>
                       <p>Pay date {formatDate(period.pay_date)} · {clientPayRunStatus(period)}</p>
                       <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={payRunHref(period.id)}>
@@ -109,7 +174,7 @@ export function ClientDashboard(): ReactElement {
                 </ul>
               ) : <p>No payroll needs your approval right now.</p>
             )}
-            {open && !openReview?.can_decide_payroll_review && (
+            {open && openReview?.can_decide_payroll_review !== true && (
               <div className="border-t border-neutral-200 pt-3">
                 <p className="font-medium">Next payroll · {formatDateRange(open.start_date, open.end_date)}</p>
                 <p>{open.pay_date ? `Pay date ${formatDate(open.pay_date)}` : 'Pay date to be set'} · {clientPayrollStatus(open.client_payroll_status)}</p>

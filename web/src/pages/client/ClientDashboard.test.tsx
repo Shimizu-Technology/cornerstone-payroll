@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
-import { clientPayPeriodsApi } from '@/services/api';
+import { clientPayPeriodsApi, clientReportsApi } from '@/services/api';
 import { ClientDashboard } from './ClientDashboard';
 
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 2 }) }));
@@ -13,6 +13,11 @@ vi.mock('@/services/api', () => ({
   clientDocumentsApi: { list: vi.fn().mockResolvedValue({ meta: { total_count: 0 } }) },
   clientPayPeriodsApi: { list: vi.fn() },
 }));
+
+const emptyPayroll = {
+  pay_periods: [],
+  meta: { current_page: 1, per_page: 100, total_count: 0, total_pages: 0, statuses: {}, sources: {}, years: [] },
+};
 
 afterEach(cleanup);
 
@@ -53,3 +58,39 @@ it('shows an open payroll whose pay date is still unset', async () => {
   render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
   expect(await screen.findByText(/Pay date to be set/)).toBeTruthy();
 });
+
+it('keeps stats visible when payroll lookup fails and retries only payroll', async () => {
+  vi.mocked(clientReportsApi.dashboard).mockResolvedValueOnce({ stats: { active_employees: 7 } } as Awaited<ReturnType<typeof clientReportsApi.dashboard>>);
+  vi.mocked(clientPayPeriodsApi.list)
+    .mockRejectedValueOnce(new Error('Payroll unavailable'))
+    .mockResolvedValueOnce(emptyPayroll);
+  render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
+
+  expect(await screen.findByText('7')).toBeTruthy();
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', "Couldn't check for payroll approvals.");
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+  expect(await screen.findByText('No payroll needs your approval right now.')).toBeTruthy();
+  expect(screen.getByText('7')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('loads payroll attention when dashboard stats fail', async () => {
+  vi.mocked(clientReportsApi.dashboard).mockRejectedValueOnce(new Error('Stats unavailable'));
+  vi.mocked(clientPayPeriodsApi.list).mockResolvedValueOnce(emptyPayroll);
+  render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
+
+  expect(await screen.findByText('Stats unavailable')).toBeTruthy();
+  expect(await screen.findByText('No payroll needs your approval right now.')).toBeTruthy();
+});
+
+it.each([{}, { pay_periods: [null] }, { pay_periods: [{ can_decide_payroll_review: true }] }, { pay_periods: [], open_period: {} }])(
+  'contains malformed payroll data in the attention card (%j)',
+  async payload => {
+    vi.mocked(clientPayPeriodsApi.list).mockResolvedValueOnce(payload as Awaited<ReturnType<typeof clientPayPeriodsApi.list>>);
+    render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
+
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(screen.getByText('Active Employees')).toBeTruthy();
+  },
+);
