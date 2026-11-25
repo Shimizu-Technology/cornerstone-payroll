@@ -120,6 +120,10 @@ RSpec.describe "View-only support sessions", type: :request do
 
     get "/api/v1/client/reports/dashboard", headers: headers
     expect(response).to have_http_status(:ok)
+    get "/api/v1/client/pay_periods", params: { status: "approved", per_page: 100 }, headers: headers
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("pay_periods")).to be_an(Array)
+
     get "/api/v1/client/employees/#{outsider.id}", headers: headers
     expect(response).to have_http_status(:not_found)
     get "/api/v1/client/employees", headers: headers.merge("X-Company-Id" => second.id.to_s)

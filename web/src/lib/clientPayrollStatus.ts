@@ -7,7 +7,7 @@ const labels: Record<string, string> = {
 };
 
 export function clientPayrollStatus(status?: string | null): string {
-  return (status && labels[status]) || 'Being prepared';
+  return status && Object.hasOwn(labels, status) ? labels[status] : 'Being prepared';
 }
 
 export function clientPayRunStatus(period: {
