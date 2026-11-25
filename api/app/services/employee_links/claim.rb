@@ -80,6 +80,7 @@ module EmployeeLinks
       return false unless EmployeeLinks.demo_boundary_allows?(@user, link.company)
       return false unless EmployeeLinks.origin_allows_company?(@azp, link.company_id)
       return false unless EmployeeLinks.demo_request_allowed?(link.company, @azp)
+      return false unless EmployeeLinks.demo_origin_allowed?(link.company, @request&.headers&.[]("Origin"))
       return false unless DemoOutbound.permit?(company: link.company, email: @user.email, channel: "employee_link_claim", user: @user)
       return false if link.user_id.present? && link.user_id != @user.id && !pending_sign_up?(link.user)
       return false if EmployeeAccountLink.where(user_id: @user.id, company_id: link.company_id, status: %w[invited active])

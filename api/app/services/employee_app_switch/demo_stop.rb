@@ -51,7 +51,7 @@ module EmployeeAppSwitch
       end
       # Clerk calls run after commit, like every other session revocation. A
       # pending row from an earlier stop whose job was never queued goes too.
-      unqueued = EmployeeAppClerkRevocation.pending.where(organization_id: @organization.id, enqueued_at: nil).pluck(:id)
+      unqueued = EmployeeAppClerkRevocation.unqueued.where(organization_id: @organization.id).pluck(:id)
       EmployeeAppClerkRevocation.enqueue!(queued | unqueued)
       summary
     end

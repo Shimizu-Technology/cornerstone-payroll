@@ -159,16 +159,24 @@ module EmployeeLinks
   # The links a login can open from this origin: the employee app's list,
   # the link it opens (every link-scoped data request) and the /auth/me
   # count all use this. A demo link also needs a session from that demo's
-  # own subdomain and the request-time demo gate, so outside it a demo link
-  # is neither listed, counted nor opened.
-  def self.openable_links(user, azp:)
+  # own subdomain and the request-time demo gate, and a browser request's
+  # Origin, when it sends one, must be that subdomain too (each link is
+  # checked on its own), so outside it a demo link is neither listed,
+  # counted nor opened.
+  def self.openable_links(user, azp:, origin: nil)
     user.employee_account_links.portal_eligible.includes(company: :organization).order(:id)
-      .select { |link| openable?(user, link, azp: azp) }
+      .select { |link| openable?(user, link, azp: azp, origin: origin) }
   end
 
-  def self.openable?(user, link, azp:)
+  def self.openable?(user, link, azp:, origin: nil)
     link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company) &&
-      demo_request_allowed?(link.company, azp)
+      demo_request_allowed?(link.company, azp) && demo_origin_allowed?(link.company, origin)
+  end
+
+  # A request with no Origin header (not from a browser page) is judged by
+  # its session alone; one that sends an Origin must send the demo's own.
+  def self.demo_origin_allowed?(company, origin)
+    origin.blank? || demo_request_allowed?(company, origin)
   end
 
   # Invitation issuance for a demo company holds the company row lock,

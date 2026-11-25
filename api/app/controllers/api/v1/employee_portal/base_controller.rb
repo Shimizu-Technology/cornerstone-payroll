@@ -53,15 +53,18 @@ module Api
         # not yet enforced) is served only while THIS process runs the RLS
         # guard in raise mode as the restricted role; otherwise it looks like
         # no link at all. A demo link's session is already pinned to the
-        # demo's own subdomain (EmployeeLinks.openable?); a browser request
-        # must also come from it.
+        # demo's own subdomain, and a browser request must come from it
+        # (EmployeeLinks.openable?, checked again here for the resolved link).
         def require_guarded_demo_process!
           company = employee_access_context&.company
           return head :not_found unless EmployeeAppSwitch::Enforcement.demo_request_allowed?(company)
-          return unless @employee_link && company&.demo?
+          return unless @employee_link
 
-          origin = request.headers["Origin"]
-          head :not_found if origin.present? && !EmployeeLinks.demo_request_allowed?(company, origin)
+          head :not_found unless EmployeeLinks.demo_origin_allowed?(company, request_origin)
+        end
+
+        def request_origin
+          request.headers["Origin"]
         end
 
         def require_employee_link!
@@ -75,7 +78,7 @@ module Api
           azp = @clerk_token_payload["azp"]
           @employee_link = TenantScope.as_system(reason: "Resolve employee link for verified Clerk user") do
             link = @current_user.employee_account_links.portal_eligible.find_by(id: link_id)
-            link if link && EmployeeLinks.openable?(@current_user, link, azp: azp)
+            link if link && EmployeeLinks.openable?(@current_user, link, azp: azp, origin: request_origin)
           end
           return head :not_found unless @employee_link
 

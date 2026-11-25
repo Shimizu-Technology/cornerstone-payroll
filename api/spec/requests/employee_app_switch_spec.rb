@@ -784,9 +784,14 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: demo.id).order(:id).last.metadata["requested"])
         .to include("clerk_session_revocations" => 0, "already_pending" => 1)
 
-      expect { RevokeEmployeeAppClerkJob.perform_now(revocation.id) }.not_to raise_error # retry_on reschedules
+      # Only the job the stop queued (the row's owner) acts on it.
+      expect(revocation.reload.job_id).to eq(enqueued_jobs.sole.fetch("job_id"))
+      expect(RevokeEmployeeAppClerkJob.perform_now(revocation.id)).to be_nil
+      expect(revocation.reload.attempts).to eq(0)
+      owner = -> { RevokeEmployeeAppClerkJob.new(revocation.id).tap { |job| job.job_id = revocation.job_id } }
+      expect { owner.call.perform_now }.not_to raise_error # retry_on reschedules
       expect(revocation.reload).to have_attributes(attempts: 1, last_error: "Clerk down", confirmed_at: nil)
-      RevokeEmployeeAppClerkJob.perform_now(revocation.id)
+      owner.call.perform_now
       expect(revocation.reload.confirmed_at).to be_present
       expect(AuditLog.where(action: RevokeEmployeeAppClerkJob::CONFIRMED_ACTION, record_id: revocation.id).count).to eq(1)
     end
@@ -794,7 +799,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     it "recovers revocations left without a job: a repeat stop queues pending rows that were never queued" do
       turn_on_directly!(demo, %w[employee_portal_enabled])
       # A stop whose commit landed but whose enqueue failed (or crashed).
-      allow(RevokeEmployeeAppClerkJob).to receive(:perform_later).and_raise(ActiveJob::EnqueueError)
+      allow(RevokeEmployeeAppClerkJob.queue_adapter).to receive(:enqueue).and_raise(ActiveJob::EnqueueError)
       orphan = TenantScope.as_system(reason: "spec") do
         EmployeeAppClerkRevocation.request!(kind: "invitation", target: "inv_orphan", organization: organization, company: demo,
           source: EmployeeAppClerkRevocation::SOURCE_DEMO_STOP, requested_by: org_admin)
@@ -803,7 +808,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(orphan.reload.enqueued_at).to be_nil
 
-      allow(RevokeEmployeeAppClerkJob).to receive(:perform_later).and_call_original
+      allow(RevokeEmployeeAppClerkJob.queue_adapter).to receive(:enqueue).and_call_original
       expect do
         post "#{path}/demo_stop", params: { reason: "Again" }, as: :json, headers: auth(recent: false, target: demo)
       end.to have_enqueued_job(RevokeEmployeeAppClerkJob).with(orphan.id).exactly(:once)

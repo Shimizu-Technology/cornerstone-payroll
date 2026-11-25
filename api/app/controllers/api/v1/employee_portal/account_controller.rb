@@ -20,7 +20,7 @@ module Api
 
         # GET /api/v1/employee/links
         def links
-          links = EmployeeLinks.openable_links(@current_user, azp: azp)
+          links = EmployeeLinks.openable_links(@current_user, azp: azp, origin: request_origin)
           response.headers["Cache-Control"] = "no-store"
           render json: { links: links.map { |link| link_payload(link) } }
         end

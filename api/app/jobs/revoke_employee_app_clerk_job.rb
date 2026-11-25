@@ -3,13 +3,22 @@
 # Carries out one Clerk revocation the demo kill switch requested
 # (EmployeeAppClerkRevocation), retried like RevokeEmployeeSessionsJob until
 # Clerk confirms. The confirmed (or abandoned) outcome is audited on its own,
-# separately from the stop's audit of what was requested.
+# separately from the stop's audit of what was requested, in the same
+# transaction that records it, so an outcome is never recorded unaudited.
+#
+# Only the job that owns the row (the one its claim queued) does anything,
+# and each attempt holds the row's lease (EmployeeAppClerkRevocation), so a
+# duplicate job, or a second run of this one, never races an attempt or an
+# outcome.
 #
 # An invitation someone already accepted can't be revoked: the person has a
 # Clerk account. The job ends that account's sessions instead (the login's
-# bound Clerk user, or the one Clerk user with the invited address) and
-# confirms only once they are ended. If no single account can be found, the
-# row ends needing follow-up, audited, and is never counted as confirmed.
+# bound Clerk user, or the one Clerk user with the invited address): every
+# active session, however late it began, since the account came from a demo
+# that is now stopped. It confirms only once a fresh listing finds none
+# active. (A later sign-in still gets nothing: the stop revoked the link and
+# turned the demo's app off.) If no single account can be found, the row
+# ends needing follow-up, audited, and is never counted as confirmed.
 class RevokeEmployeeAppClerkJob < ApplicationJob
   class RevocationFailed < StandardError; end
 
@@ -27,33 +36,46 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
   end
 
   def perform(revocation_id, clerk: ClerkInvitationService.new)
-    revocation = EmployeeAppClerkRevocation.find_by(id: revocation_id)
-    return unless revocation&.pending?
+    revocation = EmployeeAppClerkRevocation.start_attempt!(revocation_id, job_id: job_id)
+    return unless revocation
 
-    revocation.update!(attempts: revocation.attempts + 1)
-    result = call_clerk(revocation, clerk)
-    if result[:follow_up]
-      revocation.update!(follow_up_at: Time.current, outcome: result[:outcome], last_error: result[:error].to_s.first(200).presence)
-      return audit!(revocation, FOLLOW_UP_ACTION)
+    begin
+      record_result!(revocation, call_clerk(revocation, clerk))
+    ensure
+      revocation.release_lease!
     end
-    unless result[:success]
-      revocation.update!(last_error: result[:error].to_s.first(200).presence || "Clerk didn't confirm")
-      raise RevocationFailed, result[:error].to_s
-    end
-
-    revocation.update!(confirmed_at: Time.current, outcome: result[:outcome], last_error: nil)
-    audit!(revocation, CONFIRMED_ACTION)
   end
 
   def give_up!(error)
     revocation = EmployeeAppClerkRevocation.find_by(id: arguments.first)
-    return unless revocation&.pending?
-
-    revocation.update!(gave_up_at: Time.current, last_error: error.class.name.first(200))
-    audit!(revocation, GAVE_UP_ACTION)
+    revocation&.finish!(job_id: job_id) do |row|
+      row.update!(gave_up_at: Time.current, last_error: error.class.name.first(200))
+      audit!(row, GAVE_UP_ACTION)
+    end
   end
 
   private
+
+  def record_result!(revocation, result)
+    unless result[:follow_up] || result[:success]
+      still_ours = revocation.finish!(job_id: job_id) do |row|
+        row.update!(last_error: result[:error].to_s.first(200).presence || "Clerk didn't confirm")
+      end
+      # Retried only while the row is still this job's to finish.
+      raise RevocationFailed, result[:error].to_s if still_ours
+      return
+    end
+
+    revocation.finish!(job_id: job_id) do |row|
+      if result[:follow_up]
+        row.update!(follow_up_at: Time.current, outcome: result[:outcome], last_error: result[:error].to_s.first(200).presence)
+        audit!(row, FOLLOW_UP_ACTION, sessions_ended: result[:revoked])
+      else
+        row.update!(confirmed_at: Time.current, outcome: result[:outcome], last_error: nil)
+        audit!(row, CONFIRMED_ACTION, sessions_ended: result[:revoked])
+      end
+    end
+  end
 
   def call_clerk(revocation, clerk)
     case revocation.kind
@@ -89,8 +111,10 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
       clerk_id = matches.first["id"]
     end
 
-    clerk.revoke_user_sessions(clerk_id, created_before: EmployeeLinks::SessionFence.cutoff(revocation.requested_at),
-      email: email).merge(outcome: "accepted_sessions_revoked")
+    # No creation-time cutoff: a session from after the stop (the invitation
+    # accepted before Clerk heard of the revocation) ends too, and the pass
+    # confirms only once none of the account's sessions is still active.
+    clerk.revoke_user_sessions(clerk_id, created_before: nil, email: email).merge(outcome: "accepted_sessions_revoked")
   end
 
   def revoke_sessions(revocation, clerk)
@@ -107,14 +131,14 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
     clerk_id if clerk_id.present? && !clerk_id.start_with?("pending_")
   end
 
-  def audit!(revocation, action)
+  def audit!(revocation, action, sessions_ended: nil)
     AuditLog.record!(
       actor: AuditActor.system_job(self.class.name), user: nil, organization_id: revocation.organization_id,
       company_id: revocation.company_id, action: action, record_type: "EmployeeAppClerkRevocation", record_id: revocation.id,
       subject_name: revocation.kind, event_category: "security",
       metadata: { kind: revocation.kind, source: revocation.source, attempts: revocation.attempts,
                   requested_at: revocation.requested_at.utc.iso8601, user_id: revocation.user_id,
-                  outcome: revocation.outcome }.compact
+                  outcome: revocation.outcome, sessions_ended: sessions_ended }.compact
     )
   end
 end
