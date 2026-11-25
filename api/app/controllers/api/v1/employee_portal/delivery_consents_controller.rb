@@ -63,7 +63,7 @@ module Api
               next
             end
 
-            unless ActiveModel::Type::Boolean.new.cast(params[:acknowledged]) == true
+            unless params[:acknowledged] == true || params[:acknowledged] == "true"
               error_response = [ { error: "You must confirm that you have read and agree to the disclosure.", code: "acknowledgement_required" }, :unprocessable_entity ]
               next
             end

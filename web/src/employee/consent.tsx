@@ -5,11 +5,12 @@
 import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { CheckCircle2, FileText, Mail, Printer, ShieldCheck } from 'lucide-react';
 import { EmployeeApiError, StepUpCancelledError } from './api';
-import type {
-  DeliveryConsentItem,
-  DeliveryConsentKind,
-  DeliveryConsentsState,
-  W2GuAccessProofChallenge,
+import {
+  accessDay,
+  type DeliveryConsentItem,
+  type DeliveryConsentKind,
+  type DeliveryConsentsState,
+  type W2GuAccessProofChallenge,
 } from './contracts';
 import { useEmployeeAuth, useReadySession } from './contexts';
 import { longDate } from './format';
@@ -91,6 +92,11 @@ function DisclosureBody({ text }: { text: string }): ReactElement {
       })}
     </div>
   );
+}
+
+function guamLongDate(timestamp: string): string {
+  const day = accessDay(timestamp);
+  return day ? longDate(day) : '';
 }
 
 function statusChip(item: DeliveryConsentItem): ReactElement {
@@ -258,7 +264,7 @@ function ConsentCard({
         {isConsented && item.activeConsent && (
           <div className="space-y-2">
             <p className="text-neutral-700">
-              Consent recorded on <strong>{longDate(item.activeConsent.givenAt.slice(0, 10))}</strong> (version {item.activeConsent.disclosureVersion}).
+              Consent recorded on <strong>{guamLongDate(item.activeConsent.givenAt)}</strong> (version {item.activeConsent.disclosureVersion}).
             </p>
             {item.kind === 'w2gu' && item.emailNoticeLockedOn && (
               <p className="emp-inline-icon text-neutral-700">
@@ -276,7 +282,7 @@ function ConsentCard({
 
         {item.status === 'withdrawn' && item.lastWithdrawnAt && (
           <p className="text-neutral-700">
-            You withdrew electronic consent on <strong>{longDate(item.lastWithdrawnAt.slice(0, 10))}</strong>. Paper copies will continue.
+            You withdrew electronic consent on <strong>{guamLongDate(item.lastWithdrawnAt)}</strong>. Paper copies will continue.
           </p>
         )}
 

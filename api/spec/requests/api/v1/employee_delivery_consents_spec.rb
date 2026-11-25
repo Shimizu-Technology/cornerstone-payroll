@@ -274,9 +274,40 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body["code"]).to eq("disclosure_outdated")
     end
+
+    it "accepts acknowledged only when literally true or 'true', never coercing truthy non-booleans" do
+      disclosure = DeliveryDisclosure.current_for("pay_statements")
+      [ "no", [], {}, "false", false, nil, 1, "1", "yes" ].each do |bad_value|
+        post base, params: {
+          kind: "pay_statements",
+          acknowledged: bad_value,
+          disclosure_version: disclosure.version,
+          disclosure_digest: disclosure.digest
+        }, headers: employee_headers, as: :json
+        expect(response).to have_http_status(:unprocessable_entity), "expected 422 for acknowledged=#{bad_value.inspect}"
+        expect(response.parsed_body["code"]).to eq("acknowledgement_required")
+      end
+      expect(TenantScope.as_system(reason: "Verify no consents recorded") { DeliveryConsent.count }).to eq(0)
+
+      # Literal string "true" is accepted.
+      post base, params: {
+        kind: "pay_statements",
+        acknowledged: "true",
+        disclosure_version: disclosure.version,
+        disclosure_digest: disclosure.digest
+      }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:created)
+    end
   end
 
   describe "W-2GU PDF access-proof step" do
+    it "generates a readable PDF containing the code when the company name contains characters outside Windows-1252" do
+      company.update!(name: "海 Harbor Kitchen")
+      post "#{base}/w2gu_access_proof/pdf", headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      code = extract_code_from_pdf(response.parsed_body["pdf_base64"])
+      expect(code).to match(/\A[#{EmployeeAccountLink::CODE_ALPHABET.join}]{6}\z/)
+    end
     it "requires opening the test PDF and entering its code before recording W-2GU consent" do
       disclosure = DeliveryDisclosure.current_for("w2gu")
 
@@ -464,6 +495,34 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
         "paper_continues" => true
       )
       expect(summary["items"].last).to include("kind" => "w2gu", "status" => "not_consented")
+    end
+
+    it "keeps delivery_consents in resolve_configuration_review_item and review_intake_exception responses" do
+      employee.update!(
+        configuration_source: "quickbooks_history",
+        configuration_review_status: "needs_review",
+        configuration_review_items: [
+          { "code" => "time_off_setup_not_imported", "message" => "Review time off", "fields" => [] }
+        ],
+        intake_exception: { "reason" => "Pending documents", "follow_up_due_on" => "2026-12-15" }
+      )
+      staff_headers = bearer(staff_user.clerk_id, fva: [ 0, 0 ], two_factor_enabled: true).merge("X-Company-Id" => company.id.to_s)
+
+      post "/api/v1/admin/employees/#{employee.id}/resolve_configuration_review_item", params: {
+        code: "time_off_setup_not_imported",
+        resolution_note: "Confirmed not carried into payroll.",
+        acknowledgement: EmployeeConfigurationReviewService::ACKNOWLEDGEMENT
+      }, headers: staff_headers, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "delivery_consents", "items").map { |i| i["kind"] }).to eq(%w[pay_statements w2gu])
+
+      patch "/api/v1/admin/employees/#{employee.id}/intake_exception", params: {
+        intake_exception: {
+          follow_up_due_on: "2026-12-20"
+        }
+      }, headers: staff_headers, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "delivery_consents", "items").map { |i| i["kind"] }).to eq(%w[pay_statements w2gu])
     end
   end
 end

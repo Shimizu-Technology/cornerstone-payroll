@@ -1120,9 +1120,11 @@ CREATE OR REPLACE FUNCTION prevent_delivery_disclosure_mutation() RETURNS trigge
 BEGIN
   IF NEW.kind IS DISTINCT FROM OLD.kind
     OR NEW.version IS DISTINCT FROM OLD.version
+    OR NEW.title IS DISTINCT FROM OLD.title
     OR NEW.text IS DISTINCT FROM OLD.text
     OR NEW.digest IS DISTINCT FROM OLD.digest
     OR NEW.status IS DISTINCT FROM OLD.status
+    OR NEW.published_at IS DISTINCT FROM OLD.published_at
   THEN
     RAISE EXCEPTION 'delivery_disclosures rows are immutable; insert a new version instead'
       USING ERRCODE = 'check_violation';
@@ -1133,6 +1135,6 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS delivery_disclosures_immutable ON delivery_disclosures;
 CREATE TRIGGER delivery_disclosures_immutable
-BEFORE UPDATE OF kind, version, text, digest, status ON delivery_disclosures
+BEFORE UPDATE OF kind, version, title, text, digest, status, published_at ON delivery_disclosures
 FOR EACH ROW
 EXECUTE FUNCTION prevent_delivery_disclosure_mutation();

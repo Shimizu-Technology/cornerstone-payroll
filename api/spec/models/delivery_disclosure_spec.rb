@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require Rails.root.join("db/migrate/20261126000200_allow_delivery_consent_in_changes_to_confirm")
 require Rails.root.join("db/migrate/20261126000300_seed_draft_delivery_disclosures")
 
 RSpec.describe DeliveryDisclosure do
@@ -24,15 +25,17 @@ RSpec.describe DeliveryDisclosure do
         .to raise_error(ActiveRecord::ReadOnlyRecord)
     end
 
-    it "blocks direct SQL updates of kind, version, text, digest, and status via database trigger" do
+    it "blocks direct SQL updates of kind, version, title, text, digest, status, and published_at via database trigger" do
       disclosure = described_class.current_for("w2gu")
 
       [
         { kind: "pay_statements" },
         { version: "2026-11-25-draft-99" },
+        { title: "Altered Title" },
         { text: "Altered disclosure text" },
         { digest: "f" * 64 },
-        { status: "approved" }
+        { status: "approved" },
+        { published_at: 1.day.from_now }
       ].each do |mutation|
         expect do
           ActiveRecord::Base.connection.transaction(requires_new: true) do
@@ -44,8 +47,10 @@ RSpec.describe DeliveryDisclosure do
       expect(disclosure.reload).to have_attributes(
         kind: "w2gu",
         version: DeliveryDisclosures::DraftSeeds::DRAFT_VERSION,
+        title: DeliveryDisclosures::DraftSeeds::W2GU_TITLE,
         digest: PINNED_DIGESTS["w2gu"],
-        status: "draft"
+        status: "draft",
+        published_at: DeliveryDisclosures::DraftSeeds::PUBLISHED_AT
       )
     end
 
@@ -117,8 +122,19 @@ RSpec.describe DeliveryDisclosure do
       end
     end
 
+    it "hashes each runtime DraftSeeds::DEFINITIONS text directly against the pinned digests" do
+      expect(DeliveryDisclosures::DraftSeeds::DEFINITIONS.map { |d| d[:kind] }).to match_array(PINNED_DIGESTS.keys)
+      DeliveryDisclosures::DraftSeeds::DEFINITIONS.each do |definition|
+        expect(described_class.digest_for(definition[:text])).to eq(PINNED_DIGESTS.fetch(definition[:kind]))
+      end
+    end
+
     it "runs the frozen seed migration idempotently" do
       expect { SeedDraftDeliveryDisclosures.new.up }.not_to change(described_class, :count)
+    end
+
+    it "refuses irreversible rollback of AllowDeliveryConsentInChangesToConfirm" do
+      expect { AllowDeliveryConsentInChangesToConfirm.new.down }.to raise_error(ActiveRecord::IrreversibleMigration)
     end
   end
 end

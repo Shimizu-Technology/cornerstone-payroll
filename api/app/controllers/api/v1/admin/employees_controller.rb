@@ -328,7 +328,14 @@ module Api
           EmployeeIntakeExceptionReviewService.call!(employee: @employee, actor: current_user,
             attributes: params.require(:intake_exception).permit(:follow_up_due_on, :payroll_eligible_from,
               :confirm_payroll_setup, :reason, :acknowledge_default_withholding))
-          render json: { data: serialize_employee(@employee.reload, include_w4_history: true, include_document_readiness: true) }
+          render json: {
+            data: serialize_employee(
+              @employee.reload,
+              include_w4_history: true,
+              include_document_readiness: true,
+              include_delivery_consents: true
+            )
+          }
         rescue EmployeeIntakeExceptionReviewService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::RecordInvalid => e
@@ -351,7 +358,8 @@ module Api
               include_classification_history: true,
               include_lifecycle: true,
               include_w4_history: true,
-              include_configuration_review_history: true
+              include_configuration_review_history: true,
+              include_delivery_consents: true
             )
           }
         rescue EmployeeConfigurationReviewService::NotAuthorized => e
