@@ -91,6 +91,11 @@ module EmployeeContactHygiene
         }
       end
 
+      # The organization-wide list of marked addresses is authorized on its
+      # own: never from a demo-scoped report, and only for an organization
+      # administrator or staff who can configure a live client.
+      listed_placeholders = placeholder_list_visible?(target_companies, configurable_companies) ? marked_placeholders : Set.new
+
       company_entries = flagged_by_company.map do |cid, emails|
         company = company_by_id.fetch(cid)
         sorted_emails = emails.sort_by { |item| [ item[:clearable] ? 0 : 1, -item[:total_count], item[:email] ] }
@@ -111,10 +116,10 @@ module EmployeeContactHygiene
           active_employee_records: active_employee_records
         },
         can_manage_placeholders: StaffRolePolicy.allowed?(@actor, :manage_organization),
-        marked_placeholders: marked_placeholders.to_a.sort,
+        marked_placeholders: listed_placeholders.to_a.sort,
         # Listed even when no employee uses the address any more, so staff can
         # still unmark it. Configured addresses can't be unmarked here.
-        placeholder_marks: marked_placeholders.to_a.sort.map do |email|
+        placeholder_marks: listed_placeholders.to_a.sort.map do |email|
           { email: email, unmarkable: db_marked_placeholders.include?(email) && !configured_placeholders.include?(email) }
         end,
         companies: company_entries
@@ -136,6 +141,12 @@ module EmployeeContactHygiene
         placeholder_marks: [],
         companies: []
       }
+    end
+
+    def placeholder_list_visible?(target_companies, configurable_companies)
+      return false if target_companies.any?(&:demo?)
+
+      StaffRolePolicy.allowed?(@actor, :manage_organization) || configurable_companies.any?(&:live_payroll?)
     end
 
     def all_configurable_companies

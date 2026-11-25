@@ -20,8 +20,7 @@ module Api
 
         # GET /api/v1/employee/links
         def links
-          links = @current_user.employee_account_links.portal_eligible.includes(company: :organization).order(:id)
-            .select { |link| link.portal_enabled? && EmployeeLinks.origin_allows_company?(azp, link.company_id) }
+          links = EmployeeLinks.openable_links(@current_user, azp: azp)
           response.headers["Cache-Control"] = "no-store"
           render json: { links: links.map { |link| link_payload(link) } }
         end
