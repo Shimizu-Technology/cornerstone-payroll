@@ -26,6 +26,13 @@ production:
     queue: default
     schedule: every minute
 
+  # Sends W-2GU notices still pending (or failed) and matches stored email
+  # provider events to their notices (M4-5).
+  dispatch_employee_tax_form_notices:
+    class: DispatchEmployeeTaxFormNoticesJob
+    queue: default
+    schedule: every 10 minutes
+
   retry_portal_upload_cleanups:
     class: PortalUploadCleanupJob
     queue: default

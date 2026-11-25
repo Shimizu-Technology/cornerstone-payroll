@@ -25,6 +25,9 @@ class ApplicationJob < ActiveJob::Base
     when :company
       return yield if TenantScope.current&.mode == "system"
 
+      # A job run from the queue has its arguments deserialized only inside
+      # perform_now's super, so read the company ID from them first.
+      deserialize_arguments_if_needed
       TenantScope.with_company(arguments.first, &perform)
     else
       yield

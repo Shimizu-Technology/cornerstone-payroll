@@ -189,6 +189,17 @@ class EmployeeAccountLink < ApplicationRecord
     activation_locked_until.present? && activation_locked_until > now
   end
 
+  # Profile reads (contacts, emergency contacts, address requests) for a
+  # former link end at the cutoff set when it became former. Posting a W-2GU
+  # copy can lengthen former_access_until for the copy and pay stubs only
+  # (EmployeeDocuments::TaxFormRetention).
+  def profile_access_open?(now = Time.current)
+    return true unless former?
+
+    cutoff = former_profile_access_until || former_access_until
+    cutoff.present? && cutoff > now
+  end
+
   def portal_enabled?
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?
   end

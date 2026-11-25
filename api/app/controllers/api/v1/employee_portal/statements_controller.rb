@@ -8,6 +8,8 @@ module Api
       # company's employee_portal.features.stubs switch. Every failure,
       # including a switch that is off, is the same empty 404.
       class StatementsController < BaseController
+        include EmployeePortalFrozenDocuments
+
         before_action :no_store, :require_stubs!
 
         AUDIT_ACTION = "employee_statement"
@@ -51,6 +53,9 @@ module Api
 
           bytes = stored_bytes(document)
           return head :service_unavailable unless bytes
+          return head :not_found unless still_servable?(document, feature: :stubs) do |link, current|
+            EmployeeStatements.new(link: link).pdf_document(params[:id])&.id == current.id
+          end
 
           audit!("pdf_downloaded", record: document,
             metadata: { statement_id: params[:id].to_s, revision: document.revision, sha256: document.sha256 })
@@ -64,10 +69,6 @@ module Api
           head :not_found unless CompanyFeatures.for(@employee_link.company).employee_portal_feature?(:stubs)
         end
 
-        def no_store
-          response.headers["Cache-Control"] = "no-store"
-        end
-
         def statements
           @statements ||= EmployeeStatements.new(link: @employee_link)
         end
@@ -79,19 +80,6 @@ module Api
           return :invalid unless value.is_a?(String) && value.match?(pattern)
 
           value.to_i
-        end
-
-        # The frozen bytes, or nil (reported) when storage can't return the
-        # exact file that was posted.
-        def stored_bytes(document)
-          bytes = R2StorageService.new.download(document.storage_key)
-          return bytes if bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
-
-          Rails.error.report(StandardError.new("Employee document #{document.id} is missing or changed in storage"), handled: true)
-          nil
-        rescue R2StorageService::DownloadError => e
-          Rails.error.report(e, handled: true)
-          nil
         end
 
         def pdf_filename(document)
