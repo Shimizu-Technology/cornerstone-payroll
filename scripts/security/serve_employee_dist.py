@@ -10,6 +10,7 @@ Referrer-Policy, Permissions-Policy, COOP, X-Robots-Tag, Cache-Control).
 from __future__ import annotations
 
 import argparse
+import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -75,11 +76,19 @@ def make_handler(dist_dir: Path, extra_headers: list[tuple[str, str]]):
     return EmployeeDistHandler
 
 
+def write_ready_file(path: Path) -> None:
+    """Record this process's PID once the port is bound (the harness's per-run marker)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    tmp.replace(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dir", type=Path, required=True, help="Path to built employee web/dist")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4173)
+    parser.add_argument("--ready-file", type=Path, help="Write this process's PID here after the port is bound")
     args = parser.parse_args()
 
     dist_dir = args.dir.resolve()
@@ -87,7 +96,10 @@ def main() -> None:
         raise SystemExit(f"Missing {dist_dir / 'index.html'}; build the employee surface first.")
 
     headers = parse_netlify_headers(dist_dir / "_headers")
+    # Binds now; a port already in use raises before any ready file is written.
     server = ThreadingHTTPServer((args.host, args.port), make_handler(dist_dir, headers))
+    if args.ready_file:
+        write_ready_file(args.ready_file)
     print(f"Serving {dist_dir} on http://{args.host}:{args.port} with {len(headers)} _headers rules", flush=True)
     try:
         server.serve_forever()
