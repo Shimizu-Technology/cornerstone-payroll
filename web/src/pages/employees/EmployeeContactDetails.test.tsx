@@ -622,6 +622,29 @@ describe('EmployeeContactDetails', () => {
     expect((await screen.findAllByText('Saved')).length).toBeGreaterThan(0);
   });
 
+  it.each([
+    ['placeholder_email', "Not a real email. Use the employee's own address."],
+    ['recipient_not_allowed', "Email from this client's account can't go to this address. Use a different address."],
+  ])('says why a %s email was refused under the email field', async (code, message) => {
+    const emma = buildEmployee({ id: 106, first_name: 'Emma', last_name: 'Pleadwell' });
+    apiMocks.clientList.mockResolvedValue({
+      data: [emma],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
+    });
+    apiMocks.clientUpdate.mockRejectedValueOnce(new ApiError(
+      'Validation failed', 422, { email: ["This email address can't be used for this client."] },
+      { error: 'Validation failed', contact_validation: { same_person_confirmation_required: false, warnings: [], email_error_code: code } },
+    ));
+
+    renderClientPage();
+    expect((await screen.findAllByText('Emma Pleadwell')).length).toBeGreaterThan(0);
+    fireEvent.change(field('Email for Emma Pleadwell'), { target: { value: 'someone@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Emma Pleadwell' }));
+
+    expect((await screen.findAllByText(message)).length).toBeGreaterThan(0);
+    expect(screen.queryByText("This email address can't be used for this client.")).toBeNull();
+  });
+
   it('shows the staff-only shared-inbox report with mark-as-placeholder before bulk clear for authorized staff', async () => {
     authState.isClient = false;
     authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
