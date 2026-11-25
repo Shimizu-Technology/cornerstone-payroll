@@ -103,7 +103,7 @@ module Api
           unless selected_id.present? && authorized_explicit_company_id(selected_id) == target_company.id &&
               !target_company.test_workspace?
             return render json: {
-              error: "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
+              error: target_company.demo? ? Company::DEMO_UNAVAILABLE_MESSAGE : "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
             }, status: :forbidden
           end
 

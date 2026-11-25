@@ -1,6 +1,14 @@
 # frozen_string_literal: true
 
 class InvoiceRecipient < ApplicationRecord
+  # Customers that may carry firm hours, cost or fees: no payroll client, or
+  # a live client in the organization. A stale demo or practice-copy link
+  # leaves the customer out of firm reports.
+  scope :eligible_for_firm_reports, lambda { |organization|
+    where(organization_id: organization.id)
+      .where("invoice_recipients.company_id IS NULL OR invoice_recipients.company_id IN (?)",
+             Company.where(organization_id: organization.id).live_payroll.select(:id))
+  }
   belongs_to :organization
   belongs_to :company, optional: true
   has_many :invoices, dependent: :restrict_with_error
@@ -24,7 +32,11 @@ class InvoiceRecipient < ApplicationRecord
   private
 
   def source_company_is_live
-    errors.add(:company, "practice copies cannot be real billing recipients") if company&.test_workspace?
+    if company&.demo?
+      errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE)
+    elsif company&.test_workspace?
+      errors.add(:company, "practice copies cannot be real billing recipients")
+    end
   end
 
   def normalize_blanks

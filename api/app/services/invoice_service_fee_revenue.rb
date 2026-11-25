@@ -10,8 +10,18 @@
 # customer, adding invoice_recipient_id to those rows (client profitability
 # links some Tax clients straight to such a customer).
 class InvoiceServiceFeeRevenue
-  def self.call(finance_book:, service_month_from: nil, service_month_through: nil, tax_prep_service_names: nil, by_recipient: false)
+  # live_clients_only drops invoices whose payroll client, or whose customer's
+  # payroll client, is not a live client (a stale demo or practice-copy link).
+  # Unallocated invoices with no payroll client either way are kept.
+  def self.call(finance_book:, service_month_from: nil, service_month_through: nil, tax_prep_service_names: nil, by_recipient: false,
+                live_clients_only: false)
     invoices = Invoice.where(finance_book: finance_book, status: %w[open uncollectible]).includes(:line_items)
+    if live_clients_only
+      non_live = Company.where.not(payroll_environment: "live").select(:id)
+      invoices = invoices.where("invoices.company_id IS NULL OR invoices.company_id NOT IN (?)", non_live)
+                         .where("invoices.invoice_recipient_id IS NULL OR invoices.invoice_recipient_id NOT IN (?)",
+                                InvoiceRecipient.where(company_id: non_live).select(:id))
+    end
     if service_month_from
       invoices = invoices.where("COALESCE(service_period_start, invoice_date) >= ?", service_month_from.beginning_of_month)
     end

@@ -312,6 +312,8 @@ class PayPeriodLifecycleService
   end
 
   def record_aire_processing_acknowledgements
+    return { batch: [], entries: [] } if pay_period.company.demo?
+
     result = { batch: [], entries: record_financial_source_correction!.map(&:id) }
     pay_period.time_tracking_imports.includes(:time_tracking_source).where(status: "applied").find_each do |import|
       next unless import.finalized_batch?
@@ -393,6 +395,7 @@ class PayPeriodLifecycleService
   end
 
   def create_fit_tax_deposit_check!(items)
+    return if pay_period.company.demo?
     return if NonEmployeeCheck.exists?(
       pay_period: pay_period,
       company_id: pay_period.company_id,

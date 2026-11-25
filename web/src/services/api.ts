@@ -4360,6 +4360,8 @@ interface CompanyListResponse {
   can_view_client_management?: boolean;
   can_switch_company: boolean;
   current_company_id: number;
+  // Live clients that firm finance may bill or link, filtered on the server.
+  billing_company_ids?: number[];
 }
 
 interface AuthApiUser {
