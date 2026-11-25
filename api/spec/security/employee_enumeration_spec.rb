@@ -36,6 +36,12 @@ RSpec.describe "Employee enumeration resistance", type: :request do
     %w[RLS_CONTEXT_GUARD_MODE AUTH_ENABLED REQUIRE_MFA].push(DemoOutbound::ENV_KEY).each { |key| ENV[key] = saved[key] }
   end
 
+  # REQUIRE_MFA is on here, so every login, employee-only ones included, has
+  # an enrolled, freshly verified second factor.
+  def bearer(subject, **options)
+    super(subject, **options, fva: [ 0, 0 ], two_factor_enabled: true)
+  end
+
   before do
     @alpha_profile = enable_features!(alpha)
     @bravo_profile = enable_features!(bravo)

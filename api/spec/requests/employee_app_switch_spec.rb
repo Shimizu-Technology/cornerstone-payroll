@@ -198,11 +198,15 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         .to raise_error(ArgumentError, /readiness/)
 
       expect { update.call(nil).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
-      expect { update.call({ "fva" => [ 30, 30 ], "two_factor_enabled" => true }).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect { update.call({ "fva" => [ 30, 30 ], "two_factor_enabled" => true, "iat" => Time.current.to_i }).call }
+        .to raise_error(EmployeeAppSwitch::StepUpRequired)
+      # A fresh-looking fva in a token issued too long ago isn't a recent verification.
+      expect { update.call({ "fva" => [ 1, 1 ], "two_factor_enabled" => true, "iat" => 9.minutes.ago.to_i }).call }
+        .to raise_error(EmployeeAppSwitch::StepUpRequired)
       expect(stored["employee_portal_enabled"]).to be(false)
 
       @ping = { configured: false, ok: false, observation: nil, attestation_error: :not_configured }
-      fresh = { "fva" => [ 1, 1 ], "two_factor_enabled" => true }
+      fresh = { "fva" => [ 1, 1 ], "two_factor_enabled" => true, "iat" => Time.current.to_i }
       expect { update.call(fresh).call }.to raise_error(EmployeeAppSwitch::NotReady)
       observe!
       expect(update.call(fresh).call).to include(turned_on: [ "employee_portal_enabled" ])
@@ -222,7 +226,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     end
 
     {
-      "mfa" => [ "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)", -> { ENV["REQUIRE_MFA"] = "false" } ],
+      "mfa" => [ "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)", -> { ENV.delete("CLERK_MFA_EVIDENCE_REF") } ],
       "employee mfa" => [ "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)", -> { observe!(require_mfa: false) } ],
       "rls_guard" => [ "The employee service refuses any database read without a company (RLS guard in raise mode)", -> { observe!(rls_guard_mode: "log") } ],
       "employee kill switch" => [ "The employee service refuses any database read without a company (RLS guard in raise mode)",
@@ -482,6 +486,91 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     end
   end
 
+  describe "while two-step sign-in is off (REQUIRE_MFA unset, Clerk Free)" do
+    let(:ready_env) { super().merge("REQUIRE_MFA" => nil, "CLERK_MFA_ATTESTED_INSTANCE_ID" => nil, "CLERK_MFA_EVIDENCE_REF" => nil) }
+    let(:mfa_name) { "Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)" }
+
+    before { observe!(require_mfa: false, mfa_evidence_recorded: false) }
+
+    # What a Clerk Free session carries: no second factor, only fva[0].
+    def first_factor_auth(user = org_admin, fresh: true, target: company)
+      bearer(user.clerk_id, fva: fresh ? [ 1, -1 ] : [ 30, -1 ], two_factor_enabled: false).merge("X-Company-Id" => target.id.to_s)
+    end
+
+    def switch_with_first_factor!(changes, target:, fresh: true, user: org_admin)
+      patch path, params: { changes: changes, reason: "Rehearsal" }, as: :json,
+        headers: first_factor_auth(user, fresh: fresh, target: target)
+    end
+
+    [ :demo, :company ].each do |which|
+      it "turns on #{which == :demo ? 'a demo' : 'a live'} company with a fresh first factor and shows two-step sign-in as advisory" do
+        target = public_send(which)
+        get path, headers: first_factor_auth(target: target)
+        expect(response).to have_http_status(:ok), response.body
+        row = response.parsed_body.dig("data", "readiness", "checks").find { |check| check["key"] == "mfa" }
+        expect(row).to eq("key" => "mfa", "name" => mfa_name, "status" => "waived",
+          "detail" => "Two-step sign-in isn't required yet; it will be turned on for everyone before real employees use the app.")
+        expect(response.parsed_body.dig("data", "readiness", "switch_checks", "employee_portal_enabled")).not_to include("mfa")
+
+        switch_with_first_factor!({ "employee_portal_enabled" => true }, target: target, fresh: false)
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.dig("clerk_error", "metadata", "reverification"))
+          .to eq("level" => "first_factor", "afterMinutes" => MfaPolicy::STEP_UP_MAX_AGE_MINUTES)
+        expect(stored(target)["employee_portal_enabled"]).to be(false)
+
+        switch_with_first_factor!({ "employee_portal_enabled" => true }, target: target)
+        expect(response).to have_http_status(:ok), response.body
+        expect(EmployeeAppSwitch.effective_values(target)["employee_portal_enabled"]).to be(true)
+        audit = AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: target.id).sole
+        expect(audit.metadata["readiness"]).to include({ "key" => "mfa", "status" => "waived" })
+        expect(audit.metadata).not_to have_key("early_access_window_id")
+      end
+    end
+
+    it "checks the first factor in the service too, and doesn't take a fresh second factor in its place" do
+      update = ->(claims) do
+        EmployeeAppSwitch::Update.new(company: demo, actor: org_admin, changes: { "employee_portal_enabled" => true },
+          reason: "Direct call", session_claims: claims)
+      end
+      expect { update.call(nil).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect { update.call({ "fva" => [ 30, 0 ], "two_factor_enabled" => true, "iat" => Time.current.to_i }).call }
+        .to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect { update.call({ "fva" => [ 2, -1 ] }).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect(update.call({ "fva" => [ 2, -1 ], "iat" => Time.current.to_i }).call).to include(turned_on: [ "employee_portal_enabled" ])
+    end
+
+    it "lets the owner set demo early access with a fresh first factor" do
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
+      put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "Rehearsal" },
+        as: :json, headers: first_factor_auth(owner, fresh: false, target: demo)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.dig("clerk_error", "metadata", "reverification", "level")).to eq("first_factor")
+      expect(EmployeeAppEarlyAccessWindow.count).to eq(0)
+
+      put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "Rehearsal" },
+        as: :json, headers: first_factor_auth(owner, target: demo)
+      expect(response).to have_http_status(:ok), response.body
+      expect(EmployeeAppEarlyAccessWindow.sole).to have_attributes(company_ids: [ demo.id ], set_by_id: owner.id)
+    end
+
+    it "requires the second factor again, and the two-step check with evidence, once REQUIRE_MFA=true" do
+      ENV.update("REQUIRE_MFA" => "true", "CLERK_MFA_ATTESTED_INSTANCE_ID" => "ins_example", "CLERK_MFA_EVIDENCE_REF" => "evidence-ref")
+      # A Clerk Free session has no second factor enrolled, so it's sent to set one up.
+      switch_with_first_factor!({ "employee_portal_enabled" => true }, target: demo)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("mfa_enrollment_required")
+
+      switch!({ "employee_portal_enabled" => true }, target: demo)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(failing_names).to eq([ mfa_name ])
+      expect(response.parsed_body["failing_checks"].sole["detail"]).to include("employee service isn't requiring two-step sign-in")
+
+      observe!
+      switch!({ "employee_portal_enabled" => true }, target: demo)
+      expect(response).to have_http_status(:ok), response.body
+    end
+  end
+
   describe "the demo early-access rule" do
     let(:database_state) { shadow_state }
     let(:terms_status) { "draft" }
@@ -562,8 +651,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "keeps every other check required and needs the employee guard in raise mode" do
       open_window!
-      ENV["REQUIRE_MFA"] = "false"
-      observe!(rls_guard_mode: "log")
+      observe!(rls_guard_mode: "log", require_mfa: false)
       switch!({ "subdomain_enabled" => true }, target: demo)
       expect(response).to have_http_status(:unprocessable_entity)
       expect(failing_names).to include("Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)",

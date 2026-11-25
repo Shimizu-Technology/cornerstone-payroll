@@ -79,6 +79,29 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(ViewAsGrant.count).to eq(0)
   end
 
+  context "while two-step sign-in is off (REQUIRE_MFA unset, Clerk Free)" do
+    around do |example|
+      saved = ENV["REQUIRE_MFA"]
+      ENV.delete("REQUIRE_MFA")
+      example.run
+    ensure
+      ENV["REQUIRE_MFA"] = saved
+    end
+
+    it "starts a view after a fresh first-factor reverification and never asks for enrollment" do
+      start(fva: [ 20, -1 ], two_factor_enabled: false)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.dig("clerk_error", "metadata", "reverification"))
+        .to eq("level" => "first_factor", "afterMinutes" => MfaPolicy::STEP_UP_MAX_AGE_MINUTES)
+      expect(ViewAsGrant.count).to eq(0)
+
+      token = token_for(fva: [ 2, -1 ], two_factor_enabled: false)
+      get grant_path, headers: viewing(token, fva: [ 25, -1 ], two_factor_enabled: false)
+      expect(response).to have_http_status(:ok)
+      expect(ViewAsGrant.sole).to have_attributes(staff_user_id: staff.id, target_user_id: client.id)
+    end
+  end
+
   it "rejects staff targets, out-of-organization companies, and targets without company access" do
     other_org_company = create(:company)
     other_org_client = create(:user, company: other_org_company, role: :client)
@@ -824,7 +847,7 @@ RSpec.describe "View-only support sessions", type: :request do
     end
   end
 
-  it "gates ViewAsGrant.ready? in production on VIEW_AS_READY, MFA, RLS raise, and Clerk authorized parties" do
+  it "gates ViewAsGrant.ready? in production on VIEW_AS_READY, RLS raise, and Clerk authorized parties, not on MFA" do
     allow(Rails.env).to receive(:production?).and_return(true)
     keys = %w[VIEW_AS_READY REQUIRE_MFA RLS_CONTEXT_GUARD_MODE CLERK_AUTHORIZED_PARTIES]
     saved = keys.index_with { |key| ENV[key] }
@@ -840,11 +863,11 @@ RSpec.describe "View-only support sessions", type: :request do
       ENV["VIEW_AS_READY"] = "false"
       expect(ViewAsGrant.ready?).to be(false)
 
+      # View-as works while MFA is off; its step-up is then a fresh first factor.
       ENV["VIEW_AS_READY"] = "true"
       ENV["REQUIRE_MFA"] = "false"
-      expect(ViewAsGrant.ready?).to be(false)
+      expect(ViewAsGrant.ready?).to be(true)
 
-      ENV["REQUIRE_MFA"] = "true"
       ENV["RLS_CONTEXT_GUARD_MODE"] = "log"
       expect(ViewAsGrant.ready?).to be(false)
 
