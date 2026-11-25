@@ -74,9 +74,14 @@ function oneOf<T extends string>(value: unknown, options: readonly T[]): T | nul
 }
 
 // ---------- GET /employee/context ----------
-// Served today as 204 with no body (M4-8a). ASSUMED (M4-2, M4-4, M4-5, §8a):
-// { first_name, status, former_access_until, next_payday, w2_delivery,
+// Served (ContextController, M4-4c):
+// { first_name, status: "active" | "former", former_access_until: "2028-03-01" | null
+//   (the last Guam day of access), next_payday: "2026-12-04" | null,
+//   w2_delivery: null (the company setting arrives with M4-5),
 //   features: { stubs, tax_forms, profile_requests } }
+// next_payday is set only from the company's next regular run when its date
+// is settled (committed, or created on a confirmed schedule), never for a
+// former employee (§8a).
 
 export type W2Delivery = 'mailed' | 'handed_out';
 
@@ -106,9 +111,17 @@ export function parseContext(data: unknown): EmployeeContextInfo {
 }
 
 // ---------- GET /employee/statements?year=&page= ----------
-// Each row is EmployeePayStatements::Presenter#summary (served to AIRE today),
-// plus ASSUMED M4-4 fields: source, original_pdf, corrected, pdf_available.
-// The list is ASSUMED to be { statements: [...], years: [2026, 2025], next_page }.
+// Served (StatementsController, EmployeeStatements::Presenter, M4-4c):
+// { statements: [...], years: [2026, 2025], next_page: 2 | null }, 20 a page,
+// newest first. Payroll rows are EmployeePayStatements::Presenter#summary
+// (what AIRE reads) plus source: "payroll", pdf_available, original_pdf,
+// corrected, posted_at and previous; their id is the posted stub's id ("123").
+// QuickBooks rows ("From QuickBooks records") have id "qb-123", source
+// "quickbooks", payment.status null (no payment evidence), adjustment_note,
+// and pdf_available/original_pdf when Cornerstone's original stub was posted.
+// previous is { id, pay_date, check_date, net_pay, total_hours } for a regular
+// check whose previous regular check is known, even on another page; null
+// when there is none to compare with.
 
 export type StatementSource = 'payroll' | 'quickbooks';
 export type PaymentMethod = 'direct_deposit' | 'paper_check';
@@ -116,9 +129,18 @@ export type PaymentStatus = 'issued' | 'prepared' | 'pending' | 'voided';
 
 export interface StatementPayment {
   method: PaymentMethod | null;
-  status: PaymentStatus;
+  /** null: no payment evidence is recorded (QuickBooks checks), or an unknown value. */
+  status: PaymentStatus | null;
   issuedOn: string | null;
   checkNumberLast4: string | null;
+}
+
+/** The regular check before this one, for "vs last check". */
+export interface PreviousCheck {
+  id: string;
+  payDate: string;
+  netPay: Money | null;
+  totalHours: string | null;
 }
 
 export interface StatementSummary {
@@ -139,13 +161,26 @@ export interface StatementSummary {
   originalPdf: boolean;
   /** A corrected revision replaced the first one posted. */
   corrected: boolean;
+  /**
+   * The API's previous regular check. null: nothing to compare with.
+   * undefined: the response didn't say, so the list decides (format.ts).
+   */
+  previous?: PreviousCheck | null;
+}
+
+function parsePrevious(value: unknown): PreviousCheck | null {
+  const row = record(value);
+  const previousId = id(row?.id);
+  const payDate = isoDate(row?.check_date) ?? isoDate(row?.pay_date);
+  return row && previousId && payDate
+    ? { id: previousId, payDate, netPay: money(row.net_pay), totalHours: money(row.total_hours) } : null;
 }
 
 function parsePayment(value: unknown): StatementPayment {
   const payment = record(value) ?? {};
   return {
     method: oneOf(payment.method, ['direct_deposit', 'paper_check'] as const),
-    status: oneOf(payment.status, ['issued', 'prepared', 'pending', 'voided'] as const) ?? 'pending',
+    status: oneOf(payment.status, ['issued', 'prepared', 'pending', 'voided'] as const),
     issuedOn: isoDate(payment.issued_on),
     checkNumberLast4: text(payment.check_number_last4),
   };
@@ -174,6 +209,7 @@ export function parseStatementSummary(value: unknown): StatementSummary | null {
     pdfAvailable: source === 'payroll' && row.pdf_available !== false,
     originalPdf: source === 'quickbooks' && bool(row.original_pdf),
     corrected: bool(row.corrected),
+    ...('previous' in row ? { previous: parsePrevious(row.previous) } : {}),
   };
 }
 
@@ -194,7 +230,17 @@ export function parseStatementPage(data: unknown): StatementPage {
 }
 
 // ---------- GET /employee/statements/:id ----------
-// EmployeePayStatements::Presenter#detail (served to AIRE today).
+// Served: the summary above plus EmployeePayStatements::Presenter#detail's
+// earnings (label, hours, rate, amount, ytd, kind), taxes (plus kind and
+// display_label, e.g. "guam_income_tax" / "Guam income tax"), deductions,
+// other_pay, ytd { gross, net }, note, and earlier_versions: the revisions a
+// Corrected stub replaced, [{ id, status: "replaced", posted_at, payment_line }],
+// each downloadable as it was issued from /employee/statements/:id/pdf.
+// A replaced revision's id opens the current version. QuickBooks rows show
+// their imported breakdown, or only adjusted totals with a note when an
+// adjustment was recorded; they have no YTD.
+//
+// GET /employee/statements/:id/pdf: the frozen PDF as posted, Cache-Control: no-store.
 
 export interface EarningLine {
   label: string;
@@ -212,15 +258,60 @@ export interface AmountLine {
   ytd: Money | null;
 }
 
+export type TaxKind = 'guam_income_tax' | 'additional_guam_income_tax' | 'social_security' | 'medicare';
+
+export interface TaxLine extends AmountLine {
+  /** null for a tax the presenter doesn't name (shown by its printed label). */
+  kind: TaxKind | null;
+  /** The plain label, e.g. "Guam income tax" for "Federal/Guam Income Tax". */
+  displayLabel: string | null;
+}
+
+/** A revision a Corrected stub replaced, downloadable as it was issued. */
+export interface EarlierVersion {
+  id: string;
+  status: 'replaced';
+  postedAt: string | null;
+  paymentLine: string | null;
+}
+
 export interface StatementDetail extends StatementSummary {
   earnings: EarningLine[];
-  taxes: AmountLine[];
+  taxes: TaxLine[];
   deductions: AmountLine[];
   otherPay: AmountLine[];
   ytdGross: Money | null;
   ytdNet: Money | null;
   /** QuickBooks checks with recorded adjustments: "Includes recorded payroll adjustments." */
   note: string | null;
+  /** Newest first; empty unless this stub is a corrected revision. */
+  earlierVersions: EarlierVersion[];
+}
+
+function taxLines(value: unknown): TaxLine[] {
+  return (Array.isArray(value) ? value : []).flatMap((item) => {
+    const line = record(item);
+    const label = text(line?.label);
+    return line && label ? [{
+      label, amount: money(line.amount), ytd: money(line.ytd),
+      kind: oneOf(line.kind, ['guam_income_tax', 'additional_guam_income_tax', 'social_security', 'medicare'] as const),
+      displayLabel: text(line.display_label),
+    }] : [];
+  });
+}
+
+function earlierVersions(value: unknown): EarlierVersion[] {
+  return (Array.isArray(value) ? value : []).flatMap((item) => {
+    const version = record(item);
+    const versionId = id(version?.id);
+    if (!version || !versionId || version.status !== 'replaced') return [];
+    const postedAt = text(version.posted_at);
+    return [{
+      id: versionId, status: 'replaced' as const,
+      postedAt: postedAt && !Number.isNaN(Date.parse(postedAt)) ? postedAt : null,
+      paymentLine: text(version.payment_line),
+    }];
+  });
 }
 
 function amountLines(value: unknown): AmountLine[] {
@@ -244,12 +335,13 @@ export function parseStatementDetail(data: unknown): StatementDetail | null {
   return {
     ...summary,
     earnings,
-    taxes: amountLines(body.taxes),
+    taxes: taxLines(body.taxes),
     deductions: amountLines(body.deductions),
     otherPay: amountLines(body.other_pay),
     ytdGross: money(ytd.gross),
     ytdNet: money(ytd.net),
     note: text(body.adjustment_note) ?? text(body.note),
+    earlierVersions: earlierVersions(body.earlier_versions),
   };
 }
 
@@ -277,9 +369,10 @@ export function parseTaxForms(data: unknown): TaxForm[] {
 }
 
 // ---------- GET /employee/help ----------
-// Each contact is CompanyHelpContact#as_help_json (M4-9a). The endpoint is ASSUMED:
-// { help_contacts: [{ name, role, phone, email, text_ok }] }. The company's main
-// phone comes from the public branding response instead.
+// Served (HelpController, M4-4c): { help_contacts: [{ name, role, phone, email, text_ok }] },
+// each CompanyHelpContact#as_help_json (M4-9a), in the order the client set.
+// An empty list means none are set yet. The company's main phone comes from
+// the public branding response instead.
 
 export interface HelpContact {
   name: string;

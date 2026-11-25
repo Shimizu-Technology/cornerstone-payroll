@@ -71,6 +71,10 @@ Rails.application.routes.draw do
         post "profile/email/confirm", to: "profile#confirm_email", format: false
         resources :emergency_contacts, only: %i[create update destroy], format: false
         resources :address_requests, only: %i[create update destroy], format: false
+        get :help, to: "help#show", format: false
+        resources :statements, only: [ :index, :show ], format: false do
+          get :pdf, on: :member
+        end
         post :activation, to: "activations#create", format: false
         get :links, to: "account#links", format: false
         post "links/claim", to: "account#claim", format: false
