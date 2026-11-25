@@ -219,10 +219,14 @@ export function AdminEmployeeChangeRequestsPage() {
                         ? 'Approving this request updates the employee’s address and adds it to Changes to confirm.'
                         : 'Approving this request applies the reviewed payroll-sensitive changes.'}
                   </div>}
-                  <ChangeComparison before={selected.original_values} after={selected.proposed_changes} requested={selected.status === 'pending'} />
+                  <ChangeComparison
+                    before={selected.original_values}
+                    after={selected.proposed_changes}
+                    requested={selected.status !== 'approved'}
+                  />
                   <div>
                     <label htmlFor="staff-review-note" className="mb-1 block text-sm font-medium text-gray-900">
-                      {selected.profile_address ? "Note to the employee (they'll see this)" : 'Review Notes'}
+                      {selected.note_visible_to_employee ? "Note to the employee (they'll see this)" : 'Review note'}
                       {selected.status === 'pending' && <span aria-hidden="true" className="font-normal text-gray-600"> (optional)</span>}
                     </label>
                     <Textarea id="staff-review-note" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={4} readOnly={selected.status !== 'pending'} />

@@ -164,6 +164,27 @@ describe('employee app shell', () => {
     expect(screen.queryByText(/0001/)).toBeNull();
   });
 
+  it('asks the employee to refresh and confirm their address when it changed before an edit', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    const address = { address_line1: '100 Example Lane', city: 'Example City', state: 'GU', zip: '96910' };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        address,
+        address_request: { id: 8, status: 'pending', requested: { ...address, address_line1: '200 Example Lane' } },
+      }),
+      '/employee/address_requests/8': () => Response.json({ code: 'address_on_file_changed' }, { status: 409 }),
+    }));
+    render(<EmployeeApp />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit request' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save request' }));
+    expect(await screen.findByText('Your address on file changed. Refresh the page and confirm the address before submitting a new request.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save request' })).toBeTruthy();
+  });
+
   it('shows the daily limit in the email form without ending the session', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');

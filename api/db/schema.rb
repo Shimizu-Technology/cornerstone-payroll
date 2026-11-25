@@ -1167,6 +1167,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_200200) do
     t.string "name", null: false
     t.string "relationship"
     t.string "phone", null: false
+    t.datetime "deleted_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index [ "company_id", "employee_id", "id" ], name: "idx_emergency_contacts_employee"

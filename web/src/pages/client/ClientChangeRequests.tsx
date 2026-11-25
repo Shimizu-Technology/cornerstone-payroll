@@ -271,7 +271,12 @@ export function ClientChangeRequests() {
                   <DetailBlock title="Request Type" value={requestLabel(selected)} />
                   <DetailBlock title="Request Notes" value={selected.request_notes} />
                   <DetailBlock title="Review Notes" value={selected.review_notes} />
-                  <ChangeComparison before={selected.original_values} after={selected.proposed_changes} requested={selected.status === 'pending'} />
+                  <ChangeComparison
+                    before={selected.original_values}
+                    after={selected.proposed_changes}
+                    requested={selected.status !== 'approved'}
+                    current={selected.profile_address && selected.status === 'pending'}
+                  />
                   {selected.can_review && (
                     <div className="flex flex-wrap gap-2">
                       <Button onClick={() => { setReviewNotes(''); setDecision('approve'); }}>Approve</Button>
@@ -299,7 +304,10 @@ export function ClientChangeRequests() {
             </DialogDescription>
           </DialogHeader>
           <label className="space-y-1 text-sm font-medium">
-            <span>Note to the employee (they'll see this) <span aria-hidden="true" className="font-normal text-gray-600">(optional)</span></span>
+            <span>
+              {selected?.note_visible_to_employee ? "Note to the employee (they'll see this)" : 'Review note'}
+              <span aria-hidden="true" className="font-normal text-gray-600"> (optional)</span>
+            </span>
             <Input value={reviewNotes} disabled={deciding} onChange={(event) => setReviewNotes(event.target.value)} />
           </label>
           <DialogFooter>

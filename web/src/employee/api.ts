@@ -22,7 +22,7 @@ import {
 export type EmployeeApiErrorKind =
   | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
-  | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required';
+  | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -120,7 +120,7 @@ export function errorForStatus(status: number, retryAfterHeader: string | null =
   if (status === 429 && code === 'email_code_daily_limit') return new EmployeeApiError(code, status);
   if (status === 422 && (code === 'emergency_contact_limit' || code === 'personal_email_required')) return new EmployeeApiError(code, status);
   if (status === 429) return new EmployeeApiError('rate_limited', status, retryAfter(retryAfterHeader));
-  if (status === 409) return new EmployeeApiError('conflict', status);
+  if (status === 409) return new EmployeeApiError(code === 'address_on_file_changed' ? code : 'conflict', status);
   if (status === 422 || status === 400) return new EmployeeApiError('invalid', status);
   return new EmployeeApiError('server', status);
 }
@@ -251,7 +251,7 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
 
     if (!response.ok) {
       let code: unknown = null;
-      if (response.status === 403 || (stepUp && (response.status === 422 || response.status === 429))) {
+      if (response.status === 403 || (stepUp && [409, 422, 429].includes(response.status))) {
         const body: unknown = await response.json().catch(() => null);
         const hint = stepUp && response.status === 403 ? reverificationHint(body) : null;
         if (hint) throw new StepUpRequiredError(hint);

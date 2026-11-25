@@ -12,6 +12,8 @@ class EmployeeEmergencyContact < ApplicationRecord
   validates :phone, presence: true
   validate :normalize_phone
 
+  scope :active, -> { where(deleted_at: nil) }
+
   def as_profile_json
     slice(*FIELDS).merge(id: id.to_s)
   end

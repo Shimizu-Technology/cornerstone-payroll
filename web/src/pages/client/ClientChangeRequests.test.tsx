@@ -68,17 +68,39 @@ it('loads contact activity without fetching request details', async () => {
 });
 
 it.each([
-  ['Approve', 'Approve address', 'approve'],
-  ['Reject', 'Reject request', 'reject'],
-])('explains who sees the optional note when the client clicks %s', async (action, confirmation, decision) => {
-  const pendingAddress = { ...request, profile_address: true, can_review: true };
+  ['pending', 'Current', 'Requested'],
+  ['cancelled', 'Before', 'Requested'],
+  ['rejected', 'Before', 'Requested'],
+  ['approved', 'Before', 'After'],
+] as const)('labels both address columns for a %s request', async (status, original, result) => {
+  const addressRequest = {
+    ...request,
+    status,
+    profile_address: true,
+    original_values: { address_line1: '100 Example Lane' },
+    proposed_changes: { address_line1: '200 Example Lane' },
+  };
+  api.list.mockResolvedValue({ data: [addressRequest], meta });
+  api.get.mockResolvedValue({ data: addressRequest });
+
+  open('/change-requests');
+  expect(await screen.findByRole('columnheader', { name: original })).toBeTruthy();
+  expect(screen.getByRole('columnheader', { name: result })).toBeTruthy();
+});
+
+it.each([
+  ['Approve', 'Approve address', 'approve', true, "Note to the employee (they'll see this)"],
+  ['Reject', 'Reject request', 'reject', true, "Note to the employee (they'll see this)"],
+  ['Approve', 'Approve address', 'approve', false, 'Review note'],
+])('labels the optional client note for %s (%s, %s, employee visibility %s)', async (action, confirmation, decision, visible, label) => {
+  const pendingAddress = { ...request, profile_address: true, can_review: true, note_visible_to_employee: visible };
   api.list.mockResolvedValue({ data: [pendingAddress], meta });
   api.get.mockResolvedValue({ data: pendingAddress });
   api.decide.mockResolvedValue({ data: { ...pendingAddress, status: decision === 'approve' ? 'approved' : 'rejected' } });
 
   open('/change-requests');
   fireEvent.click(await screen.findByRole('button', { name: action }));
-  const note = screen.getByRole<HTMLInputElement>('textbox', { name: "Note to the employee (they'll see this)" });
+  const note = screen.getByRole<HTMLInputElement>('textbox', { name: label });
   expect(note.required).toBe(false);
   fireEvent.click(screen.getByRole('button', { name: confirmation }));
   await waitFor(() => expect(api.decide).toHaveBeenCalledWith(pendingAddress.id, decision, undefined));

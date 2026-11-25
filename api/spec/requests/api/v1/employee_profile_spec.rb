@@ -131,7 +131,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(audits("profile#update_phone").sole.record_id).to eq(employee.id)
   end
 
-  it "adds, reads, edits and removes an emergency contact and records each change" do
+  it "soft-deletes an emergency contact and retains its change history and audit" do
     post "#{base}/emergency_contacts", params: contact, headers: employee_headers, as: :json
     expect(response).to have_http_status(:created), response.body
     id = response.parsed_body.dig("emergency_contacts", 0, "id")
@@ -145,6 +145,13 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     delete "#{base}/emergency_contacts/#{id}", headers: employee_headers
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.fetch("emergency_contacts")).to be_empty
+    expect(EmployeeEmergencyContact.find(id)).to have_attributes(deleted_at: be_present, relationship: "Friend")
+    get "#{base}/profile", headers: employee_headers
+    expect(response.parsed_body.fetch("emergency_contacts")).to be_empty
+    patch "#{base}/emergency_contacts/#{id}", params: { relationship: "Family" }, headers: employee_headers, as: :json
+    expect_not_found
+    delete "#{base}/emergency_contacts/#{id}", headers: employee_headers
+    expect_not_found
     expect(EmployeeContactChangeToConfirm.where(employee: employee).order(:id).map { |entry| entry.after_values["emergency_contacts"] })
       .to eq([ [ contact.stringify_keys.merge("id" => id, "phone" => "+16715550100") ],
         [ contact.stringify_keys.merge("id" => id, "phone" => "+16715550100", "relationship" => "Friend") ], nil ])
@@ -167,6 +174,8 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(response).to have_http_status(:ok)
     post "#{base}/emergency_contacts", params: contact, headers: employee_headers, as: :json
     expect(response).to have_http_status(:created)
+    expect(response.parsed_body.fetch("emergency_contacts").size).to eq(5)
+    expect(EmployeeEmergencyContact.where(employee: employee).count).to eq(6)
   end
 
   it "keeps emergency contact changes in client activity and the audit without adding staff work or alerts" do
@@ -403,7 +412,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       reviewers.each do |path, actor|
         get "#{path}/#{id}", headers: client_headers(actor)
         expect(response).to have_http_status(:ok)
-        expect(response.parsed_body.fetch("data")).to include("can_review" => true, "status" => "pending")
+        expect(response.parsed_body.fetch("data")).to include("can_review" => true, "status" => "pending", "note_visible_to_employee" => true)
       end
 
       patch "#{base}/address_requests/#{id}", params: { address: address.merge(address_line2: "Unit 2") },
@@ -440,6 +449,37 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(employee.reload.address_line2).to eq("Unit 2")
     end
+  end
+
+  it "keeps an address request pending when an edit would overwrite a staff correction" do
+    employee.update!(address_line2: "Unit 1")
+    id = submit_address
+    employee.update!(address_line2: "Unit 2")
+
+    patch "#{base}/address_requests/#{id}", params: { address: address.merge(address_line1: "300 Example Lane", address_line2: "Unit 1") },
+      headers: employee_headers, as: :json
+
+    expect(response).to have_http_status(:conflict)
+    expect(response.parsed_body).to eq(
+      "code" => "address_on_file_changed",
+      "error" => "Your address on file changed. Refresh the page and confirm the address before submitting a new request."
+    )
+    expect(EmployeeChangeRequest.where(employee: employee).sole).to have_attributes(id: id.to_i, status: "pending")
+    expect(employee.reload.address_line2).to eq("Unit 2")
+    expect(audits("address_requests#update")).to be_empty
+  end
+
+  it "replaces a pending address request when the address on file only changed formatting" do
+    employee.update!(state: "GU", address_line2: nil)
+    id = submit_address
+    employee.update!(state: " gu ", address_line2: " ", address_line1: " 100 Example Lane ")
+
+    patch "#{base}/address_requests/#{id}", params: { address: address.merge(address_line2: "Unit 2") },
+      headers: employee_headers, as: :json
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(EmployeeChangeRequest.find(id)).to be_cancelled
+    expect(response.parsed_body.dig("address_request", "requested", "address_line2")).to eq("Unit 2")
   end
 
   it "keeps a cancelled address request in review history and frees the pending slot" do

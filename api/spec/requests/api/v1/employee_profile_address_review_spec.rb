@@ -84,8 +84,13 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     patch_employee(@employee, @requester, email: @requester.email, confirm_same_person_email: true, address_line1: new_address)
     expect(response).to have_http_status(:ok), response.body
     id = response.parsed_body.dig("change_request", "id")
+    expect(response.parsed_body.fetch("change_request")).to include("profile_address" => true, "note_visible_to_employee" => false)
+    get "#{requests_path}/#{id}", headers: headers(@reviewer)
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("data")).to include("profile_address" => true, "note_visible_to_employee" => false)
     patch "/api/v1/admin/employee_change_requests/#{id}/reject", headers: headers(@staff), params: { review_notes: "Update the unit number" }
     expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).to include("profile_address" => true, "note_visible_to_employee" => false)
     system_read do
       expect(@employee.reload.address_line1).to eq(old_address)
       expect(EmployeeChangeRequest.find(id)).to be_rejected
