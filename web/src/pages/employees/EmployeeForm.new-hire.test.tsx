@@ -65,19 +65,20 @@ describe('Adding a new hire', () => {
     expect(screen.getByRole('button', { name: 'Use hire date (2026-11-03)' })).toBeTruthy();
   });
 
-  it('warns when the W-4 was signed after its effective date', async () => {
+  it('asks for an effective date on or after the signed date before saving', async () => {
     view('/companies/1/employees/new');
     await screen.findByText('W-4 Tax Withholding');
     fireEvent.change(hireDate(), { target: { value: '2026-11-02' } });
     fireEvent.click(screen.getByRole('button', { name: 'Use hire date (2026-11-02)' }));
-    expect(screen.queryByText(/after its effective date/)).toBeNull();
+    expect(screen.queryByText(/when this W-4 was signed/)).toBeNull();
 
     fireEvent.change(w4SignedDate(), { target: { value: '2026-11-09' } });
-    expect(screen.getByRole('alert').textContent).toContain('This W-4 was signed on 2026-11-09, after its effective date of 2026-11-02.');
+    expect(screen.getByRole('alert').textContent).toBe("Set the effective date on or after 2026-11-09, when this W-4 was signed. Payroll doesn't use a W-4 for paychecks dated before it was signed.");
+    expect(screen.queryByText(/would use an election the employee had not made yet/)).toBeNull();
     expect(w4EffectiveDate().value).toBe('2026-11-02');
 
     fireEvent.change(w4EffectiveDate(), { target: { value: '2026-11-09' } });
-    expect(screen.queryByText(/after its effective date/)).toBeNull();
+    expect(screen.queryByText(/when this W-4 was signed/)).toBeNull();
   });
 
   it('links the created-employee confirmation to the new hire\'s document manager', async () => {
@@ -127,7 +128,20 @@ describe('Editing an existing employee', () => {
     expect(hireDate().value).toBe('2026-11-20');
     expect(w4EffectiveDate().value).toBe('2025-03-01');
     expect(screen.queryByRole('button', { name: /Use hire date/ })).toBeNull();
-    expect(screen.queryByText(/after its effective date/)).toBeNull();
+    expect(screen.queryByText(/when (this W-4 was|it was) signed/)).toBeNull();
+  });
+
+  it('explains which paychecks a saved W-4 signed after its effective date applies to', async () => {
+    mocks.get.mockResolvedValue({ data: { ...employee, w4_effective_on: '2026-06-01', w4_signed_on: '2026-06-10' } });
+    view('/companies/1/employees/7/edit');
+    await screen.findByDisplayValue('Juniper');
+    expect(screen.getByTestId('w4-signed-after-effective-note').textContent).toBe("This W-4 applies to paychecks dated on or after 2026-06-10, when it was signed. Earlier paychecks use the previous W-4, or default withholding (single, no adjustments) if there isn't one.");
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // Changing the election makes the date order a save requirement again.
+    fireEvent.change(screen.getByLabelText(/Source document \/ reference/), { target: { value: 'Synthetic corrected W-4' } });
+    expect(screen.queryByTestId('w4-signed-after-effective-note')).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('Set the effective date on or after 2026-06-10');
   });
 });
 
