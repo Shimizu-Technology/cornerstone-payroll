@@ -46,7 +46,23 @@ describe('OrganizationSwitcher', () => {
   it('shows a pinned organization to an ordinary admin', () => {
     authContext.mockReturnValue({ user: { role: 'admin' } });
     render(<MemoryRouter><OrganizationSwitcher /></MemoryRouter>);
+    expect(screen.getByText('Organization')).toBeTruthy();
     expect(screen.getByText('Cornerstone')).toBeTruthy();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('shows Payroll by <org name> from data to client users instead of Organization', () => {
+    authContext.mockReturnValue({ user: { role: 'client' } });
+    companyContext.mockReturnValue({
+      organizations: [{ id: 2, name: 'Pacific Payroll Partners' }],
+      activeOrganizationId: 2,
+      activeOrganizationName: 'Pacific Payroll Partners',
+      switchOrganization,
+    });
+    render(<MemoryRouter><OrganizationSwitcher /></MemoryRouter>);
+    expect(screen.getByText(/Payroll by/)).toBeTruthy();
+    expect(screen.getByText('Pacific Payroll Partners')).toBeTruthy();
+    expect(screen.queryByText('Organization')).toBeNull();
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 });

@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeList } from './EmployeeList';
 
 const apiMocks = vi.hoisted(() => ({ listEmployees: vi.fn(), listDepartments: vi.fn() }));
+const authMock = vi.hoisted(() => ({ isClient: true }));
 const companyMock = vi.hoisted(() => ({ activeCompany: undefined as Record<string, unknown> | undefined }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: true }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: authMock.isClient }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 1, activeCompany: companyMock.activeCompany }) }));
 vi.mock('@/services/api', () => ({
   employeesApi: { list: apiMocks.listEmployees },
@@ -18,7 +19,7 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/components/employees/EmployeeBulkImportModal', () => ({ EmployeeBulkImportModal: () => null }));
 
 describe('EmployeeList payment delivery', () => {
-  afterEach(() => { cleanup(); companyMock.activeCompany = undefined; });
+  afterEach(() => { cleanup(); companyMock.activeCompany = undefined; authMock.isClient = true; });
 
   it('lets a practice-copy client add an employee without the staff payroll permission', async () => {
     companyMock.activeCompany = { id: 1, active: true, test_workspace: true, practice_portal: true, workspace_can_write: false };
@@ -61,5 +62,25 @@ describe('EmployeeList payment delivery', () => {
     expect(screen.getByText('Payment method not reviewed')).toBeTruthy();
     fireEvent.click(screen.getAllByRole('button', { name: 'Dina Deposit' })[0]);
     expect(await screen.findByText('Employee overview route')).toBeTruthy();
+  });
+
+  it('scopes sentence-case Pay rate and sortable header styling to clients while keeping staff unchanged', async () => {
+    apiMocks.listDepartments.mockResolvedValue({ data: [] });
+    apiMocks.listEmployees.mockResolvedValue({
+      data: [{ id: 2, first_name: 'Dina', last_name: 'Deposit', employment_type: 'hourly', pay_rate: 20, status: 'active', payment_delivery_method: 'direct_deposit' }],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 500 },
+    });
+
+    authMock.isClient = true;
+    render(<MemoryRouter initialEntries={['/companies/1/employees']}><Routes><Route path="/companies/:companyId/employees" element={<EmployeeList />} /></Routes></MemoryRouter>);
+    const clientRateButton = await screen.findByRole('button', { name: 'Pay rate' });
+    expect(clientRateButton.className.split(/\s+/)).not.toContain('uppercase');
+    cleanup();
+
+    authMock.isClient = false;
+    render(<MemoryRouter initialEntries={['/companies/1/employees']}><Routes><Route path="/companies/:companyId/employees" element={<EmployeeList />} /></Routes></MemoryRouter>);
+    const staffRateButton = await screen.findByRole('button', { name: 'Pay Rate' });
+    expect(staffRateButton.className.split(/\s+/)).toContain('uppercase');
+    expect(screen.getByRole('button', { name: 'Employee' }).className.split(/\s+/)).toContain('uppercase');
   });
 });
