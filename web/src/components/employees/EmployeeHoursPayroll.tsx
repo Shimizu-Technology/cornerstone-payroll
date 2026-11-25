@@ -1,10 +1,11 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react';
 import { employeesApi, type EmployeePayHistoryReport } from '@/services/api';
 import type { EmployeeHoursEvidence, EvidenceTotals } from '@/lib/employee-hours-evidence';
 import { payrollItemPath, payRunPath } from '@/lib/routes';
-import { formatCurrency, formatDate, formatGuamDateTime } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { SavedHours } from './SavedHours';
@@ -75,7 +76,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
           {result.source_workspace_url && <a href={result.source_workspace_url} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 font-semibold text-primary-700">Open employee in time tracking <ArrowRight className="h-4 w-4" /></a>}
           {period ? <>
             <Button variant="outline" onClick={() => update('period', undefined)}><ArrowLeft className="mr-2 h-4 w-4" />All work periods</Button>
-            <h3 className="font-display text-lg font-bold">{formatDate(period.start_date)} – {formatDate(period.end_date)}</h3>
+            <h3 className="font-display text-lg font-bold">{formatDateRange(period.start_date, period.end_date)}</h3>
             <SourceTotals totals={period.summary} />
             <h4 className="font-semibold">Current source entries</h4>
             {period.entries?.length ? <div className="divide-y rounded-xl border border-neutral-200">{period.entries.map((entry) => <div key={entry.id} className="space-y-1 p-4 text-sm">
@@ -105,7 +106,7 @@ export function EmployeeHoursPayroll({ employeeId, companyId, report, returnTo }
             {result.evidence?.totals && <SourceTotals totals={result.evidence.totals} allPeriods />}
             <p className="text-sm text-neutral-500">{result.evidence?.pagination?.total_count || 0} original work periods match these dates.</p>
             <div className="space-y-3">{result.evidence?.periods?.map((item) => <div key={item.id} className="rounded-xl border border-neutral-200 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">{formatDate(item.start_date)} – {formatDate(item.end_date)}</h3><Button variant="outline" onClick={() => update('period', item.id)}>Review period <ArrowRight className="ml-2 h-4 w-4" /></Button></div>
+              <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-semibold">{formatDateRange(item.start_date, item.end_date)}</h3><Button variant="outline" onClick={() => update('period', item.id)}>Review period <ArrowRight className="ml-2 h-4 w-4" /></Button></div>
               <p className="mt-2 text-sm">{hours(item.summary.worked_hours)} worked · {hours(item.summary.issued_hours)} issued coverage · {hours(item.summary.committed_hours)} committed coverage · {hours(item.summary.needs_reconciliation_hours)} needs reconciliation{item.review_required ? ' · Review needed' : ''}</p>
             </div>)}</div>
             <div className="flex flex-wrap gap-3">{cursor && <Button variant="outline" onClick={() => update('hours_cursor', undefined)}>First page</Button>}{result.evidence?.pagination?.next_cursor && <Button variant="outline" onClick={() => update('hours_cursor', result.evidence?.pagination?.next_cursor || undefined)}>Next periods <ArrowRight className="ml-2 h-4 w-4" /></Button>}</div>

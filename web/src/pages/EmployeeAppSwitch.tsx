@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useCallback, useEffect, useId, useState, type FormEvent } from 'react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
 import { CheckCircle2, ChevronDown, CircleAlert, Lock, ShieldAlert, XCircle } from 'lucide-react';
@@ -22,11 +23,6 @@ const MASTER = 'employee_portal_enabled';
 function formatDateTime(value: string | null): string {
   if (!value) return 'Never';
   return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-}
-
-function formatDate(value: string): string {
-  const [year, month, day] = value.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
 type Mutation = { method: 'PATCH' | 'PUT' | 'DELETE' | 'POST'; suffix: string; body: unknown };

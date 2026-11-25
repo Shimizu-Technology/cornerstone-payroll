@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, useFeedback, ActionFeedback } from '@/components/ui/action-feedback';
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
 import { useNavigate } from 'react-router';
@@ -66,10 +67,6 @@ function formatBytes(value = 0): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatShortDate(value: string): string {
-  return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatMoney(value: number | string): string {
@@ -818,7 +815,7 @@ export function Clients() {
                       <label htmlFor="test-workspace-cutoff" className="text-xs font-semibold text-neutral-600">Last payroll to include</label>
                       <Select id="test-workspace-cutoff" className="mt-2" value={workspaceCutoffPayPeriodId ?? ''} onChange={event => setWorkspaceCutoffPayPeriodId(event.target.value ? Number(event.target.value) : null)}>
                         <option value="">Select a payroll</option>
-                        {workspacePreview?.recent_payrolls.map(period => <option key={period.id} value={period.id}>{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)} · {period.status}</option>)}
+                        {workspacePreview?.recent_payrolls.map(period => <option key={period.id} value={period.id}>{formatDateRange(period.start_date, period.end_date)} · {period.status}</option>)}
                       </Select>
                     </div>
                   )}
@@ -846,8 +843,8 @@ export function Clients() {
                           <div className="mt-3 grid gap-2 sm:grid-cols-2">
                             {workspacePreview.recent_payrolls.slice(0, workspacePreview.copy_summary.recent_payrolls_excluded).map(period => (
                               <div key={period.id} className="rounded-lg border border-amber-100 bg-white/80 p-3 text-sm text-neutral-700">
-                                <p className="font-semibold text-neutral-900">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
-                                <p className="mt-1 text-xs text-neutral-600">Pay date {formatShortDate(period.pay_date)} · <span className="capitalize">{period.status}</span></p>
+                                <p className="font-semibold text-neutral-900">{formatDateRange(period.start_date, period.end_date)}</p>
+                                <p className="mt-1 text-xs text-neutral-600">Pay date {formatDate(period.pay_date)} · <span className="capitalize">{period.status}</span></p>
                               </div>
                             ))}
                           </div>
@@ -1035,8 +1032,8 @@ export function Clients() {
                             <p className="text-sm font-semibold text-neutral-900">Payroll {index + 1}</p>
                             <Badge variant="default"><span className="capitalize">{period.status}</span></Badge>
                           </div>
-                          <p className="mt-2 text-sm text-neutral-600">{formatShortDate(period.start_date)}–{formatShortDate(period.end_date)}</p>
-                          <p className="mt-1 text-xs text-neutral-600">Pay date {formatShortDate(period.pay_date)} · {period.employee_count} employees</p>
+                          <p className="mt-2 text-sm text-neutral-600">{formatDateRange(period.start_date, period.end_date)}</p>
+                          <p className="mt-1 text-xs text-neutral-600">Pay date {formatDate(period.pay_date)} · {period.employee_count} employees</p>
                           <div className="mt-3 flex gap-6 border-t border-neutral-200 pt-3 text-sm"><span><span className="text-neutral-500">Gross </span><strong>{formatMoney(period.gross_pay)}</strong></span><span><span className="text-neutral-500">Net </span><strong>{formatMoney(period.net_pay)}</strong></span></div>
                           <fieldset className="mt-4 space-y-2">
                             <legend className="sr-only">Payment status for payroll {index + 1}</legend>

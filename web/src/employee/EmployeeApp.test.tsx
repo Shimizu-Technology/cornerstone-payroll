@@ -450,12 +450,12 @@ describe('employee app shell', () => {
     // Opening a stub titles it with the pay period and navigates via Older / Newer (E8, E9).
     await userEvent.click(within(list).getByRole('link', { name: /Nov 20/ }));
     const stub = await screen.findByRole('article');
-    expect(within(stub).getByRole('heading', { level: 2, name: 'Nov 1 – 14' })).toBeTruthy();
+    expect(within(stub).getByRole('heading', { level: 2, name: 'Nov 1 – 14, 2026' })).toBeTruthy();
     expect(within(stub).getByText('Paid Nov 20, 2026')).toBeTruthy();
-    expect(within(stub).queryByText('Pay period Nov 1 – 14')).toBeNull();
+    expect(within(stub).queryByText('Pay period Nov 1 – 14, 2026')).toBeNull();
     await userEvent.click(within(stub).getAllByRole('link', { name: /^Older:/ })[0]);
     const olderStub = await screen.findByRole('article');
-    expect(within(olderStub).getByRole('heading', { level: 2, name: 'Oct 18 – 31' })).toBeTruthy();
+    expect(within(olderStub).getByRole('heading', { level: 2, name: 'Oct 18 – 31, 2026' })).toBeTruthy();
     expect(within(olderStub).getAllByRole('link', { name: /^Newer:/ }).length).toBeGreaterThan(0);
   });
 

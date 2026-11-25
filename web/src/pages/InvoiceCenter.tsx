@@ -1,3 +1,4 @@
+import { formatDate as formatCalendarDate } from '@/lib/display-date';
 import { invoiceBusinessDate, customerDefaults, invoiceIsOverdue, invoiceDraftDueDate as withDueDate } from '@/lib/invoice-defaults';
 import { isBillingClient, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
@@ -210,11 +211,7 @@ const money = (value?: number | null, currency = 'USD') => new Intl.NumberFormat
   currency,
 }).format(Number(value || 0));
 
-const formatDate = (value?: string | null) => {
-  if (!value) return '—';
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString();
-};
+const formatDate = (value?: string | null) => formatCalendarDate(value) || '—';
 
 const formatDateTime = (value?: string | null) => value ? new Date(value).toLocaleString() : '—';
 const localTimeToIso = (value: string) => {

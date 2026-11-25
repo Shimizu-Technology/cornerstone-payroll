@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Bell, Plus, X, Send, History, Mail, Clock, AlertTriangle } from 'lucide-react';
@@ -391,8 +392,8 @@ export default function PayrollReminders() {
                         <Badge variant={log.reminder_type === 'overdue' ? 'danger' : log.reminder_type === 'create_payroll' ? 'info' : 'warning'}>{log.reminder_type === 'overdue' ? 'Overdue' : log.reminder_type === 'create_payroll' ? 'Create Payroll' : 'Upcoming'}</Badge>
                         <span className="text-right text-xs text-neutral-500">{new Date(log.sent_at).toLocaleString()}</span>
                       </div>
-                      <p className="mt-3 text-sm text-neutral-700">Pay date: {log.pay_period ? new Date(log.pay_period.pay_date).toLocaleDateString() : log.expected_pay_date ? new Date(log.expected_pay_date).toLocaleDateString() : '—'}</p>
-                      <p className="mt-1 text-sm text-neutral-700">Period: {log.pay_period ? `${new Date(log.pay_period.start_date).toLocaleDateString()} – ${new Date(log.pay_period.end_date).toLocaleDateString()}` : 'Not yet created'}</p>
+                      <p className="mt-3 text-sm text-neutral-700">Pay date: {log.pay_period ? formatDate(log.pay_period.pay_date) : log.expected_pay_date ? formatDate(log.expected_pay_date) : '—'}</p>
+                      <p className="mt-1 text-sm text-neutral-700">Period: {log.pay_period ? formatDateRange(log.pay_period.start_date, log.pay_period.end_date) : 'Not yet created'}</p>
                       <p className="mt-3 break-all text-xs text-neutral-500">Sent to {log.recipients_snapshot.join(', ')}</p>
                     </div>
                   ))}
@@ -427,8 +428,7 @@ export default function PayrollReminders() {
                             <TableCell className="text-sm">
                               {log.pay_period ? (
                                 <>
-                                  {new Date(log.pay_period.start_date).toLocaleDateString()} –{' '}
-                                  {new Date(log.pay_period.end_date).toLocaleDateString()}
+                                  {formatDateRange(log.pay_period.start_date, log.pay_period.end_date)}
                                 </>
                               ) : (
                                 <span className="text-neutral-400 italic">Not yet created</span>
@@ -436,9 +436,9 @@ export default function PayrollReminders() {
                             </TableCell>
                             <TableCell className="text-sm">
                               {log.pay_period
-                                ? new Date(log.pay_period.pay_date).toLocaleDateString()
+                                ? formatDate(log.pay_period.pay_date)
                                 : log.expected_pay_date
-                                  ? new Date(log.expected_pay_date).toLocaleDateString()
+                                  ? formatDate(log.expected_pay_date)
                                   : '—'}
                             </TableCell>
                             <TableCell className="text-sm text-neutral-500">

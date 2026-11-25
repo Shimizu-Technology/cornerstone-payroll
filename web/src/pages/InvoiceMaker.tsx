@@ -1,3 +1,5 @@
+import { formatDate } from '@/lib/display-date';
+import { formatPhone } from '@/lib/display-phone';
 import { invoicePreviewLines, newManualInvoiceLine } from '@/lib/invoice-maker-lines';
 import { numberWidthForSave } from '@/lib/invoiceNumber';
 import { InvoiceNumberWidthField } from '@/components/invoices/InvoiceNumberWidthField';
@@ -227,18 +229,6 @@ function previewTotal(preview?: InvoiceAiPreview | Record<string, never> | null)
     (sum, item) => sum + invoiceLineAmount(Number(item.quantity || 0), Number(item.rate || 0)),
     0
   );
-}
-
-function localDateFromDateOnly(value?: string | null) {
-  if (!value) return null;
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
-function formatDateOnly(value?: string | null) {
-  const date = localDateFromDateOnly(value);
-  return date ? date.toLocaleDateString() : '';
 }
 
 function formatDateTime(value?: string | null) {
@@ -1514,7 +1504,7 @@ export function InvoiceMaker() {
                   <Badge className={statusColors[invoice.status]}>{invoiceStatusLabel(invoice.status)}</Badge>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs text-neutral-600">
-                  <span>{formatDateOnly(invoice.invoice_date)}</span>
+                  <span>{formatDate(invoice.invoice_date)}</span>
                   <span className="font-medium text-neutral-700">{currency(invoice.total_amount)}</span>
                 </div>
                 <div className="mt-1 text-xs text-neutral-600">
@@ -1718,7 +1708,7 @@ export function InvoiceMaker() {
             >
               <span className="font-medium text-neutral-900">{profile.name}</span>
               {profile.is_default && <span className="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">Default</span>}
-              <span className="block truncate text-xs text-neutral-600">{profile.email || profile.phone || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'} · {themeLabel(profile.invoice_theme)} style</span>
+              <span className="block truncate text-xs text-neutral-600">{profile.email || formatPhone(profile.phone) || profile.website || 'No contact details'} · {profile.has_logo ? 'Logo attached' : 'No logo'} · {themeLabel(profile.invoice_theme)} style</span>
             </button>
           ))}
         </div>
@@ -1830,7 +1820,7 @@ export function InvoiceMaker() {
                   </h2>
                   <p className="text-sm text-neutral-500">
                     {activeLineItems.length} items · {currency(invoiceTotal)}
-                    {invoiceForm.generated_at && ` · Generated ${new Date(invoiceForm.generated_at).toLocaleDateString()}`}
+                    {invoiceForm.generated_at && ` · Generated ${formatGuamDate(invoiceForm.generated_at)}`}
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap [&>button]:w-full sm:[&>button]:w-auto">
@@ -2396,7 +2386,7 @@ export function InvoiceMaker() {
                       <p className="mt-1 text-2xl font-semibold text-neutral-900">{currency(previewTotal(activePreview))}</p>
                       <p className="mt-1 text-xs text-neutral-600">
                         Preview v{activeChatSession?.current_preview_version}
-                        {activePreview.invoice_date ? ` · ${formatDateOnly(activePreview.invoice_date)}` : ''}
+                        {activePreview.invoice_date ? ` · ${formatDate(activePreview.invoice_date)}` : ''}
                       </p>
                     </div>
 
@@ -2502,7 +2492,7 @@ export function InvoiceMaker() {
                           </div>
                         </button>
                         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-600">
-                          <span>{new Date(session.updated_at).toLocaleDateString()}</span>
+                          <span>{formatGuamDate(session.updated_at)}</span>
                           {session.archived ? (
                             <button
                               type="button"

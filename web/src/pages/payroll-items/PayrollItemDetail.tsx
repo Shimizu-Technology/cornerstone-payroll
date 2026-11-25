@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
 import { CapturedSourceHours } from '@/components/payroll/CapturedSourceHours';
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
@@ -23,7 +24,7 @@ import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { formatCurrency, formatDate, formatDateRange, formatGuamDateTime } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import {
   currentAppPath,
   employeePath,

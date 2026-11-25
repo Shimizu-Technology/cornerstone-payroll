@@ -69,7 +69,7 @@ describe('CheckRegister', () => {
 
     expect(await screen.findByText('Mo Shimizu')).toBeTruthy();
     expect(screen.getAllByText('Issued')).toHaveLength(2);
-    expect(screen.getByText('$1,425.75 · Register date 8/20/2026')).toBeTruthy();
+    expect(screen.getByText('$1,425.75 · Register date Aug 20, 2026')).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: 'Mark Cleared' }));
     fireEvent.change(screen.getByLabelText('Evidence reference'), { target: { value: 'August statement line 15' } });

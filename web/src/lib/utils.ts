@@ -1,4 +1,5 @@
 import { clsx, type ClassValue } from 'clsx';
+import { formatDate as formatCalendarDate } from '@/lib/display-date';
 import type { PayPeriod } from '@/types';
 
 /**
@@ -33,6 +34,10 @@ function parseCalendarDate(dateString: string): Date {
 }
 
 export function formatDate(dateString: string, options?: Intl.DateTimeFormatOptions): string {
+  if (!options && !dateString.includes('T')) {
+    const label = formatCalendarDate(dateString);
+    if (label) return label;
+  }
   const date = parseCalendarDate(dateString);
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
@@ -83,7 +88,8 @@ export function formatGuamDateTimeShort(dateString?: string | null): string {
 }
 
 /**
- * Format a date range (e.g., "Jan 1 - Jan 15, 2026")
+ * Legacy range label also used in saved voucher text. For new display labels,
+ * use formatDateRange from display-date.
  */
 export function formatDateRange(startDate: string, endDate: string): string {
   const start = parseCalendarDate(startDate);

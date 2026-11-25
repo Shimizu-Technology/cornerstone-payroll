@@ -1,3 +1,4 @@
+import { formatGuamDate } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { roleLabel } from '@/lib/role-labels';
 import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
@@ -780,7 +781,7 @@ export function Users() {
                           </div>
                           <div className="mt-4 grid grid-cols-2 gap-3">
                             <MobileField label="Role" value={accountRoleLabel(user.role)} />
-                            <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
+                            <MobileField label="Last active" value={user.last_active_at ? formatGuamDate(user.last_active_at) : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
                           <MobileCardActions>
@@ -860,7 +861,7 @@ export function Users() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-neutral-600">
                         {user.last_active_at ? (
-                          <span title={new Date(user.last_active_at).toLocaleString()}>{new Date(user.last_active_at).toLocaleDateString()}</span>
+                          <span title={new Date(user.last_active_at).toLocaleString()}>{formatGuamDate(user.last_active_at)}</span>
                         ) : '\u2014'}
                       </TableCell>
                       <TableCell className="text-right">

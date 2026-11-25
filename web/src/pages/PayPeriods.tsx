@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { PriorProviderHistoryNotice, PriorProviderHistoryRecordedNotice } from '@/components/payroll/PriorProviderHistoryNotice';
 import { TaxYearWarning } from '@/components/settings/TaxYearWarning';
 import { PayrollCommitDialog } from '@/components/payroll/PayrollCommitDialog';
@@ -33,7 +34,7 @@ import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
-import { formatCurrency, formatDate, formatDateRange, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany } from '@/lib/company-write-access';
@@ -90,7 +91,7 @@ function PayPeriodMobileCard({
         <div>
           <p className="font-semibold text-neutral-950">{formatDateRange(period.start_date, period.end_date)}</p>
           <p className="mt-1 text-sm text-neutral-500">
-            Pay date {new Date(period.pay_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+            Pay date {formatDate(period.pay_date)}
           </p>
         </div>
         <Badge
@@ -1036,11 +1037,7 @@ export function PayPeriods() {
                       </TableCell>
                       <TableCell className={rowTone}>
                         <span className="text-sm text-neutral-700">
-                          {new Date(period.pay_date).toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric',
-                          })}
+                          {formatDate(period.pay_date)}
                         </span>
                       </TableCell>
                       <TableCell className={rowTone}>
