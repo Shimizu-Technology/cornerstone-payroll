@@ -228,8 +228,13 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(link.profile_email_daily_codes).to eq(1)
   end
 
+  # 23:50 tomorrow in Guam: after every fixture's creation time, and ten
+  # minutes before a Guam day boundary. A fixed calendar date would fall into
+  # the past and put the clock behind the fixtures.
+  let(:guam_evening) { (Time.current.in_time_zone("Pacific/Guam") + 1.day).change(hour: 23, min: 50) }
+
   it "allows five codes per link per Guam day, including confirmation of the fifth code" do
-    travel_to Time.iso8601("2026-11-25T23:50:00+10:00")
+    travel_to guam_evening
     other_link = link_to(worker, create(:employee, company: company))
     with_portal_email do
       4.times do
@@ -249,13 +254,13 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       post "#{base}/profile/email", headers: employee_headers(other_link), params: { email: "other-link@example.test" }, as: :json
       expect(response).to have_http_status(:accepted), response.body
 
-      travel_to Time.iso8601("2026-11-26T00:00:00+10:00")
+      travel_to guam_evening + 10.minutes
       start_email("tomorrow@example.test")
     end
   end
 
   it "caps wrong attempts across codes without revealing whether an ID is active" do
-    travel_to Time.iso8601("2026-11-25T23:50:00+10:00")
+    travel_to guam_evening
     with_portal_email do
       2.times do
         id, code = start_email
@@ -281,7 +286,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       expect_daily_limit
       expect(employee.reload.email).to eq("original@example.test")
 
-      travel_to Time.iso8601("2026-11-26T00:00:00+10:00")
+      travel_to guam_evening + 10.minutes
       id, code = start_email
       confirm_email(id, code)
       expect(response).to have_http_status(:ok), response.body
