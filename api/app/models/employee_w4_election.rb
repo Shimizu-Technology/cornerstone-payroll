@@ -17,6 +17,15 @@ class EmployeeW4Election < ApplicationRecord
   SNAPSHOT_ATTRIBUTES = PROFILE_ATTRIBUTES - [ :w4_effective_on ]
   SOURCES = %w[default_withholding staff client_approved employee_creation legacy_profile quickbooks_history].freeze
 
+  EFFECTIVE_BEFORE_SIGNATURE_MESSAGE = "Set the effective date on or after the date the W-4 was signed.".freeze
+
+  DEFAULT_PROFILE_ATTRIBUTES = {
+    filing_status: "single", allowances: 0, additional_withholding: 0,
+    w4_dependent_credit: 0, w4_step2_multiple_jobs: false, w4_step4a_other_income: 0,
+    w4_step4b_deductions: 0, w4_form_version: 2020,
+    w4_signed_on: nil, w4_source_reference: nil, w4_effective_on: nil
+  }.freeze
+
   belongs_to :company
   belongs_to :employee
   belongs_to :created_by, class_name: "User", optional: true
@@ -31,6 +40,7 @@ class EmployeeW4Election < ApplicationRecord
     numericality: { only_integer: true, greater_than_or_equal_to: 1987, less_than_or_equal_to: ->(_) { Date.current.year + 1 } }
   validates :source, inclusion: { in: SOURCES }
   validates :reason, presence: true
+  validate :effective_date_on_or_after_signed_date
   validate :company_matches_employee
   validate :creator_belongs_to_company_organization
 
@@ -46,7 +56,16 @@ class EmployeeW4Election < ApplicationRecord
       .merge(w4_effective_on: effective_on)
   end
 
+  def effective_before_signature?
+    source.in?(%w[staff client_approved employee_creation]) &&
+      effective_on && w4_signed_on && effective_on < w4_signed_on
+  end
+
   private
+
+  def effective_date_on_or_after_signed_date
+    errors.add(:w4_effective_on, EFFECTIVE_BEFORE_SIGNATURE_MESSAGE) if effective_before_signature?
+  end
 
   def prevent_mutation
     errors.add(:base, "W-4 election history is append-only")

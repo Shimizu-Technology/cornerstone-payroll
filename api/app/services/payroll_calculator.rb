@@ -928,8 +928,8 @@ class PayrollCalculator
 
   def employee_value(attribute)
     unless historical_calculation?
-      if EmployeeW4Election::PROFILE_ATTRIBUTES.include?(attribute.to_sym) && w4_election_for_calculation
-        return w4_election_for_calculation.profile_attributes.fetch(attribute.to_sym)
+      if EmployeeW4Election::PROFILE_ATTRIBUTES.include?(attribute.to_sym) && employee.w2_employee?
+        return w4_profile_for_calculation.fetch(attribute.to_sym)
       end
 
       if EmployeeCompensationChangeService::BASIS_ATTRIBUTES.include?(attribute.to_s) && payroll_item.timekeeping_source != "correction_reference"
@@ -944,7 +944,15 @@ class PayrollCalculator
   def w4_election_for_calculation
     return nil if historical_calculation? || employee_value(:employment_type) == "contractor"
 
-    @w4_election_for_calculation ||= employee.w4_election_on(pay_period.pay_date)
+    return @w4_election_for_calculation if defined?(@w4_election_for_calculation)
+
+    @w4_election_for_calculation = employee.w4_election_on(pay_period.pay_date)
+  end
+
+  def w4_profile_for_calculation
+    return unless employee.w2_employee?
+
+    w4_election_for_calculation&.profile_attributes || EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES
   end
 
   def employee_deductions_for_calculation
@@ -1027,7 +1035,7 @@ class PayrollCalculator
       rates_on: pay_period.end_date,
       employee_basis: EmployeeCompensationChangeService::BASIS_ATTRIBUTES.index_with { |field| employee_value(field) }
         .merge("pay_rate" => payroll_item.pay_rate),
-      w4_election: w4_election_for_calculation,
+      w4_profile: w4_profile_for_calculation,
       retirement_election: retirement_election_for_calculation
     ).merge(built_in_employer_match_identity)
     if line_rounded_earnings?

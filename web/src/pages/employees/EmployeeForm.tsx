@@ -888,6 +888,10 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && !form.w4_effective_on && !allowsUnverifiedBlank('withholding_election')) {
       newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
     }
+    if (form.employment_type !== 'contractor' && (!isEditing || w4HasChanged || w4ElectionReceived)
+        && form.w4_effective_on && form.w4_signed_on && form.w4_effective_on < form.w4_signed_on) {
+      newErrors.w4_effective_on = ['Set the effective date on or after the date the W-4 was signed.'];
+    }
     if (payHasChanged && compensationHistory) {
       Object.assign(newErrors, payChangeEffectiveDateErrors(payChangeTiming, compensationHistory.effective_dates, { basisChanged: payBasisChanged, canCorrect: canCorrectPay }));
     }

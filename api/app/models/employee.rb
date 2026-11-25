@@ -458,12 +458,13 @@ class Employee < ApplicationRecord
   end
 
   def w4_election_on(date)
+    date = date.to_date
     if association(:employee_w4_elections).loaded?
       employee_w4_elections
-        .select { |election| election.effective_on <= date.to_date }
+        .select { |election| election.effective_on <= date && (election.w4_signed_on.nil? || election.w4_signed_on <= date) }
         .max_by { |election| [ election.effective_on, election.created_at, election.id ] }
     else
-      employee_w4_elections.effective_on(date).first
+      employee_w4_elections.effective_on(date).where("w4_signed_on IS NULL OR w4_signed_on <= ?", date).first
     end
   end
 
