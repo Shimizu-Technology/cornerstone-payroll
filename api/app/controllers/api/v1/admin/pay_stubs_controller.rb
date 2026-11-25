@@ -220,7 +220,7 @@ module Api
             return render json: { error: deposit_only ? "No direct-deposit stubs found for this pay period" : "No pay stubs found for this pay period" }, status: :unprocessable_entity
           end
 
-          combined_pdf = combine_pdfs(items.map { |item| PayStubGenerator.new(item).generate })
+          combined_pdf = combine_pdfs(items.lazy.map { |item| PayStubGenerator.new(item).generate })
           response.set_header("X-Pay-Stubs-Generated", items.count.to_s)
           response.set_header("X-Pay-Stubs-Skipped", skipped_count.to_s)
           pay_date = pay_period.pay_date&.strftime("%Y-%m-%d") || "undated"
