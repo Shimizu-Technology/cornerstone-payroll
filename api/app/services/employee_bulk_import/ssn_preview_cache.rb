@@ -80,11 +80,6 @@ module EmployeeBulkImport
       relation = legacy_binds.map { |bind| klass.where("key LIKE ?", bind) }.reduce(:or)
       v2_binds.each { |bind| relation = relation.where("key NOT LIKE ?", bind) }
       relation.delete_all
-    rescue ActiveRecord::NoDatabaseError, ActiveRecord::StatementInvalid => e
-      raise if entry_class
-
-      Rails.logger.warn("[EmployeeBulkImport::SsnPreviewCache] Skipping legacy Solid Cache purge: #{e.class}")
-      0
     end
 
     def resolved_namespaces(namespaces)

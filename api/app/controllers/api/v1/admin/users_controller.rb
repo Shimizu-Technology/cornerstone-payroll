@@ -140,6 +140,9 @@ module Api
               raise ActiveRecord::RecordInvalid, @user
             end
 
+            was_active_client = @user.client? && @user.active?
+            had_effective_grant = was_active_client && @user.has_effective_client_grant?
+
             @user.assign_attributes(permitted)
             @user.role = requested_role if role_changing
             # Validate immutable identity/role rules (such as fixed demo logins)
@@ -148,7 +151,13 @@ module Api
             unless @user.practice_company_id? && company_ids_provided
               raise ActiveRecord::RecordInvalid, @user unless @user.valid?
             end
-            sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
+            sync_company_assignments!(
+              @user,
+              company_ids: company_ids,
+              role: @user.role,
+              company_ids_provided: company_ids_provided,
+              require_effective_grant: !was_active_client || had_effective_grant
+            )
             @user.save!
             @user.association(:company_assignments).reset
             record_user_audit!("updated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
@@ -430,14 +439,14 @@ module Api
           params.dig(:user, :role).to_s
         end
 
-        def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:)
+        def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:, require_effective_grant: true)
           unless role_requires_client_assignment?(role)
             user.company_assignments.destroy_all if user.company_assignments.exists?
             return
           end
 
           unless company_ids_provided
-            if user.client? && user.active? && !user.has_effective_client_grant?
+            if require_effective_grant && user.client? && user.active? && !user.has_effective_client_grant?
               user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
               raise ActiveRecord::RecordInvalid, user
             end
@@ -484,7 +493,7 @@ module Api
             )
           end
 
-          if user.client? && user.active? && !user.has_effective_client_grant?
+          if require_effective_grant && user.client? && user.active? && !user.has_effective_client_grant?
             user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
             raise ActiveRecord::RecordInvalid, user
           end

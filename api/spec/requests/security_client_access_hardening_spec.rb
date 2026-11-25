@@ -179,6 +179,80 @@ RSpec.describe "Security client access & API hardening", type: :request do
       expect(response).to have_http_status(:unprocessable_entity)
       expect(client_user.company_assignments.reload.pluck(:company_id)).to eq([ assigned_company.id ])
     end
+
+    it "allows deleting expired, archived, or ineffective assignments while still blocking removal of the last effective grant" do
+      archived_company = create(:company, organization: organization, name: "Archived Client Co",
+        test_workspace_archived_at: 1.hour.ago)
+      second_company = create(:company, organization: organization, name: "Expired Client Co")
+      admin_user.reload
+
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user).and_return(admin_user)
+      allow_any_instance_of(Api::V1::Admin::CompanyAssignmentsController).to receive(:current_user_id).and_return(admin_user.id)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user).and_return(admin_user)
+      allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:current_user_id).and_return(admin_user.id)
+
+      # 1. Deleting an already-expired last assignment removes no access and must succeed
+      assignment.update!(expires_at: 1.minute.ago)
+      expect {
+        delete "/api/v1/admin/company_assignments/#{assignment.id}"
+      }.to change(CompanyAssignment, :count).by(-1)
+      expect(response).to have_http_status(:no_content)
+
+      # 2. Deleting an archived company's last assignment via DELETE, bulk_update, or PATCH /users must succeed
+      archived_grant = create(:company_assignment, user: client_user, company: archived_company)
+      expect {
+        delete "/api/v1/admin/company_assignments/#{archived_grant.id}"
+      }.to change(CompanyAssignment, :count).by(-1)
+      expect(response).to have_http_status(:no_content)
+
+      expired_for_bulk = create(:company_assignment, user: client_user, company: assigned_company, expires_at: 1.minute.ago)
+      put "/api/v1/admin/company_assignments/bulk_update", params: {
+        user_id: client_user.id,
+        company_ids: []
+      }
+      expect(response).to have_http_status(:ok), response.body
+      expect(CompanyAssignment.exists?(expired_for_bulk.id)).to be(false)
+
+      archived_for_user_patch = create(:company_assignment, user: client_user, company: archived_company)
+      patch "/api/v1/admin/users/#{client_user.id}", params: {
+        user: { company_ids: [] }
+      }
+      expect(response).to have_http_status(:ok), response.body
+      expect(CompanyAssignment.exists?(archived_for_user_patch.id)).to be(false)
+
+      # 3. Editing a non-assignment field (name) on an active client whose only grant already expired succeeds
+      expired_for_name_edit = create(:company_assignment, user: client_user, company: assigned_company, expires_at: 1.minute.ago)
+      patch "/api/v1/admin/users/#{client_user.id}", params: {
+        user: { name: "Renamed Expired Client" }
+      }
+      expect(response).to have_http_status(:ok), response.body
+      expect(client_user.reload.name).to eq("Renamed Expired Client")
+      expired_for_name_edit.destroy!
+
+      # 4. With one effective grant and one expired grant, deleting the expired grant succeeds
+      #    while deleting the last effective grant is still blocked with 422.
+      effective_grant = create(:company_assignment, user: client_user, company: assigned_company)
+      expired_grant = create(:company_assignment, user: client_user, company: second_company, expires_at: 1.minute.ago)
+
+      expect {
+        delete "/api/v1/admin/company_assignments/#{expired_grant.id}"
+      }.to change(CompanyAssignment, :count).by(-1)
+      expect(response).to have_http_status(:no_content)
+
+      expect {
+        delete "/api/v1/admin/company_assignments/#{effective_grant.id}"
+      }.not_to change(CompanyAssignment, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      # 5. Activating an inactive client via PATCH /users/:id with only an expired grant is still refused
+      client_user.update!(active: false)
+      effective_grant.update!(expires_at: 1.minute.ago)
+      patch "/api/v1/admin/users/#{client_user.id}", params: {
+        user: { active: true }
+      }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(client_user.reload.active?).to be(false)
+    end
   end
 
   describe "H2: employee bulk import SSN preview cache is encrypted, bound to company+user+preview_id, and deleted on cancel/apply" do
@@ -357,6 +431,32 @@ RSpec.describe "Security client access & API hardening", type: :request do
     ensure
       conn.execute("DROP TABLE IF EXISTS temp_solid_cache_entries")
     end
+
+    it "does not run a boot-time legacy SSN purge initializer and raises on SQL errors in the rake task" do
+      expect(Rails.root.join("config/initializers/purge_legacy_ssn_preview_cache.rb")).not_to exist
+
+      require "rake"
+      Rails.application.load_tasks unless Rake::Task.task_defined?("bulk_import_ssn_cache:purge_legacy")
+      task = Rake::Task["bulk_import_ssn_cache:purge_legacy"]
+
+      broken_entry_class = Class.new do
+        def self.table_exists?
+          true
+        end
+
+        def self.where(*)
+          raise ActiveRecord::StatementInvalid, "simulated solid_cache_entries SQL error"
+        end
+      end
+      stub_const("SolidCache::Entry", broken_entry_class)
+
+      task.reenable
+      expect { task.invoke }.to raise_error(ActiveRecord::StatementInvalid, /simulated solid_cache_entries SQL error/)
+
+      allow(EmployeeBulkImport::SsnPreviewCache).to receive(:purge_legacy_entries!).and_return(2)
+      task.reenable
+      expect { task.invoke }.to output("Purged 2 legacy bulk_import_ssn cache entries.\n").to_stdout
+    end
   end
 
   describe "M3: request log parameter filtering covers PII and pay fields" do
@@ -502,6 +602,84 @@ RSpec.describe "Security client access & API hardening", type: :request do
       filtered_path = ActionDispatch::Request.new(env).filtered_path
       expect(filtered_path).not_to include("Pat", "Kin", "Spouse", "671-555-0100", "2500", "140", "98-1112222", "777")
       expect(filtered_path).to include("department[name]=Kitchen", "tax_config[rate]=0.062")
+    end
+
+    it "masks bracketed array query keys and employee loan payment amounts in JSON bodies and real Rack query strings" do
+      # 1. Real Rack query strings with bracketed [] and indexed [0] array keys (plain + URL-encoded)
+      array_qs = "pay_rates[][amount]=25.50&items[0][rate]=22.75" \
+                 "&payroll_item[wage_rate_hours][][rate]=24.50" \
+                 "&payroll_item[custom_earnings][0][amount]=320.00" \
+                 "&emergency_contacts[][name]=Pat+Kin" \
+                 "&amount=175.50&employee_loan[amount]=185.50" \
+                 "&named_loan_payments[42][7]=95.00&loan_deductions[42]=85.00" \
+                 "&tax_config[rate]=0.062&invoice[amount]=100.00&department[name]=Kitchen"
+      req_plain = ActionDispatch::Request.new(
+        Rails.application.env_config.merge(Rack::MockRequest.env_for("/api/v1/admin/payroll_items?#{array_qs}"))
+      )
+
+      expect(req_plain.filtered_path).not_to include(
+        "25.50", "22.75", "24.50", "320.00", "Pat", "Kin", "175.50", "185.50", "95.00", "85.00"
+      )
+      expect(req_plain.filtered_path).to include("tax_config[rate]=0.062", "invoice[amount]=100.00", "department[name]=Kitchen")
+
+      parsed = req_plain.filtered_parameters
+      expect(parsed.dig("pay_rates", 0, "amount")).to eq("[FILTERED]")
+      expect(parsed.dig("items", "0", "rate")).to eq("[FILTERED]")
+      expect(parsed.dig("payroll_item", "wage_rate_hours", 0, "rate")).to eq("[FILTERED]")
+      expect(parsed.dig("payroll_item", "custom_earnings", "0", "amount")).to eq("[FILTERED]")
+      expect(parsed["emergency_contacts"]).to eq("[FILTERED]")
+      expect(parsed["amount"]).to eq("[FILTERED]")
+      expect(parsed.dig("employee_loan", "amount")).to eq("[FILTERED]")
+      expect(parsed["named_loan_payments"]).to eq("[FILTERED]")
+      expect(parsed["loan_deductions"]).to eq("[FILTERED]")
+      expect(parsed.dig("tax_config", "rate")).to eq("0.062")
+      expect(parsed.dig("invoice", "amount")).to eq("100.00")
+      expect(parsed.dig("department", "name")).to eq("Kitchen")
+
+      encoded_qs = "pay_rates%5B%5D%5Bamount%5D=26.50&items%5B0%5D%5Brate%5D=23.75" \
+                   "&payroll_item%5Bwage_rate_hours%5D%5B0%5D%5Brate%5D=25.25" \
+                   "&payroll_item%5Bcustom_earnings%5D%5B%5D%5Bamount%5D=310.00" \
+                   "&employee_loan%5Bamount%5D=195.00"
+      req_encoded = ActionDispatch::Request.new(
+        Rails.application.env_config.merge(Rack::MockRequest.env_for("/api/v1/admin/payroll_items?#{encoded_qs}"))
+      )
+      expect(req_encoded.filtered_path).not_to include("26.50", "23.75", "25.25", "310.00", "195.00")
+      expect(req_encoded.filtered_parameters.dig("pay_rates", 0, "amount")).to eq("[FILTERED]")
+      expect(req_encoded.filtered_parameters.dig("items", "0", "rate")).to eq("[FILTERED]")
+      expect(req_encoded.filtered_parameters.dig("payroll_item", "wage_rate_hours", "0", "rate")).to eq("[FILTERED]")
+      expect(req_encoded.filtered_parameters.dig("payroll_item", "custom_earnings", 0, "amount")).to eq("[FILTERED]")
+      expect(req_encoded.filtered_parameters.dig("employee_loan", "amount")).to eq("[FILTERED]")
+
+      # 2. Real JSON request to EmployeeLoansController#record_payment filters top-level amount
+      company = create(:company)
+      admin = create(:user, company: company, organization: company.organization, role: "admin")
+      allow_any_instance_of(Api::V1::Admin::EmployeeLoansController).to receive(:current_user).and_return(admin)
+      allow_any_instance_of(Api::V1::Admin::EmployeeLoansController).to receive(:current_company_id).and_return(company.id)
+
+      reported = []
+      callback = ->(*, payload) { reported << payload[:params] }
+      ActiveSupport::Notifications.subscribed(callback, "start_processing.action_controller") do
+        post "/api/v1/admin/employee_loans/999999/record_payment",
+          params: {
+            amount: "175.50",
+            date: "2026-11-26",
+            pay_rates: [ { amount: "25.50", label: "Base" } ],
+            items: [ { rate: "22.75", label: "Shift" } ],
+            employee_loan: { amount: "185.50", payment_amount: "50.00" },
+            invoice: { amount: "100.00" },
+            tax_config: { rate: "0.062" }
+          },
+          as: :json
+      end
+
+      logged = reported.last
+      expect(logged["amount"]).to eq("[FILTERED]")
+      expect(logged.dig("pay_rates", 0, "amount")).to eq("[FILTERED]")
+      expect(logged.dig("items", 0, "rate")).to eq("[FILTERED]")
+      expect(logged.dig("employee_loan", "amount")).to eq("[FILTERED]")
+      expect(logged.dig("employee_loan", "payment_amount")).to eq("[FILTERED]")
+      expect(logged.dig("invoice", "amount")).to eq("100.00")
+      expect(logged.dig("tax_config", "rate")).to eq("0.062")
     end
   end
 
@@ -658,6 +836,59 @@ RSpec.describe "Security client access & API hardening", type: :request do
       data = response.parsed_body.fetch("data")
       expect(data["activated_at"]).to be_present
       expect(data["invited_by_name"]).to eq("Sam Reissuer")
+    end
+
+    it "succeeds on activation when post-commit enqueue raises, logs without PII, keeps notice pending, and lets the sweep send it" do
+      pending_user = create(:user, organization: organization, company: company, role: "portal_employee",
+        email: "new.signup@example.test", invitation_status: "pending", active: true, clerk_id: "pending_enqueue_err")
+      link = EmployeeAccountLink.create!(
+        company: company, employee: employee, user: pending_user, invited_by: staff_user,
+        status: "invited", invite_delivery: "code", invite_expires_at: 14.days.from_now,
+        invite_generation: 1, sign_up_email_for_notices: true
+      )
+      request_double = instance_double(ActionDispatch::Request, remote_ip: "127.0.0.1", user_agent: "RSpec", request_id: "req-enqueue-err")
+
+      allow(SendEmployeeActivationNoticeJob).to receive(:perform_later)
+        .and_raise(ActiveRecord::StatementInvalid, "solid_queue write error for onfile.worker@example.test")
+
+      warnings = []
+      allow(Rails.logger).to receive(:warn) { |msg| warnings << msg.to_s }
+
+      # Activation commits inside a transaction and must NOT fail when post-commit enqueue raises
+      expect {
+        ActiveRecord::Base.transaction do
+          EmployeeLinks::Bind.activate!(
+            link, pending_user, request: request_double,
+            identity: { primary_email: "new.signup@example.test", primary_verified: true, verification_strategies: {} }
+          )
+        end
+      }.not_to raise_error
+
+      expect(link.reload).to have_attributes(
+        status: "active",
+        activation_notice_email: "onfile.worker@example.test",
+        activation_notice_status: "pending",
+        activation_notice_attempts: 0,
+        activation_notice_sent_at: nil
+      )
+      expect(warnings.join("\n")).to include("link #{link.id}", "ActiveRecord::StatementInvalid")
+      expect(warnings.join("\n")).not_to include("onfile.worker@example.test", "new.signup@example.test", "solid_queue write error")
+
+      # Recurring retry sweep later picks up the pending notice and delivers it
+      sent = []
+      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
+        sent << { payload: payload, idempotency_key: idempotency_key }
+        { "id" => "msg_sweep_1" }
+      end
+
+      SendEmployeeActivationNoticeJob.new.perform
+      expect(sent.size).to eq(1)
+      expect(sent.first.dig(:payload, :to)).to eq("onfile.worker@example.test")
+      expect(link.reload).to have_attributes(
+        activation_notice_status: "sent",
+        activation_notice_attempts: 1
+      )
+      expect(link.activation_notice_sent_at).to be_present
     end
   end
 
