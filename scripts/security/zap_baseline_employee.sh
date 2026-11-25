@@ -52,37 +52,183 @@ if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-# Reject symlink, non-owned, or world-writable output directories before writing
-# server logs or scan reports there (an earlier harness version left 0777 dirs).
-validate_output_dir() {
-  local dir="$1"
-  if [[ -L "$dir" ]]; then
-    echo "Refusing symlink --output-dir: ${dir}" >&2
-    exit 1
-  fi
-  mkdir -p -m 0755 "$dir"
-  if [[ ! -d "$dir" || -L "$dir" ]]; then
-    echo "Invalid --output-dir: ${dir}" >&2
-    exit 1
-  fi
-  if [[ ! -O "$dir" ]]; then
-    echo "Refusing --output-dir not owned by current user: ${dir}" >&2
-    exit 1
-  fi
-  local perm
-  if stat -c '%a' "$dir" >/dev/null 2>&1; then
-    perm="$(stat -c '%a' "$dir")"
+stat_mode_and_uid() {
+  local path="$1"
+  local raw_mode="" uid=""
+  if read -r raw_mode uid < <(stat -c '%a %u' "$path" 2>/dev/null) && [[ -n "$raw_mode" && -n "$uid" ]]; then
+    printf '%04o %s\n' $(( 8#$raw_mode & 8#7777 )) "$uid"
   else
-    perm="$(stat -f '%Lp' "$dir")"
-  fi
-  if (( (8#$perm & 8#0002) != 0 )); then
-    echo "Refusing world-writable --output-dir (mode ${perm}): ${dir}" >&2
-    exit 1
+    read -r raw_mode uid < <(stat -f '%p %u' "$path")
+    printf '%04o %s\n' $(( 8#$raw_mode & 8#7777 )) "$uid"
   fi
 }
 
-# Copy a regular file into OUTPUT_DIR without following source or destination
-# symlinks (stages via mktemp in OUTPUT_DIR and atomically renames into place).
+check_dir_safety() {
+  local dir="$1"
+  local role="$2"
+  local runner_uid
+  runner_uid="$(id -u)"
+
+  if [[ ! -d "$dir" || -L "$dir" ]]; then
+    echo "Refusing non-directory or symlink (${role}) for --output-dir: ${dir}" >&2
+    return 1
+  fi
+
+  local mode uid
+  read -r mode uid < <(stat_mode_and_uid "$dir")
+
+  if [[ "$role" == "leaf" ]]; then
+    if [[ "$uid" != "$runner_uid" ]]; then
+      echo "Refusing --output-dir not owned by current user (uid ${uid}): ${dir}" >&2
+      return 1
+    fi
+  elif [[ "$uid" != "$runner_uid" && "$uid" != "0" ]]; then
+    echo "Refusing ancestor of --output-dir not owned by current user or root (uid ${uid}): ${dir}" >&2
+    return 1
+  fi
+
+  local perm=$(( 8#$mode ))
+  local writable_kind=""
+  if (( (perm & 8#0002) != 0 )); then
+    writable_kind="world-writable"
+  elif (( (perm & 8#0020) != 0 )); then
+    writable_kind="group-writable"
+  fi
+
+  if [[ -n "$writable_kind" ]]; then
+    if [[ "$role" == "leaf" ]]; then
+      echo "Refusing ${writable_kind} --output-dir (mode ${mode}): ${dir}" >&2
+      return 1
+    elif (( (perm & 8#1000) == 0 )); then
+      echo "Refusing ${writable_kind} ancestor of --output-dir without sticky bit (mode ${mode}): ${dir}" >&2
+      return 1
+    fi
+  fi
+}
+
+validate_ancestor_chain() {
+  local cur="$1"
+  local role="$2"
+  local home_canon=""
+  local root_canon=""
+
+  if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+    home_canon="$(cd "$HOME" && pwd -P)"
+  fi
+  if [[ -n "${ROOT_DIR:-}" && -d "$ROOT_DIR" ]]; then
+    root_canon="$(cd "$ROOT_DIR" && pwd -P)"
+  fi
+
+  while true; do
+    check_dir_safety "$cur" "$role"
+    if [[ "$cur" == "/" ]]; then
+      break
+    fi
+    if [[ -n "$home_canon" && "$cur" == "$home_canon" ]]; then
+      break
+    fi
+    if [[ -n "$root_canon" && "$cur" == "$root_canon" ]]; then
+      break
+    fi
+    cur="$(dirname "$cur")"
+    role="ancestor"
+  done
+}
+
+# Reject symlink, non-owned, or group-/world-writable output directories and
+# unsafe ancestors (up to $HOME or the repo root) before publishing reports.
+validate_output_dir() {
+  local dir="$1"
+  if [[ -z "$dir" ]]; then
+    echo "Refusing empty --output-dir" >&2
+    return 1
+  fi
+  while [[ "$dir" != "/" && "$dir" == */ ]]; do
+    dir="${dir%/}"
+  done
+  if [[ -L "$dir" ]]; then
+    echo "Refusing symlink --output-dir: ${dir}" >&2
+    return 1
+  fi
+
+  local abs_dir="$dir"
+  if [[ "$abs_dir" != /* ]]; then
+    abs_dir="${PWD}/${abs_dir}"
+  fi
+
+  local home_canon=""
+  local root_canon=""
+  if [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+    home_canon="$(cd "$HOME" && pwd -P)"
+  fi
+  if [[ -n "${ROOT_DIR:-}" && -d "$ROOT_DIR" ]]; then
+    root_canon="$(cd "$ROOT_DIR" && pwd -P)"
+  fi
+
+  local probe="$abs_dir"
+  while [[ ! -e "$probe" && ! -L "$probe" && "$probe" != "/" ]]; do
+    probe="$(dirname "$probe")"
+  done
+
+  # Refuse a symlink leaf or any non-root-owned symlink ancestor before
+  # creating missing directories or resolving via pwd -P.
+  local walk="$probe"
+  while true; do
+    if [[ -L "$walk" ]]; then
+      local link_mode link_uid
+      read -r link_mode link_uid < <(stat_mode_and_uid "$walk")
+      if [[ "$walk" == "$abs_dir" || "$link_uid" != "0" ]]; then
+        echo "Refusing symlink path component in --output-dir: ${walk}" >&2
+        return 1
+      fi
+    fi
+    if [[ "$walk" == "/" ]]; then
+      break
+    fi
+    if [[ -n "$home_canon" && "$walk" == "$home_canon" ]]; then
+      break
+    fi
+    if [[ -n "$root_canon" && "$walk" == "$root_canon" ]]; then
+      break
+    fi
+    if [[ -n "${HOME:-}" && "$walk" == "$HOME" ]]; then
+      break
+    fi
+    if [[ -n "${ROOT_DIR:-}" && "$walk" == "$ROOT_DIR" ]]; then
+      break
+    fi
+    local parent
+    parent="$(dirname "$walk")"
+    [[ "$parent" == "$walk" ]] && break
+    walk="$parent"
+  done
+
+  if [[ ! -d "$probe" ]]; then
+    echo "Invalid --output-dir (existing path component is not a directory): ${probe}" >&2
+    return 1
+  fi
+
+  local probe_canon
+  probe_canon="$(cd "$probe" && pwd -P)"
+  if [[ "$probe" == "$abs_dir" ]]; then
+    validate_ancestor_chain "$probe_canon" "leaf"
+    return 0
+  fi
+
+  validate_ancestor_chain "$probe_canon" "ancestor"
+  (umask 0022 && mkdir -p -m 0755 "$abs_dir")
+  if [[ ! -d "$abs_dir" || -L "$abs_dir" ]]; then
+    echo "Invalid --output-dir: ${abs_dir}" >&2
+    return 1
+  fi
+  local leaf_canon
+  leaf_canon="$(cd "$abs_dir" && pwd -P)"
+  validate_ancestor_chain "$leaf_canon" "leaf"
+}
+
+# Copy a regular file into a destination path without following source or
+# destination symlinks (writes to a private temp file in the destination
+# directory and atomically renames into place).
 safe_copy_file() {
   local src="$1"
   local dest="$2"
@@ -94,35 +240,57 @@ safe_copy_file() {
     echo "Refusing to overwrite destination symlink or directory: ${dest}" >&2
     return 1
   fi
+  local dest_dir
+  dest_dir="$(dirname "$dest")"
   local tmp_dest
-  tmp_dest="$(mktemp "${OUTPUT_DIR}/.$(basename "$dest").XXXXXX")"
-  chmod 0644 "$tmp_dest"
-  if ! cat "$src" >"$tmp_dest" || ! mv -f "$tmp_dest" "$dest"; then
+  tmp_dest="$(mktemp "${dest_dir}/.$(basename "$dest").XXXXXX")"
+  if ! cat "$src" >"$tmp_dest" || ! chmod 0644 "$tmp_dest"; then
+    rm -f "$tmp_dest"
+    return 1
+  fi
+  if [[ -L "$dest" || -d "$dest" ]]; then
+    rm -f "$tmp_dest"
+    echo "Refusing to overwrite destination symlink or directory: ${dest}" >&2
+    return 1
+  fi
+  if ! mv -f "$tmp_dest" "$dest"; then
     rm -f "$tmp_dest"
     return 1
   fi
 }
 
-require_non_symlink_path() {
-  local path="$1"
-  if [[ -L "$path" ]]; then
-    echo "Refusing symlink destination: ${path}" >&2
-    exit 1
-  fi
+# Publish finished reports and server logs from private per-run directories to
+# OUTPUT_DIR in one step after re-validating OUTPUT_DIR and its ancestors.
+publish_outputs() {
+  local out_dir="$1"
+  local stage_dir="$2"
+  local logs_dir="$3"
+
+  validate_output_dir "$out_dir"
+  out_dir="$(cd "$out_dir" && pwd -P)"
+  validate_output_dir "$out_dir"
+
+  local file
+  for file in "${stage_dir}"/* "${logs_dir}"/*; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    safe_copy_file "$file" "${out_dir}/$(basename "$file")"
+  done
 }
 
 validate_output_dir "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
 validate_output_dir "$OUTPUT_DIR"
 
+# Do ALL working writes (server logs, readiness markers, staged ZAP config/hooks,
+# and ZAP reports) inside a private per-run directory (0700, owned by runner).
 # The ZAP container runs as the `zap` user (UID 1000), while CI runners (e.g.
 # GitHub Actions ubuntu-24.04) run as UID 1001, so the directory mounted at
-# /zap/wrk must be writable by another UID. Stage it inside a private (0700)
-# per-run parent: other local accounts can't reach it, and the sticky 1777
-# mode lets the container add reports without being able to replace the
-# config and hook files staged there. Reports are copied to OUTPUT_DIR after
-# each scan. The bind mount resolves the host path as the Docker daemon, so
-# the container needs no access to the private parent.
+# /zap/wrk must be writable by another UID. The sticky 1777 mode lets the
+# container add reports without being able to replace the 0644 config and hook
+# files staged there, while the 0700 parent keeps other local accounts out.
+# The bind mount resolves the host path as the Docker daemon, so the container
+# needs no access to the private parent. Finished outputs are published to
+# OUTPUT_DIR in one step at the end.
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zap-baseline.XXXXXX")"
 chmod 0700 "$RUN_DIR"
 ZAP_WRK="${RUN_DIR}/wrk"
@@ -132,22 +300,40 @@ chmod 1777 "$ZAP_WRK"
 # has bound its port, so a stale server from another run can't pass.
 RUN_MARKERS="${RUN_DIR}/markers"
 mkdir -m 0700 "$RUN_MARKERS"
+RUN_LOGS="${RUN_DIR}/logs"
+mkdir -m 0700 "$RUN_LOGS"
+RUN_STAGE="${RUN_DIR}/stage"
+mkdir -m 0700 "$RUN_STAGE"
 
 PIDS=()
 CREATED_DB=""
+PUBLISH_ATTEMPTED="false"
 
-cleanup() {
+stop_servers() {
+  local pid
   for pid in "${PIDS[@]:-}"; do
+    [[ -n "$pid" ]] || continue
     if kill -0 "$pid" 2>/dev/null; then
       kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
     fi
   done
+  PIDS=()
+}
+
+cleanup() {
+  local exit_code=$?
+  stop_servers
+  if [[ "$PUBLISH_ATTEMPTED" != "true" && -n "${RUN_DIR:-}" && -d "${RUN_DIR}" ]]; then
+    PUBLISH_ATTEMPTED="true"
+    publish_outputs "$OUTPUT_DIR" "$RUN_STAGE" "$RUN_LOGS" || true
+  fi
   if [[ -n "$CREATED_DB" ]]; then
     dropdb --if-exists --host 127.0.0.1 --username "${PGUSER:-postgres}" "$CREATED_DB" >/dev/null 2>&1 || true
   fi
   # Files ZAP wrote are owned by its UID; the sticky directory's owner may still remove them.
   rm -rf "$RUN_DIR" 2>/dev/null || true
+  exit "$exit_code"
 }
 trap cleanup EXIT
 
@@ -235,12 +421,13 @@ run_zap_baseline() {
       -m 2 \
       -I || status=$?
 
-  # Copy whatever reports exist (also after a failure) so CI uploads them.
-  safe_copy_file "${ZAP_WRK}/${prefix}.conf" "${OUTPUT_DIR}/${prefix}.conf"
+  # Stage whatever reports exist inside the private per-run directory (also
+  # after a failure, so cleanup can publish them for CI artifact upload).
+  safe_copy_file "${ZAP_WRK}/${prefix}.conf" "${RUN_STAGE}/${prefix}.conf"
   local report
   for report in "${ZAP_WRK}/${prefix}"-report.*; do
     [[ -e "$report" || -L "$report" ]] || continue
-    safe_copy_file "$report" "${OUTPUT_DIR}/$(basename "$report")"
+    safe_copy_file "$report" "${RUN_STAGE}/$(basename "$report")"
   done
 
   # ZAP baseline exit codes: 0 = pass, 2 = warn only (ignored with -I), 1/3 = fail/error.
@@ -251,12 +438,12 @@ run_zap_baseline() {
 
   local ext
   for ext in html json md; do
-    if [[ ! -s "${OUTPUT_DIR}/${prefix}-report.${ext}" ]]; then
-      echo "OWASP ZAP baseline did not write expected report ${OUTPUT_DIR}/${prefix}-report.${ext}" >&2
+    if [[ ! -s "${RUN_STAGE}/${prefix}-report.${ext}" ]]; then
+      echo "OWASP ZAP baseline did not write expected report ${RUN_STAGE}/${prefix}-report.${ext}" >&2
       return 1
     fi
   done
-  echo "==> PASS: ${prefix} (reports saved under ${OUTPUT_DIR}/${prefix}-report.{html,json,md})"
+  echo "==> PASS: ${prefix} (staged reports for ${OUTPUT_DIR}/${prefix}-report.{html,json,md})"
 }
 
 if [[ "$MODE" == "local" ]]; then
@@ -279,16 +466,15 @@ if [[ "$MODE" == "local" ]]; then
   require_free_port "$API_PORT" "employee API server"
 
   echo "==> Starting employee static server with _headers on 127.0.0.1:${WEB_PORT}"
-  require_non_symlink_path "${OUTPUT_DIR}/web-server.log"
   python3 "${ROOT_DIR}/scripts/security/serve_employee_dist.py" \
     --dir "${ROOT_DIR}/web/dist" \
     --host "127.0.0.1" \
     --port "$WEB_PORT" \
-    --ready-file "${RUN_MARKERS}/web.pid" >"${OUTPUT_DIR}/web-server.log" 2>&1 &
+    --ready-file "${RUN_MARKERS}/web.pid" >"${RUN_LOGS}/web-server.log" 2>&1 &
   web_pid="$!"
   PIDS+=("$web_pid")
   wait_for_own_server "http://127.0.0.1:${WEB_PORT}/" "employee web server" "$web_pid" \
-    "${RUN_MARKERS}/web.pid" "${OUTPUT_DIR}/web-server.log"
+    "${RUN_MARKERS}/web.pid" "${RUN_LOGS}/web-server.log"
   if [[ "$(tr -dc '0-9' <"${RUN_MARKERS}/web.pid")" != "$web_pid" ]]; then
     echo "Employee web server marker does not match the process this run started" >&2
     exit 1
@@ -310,7 +496,6 @@ if [[ "$MODE" == "local" ]]; then
   # and 404 handling. RLS_CONTEXT_GUARD_MODE=off avoids requiring a dedicated
   # payroll_app role for this HTTP-header scan (RLS is verified by RSpec under raise).
   echo "==> Starting employee API (APP_PROCESS_ROLE=employee_web, RAILS_ENV=production, FORCE_SSL=false) on 127.0.0.1:${API_PORT}"
-  require_non_symlink_path "${OUTPUT_DIR}/api-server.log"
   (
     cd "${ROOT_DIR}/api"
     exec env APP_PROCESS_ROLE=employee_web \
@@ -331,12 +516,12 @@ if [[ "$MODE" == "local" ]]; then
     ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY="zap-local-scan-determ-key-0123456789" \
     ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT="zap-local-scan-salt-0123456789abcdef" \
     bundle exec puma -b "tcp://127.0.0.1:${API_PORT}" -w 0 -t 2:2 --pidfile "${RUN_MARKERS}/api.pid"
-  ) >"${OUTPUT_DIR}/api-server.log" 2>&1 &
+  ) >"${RUN_LOGS}/api-server.log" 2>&1 &
   api_pid="$!"
   PIDS+=("$api_pid")
   # Puma writes its pidfile only after binding the listener; a bind failure exits.
   wait_for_own_server "http://127.0.0.1:${API_PORT}/up" "employee API server" "$api_pid" \
-    "${RUN_MARKERS}/api.pid" "${OUTPUT_DIR}/api-server.log"
+    "${RUN_MARKERS}/api.pid" "${RUN_LOGS}/api-server.log"
 
   # Smoke-verify employee_web process isolation before scanning.
   admin_status="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${API_PORT}/api/v1/admin/companies")"
@@ -366,3 +551,8 @@ else
   run_zap_baseline "$api_target" "${ROOT_DIR}/scripts/security/zap_baseline_api_production.conf" "employee-api-production" \
     "${ROOT_DIR}/scripts/security/zap_api_seed_hook.py"
 fi
+
+stop_servers
+PUBLISH_ATTEMPTED="true"
+publish_outputs "$OUTPUT_DIR" "$RUN_STAGE" "$RUN_LOGS"
+echo "==> Published reports to ${OUTPUT_DIR}"
