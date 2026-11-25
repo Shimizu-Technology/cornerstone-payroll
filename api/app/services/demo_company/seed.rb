@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "tmpdir"
-require "zlib"
 
 module DemoCompany
   # Seeds the two permanent demo employers from DemoCompany::Roster.
@@ -47,7 +46,9 @@ module DemoCompany
     ].freeze
 
     REVIEW_NOTE = "Verified against the retained QuickBooks employee setup and the client's hiring records."
-    LOCK_NAMESPACE = "demo-company-seed"
+    # Fixed 64-bit base for the per-organization seed lock, distinct from the
+    # other DedicatedAdvisoryLock bases.
+    LOCK_KEY_BASE = 4_200_000_000_000_000_000
 
     def initialize(organization:, actor:)
       @organization = organization
@@ -58,13 +59,18 @@ module DemoCompany
       @quickbooks_imported = false
     end
 
+    # Organization-level reads and company creation run as system; each
+    # company's own writes run in that company's scope. Scopes never nest.
     def call
-      authorize!
       with_organization_lock do
-        companies = COMPANIES.map { |spec| ensure_company!(spec) }
+        companies = system_scope do
+          authorize!
+          COMPANIES.map { |spec| ensure_company!(spec) }
+        end
+        companies.each { |company| company_scope(company) { apply_company_profile!(company) } }
         kitchen = companies.find { |company| fixture_key(company) == Roster::KITCHEN }
-        seed_quickbooks_history!(kitchen)
-        companies.each { |company| seed_native_payroll!(company) }
+        company_scope(kitchen) { seed_quickbooks_history!(kitchen) }
+        companies.each { |company| company_scope(company) { seed_native_payroll!(company) } }
         Result.new(companies: companies, employees_created: @employees_created, periods_committed: @periods_committed,
           periods_skipped: @periods_skipped, quickbooks_imported: @quickbooks_imported)
       end
@@ -81,17 +87,21 @@ module DemoCompany
     end
 
     # One run per organization at a time; a second concurrent run is refused.
-    def with_organization_lock
-      connection = ApplicationRecord.connection
-      key = Zlib.crc32("#{LOCK_NAMESPACE}:#{organization.id}")
-      locked = connection.select_value(ActiveRecord::Base.sanitize_sql_array([ "SELECT pg_try_advisory_lock(?)", key ]))
-      raise Refused, "Another seed run is in progress for this organization" unless locked
+    # The lock lives on its own connection, so it is safe under transaction
+    # pooling and always released when the block ends, even on an error.
+    def with_organization_lock(&)
+      DedicatedAdvisoryLock.with_lock(LOCK_KEY_BASE + Integer(organization.id), wait_seconds: 0, &)
+    rescue DedicatedAdvisoryLock::Unavailable
+      raise Refused, "Another seed run is in progress for this organization"
+    end
 
-      begin
-        yield
-      ensure
-        connection.select_value(ActiveRecord::Base.sanitize_sql_array([ "SELECT pg_advisory_unlock(?)", key ]))
-      end
+    # Enters a scope only when none is active (the DemoOutbound pattern).
+    def system_scope(&)
+      TenantScope.current ? yield : TenantScope.as_system(reason: "Seed the demo employers", &)
+    end
+
+    def company_scope(company, &)
+      TenantScope.current ? yield : TenantScope.with_company(company.id, &)
     end
 
     def fixture_key(company) = company.test_workspace_manifest["demo_fixture_key"]
@@ -115,7 +125,11 @@ module DemoCompany
         end
       end
       demo!(company)
+      company
+    end
 
+    def apply_company_profile!(company)
+      spec = spec_for(company)
       company.with_lock do
         demo!(company)
         # Fill only what is still blank, so later edits by testers survive.
@@ -146,7 +160,7 @@ module DemoCompany
 
     def seed_quickbooks_history!(company)
       demo!(company)
-      TenantScope.with_company(company.id) do
+      begin
         batch = HistoricalImportBatch.where(company: company, source_system: "quickbooks_online").where.not(status: %w[failed reversed]).order(:id).last
         return if batch&.locked? && batch.historical_ytd_bridges.where(status: "applied").exists?
 
@@ -280,7 +294,7 @@ module DemoCompany
 
     def seed_native_payroll!(company)
       demo!(company)
-      TenantScope.with_company(company.id) do
+      begin
         departments = departments_for(company)
         workweek, schedule = ensure_calendar!(company)
         people = Roster.people_for(company_key(company))
@@ -347,7 +361,9 @@ module DemoCompany
             reason_category: "voluntary", source: "operator"
           })
         end
+        # Rehire once; a tester's later termination stays in place.
         next unless person[:rehire_before] && period_spec[:index] == person[:rehire_before] && employee.status == "terminated"
+        next if employee.employee_status_events.exists?(event_type: "reactivated")
 
         EmployeeStatusTransitionService.reactivate!(employee: employee, actor: actor, attributes: {
           effective_date: period_spec[:start_date], internal_notes: "Rehired for the fall season", source: "operator"
