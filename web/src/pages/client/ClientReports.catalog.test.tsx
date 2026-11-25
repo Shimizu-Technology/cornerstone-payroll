@@ -4,12 +4,13 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ClientReports } from './ClientReports';
 import { clientReportCatalog } from './clientReportCatalog';
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
-const api = vi.hoisted(() => ({ periods: vi.fn(), employees: vi.fn(), register: vi.fn() }));
+const api = vi.hoisted(() => ({ periods: vi.fn(), employees: vi.fn(), register: vi.fn(), taxSummary: vi.fn() }));
 vi.mock('@/services/api', () => ({
   clientPayPeriodsApi: { list: api.periods },
   clientEmployeesApi: { list: api.employees },
   clientReportsApi: {
     payrollRegister: api.register,
+    taxSummary: api.taxSummary,
     ytdSummary: async () => ({ report: null }),
     annualPayrollSummary: async () => ({ report: null }),
   },
@@ -19,6 +20,7 @@ beforeEach(() => {
   api.periods.mockResolvedValue({ pay_periods: [] });
   api.employees.mockResolvedValue({ data: [] });
   api.register.mockResolvedValue({ report: null });
+  api.taxSummary.mockResolvedValue({ report: { source: { label: 'Cornerstone' } } });
 });
 afterEach(cleanup);
 it('lists every client report in three groups and guards missing selections', async () => {
@@ -28,6 +30,21 @@ it('lists every client report in three groups and guards missing selections', as
   expect(screen.getByRole('button', { name: 'Export Employee Pay History' }).hasAttribute('disabled')).toBe(true);
   expect(screen.queryByText('Full Print Package')).toBeNull();
   expect(screen.queryByText('W-2GU')).toBeNull();
+});
+
+it('shows the imported payroll exclusion only for the selected tax range', async () => {
+  const statement = 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.';
+  api.taxSummary.mockImplementation(async ({ quarter }: { quarter: string }) => ({
+    report: { source: { label: 'Cornerstone', statement: quarter === '2' ? statement : null } },
+  }));
+  render(<ClientReports />);
+  const quarter = await screen.findByRole('combobox', { name: 'Quarter' });
+  fireEvent.change(quarter, { target: { value: '2' } });
+  expect(await screen.findAllByText(statement)).toHaveLength(2);
+
+  fireEvent.change(quarter, { target: { value: '1' } });
+  expect(screen.queryByText(statement)).toBeNull();
+  await waitFor(() => expect(api.taxSummary).toHaveBeenLastCalledWith({ year: new Date().getFullYear(), quarter: '1' }));
 });
 
 it('selects only committed and baseline payroll when newer runs await approval', async () => {

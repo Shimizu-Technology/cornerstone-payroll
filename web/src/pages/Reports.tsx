@@ -1,5 +1,4 @@
 import { FilingEmployeeWarnings } from '@/components/reports/FilingEmployeeWarnings';
-import { CORNERSTONE_TAX_REPORT_SCOPE } from '@/lib/payroll-tax-summary';
 import type { FilingEmployeeCompleteness } from '@/types';
 import { PayrollReportReviewWarnings } from '@/components/reports/PayrollReportReviewWarnings';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
@@ -525,8 +524,9 @@ function TaxSummaryPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Tax Withholding Summary</CardTitle>
           <CardDescription>
-            {report?.source?.statement ?? CORNERSTONE_TAX_REPORT_SCOPE}
+            Quarterly tax withholding totals for filing preparation — all committed pay periods in range.
           </CardDescription>
+          {report?.source?.statement && <CardDescription>{report.source.statement}</CardDescription>}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">
@@ -617,14 +617,14 @@ function TaxSummaryPanel() {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               <TotalBox label="Gross Wages" value={report.totals.gross_wages} />
-              {report.totals.base_withholding_tax != null && <TotalBox label="Base Withholding Tax" value={report.totals.base_withholding_tax} />}
-              {report.totals.additional_withholding != null && <TotalBox label="Additional Withholding" value={report.totals.additional_withholding} />}
-              <TotalBox label="Total Withholding Tax" value={report.totals.withholding_tax} />
+              <TotalBox label="Withholding Tax" value={report.totals.withholding_tax} />
               <TotalBox label="SS Tax (Employee)" value={report.totals.social_security_employee} />
               <TotalBox label="SS Tax (Employer)" value={report.totals.social_security_employer} />
               <TotalBox label="Medicare (Employee)" value={report.totals.medicare_employee} />
               <TotalBox label="Medicare (Employer)" value={report.totals.medicare_employer} />
               <TotalBox label="Total Employment Taxes" value={report.totals.total_employment_taxes} />
+              {report.totals.base_withholding_tax != null && <TotalBox label="Base Withholding Tax" value={report.totals.base_withholding_tax} />}
+              {report.totals.additional_withholding != null && <TotalBox label="Additional Withholding" value={report.totals.additional_withholding} />}
             </div>
             <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
           </CardContent>
@@ -1391,14 +1391,14 @@ export function EmployeePayHistoryPanel(): ReactNode {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="Gross Pay" value={report.summary.gross_pay ?? 0} />
                 <TotalBox label="Custom Earnings" value={report.summary.custom_earnings_total ?? 0} />
-                <TotalBox label="FIT" value={report.summary.withholding_tax ?? 0} />
+                <TotalBox label="Withholding" value={report.summary.withholding_tax ?? 0} />
                 <TotalBox label="SS Tax" value={report.summary.social_security_tax ?? 0} />
                 <TotalBox label="Medicare" value={report.summary.medicare_tax ?? 0} />
                 <TotalBox label="Retirement" value={report.summary.retirement ?? 0} />
                 <TotalBox label="Custom Deductions" value={report.summary.custom_deductions_total ?? 0} />
                 <TotalBox label="Deductions" value={report.summary.total_deductions ?? 0} />
                 <TotalBox label="Net Pay" value={report.summary.net_pay ?? 0} />
-                {report.summary.total_hours != null && <TotalBox label="Combined Hours" value={report.summary.total_hours} format="number" />}
+                {report.summary.combined_hours != null && <TotalBox label="Combined Hours" value={report.summary.combined_hours} format="number" />}
               </div>
               <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
             </CardContent>
@@ -1414,7 +1414,17 @@ export function EmployeePayHistoryPanel(): ReactNode {
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
                   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{history.pay_date}</p><p className="mt-1 break-words text-xs text-neutral-600">{history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
-                  <details className="mt-3 border-t border-neutral-100 pt-3 text-sm"><summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary><dl className="mt-3 grid grid-cols-2 gap-3"><div><dt>Combined hours</dt><dd>{history.total_hours ?? '—'}</dd></div><div><dt>Regular hours</dt><dd>{history.hours_worked ?? '—'}</dd></div><div><dt>FIT</dt><dd>{fmt(history.withholding_tax ?? 0)}</dd></div><div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div><div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div><div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div></dl></details>
+                  <details className="mt-3 border-t border-neutral-100 pt-3 text-sm">
+                    <summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary>
+                    <dl className="mt-3 grid grid-cols-2 gap-3">
+                      <div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div>
+                      <div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div>
+                      <div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div>
+                      <div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div>
+                      <div><dt>Withholding</dt><dd>{fmt(history.withholding_tax ?? 0)}</dd></div>
+                      <div><dt>Combined hours</dt><dd>{history.total_hours ?? '—'}</dd></div>
+                    </dl>
+                  </details>
                 </div>
               ))}
               {report.history.length === 0 && <p className="text-sm text-neutral-500">No pay history found.</p>}
@@ -1426,15 +1436,16 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     <th className="pb-2 pr-4 font-medium">Pay Date</th>
                     <th className="pb-2 pr-4 font-medium">Period</th>
                     <th className="pb-2 pr-4 font-medium">Source</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Combined Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">OT Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
-                    <th className="pb-2 pr-4 font-medium text-right">FIT</th>
                     <th className="pb-2 pr-4 font-medium text-right">Custom Ded.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Deductions</th>
                     <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
                     <th className="pb-2 font-medium">Payment</th>
+                    <th className="pb-2 px-4 font-medium text-right">Withholding</th>
+                    <th className="pb-2 font-medium text-right">Combined Hours</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1443,20 +1454,21 @@ export function EmployeePayHistoryPanel(): ReactNode {
                       <td className="py-2 pr-4">{h.pay_date}</td>
                       <td className="py-2 pr-4 text-neutral-500">{h.period_description}</td>
                       <td className="py-2 pr-4"><Badge variant={h.record_type === 'imported' ? 'warning' : 'default'}>{h.source.label}</Badge></td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{h.total_hours ?? '—'}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_earnings_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.withholding_tax ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>
                       <td className="py-2 text-neutral-500">{payrollPaymentLabel(h)}{h.check_number && <span className="block font-mono text-xs">Check #{h.check_number}</span>}</td>
+                      <td className="py-2 px-4 text-right tabular-nums">{fmt(h.withholding_tax ?? 0)}</td>
+                      <td className="py-2 text-right tabular-nums">{h.total_hours ?? '—'}</td>
                     </tr>
                   ))}
                   {report.history.length === 0 && (
                     <tr>
-                      <td colSpan={12} className="py-6 text-center text-neutral-600">
+                      <td colSpan={13} className="py-6 text-center text-neutral-600">
                         No pay history found.
                       </td>
                     </tr>
@@ -1904,6 +1916,7 @@ export function YtdSummaryPanel() {
                       <TotalBox label="Other Employer Contributions" value={report.company_totals.other_employer_contributions ?? 0} />
                       <TotalBox label="Employer Contributions Total" value={report.company_totals.employer_contributions ?? 0} />
                       <TotalBox label="Employer Taxes and Contributions Total" value={report.company_totals.employer_taxes_and_contributions_total ?? 0} />
+                      <TotalBox label="Combined Hours" value={report.company_totals.combined_hours ?? 0} format="number" />
                     </div>
                     <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
                   </details>
@@ -1975,6 +1988,7 @@ export function YtdSummaryPanel() {
                         <span className="mt-2 block text-xs font-normal normal-case text-neutral-600">{column.treatment.replaceAll('_', ' ')} · {column.identity_label}</span>
                       </th>
                     ))}
+                    <th className="py-2 pr-4 text-right font-medium">Combined Hours</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2020,11 +2034,12 @@ export function YtdSummaryPanel() {
                       {showSourceColumns && (report.component_columns || []).map((column) => (
                         <td key={column.key} className="py-2 pr-4 text-right tabular-nums">{emp.component_values?.[column.key] == null ? '—' : fmt(emp.component_values[column.key])}</td>
                       ))}
+                      <td className="py-2 pr-4 text-right tabular-nums">{(emp.combined_hours ?? 0).toFixed(2)}</td>
                     </tr>
                   ))}
                   {report.employees.length === 0 && (
                     <tr>
-                      <td colSpan={8 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-neutral-600">
+                      <td colSpan={10 + (showCategoryColumns ? 21 : 0) + (showSourceColumns ? report.component_columns?.length || 0 : 0)} className="py-6 text-center text-neutral-600">
                         No employee data found for {report.period.label}.
                       </td>
                     </tr>
@@ -2328,8 +2343,9 @@ function EmployerLiabilityPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Employer Tax Liability</CardTitle>
           <CardDescription>
-            {report?.source?.statement ?? CORNERSTONE_TAX_REPORT_SCOPE}
+            Employer-side payroll tax obligations — Social Security match (6.2%) and Medicare match (1.45%).
           </CardDescription>
+          {report?.source?.statement && <CardDescription>{report.source.statement}</CardDescription>}
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center sm:gap-4">

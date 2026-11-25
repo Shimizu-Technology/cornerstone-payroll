@@ -51,6 +51,7 @@ class TaxSummaryPdfGenerator
     render_period_block(pdf)
     render_totals_block(pdf)
     render_payroll_fields_block(pdf)
+    render_source_and_withholding_details(pdf)
 
     period = report[:period] || {}
     quarter_label = period_label(period)
@@ -115,8 +116,6 @@ class TaxSummaryPdfGenerator
     end
 
     pdf.fill_color TEXT_DARK
-    pdf.move_down 8
-    pdf.font_size(9) { pdf.text report.dig(:source, :statement) } if report.dig(:source, :statement).present?
     pdf.move_down 12
   end
 
@@ -137,9 +136,6 @@ class TaxSummaryPdfGenerator
       [ "Medicare Tax (Employer)",            fmt(totals[:medicare_employer]),           false ],
       [ "Total Employment Taxes",             fmt(totals[:total_employment_taxes]),      true ]
     ]
-
-    rows.insert(1, [ "Base Withholding Tax", fmt(totals[:base_withholding_tax]), false ]) if totals.key?(:base_withholding_tax)
-    rows.insert(2, [ "Additional Withholding", fmt(totals[:additional_withholding]), false ]) if totals.key?(:additional_withholding)
 
     table_data = rows.map { |label, value, highlight|
       bg = highlight ? HIGHLIGHT_BG : "FFFFFF"
@@ -200,6 +196,28 @@ class TaxSummaryPdfGenerator
       row(0).background_color = SECTION_BG
       row(0).font_style = :bold
       column(3).align = :right
+    end
+  end
+
+  def render_source_and_withholding_details(pdf)
+    source = report.dig(:source, :statement) || report.dig(:source, :label)
+    if source.present?
+      pdf.move_down 12
+      pdf.font_size(9) { pdf.text "Payroll Source — #{source}" }
+    end
+
+    totals = report[:totals] || {}
+    rows = []
+    rows << [ "Base Withholding Tax", fmt(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
+    rows << [ "Additional Withholding", fmt(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
+    return if rows.empty?
+
+    pdf.move_down 8
+    pdf.table(rows, width: pdf.bounds.width,
+      cell_style: { size: 9, padding: [ 4, 6 ], border_color: BORDER_GRAY }) do
+      column(0).width = pdf.bounds.width * 0.65
+      column(0).font_style = :bold
+      column(1).align = :right
     end
   end
 

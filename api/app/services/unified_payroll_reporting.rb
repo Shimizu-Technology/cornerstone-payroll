@@ -3,8 +3,8 @@
 class UnifiedPayrollReporting
   SOURCE_STATEMENT = "QuickBooks source values remain authoritative locked snapshots and were not recalculated. Recorded ledger adjustments are shown separately and never rewrite the source."
   EMPLOYER_SOCIAL_SECURITY = /\A(?:SS|Social Security(?: Employer)?|Employer Social Security)\z/i
-  REGULAR_HOURS = /\A(?:Regular(?: Hours| Pay)?)\z/i
-  OVERTIME_HOURS = /\A(?:OT|Overtime(?: Hours| Pay)?)\z/i
+  REGULAR_HOURS = /\A(?:regular|hourly)\b/i
+  OVERTIME_HOURS = /overtime|\bot\b/i
   EMPLOYER_MEDICARE = /\A(?:Med|Medicare(?: Employer)?|Employer Medicare)\z/i
 
   def initialize(company_id:, period:)
@@ -28,6 +28,22 @@ class UnifiedPayrollReporting
     scope = locked_adjustment_scope.where(effective_pay_date: @period.range)
     scope = scope.where(historical_paychecks: { employee_id: employee_id }) if employee_id
     scope.chronological.to_a
+  end
+
+  def historical_tax_exclusion_note
+    paychecks = historical_scope.pluck(:federal_income_tax, :gross_pay)
+    adjustments = locked_adjustment_scope.where(effective_pay_date: @period.range)
+      .pluck(:federal_income_tax, :gross_pay)
+    amounts = paychecks + adjustments
+    return if amounts.empty?
+
+    fit = amounts.sum(0.to_d) { |withholding, _| withholding.to_d }
+    wages = amounts.sum(0.to_d) { |_, gross_pay| gross_pay.to_d }
+    note = "Imported QuickBooks/prior-provider payroll is not included."
+    excluded = []
+    excluded << "#{ActiveSupport::NumberHelper.number_to_currency(fit)} in FIT" unless fit.zero?
+    excluded << "#{ActiveSupport::NumberHelper.number_to_currency(wages)} in gross wages" unless wages.zero?
+    excluded.empty? ? note : "#{note} Excluded #{excluded.to_sentence}."
   end
 
   # The same eligible imported paychecks as historical_paychecks /
@@ -55,6 +71,7 @@ class UnifiedPayrollReporting
       imported_payroll_count: regular_period_count(paychecks),
       imported_opening_summary_count: opening_summary_count(paychecks),
       total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
+      combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
       total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
@@ -89,6 +106,7 @@ class UnifiedPayrollReporting
     totals = historical_totals(paychecks, adjustments)
     row.merge(
       total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
+      combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
       total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
@@ -319,7 +337,8 @@ class UnifiedPayrollReporting
     employer_contribution_totals = historical_employer_contribution_totals(rows)
     employer_contributions = sum(rows, :employer_contributions)
     {
-      total_hours: rows.sum(0.to_d) { |row| row.hours_total.to_d },
+      total_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, REGULAR_HOURS).to_d },
+      combined_hours: rows.sum(0.to_d) { |row| row.hours_total.to_d },
       total_overtime_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, OVERTIME_HOURS).to_d },
       gross_pay: sum(rows, :gross_pay),
       bonus: component_sum(rows, :earnings_breakdown, /bonus/i),

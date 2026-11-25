@@ -41,10 +41,11 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
   end
 
   def create_locked_historical_paycheck(employee:, suffix:, pay_date:, period_type: "regular", gross_pay: 500, net_pay: 300,
-                                       hours_breakdown: [], pretax_deduction_breakdown: nil, after_tax_deduction_breakdown: nil, payment_method: nil)
+                                       hours_breakdown: [], pretax_deduction_breakdown: nil, after_tax_deduction_breakdown: nil, payment_method: nil, source_system: "quickbooks_online")
     batch = HistoricalImportBatch.create!(
       company: company,
       source_label: "QuickBooks #{suffix}",
+      source_system: source_system,
       bundle_digest: "reports-#{company.id}-#{suffix}",
       importer_version: "quickbooks-online-payroll-v5",
       status: "locked",
@@ -1723,33 +1724,46 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "base_withholding_tax" => 120.11, "additional_withholding" => 50.22
       )
       scope = report.dig("source", "statement")
-      expect(scope).to eq("Payroll run in Cornerstone only; QuickBooks history not included.")
+      expect(scope).to eq("Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT and $500.00 in gross wages.")
 
       get "/api/v1/admin/reports/tax_summary_csv", params: params
       expect(response).to have_http_status(:ok)
-      csv = CSV.parse(response.body).select { |row| row.size == 2 }.to_h
-      expect(csv).to include("Payroll Source" => scope, "Base Withholding Tax" => format("%.2f", totals.fetch("base_withholding_tax")),
-        "Additional Withholding" => format("%.2f", totals.fetch("additional_withholding")),
-        "Withholding Tax" => format("%.2f", totals.fetch("withholding_tax")))
+      csv = CSV.parse(response.body)
+      expect(csv.map(&:first)).to eq([
+        "Tax Summary Report", "Client", "Description", "Reporting Basis", "Period", "Period Start", "Period End",
+        "Pay Periods Included", "Employee Count", nil, "Category", "Gross Wages", "Withholding Tax",
+        "Social Security (Employee)", "Social Security (Employer)", "Medicare (Employee)", "Medicare (Employer)",
+        "Total Employment Taxes", nil, "Payroll Field Reconciliation", "Field",
+        "Payroll Source", "Base Withholding Tax", "Additional Withholding"
+      ])
+      expect(csv[10]).to eq([ "Category", "Amount" ])
+      expect(csv[20]).to eq([ "Field", "Tax Treatment", "Category", "Paid By", "Employees", "Amount" ])
+      expect(csv[12]).to eq([ "Withholding Tax", "170.33" ])
+      expect(csv.last(3)).to eq([ [ "Payroll Source", scope ], [ "Base Withholding Tax", "120.11" ], [ "Additional Withholding", "50.22" ] ])
 
       get "/api/v1/admin/reports/tax_summary_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include(scope, "Base Withholding Tax $120.11", "Additional Withholding $50.22", "Withholding Tax $170.33")
+      expect(pdf).to match(/Withholding Tax \$170\.33.*Total Employment Taxes.*Payroll Source — #{Regexp.escape(scope)}.*Base Withholding Tax \$120\.11.*Additional Withholding \$50\.22/)
 
       get "/api/v1/admin/reports/tax_summary_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
-      expect(workbook.sheet("Summary").to_a.to_h).to include(
-        "Withholding tax" => totals.fetch("withholding_tax"),
-        "Base withholding tax" => totals.fetch("base_withholding_tax"),
-        "Additional withholding" => totals.fetch("additional_withholding")
-      )
-      expect(workbook.sheet("Report Info").to_a.to_h).to include("Source handling" => scope)
+      rows = workbook.sheet("Summary").to_a
+      expect(rows.map(&:first)).to eq([
+        "Category", "Gross wages", "Withholding tax", "Social security employee", "Social security employer",
+        "Medicare employee", "Medicare employer", "Total employment taxes", "Payroll Source",
+        "Base Withholding Tax", "Additional Withholding"
+      ])
+      expect(rows[2]).to eq([ "Withholding tax", 170.33 ])
+      expect(rows.last(3)).to eq([ [ "Payroll Source", scope ], [ "Base Withholding Tax", 120.11 ], [ "Additional Withholding", 50.22 ] ])
 
       get "/api/v1/admin/reports/tax_summary", params: { year: 2026, quarter: 1 }
       expect(response.parsed_body.dig("report", "totals", "withholding_tax")).to eq(0)
       expect(response.parsed_body.dig("report", "source", "statement")).to eq(report.dig("source", "statement"))
+
+      get "/api/v1/admin/reports/tax_summary", params: { year: 2026, quarter: 2 }
+      expect(response.parsed_body.dig("report", "source", "statement")).to be_nil
     end
 
     it "uses dedicated employer tax fields in totals" do
@@ -1788,12 +1802,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         employer_medicare_tax: 14.50
       )
 
+      create_locked_historical_paycheck(employee: nil, suffix: "prior-tax-scope",
+        pay_date: Date.new(2026, 2, 13), source_system: "prior_provider", gross_pay: 350)
+
       get "/api/v1/admin/reports/employer_liability", params: { year: 2026, quarter: 1 }
       expect(response).to have_http_status(:ok)
       report = response.parsed_body.fetch("report")
       expect(report.fetch("type")).to eq("employer_liability")
       scope = report.dig("source", "statement")
-      expect(scope).to eq("Payroll run in Cornerstone only; QuickBooks history not included.")
+      expect(scope).to eq("Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT and $350.00 in gross wages.")
       totals = report.fetch("totals")
       expect(totals.fetch("withholding_tax")).to eq(170.33)
       employer_total = totals.fetch("social_security_employer").to_d + totals.fetch("medicare_employer").to_d
@@ -1810,16 +1827,21 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         expect(response.headers["Content-Disposition"]).to include("employer_tax_liability_2026_q1#{extension}")
         case extension
         when ".csv"
-          rows = CSV.parse(response.body).to_h
-          expect(rows.fetch("Total Employer Tax Liability").to_d).to eq(employer_total)
-          expect(rows).to include("Payroll source" => scope)
+          expect(CSV.parse(response.body)).to eq([
+            [ "Category", "Amount" ],
+            [ "Gross Wages", "1000.0" ],
+            [ "Employer Social Security", "62.0" ],
+            [ "Employer Medicare", "14.5" ],
+            [ "Total Employer Tax Liability", employer_total.to_s ],
+            [ scope, nil ]
+          ])
         when ".pdf"
           pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
           expect(pdf).to include(scope, "Total Employer Tax Liability #{format('%.2f', employer_total)}")
         when ".xlsx"
-          rows = Roo::Excelx.new(StringIO.new(response.body)).sheet("Employer Liability").to_a.to_h
-          expect(rows.fetch("Total Employer Tax Liability").to_d).to eq(employer_total)
-          expect(rows).to include("Payroll source" => scope)
+          rows = Roo::Excelx.new(StringIO.new(response.body)).sheet("Employer Liability").to_a
+          expect(rows.fetch(4)).to eq([ "Total Employer Tax Liability", employer_total.to_f ])
+          expect(rows.last).to eq([ scope, nil ])
         end
       end
     end
@@ -1878,7 +1900,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(employee_row.fetch("custom_earnings_total").to_f).to eq(50.00)
       expect(employee_row).to include(
-        "total_hours" => 74.0,
+        "total_hours" => 70.0,
+        "combined_hours" => 74.0,
         "total_overtime_hours" => 4.0,
         "bonus" => 100.0,
         "straight_loan_deductions" => 25.0,
@@ -1899,7 +1922,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.00)
       expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(40.00)
       expect(report.fetch("company_totals")).to include(
-        "total_hours" => 74.0,
+        "total_hours" => 70.0,
+        "combined_hours" => 74.0,
         "total_overtime_hours" => 4.0,
         "bonus" => 100.0,
         "straight_loan_deductions" => 25.0,
@@ -2036,7 +2060,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         hours_worked: 30.11, overtime_hours: 5.22, holiday_hours: 1.33, pto_hours: 2.44)
       _batch, _period, paycheck = create_locked_historical_paycheck(
         employee: employee, suffix: "history-fit", pay_date: Date.new(2026, 4, 18),
-        hours_breakdown: [ { "label" => "Regular", "amount" => "30" }, { "label" => "OT", "amount" => "10" } ]
+        hours_breakdown: [ { "label" => "Hourly", "amount" => "30" }, { "label" => "Overtime (1.5x)", "amount" => "10" } ]
       )
       HistoricalPaycheckAdjustment.create!(
         company: company, historical_paycheck: paycheck, created_by: admin_user,
@@ -2058,11 +2082,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(hours).to eq([ 39.1, 40.0, -1.0 ])
       expect(history.pluck("hours_worked")).to eq([ 30.11, 30.0, nil ])
       expect(report.dig("summary", "withholding_tax").to_d).to eq(withholding.sum(&:to_d))
-      expect(report.dig("summary", "total_hours").to_d).to eq(hours.sum(&:to_d))
+      expect(history.pluck("overtime_hours")).to eq([ 5.22, 10.0, nil ])
+      expect(report.dig("summary", "total_hours")).to eq(60.11)
+      expect(report.dig("summary", "combined_hours").to_d).to eq(hours.sum(&:to_d))
 
       get "/api/v1/admin/reports/employee_pay_history_csv", params: params
       expect(response).to have_http_status(:ok)
       csv = CSV.parse(response.body, headers: true)
+      expect(csv.headers).to eq([
+        "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
+        "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay", "FIT", "SS Tax", "Medicare Tax",
+        "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
+      ])
+      expect(csv["Regular Hours"]).to eq([ "30.11", "30.0", nil ])
       expect(csv["FIT"].map(&:to_d)).to eq(withholding.map(&:to_d))
       expect(csv["Combined Hours"].map(&:to_d)).to eq(hours.map(&:to_d))
 
@@ -2077,37 +2109,60 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       rows = workbook.sheet("Pay History").to_a
       expect(rows.drop(1).map { |row| row.fetch(rows.first.index("FIT")) }).to eq(withholding)
       expect(rows.drop(1).map { |row| row.fetch(rows.first.index("Combined Hours")) }).to eq(hours)
-      expect(workbook.sheet("Period Summary").to_a.to_h).to include("FIT" => 250.33, "Combined Hours" => 78.1)
+      summary_rows = workbook.sheet("Period Summary").to_a
+      expect(summary_rows.map(&:first)).to eq([
+        "Metric", "Basis", "Start Date", "End Date", "Payroll Count", "Gross Pay", "Custom Earnings",
+        "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions", "Payroll Field Pre-Tax Deductions",
+        "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions", "FIT", "SS Tax", "Medicare Tax",
+        "401(k)", "Roth 401(k)", "Tips", "Tips Paid Out", "Bonus", "Total Deductions", "Custom Deductions", "Net Pay", "Combined Hours"
+      ])
+      expect(summary_rows.to_h).to include("FIT" => 250.33, "Combined Hours" => 78.1)
+      expect(rows.first).to eq(csv.headers)
     end
 
     it "counts combined hours consistently across native and imported payroll in summary exports" do
       native_item.update!(hours_worked: 30.11, overtime_hours: 5.22, holiday_hours: 1.33, pto_hours: 2.44)
       create_locked_historical_paycheck(
         employee: employee, suffix: "combined-hours", pay_date: Date.new(2026, 4, 18),
-        hours_breakdown: [ { "label" => "Regular", "amount" => "30" }, { "label" => "OT", "amount" => "10" } ]
+        hours_breakdown: [ { "label" => "Hourly", "amount" => "30" }, { "label" => "Overtime (1.5x)", "amount" => "10" } ]
       )
 
       params = { year: 2026 }
       get "/api/v1/admin/reports/ytd_summary", params: params
       expect(response).to have_http_status(:ok)
       report = response.parsed_body.fetch("report")
-      hours = report.dig("company_totals", "total_hours")
-      expect(hours).to eq(79.1)
-      expect(report.fetch("employees").sole).to include("total_hours" => hours, "total_overtime_hours" => 15.22)
+      expect(report.fetch("company_totals")).to include("total_hours" => 60.11, "combined_hours" => 79.1)
+      expect(report.fetch("employees").sole).to include("total_hours" => 60.11, "total_overtime_hours" => 15.22, "combined_hours" => 79.1)
 
       get "/api/v1/admin/reports/ytd_summary_csv", params: params
       expect(response).to have_http_status(:ok)
-      expect(CSV.parse(response.body, headers: true)["Total Hours"].map(&:to_f)).to eq([ hours ])
+      csv = CSV.parse(response.body, headers: true)
+      breakdown_headers = report.fetch("component_columns").map { |column| "Breakdown Already Included - #{column.fetch('label')}" }
+      expect(csv.headers).to eq([
+        "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
+        "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
+        "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
+        "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
+        "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
+        "401(k) After Tax Label in Source Pre-Tax Bucket", "Employer Social Security", "Employer Medicare",
+        "Other Employer Taxes", "Employer Taxes Total", "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match",
+        "Other Employer Contributions", "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost",
+        "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay",
+        "Non-Taxable Additions (Total)", *breakdown_headers, "Combined Hours"
+      ])
+      expect(csv["Total Hours"]).to eq([ "60.11" ])
+      expect(csv["Combined Hours"]).to eq([ "79.1" ])
 
       get "/api/v1/admin/reports/ytd_summary_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include("Total hours #{format('%.2f', hours)}")
+      expect(pdf).to include("Total hours 60.11", "Combined hours 79.10")
 
       get "/api/v1/admin/reports/ytd_summary_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
-      expect(workbook.sheet("Company Totals").to_a.to_h).to include("Total hours" => hours)
+      expect(workbook.sheet("Company Totals").to_a.to_h).to include("Total hours" => 60.11, "Combined hours" => 79.1)
+      expect(workbook.sheet("Payroll Summary").row(1)).to eq(csv.headers)
     end
 
     it "flags an employee and pay date present in both sources without silently dropping either paycheck" do

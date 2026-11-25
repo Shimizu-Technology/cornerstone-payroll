@@ -1,8 +1,6 @@
 import type { PayrollReportReviewWarning } from '@/services/api';
 import type { PayrollItem } from '../types';
 
-export const CORNERSTONE_TAX_REPORT_SCOPE = 'Payroll run in Cornerstone only; QuickBooks history not included.';
-
 // medicare_tax is the saved employee total, including Additional Medicare.
 // Keep signed correction amounts: clamping would hide historical reversals.
 export function payrollTaxSummary(item: Pick<PayrollItem, 'withholding_tax' | 'additional_withholding' | 'social_security_tax' | 'medicare_tax' | 'additional_medicare_tax'>): {
