@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -175,7 +175,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.datetime "updated_at", null: false
     t.bigint "financial_correction_link_id"
     t.jsonb "wire_payload", default: {}, null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "check_event_id" ], name: "index_aire_payroll_entry_acknowledgements_on_check_event_id"
     t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_72b0cfdc5e"
     t.index [ "delivered_at", "enqueued_at" ], name: "idx_aire_entry_ack_dispatch"
@@ -340,7 +340,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "reason"
     t.datetime "updated_at", null: false
     t.bigint "user_id"
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "check_number" ], name: "index_check_events_on_check_number"
     t.index [ "company_id", "payroll_item_id" ], name: "index_check_events_on_company_id_and_payroll_item_id"
     t.index [ "event_type" ], name: "index_check_events_on_event_type"
@@ -937,7 +937,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.datetime "updated_at", null: false
     t.decimal "withholding_tax", precision: 16, scale: 2, default: "0.0"
     t.integer "year", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "department_id" ], name: "index_department_ytd_totals_on_company_id_and_department_id"
     t.index [ "department_id", "year" ], name: "index_department_ytd_totals_on_department_id_and_year", unique: true
     t.index [ "department_id" ], name: "index_department_ytd_totals_on_department_id"
@@ -963,7 +963,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.date "settled_on", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_6413410598"
     t.index [ "payroll_item_id" ], name: "index_direct_deposit_payment_confirmations_on_payroll_item_id", unique: true
     t.index [ "user_id" ], name: "index_direct_deposit_payment_confirmations_on_user_id"
@@ -1224,7 +1224,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "employee_id", null: false
     t.boolean "is_percentage", default: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_id" ], name: "index_employee_deductions_on_company_id_and_employee_id"
     t.index [ "deduction_type_id" ], name: "index_employee_deductions_on_deduction_type_id"
     t.index [ "employee_id", "deduction_type_id" ], name: "idx_employee_deductions_unique", unique: true
@@ -1420,7 +1420,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.decimal "percentage", precision: 8, scale: 4
     t.date "start_date"
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_id" ], name: "index_employee_payroll_fields_on_company_id_and_employee_id"
     t.index [ "employee_id", "active" ], name: "idx_employee_payroll_fields_employee_active"
     t.index [ "employee_id", "payroll_field_definition_id" ], name: "idx_employee_payroll_fields_unique", unique: true
@@ -1572,7 +1572,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "occupation_code", limit: 3, null: false
     t.string "source"
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_id" ], name: "idx_on_company_id_employee_id_0a2ee4b589"
     t.index [ "employee_id", "occupation_code", "effective_from" ], name: "idx_employee_tipped_occupations_unique_start", unique: true
     t.index [ "employee_id" ], name: "index_employee_tipped_occupations_on_employee_id"
@@ -1642,7 +1642,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "label", null: false
     t.decimal "rate", precision: 12, scale: 6
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_id" ], name: "index_employee_wage_rates_on_company_id_and_employee_id"
     t.index [ "employee_id", "label" ], name: "index_employee_wage_rates_on_employee_id_and_label", unique: true
     t.index [ "employee_id" ], name: "index_employee_wage_rates_on_employee_id"
@@ -1723,7 +1723,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.datetime "updated_at", null: false
     t.decimal "withholding_tax", precision: 14, scale: 2, default: "0.0"
     t.integer "year", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_id" ], name: "index_employee_ytd_totals_on_company_id_and_employee_id"
     t.index [ "employee_id", "year" ], name: "index_employee_ytd_totals_on_employee_id_and_year", unique: true
     t.index [ "employee_id" ], name: "index_employee_ytd_totals_on_employee_id"
@@ -2067,7 +2067,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "source_type"
     t.string "title", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "general_transmittal_id" ], name: "idx_on_company_id_general_transmittal_id_f3b5b33f2a"
     t.index [ "general_transmittal_id", "position" ], name: "idx_general_transmittal_items_on_transmittal_position"
     t.index [ "general_transmittal_id", "source_key" ], name: "idx_transmittal_items_on_transmittal_source_key", unique: true, where: "(source_key IS NOT NULL)"
@@ -2903,7 +2903,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.date "transaction_date", null: false
     t.string "transaction_type", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_loan_id" ], name: "index_loan_transactions_on_company_id_and_employee_loan_id"
     t.index [ "employee_loan_id", "pay_period_id" ], name: "idx_loan_txns_on_loan_and_pp"
     t.index [ "employee_loan_id", "payroll_item_id" ], name: "idx_loan_txns_unique_payroll_payment", unique: true, where: "(((source)::text = 'payroll'::text) AND ((transaction_type)::text = 'payment'::text) AND (payroll_item_id IS NOT NULL))"
@@ -2925,7 +2925,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "edited_by_id"
     t.bigint "non_employee_check_id", null: false
     t.string "reason"
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "non_employee_check_id" ], name: "idx_on_company_id_non_employee_check_id_0192afa711"
     t.index [ "created_at" ], name: "index_non_employee_check_edits_on_created_at"
     t.index [ "edited_by_id" ], name: "index_non_employee_check_edits_on_edited_by_id"
@@ -2941,7 +2941,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "reference_number"
     t.string "service_period"
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "non_employee_check_id" ], name: "idx_on_company_id_non_employee_check_id_26324526eb"
     t.index [ "non_employee_check_id", "position" ], name: "idx_ne_check_line_items_on_check_position"
     t.index [ "non_employee_check_id" ], name: "idx_ne_check_line_items_on_check"
@@ -3105,7 +3105,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "pay_period_id", null: false
     t.string "reason"
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "pay_period_id" ], name: "idx_on_company_id_pay_period_id_239402a9b7"
     t.index [ "employee_id" ], name: "index_pay_period_excluded_employees_on_employee_id"
     t.index [ "excluded_by_id" ], name: "index_pay_period_excluded_employees_on_excluded_by_id"
@@ -3213,7 +3213,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.jsonb "source_evidence", default: {}, null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "pay_period_id" ], name: "idx_on_company_id_pay_period_id_cf5f1a862c"
     t.index [ "employee_id" ], name: "index_payroll_entry_resolutions_on_employee_id"
     t.index [ "pay_period_id", "employee_id" ], name: "idx_entry_resolution_regular", unique: true, where: "(payroll_standing_change_id IS NULL)"
@@ -3420,7 +3420,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.jsonb "unmatched_pdf_names", default: []
     t.datetime "updated_at", null: false
     t.jsonb "validation_errors", default: []
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "pay_period_id" ], name: "index_payroll_imports_on_company_id_and_pay_period_id"
     t.index [ "pay_period_id", "status" ], name: "index_payroll_imports_on_pay_period_id_and_status"
     t.index [ "pay_period_id" ], name: "index_payroll_imports_on_pay_period_id"
@@ -3447,7 +3447,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "verification_error"
     t.string "verification_status", default: "legacy_unverified", null: false
     t.datetime "verified_at"
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "payroll_intake_session_id" ], name: "idx_on_company_id_payroll_intake_session_id_bb029a98a5"
     t.index [ "payroll_intake_session_id", "document_type" ], name: "idx_payroll_intake_documents_session_type"
     t.index [ "payroll_intake_session_id", "position" ], name: "idx_payroll_intake_documents_session_position", unique: true
@@ -3491,7 +3491,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.decimal "week1_tips", precision: 10, scale: 2, default: "0.0", null: false
     t.decimal "week2_hours", precision: 8, scale: 2, default: "0.0", null: false
     t.decimal "week2_tips", precision: 10, scale: 2, default: "0.0", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "applied_payroll_item_id" ], name: "index_payroll_intake_rows_on_applied_payroll_item_id"
     t.index [ "company_id", "payroll_intake_session_id" ], name: "idx_on_company_id_payroll_intake_session_id_75cec87bce"
     t.index [ "dispositioned_by_id" ], name: "idx_payroll_intake_rows_dispositioned_by"
@@ -3563,7 +3563,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "payroll_item_id", null: false
     t.string "reporting_group"
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_d57c3ce395"
     t.index [ "deduction_type_id" ], name: "index_payroll_item_deductions_on_deduction_type_id"
     t.index [ "employee_loan_id" ], name: "index_payroll_item_deductions_on_employee_loan_id"
@@ -3581,7 +3581,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "payroll_item_id", null: false
     t.decimal "rate", precision: 12, scale: 6
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "payroll_item_id" ], name: "index_payroll_item_earnings_on_company_id_and_payroll_item_id"
     t.index [ "payroll_item_id", "category", "label" ], name: "idx_pi_earnings_on_pi_cat_label", unique: true
     t.index [ "payroll_item_id" ], name: "index_payroll_item_earnings_on_payroll_item_id"
@@ -3618,7 +3618,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "source", default: "employee_default", null: false
     t.string "tax_treatment", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_f881080e0a"
     t.index [ "payroll_field_definition_id" ], name: "idx_payroll_item_field_entries_definition"
     t.index [ "payroll_item_id", "payroll_field_definition_id" ], name: "idx_payroll_item_field_entries_unique_definition", unique: true
@@ -4012,7 +4012,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "staff_workbook_document_id"
     t.bigint "staff_workbook_attached_by_id"
     t.datetime "staff_workbook_attached_at"
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "payroll_submission_id" ], name: "idx_on_company_id_payroll_submission_id_d3a93dc0e2"
     t.index [ "current_submission_id" ], name: "index_payroll_submission_imports_on_current_submission_id"
     t.index [ "payroll_import_id" ], name: "index_payroll_submission_imports_on_payroll_import_id"
@@ -4382,7 +4382,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "reviewed_by_name"
     t.bigint "timecard_id", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "timecard_id" ], name: "index_punch_entries_on_company_id_and_timecard_id"
     t.index [ "timecard_id" ], name: "index_punch_entries_on_timecard_id"
   end
@@ -4721,7 +4721,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.string "source_category_key", null: false
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "company_id", "employee_id" ], name: "idx_on_company_id_employee_id_28efca9222"
     t.index [ "employee_id" ], name: "index_time_tracking_earning_choices_on_employee_id"
     t.index [ "employee_wage_rate_id" ], name: "index_time_tracking_earning_choices_on_employee_wage_rate_id"
@@ -4793,7 +4793,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "predecessor_payroll_item_id", null: false
     t.string "request_digest", null: false
     t.datetime "updated_at", null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "command_id" ], name: "index_time_tracking_financial_correction_links_on_command_id", unique: true
     t.index [ "company_id", "payroll_item_id" ], name: "idx_on_company_id_payroll_item_id_b591709100"
     t.index [ "event_id" ], name: "index_time_tracking_financial_correction_links_on_event_id", unique: true
@@ -4834,7 +4834,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
     t.bigint "time_tracking_source_id", null: false
     t.datetime "updated_at", null: false
     t.jsonb "warnings", default: [], null: false
-    t.bigint "company_id"
+    t.bigint "company_id", null: false
     t.index [ "applied_by_id" ], name: "index_time_tracking_imports_on_applied_by_id"
     t.index [ "company_id", "pay_period_id" ], name: "index_time_tracking_imports_on_company_id_and_pay_period_id"
     t.index [ "pay_period_id", "time_tracking_source_id", "start_date", "end_date", "source_payload_hash" ], name: "idx_time_tracking_imports_idempotency", unique: true
