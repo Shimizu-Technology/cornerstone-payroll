@@ -17,7 +17,7 @@ module EmployeeLinks
       new(...).call
     end
 
-    def initialize(user:, token:, code:, date_of_birth:, ssn_last4:, azp: nil, request: nil, session: nil,
+    def initialize(user:, token:, code:, date_of_birth:, ssn_last4:, azp: nil, request: nil, terms_version: nil, session: nil,
       clerk: ClerkInvitationService.new)
       @user = user
       # The verified Clerk token payload (Reactivate checks when it was issued).
@@ -25,6 +25,7 @@ module EmployeeLinks
       @check = { token: token, code: code, date_of_birth: date_of_birth, ssn_last4: ssn_last4 }
       @azp = azp
       @request = request
+      @terms_version = terms_version
       @clerk = clerk
     end
 
@@ -63,7 +64,7 @@ module EmployeeLinks
       link.update!(user: @user, status: "active", activated_at: Time.current, invite_token_digest: nil,
         invite_code_digest: nil, failed_activation_attempts: 0, activation_locked_at: nil, activation_locked_until: nil)
       EmployeeLinks.audit!(link, audit_action, user: @user, request: @request,
-        metadata: { via: link.invite_delivery, routed_to_login: link.claim_user_id.present? })
+        metadata: { via: link.invite_delivery, routed_to_login: link.claim_user_id.present?, terms_version: @terms_version }.compact)
     end
 
     def audit_action

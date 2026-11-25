@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { CircleHelp, Mail, MessageSquare, Phone } from 'lucide-react';
 import { EmployeeApiError } from './api';
 import { askManager, possessive } from './brand';
-import { TERMS } from './config';
+import { useEmployeeTerms } from './terms';
 import type { HelpContact } from './contracts';
 import { useBrand, useReadySession } from './contexts';
 import { formatPhone, smsHref, telHref } from './format';
@@ -110,6 +110,7 @@ function useHelpContacts(): { state: ContactsState; reload: () => void } {
 }
 
 export function HelpTab(): ReactElement {
+  const { terms } = useEmployeeTerms();
   const brand = useBrand();
   const { state, reload } = useHelpContacts();
   const company = brand.isFallback ? 'your employer' : brand.name;
@@ -144,11 +145,11 @@ export function HelpTab(): ReactElement {
             ))}
           </div>
         </Card>
-        {TERMS && (
+        {terms && (
           <Card title="Terms and privacy">
             <ul className="space-y-1">
-              <li><a className="emp-link" href={TERMS.termsUrl} target="_blank" rel="noreferrer">Employee App Terms</a></li>
-              <li><a className="emp-link" href={TERMS.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a></li>
+              <li><a className="emp-link" href={terms.termsUrl} target="_blank" rel="noreferrer">Employee App Terms</a></li>
+              <li><a className="emp-link" href={terms.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a></li>
             </ul>
           </Card>
         )}

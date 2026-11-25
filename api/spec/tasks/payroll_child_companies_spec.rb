@@ -15,6 +15,7 @@ RSpec.describe "Payroll child company tasks" do
   it "backfills a legacy row and prints its count using BATCH_SIZE" do
     item = create(:payroll_item)
     ApplicationRecord.connection.execute("ALTER TABLE check_events DISABLE TRIGGER fill_check_events_company_id")
+    ApplicationRecord.connection.change_column_null :check_events, :company_id, true
     id = CheckEvent.insert_all!([ { payroll_item_id: item.id, event_type: "printed", check_number: "123", effective_on: Date.current } ],
       returning: %w[id]).rows.sole.sole
     allow(ENV).to receive(:fetch).and_call_original

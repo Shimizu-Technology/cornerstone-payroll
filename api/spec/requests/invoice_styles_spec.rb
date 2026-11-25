@@ -191,7 +191,7 @@ RSpec.describe "Invoice style settings API", type: :request do
       get "/api/v1/admin/invoices/#{invoice.id}"
 
       expect(response.parsed_body.dig("invoice", "pdf_unprintable_text")).to eq([
-        { "field" => "Customer name", "characters" => [ "東", "京", "😀" ] },
+        { "field" => "Customer name", "characters" => [ "😀" ] },
         { "field" => "Line 1 description", "characters" => [ "U+0009" ] }
       ])
       post "/api/v1/admin/invoices/#{invoice.id}/preview_pdf"
@@ -200,7 +200,7 @@ RSpec.describe "Invoice style settings API", type: :request do
 
     it "refuses every issue path with a message naming the field and characters" do
       profile.update!(numbering_style: "continuing", next_invoice_number: 7055)
-      invoice = create_draft_for("東京 Trading")
+      invoice = create_draft_for("東京 Trading 😀")
       [
         -> { post "/api/v1/admin/invoices/#{invoice.id}/issue" },
         -> { post "/api/v1/admin/invoices/#{invoice.id}/generate_pdf" },
@@ -208,7 +208,7 @@ RSpec.describe "Invoice style settings API", type: :request do
       ].each do |issue|
         expect { issue.call }.not_to change(InvoiceArtifact, :count)
         expect(response).to have_http_status(:unprocessable_entity)
-        expect(response.parsed_body.fetch("errors").join).to include("Customer name (東 京)", "Line 1 description (U+0009)",
+        expect(response.parsed_body.fetch("errors").join).to include("Customer name (😀)", "Line 1 description (U+0009)",
                                                                        "empty boxes")
       end
 

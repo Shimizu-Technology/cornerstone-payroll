@@ -53,11 +53,11 @@ The screen shows the observed guard state and the database state side by side, a
 
 ### Loading the Terms version
 
-The sign-up screen still reads the Terms version from the employee build (`VITE_EMPLOYEE_TERMS_*`). The server copy exists so the switch can check counsel's status. Record each version, and keep it the same as the build. (Follow-up: serve the current version from the API so the employee web shows exactly the wording readiness checked.)
+Sign-up and claim use the current server-published Terms. Publish each immutable version with the exact served Terms file so the API can return its SHA-256 digest.
 
 ```bash
 VERSION=2026-12-01-draft STATUS=draft TERMS_URL=https://... PRIVACY_URL=https://... \
-  bin/rails employee_terms:publish
+  TERMS_FILE=terms.html bin/rails employee_terms:publish
 ```
 
 Rows can't be edited or deleted. Counsel's approval is a new row with `STATUS=approved`.

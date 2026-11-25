@@ -31,10 +31,13 @@ module Api
 
           return render_unavailable if WriteMaintenance.enabled?
 
+          terms_version = require_current_employee_terms
+          return unless terms_version
+
           link_check_started!
           result = EmployeeLinks::Activate.call(
             **link_check_params, email: link_body_param(:email), use_for_notices: link_body_param(:use_for_notices),
-            request: request
+            request: request, terms_version: terms_version
           )
           wait_for_response_floor unless result.outcome == :sign_up
           case result.outcome

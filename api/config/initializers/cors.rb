@@ -19,9 +19,13 @@ module PayrollCors
     return false unless TenantSubdomainRegistry::ORIGIN_PATTERN.match?(origin)
 
     path = TenantSubdomainRegistry.cors_path(env.fetch("PATH_INFO"))
-    if TenantSubdomainRegistry::BRANDING_PATH.match?(path)
+    public_methods = case path
+    when TenantSubdomainRegistry::BRANDING_PATH then TenantSubdomainRegistry::BRANDING_METHODS
+    when TenantSubdomainRegistry::TERMS_PATH then TenantSubdomainRegistry::TERMS_METHODS
+    end
+    if public_methods
       method = env["HTTP_ACCESS_CONTROL_REQUEST_METHOD"] if env["REQUEST_METHOD"] == "OPTIONS"
-      return false unless TenantSubdomainRegistry::BRANDING_METHODS.include?(method || env["REQUEST_METHOD"])
+      return false unless public_methods.include?(method || env["REQUEST_METHOD"])
     elsif !TenantSubdomainRegistry::PORTAL_PATH.match?(path)
       return false
     end
@@ -44,6 +48,8 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
 
     resource TenantSubdomainRegistry::BRANDING_PATH,
       headers: :any, methods: TenantSubdomainRegistry::BRANDING_METHODS.map(&:downcase), credentials: false, max_age: 0
+    resource TenantSubdomainRegistry::TERMS_PATH,
+      headers: :any, methods: TenantSubdomainRegistry::TERMS_METHODS.map(&:downcase), credentials: false, max_age: 0
     resource TenantSubdomainRegistry::PORTAL_PATH, headers: :any, methods: PayrollCors::METHODS,
       expose: PayrollCors::EXPOSED_HEADERS, credentials: true, max_age: 0
   end

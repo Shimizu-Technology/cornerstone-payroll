@@ -366,11 +366,11 @@ RSpec.describe "Api::V1::Admin::Checks", type: :request do
     end
 
     it "explains which name to fix when the check can't print it" do
-      item_a.employee.update!(first_name: "小明", last_name: "王")
+      item_a.employee.update!(first_name: "Test", last_name: "🦄")
       get "/api/v1/admin/payroll_items/#{item_a.id}/check"
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body).to include("code" => "unprintable_name")
-      expect(response.parsed_body["error"]).to include("小明 王", "Latin letters")
+      expect(response.parsed_body["error"]).to include("Test 🦄", "Latin letters")
     end
 
     it "returns 422 for an uncommitted pay period" do

@@ -70,7 +70,7 @@ module InvoicePdf
       families.uniq.each do |family|
         pdf.font_families[family] = available?(family) ? styles_for(family) : pdf.font_families[FALLBACK]
       end
-      pdf.fallback_fonts([ FALLBACK ])
+      pdf.fallback_fonts([ FALLBACK, *pdf.fallback_fonts ].uniq)
       pdf
     end
 
