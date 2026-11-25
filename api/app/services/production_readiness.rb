@@ -22,12 +22,15 @@ class ProductionReadiness
     IPAddr.new("fe80::/10")
   ].freeze
 
-  Check = Data.define(:name, :passed, :detail) do
-    # An advisory uses nil because it was not verified and does not block release.
-    def status
-      return "WARN" if passed.nil?
+  Check = Data.define(:name, :passed, :detail, :advisory) do
+    def initialize(name:, passed:, detail:, advisory: false)
+      super(name: name, passed: passed, detail: detail, advisory: advisory)
+    end
 
-      passed ? "PASS" : "FAIL"
+    def status
+      return "PASS" if passed
+
+      advisory ? "WARN" : "FAIL"
     end
   end
 
@@ -46,7 +49,11 @@ class ProductionReadiness
     end
 
     def failures
-      checks.select { |check| check.passed == false }
+      checks.reject { |check| check.passed || check.advisory }
+    end
+
+    def warnings
+      checks.select { |check| !check.passed && check.advisory }
     end
 
     def as_json(*)
@@ -139,11 +146,13 @@ class ProductionReadiness
   end
 
   def resend_webhook_check
-    configured = env["RESEND_WEBHOOK_SECRET"].present?
+    secret = env["RESEND_WEBHOOK_SECRET"].to_s
+    configured = secret.start_with?("whsec_") && secret.length > "whsec_".length
     Check.new(
       name: "Resend webhook signing secret is configured",
-      passed: configured ? true : nil,
-      detail: configured ? "configured" : "Set RESEND_WEBHOOK_SECRET to receive W-2 notice delivery and bounce updates"
+      passed: configured,
+      advisory: true,
+      detail: configured ? "configured" : "Set RESEND_WEBHOOK_SECRET to the signing secret from the Resend webhook details (starts with whsec_)"
     )
   end
 

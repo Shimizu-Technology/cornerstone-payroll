@@ -231,11 +231,11 @@ export function YearEndChecklist(): ReactElement {
             </ol>
 
             {canManageCopies && (
-              <EmployeeW2Copies key={scope} companyId={companyId} companyName={checklist.company.name} year={year}
+              <EmployeeW2Copies key={`w2-copies:${scope}`} companyId={companyId} companyName={checklist.company.name} year={year}
                 canWrite={canWriteCompany(activeCompany, 'manage_client_administration')} checklistLoading={loading} />
             )}
 
-            <PayrollHistoryReview key={scope} companyId={companyId} year={year} onSaved={onSaved} onRefresh={onRefresh} />
+            <PayrollHistoryReview key={`payroll-history:${scope}`} companyId={companyId} year={year} onSaved={onSaved} onRefresh={onRefresh} />
 
             {(checklist.files_w2 || checklist.files_1099) && (
               <Card>

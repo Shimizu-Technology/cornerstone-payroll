@@ -6,7 +6,7 @@ const company = { id: 6, name: 'Demo Clockwork Bakery', active: true, test_works
 const copiesPath = '/api/v1/admin/employee_tax_forms';
 const person = 'Fictional Worker A';
 const posted: EmployeeTaxFormCopy = {
-  id: 51, employee_id: 71, employee_name: person, status: 'posted', posted_at: '2027-01-22T22:00:00Z', withdrawal_note: null,
+  id: 51, employee_id: 71, employee_name: person, status: 'posted', revision: 1, withdrawn_at: null, withdrawn_by: null, posted_at: '2027-01-22T22:00:00Z', withdrawal_note: null,
   inputs_changed_since_posting: true, notice: { status: 'sent', delivery_status: 'bounced' },
 };
 
@@ -57,7 +57,7 @@ for (const width of [390, 1280]) {
       expect(request.postDataJSON()).toEqual({ reason: 'Year-end figures were corrected' });
       withdrawAttempts += 1;
       if (withdrawAttempts === 1) return json(route, { error: 'Could not withdraw the copy. Try again.' }, 422);
-      const withdrawn = { ...posted, status: 'withdrawn' as const, inputs_changed_since_posting: false, withdrawal_note: 'Year-end figures were corrected' };
+      const withdrawn = { ...posted, status: 'withdrawn' as const, withdrawn_at: '2027-01-23T23:00:00Z', withdrawn_by: 'Demo Staff Reviewer', inputs_changed_since_posting: false, withdrawal_note: 'Year-end figures were corrected' };
       listing.documents[0] = withdrawn;
       return json(route, { document: withdrawn });
     });
@@ -94,12 +94,12 @@ for (const width of [390, 1280]) {
     listing.blocker_message = 'Mark the W-2s ready on the current figures first.';
     listing.documents = [
       posted,
-      { ...posted, id: 52, employee_name: 'Fictional Worker B', inputs_changed_since_posting: false, notice: { status: 'skipped', delivery_status: 'unknown' } },
-      { ...posted, id: 53, employee_name: 'Fictional Worker C', inputs_changed_since_posting: false, notice: { status: 'sent', delivery_status: 'unknown' } },
-      { ...posted, id: 54, employee_name: 'Fictional Worker D', inputs_changed_since_posting: false, notice: null },
+      { ...posted, id: 52, employee_id: 72, employee_name: 'Fictional Worker B', inputs_changed_since_posting: false, notice: { status: 'skipped', delivery_status: 'unknown' } },
+      { ...posted, id: 53, employee_id: 73, employee_name: 'Fictional Worker C', inputs_changed_since_posting: false, notice: { status: 'sent', delivery_status: 'unknown' } },
+      { ...posted, id: 54, employee_id: 74, employee_name: 'Fictional Worker D', inputs_changed_since_posting: false, notice: null },
     ];
     await page.getByRole('button', { name: 'Refresh list' }).click();
-    for (const label of ['Bounced', 'Skipped', 'Sent · Delivery unknown', 'Unknown']) {
+    for (const label of ['Bounced', 'Skipped', 'Sent · Delivery unknown', 'Not scheduled yet']) {
       await expect(page.getByText(new RegExp(`Email notice: ${label}$`))).toBeVisible();
     }
     await expect(page.getByText('W-2 figures changed since posting.')).toBeVisible();

@@ -360,17 +360,22 @@ RSpec.describe ProductionReadiness do
     expect(report.checks.length).to eq(21)
   end
 
-  it "warns when the Resend webhook secret is blank and reports only its presence when set" do
+  it "warns when the Resend webhook secret is blank or malformed and reports only its format" do
     name = "Resend webhook signing secret is configured"
-    env["RESEND_WEBHOOK_SECRET"] = " "
+    [ "", "fixture-signing-value", "whsec_" ].each do |secret|
+      env["RESEND_WEBHOOK_SECRET"] = secret
+      report = readiness.run(live: false)
+
+      expect(report).to be_passed
+      expect(report.warnings.map(&:name)).to eq([ name ])
+      expect(report.as_json[:checks]).to include(a_hash_including(name: name, passed: false, advisory: true, status: "WARN", detail: a_string_including("starts with whsec_")))
+    end
+
+    env["RESEND_WEBHOOK_SECRET"] = "whsec_fixture-signing-value"
     report = readiness.run(live: false)
-
-    expect(report).to be_passed
-    expect(report.as_json[:checks]).to include(a_hash_including(name: name, passed: nil, status: "WARN"))
-
-    env["RESEND_WEBHOOK_SECRET"] = "fixture-signing-value"
-    evidence = readiness.run(live: false).as_json
-    expect(evidence[:checks]).to include(a_hash_including(name: name, passed: true, status: "PASS"))
+    evidence = report.as_json
+    expect(report.warnings).to be_empty
+    expect(evidence[:checks]).to include(a_hash_including(name: name, passed: true, advisory: true, status: "PASS"))
     expect(evidence.to_json).not_to include(env.fetch("RESEND_WEBHOOK_SECRET"))
   end
 
