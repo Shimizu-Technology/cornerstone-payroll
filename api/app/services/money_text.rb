@@ -13,7 +13,7 @@ module MoneyText
   end
 
   def self.cents(value)
-    value.nil? ? 0.to_d : value.to_d.round(2)
+    value.nil? ? 0.to_d : value.to_d.round(2, BigDecimal::ROUND_HALF_UP)
   end
   private_class_method :cents
 end

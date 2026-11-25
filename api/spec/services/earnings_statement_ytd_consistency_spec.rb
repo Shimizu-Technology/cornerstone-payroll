@@ -156,6 +156,26 @@ RSpec.describe "Earnings statement YTD consistency" do
       ytd_withholding_tax: later.withholding_tax + earlier.withholding_tax, ytd_net: later.net_pay + earlier.net_pay)
   end
 
+  it "refreshes an employee's later snapshots in a fixed number of queries" do
+    periods = (0..6).map { |index| committed_period(Date.new(2026, 1, 16) + (14 * index)) }
+    other = create(:employee, company: company, first_name: "Sam", last_name: "Sample")
+    later = periods.map { |period| item_for(period) }.drop(1)
+    periods.first(3).each { |period| item_for(period, worker: other) }
+    statements = lambda do |worker|
+      total = 0
+      counter = ->(*, payload) { total += 1 unless payload[:cached] || payload[:name].in?(%w[SCHEMA TRANSACTION]) }
+      ActiveSupport::Notifications.subscribed(counter, "sql.active_record") do
+        PayrollYtdSnapshotRefresh.after(pay_period: periods.first, employee_ids: [ worker.id ])
+      end
+      total
+    end
+
+    # The first refresh writes each later snapshot; an unchanged one writes none.
+    [ employee, other ].each { |worker| statements.call(worker) }
+    expect(later.map { |item| item.reload.ytd_gross }).to eq((2..7).map { |checks| 1_000.to_d * checks })
+    expect(statements.call(employee)).to eq(statements.call(other))
+  end
+
   it "keeps itemized 401(k) contributions in the retirement snapshot after a pay date correction" do
     period = committed_period(Date.new(2026, 6, 19))
     item = item_for(period, retirement_payment: 0)
@@ -213,6 +233,18 @@ RSpec.describe "Earnings statement YTD consistency" do
     expect(PayStubGenerator.new(item).statement.fetch(:taxes)).to eq([])
     expect(text).not_to include("Social Security", "Medicare", "Federal/Guam")
     expect(text).to include("NET PAY", "$500.00")
+  end
+
+  it "keeps an employee paycheck's tax lines after the worker becomes a contractor" do
+    item = item_for(committed_period(Date.new(2026, 4, 17)), withholding_tax: 115.64, social_security_tax: 99.20,
+      medicare_tax: 23.20, net_pay: 761.96)
+    employee.update_columns(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "flat_fee")
+    generator = PayStubGenerator.new(item.reload)
+    text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
+
+    expect(generator.statement.fetch(:taxes).map { |row| row.fetch(:amount) }).to eq([ 115.64.to_d, 99.20.to_d, 23.20.to_d ])
+    expect(text).to include("Federal/Guam Income Tax $115.64", "Social Security (6.2%) $99.20", "Medicare (1.45%) $23.20",
+      "TOTAL DEDUCTIONS $238.04", "Federal/Guam Tax $115.64")
   end
 
   describe "printed money" do

@@ -9,8 +9,9 @@ class PayrollEarningsYtdBreakdown
   Row = Data.define(:label, :source_label, :category, :hours, :rate, :current, :ytd)
   Component = Data.define(:label, :category, :hours, :rate, :amount)
 
-  def initialize(payroll_item)
+  def initialize(payroll_item, sources: nil)
     @payroll_item = payroll_item
+    @sources = sources || PayrollStatementYtdSources.new(payroll_item)
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
     @company = payroll_item.company
@@ -88,28 +89,7 @@ class PayrollEarningsYtdBreakdown
   end
 
   def ytd_source_items
-    @ytd_source_items ||= begin
-      pay_date = pay_period.pay_date || Date.current
-      prior_periods = PayPeriod.reportable_for_company(company)
-        .where(pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
-        .where(
-          "pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)",
-          pay_date: pay_date,
-          period_id: pay_period.id
-        )
-      prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
-      items = employee.payroll_items.financially_reportable.reportable
-        .where(company_id: company.id, pay_period_id: prior_periods.select(:id))
-        .includes(:payroll_item_earnings, :payroll_item_field_entries)
-        .to_a
-
-      if payroll_item.payroll_included? &&
-          pay_period.correction_status.in?([ nil, "correction" ]) &&
-          (historical_cutoff.nil? || pay_date > historical_cutoff)
-        items << payroll_item
-      end
-      items
-    end
+    @sources.items
   end
 
   def historical_components
@@ -128,22 +108,7 @@ class PayrollEarningsYtdBreakdown
   end
 
   def historical_balance
-    @historical_balance ||= HistoricalEmployeeYtdBalance
-      .joins(:historical_ytd_bridge)
-      .where(
-        company_id: company.id,
-        employee_id: employee.id,
-        tax_year: (pay_period.pay_date || Date.current).year,
-        historical_ytd_bridges: { status: "applied" }
-      )
-      .where("historical_employee_ytd_balances.through_pay_date <= ?", pay_period.pay_date || Date.current)
-      .order(
-        through_pay_date: :desc,
-        "historical_ytd_bridges.applied_at" => :desc,
-        "historical_ytd_bridges.id" => :desc,
-        id: :desc
-      )
-      .first
+    @sources.historical_balance
   end
 
   def historical_cutoff
