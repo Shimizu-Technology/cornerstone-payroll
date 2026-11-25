@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
@@ -19,7 +20,7 @@ import { controlClassName, FIELD_LABEL } from '@/components/ui/field-styles';
 import { Textarea } from '@/components/ui/textarea';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath } from '@/lib/routes';
-import { formatDate, formatGuamDate, formatGuamDateTime } from '@/lib/utils';
+import { formatGuamDate, formatGuamDateTime } from '@/lib/utils';
 import { payrollGoLiveApi, type PayrollGoLivePayload, type PayrollGoLiveReview } from '@/services/api';
 
 type SourceTotals = {
@@ -316,7 +317,7 @@ export function PayrollGoLive(): ReactElement {
           <CardContent className="space-y-6">
             <form className="space-y-4" onSubmit={recordParallel}>
               <FieldSelect label="Cornerstone comparison pay run" value={payPeriodId} onChange={setPayPeriodId} disabled={!payload.permissions.can_record_parallel || sealed} required>
-                <option value="">Select a calculated or approved run</option>{payload.eligible_pay_periods.map((period) => <option key={period.id} value={period.id}>{formatDate(period.start_date)}–{formatDate(period.end_date)} · pay {formatDate(period.pay_date)}{period.parallel_run ? ' · already recorded' : ''}</option>)}
+                <option value="">Select a calculated or approved run</option>{payload.eligible_pay_periods.map((period) => <option key={period.id} value={period.id}>{formatDateRange(period.start_date, period.end_date)} · pay {formatDate(period.pay_date)}{period.parallel_run ? ' · already recorded' : ''}</option>)}
               </FieldSelect>
               {selectedPeriod && <div className="grid gap-3 sm:grid-cols-3"><Metric label="Cornerstone employees" value={String(selectedPeriod.employee_count)} /><Metric label="Cornerstone gross" value={money(selectedPeriod.gross_pay)} /><Metric label="Cornerstone net" value={money(selectedPeriod.net_pay)} /></div>}
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">

@@ -53,10 +53,17 @@ it('returns focus when a generating preview is cancelled and ignores its late PD
 });
 
 it('names the sign-off editor, contains focus, and returns to its opener on close or Escape', async (): Promise<void> => {
+ const entries = [{ name: 'Example, Avery', check_number: '101' }];
+ api.signoff.mockResolvedValue({
+  company_name: 'Synthetic',
+  entries,
+  saved_signoff: { entries, generated_at: '2026-11-20T14:38:52Z' },
+ });
  const user=userEvent.setup();render(<MemoryRouter><ReportsDownloadPanel payPeriodId={2} payPeriodStatus="committed" payDate="2026-10-15" /></MemoryRouter>);
  const row=screen.getByText('Check Sign-Off Sheet',{exact:true}).parentElement!.parentElement!;
  const trigger=within(row).getByRole('button',{name:'View'});await user.click(trigger);
  const dialog=await screen.findByRole('dialog',{name:'Edit Check Sign-Off Sheet'});
+ expect(await within(dialog).findByText('Last generated: Nov 21, 2026, 12:38 AM ChST')).toBeTruthy();
  await within(dialog).findByDisplayValue('Example, Avery');await waitFor(()=>expect(dialog.contains(document.activeElement)).toBe(true));
  expect(trigger.closest('[inert]')).not.toBeNull();await user.tab({shift:true});expect(dialog.contains(document.activeElement)).toBe(true);
  await user.click(within(dialog).getByRole('button',{name:'Close check sign-off editor'}));

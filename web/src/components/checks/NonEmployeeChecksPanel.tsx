@@ -14,7 +14,7 @@ import { DRT } from '@/lib/constants';
 import { NonEmployeeCheckEditModal } from './NonEmployeeCheckEditModal';
 import { NonEmployeeCheckHistory } from './NonEmployeeCheckHistory';
 import { Form500EditorModal } from '@/components/form500/Form500EditorModal';
-import { formatCurrency } from '@/lib/utils';
+import { formatGuamDate, formatCurrency } from '@/lib/utils';
 import { InlineCheckNumberField } from './InlineCheckNumberField';
 import { checkNumberValidationError } from './checkNumberDrafts';
 
@@ -686,7 +686,7 @@ export function NonEmployeeChecksPanel({ payPeriodId, companyId, payPeriodStatus
                         </div>
                         {check.memo && <span>{check.memo}</span>}
                         {check.reference_number && <span>Ref: {check.reference_number}</span>}
-                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{new Date(check.created_at).toLocaleDateString()}</span>
+                        <span>Created {check.created_by_name ? `by ${check.created_by_name} ` : ''}{formatGuamDate(check.created_at)}</span>
                         {check.check_type === 'grt' && (
                           <span className="text-amber-700">
                             GRT: confirm monthly receipts total, GuamTax filing/confirmation, and two printed return copies if paying in person.{' '}
