@@ -43,6 +43,12 @@ class PayrollStatementYtdBreakdown
     end
   end
 
+  # The earlier and current paychecks these YTD rows add up, for statement
+  # readers that must count exactly the same population.
+  def source_items
+    ytd_source_items
+  end
+
   # Legacy cached PDFs may still show these accountant-only warnings.
   # Downloads use this to regenerate affected employee statements.
   def review_warnings

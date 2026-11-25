@@ -135,6 +135,8 @@ class PayPeriodLifecycleService
       )
 
       apply_ytd_and_loan_effects!(committed_items)
+      # A run paid before already-committed runs adds to their YTD.
+      PayrollYtdSnapshotRefresh.after(pay_period: pay_period, employee_ids: committed_items.map(&:employee_id).uniq)
       PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
       assign_check_numbers!(committed_items)
       create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?

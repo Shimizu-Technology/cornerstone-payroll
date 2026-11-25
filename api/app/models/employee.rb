@@ -601,7 +601,7 @@ class Employee < ApplicationRecord
     )
   end
 
-  def ytd_totals_for_scope(scope, tax_year:, for_reporting: false)
+  def ytd_totals_for_scope(scope, tax_year:, for_reporting: false, historical_balance: :latest)
     columns = self.class.ytd_aggregate_columns_for_year(tax_year)
     select_list = columns.map { |key, sql| "#{sql} AS #{key}" }.join(", ")
     row = self.class.connection.select_one(scope.reselect(Arel.sql(select_list)).to_sql) || {}
@@ -610,7 +610,9 @@ class Employee < ApplicationRecord
       totals[key] = row[key.to_s].to_f
     end
     live_totals.merge!(PayrollRetirementTotals.for_scope(scope, for_reporting: for_reporting))
-    merge_historical_ytd(live_totals, tax_year)
+    return merge_historical_ytd(live_totals, tax_year) if historical_balance == :latest
+
+    merge_historical_ytd(live_totals, tax_year, historical_balance: historical_balance, preloaded: true)
   end
 
   # Calculate YTD gross from payroll items.
@@ -950,8 +952,16 @@ class Employee < ApplicationRecord
       "(pay_periods.pay_date < ?) OR (pay_periods.pay_date = ? AND pay_periods.id #{comparator} ?)",
       pay_date, pay_date, pay_period_id
     )
+    return ytd_totals_for_scope(scope, tax_year: year) unless for_reporting
 
-    ytd_totals_for_scope(scope, tax_year: year, for_reporting: for_reporting)
+    # Statements report the same population as their YTD breakdowns and W-2GU:
+    # no legacy-disposed rows, only an opening balance already paid by this
+    # date, and no live pay that balance already contains. Payroll
+    # calculation keeps the unfiltered totals.
+    balance = reportable_historical_ytd_balance(year, pay_date)
+    scope = scope.reportable
+    scope = scope.where("pay_periods.pay_date > ?", balance.through_pay_date) if balance
+    ytd_totals_for_scope(scope, tax_year: year, for_reporting: true, historical_balance: balance)
   end
 
   def historical_ytd_value(year, field)
@@ -965,6 +975,22 @@ class Employee < ApplicationRecord
     historical_employee_ytd_balances
       .joins(:historical_ytd_bridge)
       .where(tax_year: year, historical_ytd_bridges: { status: "applied" })
+      .order(
+        through_pay_date: :desc,
+        "historical_ytd_bridges.applied_at" => :desc,
+        "historical_ytd_bridges.id" => :desc,
+        id: :desc
+      )
+      .first
+  end
+
+  # The opening balance a statement paid on pay_date reports: the latest
+  # applied bridge balance dated on or before it, as the statement breakdowns use.
+  def reportable_historical_ytd_balance(year, pay_date)
+    historical_employee_ytd_balances
+      .joins(:historical_ytd_bridge)
+      .where(tax_year: year, historical_ytd_bridges: { status: "applied" })
+      .where("historical_employee_ytd_balances.through_pay_date <= ?", pay_date)
       .order(
         through_pay_date: :desc,
         "historical_ytd_bridges.applied_at" => :desc,

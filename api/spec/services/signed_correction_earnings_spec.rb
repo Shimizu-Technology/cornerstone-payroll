@@ -30,7 +30,7 @@ RSpec.describe SignedCorrectionEarnings do
     expect(disclosure[:earnings]).to include(hash_including(label: "Regular adjustment", amount: -25.to_d))
     expect(disclosure[:earnings].sum { |line| line[:amount] }).to eq(item.gross_pay)
     text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join("\n")
-    expect(text).to include("Regular adjustment", "-1.00", "$25.00", "$-25.00")
+    expect(text).to include("Regular adjustment", "-1.00", "$25.00", "-$25.00")
     expect(item.reload.attributes).to eq(before)
     expect(item.payroll_item_earnings.count).to eq(0)
   end
@@ -49,7 +49,7 @@ RSpec.describe SignedCorrectionEarnings do
     disclosure = PayrollItemDisclosure.new(item).as_json
     expect(disclosure[:earnings].sole[:amount]).to eq(-30.to_d)
     text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join("\n")
-    expect(text).to include("Taxable earnings adjustment", "$-30.00")
+    expect(text).to include("Taxable earnings adjustment", "-$30.00")
     expect(text).not_to include("Regular adjustment")
   end
 
