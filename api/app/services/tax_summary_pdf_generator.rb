@@ -115,7 +115,9 @@ class TaxSummaryPdfGenerator
     end
 
     pdf.fill_color TEXT_DARK
-    pdf.move_down 18
+    pdf.move_down 8
+    pdf.font_size(9) { pdf.text report.dig(:source, :statement) } if report.dig(:source, :statement).present?
+    pdf.move_down 12
   end
 
   # ─── Totals Block ───────────────────────────────────────────────────────────
@@ -135,6 +137,9 @@ class TaxSummaryPdfGenerator
       [ "Medicare Tax (Employer)",            fmt(totals[:medicare_employer]),           false ],
       [ "Total Employment Taxes",             fmt(totals[:total_employment_taxes]),      true ]
     ]
+
+    rows.insert(1, [ "Base Withholding Tax", fmt(totals[:base_withholding_tax]), false ]) if totals.key?(:base_withholding_tax)
+    rows.insert(2, [ "Additional Withholding", fmt(totals[:additional_withholding]), false ]) if totals.key?(:additional_withholding)
 
     table_data = rows.map { |label, value, highlight|
       bg = highlight ? HIGHLIGHT_BG : "FFFFFF"
@@ -201,7 +206,7 @@ class TaxSummaryPdfGenerator
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   def fmt(value)
-    format("$%.2f", value.to_f)
+    format("$%.2f", value.to_d)
   end
 
   def period_label(period)

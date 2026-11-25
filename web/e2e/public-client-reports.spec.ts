@@ -54,6 +54,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByRole('region', { name: 'Report catalog' })).toBeVisible();
     await expect(page.getByRole('option', { name: '2026-11-01 - 2026-11-14' })).toHaveCount(0);
     await expect(page.getByRole('option', { name: '2026-10-19 - 2026-11-01' })).toHaveCount(0);
+    const payrollScope = page.getByText('Payroll run in Cornerstone only; QuickBooks history not included.');
+    await expect(payrollScope).toHaveCount(2);
+    await expect(payrollScope.first()).toBeVisible();
+    await expect(payrollScope.last()).toBeVisible();
     await expect(page.getByText('Deductions & Contributions', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Export Payroll Summary by Employee' }).click();
     const download = page.waitForEvent('download');

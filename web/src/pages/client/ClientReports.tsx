@@ -1,3 +1,4 @@
+import { CORNERSTONE_TAX_REPORT_SCOPE } from '@/lib/payroll-tax-summary';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientReportCatalog } from './clientReportCatalog';
@@ -318,7 +319,12 @@ export function ClientReports() {
                 <div className="grid gap-3 md:grid-cols-2">
                   {clientReportCatalog.filter(report => report.group === group).map(report => <Card key={report.key}>
                     <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                      <p className="min-w-0 font-medium">{report.title}</p>
+                      <div className="min-w-0">
+                        <p className="font-medium">{report.title}</p>
+                        {(report.key === 'tax_summary' || report.key === 'employer_liability') && (
+                          <p className="mt-1 text-sm text-gray-600">{CORNERSTONE_TAX_REPORT_SCOPE}</p>
+                        )}
+                      </div>
                       <ReportDownloadMenu ariaLabel={`Export ${report.title}`} disabled={exporting !== null || (report.scope === 'period' && !selectedPayPeriodId) || (report.scope === 'employee' && !employeeId)} formats={('pdfOnly' in report ? ['pdf'] : ['pdf', 'xlsx']).map(format => ({
                         key: `${report.key}-${format}`, label: format === 'pdf' ? 'PDF' : 'Excel workbook',
                         description: report.title, kind: format === 'pdf' ? 'pdf' as const : 'spreadsheet' as const,

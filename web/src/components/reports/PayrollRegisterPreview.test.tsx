@@ -35,6 +35,7 @@ const report = {
     total_employer_contributions: 75,
     total_employer_payroll_cost: 2_325,
     total_withholding: 200,
+    total_additional_withholding: 25,
     total_social_security: 130.2,
     total_medicare: 30.45,
     total_retirement: 84,
@@ -83,6 +84,13 @@ describe('PayrollRegisterPreviewContent', () => {
     expect(screen.getByText('Employer cost').nextElementSibling?.textContent).toBe('$2,325.00');
     expect(screen.getAllByText('Straight Loan').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Installment Loan').length).toBeGreaterThan(0);
+  });
+
+  it('shows base and additional FIT separately in the summary', () => {
+    render(<PayrollRegisterPreviewContent report={report} />);
+
+    expect(screen.getAllByText('Base FIT')[0].nextElementSibling?.textContent).toBe('$200.00');
+    expect(screen.getAllByText('Additional FIT')[0].nextElementSibling?.textContent).toBe('$25.00');
   });
 
   it('makes rehearsal registers visibly test-only without labeling locked imports that way', () => {
