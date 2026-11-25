@@ -446,6 +446,47 @@ RSpec.describe "Employee app switch security" do
       expect(described_class).not_to have_been_enqueued
     end
 
+    it "gives a run that stalls between taking its lease and reloading it nothing once a newer attempt takes over" do
+      revocation = request!("sessions", login.id, user: login)
+      TenantScope.as_system(reason: "spec") { EmployeeAppClerkRevocation.enqueue!([ revocation.id ]) }
+      owner = owning_job(revocation)
+      clear_enqueued_jobs
+      allow(clerk).to receive(:revoke_user_sessions).and_return({ success: true, revoked: 1 })
+
+      # The stale run takes the lease, then pauses before reloading the row
+      # until its lease has run out, and a duplicate delivery of the same job
+      # (same job_id) takes a fresh lease meanwhile.
+      newer = nil
+      stalled = false
+      allow(EmployeeAppClerkRevocation).to receive(:leased_row).and_wrap_original do |original, *args|
+        unless stalled
+          stalled = true
+          travel(EmployeeAppClerkRevocation::ATTEMPT_LEASE + 1.minute) do
+            newer = EmployeeAppClerkRevocation.start_attempt!(revocation.id, job_id: owner.job_id)
+          end
+        end
+        original.call(*args)
+      end
+
+      owner.perform_now
+      # The stale run got no row, so it never read the newer token: it
+      # called nobody, recorded nothing, and left the newer lease in place.
+      expect(newer.held_lease).to be_present
+      expect(clerk).not_to have_received(:revoke_user_sessions)
+      expect(revocation.reload).to have_attributes(confirmed_at: nil, outcome: nil, last_error: nil, attempts: 2,
+        lease_token: newer.held_lease)
+      expect(revocation.leased_until).to be > Time.current
+      expect(AuditLog.where(action: described_class::CONFIRMED_ACTION, record_id: revocation.id)).to be_empty
+      expect(described_class).not_to have_been_enqueued
+
+      # The newer attempt keeps the token it generated, even across a reload,
+      # and still finishes and releases under it.
+      expect(newer.reload.held_lease).to eq(revocation.lease_token)
+      expect(newer.finish!(job_id: owner.job_id, lease_token: newer.held_lease) { |row| row.update!(last_error: "newer") }).to be(true)
+      expect(newer.release_lease!(newer.held_lease)).to eq(1)
+      expect(revocation.reload).to have_attributes(leased_until: nil, lease_token: nil, last_error: "newer")
+    end
+
     it "gives up only while no newer attempt holds the lease" do
       revocation = request!("sessions", login.id, user: login)
       newer = EmployeeAppClerkRevocation.start_attempt!(revocation.id, job_id: nil)
@@ -457,6 +498,33 @@ RSpec.describe "Employee app switch security" do
       TenantScope.as_system(reason: "spec") { job.give_up!(RevokeEmployeeAppClerkJob::RevocationFailed.new("nope")) }
       expect(revocation.reload).to have_attributes(attempts: 1, leased_until: nil, lease_token: nil)
       expect(revocation.gave_up_at).to be_present
+    end
+
+    it "cuts a Clerk call that trickles in past the pass deadline off, and reschedules the pass" do
+      stub_const("#{described_class}::PASS_DEADLINE", 0.2.seconds)
+      previous = ENV["CLERK_SECRET_KEY"]
+      ENV["CLERK_SECRET_KEY"] = "sk_test_synthetic"
+      allow(ClerkInvitationService).to receive(:new).and_call_original
+      real = ClerkInvitationService.new
+      allow(ClerkInvitationService).to receive(:new).and_return(real)
+      revocation = request!("sessions", login.id, user: login)
+      clear_enqueued_jobs
+      # Each piece arrives inside the socket read timeout; the whole never does.
+      stub_request(:get, "https://api.clerk.com/v1/sessions")
+        .with(query: { user_id: "user_employee_1", status: "active", limit: "100" })
+        .to_return do
+          100.times { sleep(0.02) }
+          { status: 200, body: "[]" }
+        end
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      described_class.perform_now(revocation.id)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
+      expect(revocation.reload).to have_attributes(confirmed_at: nil, gave_up_at: nil, attempts: 1, leased_until: nil,
+        lease_token: nil, last_error: described_class::DEADLINE_ERROR)
+      expect(enqueued_jobs.sole.fetch("exception_executions")).to eq("[ClerkInvitationService::DeadlineReached]" => 1)
+    ensure
+      ENV["CLERK_SECRET_KEY"] = previous
     end
 
     it "stops a pass at its deadline, inside the lease, and reschedules it to carry on" do

@@ -225,6 +225,60 @@ RSpec.describe ClerkInvitationService do
     expect(described_class.new.fetch_user("user_requested")).to be_nil
   end
 
+  describe "each Clerk call's total budget" do
+    let(:listing_url) { "https://api.clerk.com/v1/sessions" }
+    let(:query) { { user_id: "user_slow", status: "active", limit: "100" } }
+
+    # Clerk answers a little at a time, each piece inside the socket read
+    # timeout, for far longer than the call's budget.
+    def trickling_listing
+      stub_request(:get, listing_url).with(query: query).to_return do
+        50.times { sleep(0.02) }
+        { status: 200, body: "[]" }
+      end
+    end
+
+    def elapsed
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      yield
+      Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    end
+
+    it "cuts a call that trickles in past its own budget off, and fails closed" do
+      stub_const("ClerkInvitationService::REQUEST_BUDGET", 0.1.seconds)
+      trickling_listing
+      result = nil
+      expect(elapsed { result = described_class.new.revoke_user_sessions("user_slow") }).to be < 0.5
+      expect(result).to eq(success: false, error: "Could not list Clerk sessions")
+    end
+
+    it "cuts a call off at the pass deadline and ends the pass, rather than letting it run on" do
+      trickling_listing
+      expect(elapsed do
+        expect do
+          described_class.within_deadline(Time.current + 0.1.seconds) { described_class.new.revoke_user_sessions("user_slow") }
+        end.to raise_error(described_class::DeadlineReached)
+      end).to be < 0.5
+    end
+
+    it "refuses a response larger than the limit while it streams in" do
+      stub_const("ClerkInvitationService::MAX_RESPONSE_BYTES", 64)
+      big = Array.new(10) { |index| { id: "sess_big#{index}" } }.to_json
+      stub_request(:get, listing_url).with(query: query).to_return(status: 200, body: big)
+      expect(described_class.new.revoke_user_sessions("user_slow")).to eq(success: false, error: "Could not list Clerk sessions")
+
+      stub_request(:post, "https://api.clerk.com/v1/invitations/inv_big/revoke").to_return(status: 400, body: big)
+      expect(described_class.new.revoke_invitation("inv_big")).to include(success: false)
+    end
+
+    it "still reads an ordinary answer in full" do
+      page = [ { id: "sess_ok" } ]
+      stub_request(:get, listing_url).with(query: query).to_return({ status: 200, body: page.to_json }, { status: 200, body: "[]" })
+      stub_request(:post, "#{listing_url}/sess_ok/revoke").to_return(status: 200, body: "{}")
+      expect(described_class.new.revoke_user_sessions("user_slow")).to eq(success: true, revoked: 1)
+    end
+  end
+
   describe "#create_invitation logging" do
     let(:address) { "reviewer+manager@demo-mail.example" }
     let(:logged) { [] }

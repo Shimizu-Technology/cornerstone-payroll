@@ -122,16 +122,33 @@ class EmployeeAppClerkRevocation < ApplicationRecord
   # Takes the lease for this job, only if the row is still pending, this job
   # owns it (or no job has claimed it yet), and no other attempt holds the
   # lease, with a fresh lease_token for this attempt (counted when attempt:
-  # is true). Returns the row, whose lease_token the caller keeps and passes
-  # to finish! and release_lease!, or nil.
+  # is true). Returns the row, holding that token in memory (held_lease),
+  # or nil. The caller passes held_lease to finish! and release_lease!.
+  #
+  # The token is the one generated here, never one read back: the row is
+  # reloaded by id and that token together, so a run that stalls between
+  # taking the lease and reloading it, and loses the lease to a newer
+  # attempt meanwhile, gets nil rather than the newer attempt's token.
   def self.take_lease!(id, job_id:, now: Time.current, attempt: false)
     token = SecureRandom.hex(16)
     counted = attempt ? "attempts + 1" : "attempts"
     taken = pending.where(id: id).where("job_id IS NULL OR job_id = ?", job_id)
       .where("leased_until IS NULL OR leased_until < ?", now)
       .update_all([ "attempts = #{counted}, leased_until = ?, lease_token = ?, updated_at = ?", now + ATTEMPT_LEASE, token, now ])
-    find(id) if taken == 1
+    return unless taken == 1
+
+    leased_row(id, token)&.tap { |row| row.held_lease = token }
   end
+
+  def self.leased_row(id, token)
+    find_by(id: id, lease_token: token)
+  end
+  private_class_method :leased_row
+
+  # The lease token this attempt generated (set by take_lease!), kept apart
+  # from the lease_token column so a later reload can't swap in another
+  # attempt's token.
+  attr_accessor :held_lease
 
   # Records an outcome under the row lock, only while the row is still
   # pending, owned by this job, and leased to this attempt (lease_token): a

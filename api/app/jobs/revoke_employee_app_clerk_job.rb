@@ -28,8 +28,9 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
   CONFIRMED_ACTION = "employee_app_switch#clerk_revocation_confirmed"
   GAVE_UP_ACTION = "employee_app_switch#clerk_revocation_failed"
   FOLLOW_UP_ACTION = "employee_app_switch#clerk_revocation_needs_follow_up"
-  # How long one pass may call Clerk. Each call has its own short timeouts,
-  # so a pass ends well before its lease (ATTEMPT_LEASE) runs out.
+  # How long one pass may call Clerk. Each call is cut off at this deadline
+  # however slowly Clerk answers (ClerkInvitationService#request_json), so a
+  # pass ends well before its lease (ATTEMPT_LEASE) runs out.
   PASS_DEADLINE = 10.minutes
   DEADLINE_ERROR = "Clerk pass deadline reached; rescheduled"
 
@@ -52,7 +53,7 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
     revocation = EmployeeAppClerkRevocation.start_attempt!(revocation_id, job_id: job_id)
     return unless revocation
 
-    lease = revocation.lease_token
+    lease = revocation.held_lease
     begin
       result = ClerkInvitationService.within_deadline(Time.current + PASS_DEADLINE) { call_clerk(revocation, clerk) }
       record_result!(revocation, lease, result)
@@ -71,7 +72,7 @@ class RevokeEmployeeAppClerkJob < ApplicationJob
     revocation = EmployeeAppClerkRevocation.take_lease!(arguments.first, job_id: job_id)
     return unless revocation
 
-    lease = revocation.lease_token
+    lease = revocation.held_lease
     begin
       revocation.finish!(job_id: job_id, lease_token: lease) do |row|
         row.update!(gave_up_at: Time.current, last_error: error.class.name.first(200))
