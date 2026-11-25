@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
@@ -43,11 +44,6 @@ function guamYearStart(): string {
 
 function formatCurrency(value: string | number): string {
   return Number(value).toLocaleString(undefined, { style: 'currency', currency: 'USD' });
-}
-
-function formatDate(value: string | null): string {
-  if (!value) return '—';
-  return new Date(`${value}T00:00:00`).toLocaleDateString();
 }
 
 export function CheckRegister({ companyId, refreshVersion }: CheckRegisterProps) {
@@ -160,7 +156,7 @@ export function CheckRegister({ companyId, refreshVersion }: CheckRegisterProps)
                   </div>
                   <p className="mt-2 truncate font-medium text-neutral-900">{row.payee}</p>
                   <p className="mt-2 text-sm text-neutral-500">
-                    {formatCurrency(row.amount)} · Register date {formatDate(row.register_date)}
+                    {formatCurrency(row.amount)} · Register date {formatDate(row.register_date) || '—'}
                     {row.previous_check_numbers.length > 0 ? ` · Replaces ${row.previous_check_numbers.map((number) => `#${number}`).join(', ')}` : ''}
                   </p>
                 </div>
