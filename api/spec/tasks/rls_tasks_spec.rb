@@ -105,6 +105,17 @@ RSpec.describe "RLS owner tasks", :rls do
       holder = PG.connect(ActiveRecord::Base.connection_db_config.url)
       holder.exec("SELECT pg_advisory_lock(#{RlsConfiguration::OWNER_TASK_LOCK})")
       with_migration_url { expect { invoke("rls:enforce") }.to raise_error(SystemExit, /holds the enforcement lock/) }
+      # A dry run never takes the lock, so it can't hold up a rollback.
+      allow(RlsEnforcement).to receive(:runtime_role_ready?).and_return(true)
+      with_env("DRY_RUN" => "1") do
+        with_migration_url { expect { invoke("rls:enforce") }.to output(/Dry run: /).to_stdout }
+      end
+      # rls:disable waits a bounded time for a live enforce, then says why.
+      with_env("LOCK_WAIT" => "1") do
+        with_migration_url do
+          expect { invoke("rls:disable") }.to raise_error(SystemExit, /still holds the enforcement lock after 1s. Set the kill switch first/)
+        end
+      end
       holder.close
 
       ActiveRecord::Base.connection.execute("UPDATE #{RlsDatabase::SWITCH} SET bypass_enabled = true WHERE singleton")

@@ -51,20 +51,36 @@ Complete these before the window opens. Any failure postpones it.
 3. **Readiness.** Production readiness passes with `RLS_EXPECT_ENFORCED` unset.
 4. **Child companies.** The contract migration deploys whenever this PR merges, so check this against production before merging: `bundle exec rails payroll_child_companies:verify` prints `nulls=0 parent_fk=valid` for all 26 promoted children. Merge at low traffic.
 5. **Kill-switch drill.** Hold an owner `psql` session open for the whole window. Set the switch with the SQL above and confirm `rls:status` reports `kill_switch: true`. Clear it and confirm `false`. Record how long each step took.
+6. **Postgres version.** The contract migration's `SET NOT NULL` relies on the validated `CHECK` to skip a full table scan, and CI runs Postgres 16. From the owner session, `SELECT current_setting('server_version_num')::int >= 160000 AS ok, version();` must return `ok = t`. On an older server, postpone and upgrade first.
+7. **Demo employee access.** List the demo companies with an open early-access window and their active employee logins (the employee app switch screen shows both). Pick one active demo account to check during the window. Tell its users that demo employee access pauses from the first enforced table until enforcement is verified (see "Demo employee access during the window").
 
 ### Order
 
 1. **Deploy the contract migration.** `ContractPayrollChildCompanies` makes `company_id` NOT NULL on the 26 promoted children. It does not depend on the window and normally ships before it, with the deploy that follows this PR's merge. For each table it adds a `CHECK (company_id IS NOT NULL) NOT VALID`, validates the check without blocking writes, then sets NOT NULL and drops the check. Each step uses a five-second lock timeout and three attempts. If any NULL remains, it refuses and names the tables. In that case, run `payroll_child_companies:backfill` and deploy again. A rerun skips the tables already contracted. Afterwards, `OWNER bundle exec rails rls:enforce DRY_RUN=1` must not mention a nullable `company_id`.
 2. **Guard to `raise` on web and worker.** Set `RLS_CONTEXT_GUARD_MODE=raise` on both services and restart them. The employee API service already uses `raise`. `rls:status` then reports `guard_mode: raise`. An unscoped protected query now fails its request or job. Run the smoke tests below and watch the logs for 15 minutes. If anything fails, set the guard back to `log` and stop.
 3. **Enforce in batches.**
-   1. `OWNER bundle exec rails rls:enforce DRY_RUN=1` lists the tables that still need ENABLE and FORCE, in batches of 10. It refuses if the kill switch is not readable and off, if any policy is unstaged, if the login link decision is not restricted, if `payroll_app` can bypass RLS or write the switch, if the owner does not bypass RLS, or if a promoted `company_id` is still nullable.
+   1. `OWNER bundle exec rails rls:enforce DRY_RUN=1` lists the tables that still need ENABLE and FORCE, in batches of 10. It does not take the enforcement lock, so it never delays a rollback. It refuses if the kill switch is not readable and off, if any policy is unstaged, if any policy's USING, WITH CHECK, roles or command differ from what `rls:install` would create now (it names the tables; run `OWNER bundle exec rails rls:install` to reinstall them, then dry-run again), if the login link decision is not restricted, if `payroll_app` can bypass RLS or write the switch, if the owner does not bypass RLS, or if a promoted `company_id` is still nullable.
    2. Pilot one batch: `OWNER bundle exec rails rls:enforce TABLES="<the dry run's batch 1>"`. Run the smoke tests and watch the logs for five minutes.
-   3. Run the rest: `OWNER bundle exec rails rls:enforce`. The busiest payroll tables (`timecards` through `employees` and `audit_logs`) go last. Each table commits separately with a three-second lock timeout and three attempts. Five seconds separate each batch; change that with `BATCH_PAUSE` and the batch size with `BATCH_SIZE`. A table that cannot be locked is reported. Rerun the same command to resume: tables already enforced are skipped. The task checks the kill switch before every table and stops once it is set. Only one `rls:enforce` runs at a time, and `rls:disable` waits for a running one to stop. Any other error stops the run without a summary. The tables already enforced stay enforced, so read `rls:status` and rerun.
+   3. Run the rest: `OWNER bundle exec rails rls:enforce`. The busiest payroll tables (`timecards` through `employees` and `audit_logs`) go last. Each table commits separately with a three-second lock timeout and three attempts. Five seconds separate each batch; change that with `BATCH_PAUSE` and the batch size with `BATCH_SIZE`. A table that cannot be locked is reported. Rerun the same command to resume: tables already enforced are skipped. The task checks the kill switch before every table and stops once it is set. Only one live `rls:enforce` runs at a time, and `rls:disable` waits up to 60 seconds for a running one to stop. Any other error stops the run without a summary. The tables already enforced stay enforced, so read `rls:status` and rerun.
 4. **Verify.**
    - The task prints `all_enforced: true` and `All protected tables are enabled and forced`.
    - `rls:status` shows `enforcement.phase` of `enforced`, with `enforced_tables` equal to `protected_tables`.
    - Set `RLS_EXPECT_ENFORCED=true` on web, worker and the employee API and restart them. Production readiness then passes, including "RLS policy installation matches the selected phase" and "RLS kill switch is off".
    - The employee app switch's database check reports `enforced`. Demo early-access windows retire on the next demo read or expiry sweep, which ends the waiver.
+   - The active demo account from pre-check 7 signs in and opens its pay stubs again. Verified enforcement needs no waiver.
+
+### Demo employee access during the window
+
+A demo company's employee app opens under its early-access waiver only while the database is in shadow mode with the kill switch off. Expect it to pause:
+
+- **From the first enforced table until verification.** The pilot batch moves the database to `partial`, which closes the waiver. Each demo's window and stored switches stay as they are, so nobody has to act: once every table is enforced and the kill switch is off, the database check reports `enforced` and the demo opens again without a waiver (within five seconds per process).
+- **While the kill switch is set.** A bypassed database also closes the waiver. If the switch is set and cleared before full enforcement, the waiver applies again once the database is back in shadow mode with the switch off, provided the window hasn't expired.
+
+Verified enforcement retires every open window for good. If enforcement is then rolled back with `rls:disable`, the expiry sweep turns the demo's stored switches off and revokes their switch activations, because no window covers it. To reopen demo access after that rollback:
+
+1. Confirm `rls:status` shows `enforcement.phase` of `shadow` with `kill_switch: false`.
+2. A super_admin sets a new early-access window on the employee app switch screen, with a reason that names the rollback. Retired windows never apply again, but a new one can be set while the database is not enforcing.
+3. A switch admin turns the demo's employee app back on from the same screen. That re-runs its readiness checks and records new switch activations. The sweep leaves employee logins alone, so demo employees then sign in as before.
 
 ### Smoke tests
 
@@ -74,6 +90,7 @@ Run these after the guard change, after the pilot batch and after the full run. 
 - **Cross-company.** A staff user assigned to one client gets "not found" for another client's employee or pay period.
 - **Client portal.** Open documents, messages and payroll submissions. Upload a test file.
 - **Employee app.** Open pay stubs and W-2GU documents. A same-person email confirmation saves. A login linked to another client's employee is refused.
+- **Demo employee app.** With the active demo account from pre-check 7: after the guard change it still opens; after the pilot batch it is paused; after the full run and verification it opens again.
 - **AIRE.** A worker statement (My Pay) request and an event post succeed.
 - **Worker.** Recurring jobs run. The count of Solid Queue failed executions does not grow, and the worker heartbeat stays current.
 
@@ -87,8 +104,8 @@ Run these after the guard change, after the pilot batch and after the full run. 
 ### Instant rollback
 
 1. **Kill switch.** Takes seconds and needs no deploy. Set it with the SQL above from the owner session. Each process enters system mode for new scopes within five seconds, and unscoped statements log instead of raising. While the switch is on, readiness fails "RLS kill switch is off", which is expected.
-2. **Disable.** `MIGRATION_DATABASE_URL=<direct owner URL> bundle exec rails rls:disable` disables RLS table by table. `rls:status` then shows `enforcement.phase` of `shadow`.
-3. **Settle.** Unset `RLS_EXPECT_ENFORCED` on web, worker and the employee API. Set the guard back to `log` if the guard caused the incident, and restart. Confirm `rls:status` shows `enforcement.phase` of `shadow` before clearing the kill switch, with a reason.
+2. **Disable.** `MIGRATION_DATABASE_URL=<direct owner URL> bundle exec rails rls:disable` disables RLS table by table. It waits up to 60 seconds (`LOCK_WAIT=` to change) for a live `rls:enforce`, which stops before its next table once the kill switch is set. If the wait runs out it stops and says so: confirm the switch is set, then rerun. `rls:status` then shows `enforcement.phase` of `shadow`.
+3. **Settle.** Unset `RLS_EXPECT_ENFORCED` on web, worker and the employee API. Set the guard back to `log` if the guard caused the incident, and restart. Confirm `rls:status` shows `enforcement.phase` of `shadow` before clearing the kill switch, with a reason. If the run had already reached full enforcement, reopen demo employee access as described under "Demo employee access during the window".
 
 The contract migration does not need rolling back. NOT NULL is independent of enforcement, and the fill triggers keep supplying `company_id` on insert.
 

@@ -50,6 +50,13 @@ module RlsEnforcement
     missing = RlsTables::PROTECTED_TABLES.to_a - status.map { |row| row.fetch("table") }
     unstaged = status.reject { |row| row.fetch("policy") }.map { |row| row.fetch("table") }
     failures << "policies are not staged on: #{(missing + unstaged).sort.join(', ')}" if (missing + unstaged).any?
+    # Names and commands can match while a predicate or role list is stale.
+    staged = status.select { |row| row.fetch("policy") }.map { |row| row.fetch("table") }
+    differing = RlsDatabase.policy_mismatches(connection, staged)
+    if differing.any?
+      failures << "policy definitions differ from db/rls_policies.sql on: #{differing.sort.join(', ')}; " \
+                  "re-run rls:install to reinstall them"
+    end
 
     failures << "the login link decision function is not restricted (see rls:status)" unless RlsDatabase.login_link_decision_ready?(connection)
     failures << "payroll_app must exist without BYPASSRLS and with SELECT-only kill switch access" unless runtime_role_ready?(connection)
@@ -81,7 +88,8 @@ module RlsEnforcement
   end
 
   # true when this session now holds the lock shared with rls:disable. It
-  # is released when the maintenance connection closes.
+  # is released when the maintenance connection closes. A dry run never
+  # takes it, so it cannot hold up a rollback.
   def self.lock!(connection)
     connection.select_value("SELECT pg_try_advisory_lock(#{RlsConfiguration::OWNER_TASK_LOCK})") == true
   end

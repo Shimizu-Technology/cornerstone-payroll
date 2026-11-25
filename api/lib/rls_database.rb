@@ -43,14 +43,59 @@ module RlsDatabase
       connection.execute(File.read(POLICY_FILE))
     end
     RlsTables::PROTECTED_TABLES.each do |table|
-      parent, foreign_key = RlsTables::RLS_PARENT_PROTECTED_TABLES[table]
-      shared_read = RlsTables::RLS_SHARED_READ_TABLES.include?(table)
-      args = [ schema, table, parent, foreign_key, shared_read ].map { |value| connection.quote(value) }.join(", ")
       connection.transaction do
         connection.execute("SET LOCAL lock_timeout = '3s'")
-        connection.execute("SELECT pg_temp.install_company_policy(#{args})")
+        connection.execute(install_policy_sql(connection, schema, table))
       end
     end
+  end
+
+  def self.install_policy_sql(connection, schema, table, policy_schema: nil)
+    parent, foreign_key = RlsTables::RLS_PARENT_PROTECTED_TABLES[table]
+    shared_read = RlsTables::RLS_SHARED_READ_TABLES.include?(table)
+    args = [ schema, table, parent, foreign_key, shared_read, policy_schema ].map { |value| connection.quote(value) }.join(", ")
+    "SELECT pg_temp.install_company_policy(#{args})"
+  end
+
+  # Every policy on a relation as Postgres stores it: name, command,
+  # permissive, roles and the deparsed USING and WITH CHECK expressions.
+  def self.policy_definitions(connection, relation)
+    connection.select_all(<<~SQL).to_a
+      SELECT polname::text AS name, polcmd::text AS cmd, polpermissive AS permissive,
+             (SELECT string_agg(CASE WHEN r = 0 THEN 'public' ELSE pg_get_userbyid(r)::text END, ',' ORDER BY 1)
+              FROM unnest(polroles) AS r) AS roles,
+             pg_get_expr(polqual, polrelid) AS qual, pg_get_expr(polwithcheck, polrelid) AS with_check
+      FROM pg_policy WHERE polrelid = to_regclass(#{connection.quote(relation)})
+      ORDER BY polname
+    SQL
+  end
+
+  # The protected tables whose policies differ from what rls:install would
+  # create now. The installer builds the expected policies on a same-named
+  # pg_temp copy of each table, so Postgres normalizes both sides the same
+  # way; the whole comparison rolls back. Reads the live definitions before
+  # each copy exists, while the table name still resolves to the real table.
+  def self.policy_mismatches(connection, tables = RlsTables::PROTECTED_TABLES.to_a)
+    schema = connection.select_value("SELECT current_schema()")
+    function = File.read(POLICY_FILE)[/^-- BEGIN install_company_policy\n(.*)^-- END install_company_policy$/m, 1]
+    raise "install_company_policy markers are missing from #{POLICY_FILE}" unless function
+
+    mismatched = []
+    connection.transaction(requires_new: true) do
+      connection.execute("SET LOCAL lock_timeout = '3s'")
+      connection.execute(function)
+      tables.each do |table|
+        identifier = connection.quote_table_name(table)
+        actual = policy_definitions(connection, "#{schema}.#{table}")
+        connection.execute("CREATE TEMP TABLE #{identifier} (LIKE #{connection.quote_table_name(schema)}.#{identifier})")
+        connection.execute(install_policy_sql(connection, schema, table, policy_schema: "pg_temp"))
+        expected = policy_definitions(connection, "pg_temp.#{table}")
+        connection.execute("DROP TABLE pg_temp.#{identifier}")
+        mismatched << table unless actual == expected
+      end
+      raise ActiveRecord::Rollback
+    end
+    mismatched
   end
 
   def self.verify_runtime!(connection)

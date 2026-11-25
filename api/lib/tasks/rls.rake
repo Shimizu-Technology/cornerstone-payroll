@@ -48,7 +48,7 @@ namespace :rls do
     record = RlsMaintenanceRecord
     record.establish_connection(url)
     record.connection_pool.with_connection do |connection|
-      abort "Another rls:enforce or rls:disable holds the enforcement lock" unless RlsEnforcement.lock!(connection)
+      abort "Another rls:enforce or rls:disable holds the enforcement lock" unless dry_run || RlsEnforcement.lock!(connection)
       failures = RlsEnforcement.preflight_failures(connection)
       abort "Refusing to enforce RLS:\n- #{failures.join("\n- ")}" if failures.any?
 
@@ -106,8 +106,16 @@ namespace :rls do
 
     url = RlsConfiguration.direct_url!(ENV.fetch("MIGRATION_DATABASE_URL"), "MIGRATION_DATABASE_URL")
     PG.connect(url) do |connection|
-      # Waits for a running rls:enforce, which stops at the kill switch.
-      connection.exec("SELECT pg_advisory_lock(#{RlsConfiguration::OWNER_TASK_LOCK})")
+      # Waits a bounded time for a running rls:enforce, which stops before
+      # its next table once the kill switch is set.
+      wait = Integer(ENV.fetch("LOCK_WAIT", "60"))
+      begin
+        connection.exec("SET lock_timeout = '#{wait}s'")
+        connection.exec("SELECT pg_advisory_lock(#{RlsConfiguration::OWNER_TASK_LOCK})")
+      rescue PG::LockNotAvailable
+        abort "An rls:enforce still holds the enforcement lock after #{wait}s. Set the kill switch first; " \
+              "enforce stops before its next table. Then rerun rls:disable (LOCK_WAIT= seconds to wait longer)."
+      end
       connection.exec("SET lock_timeout = '3s'")
       enforced = connection.exec(<<~SQL).column_values(0)
         SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
