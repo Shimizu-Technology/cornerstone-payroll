@@ -3,6 +3,7 @@ import { chooseLink, createEmployeeApi, problemFor, usableLinks, type EmployeeLi
 import { API_BASE_URL, TENANT_SLUG, today } from './config';
 import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue } from './contexts';
 import { useSignOut } from './hooks';
+import { resetAnalytics } from '@/lib/analytics';
 
 /** How long opening the app may take before it shows the error screen with Try again. */
 export const SESSION_LOAD_TIMEOUT_MS = 15_000;
@@ -116,8 +117,10 @@ export function EmployeeSessionProvider({ viewOnly = false, support, children }:
   }, []);
 
   const chooseLinkId = useCallback((linkId: string | null): void => {
-    // Another employer's pay never shows from this one's memory.
+    // Another employer's pay never shows from this one's memory, and analytics
+    // starts a fresh anonymous device session on employer switch.
     setMemory(new Map());
+    resetAnalytics();
     opened.current = false;
     setChosenId(linkId);
     setAttempt((n) => n + 1);

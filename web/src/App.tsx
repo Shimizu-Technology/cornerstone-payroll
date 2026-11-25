@@ -9,7 +9,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { CompanyProvider, useCompany } from '@/contexts/CompanyContext';
 import { FinanceBookGate } from '@/contexts/FinanceBookContext';
 import { PostHogPageView, usePostHog, isPostHogEnabled } from '@/providers/PostHogProvider';
-import { identifyUser, resetAnalytics } from '@/lib/analytics';
+import { registerAnalyticsContext, resetAnalytics } from '@/lib/analytics';
 import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
@@ -275,23 +275,22 @@ function ClientOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function PostHogIdentify() {
+function PostHogSessionSync() {
   const { user } = useAuth();
   const posthog = usePostHog();
-  const wasIdentified = useRef(false);
+  const hadUser = useRef(false);
 
   useEffect(() => {
     if (!isPostHogEnabled || !posthog) return;
     if (user) {
-      identifyUser(posthog, {
-        userId: user.id,
+      registerAnalyticsContext(posthog, {
         role: user.role,
         surface: 'staff',
       });
-      wasIdentified.current = true;
-    } else if (wasIdentified.current) {
-      resetAnalytics(posthog);
-      wasIdentified.current = false;
+      hadUser.current = true;
+    } else if (hadUser.current) {
+      resetAnalytics(posthog, { surface: 'staff', keepRole: false });
+      hadUser.current = false;
     }
   }, [user, posthog]);
 
@@ -487,7 +486,7 @@ const developmentToken = async () => null;
 function AppContents() {
   const workspace = (
     <AuthProvider>
-      {!supportToken && <PostHogIdentify />}
+      {!supportToken && <PostHogSessionSync />}
       <CompanyProvider>
         <AppFeedback><AppRoutes /></AppFeedback>
       </CompanyProvider>
