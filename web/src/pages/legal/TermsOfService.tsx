@@ -117,6 +117,10 @@ export function TermsOfService() {
 
       <LegalSection id="contact" title="Contact">
         <p>
+          For help with Employee App access or payroll records, contact your employer using the contacts listed in Help,
+          or ask your manager. Your employer can put you in touch with Cornerstone if needed.
+        </p>
+        <p>
           Shimizu Technology,{' '}
           <a href="mailto:shimizutechnology@gmail.com" className="font-semibold text-primary-800 underline underline-offset-4">
             shimizutechnology@gmail.com
