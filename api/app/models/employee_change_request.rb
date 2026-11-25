@@ -2,6 +2,9 @@
 
 class EmployeeChangeRequest < ApplicationRecord
   include PortalInboxUpdates
+
+  class Cancelled < StandardError; end
+
   PENDING_PROFILE_REQUEST_MESSAGE = "A change is already being reviewed"
   ADDRESS_FIELDS = %w[address_line1 address_line2 city state zip].freeze
   IDENTIFIER_KEYS = %i[ssn ssn_encrypted contractor_ein].freeze
@@ -60,7 +63,7 @@ class EmployeeChangeRequest < ApplicationRecord
   belongs_to :requested_by_link, class_name: "EmployeeAccountLink", optional: true
   belongs_to :reviewed_by, class_name: "User", optional: true
 
-  enum :status, { pending: 0, approved: 1, rejected: 2 }
+  enum :status, { pending: 0, approved: 1, rejected: 2, cancelled: 3 }
 
   validates :proposed_changes, presence: true
   validates :requested_by, presence: true, on: :create
@@ -141,7 +144,7 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
-      PortalNotifications.employee_change_decided!(self, actor: actor)
+      notify_decision!(actor)
     end
   end
 
@@ -157,11 +160,19 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
-      PortalNotifications.employee_change_decided!(self, actor: actor)
+      notify_decision!(actor)
     end
   end
 
   private
+
+  def notify_decision!(actor)
+    if requested_by_link_id.present?
+      PortalNotifications.employee_address_decided!(self, actor: actor)
+    else
+      PortalNotifications.employee_change_decided!(self, actor: actor)
+    end
+  end
 
   def authorized_review_actor!(actor)
     actor = User.lock.find_by(id: actor&.id)
@@ -202,7 +213,7 @@ class EmployeeChangeRequest < ApplicationRecord
     employee.update!(proposed_changes)
     EmployeeContactChangeToConfirm.record!(
       employee: employee, actor: requested_by, before_values: before_values,
-      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer
+      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer, notify_staff: requested_by_link_id.present?
     )
   end
 
@@ -218,6 +229,7 @@ class EmployeeChangeRequest < ApplicationRecord
 
   def ensure_pending!
     return if pending?
+    raise Cancelled, "This request was cancelled. Refresh to see the latest requests." if cancelled?
 
     errors.add(:status, "must be pending before review actions can be applied")
     raise ActiveRecord::RecordInvalid, self

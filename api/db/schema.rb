@@ -944,6 +944,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_210000) do
     t.datetime "sign_up_reset_requested_at"
     t.bigint "sign_up_reset_requested_by_id"
     t.string "sign_up_reset_reason", limit: 500
+    t.text "profile_email_challenge"
+    t.datetime "profile_email_sent_at"
+    t.date "profile_email_usage_date"
+    t.integer "profile_email_daily_codes", default: 0, null: false
+    t.integer "profile_email_daily_failures", default: 0, null: false
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"
@@ -1154,6 +1159,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_210000) do
     t.check_constraint "revision > 0", name: "employee_documents_positive_revision"
     t.check_constraint "sha256::text ~ '^[a-f0-9]{64}$'::text", name: "employee_documents_sha256"
     t.check_constraint "status::text = ANY (ARRAY['posted'::character varying, 'replaced'::character varying, 'withdrawn'::character varying]::text[])", name: "employee_documents_valid_status"
+  end
+
+  create_table "employee_emergency_contacts", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.string "name", null: false
+    t.string "relationship"
+    t.string "phone", null: false
+    t.datetime "deleted_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_id", "id" ], name: "idx_emergency_contacts_employee"
   end
 
   create_table "employee_loans", force: :cascade do |t|
@@ -5221,6 +5238,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_210000) do
   add_foreign_key "employee_documents", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_employee_id"
   add_foreign_key "employee_documents", "historical_paychecks", column: [ "historical_paycheck_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_historical_paycheck_id"
   add_foreign_key "employee_documents", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_payroll_item_id"
+  add_foreign_key "employee_emergency_contacts", "companies"
+  add_foreign_key "employee_emergency_contacts", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_emergency_contacts_employee", on_delete: :cascade
   add_foreign_key "employee_loans", "companies"
   add_foreign_key "employee_loans", "deduction_types"
   add_foreign_key "employee_loans", "employees"

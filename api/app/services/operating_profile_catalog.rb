@@ -321,7 +321,7 @@ class OperatingProfileCatalog
       capability: :manage_client_administration,
       what: "Allows active and former employees to view and download committed pay stubs in the employee portal (Milestone 4).",
       example: "false during Milestone 3; true when MoSa's pilot launches.",
-      effect: "Gates /api/v1/employee/pay_stubs endpoints when employee_portal_enabled is true.",
+      effect: "Gates /api/v1/employee/statements endpoints when employee_portal_enabled is true.",
       requires: [ "employee_portal_enabled" ].freeze
     ),
     Entry.new(

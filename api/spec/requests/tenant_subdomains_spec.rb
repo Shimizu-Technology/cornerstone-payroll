@@ -317,7 +317,7 @@ RSpec.describe "Client subdomains", type: :request do
       end
       token = token_for("https://#{enabled_host}")
 
-      company_links.zip([ :no_content, :not_found ]).each do |link, status|
+      company_links.zip([ :ok, :not_found ]).each do |link, status|
         get "/api/v1/employee/context", headers: {
           "Authorization" => "Bearer #{token}", "X-Employee-Link-Id" => link.id.to_s
         }
