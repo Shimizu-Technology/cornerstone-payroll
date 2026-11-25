@@ -14,7 +14,8 @@ import { ChevronLeft } from 'lucide-react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { createEmployeeApi, EmployeeApiError, StepUpCancelledError } from './api';
 import { askManager } from './brand';
-import { API_BASE_URL, TERMS } from './config';
+import { API_BASE_URL } from './config';
+import { useEmployeeTerms, type EmployeeTerms } from './terms';
 import type { IdentityCheck } from './contracts';
 import { useBrand, useEmployeeAuth } from './contexts';
 import { CantSignIn } from './help';
@@ -103,17 +104,23 @@ function IdentityFields({ draft, setDraft, problems, token }: { draft: IdentityD
   );
 }
 
-function TermsCheckbox({ checked, onChange, error }: { checked: boolean; onChange: (checked: boolean) => void; error?: string | null }): ReactElement | null {
-  if (!TERMS) return null;
+function TermsCheckbox({ terms, loadFailed, reload, checked, onChange, error }: { loadFailed: boolean; reload: () => void; terms: EmployeeTerms | null | undefined; checked: boolean; onChange: (checked: boolean) => void; error?: string | null }): ReactElement | null {
+  if (loadFailed) return (
+    <>
+      <FormMessage tone="bad">Couldn’t load the Employee App Terms. Please try again.</FormMessage>
+      <EmpButton type="button" onClick={reload}>Retry loading terms</EmpButton>
+    </>
+  );
+  if (!terms) return <FormMessage tone={terms === null ? 'bad' : 'info'}>{terms === null ? 'Sign-up is unavailable right now. Reload to try again, or contact your manager.' : 'Loading the Employee App Terms…'}</FormMessage>;
   return (
     <div className="emp-field">
       <label className="emp-check">
         <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} aria-invalid={error ? true : undefined} aria-describedby={error ? 'emp-terms-error' : undefined} />
         <span>
           I agree to the{' '}
-          <a className="emp-link-inline" href={TERMS.termsUrl} target="_blank" rel="noreferrer">Employee App Terms</a>
+          <a className="emp-link-inline" href={terms.termsUrl} target="_blank" rel="noreferrer">{terms.title} ({terms.version})</a>
           {' '}and{' '}
-          <a className="emp-link-inline" href={TERMS.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a>.
+          <a className="emp-link-inline" href={terms.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a>.
         </span>
       </label>
       {error && <p id="emp-terms-error" className="emp-field-error">{error}</p>}
@@ -144,12 +151,13 @@ function NoMatchMessage(): ReactElement {
   );
 }
 
-type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out';
+type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated';
 
 function failureOf(error: unknown): Failure {
   if (error instanceof StepUpCancelledError) return 'cancelled';
   if (!(error instanceof EmployeeApiError)) return 'server';
   switch (error.kind) {
+    case 'terms_updated': return 'terms_updated';
     case 'invalid':
     case 'not_found':
     case 'conflict': return 'no_match';
@@ -191,6 +199,7 @@ function FailureMessage({ failure, cancelledText }: { failure: Failure | null; c
   if (failure === 'cancelled') return <FormMessage tone="bad">{cancelledText ?? "Not done. Confirm it's you to continue."}</FormMessage>;
   if (failure === 'signed_out') return <FormMessage tone="bad">Your sign-in ended. Sign in again, then try again.</FormMessage>;
   if (failure === 'rate_limited') return <FormMessage tone="bad">Too many tries. Wait a minute, then try again.</FormMessage>;
+  if (failure === 'terms_updated') return <FormMessage tone="bad">The terms were updated. Please review them again.</FormMessage>;
   if (failure === 'offline') return <FormMessage tone="bad">You're offline. Connect to Wi-Fi or data, then try again.</FormMessage>;
   return <FormMessage tone="bad">Something went wrong on our end. Try again in a minute.</FormMessage>;
 }
@@ -249,6 +258,7 @@ export function ActivateScreen(): ReactElement {
   const [email, setEmail] = useState('');
   const [useForNotices, setUseForNotices] = useState(false);
   const [agreed, setAgreed] = useState(false);
+  const { terms, loadFailed, reload } = useEmployeeTerms();
   const [emailProblems, setEmailProblems] = useState<{ email?: string; terms?: string }>({});
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -267,16 +277,16 @@ export function ActivateScreen(): ReactElement {
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    if (!check) return;
+    if (!check || !terms) return;
     const found: { email?: string; terms?: string } = {};
     if (!EMAIL.test(email.trim())) found.email = 'Enter an email address like name@example.com.';
-    if (TERMS && !agreed) found.terms = 'To create your account, agree to the Terms and Privacy Notice.';
+    if (!agreed) found.terms = 'To create your account, agree to the Terms and Privacy Notice.';
     setEmailProblems(found);
     if (Object.keys(found).length > 0) return;
     setWorking(true);
     setFailure(null);
     try {
-      const outcome = await api.activate(check, { email, useForNotices, termsVersion: TERMS?.version ?? null }, window.location.origin);
+      const outcome = await api.activate(check, { email, useForNotices, termsVersion: terms.version }, window.location.origin);
       if (outcome.next === 'sign_in') {
         setStep('sign_in');
         setWorking(false);
@@ -287,6 +297,10 @@ export function ActivateScreen(): ReactElement {
       window.location.assign(outcome.signUpUrl);
     } catch (error) {
       const result = failureOf(error);
+      if (result === 'terms_updated') {
+        setAgreed(false);
+        reload();
+      }
       setFailure(result);
       // Wrong details: back to the step that has them.
       if (result === 'no_match') setStep('details');
@@ -338,9 +352,9 @@ export function ActivateScreen(): ReactElement {
               If you leave this off, notices go to the email {company} has on file for you. If there isn't one, they come here.
             </p>
           </div>
-          <TermsCheckbox checked={agreed} onChange={setAgreed} error={emailProblems.terms} />
+          <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={emailProblems.terms} />
           <FailureMessage failure={failure} />
-          <EmpButton type="submit" block disabled={working} aria-busy={working}>{working ? 'Opening…' : 'Create account'}</EmpButton>
+          <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? 'Opening…' : 'Create account'}</EmpButton>
           <p className="emp-hint text-center">Next you'll choose a password, or use Google or an emailed code.</p>
           <EmpButton variant="quiet" block onClick={() => { setStep('details'); setFailure(null); }}>Back to step 1</EmpButton>
         </form>
@@ -457,6 +471,7 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
   const [draft, setDraft] = useState<IdentityDraft>(EMPTY_DRAFT);
   const [problems, setProblems] = useState<IdentityProblems & { terms?: string }>({});
   const [agreed, setAgreed] = useState(false);
+  const { terms, loadFailed, reload } = useEmployeeTerms();
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   useDocumentTitle(copy.title);
@@ -465,11 +480,11 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
     event.preventDefault();
     const result = checkDraft(draft, token);
     const found: IdentityProblems & { terms?: string } = { ...result.problems };
-    if (TERMS && !agreed) found.terms = 'To continue, agree to the Terms and Privacy Notice.';
+    if (!agreed) found.terms = 'To continue, agree to the Terms and Privacy Notice.';
     setProblems(found);
-    if (!result.check || found.terms) return;
+    if (!terms || !result.check || found.terms) return;
     const checked = result.check;
-    const termsVersion = TERMS?.version ?? null;
+    const termsVersion = terms.version;
     setWorking(true);
     setFailure(null);
     try {
@@ -477,7 +492,12 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
       forgetInviteToken();
       navigate('/', { replace: true });
     } catch (error) {
-      setFailure(failureOf(error));
+      const result = failureOf(error);
+      if (result === 'terms_updated') {
+        setAgreed(false);
+        reload();
+      }
+      setFailure(result);
     } finally {
       setWorking(false);
     }
@@ -491,10 +511,10 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
           <p className="emp-lead">{copy.lead(company)}</p>
         </div>
         <IdentityFields draft={draft} setDraft={setDraft} problems={problems} token={token} />
-        <TermsCheckbox checked={agreed} onChange={setAgreed} error={problems.terms} />
+        <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={problems.terms} />
         <FailureMessage failure={failure} cancelledText={copy.cancelled} />
         <p className="emp-hint">To keep your pay private, we'll ask you to confirm it's you with your password or a code.</p>
-        <EmpButton type="submit" block disabled={working} aria-busy={working}>{working ? copy.working : copy.button}</EmpButton>
+        <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? copy.working : copy.button}</EmpButton>
         {!token && <p className="emp-hint text-center">Got an invite email? Open its link on this device instead of typing a code.</p>}
       </form>
     </AuthFrame>

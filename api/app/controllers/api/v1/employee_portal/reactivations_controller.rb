@@ -20,10 +20,13 @@ module Api
           response.headers["Cache-Control"] = "no-store"
           return render_write_maintenance if WriteMaintenance.enabled?
 
+          terms_version = require_current_employee_terms
+          return unless terms_version
+
           link_check_started!
           link = EmployeeLinks::Reactivate.call(
             user: @current_user, **link_check_params, azp: @clerk_token_payload&.fetch("azp", nil),
-            session: @clerk_token_payload, request: request
+            session: @clerk_token_payload, request: request, terms_version: terms_version
           )
           unless link
             wait_for_response_floor
