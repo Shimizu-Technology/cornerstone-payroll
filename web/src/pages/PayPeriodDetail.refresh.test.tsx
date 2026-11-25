@@ -729,6 +729,27 @@ function approvedCommitView(refreshToken = 0, withAire = false) {
     <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={{ ...initialPayPeriod, status: 'approved', ...(withAire ? { time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } : {}) } as PayPeriod} refreshToken={refreshToken} />} />
   </Routes></MemoryRouter>;
 }
+it('leads the approved header with the commit step even when time tracking hours were never added', async () => {
+  vi.clearAllMocks();
+  apiMocks.get.mockResolvedValue({ pay_period: { ...initialPayPeriod, status: 'approved', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } });
+  render(approvedCommitView(0, true));
+  const next = await screen.findByRole('link', { name: "Approved. Commit when you're ready." });
+  expect(next.getAttribute('href')).toContain('#payroll-commit');
+  expect(screen.queryByRole('link', { name: 'Time tracking hours have not been added' })).toBeNull();
+});
+it('keeps the time tracking coverage note in the header while hours can still be added', async () => {
+  vi.clearAllMocks();
+  const calculated = { ...initialPayPeriod, status: 'calculated', time_tracking: { active_source_types: ['aire_services'], linked_aire_records: [], aire_calendar: sourceCalendar } } as PayPeriod;
+  apiMocks.get.mockResolvedValue({ pay_period: calculated });
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayPeriodDetail initialPayPeriod={calculated} />} />
+  </Routes></MemoryRouter>);
+  const note = await screen.findByRole('link', { name: 'Time tracking hours have not been added' });
+  expect(note.getAttribute('href')).toContain('#time-tracking-sync');
+});
 it('requires explicit React confirmation and lets an operator cancel without an API write', async () => {
   vi.clearAllMocks(); render(approvedCommitView());
   fireEvent.click(await findPayRunButton('Commit'));

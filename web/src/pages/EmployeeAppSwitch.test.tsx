@@ -209,4 +209,31 @@ describe('EmployeeAppSwitch', () => {
     expect(await screen.findByRole('heading', { name: 'Ready to turn on' })).toBeTruthy();
     expect(screen.queryByText(/fixes this/)).toBeNull();
   });
+
+  it('says the database check is waived when demo early access permits turning on', async () => {
+    mocks.get.mockResolvedValue({ data: state({}, [
+      passed('company', 'This is a live client or a demo company'),
+      passed('rls_guard', 'The employee service refuses any database read without a company (RLS guard in raise mode)'),
+      { key: 'rls_database', name: 'The database enforces company separation (row-level security on)', status: 'waived',
+        detail: 'Waived for this demo company under early access.' },
+    ]) });
+    renderPage();
+
+    const summary = (await screen.findByRole('heading', { name: 'Ready to turn on' })).closest('section') as HTMLElement;
+    expect(within(summary).getByText('Ready to turn on under demo early access (database check waived). Turn it on under Switches below.')).toBeTruthy();
+    expect(within(summary).queryByText(/Every check .* passes/)).toBeNull();
+  });
+
+  it('lists the blocker the server names even when every listed check passed', async () => {
+    const data = state({}, [passed('company', 'This is a live client or a demo company')]);
+    data.switches = data.switches.map((row) => ({ ...row, blocked_by: ['terms'] }));
+    mocks.get.mockResolvedValue({ data });
+    renderPage();
+
+    const summary = (await screen.findByRole('heading', { name: 'Not ready yet: 1 thing to fix' })).closest('section') as HTMLElement;
+    expect(within(summary).getByText('These checks must pass before the employee app can turn on:')).toBeTruthy();
+    expect(within(summary).getByText(/The employee app terms and privacy notice are ready/)).toBeTruthy();
+    expect(within(summary).getByText(/Cornerstone fixes this/)).toBeTruthy();
+    expect(within(summary).queryByText(/passes/)).toBeNull();
+  });
 });

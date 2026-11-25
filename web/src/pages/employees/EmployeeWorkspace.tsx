@@ -59,7 +59,7 @@ import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { SavedHours } from '@/components/employees/SavedHours';
 import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
-import { paymentEvidenceLabel, payrollPaymentLabel } from '@/lib/payroll-payment-label';
+import { needsBankPaymentConfirmation, paymentEvidenceLabel, payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
 import { EmployeeDeliveryConsentPanel } from '@/components/employees/EmployeeDeliveryConsentPanel';
 import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
@@ -384,7 +384,7 @@ export function EmployeeWorkspace(): ReactElement {
           />
         )}
         {activeTab === 'pay-history' && (
-          <PayHistory companyId={companyId} report={payHistory} returnTo={currentPath} />
+          <PayHistory companyId={companyId} report={payHistory} returnTo={currentPath} readOnly={readOnly} />
         )}
         {activeTab === 'hours-payroll' && <EmployeeHoursPayroll employeeId={employeeId} companyId={companyId} report={payHistory} returnTo={currentPath} />}
         {activeTab === 'activity' && <EmployeeActivity companyId={companyId} employee={employee} returnTo={currentPath} />}
@@ -648,9 +648,10 @@ interface PayHistoryProps {
   companyId: number;
   report: PayHistoryReport | null;
   returnTo: string;
+  readOnly: boolean;
 }
 
-function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElement {
+function PayHistory({ companyId, report, returnTo, readOnly }: PayHistoryProps): ReactElement {
   const [historyParams, setHistoryParams] = useSearchParams();
   const yearFilter = historyParams.get('history_year') || 'all';
   const sourceFilter = historyParams.get('history_source') || 'all';
@@ -737,7 +738,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <div><p className="text-xs text-neutral-500">Payment</p><p>{payrollPaymentLabel(item)}</p>{item.check_number && <p className="text-xs text-neutral-500">Check #{item.check_number}</p>}</div>
                 </div>
                 <SavedHours item={item} />
-                {item.net_pay > 0 && <p className="text-sm text-neutral-600">{paymentEvidenceLabel(item)}</p>}
+                {item.net_pay > 0 && <p className="text-sm text-neutral-600">{paymentEvidenceLabel(item)}<ConfirmBankPaymentLink companyId={companyId} item={item} readOnly={readOnly} returnTo={returnTo} /></p>}
                 <div className="grid grid-cols-2 gap-2">
                   {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
                     <Button variant="outline" size="sm" className="min-h-11" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
@@ -769,7 +770,7 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
                   <TableCell className="font-semibold text-emerald-700">{formatCurrency(item.net_pay)}</TableCell>
-                  <TableCell>{item.net_pay > 0 && <p className="text-xs text-neutral-500">{paymentEvidenceLabel(item)}</p>}{payrollPaymentLabel(item)}{item.check_number && <span className="block text-xs text-neutral-500">Check #{item.check_number}</span>}</TableCell>
+                  <TableCell>{item.net_pay > 0 && <p className="text-xs text-neutral-500">{paymentEvidenceLabel(item)}<ConfirmBankPaymentLink companyId={companyId} item={item} readOnly={readOnly} returnTo={returnTo} /></p>}{payrollPaymentLabel(item)}{item.check_number && <span className="block text-xs text-neutral-500">Check #{item.check_number}</span>}</TableCell>
                   <TableCell className="text-right"><div className="flex flex-wrap items-center justify-end gap-3">
                     <Link aria-label={`Open ${item.record_type === 'native' ? 'payroll item' : 'imported pay run'} for ${formatDate(item.pay_date)}`} className="inline-flex min-h-11 items-center gap-1 font-bold text-primary-700 hover:text-primary-900" to={item.record_type === 'native' && item.pay_period_id && item.payroll_item_id ? payrollItemPath(companyId, item.pay_period_id, item.payroll_item_id, { returnTo }) : payHistoryRunPath(companyId, item, returnTo)}>Open <ArrowRight className="h-4 w-4" /></Link>
                   </div></TableCell>
@@ -783,6 +784,12 @@ function PayHistory({ companyId, report, returnTo }: PayHistoryProps): ReactElem
       </CardContent>
     </Card><PdfPreview artifact={stubArtifact} onClose={() => setStubArtifact(null)} /></>
   );
+}
+
+// Bank payments are confirmed on the pay run's Checks tab.
+function ConfirmBankPaymentLink({ companyId, item, readOnly, returnTo }: { companyId: number; item: PayHistoryReport['history'][number]; readOnly: boolean; returnTo: string }) {
+  if (readOnly || item.record_type !== 'native' || !item.pay_period_id || !needsBankPaymentConfirmation(item)) return null;
+  return <Link className="mt-1 flex min-h-11 items-center font-semibold text-primary-700 underline underline-offset-4 sm:min-h-0" aria-label={`Confirm bank payment for ${formatDate(item.pay_date)}`} to={payRunPath(companyId, item.pay_period_id, 'checks', { returnTo })}>Confirm bank payment</Link>;
 }
 
 function payHistoryRunPath(companyId: number, item: PayHistoryReport['history'][number], returnTo: string): string {
