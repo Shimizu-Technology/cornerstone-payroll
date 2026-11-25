@@ -58,6 +58,18 @@ RSpec.describe "Api::V1::Admin::PayrollItems", type: :request do
     allow_any_instance_of(Api::V1::Admin::PayrollItemsController).to receive(:current_user).and_return(admin_user)
   end
 
+  it "reports base, additional and total withholding in the payroll items summary" do
+    payroll_item.update!(withholding_tax: 120.11, additional_withholding: 50.22)
+
+    get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("summary").transform_values(&:to_d)).to include(
+      "total_withholding" => 120.11.to_d, "total_additional_withholding" => 50.22.to_d,
+      "total_income_tax_withheld" => 170.33.to_d
+    )
+  end
+
   describe "GET /api/v1/admin/pay_periods/:pay_period_id/payroll_items/:id" do
     it "returns the exact payroll item within the active company" do
       get "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{payroll_item.id}"
