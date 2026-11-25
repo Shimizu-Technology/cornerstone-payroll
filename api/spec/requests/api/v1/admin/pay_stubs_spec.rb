@@ -182,6 +182,31 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(CombinePDF.parse(response.body).pages.count).to eq(2)
     end
 
+    it "reads the CJK font at most once for a 20-stub batch" do
+      employee.update!(last_name: "王")
+      second_employee.update!(last_name: "王")
+      18.times do
+        worker = create(:employee, company: company, department: department, last_name: "王")
+        create(:payroll_item, pay_period: pay_period, employee: worker, gross_pay: 500, net_pay: 400)
+      end
+
+      previous_bytes = PdfUnicodeFont.instance_variable_get(:@cjk_font_bytes)
+      PdfUnicodeFont.instance_variable_set(:@cjk_font_bytes, nil)
+      allow(File).to receive(:binread).and_call_original
+      expect(File).to receive(:binread).with(PdfUnicodeFont::CJK_FILE).once.and_call_original
+      allow(TTFunk::File).to receive(:open).and_call_original
+      expect(TTFunk::File).not_to receive(:open).with(PdfUnicodeFont::CJK_FILE)
+
+      post "/api/v1/admin/pay_stubs/batch_pdf", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      pages = PDF::Reader.new(StringIO.new(response.body)).pages
+      expect(pages.size).to eq(20)
+      expect(pages.map(&:text)).to all(include("王"))
+    ensure
+      PdfUnicodeFont.instance_variable_set(:@cjk_font_bytes, previous_bytes)
+    end
+
     it "skips payroll items with no pay activity when printing all pay stubs" do
       unpaid_employee = create(:employee, company: company, department: department, first_name: "Una", last_name: "Paid")
       create(:payroll_item, pay_period: pay_period, employee: unpaid_employee, gross_pay: 0, net_pay: 0, check_number: nil)
