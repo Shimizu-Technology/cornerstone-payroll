@@ -1,4 +1,5 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
+import { roleLabel } from '@/lib/role-labels';
 import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
@@ -75,7 +76,6 @@ export function Users() {
     : allRoleOptions.filter((role) => role.value !== 'super_admin');
   const invitationRoleOptions = roleOptions.filter((role) => !role.legacy && role.value !== 'employee');
   const roleGuideOptions = roleOptions.filter((role) => !role.legacy);
-  const roleLabel = (role: UserRole) => allRoleOptions.find((option) => option.value === role)?.label || role;
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -581,6 +581,7 @@ export function Users() {
     <div>
       <Header
         title="User Management"
+        organizationWide
         description="Manage staff accounts, roles, and payroll client access"
         actions={
           !isAddingNew && (

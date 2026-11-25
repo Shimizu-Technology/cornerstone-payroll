@@ -4,14 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ActionFeedback } from '@/components/ui/action-feedback';
+import { roleLabel } from '@/lib/role-labels';
 import { portalAlertRecipientsApi, type PortalAlertRecipients } from '@/services/portal-notifications-api';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function roleLabel(role: string): string {
-  if (role === 'org_admin' || role === 'admin') return 'Organization Admin';
-  return role.split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
-}
 
 interface Props {
   companyId: number;

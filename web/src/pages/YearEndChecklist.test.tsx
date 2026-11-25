@@ -236,7 +236,7 @@ describe('Year-end checklist', () => {
     vi.spyOn(yearEnd, 'parseYearEndTaxYear').mockReturnValue(year);
     mocks.checklist.mockResolvedValue(checklist([], { tax_year: year, files_w2: true, files_1099: false }));
     renderPage(year);
-    await screen.findByText('1. File and confirm');
+    await screen.findByText('File and confirm');
     await waitFor(() => expect(mocks.filingRecord).toHaveBeenCalledTimes(year < 2026 ? 1 : 2));
     expect(screen.getAllByText('No agency submission recorded.')).toHaveLength(year < 2026 ? 1 : 2);
     if (year < 2026) {
@@ -272,7 +272,12 @@ describe('Year-end checklist', () => {
     const steps = [...working(), step('form_1099_ready', 8, 'Mark the 1099s ready', 'waiting'), printAndFile(false)];
     mocks.checklist.mockResolvedValue(checklist(steps));
     renderPage();
-    expect(await screen.findByText(`${steps.length + 1}. File and confirm`)).toBeTruthy();
+    const heading = await screen.findByText('File and confirm');
+    // Same number style as the step cards, and it comes before the extra cards.
+    expect(heading.textContent).toBe(`Step ${steps.length + 1}: File and confirm`);
+    expect(screen.getByText(String(steps.length + 1), { selector: 'span[aria-hidden="true"]' })).toBeTruthy();
+    const extras = screen.getByText('Also for this year');
+    expect(heading.compareDocumentPosition(extras) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('asks who files first and locks the later steps', async () => {

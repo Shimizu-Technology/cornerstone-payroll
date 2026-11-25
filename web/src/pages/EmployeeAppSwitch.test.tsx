@@ -90,7 +90,7 @@ describe('EmployeeAppSwitch', () => {
     expect(await screen.findByText('Readiness checklist')).toBeTruthy();
     expect(screen.getByText("The employee service's guard is set to log, not raise.")).toBeTruthy();
     const row = screen.getByText('Employee app', { selector: 'p' }).closest('li') as HTMLElement;
-    expect(within(row).getByText(/Can't turn on yet: The employee service refuses any database read without a company/)).toBeTruthy();
+    expect(within(row).getByText(/Can't turn on yet: 1 check to finish \(The employee app reads only this company's records\)/)).toBeTruthy();
     expect((within(row).getByRole('button', { name: 'Turn on' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Locked off')).toBeTruthy();
     // Observed guard and database state are shown separately.
@@ -175,5 +175,38 @@ describe('EmployeeAppSwitch', () => {
     renderPage();
     await screen.findByText('Readiness checklist');
     expect(screen.queryByText('Stop all demo employee access')).toBeNull();
+  });
+
+  it('leads with a plain summary and keeps the server wording under technical details', async () => {
+    mocks.get.mockResolvedValue({ data: state({}, [
+      passed('company', 'This is a live client or a demo company'),
+      { key: 'subdomain', name: "The company's web address (subdomain) is set", status: 'failed', detail: "Set this company's subdomain on its employee app settings first." },
+      { key: 'mfa', name: 'Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)', status: 'failed',
+        detail: "Payroll isn't requiring two-step sign-in with recorded evidence of the claim yet." },
+    ]) });
+    renderPage();
+
+    const summary = (await screen.findByRole('heading', { name: 'Not ready yet: 2 things to fix' })).closest('section') as HTMLElement;
+    expect(within(summary).getByText(/Two-step sign-in is turned on/)).toBeTruthy();
+    expect(within(summary).getByText(/Shimizu Technology fixes this/)).toBeTruthy();
+    expect(within(summary).getByText(/Cornerstone fixes this/)).toBeTruthy();
+
+    // Cornerstone's own check explains itself; the platform check's setting names are tucked away.
+    const subdomain = screen.getByText("The company's web address is set", { selector: 'p' }).closest('li') as HTMLElement;
+    expect(within(subdomain).getByText("Set this company's subdomain on its employee app settings first.").closest('details')).toBeNull();
+    const mfa = screen.getByText('Two-step sign-in is turned on', { selector: 'p' }).closest('li') as HTMLElement;
+    const technical = within(mfa).getByText('Technical details').closest('details') as HTMLDetailsElement;
+    expect(technical.open).toBe(false);
+    expect(within(technical).getByText(/REQUIRE_MFA=true/)).toBeTruthy();
+    expect(within(technical).getByText(/recorded evidence of the claim/)).toBeTruthy();
+    expect(screen.getByText(/Can't turn on yet: 2 checks to finish\. See the readiness checklist above\./)).toBeTruthy();
+  });
+
+  it('says ready to turn on once nothing blocks the employee app', async () => {
+    mocks.get.mockResolvedValue({ data: state({}, [passed('company', 'This is a live client or a demo company')]) });
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Ready to turn on' })).toBeTruthy();
+    expect(screen.queryByText(/fixes this/)).toBeNull();
   });
 });

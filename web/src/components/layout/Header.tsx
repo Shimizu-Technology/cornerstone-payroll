@@ -9,12 +9,14 @@ interface HeaderProps {
   contextLabel?: string;
   contextValue?: string;
   mobileSticky?: boolean;
+  /** Organization-wide pages (users, tax rates, activity) apply to every client, so they hide the client chip. */
+  organizationWide?: boolean;
 }
 
-export function Header({ title, description, subtitle, actions, contextLabel, contextValue, mobileSticky = true }: HeaderProps) {
+export function Header({ title, description, subtitle, actions, contextLabel, contextValue, mobileSticky = true, organizationWide = false }: HeaderProps) {
   const helperText = description ?? subtitle;
   const { activeCompany } = useCompany();
-  const displayedContext = contextValue || activeCompany?.name;
+  const displayedContext = contextValue || (organizationWide ? undefined : activeCompany?.name);
   const displayedLabel = contextValue ? contextLabel || 'Workspace' : 'Client';
 
   return (
