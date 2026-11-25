@@ -753,6 +753,8 @@ export const employeeBulkImportApi = {
   },
   applyJson: (employees: Record<string, unknown>[], previewId?: string): Promise<BulkImportApplyResult> =>
     api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees, preview_id: previewId }),
+  cancelPreview: (previewId: string): Promise<void> =>
+    api.delete<void>(`/admin/employee_bulk_imports/preview/${encodeURIComponent(previewId)}`),
 };
 
 export const payrollFieldsApi = {
@@ -7000,12 +7002,20 @@ export const expensesApi = {
     api.getBlobWithParams('/admin/expenses/export', params),
 };
 
+const STAFF_DRAFT_STORAGE_PREFIXES = [
+  'prior-provider-history:',
+  'pay-item-draft:',
+  'shared-pay-field-draft:',
+] as const;
+
 // Auth
 export function clearPriorProviderDrafts(): void {
   try {
     for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
       const key = sessionStorage.key(index);
-      if (key?.startsWith('prior-provider-history:')) sessionStorage.removeItem(key);
+      if (key && STAFF_DRAFT_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        sessionStorage.removeItem(key);
+      }
     }
   } catch { /* Storage can be unavailable in restricted browser contexts. */ }
 }

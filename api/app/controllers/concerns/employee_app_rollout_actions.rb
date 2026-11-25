@@ -114,7 +114,7 @@ module EmployeeAppRolloutActions
   end
 
   def employee_payload(record)
-    rollout.employee_status(record, rollout.latest_access(record)).merge(
+    rollout.employee_status(record, rollout.latest_access(record), include_issuer: current_user.staff_member?).merge(
       enabled: rollout.enabled, can_manage_invites: can_manage_invites?,
       staff_actions: EmployeeLinks.staff_management_allowed?(current_user, current_company)
     )

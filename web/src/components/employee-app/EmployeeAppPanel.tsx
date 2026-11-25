@@ -84,6 +84,14 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
         {access && (
           <>
             <Badge variant={access.status === 'active' ? 'success' : access.status === 'locked' ? 'warning' : 'default'}>{labels[access.status]}</Badge>
+            {access.status === 'active' && (access.activated_at || (access.staff_actions && access.invite_delivery === 'code' && access.invited_by_name)) && (
+              <p className="text-sm text-neutral-700">
+                {access.activated_at ? `Activated ${formatEmployeeAppDate(access.activated_at)}` : 'Activated'}
+                {access.staff_actions && access.invite_delivery === 'code' && access.invited_by_name
+                  ? ` · Printed code issued by ${access.invited_by_name}`
+                  : null}
+              </p>
+            )}
             {!access.enabled && <p className="text-sm text-neutral-700">{employeeAppOff}</p>}
             {access.status === 'former' && access.former_access_until && <p className="text-sm">Former employee access through {formatEmployeeAppDate(access.former_access_until)}.</p>}
             {open && access.invite_expires_at && !access.reset_pending && (

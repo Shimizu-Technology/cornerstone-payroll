@@ -285,7 +285,8 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     allow_any_instance_of(PayrollIntake::SourcePackageVerifier).to receive(:verify!).and_raise(StandardError, "verification interrupted")
     post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: source.id }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body["error"]).to include("verification interrupted")
+    expect(response.parsed_body["error"]).to include("Import apply failed")
+    expect(response.parsed_body["error"]).not_to include("verification interrupted")
     expect(PayrollSubmissionImport.count).to eq(0)
     expect(period.reload.pay_period_id).to be_nil
     expect(PayrollImportRecord.find(data["import_id"]).status).to eq("previewed")

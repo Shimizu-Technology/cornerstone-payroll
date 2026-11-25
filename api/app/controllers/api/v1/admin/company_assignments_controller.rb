@@ -100,7 +100,34 @@ module Api
           assignment = scoped_assignments.find_by(id: params[:id])
           return render json: { error: "Assignment not found" }, status: :not_found unless assignment
 
-          assignment.destroy!
+          refused = false
+          CompanyAssignment.transaction do
+            user = User.lock.find(assignment.user_id)
+            current_assignment = user.company_assignments.find_by(id: assignment.id)
+            next unless current_assignment
+
+            if user.client? && user.active? && !current_assignment.expired?
+              remaining_active = user.company_assignments.active_access
+                .joins(:company)
+                .where(companies: { test_workspace_archived_at: nil })
+                .where.not(id: current_assignment.id)
+                .exists?
+              unless remaining_active
+                refused = true
+                next
+              end
+            end
+
+            current_assignment.destroy!
+          end
+
+          if refused
+            return render json: {
+              error: "Cannot remove the last active client assignment from an active client portal user. Deactivate the login first.",
+              code: "client_required"
+            }, status: :unprocessable_entity
+          end
+
           head :no_content
         end
 
@@ -116,9 +143,25 @@ module Api
             return render json: { error: "One or more companies are not accessible" }, status: :forbidden
           end
 
+          refused = false
           CompanyAssignment.transaction do
-            existing_assignments = user.company_assignments.to_a
+            user.lock!
+            existing_assignments = user.company_assignments.includes(:company).to_a
             retained_assignments = existing_assignments.select { |assignment| company_ids.include?(assignment.company_id) }
+            new_company_ids = company_ids - existing_assignments.map(&:company_id)
+
+            if user.client? && user.active?
+              has_active_retained = retained_assignments.any? do |assignment|
+                !assignment.expired? && assignment.company&.test_workspace_archived_at.nil?
+              end
+              has_active_new = new_company_ids.any? &&
+                Company.where(id: new_company_ids, test_workspace_archived_at: nil).exists?
+              unless has_active_retained || has_active_new
+                refused = true
+                next
+              end
+            end
+
             retained_assignments.each do |assignment|
               assignment.user = user
               raise ActiveRecord::RecordInvalid, assignment unless assignment.valid?
@@ -126,7 +169,6 @@ module Api
             # This endpoint replaces the full membership list, including
             # expired grants. Retained grants keep their original metadata.
             (existing_assignments - retained_assignments).each(&:destroy!)
-            new_company_ids = company_ids - existing_assignments.map(&:company_id)
             new_company_ids.each do |cid|
               company = Company.find(cid)
               user.company_assignments.create!(
@@ -136,6 +178,14 @@ module Api
               )
             end
           end
+
+          if refused
+            return render json: {
+              error: "Choose at least one client for an active client portal user, or deactivate the login first.",
+              code: "client_required"
+            }, status: :unprocessable_entity
+          end
+
           user.association(:company_assignments).reset
 
           render json: {

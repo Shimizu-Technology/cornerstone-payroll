@@ -179,7 +179,8 @@ class PayrollInvitation
   def locked_bind(user, binding)
     subject = binding.fetch(:subject)
     request = binding.fetch(:request)
-    user.with_lock(LOGIN_LOCK) do
+    activation_notice = nil
+    bound_user = user.with_lock(LOGIN_LOCK) do
       # A simultaneous request can complete this exact binding first.
       next user if user.clerk_id == subject
       next unless user.clerk_invitation_id == binding.fetch(:invitation_id) && nonce_matches?(user, binding.fetch(:digest))
@@ -198,11 +199,13 @@ class PayrollInvitation
         next false if user.portal_employee? && !link
 
         bind!(user, subject, actor: user, request: request, source: "invitation_metadata")
-        EmployeeLinks::Bind.activate!(link, user, request: request, identity: binding.fetch(:identity)) if link
+        activation_notice = EmployeeLinks::Bind.activate!(link, user, request: request, identity: binding.fetch(:identity), notify: false) if link
         true
       end
       user if bound
     end
+    EmployeeLinks::ActivationNoticeEmail.deliver(**activation_notice) if bound_user && activation_notice
+    bound_user
   end
 
   # A demo login binds only when every address involved is allow-listed: the

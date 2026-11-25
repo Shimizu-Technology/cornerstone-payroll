@@ -57,10 +57,11 @@ module Api
           end
 
           if ssn_cache.any?
-            Rails.cache.write(
-              "bulk_import_ssn:#{preview_id}",
-              ssn_cache,
-              expires_in: 2.hours
+            EmployeeBulkImport::SsnPreviewCache.write(
+              company_id: current_company_id,
+              user_id: current_user.id,
+              preview_id: preview_id,
+              tokens: ssn_cache
             )
           end
 
@@ -86,7 +87,11 @@ module Api
 
           ssn_cache = nil
           if params[:preview_id].present?
-            ssn_cache = Rails.cache.read("bulk_import_ssn:#{params[:preview_id]}")
+            ssn_cache = EmployeeBulkImport::SsnPreviewCache.read(
+              company_id: current_company_id,
+              user_id: current_user.id,
+              preview_id: params[:preview_id]
+            )
           end
 
           # If any row references an SSN token but the cache has expired,
@@ -124,7 +129,11 @@ module Api
 
           # Clean up the SSN cache after use
           if params[:preview_id].present?
-            Rails.cache.delete("bulk_import_ssn:#{params[:preview_id]}")
+            EmployeeBulkImport::SsnPreviewCache.delete(
+              company_id: current_company_id,
+              user_id: current_user.id,
+              preview_id: params[:preview_id]
+            )
           end
 
           render json: {
@@ -133,6 +142,18 @@ module Api
             errors: create_result[:errors],
             warnings: create_result[:warnings] || []
           }
+        end
+
+        # DELETE /api/v1/admin/employee_bulk_imports/preview/:preview_id
+        def cancel_preview
+          if params[:preview_id].present?
+            EmployeeBulkImport::SsnPreviewCache.delete(
+              company_id: current_company_id,
+              user_id: current_user.id,
+              preview_id: params[:preview_id]
+            )
+          end
+          head :no_content
         end
 
         private

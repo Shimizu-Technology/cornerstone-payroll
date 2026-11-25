@@ -17,6 +17,8 @@ export interface EmployeeAppAccess extends EmployeeName {
   can_manage_invites: boolean;
   staff_actions: boolean;
   access_id: number | null;
+  activated_at?: string | null;
+  invited_by_name?: string | null;
   former_access_until: string | null;
   invite_expires_at: string | null;
   invite_delivery: InviteDelivery | null;

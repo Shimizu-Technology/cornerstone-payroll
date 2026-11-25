@@ -58,6 +58,12 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const cancelPendingPreview = useCallback(() => {
+    if (previewId && step !== 'done') {
+      void employeeBulkImportApi.cancelPreview(previewId).catch(() => { /* Best-effort server cache cleanup. */ });
+    }
+  }, [previewId, step]);
+
   const reset = useCallback(() => {
     setStep('upload');
     setFile(null);
@@ -71,6 +77,7 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
   }, [setError]);
 
   const handleClose = () => {
+    cancelPendingPreview();
     if (step === 'done') onComplete();
     reset();
     onClose();

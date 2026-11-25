@@ -15,7 +15,11 @@ RSpec.describe "Demo company staff and client access", type: :request do
   let!(:catering) { create_demo_company(organization: organization, name: "Harbor Finch Catering", fixture_key: "harbor-finch-catering") }
   let!(:admin) { create(:user, company: live, organization: organization, role: "admin") }
   let!(:accountant) { create(:user, company: live, organization: organization, role: "accountant") }
-  let!(:live_client) { create(:user, company: live, organization: organization, role: "client", email: "owner@client.example") }
+  let!(:live_client) do
+    create(:user, company: live, organization: organization, role: "client", email: "owner@client.example").tap do |user|
+      CompanyAssignment.create!(user: user, company: live)
+    end
+  end
 
   around do |example|
     saved = ENV[DemoOutbound::ENV_KEY]

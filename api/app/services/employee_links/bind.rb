@@ -36,12 +36,17 @@ module EmployeeLinks
       link
     end
 
-    def activate!(link, user, request:, identity:)
+    def activate!(link, user, request:, identity:, notify: true)
       now = Time.current
+      email_on_file = link.employee.email.to_s.strip.presence
       link.update!(status: "active", activated_at: now, invite_token_digest: nil, invite_code_digest: nil,
         failed_activation_attempts: 0, activation_locked_at: nil, activation_locked_until: nil)
       save_contact_email(link, user, verified: email_proven?(link, user, identity), now: now)
-      EmployeeLinks.audit!(link, "activated", user: user, request: request, metadata: { via: link.invite_delivery })
+      EmployeeLinks.audit!(link, "activated", user: user, request: request,
+        metadata: { via: link.invite_delivery, invited_by_id: link.invited_by_id }.compact)
+      notice = { link: link, email_on_file: email_on_file, activated_at: now }
+      ActivationNoticeEmail.deliver(**notice) if notify
+      notice
     end
 
     # The sign-up address counts as confirmed only on evidence from the bound

@@ -34,6 +34,7 @@ module EmployeeLinks
       return unless user_allowed?
 
       replaced_invitation = nil
+      email_on_file = nil
       # The claimant (and an abandoned pending sign-up on the link) are locked
       # before the link, so two claims by one login serialize and the second
       # sees the first's link as open (EmployeeLinks lock order).
@@ -46,11 +47,13 @@ module EmployeeLinks
         @user.reload
         next unless user_allowed? && claimable?(candidate)
 
+        email_on_file = candidate.employee.email.to_s.strip.presence
         replaced_invitation = retire_pending_user!(candidate)
         attach!(candidate)
         candidate
       end
       revoke_invitation(replaced_invitation) if link && replaced_invitation
+      ActivationNoticeEmail.deliver(link: link, email_on_file: email_on_file, activated_at: link.activated_at) if link
       link
     end
 
@@ -64,7 +67,8 @@ module EmployeeLinks
       link.update!(user: @user, status: "active", activated_at: Time.current, invite_token_digest: nil,
         invite_code_digest: nil, failed_activation_attempts: 0, activation_locked_at: nil, activation_locked_until: nil)
       EmployeeLinks.audit!(link, audit_action, user: @user, request: @request,
-        metadata: { via: link.invite_delivery, routed_to_login: link.claim_user_id.present?, terms_version: @terms_version }.compact)
+        metadata: { via: link.invite_delivery, invited_by_id: link.invited_by_id,
+          routed_to_login: link.claim_user_id.present?, terms_version: @terms_version }.compact)
     end
 
     def audit_action
