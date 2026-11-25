@@ -70,32 +70,46 @@ module RlsDatabase
     SQL
   end
 
+  COMPARE_LOCK_TIMEOUT = "2s"
+
   # The protected tables whose policies differ from what rls:install would
   # create now. The installer builds the expected policies on a same-named
   # pg_temp copy of each table, so Postgres normalizes both sides the same
-  # way; the whole comparison rolls back. Reads the live definitions before
-  # each copy exists, while the table name still resolves to the real table.
+  # way. Each table compares in its own short transaction that rolls back at
+  # once, so any lock it takes (pg_get_expr on the live table, a policy that
+  # reads a parent table) is held only for that table and never queues
+  # behind DDL such as rls:disable for longer than COMPARE_LOCK_TIMEOUT. The
+  # copy's columns come from the catalog rather than LIKE, which would lock
+  # the live table. Reads the live definitions before the copy exists, while
+  # the table name still resolves to the real table.
   def self.policy_mismatches(connection, tables = RlsTables::PROTECTED_TABLES.to_a)
     schema = connection.select_value("SELECT current_schema()")
     function = File.read(POLICY_FILE)[/^-- BEGIN install_company_policy\n(.*)^-- END install_company_policy$/m, 1]
     raise "install_company_policy markers are missing from #{POLICY_FILE}" unless function
 
-    mismatched = []
-    connection.transaction(requires_new: true) do
-      connection.execute("SET LOCAL lock_timeout = '3s'")
-      connection.execute(function)
-      tables.each do |table|
-        identifier = connection.quote_table_name(table)
+    tables.select do |table|
+      differs = false
+      connection.transaction(requires_new: true) do
+        connection.execute("SET LOCAL lock_timeout = '#{COMPARE_LOCK_TIMEOUT}'")
+        connection.execute(function)
         actual = policy_definitions(connection, "#{schema}.#{table}")
-        connection.execute("CREATE TEMP TABLE #{identifier} (LIKE #{connection.quote_table_name(schema)}.#{identifier})")
+        connection.execute("CREATE TEMP TABLE #{connection.quote_table_name(table)} (#{column_definitions(connection, schema, table)})")
         connection.execute(install_policy_sql(connection, schema, table, policy_schema: "pg_temp"))
-        expected = policy_definitions(connection, "pg_temp.#{table}")
-        connection.execute("DROP TABLE pg_temp.#{identifier}")
-        mismatched << table unless actual == expected
+        differs = actual != policy_definitions(connection, "pg_temp.#{table}")
+        raise ActiveRecord::Rollback
       end
-      raise ActiveRecord::Rollback
+      differs
     end
-    mismatched
+  end
+
+  # The live table's columns and types, read from the catalog without
+  # locking the table.
+  def self.column_definitions(connection, schema, table)
+    connection.select_value(<<~SQL)
+      SELECT string_agg(format('%I %s', attname, format_type(atttypid, atttypmod)), ', ' ORDER BY attnum)
+      FROM pg_attribute
+      WHERE attrelid = to_regclass(#{connection.quote("#{schema}.#{table}")}) AND attnum > 0 AND NOT attisdropped
+    SQL
   end
 
   def self.verify_runtime!(connection)

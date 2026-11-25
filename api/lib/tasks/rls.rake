@@ -104,11 +104,13 @@ namespace :rls do
     require_relative "../rls_configuration"
     require_relative "../rls_tables"
 
+    # Waits a bounded time for a running rls:enforce, which stops before its
+    # next table once the kill switch is set. 0 would turn lock_timeout off
+    # and wait forever, so it is refused like any value outside the bound.
+    wait = Integer(ENV.fetch("LOCK_WAIT", "60"), 10, exception: false)
+    abort "LOCK_WAIT must be a whole number of seconds from 1 to 600" unless wait&.between?(1, 600)
     url = RlsConfiguration.direct_url!(ENV.fetch("MIGRATION_DATABASE_URL"), "MIGRATION_DATABASE_URL")
     PG.connect(url) do |connection|
-      # Waits a bounded time for a running rls:enforce, which stops before
-      # its next table once the kill switch is set.
-      wait = Integer(ENV.fetch("LOCK_WAIT", "60"))
       begin
         connection.exec("SET lock_timeout = '#{wait}s'")
         connection.exec("SELECT pg_advisory_lock(#{RlsConfiguration::OWNER_TASK_LOCK})")

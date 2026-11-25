@@ -52,7 +52,12 @@ module RlsEnforcement
     failures << "policies are not staged on: #{(missing + unstaged).sort.join(', ')}" if (missing + unstaged).any?
     # Names and commands can match while a predicate or role list is stale.
     staged = status.select { |row| row.fetch("policy") }.map { |row| row.fetch("table") }
-    differing = RlsDatabase.policy_mismatches(connection, staged)
+    differing = begin
+      RlsDatabase.policy_mismatches(connection, staged)
+    rescue ActiveRecord::LockWaitTimeout
+      failures << "could not compare policy definitions: a table is locked by other DDL (rls:disable?); retry"
+      []
+    end
     if differing.any?
       failures << "policy definitions differ from db/rls_policies.sql on: #{differing.sort.join(', ')}; " \
                   "re-run rls:install to reinstall them"
