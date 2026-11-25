@@ -276,6 +276,35 @@ describe('Clients migration promotion', () => {
     expect(screen.queryByRole('heading', { name: 'Create a test workspace' })).toBeNull();
   });
 
+  it('lists a demo company like any client and names its type only in the admin edit form', async () => {
+    const user = userEvent.setup();
+    const demo = { ...target, id: 9, name: 'Harbor Finch Kitchen' };
+    apiMocks.list.mockResolvedValue({ companies: [demo] });
+    apiMocks.get.mockResolvedValue({ company: { ...demo, company_type: 'demo' } });
+    render(<Clients />);
+
+    expect((await screen.findAllByText('Harbor Finch Kitchen')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Company type')).toBeNull();
+    expect(screen.queryByText(/Demo company|Test workspace ·/)).toBeNull();
+    await user.click(screen.getAllByRole('button', { name: 'Edit' })[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Edit Client' })).toBeTruthy();
+    expect(apiMocks.get).toHaveBeenCalledWith(9);
+    expect(screen.getByText('Company type')).toBeTruthy();
+    expect(screen.getByText('Demo')).toBeTruthy();
+  });
+
+  it('shows no company type for an ordinary client', async () => {
+    const user = userEvent.setup();
+    apiMocks.list.mockResolvedValue({ companies: [target] });
+    apiMocks.get.mockResolvedValue({ company: { ...target, company_type: 'client' } });
+    render(<Clients />);
+
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    expect(await screen.findByRole('heading', { name: 'Edit Client' })).toBeTruthy();
+    expect(screen.queryByText('Company type')).toBeNull();
+  });
+
   it('closes an open workspace preview before editing a client', async () => {
     const user = userEvent.setup();
     apiMocks.get.mockResolvedValue({ company: target });

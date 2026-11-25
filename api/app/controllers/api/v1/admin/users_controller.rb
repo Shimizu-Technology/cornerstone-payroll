@@ -533,7 +533,7 @@ module Api
               {
                 id: company.id,
                 name: company.name,
-                test_workspace: company.test_workspace?,
+                test_workspace: company.practice_copy?,
                 workspace_access_level: user.company_assignments.find { |assignment| assignment.company_id == company.id }&.workspace_access_level
               }
             end

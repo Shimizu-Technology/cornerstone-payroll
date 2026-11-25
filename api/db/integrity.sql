@@ -1043,3 +1043,26 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 20261125160000_add_demo_test_workspace_purpose.rb
+CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
+BEGIN
+  IF (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
+    OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo' AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
+    RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF COALESCE(OLD.test_workspace_purpose, '') = 'demo'
+    AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
+    RAISE EXCEPTION 'demo fixture keys are immutable'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS companies_demo_shape_immutable ON companies;
+CREATE TRIGGER companies_demo_shape_immutable
+BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_conversion();
