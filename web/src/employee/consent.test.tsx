@@ -134,13 +134,13 @@ describe('employee electronic-delivery consent screens', () => {
     expect(screen.queryByRole('region', { name: 'Electronic Form W-2GU' })).toBeNull();
 
     // Also hidden on Tax forms
-    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Taxes' }));
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Tax forms' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Tax forms' })).toBeTruthy();
     expect(screen.queryByRole('region', { name: 'Electronic Form W-2GU' })).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/delivery_consents'))).toBe(false);
   });
 
-  it('shows plain disclosure text with NO draft marker for regular employees, and shows the marker for staff/dev', async () => {
+  it('collapses disclosure text behind "Read the disclosure", omits "pilot", and shows draft marker only for staff/dev', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');
     vi.stubGlobal('fetch', respond({
@@ -154,8 +154,17 @@ describe('employee electronic-delivery consent screens', () => {
     }));
     const first = render(<EmployeeApp />);
 
-    expect(await screen.findByRole('region', { name: 'Electronic pay statements' })).toBeTruthy();
-    expect(screen.getByText('Electronic pay statements under Guam UETA.')).toBeTruthy();
+    const payCard = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    expect(within(payCard).getByText('Paper delivery')).toBeTruthy();
+    expect(payCard.textContent).not.toMatch(/\bpilot\b/i);
+    expect(within(payCard).getByText(/Paper copies continue for everyone for now\./)).toBeTruthy();
+    const toggle = within(payCard).getByRole('button', { name: 'Read the disclosure' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(within(payCard).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).not.toBeNull();
+
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(within(payCard).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).toBeNull();
     expect(screen.queryByTestId('draft-wording-marker')).toBeNull();
     expect(screen.queryByText('Draft wording')).toBeNull();
     first.unmount();
@@ -237,7 +246,8 @@ describe('employee electronic-delivery consent screens', () => {
     const dialog = await screen.findByTestId('dev-preview-step-up');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Confirm' }));
 
-    expect(await screen.findByText(/Consent recorded for electronic Form W-2GU/)).toBeTruthy();
+    expect(await screen.findByText(/Consent recorded for electronic Form W-2GU\. Paper copies still continue for now\./)).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/\bpilot\b/i);
     expect(lastConsentBody).toMatchObject({
       kind: 'w2gu',
       acknowledged: true,
@@ -311,6 +321,7 @@ describe('employee electronic-delivery consent screens', () => {
     expect(printSpy).toHaveBeenCalledOnce();
     expect(document.body.classList.contains('emp-printing-disclosure')).toBe(true);
     expect(w2Card.getAttribute('data-print-target')).toBe('true');
+    expect(within(w2Card).getByText('You need a PDF viewer.').closest('[hidden]')).toBeNull();
     expect(payCard.getAttribute('data-print-target')).toBeNull();
 
     act(() => {

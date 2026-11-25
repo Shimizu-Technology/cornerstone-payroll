@@ -26,12 +26,14 @@ describe('employee API client', () => {
   });
 
   it('reads links without a link header', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({ links: [{ id: 7, company_name: "MoSa's", subdomain_slug: 'mosas', status: 'active', former_access_until: null }] }));
+    const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
+      links: [{ id: 7, company_name: "MoSa's", subdomain_slug: 'mosas', status: 'active', former_access_until: null, latest_pay_date: '2026-11-20' }],
+    }));
     const links = await client(fetchImpl).links();
 
     expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/employee/links');
     expect(fetchImpl.mock.calls[0][1]?.headers).not.toHaveProperty('X-Employee-Link-Id');
-    expect(links).toEqual([{ id: '7', companyName: "MoSa's", subdomainSlug: 'mosas', status: 'active', formerAccessUntil: null }]);
+    expect(links).toEqual([{ id: '7', companyName: "MoSa's", subdomainSlug: 'mosas', status: 'active', formerAccessUntil: null, latestPayDate: '2026-11-20' }]);
   });
 
   it('builds URLs from a base with or without a trailing slash', async () => {
@@ -143,7 +145,7 @@ describe('parseLinks', () => {
 
   it('accepts a bare array and drops entries without a usable id', () => {
     expect(parseLinks([{ id: '12', company_name: 'A' }, { id: 'abc' }, { company_name: 'no id' }, null])).toEqual([
-      { id: '12', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null },
+      { id: '12', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null, latestPayDate: null },
     ]);
   });
 
@@ -170,7 +172,7 @@ describe('problemFor', () => {
 });
 
 describe('chooseLink', () => {
-  const link = (overrides: Partial<EmployeeLink>): EmployeeLink => ({ id: '1', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null, ...overrides });
+  const link = (overrides: Partial<EmployeeLink>): EmployeeLink => ({ id: '1', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null, latestPayDate: null, ...overrides });
 
   it('shows "unavailable" when there are no links', () => {
     expect(chooseLink([], '2026-11-24', null)).toBe('unavailable');

@@ -59,7 +59,7 @@ describe('employee app shell', () => {
 
     expect(await screen.findByRole('heading', { level: 1, name: 'Welcome' })).toBeTruthy();
     const nav = screen.getByRole('navigation', { name: 'Main' });
-    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Pay', 'Taxes', 'My info', 'Help']);
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['Home', 'Pay', 'Tax forms', 'My info', 'Help']);
     expect(within(nav).getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBe('page');
 
     const contextCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/employee/context'));
@@ -216,7 +216,8 @@ describe('employee app shell', () => {
 
     expect(await screen.findByText(`Your new address was approved. ${expectedMessage}`)).toBeTruthy();
     expect(screen.getByText('Thanks for updating your address.')).toBeTruthy();
-    expect(screen.getByText('Contact Cornerstone')).toBeTruthy();
+    expect(screen.getByText('To change these, ask your manager to put you in touch with Cornerstone.')).toBeTruthy();
+    expect(screen.queryByText('Contact Cornerstone')).toBeNull();
     expect(screen.queryByText(/0001/)).toBeNull();
   });
 
@@ -349,6 +350,162 @@ describe('employee app shell', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Continue as preview employee' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Tax forms' })).toBeTruthy();
     expect(window.location.pathname).toBe('/taxes');
+  });
+
+  it('offers an Account menu in the header to switch employers or sign out from any screen', async () => {
+    signedIn();
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({
+        links: [
+          { id: 10, company_name: 'Harbor Finch Kitchen', status: 'active', latest_pay_date: '2026-11-20' },
+          { id: 11, company_name: 'Harbor Finch Catering', status: 'former', former_access_until: '2027-06-30', latest_pay_date: '2025-12-19' },
+        ],
+      }),
+      '/employee/context': () => Response.json({ first_name: 'Maren', status: 'active', features: { stubs: false } }),
+    }));
+    render(<EmployeeApp />);
+
+    // Employer picker shows latest pay date to tell jobs apart (E11).
+    expect(await screen.findByRole('heading', { level: 1, name: 'Which job do you want to see?' })).toBeTruthy();
+    expect(screen.getByText('Current job · Last paid Nov 20')).toBeTruthy();
+    expect(screen.getByText('Former job · Last paid Dec 19, 2025 · view until Jun 30, 2027')).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: /Harbor Finch Kitchen/ }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Hi, Maren' })).toBeTruthy();
+
+    // Header Account menu exposes Switch employer, Sign-in & security, and Sign out (E2).
+    const accountButton = screen.getByRole('button', { name: 'Account, Maren' });
+    await userEvent.click(accountButton);
+    const menu = screen.getByRole('menu', { name: 'Account' });
+    expect(within(menu).getByText('Maren')).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'Switch employer' })).toBeTruthy();
+    expect(within(menu).getByRole('menuitem', { name: 'Sign-in & security' })).toBeTruthy();
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'Sign out' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
+  });
+
+  it('labels unverified phone as "Added by you" and verified email as "Verified"', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen', status: 'active' }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        legal_name: 'Maren Fable',
+        phone: '6715550142',
+        phone_confirmed: true,
+        email: 'maren@harborfinch.test',
+        email_verified: true,
+      }),
+    }));
+    render(<EmployeeApp />);
+
+    const contact = await screen.findByRole('region', { name: 'Contact details' });
+    expect(within(contact).getByText('Added by you')).toBeTruthy();
+    expect(within(contact).getByText('Verified')).toBeTruthy();
+    expect(within(contact).queryByText('Confirmed by you')).toBeNull();
+  });
+
+  it('opens Pay directly on the full list by year, titles stubs with the pay period, and uses Older/Newer', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/pay');
+    const stubs = [
+      {
+        id: 906,
+        pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20', run_purpose: 'regular' },
+        check_date: '2026-11-20',
+        gross_pay: '612.50',
+        net_pay: '534.18',
+        total_hours: '38.50',
+        payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-20', check_number_last4: null },
+        pdf_available: true,
+      },
+      {
+        id: 905,
+        pay_period: { start_date: '2026-10-18', end_date: '2026-10-31', pay_date: '2026-11-06', run_purpose: 'regular' },
+        check_date: '2026-11-06',
+        gross_pay: '651.00',
+        net_pay: '570.63',
+        total_hours: '42.00',
+        payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-06', check_number_last4: null },
+        pdf_available: true,
+      },
+    ];
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen', status: 'active' }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: stubs, years: [2026, 2025], next_page: null }),
+      '/employee/statements/906': () => Response.json({ ...stubs[0], earnings: [], taxes: [], deductions: [], other_pay: [], ytd: { gross: '12000.00', net: '10000.00' } }),
+      '/employee/statements/905': () => Response.json({ ...stubs[1], earnings: [], taxes: [], deductions: [], other_pay: [], ytd: { gross: '11387.50', net: '9465.82' } }),
+    }));
+    render(<EmployeeApp />);
+
+    // Opens directly on the full list grouped by year, not a duplicate Latest pay overview (E10).
+    expect(await screen.findByRole('heading', { level: 1, name: 'Pay stubs' })).toBeTruthy();
+    const list = await screen.findByRole('list', { name: 'Paychecks' });
+    expect(screen.getByRole('button', { name: '2026' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'View all pay stubs' })).toBeNull();
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+
+    // Opening a stub titles it with the pay period and navigates via Older / Newer (E8, E9).
+    await userEvent.click(within(list).getByRole('link', { name: /Nov 20/ }));
+    const stub = await screen.findByRole('article');
+    expect(within(stub).getByRole('heading', { level: 2, name: 'Nov 1 – 14' })).toBeTruthy();
+    expect(within(stub).getByText('Paid Nov 20, 2026')).toBeTruthy();
+    expect(within(stub).queryByText('Pay period Nov 1 – 14')).toBeNull();
+    await userEvent.click(within(stub).getAllByRole('link', { name: /^Older:/ })[0]);
+    const olderStub = await screen.findByRole('article');
+    expect(within(olderStub).getByRole('heading', { level: 2, name: 'Oct 18 – 31' })).toBeTruthy();
+    expect(within(olderStub).getAllByRole('link', { name: /^Newer:/ }).length).toBeGreaterThan(0);
+  });
+
+  it('sets honest Step 1 copy, hides internal terms version, and keeps Step 2 entries on mismatch', async () => {
+    window.history.pushState({}, '', '/activate');
+    let activationCalls = 0;
+    let lastBody: Record<string, unknown> | null = null;
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      const path = new URL(String(input), 'http://localhost').pathname.replace(/^\/api\/v1/, '');
+      if (path === '/public/employee_terms') {
+        return Response.json({ version: '2026-11-25-draft-1', title: 'Employee App Terms', terms_url: '/terms', privacy_url: '/privacy' });
+      }
+      if (path === '/employee/activation') {
+        activationCalls += 1;
+        lastBody = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+        return Response.json({ code: 'activation_failed' }, { status: 422 });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    render(<EmployeeApp />);
+
+    // Honest Step 1 copy (E1).
+    expect(await screen.findByText("First, tell us who you are. We'll check everything when you create your account.")).toBeTruthy();
+    await userEvent.type(screen.getByLabelText('Sign-up code'), 'ABCDEFGHJK');
+    await userEvent.selectOptions(screen.getByLabelText('Month'), '4');
+    await userEvent.type(screen.getByLabelText('Day'), '7');
+    await userEvent.type(screen.getByLabelText('Year'), '1990');
+    await userEvent.type(screen.getByLabelText('Last 4 of your Social Security number'), '1234');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    // Terms link shows title only, never the internal version code (E4).
+    const termsLink = await screen.findByRole('link', { name: 'Employee App Terms' });
+    expect(termsLink.textContent).toBe('Employee App Terms');
+    expect(screen.queryByText(/2026-11-25-draft-1/)).toBeNull();
+
+    await userEvent.type(screen.getByLabelText('Your email'), 'maren@harborfinch.test');
+    await userEvent.click(screen.getByLabelText('Send my pay stub notices to this email'));
+    await userEvent.click(screen.getByRole('checkbox', { name: /Employee App Terms/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
+
+    // Sent back to Step 1 with the mismatch message, and the version was still sent in the request.
+    expect(await screen.findByText("We couldn't match those details")).toBeTruthy();
+    expect(activationCalls).toBe(1);
+    expect(lastBody).toMatchObject({ terms_version: '2026-11-25-draft-1' });
+
+    // Continuing back to Step 2 preserves the email, notice preference, and agreement (E1).
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect((await screen.findByLabelText('Your email') as HTMLInputElement).value).toBe('maren@harborfinch.test');
+    expect((screen.getByLabelText('Send my pay stub notices to this email') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /Employee App Terms/ }) as HTMLInputElement).checked).toBe(true);
   });
 });
 

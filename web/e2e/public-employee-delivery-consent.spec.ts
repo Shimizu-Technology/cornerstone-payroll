@@ -169,6 +169,10 @@ for (const viewport of [
     const w2Card = page.getByRole('region', { name: 'Electronic Form W-2GU' });
     await expect(w2Card).toBeVisible();
     await expect(page.getByTestId('draft-wording-marker')).toHaveCount(0);
+    await expect(w2Card).not.toContainText(/\bpilot\b/i);
+    await expect(w2Card.getByText('Paper Form W-2GU continues unless you consent.')).toBeHidden();
+    await w2Card.getByRole('button', { name: 'Read the disclosure' }).click();
+    await expect(w2Card.getByText('Paper Form W-2GU continues unless you consent.')).toBeVisible();
     await expectNoHorizontalScroll(page);
 
     await w2Card.getByRole('button', { name: 'Open test PDF' }).click();

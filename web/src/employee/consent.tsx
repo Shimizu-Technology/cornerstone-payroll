@@ -132,6 +132,7 @@ function ConsentCard({
   const disclosure = item.disclosure;
 
   const [acknowledged, setAcknowledged] = useState(false);
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
   const [challenge, setChallenge] = useState<W2GuAccessProofChallenge | null>(null);
   const [proofCode, setProofCode] = useState('');
   const [loadingPdf, setLoadingPdf] = useState(false);
@@ -200,7 +201,7 @@ function ConsentCard({
       setChallenge(null);
       setProofCode('');
       setPdfNotice(null);
-      onUpdated(next, `Consent recorded for electronic ${copy.shortLabel}. Paper copies still continue during the pilot.`);
+      onUpdated(next, `Consent recorded for electronic ${copy.shortLabel}. Paper copies still continue for now.`);
     } catch (failure) {
       if (failure instanceof EmployeeApiError && failure.kind === 'mfa_enrollment_required') {
         setNeedsTwoStep(true);
@@ -237,6 +238,8 @@ function ConsentCard({
   };
 
   const canSubmit = acknowledged && (!item.requiresAccessProof || (challenge !== null && proofCode.trim().length >= 6));
+  const showDisclosure = disclosureOpen || isPrintTarget;
+  const disclosureId = `emp-disclosure-${item.kind}`;
 
   return (
     <Card
@@ -256,7 +259,7 @@ function ConsentCard({
         {item.paperContinues && (
           <div className="emp-notice-inline" role="note">
             <p className="text-neutral-700">
-              Paper copies continue for everyone during the pilot. Your choice here records your preference for future electronic delivery.
+              Paper copies continue for everyone for now. Your choice here records your preference for future electronic delivery.
             </p>
           </div>
         )}
@@ -288,18 +291,29 @@ function ConsentCard({
 
         {disclosure ? (
           <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="emp-label-quiet">{disclosure.title}</p>
+            <div className="emp-no-print flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                className="emp-disclosure-toggle"
+                aria-expanded={showDisclosure}
+                aria-controls={disclosureId}
+                onClick={() => setDisclosureOpen((open) => !open)}
+              >
+                Read the disclosure
+              </button>
               <EmpButton
                 variant="quiet"
-                className="emp-btn-small emp-no-print"
+                className="emp-btn-small"
                 onClick={onPrint}
               >
                 <Printer aria-hidden="true" className="size-4" />
                 Print
               </EmpButton>
             </div>
-            <DisclosureBody text={disclosure.text} />
+            <div id={disclosureId} className="emp-disclosure-panel space-y-2" hidden={!showDisclosure}>
+              <p className="emp-label-quiet">{disclosure.title}</p>
+              <DisclosureBody text={disclosure.text} />
+            </div>
           </div>
         ) : (
           <p className="text-neutral-600">Disclosure text is not available right now.</p>

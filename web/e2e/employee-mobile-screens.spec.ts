@@ -60,8 +60,9 @@ test.describe('employee app on a phone', () => {
     await expect(page).toHaveURL(/\/pay\/906$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Pay stub' })).toBeFocused();
     const stub = page.getByRole('article');
-    await expect(stub.getByRole('heading', { name: 'Nov 20, 2026' })).toBeVisible();
-    await expect(stub).toContainText('Pay period Nov 1 – 14');
+    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14' })).toBeVisible();
+    await expect(stub).toContainText('Paid Nov 20, 2026');
+    await expect(stub).not.toContainText('Pay period Nov 1 – 14');
     await expect(stub).toContainText('36 hrs × $15.00');
     await expect(stub).toContainText('2.5 hrs × $22.50');
     await expect(stub.getByRole('row', { name: /Tips/ })).toContainText('$16.25');
@@ -79,25 +80,22 @@ test.describe('employee app on a phone', () => {
     expect(pdfRequest?.headers['x-employee-link-id']).toBe('42');
     expect(pdfRequest?.headers.accept).toBe('application/pdf');
 
-    // Previous walks to the older check, as a new screen with focus on its heading.
-    await stub.getByRole('link', { name: /^Previous/ }).click();
+    // Older walks to the earlier check, as a new screen with focus on its heading.
+    await stub.getByRole('link', { name: /^Older:/ }).click();
     await expect(page).toHaveURL(/\/pay\/905$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Pay stub' })).toBeFocused();
-    await expect(page.getByRole('article').getByRole('heading', { name: 'Nov 6, 2026' })).toBeVisible();
+    await expect(page.getByRole('article').getByRole('heading', { name: 'Oct 18 – 31' })).toBeVisible();
     await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await expect(page.getByRole('heading', { level: 1, name: 'Pay stubs' })).toBeVisible();
   });
 
-  test('Pay shows the latest, the three before it, then all by year with QuickBooks checks', async ({ page }) => {
+  test('Pay opens directly on the full list by year with QuickBooks checks', async ({ page }) => {
     await signIn(page);
     await mockEmployeeApi(page);
     await page.goto(`/pay?${tenantQuery}`);
 
-    await expect(page.getByRole('region', { name: 'Latest pay' })).toContainText('$534.18');
-    await expect(page.getByRole('region', { name: 'Recent pay' }).getByRole('listitem')).toHaveCount(3);
-    await snap(page, '03-pay');
-    await page.getByRole('link', { name: 'View all pay stubs' }).click();
-    await expect(page.getByRole('heading', { level: 1, name: 'All pay stubs' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Pay stubs' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View all pay stubs' })).toHaveCount(0);
     const paychecks = page.getByRole('list', { name: 'Paychecks' });
     await expect(paychecks.getByRole('listitem')).toHaveCount(5);
     await expect(paychecks.getByRole('listitem').first()).toContainText('38.5 hours');
@@ -105,19 +103,19 @@ test.describe('employee app on a phone', () => {
     const quickbooks = page.getByRole('list', { name: 'From QuickBooks records' });
     await expect(quickbooks.getByRole('listitem')).toHaveCount(2);
     await expectPhoneBasics(page);
-    await snap(page, '04-pay-all', true);
+    await snap(page, '03-pay', true);
 
     // A QuickBooks check with its original PDF offers it; one without says nothing about it.
     await quickbooks.getByRole('link', { name: /Aug 28/ }).click();
     await expect(page.getByRole('button', { name: 'View original stub (PDF)' })).toBeVisible();
     await expect(page.getByText('From QuickBooks records')).toBeVisible();
-    await page.getByRole('link', { name: 'All pay stubs' }).click();
+    await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await page.getByRole('list', { name: 'From QuickBooks records' }).getByRole('link', { name: /Aug 14/ }).click();
-    await expect(page.getByRole('heading', { name: 'Aug 14, 2026' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Jul 26 – Aug 8' })).toBeVisible();
     await expect(page.getByRole('button', { name: /PDF|original/i })).toHaveCount(0);
     await expect(page.getByRole('main')).not.toContainText(/no original|not available|missing/i);
 
-    await page.getByRole('link', { name: 'All pay stubs' }).click();
+    await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await page.getByRole('button', { name: '2025' }).click();
     await expect(page.getByRole('list', { name: 'Paychecks' }).getByRole('listitem')).toHaveCount(1);
     await expect(page).toHaveURL(/year=2025/);
@@ -149,7 +147,9 @@ test.describe('employee app on a phone', () => {
 
     const contact = page.getByRole('region', { name: 'Contact details' });
     await expect(contact).toContainText('(671) 555-0142');
+    await expect(contact.getByText('Added by you')).toBeVisible();
     await expect(contact.getByText('Verified')).toBeVisible();
+    await expect(contact.getByText('Confirmed by you')).toHaveCount(0);
     await expectPhoneBasics(page);
     await snap(page, '06-my-info', true);
 
@@ -258,8 +258,8 @@ test.describe('employee app on a phone', () => {
     await page.goto(`/my-info?${tenantQuery}`);
     const legal = page.getByRole('region', { name: 'Name and Social Security number' });
     await expect(legal).toContainText('Tala Mendiola Reyes');
-    await expect(legal).toContainText('To change these, ask your manager');
-    await expect(legal).toContainText('Ask your manager to put you in touch with Cornerstone');
+    await expect(legal).toContainText('To change these, ask your manager to put you in touch with Cornerstone.');
+    await expect(legal).not.toContainText('Contact Cornerstone');
     await expect(legal).toContainText('Your Social Security card');
     await expect(legal.getByRole('button')).toHaveCount(0);
   });
@@ -281,7 +281,7 @@ test.describe('employee app on a phone', () => {
     await expect(page.getByRole('button', { name: /Change|Request a change|Add a contact/ })).toHaveCount(0);
     await snap(page, '13-former-my-info', true);
 
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Taxes' }).click();
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tax forms' }).click();
     await expect(page.getByText('Your paper copy is mailed to your last address on file.')).toBeVisible();
   });
 
@@ -297,7 +297,7 @@ test.describe('employee app on a phone', () => {
     await expect(page.getByText('Next payday')).toHaveCount(0);
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My info' }).click();
     await expect(page.getByText("Your details can't be changed here after your job ends.")).toBeVisible();
-    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Taxes' }).click();
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tax forms' }).click();
     await expect(page.getByText('Your paper copy is mailed to your last address on file.')).toBeVisible();
     for (const path of ['/claim', '/add-access', '/activate', '/reactivate']) {
       await page.evaluate((to) => { window.history.pushState(null, '', to); window.dispatchEvent(new PopStateEvent('popstate')); }, path);
@@ -333,17 +333,17 @@ test.describe('employee app on a phone', () => {
 
     // A stub and back: all five are still listed, with no reload.
     await paychecks.getByRole('link', { name: /Sep 25/ }).click();
-    await expect(page.getByRole('article').getByRole('heading', { name: 'Sep 25, 2026' })).toBeVisible();
-    await page.getByRole('link', { name: 'All pay stubs' }).click();
+    await expect(page.getByRole('article').getByRole('heading', { name: 'Sep 6 – 19' })).toBeVisible();
+    await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await expect(page.getByRole('list', { name: 'Paychecks' }).getByRole('listitem')).toHaveCount(5);
   });
 
-  test('All pay stubs says what went wrong instead of loading forever', async ({ page }) => {
+  test('Pay stubs says what went wrong instead of loading forever', async ({ page }) => {
     await signIn(page);
     await mockEmployeeApi(page);
     // The newest checks (no year) fail, so the list doesn't know which year to open.
     await page.route((url) => url.pathname.endsWith('/employee/statements') && !url.searchParams.has('year'), (route) => route.fulfill({ status: 500 }));
-    await page.goto(`/pay/all?${tenantQuery}`);
+    await page.goto(`/pay?${tenantQuery}`);
     await expect(page.getByText("We couldn't load your pay stubs. Try again in a minute.")).toBeVisible();
     await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   });
@@ -488,8 +488,11 @@ test.describe('signing up on a phone', () => {
   test('new terms require another acceptance before retrying', async ({ page }) => {
     let version = 'first';
     const log = await mockEmployeeApi(page, { activation: () => {
-      version = 'second';
-      return { status: 409, body: { code: 'terms_updated' } };
+      if (version === 'first') {
+        version = 'second';
+        return { status: 409, body: { code: 'terms_updated' } };
+      }
+      return { status: 200, body: { next: 'sign_up', sign_up_url: '/sign-up?__clerk_ticket=preview', message: null } };
     } });
     await page.route('**/api/v1/public/employee_terms', (route) => route.fulfill({ json: {
       version, title: 'Employee App Terms', terms_url: '/terms', privacy_url: '/privacy',
@@ -498,13 +501,20 @@ test.describe('signing up on a phone', () => {
     await fillDetails(page);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('Your email').fill('worker@example.test');
-    await page.getByRole('checkbox', { name: /Employee App Terms.*first/ }).check();
+    const termsBox = page.getByRole('checkbox', { name: /Employee App Terms/ });
+    // Terms link shows title only, never the internal version code (E4).
+    await expect(page.getByRole('link', { name: 'Employee App Terms', exact: true })).toBeVisible();
+    await expect(page.getByText('first')).toHaveCount(0);
+    await termsBox.check();
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page.getByText('The terms were updated. Please review them again.')).toBeVisible();
-    await expect(page.getByRole('checkbox', { name: /Employee App Terms.*second/ })).not.toBeChecked();
-    expect(log.requests.find((request) => request.path === '/employee/activation')?.body)
-      .toMatchObject({ terms_version: 'first' });
+    await expect(termsBox).not.toBeChecked();
+    await termsBox.check();
+    await page.getByRole('button', { name: 'Create account' }).click();
+    await expect(page.getByTestId('dev-preview-sign-up')).toBeVisible();
+    const activations = log.requests.filter((request) => request.path === '/employee/activation');
+    expect(activations.map((request) => (request.body as Record<string, unknown>).terms_version)).toEqual(['first', 'second']);
   });
 
   test('every failed check comes back to step 1 with the same message, which mentions the 24-hour pause', async ({ page }) => {
@@ -521,10 +531,13 @@ test.describe('signing up on a phone', () => {
     await expect(page.getByText('After too many tries, sign-up pauses for 24 hours')).toBeVisible();
     await expect(page.getByText("If it still doesn't work, ask your manager at Coral Kitchen.")).toBeVisible();
     await expect(page.getByText('whatever the API says')).toHaveCount(0);
-    // The details are still filled in to fix.
+    // The details are still filled in to fix, and returning to step 2 keeps its entries (E1).
     await expect(page.getByLabel('Last 4 of your Social Security number')).toHaveValue('9999');
     await expectPhoneBasics(page);
     await snap(page, '22-sign-up-no-match', true);
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByLabel('Your email')).toHaveValue('tala.reyes@example.com');
+    await expect(page.getByRole('checkbox', { name: /Employee App Terms/ })).toBeChecked();
   });
 
   test('an email that can\'t start an account offers sign-in, which adds the access with the same invite', async ({ page }) => {
@@ -662,14 +675,16 @@ test.describe('signing up on a phone', () => {
 test.describe('several employers on the shared host', () => {
   test('the picker opens the chosen employer and My info can switch back', async ({ page }) => {
     await signIn(page);
+    await page.clock.setFixedTime(new Date('2026-11-25T09:00:00+10:00'));
     const log = await mockEmployeeApi(page, { links: { links: [
-      { id: 42, company_name: 'Coral Kitchen', subdomain_slug: 'coral', status: 'active', former_access_until: null },
-      { id: 77, company_name: 'Pelican Row Bakery (demo)', subdomain_slug: 'pelican', status: 'former', former_access_until: '2027-06-30' },
+      { id: 42, company_name: 'Coral Kitchen', subdomain_slug: 'coral', status: 'active', former_access_until: null, latest_pay_date: '2026-11-20' },
+      { id: 77, company_name: 'Pelican Row Bakery (demo)', subdomain_slug: 'pelican', status: 'former', former_access_until: '2027-06-30', latest_pay_date: '2026-08-14' },
     ] } });
     await page.route('**/api/v1/public/tenant_branding**', (route) => json(route, {}, 404));
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1, name: 'Which job do you want to see?' })).toBeVisible();
-    await expect(page.getByText('Former job · view until Jun 30, 2027')).toBeVisible();
+    await expect(page.getByText('Current job · Last paid Nov 20')).toBeVisible();
+    await expect(page.getByText('Former job · Last paid Aug 14 · view until Jun 30, 2027')).toBeVisible();
     await expectPhoneBasics(page);
     await snap(page, '26-employer-picker');
     await page.getByRole('button', { name: /Pelican Row Bakery/ }).click();
