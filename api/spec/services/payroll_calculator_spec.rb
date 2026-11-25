@@ -51,6 +51,19 @@ RSpec.describe PayrollCalculator do
       expect(calculator.send(:employee_w4_snapshot).dig("w4", "source_reference")).to eq("Signed source W4.pdf")
       expect(payroll_item.calculation_context_snapshot.dig("employee", "w4_signed_on")).to eq("2023-12-20")
     end
+    it "uses an effective election without a signature date when the association is loaded" do
+      election = EmployeeW4Election.create!(
+        **base_attributes.merge(additional_withholding: 15, reason: "Recorded W-4"),
+        effective_on: Date.new(2024, 1, 1), w4_signed_on: nil, filing_status: "single"
+      )
+      employee.employee_w4_elections.load
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.additional_withholding).to eq(15)
+      expect(payroll_item.tax_rule_snapshot.fetch("w4")).to include("election_id" => election.id, "signed_on" => nil)
+    end
+
     context "when a June 1 election was signed June 10" do
       let(:pay_period) { create(:pay_period, company: company, pay_date: Date.new(2024, 6, 5)) }
       let!(:later_election) do
