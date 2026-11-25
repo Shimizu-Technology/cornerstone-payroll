@@ -90,3 +90,9 @@ it.each([
   // Display rules must not change the saved register totals.
   expect(screen.getByRole('row', { name: /Totals \(1\)/ }).textContent).toContain('42.00');
 });
+
+it('flags a new hire whose documents still block approval', (): void => {
+  render(<MemoryRouter><PayRunResultsView {...props} payPeriod={{ ...props.payPeriod, status: 'calculated', new_hire_document_gaps: [{ employee_id: 7, employee_name: 'Maya Manual', missing: ['Identity and work authorization', 'Signed withholding election'] }] }} /></MemoryRouter>);
+  expect(within(screen.getByRole('row', { name: /Maya Manual/ })).getByText(/2 documents needed/)).toBeTruthy();
+  expect(within(screen.getByRole('region', { name: 'Payroll result for Maya Manual' })).getByText(/2 documents needed/)).toBeTruthy();
+});

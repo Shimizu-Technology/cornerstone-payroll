@@ -2223,7 +2223,16 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.fetch("error")).to include("Resolve required new-hire documents")
+      expect(response.parsed_body).to include("code" => "new_hire_documents_required")
+      expect(response.parsed_body.fetch("blocked_employees")).to contain_exactly(
+        include("employee_id" => employee.id, "employee_name" => employee.full_name, "missing" => include("Signed withholding election"))
+      )
       expect(pay_period.reload).to be_calculated
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      expect(response.parsed_body.dig("pay_period", "new_hire_document_gaps")).to contain_exactly(
+        include("employee_id" => employee.id, "missing" => include("Identity and work authorization", "Signed withholding election"))
+      )
     end
 
     it "publishes the current revision at staff approval and gates commit instead" do
@@ -2404,6 +2413,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.fetch("error")).to include("Resolve required new-hire documents")
+      expect(response.parsed_body.fetch("blocked_employees").pluck("employee_id")).to eq([ employee.id ])
       expect(pay_period.reload).to be_approved
     end
 

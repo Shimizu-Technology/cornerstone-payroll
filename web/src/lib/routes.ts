@@ -49,6 +49,11 @@ export function employeeEditPath(companyId: number, employeeId: number, context:
   return withReturnContext(`${employeesPath(companyId)}/${employeeId}/edit`, context);
 }
 
+/** Opens the employee's document manager, where new-hire documents are uploaded and verified. */
+export function employeeDocumentsPath(companyId: number, employeeId: number, context: ReturnContext = {}): string {
+  return `${employeeEditPath(companyId, employeeId, context)}#employee-documents`;
+}
+
 export function retirementSetupPath(
   companyId: number,
   employeeId: number,
