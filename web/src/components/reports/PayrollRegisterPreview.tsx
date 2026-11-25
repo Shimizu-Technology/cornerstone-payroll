@@ -431,7 +431,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
   const deductionColumns = fieldColumns.filter((column) => column.group === 'deduction');
   const employerColumns = fieldColumns.filter((column) => column.group === 'employer');
   const historicalLoans = workers.some((worker) => worker.historical_loan_deductions_unclassified !== undefined);
-  const columnCount = 22 + fieldColumns.length + adjustmentColumns.length + Number(historicalLoans);
+  const columnCount = 23 + fieldColumns.length + adjustmentColumns.length + Number(historicalLoans);
   const total = (key: keyof PayrollWorker) => workers.reduce((sum, worker) => sum + Number(worker[key] || 0), 0);
   const fieldTotal = (column: PayrollFieldColumn) => workers.reduce((sum, worker) => (
     sum + (payrollFieldAmount(worker, column) || 0)
@@ -456,10 +456,10 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
     ...(historicalLoans ? [['Previous provider loans (type not recorded)', currency(total('historical_loan_deductions_unclassified'))]] : []),
     ['Employer contributions', currency(report.summary.total_employer_contributions)],
     ['Employer cost', currency(report.summary.total_employer_payroll_cost)],
-    ['Base FIT', currency(report.summary.total_withholding)],
-    ['Additional FIT', currency(report.summary.total_additional_withholding)],
+    ['Withholding', currency(Number(report.summary.total_withholding ?? 0) + Number(report.summary.total_additional_withholding ?? 0))],
     ['Deductions', currency(report.summary.total_deductions)],
     ['Total net', currency(Number(report.summary.total_net) + Number(contractorNet))],
+    ['Additional FIT', currency(report.summary.total_additional_withholding)],
   ];
   const workerSections = [
     { label: 'W-2 employees', workers: report.employees },
@@ -523,6 +523,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Employer Cost</th>
                 {employerColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-neutral-200 px-3 py-2.5 font-bold">Check #</th>
+                <th className="border-b border-neutral-200 px-3 py-2.5 font-bold">Total FIT (Base + Additional)</th>
               </tr>
             </thead>
             <tbody>
@@ -563,6 +564,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                       <td className="border-b border-r border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(worker.employer_payroll_cost)}</td>
                       {employerColumns.map((column) => <PayrollFieldCell key={column.key} worker={worker} column={column} />)}
                       <td className="border-b border-neutral-100 px-3 py-2 font-mono">{worker.check_number || ''}</td>
+                      <td className="border-b border-neutral-100 px-3 py-2 text-right tabular-nums">{currency(Number(worker.withholding_tax ?? 0) + Number(worker.additional_withholding ?? 0))}</td>
                     </tr>
                   ))}
                 </Fragment>
@@ -608,6 +610,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                   <td key={column.key} className="border-t-2 border-r border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(fieldTotal(column))}</td>
                 ))}
                 <td className="border-t-2 border-neutral-300 px-3 py-2.5" />
+                <td className="border-t-2 border-neutral-300 px-3 py-2.5 text-right font-bold tabular-nums">{currency(total('withholding_tax') + total('additional_withholding'))}</td>
               </tr>
             </tfoot>
           </table>

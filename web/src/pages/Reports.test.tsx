@@ -472,10 +472,10 @@ describe('PayrollRegisterPanel', () => {
 describe('Tax Withholding Summary', () => {
   afterEach(cleanup);
 
-  it('shows the Cornerstone-only scope before exporting and displays base, additional, and total withholding', async () => {
+  it('keeps the report description and shows the selected range exclusion and total withholding', async () => {
     apiMocks.taxSummary.mockResolvedValue({ report: {
       period: { label: '2026' },
-      source: { label: 'Cornerstone', statement: 'Payroll run in Cornerstone only; QuickBooks history not included.' },
+      source: { label: 'Cornerstone', statement: 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.' },
       totals: {
         gross_wages: 1000,
         base_withholding_tax: 120.11,
@@ -493,11 +493,13 @@ describe('Tax Withholding Summary', () => {
     } });
     renderReportPanel(<Reports />);
     fireEvent.click(screen.getByRole('button', { name: 'Review taxes' }));
-    expect(await screen.findByText('Payroll run in Cornerstone only; QuickBooks history not included.')).toBeTruthy();
+    expect(screen.getByText('Quarterly tax withholding totals for filing preparation — all committed pay periods in range.')).toBeTruthy();
+    expect(screen.queryByText(/Imported QuickBooks/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
     expect((await screen.findByText('Base Withholding Tax')).nextElementSibling?.textContent).toBe('$120.11');
     expect(screen.getByText('Additional Withholding').nextElementSibling?.textContent).toBe('$50.22');
-    expect(screen.getByText('Total Withholding Tax').nextElementSibling?.textContent).toBe('$170.33');
+    expect(screen.getByText('Withholding Tax').nextElementSibling?.textContent).toBe('$170.33');
+    expect(screen.getByText('Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.')).toBeTruthy();
   });
 });
 
@@ -531,6 +533,9 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
     await screen.findByRole('combobox', { name: 'Employee' });
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
+    expect((screen.getByRole('columnheader', { name: 'Hours' }) as HTMLTableCellElement).cellIndex).toBe(3);
+    expect(screen.getAllByRole('columnheader').at(-1)?.textContent).toBe('Combined Hours');
+    expect(screen.getAllByText('30.11')).toHaveLength(2);
     expect(screen.getAllByText('Direct deposit')).toHaveLength(2);
     expect(screen.getAllByText('$170.33')).toHaveLength(2);
     expect(screen.getAllByText('39.1')).toHaveLength(2);

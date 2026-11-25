@@ -50,14 +50,21 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       if (route.request().url().includes('_pdf')) return route.fulfill({ contentType: 'application/pdf', headers: { 'Content-Disposition': 'attachment; filename="report.pdf"' }, body: '%PDF-1.4 test' });
       return json(route, { report: null });
     });
+    const statement = 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.';
+    await page.route('**/api/v1/client/reports/tax_summary?**', (route) => json(route, {
+      report: { source: { statement: new URL(route.request().url()).searchParams.get('quarter') === '2' ? statement : null } },
+    }));
     await page.goto('/reports');
     await expect(page.getByRole('region', { name: 'Report catalog' })).toBeVisible();
     await expect(page.getByRole('option', { name: '2026-11-01 - 2026-11-14' })).toHaveCount(0);
     await expect(page.getByRole('option', { name: '2026-10-19 - 2026-11-01' })).toHaveCount(0);
-    const payrollScope = page.getByText('Payroll run in Cornerstone only; QuickBooks history not included.');
+    await page.getByRole('combobox', { name: 'Quarter' }).selectOption('2');
+    const payrollScope = page.getByText(statement);
     await expect(payrollScope).toHaveCount(2);
     await expect(payrollScope.first()).toBeVisible();
     await expect(payrollScope.last()).toBeVisible();
+    await page.getByRole('combobox', { name: 'Quarter' }).selectOption('1');
+    await expect(payrollScope).toHaveCount(0);
     await expect(page.getByText('Deductions & Contributions', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Export Payroll Summary by Employee' }).click();
     const download = page.waitForEvent('download');

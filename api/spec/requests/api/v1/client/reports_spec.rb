@@ -744,7 +744,26 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response.body).to start_with("%PDF")
   end
 
-  it "reconciles client payroll register summary totals without exposing staff payload keys" do
+  it "preserves check numbers and adjustment notes in the client history and deductions workbooks" do
+    payroll_item.update!(check_number: "TEST-100", payroll_adjustments: [
+      { "label" => "Shift premium", "treatment" => "taxable_addition", "amount" => 10, "notes" => "Shift premium test memo" }
+    ])
+
+    { "paycheck_history" => "Payroll Register Rows", "deductions_contributions" => "Payroll Rows" }.each do |action, sheet|
+      get "/api/v1/client/reports/#{action}_xlsx", params: { pay_period_id: pay_period.id }
+
+      expect(response).to have_http_status(:ok)
+      workbook = Roo::Excelx.new(StringIO.new(response.body))
+      rows = workbook.sheet(sheet).to_a
+      header = rows.index { |row| row.include?("Check Number") }
+      expect(rows.fetch(header + 1).fetch(rows.fetch(header).index("Check Number"))).to eq("TEST-100")
+      rows = workbook.sheet("Payroll Adjustments Detail").to_a
+      header = rows.index { |row| row.include?("Notes") }
+      expect(rows.fetch(header + 1).fetch(rows.fetch(header).index("Notes"))).to eq("Shift premium test memo")
+    end
+  end
+
+  it "reconciles client payroll register totals and preserves its row visibility" do
     payroll_item.update!(hours_worked: 70.25, overtime_hours: 4.5, bonus: 42.67,
       reported_tips: 20, tips_paid_out: 10, additional_withholding: 12.34, check_number: "TEST-100",
       additional_withholding_override: 12.34, loan_deduction: 10, loan_payment: 25, employer_retirement_match: 24,
@@ -770,26 +789,24 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     row = report.fetch("employees").sole
     expect(summary.fetch("total_employer_payroll_cost").to_d).to eq(row.fetch("employer_payroll_cost").to_d)
     expect(summary.fetch("total_employer_contributions").to_d).to eq(row.fetch("employer_contributions_total").to_d)
-    expect(row.keys).not_to include("check_number", "additional_withholding_override", "withholding_tax_override", "withholding_tax_adjustment")
-    expect(row.fetch("payroll_adjustments").sole.keys).to match_array(%w[
-      payroll_item_id pay_period_id pay_date period_description employee_id employee_name employment_type
-      position label treatment kind source employee_paid employer_paid amount
-    ])
-    expect(response.body).not_to include("Internal test memo", "TEST-100")
+    expect(row.keys).not_to include("check_number")
+    expect(row.fetch("additional_withholding_override").to_d).to eq(12.34.to_d)
+    expect(row.fetch("payroll_adjustments").sole.fetch("notes")).to eq("Internal test memo")
+    expect(response.body).not_to include("TEST-100")
 
     get "/api/v1/client/reports/payroll_register_pdf", params: params
     expect(response).to have_http_status(:ok)
     pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
     expect(pdf).to include(company.name, "Regular Hours 70.25", "Overtime Hours 4.50",
       "Bonus $42.67", "Total FIT (Base + Additional) $132.34", "Employer Payroll Cost $1,584.20")
-    expect(pdf).not_to include("Internal test memo", "TEST-100")
+    expect(pdf).not_to include("TEST-100")
 
     get "/api/v1/client/reports/payroll_register_csv", params: params
     expect(response).to have_http_status(:ok)
     row = CSV.parse(response.body, headers: true)[-1]
     expect(row.fetch("Regular Hours").to_d).to eq(summary.fetch("total_hours").to_d)
     expect(row.fetch("Total FIT (Base + Additional)")).to eq("132.34")
-    expect(response.body).not_to include("Internal test memo", "TEST-100")
+    expect(response.body).not_to include("TEST-100")
 
     get "/api/v1/client/reports/payroll_register_xlsx", params: params
     expect(response).to have_http_status(:ok)
@@ -797,7 +814,8 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     rows = workbook.sheet("Employees").to_a
     expect(rows.last.fetch(rows.fetch(3).index("Regular Hours")).to_d).to eq(summary.fetch("total_hours").to_d)
     expect(rows.last.fetch(rows.fetch(3).index("Total FIT (Base + Additional)"))).to eq(132.34)
-    expect(workbook.sheets.flat_map { |name| workbook.sheet(name).to_a.flatten }).not_to include("Internal test memo", "TEST-100")
+    expect(workbook.sheets.flat_map { |name| workbook.sheet(name).to_a.flatten }).not_to include("TEST-100")
+    expect(workbook.sheet("Payroll Adjustments Detail").column(8)).to include("Internal test memo")
   end
 
   it "exports the client payroll register in CSV and Excel from the same committed snapshot" do
