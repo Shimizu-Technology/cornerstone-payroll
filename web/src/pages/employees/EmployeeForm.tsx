@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Save, Trash2, AlertCircle, Plus, X, RotateCcw, FileText, LockKeyhole, ArrowRightLeft, CheckCircle2, XCircle, Link2 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
 import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
-import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
+import { employeeDocumentsPath, employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
 import { PayChangeEffectiveDate } from '@/components/employees/PayChangeEffectiveDate';
 import {
@@ -258,6 +258,8 @@ export function EmployeeForm() {
   const [isSaving, setIsSaving] = useState(false);
   const [statusTransitionMode, setStatusTransitionMode] = useState<'terminate' | 'reactivate' | 'deactivate' | null>(null);
   const [employeeDocumentsOpen, setEmployeeDocumentsOpen] = useState(false);
+  const location = useLocation();
+  const openedDocumentsForRef = useRef<string | null>(null);
   const [classificationTransitionOpen, setClassificationTransitionOpen] = useState(false);
   const employeeRequestIdRef = useRef(0);
   const departmentsRequestIdRef = useRef(0);
@@ -415,6 +417,15 @@ export function EmployeeForm() {
     const expectedEmployeeId = Number(id);
     setLoadedEmployee((current) => withDocumentReadiness(current, expectedEmployeeId, readiness));
   }, [companyId, id]);
+
+  // Links from the pay run and the employee overview open the document manager directly.
+  useEffect(() => {
+    const loaded = loadedEmployee !== null && loadedEmployee.id === Number(id);
+    if (!loaded || isLoading || location.hash !== '#employee-documents' || openedDocumentsForRef.current === location.key) return;
+    openedDocumentsForRef.current = location.key;
+    document.getElementById('employee-documents')?.scrollIntoView?.({ block: 'start' });
+    setEmployeeDocumentsOpen(true);
+  }, [id, loadedEmployee, isLoading, location.hash, location.key]);
 
   const fetchDepartments = useCallback(async () => {
     const requestId = ++departmentsRequestIdRef.current;
@@ -983,6 +994,7 @@ export function EmployeeForm() {
       let portalNotice: string | null = null;
       let portalChangeRequestId: number | null = null;
       let aireMappingNotice: string | null = null;
+      let createdMissingDocuments: string[] = [];
       let compensationWarnings: string[] = [];
       let initialWageRatesSaved = false;
       let fallbackRates: Awaited<ReturnType<typeof employeeWageRatesApi.list>> | undefined;
@@ -1051,6 +1063,7 @@ export function EmployeeForm() {
         } else {
           const response = await employeesApi.create({ ...employeePayload, company_id: companyId });
           savedEmployeeId = response.data.id;
+          createdMissingDocuments = response.data.document_readiness?.missing || [];
           initialWageRatesSaved = Boolean(response.data.compensation_history);
           if (isCurrentSubmission()) {
             // The employee is already saved. Summary recovery must not block
@@ -1129,7 +1142,13 @@ export function EmployeeForm() {
       }
 
       if (!isCurrentSubmission()) return;
-      notify({ tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
+      const createdDocumentsMessage = `Employee created. Before their first payroll is approved, upload and verify: ${createdMissingDocuments.join(', ')}.`;
+      notify(!portalNotice && !isEditing && createdMissingDocuments.length
+        ? { tone: 'success', message: createdDocumentsMessage, children: <>
+          {createdDocumentsMessage}{' '}
+          <Link className="font-semibold text-primary-700" to={employeeDocumentsPath(companyId, savedEmployeeId, { returnTo })}>Open documents</Link>
+        </> }
+        : { tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
       // Warnings owned by this form are cleared when it navigates away; an
       // info notice stays with the employee list.
       compensationWarnings.forEach((message) => notify({ tone: 'info', message }));
@@ -1207,6 +1226,10 @@ export function EmployeeForm() {
     </section>;
   }
 
+  const documentReadiness = loadedEmployee?.document_readiness;
+  const w4SignedAfterEffective = Boolean(form.w4_signed_on && form.w4_effective_on && form.w4_signed_on > form.w4_effective_on);
+  const documentsNeeded = documentReadiness && !documentReadiness.ready_for_payroll ? documentReadiness.required - documentReadiness.satisfied : 0;
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -1221,10 +1244,18 @@ export function EmployeeForm() {
         title={isEditing ? `Edit ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : 'Add Employee / Contractor'}
         description={isEditing ? `Update ${form.employment_type === 'contractor' ? 'contractor' : 'employee'} information` : 'Add a new employee or 1099 contractor'}
         actions={
-          <Button variant="outline" onClick={() => navigate(returnTo)} disabled={payItemPending || showQuickPayrollField}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {isEditing && id && documentsNeeded > 0 && (
+              <Button variant="outline" onClick={() => setEmployeeDocumentsOpen(true)}>
+                <FileText className="w-4 h-4 mr-2" />
+                Documents · {documentsNeeded} needed
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => navigate(returnTo)} disabled={payItemPending || showQuickPayrollField}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back
+            </Button>
+          </div>
         }
       />
 
@@ -1417,7 +1448,9 @@ export function EmployeeForm() {
                   type="date"
                   value={form.date_of_birth || ''}
                   onChange={(e) => handleChange('date_of_birth', e.target.value)}
+                  aria-describedby="employee-dob-hint"
                 />
+                <p id="employee-dob-hint" className="mt-1 text-xs text-gray-500">Optional for payroll. Needed for the employee app sign-up.</p>
               </div>
               {!taxIdUsesSsn && (
                 <div>
@@ -2068,16 +2101,23 @@ export function EmployeeForm() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-17">
-                      Effective date
+                      Effective date {!allowsUnverifiedBlank('withholding_election') && <span className="text-danger-600">*</span>}
                     </label>
                     <Input id="employee-field-17"
                       name="w4_effective_on"
                       type="date"
                       value={form.w4_effective_on || ''}
                       onChange={(e) => handleChange('w4_effective_on', e.target.value || null)}
+                      required={!allowsUnverifiedBlank('withholding_election')}
                       aria-invalid={Boolean(getFieldError('w4_effective_on'))}
                     />
                     <p className="mt-1 text-xs text-gray-500">{allowsUnverifiedBlank('withholding_election') ? 'Leave blank if the employee withholding election has not been received. Payroll needs a separate reviewed withholding decision.' : 'Record the date this withholding election became effective.'}</p>
+                    {/* Staff accept the hire date explicitly; a silent default could date the election before the W-4 was signed. */}
+                    {!isEditing && form.hire_date && form.w4_effective_on !== form.hire_date && (
+                      <button type="button" className="mt-1 inline-flex min-h-9 items-center text-sm font-semibold text-primary-700 underline" onClick={() => handleChange('w4_effective_on', form.hire_date)}>
+                        Use hire date ({form.hire_date})
+                      </button>
+                    )}
                     {getFieldError('w4_effective_on') && <p className="mt-1 text-sm text-danger-600">{getFieldError('w4_effective_on')}</p>}
                   </div>
                 </div>
@@ -2090,6 +2130,11 @@ export function EmployeeForm() {
                 <label className="text-sm font-medium text-gray-700">Source document / reference (optional)
                   <Input maxLength={255} value={form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
                 </label>
+                {w4SignedAfterEffective && (
+                  <p role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900 md:col-span-2">
+                    This W-4 was signed on {form.w4_signed_on}, after its effective date of {form.w4_effective_on}. Paychecks dated before the signature would use an election the employee had not made yet. Check both dates; the effective date is usually on or after the signed date.
+                  </p>
+                )}
                 <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. The effective date controls which paychecks use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
               </div>
 
@@ -2454,9 +2499,15 @@ export function EmployeeForm() {
               </div>
             </CardHeader>
             <CardContent>
-              <p className="text-sm leading-6 text-neutral-600">
-                Documents are tucked away here so the employee profile stays focused on payroll setup. Open the manager when you need to upload, preview, download, or remove employee files.
-              </p>
+              {loadedEmployee?.document_readiness && !loadedEmployee.document_readiness.ready_for_payroll && (loadedEmployee.document_readiness.missing?.length ?? 0) > 0 ? (
+                <p className="text-sm leading-6 text-warning-900">
+                  Before this employee's first payroll is approved, upload and verify: {loadedEmployee.document_readiness.missing!.join(', ')}.
+                </p>
+              ) : (
+                <p className="text-sm leading-6 text-neutral-600">
+                  Upload, preview, download, or remove this employee's files.
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
