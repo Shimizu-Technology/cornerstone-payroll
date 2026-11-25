@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
 
-export const LEGAL_LAST_UPDATED = 'November 23, 2026';
+export const LEGAL_LAST_UPDATED = 'November 25, 2026';
 
 interface LegalLayoutProps {
   title: string;

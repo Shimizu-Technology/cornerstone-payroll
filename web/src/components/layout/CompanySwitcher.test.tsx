@@ -6,14 +6,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompanySwitcher } from './CompanySwitcher';
 
-const { companyContext } = vi.hoisted(() => ({ companyContext: vi.fn() }));
+const { companyContext } = vi.hoisted(() => ({
+  companyContext: vi.fn(),
+}));
 
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => companyContext(),
-}));
-
-vi.mock('@/lib/analytics', () => ({
-  analytics: { companySwitch: vi.fn() },
 }));
 
 vi.mock('@/lib/keyboard-shortcuts', () => ({
