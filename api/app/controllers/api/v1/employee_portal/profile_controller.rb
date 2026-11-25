@@ -77,7 +77,15 @@ module Api
             return render json: { error: "Wait before requesting another code." }, status: :too_many_requests
           end
 
-          email_challenge.issue!(validated_email!(email_params[:email]))
+          email = validated_email!(email_params[:email])
+          # A demo company emails only allow-listed addresses; checked before a
+          # code exists. Real clients are unaffected.
+          unless DemoOutbound.permit?(company: current_company, email: email, channel: EmployeeProfiles::EmailChallenge::CHANNEL)
+            return render json: { error: Company::DEMO_RECIPIENT_REFUSED_MESSAGE, code: "recipient_not_allowed" },
+              status: :unprocessable_entity
+          end
+
+          email_challenge.issue!(email)
         end
 
         def render_email_daily_limit!

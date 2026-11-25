@@ -13,21 +13,30 @@ RSpec.describe "production:readiness" do
     allow(ProductionReadiness).to receive(:new).and_return(service)
   end
 
-  it "prints safe machine-readable evidence and succeeds when every check passes" do
-    report = ProductionReadiness::Report.new(
-      checks: [ ProductionReadiness::Check.new(name: "safe probe", passed: true, detail: "verified") ],
-      generated_at: Time.zone.parse("2026-08-23 12:00:00"),
-      revision: "abc123"
-    )
-    allow(service).to receive(:run).with(live: false).and_return(report)
-
-    expect { task.invoke }.to output(
-      a_string_including(
+  [ 0, 1, 2 ].each do |count|
+    it "reports successful readiness with #{count} advisory warnings" do
+      warnings = Array.new(count) do
+        ProductionReadiness::Check.new(name: "optional probe", passed: false, detail: "not configured", advisory: true)
+      end
+      report = ProductionReadiness::Report.new(
+        checks: [ ProductionReadiness::Check.new(name: "safe probe", passed: true, detail: "verified"), *warnings ],
+        generated_at: Time.zone.parse("2026-08-23 12:00:00"),
+        revision: "abc123"
+      )
+      allow(service).to receive(:run).with(live: false).and_return(report)
+      lines = [
         "PASS  safe probe (verified)",
         'EVIDENCE {"generated_at":"2026-08-23T12:00:00Z","revision":"abc123","passed":true',
-        "Production configuration and live dependency probes passed"
-      )
-    ).to_stdout
+        [
+          "Production configuration and live dependency probes passed.",
+          "Production configuration and live dependency probes passed (1 warning).",
+          "Production configuration and live dependency probes passed (2 warnings)."
+        ].fetch(count)
+      ]
+      lines << "WARN  optional probe (not configured)" if count.positive?
+
+      expect { task.invoke }.to output(a_string_including(*lines)).to_stdout
+    end
   end
 
   it "fails closed while preserving the evidence line when a check fails" do
