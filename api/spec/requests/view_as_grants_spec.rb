@@ -669,4 +669,186 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(response).to have_http_status(:not_found)
     expect(ViewAsGrant.count).to eq(0)
   end
+
+  it "blocks escalation via Clerk impersonation tokens (act claim), non-super-admin roles, and any staff target" do
+    # Clerk impersonation tokens carrying an `act` claim can neither list targets, start, nor use a grant.
+    get "#{grant_path}/targets", headers: authenticated(staff, act: { sub: "user_impersonator" }).merge("X-Company-Id" => company.id.to_s)
+    expect(response).to have_http_status(:forbidden)
+
+    start(client, act: { sub: "user_impersonator" })
+    expect(response).to have_http_status(:forbidden)
+    expect(ViewAsGrant.count).to eq(0)
+
+    token = token_for
+    get "/api/v1/client/employees", headers: viewing(token, staff, act: { sub: "user_impersonator" })
+    expect(response).to have_http_status(:not_found)
+
+    # No non-super-admin role may start a grant, even with view_as_allowed: true.
+    %w[org_admin admin manager accountant client portal_employee].each do |role|
+      actor = create(:user, company: company, organization: organization, role: role, view_as_allowed: true,
+        clerk_id: "user_va_#{role}")
+      start(client, user: actor)
+      expect(response).to have_http_status(:forbidden), "Expected role #{role} to be forbidden, got #{response.status}"
+    end
+
+    # No staff role may be targeted, nor an employee linked to another staff member.
+    other_staff = create(:user, company: company, organization: organization, role: :accountant, clerk_id: "user_va_target_acct")
+    %w[super_admin org_admin admin manager accountant].each do |role|
+      target = create(:user, company: company, organization: organization, role: role)
+      start(target, type: "client")
+      expect(response).to have_http_status(:not_found), "Expected staff target #{role} to be refused"
+    end
+
+    enable_employee_surface!
+    EmployeeAccountLink.create!(employee: employee, company: company, user: other_staff, status: "active")
+    start(employee, type: "employee")
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "prevents cross-surface escape, header spoofing, and continued use after company/org deactivation" do
+    enable_employee_surface!
+    colleague = create(:employee, company: company, first_name: "Colleague", last_name: "Other")
+    colleague_user = create(:user, company: company, organization: organization, role: :portal_employee)
+    colleague_link = EmployeeAccountLink.create!(employee: colleague, company: company, user: colleague_user, status: "active")
+
+    # Client grant cannot cross into employee, admin, finance, or view-as targets surfaces.
+    client_token = token_for(client)
+    [
+      [ "/api/v1/employee/context", employee_origin, 404 ],
+      [ "/api/v1/admin/companies", EmployeeLinkHelpers::PAYROLL_ORIGIN, 404 ],
+      [ "/api/v1/finance/context", EmployeeLinkHelpers::PAYROLL_ORIGIN, 401 ],
+      [ "/api/v1/form_500s/defaults", EmployeeLinkHelpers::PAYROLL_ORIGIN, 404 ],
+      [ "/api/v1/auth/view_as/targets", EmployeeLinkHelpers::PAYROLL_ORIGIN, 404 ]
+    ].each do |path, origin, expected_status|
+      get path, headers: viewing(client_token, staff, azp: origin)
+      expect(response).to have_http_status(expected_status), "Client grant reached #{path} (#{response.status})"
+    end
+
+    # Mismatched X-Organization-Id header is rejected.
+    other_org = create(:organization)
+    get "/api/v1/client/employees", headers: viewing(client_token).merge("X-Organization-Id" => other_org.id.to_s)
+    expect(response).to have_http_status(:not_found)
+
+    # Employee grant cannot cross into client/admin/auth/links surfaces, and ignores spoofed X-Employee-Link-Id.
+    emp_token = token_for(employee, type: "employee")
+    emp_headers = viewing(emp_token, staff, azp: employee_origin)
+    [
+      "/api/v1/employee/links",
+      "/api/v1/auth/me",
+      "/api/v1/companies",
+      "/api/v1/client/employees",
+      "/api/v1/admin/employees",
+      "/api/v1/auth/view_as/targets"
+    ].each do |path|
+      get path, headers: emp_headers
+      expect(response.status).to be_in([ 403, 404 ]), "Employee grant reached #{path} (#{response.status})"
+    end
+
+    get "/api/v1/employee/profile", headers: emp_headers.merge("X-Employee-Link-Id" => colleague_link.id.to_s)
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body).to include("legal_name" => employee.full_name)
+
+    # Deactivating the company closes the active grant immediately.
+    company.update!(active: false)
+    get "/api/v1/employee/context", headers: emp_headers
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "enforces the 30-minute limit on employee views, records a single ended audit, and exposes employee views to client support logs" do
+    freeze_time do
+      enable_employee_surface!
+      token = token_for(employee, type: "employee")
+      grant = ViewAsGrant.last
+      emp_headers = viewing(token, staff, azp: employee_origin)
+
+      travel 29.minutes + 59.seconds
+      get "/api/v1/employee/context", headers: viewing(token, staff, azp: employee_origin)
+      expect(response).to have_http_status(:ok)
+
+      travel 1.second
+      expired_headers = viewing(token, staff, azp: employee_origin)
+      get "/api/v1/employee/context", headers: expired_headers
+      expect(response).to have_http_status(:not_found)
+      get "/api/v1/employee/statements", headers: expired_headers
+      expect(response).to have_http_status(:not_found)
+
+      # Ending a grant is idempotent and records exactly one view_as#ended audit stamped to real staff.
+      delete grant_path, headers: expired_headers
+      expect(response).to have_http_status(:no_content)
+      delete grant_path, headers: expired_headers
+      expect(response).to have_http_status(:no_content)
+      ended = AuditLog.where(action: "view_as#ended", view_as_grant_id: grant.id)
+      expect(ended.count).to eq(1)
+      expect(ended.sole).to have_attributes(user_id: staff.id, real_user_id: staff.id, company_id: company.id, event_category: "security")
+
+      # Client admins see employee support views in support_access_logs without internal reason text.
+      get "/api/v1/client/support_access_logs", headers: authenticated(client)
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("events").pluck("description")).to include("Support Fixture viewed as Worker Fixture")
+      expect(response.body).not_to include("Investigate a display question")
+    end
+  end
+
+  it "refuses remaining employee and client write endpoints in view-only mode" do
+    enable_employee_surface!
+    emp_headers = viewing(token_for(employee, type: "employee"), staff, azp: employee_origin)
+    [
+      [ :patch, "/api/v1/employee/emergency_contacts/1" ],
+      [ :put, "/api/v1/employee/emergency_contacts/1" ],
+      [ :delete, "/api/v1/employee/emergency_contacts/1" ],
+      [ :post, "/api/v1/employee/address_requests" ],
+      [ :patch, "/api/v1/employee/address_requests/1" ],
+      [ :put, "/api/v1/employee/address_requests/1" ],
+      [ :post, "/api/v1/employee/delivery_consents" ],
+      [ :post, "/api/v1/employee/delivery_consents/withdraw" ],
+      [ :post, "/api/v1/employee/delivery_consents/w2gu_access_proof/pdf" ]
+    ].each do |verb, path|
+      public_send(verb, path, headers: emp_headers)
+      expect(response).to have_http_status(:forbidden), "#{verb.upcase} #{path} returned #{response.status}"
+      expect(response.parsed_body).to include("code" => "view_as_read_only")
+    end
+
+    client_headers = viewing(token_for(client))
+    [
+      [ :post, "/api/v1/client/employee_app_rollout/#{company.id}/invite" ],
+      [ :patch, "/api/v1/client/employee_change_requests/1/approve" ],
+      [ :patch, "/api/v1/client/employee_change_requests/1/reject" ]
+    ].each do |verb, path|
+      public_send(verb, path, headers: client_headers)
+      expect(response).to have_http_status(:forbidden), "#{verb.upcase} #{path} returned #{response.status}"
+      expect(response.parsed_body).to include("code" => "view_as_read_only")
+    end
+  end
+
+  it "gates ViewAsGrant.ready? in production on VIEW_AS_READY, MFA, RLS raise, and Clerk authorized parties" do
+    allow(Rails.env).to receive(:production?).and_return(true)
+    keys = %w[VIEW_AS_READY REQUIRE_MFA RLS_CONTEXT_GUARD_MODE CLERK_AUTHORIZED_PARTIES]
+    saved = keys.index_with { |key| ENV[key] }
+    begin
+      ENV.update(
+        "VIEW_AS_READY" => "true",
+        "REQUIRE_MFA" => "true",
+        "RLS_CONTEXT_GUARD_MODE" => "raise",
+        "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.test"
+      )
+      expect(ViewAsGrant.ready?).to be(true)
+
+      ENV["VIEW_AS_READY"] = "false"
+      expect(ViewAsGrant.ready?).to be(false)
+
+      ENV["VIEW_AS_READY"] = "true"
+      ENV["REQUIRE_MFA"] = "false"
+      expect(ViewAsGrant.ready?).to be(false)
+
+      ENV["REQUIRE_MFA"] = "true"
+      ENV["RLS_CONTEXT_GUARD_MODE"] = "log"
+      expect(ViewAsGrant.ready?).to be(false)
+
+      ENV["RLS_CONTEXT_GUARD_MODE"] = "raise"
+      ENV["CLERK_AUTHORIZED_PARTIES"] = ""
+      expect(ViewAsGrant.ready?).to be(false)
+    ensure
+      saved.each { |key, value| ENV[key] = value }
+    end
+  end
 end

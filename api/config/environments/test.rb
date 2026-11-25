@@ -15,8 +15,10 @@ Rails.application.configure do
   # loading is working properly before deploying your code.
   config.eager_load = ENV["CI"].present?
 
-  # Configure public file server for tests with cache-control for performance.
-  config.public_file_server.headers = { "cache-control" => "public, max-age=3600" }
+  # Configure public file server for tests with security headers and cache-control.
+  config.public_file_server.headers = Api::Application::PUBLIC_FILE_SECURITY_HEADERS.merge(
+    "cache-control" => "public, max-age=3600"
+  )
 
   # Show full error reports.
   config.consider_all_requests_local = true

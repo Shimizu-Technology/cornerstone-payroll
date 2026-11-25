@@ -71,7 +71,8 @@ module Api
         end
 
         def writable_link?
-          current_user.payroll_access_allowed? && @employee_link.active? && @employee_link.user_id == current_user.id &&
+          current_user.payroll_access_allowed? && @employee_link.active? && !@employee_link.activation_locked? &&
+            @employee_link.user_id == current_user.id &&
             @employee_link.employee_id == @employee.id && @employee_link.company_id == @employee.company_id
         end
 
