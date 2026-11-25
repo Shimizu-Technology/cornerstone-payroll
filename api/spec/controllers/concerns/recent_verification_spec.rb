@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe RecentVerification, type: :controller do
+  include ActiveSupport::Testing::TimeHelpers
+
   controller(ActionController::API) do
     include ClerkAuthenticatable
     include RecentVerification
@@ -22,6 +24,11 @@ RSpec.describe RecentVerification, type: :controller do
   let(:origin) { "https://payroll.example.test" }
   let(:signing_key) { OpenSSL::PKey::RSA.generate(2048) }
   let(:jwk) { JWT::JWK.new(signing_key) }
+
+  # The token's age (now - iat) counts toward the window, rounded up to a
+  # minute, so a clock tick between issuing and checking would push the
+  # nine-minute examples to ten. Freeze it so iat is exactly now.
+  around { |example| freeze_time { example.run } }
 
   before do
     verifier = ClerkTokenVerifier.new(
@@ -116,6 +123,11 @@ RSpec.describe RecentVerification, type: :controller do
         submit(role: role, ages: [ 25, 10 ], enrollment: true)
         expect_reverification("second_factor")
       end
+    end
+
+    it "rounds a token's age up, so nine minutes plus one second since issue is past the window" do
+      submit(role: :admin, ages: [ 25, 9 ], enrollment: true, issued: 1.second.ago)
+      expect_reverification("second_factor")
     end
 
     %i[admin client portal_employee employee].each do |role|
