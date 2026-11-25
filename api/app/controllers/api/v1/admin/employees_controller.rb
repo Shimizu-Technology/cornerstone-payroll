@@ -65,6 +65,7 @@ module Api
               include_configuration_review_history: true,
               include_document_readiness: true,
               include_compensation_history: true,
+              include_delivery_consents: true,
               contact_context: contact_context
             )
           }
@@ -118,6 +119,7 @@ module Api
               include_w4_history: true,
               include_document_readiness: true,
               include_compensation_history: true,
+              include_delivery_consents: true,
               contact_context: contact_context
             ),
             contact_warnings: @contact_validation_result&.warnings || []
@@ -739,6 +741,7 @@ module Api
           include_configuration_review_history: false,
           include_document_readiness: false,
           include_compensation_history: false,
+          include_delivery_consents: false,
           contact_context: nil
         )
           data = employee.as_json(
@@ -827,6 +830,10 @@ module Api
 
           if include_document_readiness
             data["document_readiness"] = EmployeeDocumentReadiness.summary(employee)
+          end
+
+          if include_delivery_consents
+            data["delivery_consents"] = DeliveryConsents::StaffSummary.for(employee)
           end
 
           data

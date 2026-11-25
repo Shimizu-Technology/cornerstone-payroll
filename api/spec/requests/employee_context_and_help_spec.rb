@@ -48,7 +48,7 @@ RSpec.describe "Employee context and help", type: :request do
     it "returns the employee's first name, link status, switches and no unsettled payday" do
       expect(context).to eq(
         "first_name" => "Jordan", "status" => "active", "former_access_until" => nil, "next_payday" => nil,
-        "w2_delivery" => nil, "features" => { "stubs" => true, "tax_forms" => false, "profile_requests" => false }
+        "w2_delivery" => nil, "features" => { "stubs" => true, "tax_forms" => false, "profile_requests" => false, "delivery_consent" => false }
       )
       expect(response.headers["Cache-Control"]).to eq("no-store")
     end

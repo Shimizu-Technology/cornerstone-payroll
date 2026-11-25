@@ -90,6 +90,7 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
               <option value="">All changes</option>
               <option value="address">Address</option>
               <option value="contact">Contact details</option>
+              <option value="delivery_consent">Delivery consent</option>
             </Select>
           </label>
           <label className="space-y-1 text-sm font-medium">
@@ -121,7 +122,7 @@ export function ContactChangeActivity({ staffCompanyId }: { staffCompanyId?: num
             <div className="min-w-0">
               <CardTitle className="break-words text-base">{entry.employee_name}</CardTitle>
               <p className="mt-1 break-words text-sm text-neutral-600">
-                {entry.change_kind === 'address' ? 'Address' : 'Contact details'} · {entry.changed_by_name || 'Account unavailable'} · {new Date(entry.created_at).toLocaleDateString()}
+                {entry.change_kind === 'address' ? 'Address' : entry.change_kind === 'delivery_consent' ? 'Delivery consent' : 'Contact details'} · {entry.changed_by_name || 'Account unavailable'} · {new Date(entry.created_at).toLocaleDateString()}
               </p>
             </div>
             {staffCompanyId && !entry.confirmed_at && (
