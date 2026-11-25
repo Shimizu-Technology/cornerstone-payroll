@@ -121,26 +121,6 @@ class PayPeriodPayDateCorrectionService
                                    .where(pay_date: lower_bound..Date.new(locked.pay_date.year, 12, 31))
                                    .pluck(:id)
 
-    PayrollItem.includes(:employee, :pay_period)
-               .financially_reportable.where(pay_period_id: affected_period_ids)
-               .find_each do |item|
-      period = item.pay_period
-      ytd = item.employee.ytd_totals_before(
-        year: period.pay_date.year,
-        pay_date: period.pay_date,
-        pay_period_id: period.id
-      )
-
-      item.update_columns(
-        ytd_gross: ytd[:gross_pay].to_d + item.gross_pay.to_d,
-        ytd_net: ytd[:net_pay].to_d + item.net_pay.to_d,
-        ytd_withholding_tax: ytd[:withholding_tax].to_d + item.withholding_tax.to_d,
-        ytd_social_security_tax: ytd[:social_security_tax].to_d + item.social_security_tax.to_d,
-        ytd_medicare_tax: ytd[:medicare_tax].to_d + item.medicare_tax.to_d,
-        ytd_retirement: ytd[:retirement].to_d + item.retirement_payment.to_d,
-        ytd_roth_retirement: ytd[:roth_retirement].to_d + item.roth_retirement_payment.to_d,
-        updated_at: Time.current
-      )
-    end
+    PayrollYtdSnapshotRefresh.refresh!(PayrollItem.financially_reportable.where(pay_period_id: affected_period_ids))
   end
 end

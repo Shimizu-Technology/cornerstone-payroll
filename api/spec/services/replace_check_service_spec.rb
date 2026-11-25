@@ -153,7 +153,7 @@ RSpec.describe ReplaceCheckService do
       }, content_type: "application/pdf")
     end
 
-    it "keeps a later stub at revision one after correcting an earlier check and printing the later check" do
+    it "revises a later stub once when correcting an earlier check moves its YTD, and not for printing it" do
       pay_period.update_columns(start_date: Date.new(2024, 7, 1), end_date: Date.new(2024, 7, 14), pay_date: Date.new(2024, 7, 20))
       later_period = create(:pay_period, :committed, company: company, start_date: Date.new(2024, 8, 1),
         end_date: Date.new(2024, 8, 14), pay_date: Date.new(2024, 8, 20))
@@ -167,12 +167,18 @@ RSpec.describe ReplaceCheckService do
       old_ytd = PayStubGenerator.new(later).statement.fetch(:ytd).fetch(:gross)
       described_class.replace!(payroll_item: original_item, corrected_inputs: { hours_worked: 80 },
         reason: "Correct the earlier July check", actor: actor)
-      expect(PayStubGenerator.new(later.reload).statement.fetch(:ytd).fetch(:gross)).not_to eq(old_ytd)
+      new_ytd = PayStubGenerator.new(later.reload).statement.fetch(:ytd).fetch(:gross)
+      expect(new_ytd).to eq(old_ytd + 300)
+      expect(later.ytd_gross).to eq(new_ytd)
+
+      PostEmployeePayStubsJob.perform_now
+      revised = EmployeeDocument.posted.find_by!(payroll_item: later)
+      expect([ original.reload.status, revised.revision ]).to eq([ "replaced", 2 ])
 
       later.update!(check_printed_at: Time.current)
       PostEmployeePayStubsJob.perform_now
-      expect(EmployeeDocument.where(payroll_item: later).pluck(:id, :revision)).to eq([ [ original.id, 1 ] ])
-      expect(original.reload.payroll_facts_checked_at).to be >= later.updated_at
+      expect(EmployeeDocument.where(payroll_item: later).order(:revision).pluck(:id)).to eq([ original.id, revised.id ])
+      expect(revised.reload.payroll_facts_checked_at).to be >= later.updated_at
     end
 
     it "rewrites the item with corrected values, keeps the same check #, and logs a replaced event" do

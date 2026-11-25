@@ -360,11 +360,11 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def fn(value)
-    ActiveSupport::NumberHelper.number_to_delimited(format("%.2f", value.to_f))
+    MoneyText.amount(value)
   end
 
   def fd(value)
-    "$#{fn(value)}"
+    MoneyText.currency(value)
   end
 
   def format_date(date)

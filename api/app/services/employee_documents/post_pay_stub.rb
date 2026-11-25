@@ -41,7 +41,7 @@ module EmployeeDocuments
       checked_at = Time.current
       generator = PayStubGenerator.new(@item, employee_copy: true)
       fingerprint = generator.employee_payroll_facts_sha256
-      if latest&.posted? && !repairing_link && latest.payroll_facts_sha256 == fingerprint
+      if latest&.posted? && !repairing_link && generator.employee_payroll_facts_current?(latest.payroll_facts_sha256)
         latest.update!(payroll_facts_checked_at: checked_at)
         return
       end

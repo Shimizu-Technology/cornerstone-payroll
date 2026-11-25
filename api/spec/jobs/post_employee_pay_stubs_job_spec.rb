@@ -231,6 +231,61 @@ RSpec.describe PostEmployeePayStubsJob do
     end
   end
 
+  describe "printed YTD" do
+    def posted_text(document)
+      text = nil
+      expect(storage).to have_received(:upload).with(document.storage_key, satisfy { |bytes|
+        text = PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
+      }, content_type: "application/pdf")
+      text
+    end
+
+    it "revises a posted stub when an earlier check's change moves a YTD amount it prints, and only then" do
+      earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 7, 20),
+        start_date: Date.new(2026, 7, 18), end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 6))
+      earlier = create(:payroll_item, pay_period: earlier_period, employee: employee, gross_pay: 1_000, net_pay: 800,
+        payment_delivery_method: "direct_deposit")
+      item
+      run_at(cutoff)
+      original = documents.sole
+
+      earlier.update_columns(gross_pay: 1_100, net_pay: 880)
+      item.update_columns(updated_at: cutoff + 1.minute)
+      run_at(cutoff + 5.minutes)
+
+      expect(documents.reload.pluck(:revision)).to eq([ 1, 2 ])
+      expect(original.reload).to be_replaced
+      expect(posted_text(documents.last)).to include("Gross Earnings $2,300.00", "Net Pay $1,840.00")
+      item.update_columns(updated_at: cutoff + 6.minutes)
+      expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocument, :count)
+    end
+
+    context "for a stub posted under the earlier fingerprint" do
+      def post_with_legacy_fingerprint(ytd_net:)
+        item.update_columns(ytd_net: ytd_net, ytd_withholding_tax: 0, ytd_social_security_tax: 0, ytd_medicare_tax: 0)
+        run_at(cutoff)
+        facts = PayStubGenerator.new(item.reload, employee_copy: true)
+          .send(:employee_payroll_current_facts, PayStubGenerator::LEGACY_YTD_SNAPSHOT_FACTS)
+        EmployeeDocument.where(id: documents.sole.id).update_all(payroll_facts_sha256: Digest::SHA256.hexdigest(facts.to_json))
+        item.update_columns(updated_at: cutoff + 1.minute)
+      end
+
+      it "keeps it current while its saved tax and net YTD match what the statement prints" do
+        post_with_legacy_fingerprint(ytd_net: 960)
+
+        expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
+        expect(documents.sole.payroll_facts_checked_at).to be >= cutoff + 5.minutes
+      end
+
+      it "posts a revision when the statement now prints a different YTD than the stale snapshot it showed" do
+        post_with_legacy_fingerprint(ytd_net: 900)
+
+        expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocument, :count).by(1)
+        expect(documents.last.payroll_facts_sha256).to eq(PayStubGenerator.new(item, employee_copy: true).employee_payroll_facts_sha256)
+      end
+    end
+  end
+
   it "leaves a reversed item withdrawn when there is no successor" do
     item
     run_at(cutoff)

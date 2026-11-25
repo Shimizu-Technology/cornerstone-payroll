@@ -327,8 +327,10 @@ class Company < ApplicationRecord
     reserved
   end
 
+  # Whichever address parts exist, as W-2GU prints them ("City, ST 96910").
   def full_address
-    [ address_line1, address_line2, "#{city}, #{state} #{zip}" ].compact_blank.join("\n")
+    city_line = [ [ city.presence, state.presence ].compact.join(", ").presence, zip.presence ].compact.join(" ")
+    [ address_line1, address_line2, city_line ].compact_blank.join("\n")
   end
 
   def first_hawaiian_4up_checks?

@@ -354,6 +354,6 @@ class W2GuPdfGenerator
   # ─── Helpers ────────────────────────────────────────────────────────────────
 
   def fmt(value)
-    format("$%.2f", value.to_f)
+    MoneyText.currency(value)
   end
 end
