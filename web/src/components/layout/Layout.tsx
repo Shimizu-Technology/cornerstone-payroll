@@ -9,6 +9,8 @@ import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-acc
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 
+import { supportToken } from '@/support/grant';
+
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -139,7 +141,7 @@ export function Layout() {
   return (
     <div
       data-testid="app-shell"
-      className="flex h-screen bg-transparent text-neutral-950"
+      className={`flex bg-transparent text-neutral-950 ${supportToken ? 'min-h-0 flex-1' : 'h-screen'}`}
       style={{ '--sidebar-width': collapsed ? '0rem' : '18rem' } as CSSProperties}
     >
       {!collapsed && (

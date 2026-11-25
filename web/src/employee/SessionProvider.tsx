@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
-import { chooseLink, createEmployeeApi, problemFor, usableLinks } from './api';
+import { chooseLink, createEmployeeApi, problemFor, usableLinks, type EmployeeLink } from './api';
 import { API_BASE_URL, TENANT_SLUG, today } from './config';
 import { EmployeeSessionContext, useEmployeeAuth, type EmployeeSessionState, type EmployeeSessionValue } from './contexts';
 import { useSignOut } from './hooks';
@@ -16,10 +16,14 @@ class SessionLoadTimeout extends Error {}
  * use the same client, which sends the link in X-Employee-Link-Id. Nothing is
  * stored on the device: the chosen employer and loaded pay live in memory.
  */
-export function EmployeeSessionProvider({ viewOnly = false, children }: { viewOnly?: boolean; children: ReactNode }): ReactElement {
+export function EmployeeSessionProvider({ viewOnly = false, support, children }: {
+  viewOnly?: boolean;
+  support?: { token: string; link: EmployeeLink };
+  children: ReactNode;
+}): ReactElement {
   const { getToken } = useEmployeeAuth();
   const signOut = useSignOut();
-  const api = useMemo(() => createEmployeeApi({ baseUrl: API_BASE_URL, getToken }), [getToken]);
+  const api = useMemo(() => createEmployeeApi({ baseUrl: API_BASE_URL, getToken, grantToken: support?.token }), [getToken, support?.token]);
   const [state, setState] = useState<EmployeeSessionState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [chosenId, setChosenId] = useState<string | null>(null);
@@ -45,8 +49,8 @@ export function EmployeeSessionProvider({ viewOnly = false, children }: { viewOn
     setState({ status: 'loading' });
     void (async (): Promise<void> => {
       try {
-        const links = await bounded(api.links(controller.signal));
-        const choice = chooseLink(links, today(), TENANT_SLUG, chosenId);
+        const links = support ? [support.link] : await bounded(api.links(controller.signal));
+        const choice = support?.link ?? chooseLink(links, today(), TENANT_SLUG, chosenId);
         if (cancelled) return;
         if (choice === 'choose') {
           const usable = usableLinks(links, today(), TENANT_SLUG);
@@ -75,7 +79,7 @@ export function EmployeeSessionProvider({ viewOnly = false, children }: { viewOn
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [api, attempt, chosenId]);
+  }, [api, attempt, chosenId, support]);
 
   const problem = state.status === 'problem' ? state.problem : null;
 
@@ -121,7 +125,7 @@ export function EmployeeSessionProvider({ viewOnly = false, children }: { viewOn
 
   // Tracked apart, so a view-only look at a former employee shows exactly what that employee sees.
   const isFormer = state.status === 'ready' && (state.link.status === 'former' || state.info.status === 'former');
-  const isViewOnly = viewOnly;
+  const isViewOnly = viewOnly || Boolean(support);
 
   const value = useMemo<EmployeeSessionValue>(
     () => ({ state, api, retry, reportError, chooseLink: chooseLinkId, isFormer, isViewOnly, readOnly: isFormer || isViewOnly, memory }),

@@ -11,6 +11,8 @@ import { formatCurrency } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeesPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
+import { supportToken } from '@/support/grant';
+
 type ClientDashboardStats = Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'];
 
 interface ClientDashboardPayload {
@@ -71,7 +73,7 @@ export function ClientDashboard(): ReactElement {
       <Header
         title="Client Portal"
         description="Manage employees, review payroll, and securely share documents."
-        actions={<Button onClick={() => navigate(newEmployeeHref)}>Add Employee</Button>}
+        actions={!supportToken && <Button onClick={() => navigate(newEmployeeHref)}>Add Employee</Button>}
       />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">

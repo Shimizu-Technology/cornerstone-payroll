@@ -52,6 +52,8 @@ module ClerkAuthenticatable
       return render_write_maintenance("New Payroll sign-ins are paused during maintenance. Try again shortly using this same sign-in.")
     end
 
+    return head :unauthorized if !@current_user && view_as_requested?
+
     unless @current_user
       denied_user = nil
       @current_user = PayrollInvitation.new.bind_from_metadata(clerk_id, request: request, azp: @clerk_token_payload["azp"]) do |candidate|

@@ -52,6 +52,10 @@ Rails.application.routes.draw do
 
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
+      get "auth/view_as", to: "view_as_grants#show", format: false
+      delete "auth/view_as", to: "view_as_grants#destroy", format: false
+      post "auth/view_as", to: "view_as_grants#create", format: false if payroll_routes
+      get "auth/view_as/targets", to: "view_as_grants#targets", format: false if payroll_routes
       post "cable_ticket", to: "cable_tickets#create" if payroll_routes
       resource :notification_settings, only: [ :show, :update ] if payroll_routes
       get "companies", to: "companies#index" if payroll_routes
@@ -93,6 +97,7 @@ Rails.application.routes.draw do
       # Mount future kiosk routes under this same employee_routes guard.
 
       namespace :client do
+        resources :support_access_logs, only: :index
         resource :employee_intake_settings, only: :show
         get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
         post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"

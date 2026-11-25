@@ -1,9 +1,12 @@
 # frozen_string_literal: true
 
 class ApplicationJob < ActiveJob::Base
+  include ViewAsJobEnqueueGuard
+
   class_attribute :rls_mode, instance_writer: false
 
   def perform_now
+    Current.prevent_view_as_side_effects!
     # Active Job handles retries and discards after the perform callbacks unwind.
     with_job_rls_scope do
       Current.with_isolated_actor(AuditActor.system_job(self)) { super }

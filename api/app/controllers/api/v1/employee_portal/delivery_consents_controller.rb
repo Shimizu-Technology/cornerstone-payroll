@@ -20,7 +20,7 @@ module Api
 
         # GET /api/v1/employee/delivery_consents
         def show
-          audit!("show", record: @employee_link)
+          audit!("show", record: @employee_link || @view_as_employee_context&.link || @employee)
           render json: status_payload
         end
 
@@ -214,7 +214,7 @@ module Api
         end
 
         def current_company
-          @employee_link.company
+          employee_access_context.company
         end
 
         def require_delivery_consent!
@@ -222,7 +222,7 @@ module Api
         end
 
         def load_employee
-          @employee = Employee.where(company_id: current_company_id).find(@employee_link.employee_id)
+          @employee = Employee.where(company_id: current_company_id).find(employee_access_context.employee_id)
         end
 
         def require_active_link!
@@ -272,15 +272,15 @@ module Api
           AuditLog.record!(
             actor: Current.actor,
             user: @current_user,
-            organization_id: @employee_link.company.organization_id,
-            company_id: @employee_link.company_id,
+            organization_id: current_company.organization_id,
+            company_id: current_company_id,
             action: "#{AUDIT_ACTION}##{event}",
             record_type: record.class.table_name,
             record_id: record.id,
             subject_name: @employee.display_name,
             event_category: "employee_portal",
             metadata: metadata.merge(
-              employee_account_link_id: @employee_link.id,
+              employee_account_link_id: employee_access_context.id,
               employee_id: @employee.id
             ).compact
           )
