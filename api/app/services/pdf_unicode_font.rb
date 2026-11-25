@@ -95,6 +95,7 @@ module PdfUnicodeFont
             super(run, run_options.merge(font_options))
             x += primary.compute_width_of(run, **width_options.reverse_merge(size: font_size))
           end
+          x += character_spacing * (cjk ? 1 : run.length)
         end
       end
       return draw.call unless options[:rotate]
@@ -110,7 +111,7 @@ module PdfUnicodeFont
       runs = cjk_runs(string, font)
       return super unless runs.any?(&:first)
 
-      runs.sum do |cjk, chars|
+      run_width = runs.sum do |cjk, chars|
         if cjk
           width = nil
           font(PdfUnicodeFont::CJK_FAMILY) { width = super(chars.join, options.except(:style)) }
@@ -119,6 +120,7 @@ module PdfUnicodeFont
           super(chars.join, options)
         end
       end
+      run_width + character_spacing * (runs.length - 1)
     end
 
     def cjk_runs(text, primary)
@@ -173,7 +175,7 @@ module PdfUnicodeFont
   end
 
   def cjk_character?(char)
-    char.match?(/[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}\p{Bopomofo}\u3000-\u303F\u31C0-\u31EF\u3200-\u33FF\uFE30-\uFE4F\uFF00-\uFFEF]/)
+    char.match?(/[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}\p{Bopomofo}\u3000-\u303F\u3099-\u309A\u30FB-\u30FC\u31C0-\u31EF\u3200-\u33FF\uFE30-\uFE4F\uFF00-\uFFEF]/)
   end
 
   def unprintable_characters(text, cjk: true)

@@ -236,13 +236,25 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
   end
 
   describe "#generate" do
-    it "refuses to file a name the form would print as empty boxes" do
+    it "refuses to file a CJK employee name" do
+      employee_rows.first[:name] = "王小明"
+      expect { described_class.new(report: report).generate }
+        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "王小明"/)
+    end
+
+    it "refuses to file a CJK employee address" do
+      employees.first.update!(address_line1: "12 마을 Rd")
+      expect { described_class.new(report: report).generate }
+        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address .*\(마 을\)/)
+    end
+
+    it "refuses to file an employee name containing emoji" do
       employee_rows.first[:name] = "🦄"
       expect { described_class.new(report: report).generate }
         .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "🦄"/)
     end
 
-    it "refuses to file an address the form would print as empty boxes" do
+    it "refuses to file an employee address containing emoji" do
       employees.first.update!(address_line1: "12 🦄 Rd")
       expect { described_class.new(report: report).generate }
         .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address .*\(🦄\)/)
