@@ -121,7 +121,7 @@ module Api
       end
 
       def employee_site_enabled?
-        return false unless @support_company.live_payroll?
+        return false unless @support_company.live_payroll? || @support_company.demo?
 
         features = CompanyFeatures.for(@support_company)
         features.employee_portal_enabled? && features.subdomain_enabled? &&

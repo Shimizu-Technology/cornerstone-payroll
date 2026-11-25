@@ -12,6 +12,7 @@ module EmployeeProfiles
     DAILY_CODE_LIMIT = 5
     DAILY_FAILURE_LIMIT = 15
     DELIVERY_TIMEOUT = 10.seconds
+    CHANNEL = "employee_profile_email"
     Delivery = Data.define(:id, :email, :code)
 
     class DeliveryUnavailable < StandardError; end
@@ -45,15 +46,21 @@ module EmployeeProfiles
       Delivery.new(id, email, code)
     end
 
+    # Rechecked right before sending, and the transport filters inside the
+    # demo scope too (DemoOutbound).
     def deliver!(delivery)
       transport = PortalNotifications::Transport
       raise DeliveryUnavailable unless transport.configured?
+      company = @link.company
+      raise DeliveryUnavailable unless DemoOutbound.permit?(company: company, email: delivery.email, channel: CHANNEL)
 
-      result = Timeout.timeout(DELIVERY_TIMEOUT, Timeout::Error) do
-        transport.deliver({
-          from: transport.from_email, to: [ delivery.email ], subject: "Cornerstone Payroll email verification",
-          text: "Your Cornerstone Payroll verification code is #{delivery.code}. It expires in 10 minutes. If you didn't request this code, you can ignore this email."
-        }, idempotency_key: "employee-profile-email:#{delivery.id}")
+      result = DemoOutbound.scoped(company) do
+        Timeout.timeout(DELIVERY_TIMEOUT, Timeout::Error) do
+          transport.deliver({
+            from: transport.from_email, to: [ delivery.email ], subject: "Cornerstone Payroll email verification",
+            text: "Your Cornerstone Payroll verification code is #{delivery.code}. It expires in 10 minutes. If you didn't request this code, you can ignore this email."
+          }, idempotency_key: "employee-profile-email:#{delivery.id}")
+        end
       end
       raise DeliveryUnavailable if result["id"].blank? || result["staging_captured"]
     rescue StandardError => error
