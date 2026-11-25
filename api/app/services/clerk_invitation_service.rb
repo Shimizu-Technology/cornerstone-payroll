@@ -6,15 +6,31 @@ class ClerkInvitationService
   SUBJECT_PATTERN = /\Auser_[a-zA-Z0-9_-]+\z/
   DEADLINE_KEY = :clerk_pass_deadline
 
+  # The most one Clerk call may take from connecting to its last byte, and
+  # the most body it may send. Within a pass deadline the call gets only the
+  # time left before it, if that is less.
+  REQUEST_BUDGET = 30.seconds
+  MAX_RESPONSE_BYTES = 5.megabytes
+  SOCKET_TIMEOUT = 5
+
   # A pass ran out of time: raised instead of starting a Clerk call after
-  # the deadline set by within_deadline. Deliberately not one of the network
-  # errors the calls below rescue, so it ends the whole pass.
+  # the deadline set by within_deadline, or when a call in flight runs into
+  # it. Deliberately not one of the network errors the calls below rescue,
+  # so it ends the whole pass.
   class DeadlineReached < StandardError; end
+  # One Clerk call used up its own budget (REQUEST_BUDGET) or sent more
+  # than MAX_RESPONSE_BYTES. Both are request failures the calls below
+  # rescue and fail closed on.
+  class RequestBudgetExceeded < Timeout::Error; end
+  class ResponseTooLarge < IOError; end
+
+  REQUEST_ERRORS = [ Timeout::Error, SystemCallError, SocketError, EOFError, ResponseTooLarge,
+                     OpenSSL::SSL::SSLError, JSON::ParserError ].freeze
 
   # Runs the block with a deadline for this thread's Clerk calls (the
   # earlier one, when nested): a call that would start after it raises
-  # DeadlineReached instead. Each call is bounded by its own timeouts, so a
-  # pass ends within one call of the deadline.
+  # DeadlineReached instead, and a call in flight is cut off at it (see
+  # request_json), so a pass never runs past its deadline.
   def self.within_deadline(deadline)
     previous = Thread.current[DEADLINE_KEY]
     Thread.current[DEADLINE_KEY] = [ previous, deadline ].compact.min
@@ -66,7 +82,7 @@ class ClerkInvitationService
       Rails.logger.error("[ClerkInvitation] Failed for #{LogRedaction.email(email)}: status=#{response.code} code=#{error_code || 'none'}")
       { success: false, error: error_message, status_code: response.code.to_i, error_code: error_code }
     end
-  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+  rescue *REQUEST_ERRORS => e
     Rails.logger.error("[ClerkInvitation] Clerk request failed: #{e.class}")
     { success: false, error: "Could not reach Clerk API" }
   end
@@ -150,7 +166,7 @@ class ClerkInvitationService
       targeted(recheck[:sessions], cutoff).any?
 
     { success: true, revoked: revoked }
-  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+  rescue *REQUEST_ERRORS => e
     { success: false, error: e.class.name }
   end
 
@@ -185,7 +201,7 @@ class ClerkInvitationService
     return { success: true } if response.is_a?(Net::HTTPSuccess) || response.code.to_i == 404
 
     { success: false, error: extract_error_message(response), status: response.code.to_i }
-  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+  rescue *REQUEST_ERRORS => e
     { success: false, error: e.class.name }
   end
 
@@ -211,7 +227,7 @@ class ClerkInvitationService
       { success: false, error: extract_error_message(response), status: response.code.to_i,
         error_code: error.is_a?(Hash) ? error["code"] : nil }
     end
-  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+  rescue *REQUEST_ERRORS => e
     { success: false, error: e.message }
   end
 
@@ -301,7 +317,7 @@ class ClerkInvitationService
 
     response = request_json(path, Net::HTTP::Get)
     JSON.parse(response.body) if response.is_a?(Net::HTTPSuccess)
-  rescue Timeout::Error, SystemCallError, SocketError, EOFError, OpenSSL::SSL::SSLError, JSON::ParserError => e
+  rescue *REQUEST_ERRORS => e
     Rails.logger.warn("[ClerkInvitation] Clerk lookup failed: #{e.class}")
     nil
   end
@@ -310,24 +326,58 @@ class ClerkInvitationService
     request_json(path, Net::HTTP::Post, body)
   end
 
+  # One Clerk call, bounded as a whole: the connection, the request, and
+  # the response down to its last byte must finish within its budget (the
+  # time left before the pass deadline, at most REQUEST_BUDGET), however
+  # slowly Clerk trickles it in, and the body may not pass
+  # MAX_RESPONSE_BYTES. Running out of the pass deadline raises
+  # DeadlineReached so the pass is rescheduled; running out of the call's
+  # own budget, or an oversized body, is a request failure.
   def request_json(path, method, body = nil)
     deadline = Thread.current[DEADLINE_KEY]
-    raise DeadlineReached, "Clerk pass deadline reached" if deadline && Time.current >= deadline
+    started = Time.current
+    raise DeadlineReached, "Clerk pass deadline reached" if deadline && started >= deadline
+
+    budget = REQUEST_BUDGET.to_f
+    pass_bound = deadline && (deadline - started) <= budget
+    budget = (deadline - started).to_f if pass_bound
 
     uri = URI("#{BASE_URL}#{path}")
     http = Net::HTTP.new(uri.hostname, uri.port)
     http.use_ssl = true
-    http.open_timeout = 5
-    http.read_timeout = 5
-    http.write_timeout = 5
+    http.open_timeout = http.read_timeout = http.write_timeout = [ SOCKET_TIMEOUT, budget ].min
 
     req = method.new(uri)
     req["Authorization"] = "Bearer #{@secret_key}"
     req["Content-Type"] = "application/json"
     req.body = body.to_json if body
 
-    http.request(req)
+    Timeout.timeout(budget, RequestBudgetExceeded, "Clerk request budget exceeded") do
+      http.request(req) { |response| response.read_body(BoundedBody.new(MAX_RESPONSE_BYTES)) }
+    end
+  rescue Timeout::Error => e
+    # Cut off at the pass deadline (by the budget, or a socket timeout that
+    # the deadline shortened): the pass ends and is rescheduled.
+    raise DeadlineReached, "Clerk pass deadline reached" if
+      pass_bound && (e.is_a?(RequestBudgetExceeded) || Time.current >= deadline)
+
+    raise
   end
+
+  # A response body that refuses to grow past its limit as it streams in.
+  class BoundedBody < String
+    def initialize(limit)
+      super()
+      @limit = limit
+    end
+
+    def <<(chunk)
+      raise ResponseTooLarge, "Clerk response exceeded #{@limit} bytes" if bytesize + chunk.bytesize > @limit
+
+      super
+    end
+  end
+  private_constant :BoundedBody
 
   def parse_body(response)
     parsed = JSON.parse(response.body)
