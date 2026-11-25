@@ -31,7 +31,7 @@ module Api
           roles: {
             staff: StaffRolePolicy.allowed?(current_user, :staff_workspace),
             client: current_user.client?,
-            employee_links_count: current_user.employee_account_links.portal_eligible.includes(company: :organization).count(&:portal_enabled?)
+            employee_links_count: EmployeeLinks.openable_links(current_user, azp: @clerk_token_payload&.fetch("azp", nil)).size
           },
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }

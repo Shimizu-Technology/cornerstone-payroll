@@ -64,22 +64,29 @@ export function SharedInboxReportPanel({
   const [markingEmail, setMarkingEmail] = useState<string | null>(null);
   const onReportLoadedRef = useRef(onReportLoaded);
   onReportLoadedRef.current = onReportLoaded;
+  // The report belongs to the selected company: switching companies reloads
+  // it, and an answer for a previous selection is dropped.
+  const requestedCompanyRef = useRef(activeCompanyId);
+  requestedCompanyRef.current = activeCompanyId;
 
   const loadReport = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     try {
-      const response = await staffContactHygieneApi.sharedEmails();
+      const response = await staffContactHygieneApi.sharedEmails(activeCompanyId);
+      if (requestedCompanyRef.current !== activeCompanyId) return;
       setReport(response);
       onReportLoadedRef.current?.(response);
     } catch (caught) {
+      if (requestedCompanyRef.current !== activeCompanyId) return;
       setError(caught instanceof Error ? caught.message : 'Could not load the shared and placeholder email report.');
     } finally {
-      setLoading(false);
+      if (requestedCompanyRef.current === activeCompanyId) setLoading(false);
     }
-  }, []);
+  }, [activeCompanyId]);
 
   useEffect(() => {
+    setReport(null);
     void loadReport();
   }, [loadReport]);
 

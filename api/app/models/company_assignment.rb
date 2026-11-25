@@ -46,7 +46,7 @@ class CompanyAssignment < ApplicationRecord
   def client_management_grant_shape
     return unless client_management?
 
-    errors.add(:client_management, "is only available for live accountant assignments") unless user&.accountant? && company&.live_payroll? && workspace_access_level.nil?
+    errors.add(:client_management, "is only available for live accountant assignments") unless user&.accountant? && (company&.live_payroll? || company&.demo?) && workspace_access_level.nil?
     return unless new_record? || will_save_change_to_client_management? || validation_context == :client_management_update
 
     actor = User.find_by(id: granted_by_id)
@@ -72,7 +72,13 @@ class CompanyAssignment < ApplicationRecord
       errors.add(:company, "must be the login’s practice copy") unless company_id == user.practice_company_id && user.client?
       return
     end
-    return if !company.test_workspace? || user.staff_member?
+    # A client login stays on its own side: demo logins on demo companies,
+    # live logins on live ones.
+    if user.client? && company.demo? != (user.company&.demo? || false)
+      errors.add(:company, "must belong to the same kind of client as the login")
+      return
+    end
+    return if !company.test_workspace? || user.staff_member? || (user.client? && company.demo?)
 
     errors.add(:company, "test workspaces are available only to payroll staff")
   end
@@ -82,9 +88,9 @@ class CompanyAssignment < ApplicationRecord
 
     if user&.practice_company_id?
       errors.add(:workspace_access_level, "is unavailable to practice client logins") if workspace_access_level.present?
-    elsif company.test_workspace? && workspace_access_level.blank?
+    elsif company.practice_copy? && workspace_access_level.blank?
       errors.add(:workspace_access_level, "is required for a test workspace")
-    elsif company.live_payroll? && workspace_access_level.present?
+    elsif !company.practice_copy? && workspace_access_level.present?
       errors.add(:workspace_access_level, "is only available for a test workspace")
     end
   end
