@@ -62,6 +62,7 @@ module EmployeeDocuments
           events = EmailProviderEvent.unapplied.where(provider: PROVIDER, provider_message_id: message_id)
             .order(:occurred_at, :id).lock.to_a
           events.each do |event|
+            PaperTaxFormFollowUp.record!(notice, event)
             apply!(notice, event)
             event.update!(applied_at: Time.current)
           end

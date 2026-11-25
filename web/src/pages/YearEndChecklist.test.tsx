@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   checklist: vi.fn(), acknowledge: vi.fn(), downloadDocument: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
   linkPayee: vi.fn(), addContractor: vi.fn(), unlinkPayee: vi.fn(), mark1099Ready: vi.fn(),
   filingRecord: vi.fn(async () => ({ filing: null })),
-  canManageCopies: vi.fn(() => false), listCopies: vi.fn(),
+  canManageCopies: vi.fn(() => false), listCopies: vi.fn(), markPaperMailed: vi.fn(),
   companyGet: vi.fn(), companyUpdate: vi.fn(), employeeUpdate: vi.fn(),
 }));
 vi.mock('@/services/api', () => ({
@@ -42,7 +42,7 @@ vi.mock('@/hooks/useSelectedCompanyCapability', async (importOriginal) => ({
   useOptionalSelectedCompanyCapability: () => mocks.canManageCopies(),
 }));
 vi.mock('@/services/employee-tax-forms-api', () => ({
-  employeeTaxFormsApi: () => ({ list: mocks.listCopies }),
+  employeeTaxFormsApi: () => ({ list: mocks.listCopies, markPaperMailed: mocks.markPaperMailed }),
 }));
 
 const employerData: ActiveYearEndStep<'employer'>['data'] = {
@@ -205,6 +205,30 @@ describe('Year-end checklist', () => {
     expect(screen.getByText(/Skipped · No app access yet/)).toBeTruthy();
     expect(screen.getByText(/Not scheduled yet/)).toBeTruthy();
     expect(consoleError.mock.calls.flat()).not.toContainEqual(expect.stringContaining('same key'));
+  });
+
+  it('shows an overdue paper copy and displays the saved mailing record', async () => {
+    mocks.canManageCopies.mockReturnValue(true);
+    mocks.checklist.mockResolvedValue(checklist([]));
+    const copy: EmployeeTaxFormCopy = {
+      id: 61, employee_id: 71, employee_name: 'Fictional Worker', revision: 1, status: 'posted',
+      posted_at: '2026-09-30T00:00:00Z', withdrawn_at: null, withdrawn_by: null, withdrawal_note: null,
+      inputs_changed_since_posting: false, notice: { status: 'sent', delivery_status: 'bounced' },
+      paper_follow_up: { status: 'overdue', bounced_on: '2026-10-01', due_on: '2026-10-31', mailed_on: null, mailed_by: null },
+    };
+    const result = { can_post: true, w2_delivery: null, documents: [copy] };
+    mocks.listCopies.mockResolvedValueOnce(result).mockResolvedValue({
+      ...result, documents: [{ ...copy, paper_follow_up: {
+        ...copy.paper_follow_up, status: 'mailed', mailed_on: '2026-11-19', mailed_by: 'Test Staff',
+      } }],
+    });
+    mocks.markPaperMailed.mockResolvedValue({});
+    renderPage();
+
+    expect(await screen.findByText(/Paper copy overdue.*Due Oct 31, 2026/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark paper copy mailed for Fictional Worker' }));
+    expect(await screen.findByText(/Paper copy mailed Nov 19, 2026 by Test Staff/)).toBeTruthy();
+    expect(mocks.markPaperMailed).toHaveBeenCalledWith(61);
   });
 
   it.each([2025, 2026])('composes the correct W-2 filing panels for %i', async (year) => {
