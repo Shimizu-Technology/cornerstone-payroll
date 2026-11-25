@@ -441,7 +441,9 @@ RSpec.describe "Company RLS", :rls do
         EmployeeAccountLink.create!(company: company, employee: here_other, user: users["both"], status: "active")
         EmployeeAccountLink.create!(company: other_company, employee: there_invited, user: users["both"], status: "invited")
         own_decision_function_like_production(connection, bypass: owner_bypass)
-        setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users])
+        # payroll_app reads every table in production (rls_runtime_role.sql);
+        # contact validation also checks whether the actor is a demo login.
+        setup_step_three(connection, tables: %w[employee_account_links employees], read_tables: %w[users companies company_assignments])
         { company: company, other_company: other_company, here: here, here_other: here_other, there: there, users: users }
       end
     end

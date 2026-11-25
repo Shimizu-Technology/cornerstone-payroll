@@ -14,7 +14,7 @@ module Api
         MAX_REASON = 500
         DOCUMENT_ID = /\A[1-9]\d{0,18}\z/
         BLOCKER_MESSAGES = {
-          feature_off: "The employee app's tax forms are switched off for this client.",
+          feature_off: "Tax forms are turned off in the employee app for this client, so copies can't be posted yet.",
           unsupported_year: "W-2GU copies can be posted for tax year #{W2GuOfficialCopies::SUPPORTED_TAX_YEARS.to_sentence} only.",
           not_filed: "Cornerstone does not file this year's W-2s for this client, so there are no copies to post.",
           not_final: "The W-2s aren't marked ready on the current figures, so the copies would print as drafts. Mark them ready first."

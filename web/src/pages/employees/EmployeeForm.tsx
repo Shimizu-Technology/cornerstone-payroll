@@ -24,6 +24,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
 import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
+import { contactEmailErrorMessage } from '@/lib/contact-email-errors';
 import { employeeDocumentsPath, employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
 import { PayChangeEffectiveDate } from '@/components/employees/PayChangeEffectiveDate';
@@ -1188,13 +1189,15 @@ export function EmployeeForm() {
         }
       }
       if (err instanceof ApiError && Object.keys(err.fieldErrors).length > 0) {
-        setErrors(err.fieldErrors);
-        const fieldMessages = Object.entries(err.fieldErrors).map(([field, messages]) =>
+        const emailReason = contactEmailErrorMessage(err.data);
+        const fieldErrors = emailReason && err.fieldErrors.email ? { ...err.fieldErrors, email: [emailReason] } : err.fieldErrors;
+        setErrors(fieldErrors);
+        const fieldMessages = Object.entries(fieldErrors).map(([field, messages]) =>
           `${field.replaceAll('_', ' ')}: ${messages.join(' ')}`
         ).join('; ');
         setGeneralError(`${err.message}. ${fieldMessages}`);
         if ((err.data as { code?: string } | undefined)?.code === 'employee_intake_expired') void intake.reload();
-        focusFirstInvalidField(Object.keys(err.fieldErrors)[0]);
+        focusFirstInvalidField(Object.keys(fieldErrors)[0]);
       } else {
         setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
       }
