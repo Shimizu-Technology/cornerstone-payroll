@@ -15,7 +15,7 @@ import { formatDate, payPeriodStatusConfig } from '@/lib/utils';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { capturedSourceHoursLocked, worksheetHoursInvalid, worksheetPayBasisHold } from '@/lib/captured-source-worksheet';
 import { parsePayRunId } from '@/lib/pay-run-filters';
-import { ApiError, payPeriodsApi, employeesApi, type PayrollCommitSnapshot } from '@/services/api';
+import { ApiError, payPeriodsApi, employeesApi, nonEmployeeChecksApi, type PayrollCommitSnapshot } from '@/services/api';
 
 import { useAireCalendarRefresh } from '@/hooks/useAireCalendarRefresh';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -39,7 +39,8 @@ export function usePayRunController({
   initialPayPeriod,
   onPayPeriodChange,
   refreshToken = 0,
-}: PayPeriodDetailProps) {
+  loadsNonEmployeeChecks = false,
+}: PayPeriodDetailProps & { loadsNonEmployeeChecks?: boolean }) {
   const { companyId: companyIdParam, id } = useParams<{ companyId: string; id: string }>();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -454,6 +455,20 @@ export function usePayRunController({
     if (payPeriod.status !== 'committed') return;
     loadSupplementals(payPeriod.id);
   }, [payPeriod, loadSupplementals]);
+
+  // The Checks tab mounts only when opened, but the Results FIT-deposit
+  // check needs its non-employee checks first. Once the panel reports its
+  // own list, that list wins.
+  const nonEmployeeChecksPeriodId = loadsNonEmployeeChecks && payPeriod?.status === 'committed'
+    && activeCompany?.payroll_environment !== 'migration_rehearsal' ? payPeriod.id : null;
+  useEffect(() => {
+    if (nonEmployeeChecksPeriodId === null) return;
+    let current = true;
+    nonEmployeeChecksApi.list({ pay_period_id: nonEmployeeChecksPeriodId })
+      .then((response) => { if (current && !nonEmployeeChecksLoadedRef.current) setNonEmployeeChecks(response.non_employee_checks); })
+      .catch(() => {});
+    return () => { current = false; };
+  }, [nonEmployeeChecksPeriodId]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
     if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
