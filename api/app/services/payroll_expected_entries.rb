@@ -115,6 +115,19 @@ class PayrollExpectedEntries
       %i[hours_worked overtime_hours holiday_hours pto_hours].any? { |field| item.public_send(field).to_d.positive? }
   end
 
+  # Before the first calculation, salaried people on the default roster get
+  # their usual salary, so they aren't missing. Variable salary still needs
+  # period pay, and anyone left off the roster still shows.
+  def salary_default_ids(candidates)
+    return [] if candidates.empty? || !@period.draft? || !@period.includes_base_salary?
+
+    roster = PayPeriodDefaultRoster.new(@period).employee_ids
+    candidates.select do |employee|
+      compensation = employee.payroll_compensation_on(@period.end_date)
+      roster.include?(employee.id) && compensation.employment_type == "salary" && compensation.salary_type != "variable"
+    end.map(&:id)
+  end
+
   def missing_regulars(covered)
     company = @period.company
     recent = PayPeriod.where(company_id: company.id, status: "committed", cycle: "regular", run_purpose: "regular",
@@ -126,8 +139,10 @@ class PayrollExpectedEntries
     # missing until staff enter their hours.
     awaiting = items.select { |item| awaiting_hours?(item) }.map(&:employee_id)
     paid = items.map(&:employee_id) - awaiting
-    Employee.where(company_id: company.id, status: "active", id: counts.keys).where.not(id: covered + paid)
-      .order(:last_name, :first_name).map do |employee|
+    candidates = Employee.where(company_id: company.id, status: "active", id: counts.keys).where.not(id: covered + paid)
+      .order(:last_name, :first_name).to_a
+    salaried = salary_default_ids(candidates)
+    candidates.reject { |employee| salaried.include?(employee.id) }.map do |employee|
         resolution = resolutions.find { |row| row.employee_id == employee.id && row.payroll_standing_change_id.nil? }
         exclusion = exclusions.find { |row| row.employee_id == employee.id }
         { employee_id: employee.id, label: employee.full_name, resolved: resolution.present? || exclusion.present?, excluded: exclusion.present?,

@@ -381,6 +381,7 @@ export interface Employee {
     required: number;
     satisfied: number;
     ready_for_payroll: boolean;
+    missing?: string[];
   };
   configuration_review_resolutions?: Array<{
     id: number;
@@ -1420,6 +1421,13 @@ export interface AirePayrollCommandResponse {
   command_result?: Record<string, unknown>;
 }
 
+/** A new hire whose required documents must be verified before approval. */
+export interface NewHireDocumentGap {
+  employee_id: number;
+  employee_name: string;
+  missing: string[];
+}
+
 export interface ExpectedEntries {
   fields: { id: number; employee_id: number; employee_wage_rate_id: number | null; wage_rate?: string; wage_rate_label?: string; saved_wage_rate_hours?: PayrollItemWageRateHours[]; label: string; help_text?: string; kind: 'owner_pay' | 'extra_hours'; required: boolean; allow_none: boolean; availability_error?: string; inline_save_error?: string; source_revision?: number; status: 'filled' | 'missing' | 'none' | 'excluded'; value: string; note?: string }[];
   missing_regulars: { employee_id: number; label: string; resolved: boolean; excluded?: boolean; awaiting_hours?: boolean; note?: string }[];
@@ -1444,6 +1452,7 @@ export interface PayPeriod {
   check_number_summary?: { next_check_number: number; last_used_check_number: number | null; can_change: boolean } | null;
   ineligible_workers?: { resolution?: string; employee_id: number; reason: string; status: string; effective_date: string | null }[];
   expected_entries?: ExpectedEntries;
+  new_hire_document_gaps?: NewHireDocumentGap[];
   client_files?: { period_id: number; revision: number; submission_id: number; submitted_at: string; status: string; blocks_calculation: boolean } | null;
   prior_provider_history_available?: boolean;
   /** Initial roster defaults; explicit operator selections remain authoritative. */
