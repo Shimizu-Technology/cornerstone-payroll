@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PayrollItem } from '@/types';
-import { paymentEvidenceLabel, payRunPaymentDisplay, payrollPaymentLabel } from './payroll-payment-label';
+import { needsBankPaymentConfirmation, paymentEvidenceLabel, payRunPaymentDisplay, payrollPaymentLabel } from './payroll-payment-label';
 
 describe('payrollPaymentLabel', () => {
   it('uses the saved direct-deposit method and distinguishes zero-net statements', () => {
@@ -37,9 +37,14 @@ describe('payRunPaymentDisplay action eligibility', () => {
 });
 
 describe('paymentEvidenceLabel', () => {
-  it('describes an unconfirmed direct deposit as a transfer handled outside the app', () => {
-    expect(paymentEvidenceLabel({ payment_delivery_method: 'direct_deposit', payment_evidence: { status: 'unissued', label: 'Transfer not confirmed' } }))
-      .toBe('Bank transfer handled outside the app');
+  it('keeps an unconfirmed direct deposit open for staff to confirm', () => {
+    const unconfirmed = { payment_delivery_method: 'direct_deposit', payment_evidence: { status: 'unissued', label: 'Transfer not confirmed' } };
+    expect(paymentEvidenceLabel(unconfirmed)).toBe('Bank payment not confirmed yet');
+    expect(needsBankPaymentConfirmation(unconfirmed)).toBe(true);
+    const confirmed = { payment_delivery_method: 'direct_deposit', payment_evidence: { status: 'issued', label: 'Transfer confirmed' } };
+    expect(paymentEvidenceLabel(confirmed)).toBe('Transfer confirmed');
+    expect(needsBankPaymentConfirmation(confirmed)).toBe(false);
+    expect(needsBankPaymentConfirmation({ payment_delivery_method: 'paper_check', payment_evidence: { status: 'unissued', label: 'Issue not recorded' } })).toBe(false);
   });
 
   it('keeps the server wording for confirmed transfers, checks and missing evidence', () => {

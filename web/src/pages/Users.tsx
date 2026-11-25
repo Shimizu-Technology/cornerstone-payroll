@@ -69,6 +69,11 @@ function inviteFailureReason(response: InvitationDeliveryResponse): string {
   return invitationOutcomeMessage(response);
 }
 
+// The account list keeps the editor's "(legacy)" marker for older admin accounts.
+function accountRoleLabel(role: UserRole): string {
+  return allRoleOptions.find((option) => option.value === role)?.label ?? roleLabel(role);
+}
+
 export function Users() {
   const { user: currentUser } = useAuth();
   const roleOptions = currentUser?.role === 'super_admin'
@@ -733,7 +738,7 @@ export function Users() {
                             <StatusBadges user={user} />
                           </div>
                           <div className="mt-4 grid grid-cols-2 gap-3">
-                            <MobileField label="Role" value={roleLabel(user.role)} />
+                            <MobileField label="Role" value={accountRoleLabel(user.role)} />
                             <MobileField label="Last active" value={user.last_active_at ? new Date(user.last_active_at).toLocaleDateString() : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
@@ -803,7 +808,7 @@ export function Users() {
                         ) : (
                           <div>
                             <span className="inline-flex items-center gap-1.5">
-                              {roleLabel(user.role)}
+                              {accountRoleLabel(user.role)}
                             </span>
                             {renderAssignedCompanies(user)}
                           </div>

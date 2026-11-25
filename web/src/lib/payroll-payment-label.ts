@@ -31,14 +31,19 @@ interface PaymentEvidenceRecord {
 }
 
 /**
- * Cornerstone confirms bank transfers outside the app, so an unconfirmed
- * direct deposit is the normal state, not a problem. Say so neutrally.
+ * The server can't tell a transfer Cornerstone still has to confirm from one
+ * handled outside the app, so an unconfirmed direct deposit stays an open item
+ * that staff can confirm from the pay run's Checks tab.
  */
 export function paymentEvidenceLabel(record: PaymentEvidenceRecord): string {
   const evidence = record.payment_evidence;
   if (!evidence) return 'Payment evidence not available';
-  if (record.payment_delivery_method === 'direct_deposit' && evidence.status === 'unissued') return 'Bank transfer handled outside the app';
+  if (needsBankPaymentConfirmation(record)) return 'Bank payment not confirmed yet';
   return evidence.label;
+}
+
+export function needsBankPaymentConfirmation(record: PaymentEvidenceRecord): boolean {
+  return record.payment_delivery_method === 'direct_deposit' && record.payment_evidence?.status === 'unissued';
 }
 
 interface PayRunPaymentDisplay {
