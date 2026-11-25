@@ -3,12 +3,20 @@
 # A Clerk revocation the demo kill switch requested (M4-9d): a pending
 # sign-up invitation, or every session of an employee-only demo login. The
 # row is the durable request; RevokeEmployeeAppClerkJob retries it until
-# Clerk confirms (confirmed_at) or the retries run out (gave_up_at), and
-# audits the confirmed outcome separately from the request. While a row is
-# still pending, a repeat stop finds it instead of queueing a duplicate.
+# Clerk confirms (confirmed_at), the retries run out (gave_up_at), or Clerk's
+# answer needs a person to check it (follow_up_at; an invitation already
+# accepted whose sign-in couldn't be found). Each outcome is audited
+# separately from the request. While a row is still pending, a repeat stop
+# finds it instead of queueing a duplicate, and queues its job again if none
+# was queued; RetryEmployeeAppClerkRevocationsJob re-enqueues rows whose job
+# never ran or was lost.
 class EmployeeAppClerkRevocation < ApplicationRecord
   KINDS = %w[invitation sessions].freeze
   SOURCE_DEMO_STOP = "demo_stop"
+  # A pending row never queued this long after its request, or untouched
+  # this long (longer than the job's slowest retry wait), has no live job.
+  UNQUEUED_AFTER = 5.minutes
+  LOST_AFTER = 6.hours
 
   belongs_to :organization
   belongs_to :company
@@ -18,7 +26,12 @@ class EmployeeAppClerkRevocation < ApplicationRecord
   validates :kind, inclusion: { in: KINDS }
   validates :target, :source, :requested_at, presence: true
 
-  scope :pending, -> { where(confirmed_at: nil, gave_up_at: nil) }
+  scope :pending, -> { where(confirmed_at: nil, gave_up_at: nil, follow_up_at: nil) }
+  # Pending rows with no job to carry them out.
+  scope :stale, lambda { |now = Time.current|
+    pending.where("(enqueued_at IS NULL AND requested_at < :unqueued) OR updated_at < :lost",
+      unqueued: now - UNQUEUED_AFTER, lost: now - LOST_AFTER)
+  }
 
   # Records the request unless the same one is still pending. Returns the
   # new row, or nil for a duplicate. Run inside the caller's transaction;
@@ -34,7 +47,21 @@ class EmployeeAppClerkRevocation < ApplicationRecord
     nil
   end
 
+  # Queues the job for each pending row and records when. A failed enqueue
+  # leaves enqueued_at unset, so the sweep (or a repeat stop) queues it again.
+  # Returns the ids queued.
+  def self.enqueue!(ids, now: Time.current)
+    pending.where(id: ids).order(:id).pluck(:id).select do |id|
+      RevokeEmployeeAppClerkJob.perform_later(id)
+      where(id: id).update_all(enqueued_at: now, updated_at: now)
+      true
+    rescue StandardError => error
+      Rails.logger.error("[EmployeeAppClerkRevocation] could not queue revocation #{id}: #{error.class}")
+      false
+    end
+  end
+
   def pending?
-    confirmed_at.nil? && gave_up_at.nil?
+    confirmed_at.nil? && gave_up_at.nil? && follow_up_at.nil?
   end
 end

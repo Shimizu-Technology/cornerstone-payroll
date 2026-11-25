@@ -27,6 +27,12 @@ production:
     queue: default
     schedule: every 15 minutes
 
+  # Re-enqueues demo kill switch Clerk revocations left without a job (M4-9d).
+  retry_employee_app_clerk_revocations:
+    class: RetryEmployeeAppClerkRevocationsJob
+    queue: default
+    schedule: every 15 minutes
+
   expire_practice_portal_access:
     class: ExpirePracticePortalAccessJob
     queue: default

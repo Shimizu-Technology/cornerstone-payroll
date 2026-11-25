@@ -8,6 +8,12 @@ module EmployeeAppSwitch
   class Error < StandardError; end
   class Forbidden < Error; end
   class Invalid < Error; end
+  # Turning on needs a second factor verified within the step-up window.
+  class StepUpRequired < Error
+    def initialize(message = "Verify your second factor again to turn this on.")
+      super
+    end
+  end
 
   # Raised when a turn-on fails a readiness check; lists each failing check.
   class NotReady < Error

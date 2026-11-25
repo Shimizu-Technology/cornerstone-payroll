@@ -23,7 +23,7 @@ RSpec.describe DemoOutbound, :portal_notifications do
         expect(described_class.permit?(company: demo, email: allowed, channel: channel)).to be(false)
       end
       log = AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last
-      expect(log.metadata).to include("channel" => "employee_tax_form_notice", "reason" => "employee_app_off")
+      expect(log.metadata).to include("channel" => DemoOutbound::EMPLOYEE_CHANNELS.last, "reason" => "employee_app_off")
 
       # Client and staff mail keep following the allow-list alone.
       expect(described_class.permit?(company: demo, email: allowed, channel: "portal_notification")).to be(true)
@@ -108,6 +108,25 @@ RSpec.describe DemoOutbound, :portal_notifications do
       # Other demo mail still follows the allow-list alone.
       described_class.scoped(demo) { StagingMailTransport.deliver(payload) }
       expect(Resend::Emails).to have_received(:send).twice
+    end
+
+    it "rechecks employee portal alerts at the transport on the employee channel; staff alerts keep the allow-list alone" do
+      allow(Resend::Emails).to receive(:send).and_return({ "id" => "sent-1" })
+      allow(PortalNotifications::Transport).to receive(:from_email).and_return("alerts@example.test")
+      email = instance_double(PortalNotifications::Email,
+        payload: { from: "alerts@example.test", to: [ allowed ], subject: "New pay stub", html: "<p>Hi</p>" })
+      allow(PortalNotifications::Email).to receive(:new).and_return(email)
+      event = Struct.new(:company).new(demo)
+      dispatcher = PortalNotifications::Dispatcher.new(Time.current)
+      group = ->(audience) { { user: nil, address: allowed, audience: audience, ids: [], key: "key-#{audience}", mode: "instant", events: [ event ] } }
+
+      expect(dispatcher.send(:deliver, group.call("employee"))).to be(false)
+      expect(Resend::Emails).not_to have_received(:send)
+      expect(AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last.metadata)
+        .to include("channel" => "employee_portal_notification", "reason" => "employee_app_off")
+
+      expect(dispatcher.send(:deliver, group.call("client"))).to be(true)
+      expect(Resend::Emails).to have_received(:send).once
     end
 
     it "refuses a Clerk invitation for a non-allowed address inside a demo scope" do

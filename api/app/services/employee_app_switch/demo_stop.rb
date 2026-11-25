@@ -17,7 +17,8 @@ module EmployeeAppSwitch
   # stop's audit lists what it did in the database (confirmed) separately
   # from what it asked Clerk to do (requested), and the job audits each
   # confirmation. A repeat stop finds the still-pending requests instead of
-  # queueing duplicates.
+  # duplicating them, and queues a job for any pending row that has none
+  # (RetryEmployeeAppClerkRevocationsJob does the same on a schedule).
   class DemoStop
     ACTION = "employee_app_switch#demo_stopped"
 
@@ -48,8 +49,10 @@ module EmployeeAppSwitch
           companies: results.map { |row| row.slice(:company_id, :confirmed, :requested) } }.compact)
         result
       end
-      # Clerk calls run after commit, like every other session revocation.
-      queued.each { |revocation_id| RevokeEmployeeAppClerkJob.perform_later(revocation_id) }
+      # Clerk calls run after commit, like every other session revocation. A
+      # pending row from an earlier stop whose job was never queued goes too.
+      unqueued = EmployeeAppClerkRevocation.pending.where(organization_id: @organization.id, enqueued_at: nil).pluck(:id)
+      EmployeeAppClerkRevocation.enqueue!(queued | unqueued)
       summary
     end
 

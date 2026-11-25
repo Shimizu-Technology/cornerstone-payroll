@@ -1068,10 +1068,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060400) do
     t.bigint "company_id", null: false
     t.datetime "confirmed_at"
     t.datetime "created_at", null: false
+    t.datetime "enqueued_at"
+    t.datetime "follow_up_at"
     t.datetime "gave_up_at"
     t.string "kind", limit: 20, null: false
     t.string "last_error", limit: 200
     t.bigint "organization_id", null: false
+    t.string "outcome", limit: 40
     t.datetime "requested_at", null: false
     t.bigint "requested_by_id"
     t.string "source", limit: 40, null: false
@@ -1079,11 +1082,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060400) do
     t.datetime "updated_at", null: false
     t.bigint "user_id"
     t.index [ "company_id" ], name: "index_employee_app_clerk_revocations_on_company_id"
-    t.index [ "kind", "target" ], name: "idx_employee_app_clerk_revocations_pending", unique: true, where: "((confirmed_at IS NULL) AND (gave_up_at IS NULL))"
+    t.index [ "enqueued_at", "id" ], name: "idx_employee_app_clerk_revocations_sweep", where: "((confirmed_at IS NULL) AND (gave_up_at IS NULL) AND (follow_up_at IS NULL))"
+    t.index [ "kind", "target" ], name: "idx_employee_app_clerk_revocations_pending", unique: true, where: "((confirmed_at IS NULL) AND (gave_up_at IS NULL) AND (follow_up_at IS NULL))"
     t.index [ "organization_id" ], name: "index_employee_app_clerk_revocations_on_organization_id"
     t.index [ "requested_by_id" ], name: "index_employee_app_clerk_revocations_on_requested_by_id"
     t.index [ "user_id" ], name: "index_employee_app_clerk_revocations_on_user_id"
-    t.check_constraint "NOT (confirmed_at IS NOT NULL AND gave_up_at IS NOT NULL)", name: "employee_app_clerk_revocations_outcome_check"
+    t.check_constraint "num_nonnulls(confirmed_at, gave_up_at, follow_up_at) <= 1", name: "employee_app_clerk_revocations_outcome_check"
     t.check_constraint "attempts >= 0", name: "employee_app_clerk_revocations_attempts_check"
     t.check_constraint "kind::text = ANY (ARRAY['invitation'::character varying, 'sessions'::character varying]::text[])", name: "employee_app_clerk_revocations_kind_check"
   end

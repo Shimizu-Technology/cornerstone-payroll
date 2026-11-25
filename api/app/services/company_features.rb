@@ -202,11 +202,13 @@ class CompanyFeatures
   end
 
   # A demo company's employee app opens only while the database enforces
-  # RLS or an in-effect early-access window names it (today, Guam time).
+  # RLS, or in the shadow state while an in-effect early-access window names
+  # it (today, Guam time) and this process runs the guarded runtime role.
+  # Requests, jobs and mail all read it here, so each fails closed alike.
   def demo_gate_open?
     return true unless company.demo?
     return @demo_gate_open if defined?(@demo_gate_open)
 
-    @demo_gate_open = EmployeeAppSwitch::Enforcement.demo_open?(company)
+    @demo_gate_open = EmployeeAppSwitch::Enforcement.demo_app_open?(company)
   end
 end
