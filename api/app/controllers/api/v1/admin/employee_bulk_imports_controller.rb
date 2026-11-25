@@ -94,18 +94,22 @@ module Api
             )
           end
 
-          # If any row references an SSN token but the cache has expired,
-          # reject the request so SSNs aren't silently dropped.
-          if ssn_cache.nil?
-            has_tokens = employees_data.any? do |emp|
-              h = emp.respond_to?(:to_unsafe_h) ? emp.to_unsafe_h : emp.to_h
-              h["_ssn_token"].present?
-            end
-            if has_tokens
+          # Resolve every supplied SSN token against the authenticated preview
+          # before writing any employee; reject the whole batch if any token is
+          # missing or invalid so SSNs are never silently dropped.
+          resolved_ssns = {}
+          employees_data.each_with_index do |emp, idx|
+            h = emp.respond_to?(:to_unsafe_h) ? emp.to_unsafe_h : emp.to_h
+            token = h["_ssn_token"].to_s.strip
+            next if token.empty?
+
+            digits = ssn_cache.is_a?(Hash) ? ssn_cache[token].to_s : ""
+            unless digits.match?(/\A\d{9}\z/)
               return render json: {
-                error: "Your preview session has expired. Please re-upload the file and try again."
+                error: "Your preview session has expired or is no longer valid. Please re-upload the file and try again."
               }, status: :unprocessable_entity
             end
+            resolved_ssns[idx] = digits
           end
 
           company = Company.find(current_company_id)
@@ -120,7 +124,7 @@ module Api
           rows = employees_data.each_with_index.map do |emp, idx|
             {
               row_number: idx + 1,
-              attributes: sanitize_employee_attrs(emp, ssn_cache),
+              attributes: sanitize_employee_attrs(emp, resolved_ssn: resolved_ssns[idx]),
               raw: emp.to_unsafe_h
             }
           end
@@ -170,7 +174,7 @@ module Api
           status
         ].freeze
 
-        def sanitize_employee_attrs(emp_params, ssn_cache = nil)
+        def sanitize_employee_attrs(emp_params, resolved_ssn: nil)
           attrs = {}
           h = emp_params.respond_to?(:to_unsafe_h) ? emp_params.to_unsafe_h.symbolize_keys : emp_params.to_h.symbolize_keys
 
@@ -179,11 +183,10 @@ module Api
           end
 
           # SSN resolution order:
-          # 1. _ssn_token -> look up raw digits from server-side cache (file-originated, not edited)
+          # 1. resolved_ssn -> verified raw digits resolved from server-side preview cache
           # 2. ssn -> user-provided raw digits (manually added or user-edited SSN field)
-          if h[:_ssn_token].present? && ssn_cache
-            digits = ssn_cache[h[:_ssn_token].to_s]
-            attrs[:ssn_encrypted] = digits if digits.present? && digits.length == 9
+          if resolved_ssn.present?
+            attrs[:ssn_encrypted] = resolved_ssn
           elsif h[:ssn].present? && !h.key?(:ssn_encrypted)
             digits = h[:ssn].to_s.gsub(/\D/, "")
             attrs[:ssn_encrypted] = digits if digits.length == 9

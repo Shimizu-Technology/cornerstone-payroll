@@ -34,7 +34,6 @@ module EmployeeLinks
       return unless user_allowed?
 
       replaced_invitation = nil
-      email_on_file = nil
       # The claimant (and an abandoned pending sign-up on the link) are locked
       # before the link, so two claims by one login serialize and the second
       # sees the first's link as open (EmployeeLinks lock order).
@@ -50,10 +49,10 @@ module EmployeeLinks
         email_on_file = candidate.employee.email.to_s.strip.presence
         replaced_invitation = retire_pending_user!(candidate)
         attach!(candidate)
+        ActivationNoticeEmail.schedule!(link: candidate, email_on_file: email_on_file)
         candidate
       end
       revoke_invitation(replaced_invitation) if link && replaced_invitation
-      ActivationNoticeEmail.deliver(link: link, email_on_file: email_on_file, activated_at: link.activated_at) if link
       link
     end
 

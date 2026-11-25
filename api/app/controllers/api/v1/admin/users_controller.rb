@@ -158,12 +158,27 @@ module Api
         def activate
           return if reject_closed_practice_copy!
 
-          before_values = user_audit_snapshot(@user)
+          refused = false
           ActiveRecord::Base.transaction do
+            @user.lock!
+            before_values = user_audit_snapshot(@user)
             restore_practice_grant!(@user)
+            if @user.client? && !@user.has_effective_client_grant?
+              refused = true
+              next
+            end
+
             @user.update!(active: true)
             record_user_audit!("activated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
+
+          if refused
+            return render json: {
+              error: "Choose at least one client for an active client portal user before activating the login.",
+              code: "client_required"
+            }, status: :unprocessable_entity
+          end
+
           render json: { data: user_json(@user) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -416,8 +431,7 @@ module Api
           end
 
           unless company_ids_provided
-            if user.client? && user.active? &&
-                user.company_assignments.active_access.joins(:company).where(companies: { test_workspace_archived_at: nil }).none?
+            if user.client? && user.active? && !user.has_effective_client_grant?
               user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
               raise ActiveRecord::RecordInvalid, user
             end
@@ -448,18 +462,6 @@ module Api
           end
           new_company_ids = normalized_company_ids - existing_assignments.map(&:company_id)
 
-          if user.client? && user.active?
-            has_active_retained = retained_assignments.any? do |assignment|
-              !assignment.expired? && assignment.company&.test_workspace_archived_at.nil?
-            end
-            has_active_new = new_company_ids.any? &&
-              Company.where(id: new_company_ids, test_workspace_archived_at: nil).exists?
-            unless has_active_retained || has_active_new
-              user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
-              raise ActiveRecord::RecordInvalid, user
-            end
-          end
-
           retained_assignments.each do |assignment|
             # Retention must not bypass role/organization validation after a
             # role change (for example, staff becoming a client portal user).
@@ -474,6 +476,11 @@ module Api
               workspace_access_level: company.practice_copy? ? "operator" : nil,
               granted_by: current_user
             )
+          end
+
+          if user.client? && user.active? && !user.has_effective_client_grant?
+            user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
+            raise ActiveRecord::RecordInvalid, user
           end
         end
 

@@ -257,12 +257,27 @@ describe('employee site deploy files', () => {
     expect(() => finalizeEmployeeDist({ distDir: tempDir(), deployDir, env })).toThrow(/No build output/);
   });
 
-  it('does nothing for the staff surface', () => {
+  it('generates staff _headers from VITE_API_URL and allows external HTTPS logos without dropping staff files', () => {
+    const dist = tempDir();
+    for (const file of ['index.html', 'sw.js', 'offline.html', 'sitemap.xml']) writeFileSync(path.join(dist, file), 'staff');
+
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    expect(() => main({ VITE_APP_SURFACE: 'staff' })).not.toThrow();
-    expect(() => main({})).not.toThrow();
-    expect(log).toHaveBeenCalledTimes(2);
+    expect(() => main({
+      VITE_APP_SURFACE: 'staff',
+      VITE_API_URL: 'https://api-staging.example.test/api/v1',
+      VITE_CLERK_PUBLISHABLE_KEY: publishableKey('clerk-staging.example.test', 'pk_test_'),
+    }, { distDir: dist })).not.toThrow();
     log.mockRestore();
+
+    const headers = readFileSync(path.join(dist, '_headers'), 'utf8');
+    expect(headers).toContain('https://api-staging.example.test');
+    expect(headers).toContain('wss://api-staging.example.test');
+    expect(headers).toContain('https://clerk-staging.example.test');
+    expect(headers).not.toContain('cornerstone-payroll-api.onrender.com');
+    const reportOnlyLine = headers.split('\n').map((line) => line.trim()).find((line) => line.startsWith('Content-Security-Policy-Report-Only:')) ?? '';
+    const imgSrc = reportOnlyLine.split('; ').find((part) => part.startsWith('img-src ')) ?? '';
+    expect(imgSrc.split(' ')).toContain('https:');
+    for (const file of ['sw.js', 'offline.html', 'sitemap.xml']) expect(existsSync(path.join(dist, file))).toBe(true);
   });
 
   it('assembles a real employee build with its headers, redirects and no staff service worker', async () => {
@@ -310,13 +325,16 @@ describe('shared Netlify configuration', () => {
     expect(reportOnlyLine).toBeDefined();
     expect(reportOnlyLine).toContain('https://clerk.shimizu-technology.com');
     expect(reportOnlyLine).toContain('https://img.clerk.com');
-    expect(reportOnlyLine).toContain('https://cornerstone-payroll-api.onrender.com');
-    expect(reportOnlyLine).toContain('wss://cornerstone-payroll-api.onrender.com');
+    expect(reportOnlyLine).toContain('https://cornerstone-payroll.onrender.com');
+    expect(reportOnlyLine).toContain('wss://cornerstone-payroll.onrender.com');
+    expect(reportOnlyLine).not.toContain('cornerstone-payroll-api.onrender.com');
     expect(reportOnlyLine).toContain('https://*.r2.cloudflarestorage.com');
     expect(reportOnlyLine).toContain('https://us.i.posthog.com');
     expect(reportOnlyLine).toContain('https://us-assets.i.posthog.com');
     expect(reportOnlyLine).toContain('https://fonts.googleapis.com');
     expect(reportOnlyLine).toContain('https://fonts.gstatic.com');
     expect(reportOnlyLine).toContain("frame-ancestors 'none'");
+    const imgSrc = reportOnlyLine!.split('; ').find((part) => part.startsWith('img-src ')) ?? '';
+    expect(imgSrc.split(' ')).toContain('https:');
   });
 });
