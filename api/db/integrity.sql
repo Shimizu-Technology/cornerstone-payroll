@@ -1107,3 +1107,10 @@ CREATE TRIGGER time_tracking_sources_refuse_demo_company
 BEFORE INSERT OR UPDATE OF company_id ON time_tracking_sources
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_external_records();
+
+-- 20261125210000_refuse_demo_company_non_employee_checks.rb
+DROP TRIGGER IF EXISTS non_employee_checks_refuse_demo_company ON non_employee_checks;
+CREATE TRIGGER non_employee_checks_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON non_employee_checks
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();

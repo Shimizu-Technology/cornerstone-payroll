@@ -169,6 +169,8 @@ class Employee < ApplicationRecord
   validates :configuration_review_status, inclusion: { in: CONFIGURATION_REVIEW_STATUSES }
   validates :configuration_source, inclusion: { in: CONFIGURATION_SOURCES }, allow_nil: true
   validate :plausible_hire_date, if: :will_save_change_to_hire_date?
+  validate :demo_bank_details_are_fictional, if: -> { company&.demo? && bank_routing_number_encrypted.present? }
+  validate :demo_has_no_contractors, if: -> { company&.demo? && employment_type == "contractor" }
   validate :configuration_review_items_are_valid
   validates :salary_type, inclusion: { in: SALARY_TYPES }, if: :salary?
   validates :contractor_type, inclusion: { in: CONTRACTOR_TYPES }, if: :contractor?
@@ -687,6 +689,19 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  # A demo company's direct deposits are simulated: its routing numbers must
+  # fail the ABA checksum, so no real bank account can ever be stored.
+  def demo_bank_details_are_fictional
+    return unless AbaRoutingNumber.valid_checksum?(bank_routing_number_encrypted)
+
+    errors.add(:bank_routing_number_encrypted, "isn't available for this client")
+  end
+
+  # Contractor checks pay a real outside party, so a demo has no contractors.
+  def demo_has_no_contractors
+    errors.add(:employment_type, "isn't available for this client")
+  end
 
   def test_workspace_source_employee_is_valid
     return if test_workspace_source_employee.blank?

@@ -18,7 +18,9 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/check_print_runs" => %w[create pdf confirm],
     "api/v1/admin/check_print_generations" => %w[create],
     "api/v1/admin/check_register" => %w[create_event],
-    "api/v1/admin/non_employee_checks" => %w[create update destroy mark_printed void_check batch_pdf mark_all_printed check_pdf voucher_pdf],
+    "api/v1/admin/non_employee_checks" => %w[
+      create update destroy mark_printed void_check batch_pdf mark_all_printed check_pdf voucher_pdf mark_paid supersede_with_payroll_item
+    ],
     "api/v1/admin/general_transmittals" => %w[generate_pdf artifact_pdf],
     "api/v1/admin/reports" => %w[
       start_quarterly_compliance_packet_workflow update_quarterly_compliance_packet_task
@@ -39,6 +41,15 @@ class TestWorkspaceSafetyPolicy
   # previews, copies and checklist steps work as they do for a live client.
   # Integration and firm-finance prefixes stay closed (see blocked?).
   DEMO_ALLOWED_ACTIONS = {
+    # A demo commits, voids and corrects its own simulated payroll. Liability
+    # postings, FIT deposit checks and AIRE are skipped by company in the
+    # services, so nothing reaches the firm's ledger or a provider.
+    "api/v1/admin/pay_periods" => %w[commit void reopen_unpaid create_correction_run correct_pay_date corrective_paychecks],
+    # Plain-paper checks only; preprinted bank stock refuses a demo.
+    "api/v1/admin/checks" => %w[batch_pdf mark_all_printed mark_printed mark_delivered void reprint update_check_number replace_check],
+    "api/v1/admin/check_print_runs" => %w[create pdf confirm],
+    "api/v1/admin/check_print_generations" => %w[create],
+    "api/v1/admin/check_register" => %w[create_event],
     "api/v1/admin/check_numbers" => %w[update],
     "api/v1/admin/general_transmittals" => %w[generate_pdf artifact_pdf],
     "api/v1/admin/reports" => %w[
@@ -54,7 +65,6 @@ class TestWorkspaceSafetyPolicy
   # existing access to these; the e-files above are blocked for every workspace.
   DEMO_BLOCKED_ACTIONS = {
     "api/v1/admin/reports" => %w[quarterly_compliance_packet_swica_ascii],
-    "api/v1/admin/checks" => %w[show],
     # A refresh pulls the whole organization's Cornerstone Tax hours.
     "api/v1/admin/client_profitability" => %w[refresh]
   }.freeze
