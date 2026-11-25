@@ -10,6 +10,7 @@ module PortalNotifications
     RETRY_BACKOFF = [ 1.minute, 5.minutes, 30.minutes, 2.hours ].freeze
     MAX_ATTEMPTS = RETRY_BACKOFF.size + 1
     RECIPIENT_LIMIT = 200
+    EMPLOYEE_CHANNEL = "employee_portal_notification"
 
     def self.run!(now: Time.current)
       new(now).run!
@@ -83,8 +84,9 @@ module PortalNotifications
       revoked = Recipients.revocation_reason(row)
       return revoked if revoked
       # Rechecked before every send and retry, so a stale queued row for a
-      # demo address that has left the allow-list sends nothing.
-      unless DemoOutbound.permit?(company: event.company, email: row.address, channel: "portal_notification", user: row.user)
+      # demo address that has left the allow-list (or, for an employee
+      # alert, a demo whose employee app is off) sends nothing.
+      unless DemoOutbound.permit?(company: event.company, email: row.address, channel: channel_for(event.audience), user: row.user)
         return "recipient_not_allowed"
       end
       return nil unless row.user
@@ -99,7 +101,9 @@ module PortalNotifications
       email = Email.new(audience: group.fetch(:audience), delivery_mode: group.fetch(:mode), events: group.fetch(:events),
         app_user: group.fetch(:user).present?)
       demo_company = group.fetch(:events).map(&:company).find { |company| company&.demo? }
-      response = DemoOutbound.scoped(demo_company) do
+      # An employee alert is rechecked at the transport against the demo's
+      # employee app too (the demo kill switch may have run since the claim).
+      response = DemoOutbound.scoped(demo_company, channel: channel_for(group.fetch(:audience))) do
         Transport.deliver(email.payload(from: Transport.from_email, to: group.fetch(:address)), idempotency_key: group.fetch(:key))
       end
       if response["suppressed"]
@@ -118,6 +122,10 @@ module PortalNotifications
     rescue StandardError => error
       record_failure!(group, error)
       false
+    end
+
+    def channel_for(audience)
+      audience == "employee" ? EMPLOYEE_CHANNEL : "portal_notification"
     end
 
     def complete!(group, **attributes)

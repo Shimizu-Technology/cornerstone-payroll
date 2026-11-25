@@ -17,6 +17,25 @@ RSpec.describe DemoOutbound, :portal_notifications do
     ENV[described_class::ENV_KEY] = saved
   end
 
+  describe "employee app mail while a demo's employee app is off (M4-9d kill switch)" do
+    it "refuses every employee channel, even to an allow-listed address, and audits why" do
+      DemoOutbound::EMPLOYEE_CHANNELS.each do |channel|
+        expect(described_class.permit?(company: demo, email: allowed, channel: channel)).to be(false)
+      end
+      log = AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last
+      expect(log.metadata).to include("channel" => DemoOutbound::EMPLOYEE_CHANNELS.last, "reason" => "employee_app_off")
+
+      # Client and staff mail keep following the allow-list alone.
+      expect(described_class.permit?(company: demo, email: allowed, channel: "portal_notification")).to be(true)
+      # A live company is never affected.
+      expect(described_class.permit?(company: live, email: "anyone@client.example", channel: "employee_link_invite")).to be(true)
+
+      allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
+      expect(described_class.permit?(company: demo, email: allowed, channel: "employee_link_invite")).to be(true)
+      expect(described_class.permit?(company: demo, email: other_alias, channel: "employee_link_invite")).to be(false)
+    end
+  end
+
   describe "the allow-list" do
     it "reads normalized, exact addresses from private configuration and keeps plus aliases distinct" do
       expect(described_class.allowlist).to contain_exactly(allowed, "reviewer+employee@demo-mail.example")
@@ -68,6 +87,46 @@ RSpec.describe DemoOutbound, :portal_notifications do
 
       described_class.scoped(live) { StagingMailTransport.deliver(payload.merge(to: other_alias)) }
       expect(Resend::Emails).to have_received(:send).twice
+    end
+
+    it "rechecks a demo's employee app right before sending employee mail, as the kill switch may have run since enqueue" do
+      allow(Resend::Emails).to receive(:send).and_return({ "id" => "sent-1" })
+      payload = { from: "alerts@example.test", to: [ allowed ], subject: "Your invite", html: "<p>Hi</p>" }
+      open = true
+      allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?) { open }
+
+      described_class.scoped(demo, channel: "employee_link_invite") { StagingMailTransport.deliver(payload) }
+      expect(Resend::Emails).to have_received(:send).once
+
+      open = false
+      result = described_class.scoped(demo, channel: "employee_link_invite") { StagingMailTransport.deliver(payload) }
+      expect(result).to include("suppressed" => true)
+      expect(Resend::Emails).to have_received(:send).once
+      expect(AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last.metadata)
+        .to include("channel" => "employee_link_invite", "reason" => "employee_app_off")
+
+      # Other demo mail still follows the allow-list alone.
+      described_class.scoped(demo) { StagingMailTransport.deliver(payload) }
+      expect(Resend::Emails).to have_received(:send).twice
+    end
+
+    it "rechecks employee portal alerts at the transport on the employee channel; staff alerts keep the allow-list alone" do
+      allow(Resend::Emails).to receive(:send).and_return({ "id" => "sent-1" })
+      allow(PortalNotifications::Transport).to receive(:from_email).and_return("alerts@example.test")
+      email = instance_double(PortalNotifications::Email,
+        payload: { from: "alerts@example.test", to: [ allowed ], subject: "New pay stub", html: "<p>Hi</p>" })
+      allow(PortalNotifications::Email).to receive(:new).and_return(email)
+      event = Struct.new(:company).new(demo)
+      dispatcher = PortalNotifications::Dispatcher.new(Time.current)
+      group = ->(audience) { { user: nil, address: allowed, audience: audience, ids: [], key: "key-#{audience}", mode: "instant", events: [ event ] } }
+
+      expect(dispatcher.send(:deliver, group.call("employee"))).to be(false)
+      expect(Resend::Emails).not_to have_received(:send)
+      expect(AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last.metadata)
+        .to include("channel" => "employee_portal_notification", "reason" => "employee_app_off")
+
+      expect(dispatcher.send(:deliver, group.call("client"))).to be(true)
+      expect(Resend::Emails).to have_received(:send).once
     end
 
     it "refuses a Clerk invitation for a non-allowed address inside a demo scope" do
@@ -243,6 +302,10 @@ RSpec.describe DemoOutbound, :portal_notifications do
   describe "employee links" do
     let(:employee) { create(:employee, company: demo, department: create(:department, company: demo), email: other_alias) }
 
+    # The allow-list sits behind the demo's employee app switch (M4-9d);
+    # open that gate to exercise the allow-list itself.
+    before { allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true) }
+
     it "issues no emailed invite token to a non-allowed demo address" do
       link = EmployeeAccountLink.new(company: demo, employee: employee)
       expect { EmployeeLinks::Credentials.issue(link, delivery: "email", email: other_alias) }
@@ -268,6 +331,8 @@ RSpec.describe DemoOutbound, :portal_notifications do
       claim.instance_variable_set(:@user, outsider)
       claim.instance_variable_set(:@azp, nil)
       allow(EmployeeLinks).to receive(:origin_allows_company?).and_return(true)
+      # The demo's own-subdomain and guarded-process rule has its own spec.
+      allow(EmployeeLinks).to receive(:demo_request_allowed?).and_return(true)
       allow(demo).to receive(:organization_id).and_return(outsider.organization_id)
       expect(claim.send(:claimable?, link)).to be(false)
 

@@ -157,14 +157,47 @@ module EmployeeLinks
   end
 
   # The links a login can open from this origin: the employee app's list,
-  # the link it opens and the /auth/me count all use this.
-  def self.openable_links(user, azp:)
+  # the link it opens (every link-scoped data request) and the /auth/me
+  # count all use this. A demo link also needs a session from that demo's
+  # own subdomain and the request-time demo gate, and a browser request's
+  # Origin, when it sends one, must be that subdomain too (each link is
+  # checked on its own), so outside it a demo link is neither listed,
+  # counted nor opened.
+  def self.openable_links(user, azp:, origin: nil)
     user.employee_account_links.portal_eligible.includes(company: :organization).order(:id)
-      .select { |link| openable?(user, link, azp: azp) }
+      .select { |link| openable?(user, link, azp: azp, origin: origin) }
   end
 
-  def self.openable?(user, link, azp:)
-    !link.activation_locked? && link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company)
+  def self.openable?(user, link, azp:, origin: nil)
+    !link.activation_locked? && link.portal_enabled? && origin_allows_company?(azp, link.company_id) &&
+      demo_boundary_allows?(user, link.company) && demo_request_allowed?(link.company, azp) &&
+      demo_origin_allowed?(link.company, origin)
+  end
+
+  # A request with no Origin header (not from a browser page) is judged by
+  # its session alone; one that sends an Origin must send the demo's own.
+  def self.demo_origin_allowed?(company, origin)
+    origin.blank? || demo_request_allowed?(company, origin)
+  end
+
+  # Invitation issuance for a demo company holds the company row lock,
+  # shared, which the demo kill switch takes exclusively (DemoStop), so an
+  # invitation is never issued halfway through a stop. Call first inside the
+  # issuing transaction, then re-check the employee app is on.
+  def self.lock_for_issuance!(company)
+    return unless company&.demo?
+
+    Company.where(id: company.id).lock("FOR SHARE").pick(:id)
+  end
+
+  # A demo link's activation, claim, bind and data requests must come from
+  # that demo company's own subdomain, and (under the early-access waiver)
+  # this process must run the RLS guard in raise mode as the restricted role.
+  def self.demo_request_allowed?(company, origin)
+    return true unless company&.demo?
+
+    TenantSubdomainRegistry.client_origin?(origin) && TenantSubdomainRegistry.enabled_origin_company_id(origin) == company.id &&
+      EmployeeAppSwitch::Enforcement.demo_request_allowed?(company)
   end
 
   # A link to a client subdomain belongs to that subdomain's company only.

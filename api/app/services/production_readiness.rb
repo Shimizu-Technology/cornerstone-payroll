@@ -132,6 +132,12 @@ class ProductionReadiness
     Report.new(checks: checks, connected_payroll: ConnectedPayrollMode.capability(env: env, environment: environment))
   end
 
+  # The employee service's own configuration checks, without the live
+  # dependency probes. Empty on any other process role (M4-9d observation).
+  def employee_service_checks
+    employee_web_checks
+  end
+
   private
 
   attr_reader :env, :environment, :config, :primary_record, :cache, :cache_record,
@@ -336,22 +342,11 @@ class ProductionReadiness
   end
 
   def clerk_authorized_parties_valid?
-    parties = env.fetch("CLERK_AUTHORIZED_PARTIES", "").split(",").map(&:strip).reject(&:empty?)
-    parties.present? && parties.all? { |party| ClerkTokenVerifier.valid_production_https_origin?(party) }
+    RolloutEnvironment.clerk_authorized_parties_valid?(env)
   end
 
   def mfa_attestation_recorded?
-    raw_instance_id = env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s
-    raw_evidence_ref = env["CLERK_MFA_EVIDENCE_REF"].to_s
-    return false if raw_instance_id.match?(/[\r\n]/) || raw_evidence_ref.match?(/[\r\n]/)
-
-    instance_id = raw_instance_id.strip
-    evidence_ref = raw_evidence_ref.strip
-
-    MfaPolicy.enabled?(env: env) &&
-      instance_id.match?(/\Ains_[A-Za-z0-9]+\z/) &&
-      evidence_ref.present? &&
-      evidence_ref.bytesize <= 500
+    RolloutEnvironment.mfa_evidence_recorded?(env)
   end
 
   def r2_configuration_present?

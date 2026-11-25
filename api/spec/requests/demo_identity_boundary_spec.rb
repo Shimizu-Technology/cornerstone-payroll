@@ -11,7 +11,9 @@ RSpec.describe "Demo identity boundary", type: :request do
   let(:allowed) { "reviewer+manager@demo-mail.example" }
   let(:organization) { create(:organization) }
   let(:live) { create(:company, organization: organization, name: "Live Grill") }
-  let(:demo) { create_demo_company(organization: organization) }
+  let(:demo) { create_demo_company(organization: organization, subdomain_slug: "harborfinch") }
+  # A demo link opens only from the demo's own subdomain (M4-9d).
+  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::ROOT_DOMAIN}" }
   let(:admin) { create(:user, role: :admin, company: live, organization: organization) }
   let(:demo_login) do
     create(:user, role: :client, company: demo, organization: organization, email: allowed, name: "Jordan Reyes",
@@ -31,8 +33,12 @@ RSpec.describe "Demo identity boundary", type: :request do
   end
 
   before do
+    # M4-9d: a demo's app opens only while the database enforces RLS (stubbed
+    # here) or under an early-access window.
+    allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
+      .and_return({ phase: "enforced", enforced: true, kill_switch_bypass: false, enforced_tables: 1, protected_tables: 1 })
     enable_employee_app!(live)
-    enable_employee_app!(demo)
+    enable_employee_app!(demo, subdomain: true)
   end
 
   def employee_at(company)
@@ -82,11 +88,12 @@ RSpec.describe "Demo identity boundary", type: :request do
     it "won't list or open a demo link that a live login holds" do
       crossing = EmployeeAccountLink.create!(user: live_login, company: demo, employee: employee_at(demo), status: "active")
       own = EmployeeAccountLink.create!(user: demo_login, company: demo, employee: employee_at(demo), status: "active")
-      get "/api/v1/employee/context", headers: bearer("user_demo").merge("X-Employee-Link-Id" => own.id.to_s)
+      get "/api/v1/employee/context", headers: bearer("user_demo", azp: demo_origin).merge("X-Employee-Link-Id" => own.id.to_s, "Origin" => demo_origin)
       expect(response).to have_http_status(:ok), response.body
-      get "/api/v1/employee/links", headers: bearer("user_live")
+      # Even from the demo's own subdomain, the login boundary refuses the live login.
+      get "/api/v1/employee/links", headers: bearer("user_live", azp: demo_origin)
       expect(response.parsed_body.fetch("links")).to be_empty
-      get "/api/v1/employee/context", headers: bearer("user_live").merge("X-Employee-Link-Id" => crossing.id.to_s)
+      get "/api/v1/employee/context", headers: bearer("user_live", azp: demo_origin).merge("X-Employee-Link-Id" => crossing.id.to_s, "Origin" => demo_origin)
       expect(response).to have_http_status(:not_found)
     end
 

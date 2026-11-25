@@ -48,7 +48,7 @@ RSpec.describe "Employee tax forms", type: :request do
       offering: "payroll_service", hours_source: "manual", employee_portal_enabled: true,
       options: { "employee_portal" => { "features" => { "tax_forms" => tax_forms, "profile_requests" => profile_requests } } }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(target)
   end
 
   def pay(person, pay_date, target = company)

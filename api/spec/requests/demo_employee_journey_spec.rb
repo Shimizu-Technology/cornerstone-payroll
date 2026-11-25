@@ -41,8 +41,18 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
     [ DemoOutbound::ENV_KEY, "EMPLOYEE_PORTAL_URL" ].each { |key| ENV[key] = saved[key] }
   end
 
+  let(:shadow_state) { { phase: "shadow", enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 1 } }
+
   before do
     DeliveryDisclosures::DraftSeeds.seed!
+    # M4-9d: the database is in shadow mode, so the demos open only under the
+    # owner's early-access window, on a process running the RLS guard as the
+    # restricted role (stubbed here; the guard itself runs in raise mode).
+    allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
+    allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
+    owner = create(:user, role: :super_admin, company: live, organization: organization, clerk_id: "user_owner")
+    EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ kitchen.id, catering.id ],
+      expires_on: PayrollBusinessClock.today + 7, reason: "Owner approved the demo rehearsal", set_by: owner)
     [ kitchen, catering, live ].each { |company| turn_on_employee_app!(company) }
     allow(R2StorageService).to receive(:new).and_return(storage)
     allow(storage).to receive(:upload) { |key, bytes, **| stored[key] = bytes.dup.b }
@@ -50,14 +60,30 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
     allow(storage).to receive(:delete) { |key| stored.delete(key) }
   end
 
-  # What M4-9d's switch will set for an approved demo; built directly here.
+  # What M4-9d's switch sets for an approved company: the profile flags and
+  # an activation for each part (activate_employee_app!). A demo opens on
+  # its own subdomain.
   def turn_on_employee_app!(company)
     features = %w[stubs tax_forms profile_requests delivery_consent].index_with(true)
     company.client_operating_profiles.create!(
       effective_on: PayrollBusinessClock.today - 30, version: 1, offering: "payroll_portals", hours_source: "manual",
-      client_portal_enabled: true, employee_portal_enabled: true, options: { "employee_portal" => { "features" => features } }
+      client_portal_enabled: true, employee_portal_enabled: true,
+      options: { "subdomain_enabled" => company.demo?, "employee_portal" => { "features" => features } }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(company, actor: staff)
+  end
+
+  def origin_for(company)
+    "https://#{company.subdomain_slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+  end
+
+  # A demo employee's session and browser requests come from the demo's own
+  # subdomain (EmployeeLinks.demo_request_allowed?); everyone else's from
+  # the shared origin.
+  def bearer(subject, azp: nil, **options)
+    user = User.find_by(clerk_id: subject)
+    azp ||= user&.portal_employee? && user.company&.demo? ? origin_for(user.company) : EmployeeLinkHelpers::PAYROLL_ORIGIN
+    super(subject, azp: azp, **options)
   end
 
   def staff_headers(company = kitchen)
@@ -65,7 +91,8 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
   end
 
   def employee_headers(link, subject: link.user.clerk_id)
-    bearer(subject).merge("X-Employee-Link-Id" => link.id.to_s)
+    origin = origin_for(link.company)
+    bearer(subject, azp: link.company.demo? ? origin : nil).merge("X-Employee-Link-Id" => link.id.to_s, "Origin" => origin)
   end
 
   def invite_by_email!(employee)
@@ -80,11 +107,11 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
   end
 
   def sign_up!(employee, token, email, subject)
-    post_activation(activation_params(employee, token: token, email: email))
+    post_activation(activation_params(employee, token: token, email: email), headers: { "Origin" => origin_for(employee.company) })
     expect_sign_up_started
     expect(clerk_invitations.last[:email]).to eq(email)
     accept_clerk_invitation!(subject)
-    get "/api/v1/auth/me", headers: bearer(subject)
+    get "/api/v1/auth/me", headers: bearer(subject, azp: origin_for(employee.company))
     expect(response).to have_http_status(:ok), response.body
     User.find_by!(clerk_id: subject)
   end
@@ -243,12 +270,17 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
     expect(response).to have_http_status(:ok), response.body
     code = response.parsed_body.dig("print", "code")
     expect(code).to be_present
-    post "/api/v1/employee/links/claim", headers: bearer("user_kit").merge("CONTENT_TYPE" => "application/json"),
+    # A demo claim comes from that demo's own subdomain.
+    post "/api/v1/employee/links/claim", headers: bearer("user_kit", azp: origin_for(catering))
+      .merge("CONTENT_TYPE" => "application/json", "Origin" => origin_for(catering)),
       params: activation_params(kit_catering, code: code).except(:email).to_json
     expect(response).to have_http_status(:created), response.body
 
-    get "/api/v1/employee/links", headers: bearer("user_kit")
-    expect(response.parsed_body.fetch("links").map { |link| link["company_name"] }).to eq([ "Harbor Finch Kitchen", "Harbor Finch Catering" ])
+    # Each demo employer's subdomain lists, and opens, only its own link.
+    { kitchen => "Harbor Finch Kitchen", catering => "Harbor Finch Catering" }.each do |company, name|
+      get "/api/v1/employee/links", headers: bearer("user_kit", azp: origin_for(company))
+      expect(response.parsed_body.fetch("links").map { |link| link["company_name"] }).to eq([ name ])
+    end
     EmployeeAccountLink.where(user: User.find_by!(clerk_id: "user_kit")).find_each do |link|
       get "/api/v1/employee/context", headers: employee_headers(link)
       expect(response).to have_http_status(:ok), response.body
@@ -324,7 +356,7 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
       pending_link = nil
       with_portal_email do
         pending_link = invite_by_email!(robin)
-        post_activation(activation_params(robin, token: invite_token, email: robin_email))
+        post_activation(activation_params(robin, token: invite_token, email: robin_email), headers: { "Origin" => origin_for(kitchen) })
         expect_sign_up_started
       end
       pending = pending_link.reload.user
@@ -391,7 +423,9 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
       expect(response).to have_http_status(:ok), response.body
       demo_code = response.parsed_body.dig("print", "code")
       expect(demo_code).to be_present
-      post "/api/v1/employee/links/claim", headers: bearer("user_live_robin").merge("CONTENT_TYPE" => "application/json"),
+      # From the demo's own subdomain, so the login boundary is what refuses it.
+      post "/api/v1/employee/links/claim", headers: bearer("user_live_robin", azp: origin_for(kitchen))
+        .merge("CONTENT_TYPE" => "application/json", "Origin" => origin_for(kitchen)),
         params: activation_params(robin, code: demo_code).except(:email).to_json
       expect(response).to have_http_status(:not_found)
 
@@ -432,7 +466,7 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
         expect(response).to have_http_status(:ok), response.body
         code = response.parsed_body.dig("print", "code")
         expect(code).to be_present
-        post_activation(activation_params(outsider, code: code, email: outside_email))
+        post_activation(activation_params(outsider, code: code, email: outside_email), headers: { "Origin" => origin_for(kitchen) })
         expect(clerk_invitations).to be_empty
         expect(captured_portal_emails).to be_empty
       end

@@ -50,6 +50,8 @@ RSpec.describe "Employee enumeration resistance", type: :request do
         "employee_portal" => { "features" => { "stubs" => true, "tax_forms" => true, "profile_requests" => true, "delivery_consent" => true } }
       }
     )
+    # A profile flag alone opens nothing (M4-9d): turn it on the way the switch does.
+    activate_employee_app!(company)
     TenantSubdomainRegistry.invalidate!
     profile
   end

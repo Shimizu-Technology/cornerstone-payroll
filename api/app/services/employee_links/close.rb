@@ -24,7 +24,11 @@ module EmployeeLinks
       link.user_id == user_id
     end
 
-    def revoke!(link, reason:, actor: nil, audit_actor: nil, request: nil, now: Time.current)
+    # invitation_revocations: an array to collect a closed pending sign-up's
+    # Clerk invitation id into, for a caller that records and retries the
+    # revocation itself (the demo kill switch), instead of the best-effort
+    # call after commit.
+    def revoke!(link, reason:, actor: nil, audit_actor: nil, request: nil, now: Time.current, invitation_revocations: nil)
       return link if link.revoked?
 
       previous_status = link.status
@@ -36,7 +40,7 @@ module EmployeeLinks
           metadata: { reason: reason, previous_status: previous_status })
       end
       if pending
-        close_pending_login!(pending)
+        close_pending_login!(pending, invitation_revocations: invitation_revocations)
       elsif link.user
         deactivate_if_last!(link.user, closed_link: link, now: now)
       end
@@ -122,13 +126,14 @@ module EmployeeLinks
     # stays reserved for this same employee, so a later invite reuses the row
     # (Activate) instead of finding the address taken. One an admin already
     # deactivated keeps that reason, so it is never reused.
-    def close_pending_login!(pending)
+    def close_pending_login!(pending, invitation_revocations: nil)
       pending = EmployeeLinks.lock_users!([ pending.id ]).first
       return unless pending&.awaiting_clerk_binding?
 
       invitation_id = pending.clerk_invitation_id
       pending.update!(EmployeeLinks.pending_closure_attributes(pending))
       return if invitation_id.blank?
+      return invitation_revocations << [ invitation_id, pending.id ] if invitation_revocations
 
       ActiveRecord.after_all_transactions_commit { revoke_invitation_best_effort(invitation_id) }
     end

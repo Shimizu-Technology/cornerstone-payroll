@@ -190,6 +190,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       employee_portal_enabled: enabled,
       options: { "subdomain_enabled" => true, "employee_portal" => { "features" => defaults.merge(features) } }
     )
+    # A profile flag alone opens nothing (M4-9d): turn it on the way the switch does.
+    activate_employee_app!(company) if enabled
     TenantSubdomainRegistry.invalidate!
     profile
   end
@@ -896,7 +898,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
   # 9. Demo versus live identity boundary across EVERY employee endpoint.
   it "enforces the demo versus live identity boundary across every employee endpoint" do
     require_all_non_link_routes_exercised!(:demo_boundary) do
-    demo = create_demo_company(organization: organization, name: "Demo Diner")
+    demo = create_demo_company(organization: organization, name: "Demo Diner", subdomain_slug: "demo-iso")
     demo_user = create(:user, company: demo, organization: organization, role: :client,
       email: "demo.worker@demo-iso.example", name: "Jordan Reyes", clerk_id: "user_iso_demo")
     CompanyAssignment.create!(user: demo_user, company: demo)
@@ -942,27 +944,36 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     # every use (EmployeeLinks.demo_boundary_allows? via openable?, Bind,
     # claim), not on the stored row, so a live login's link into a demo
     # company is refused by every endpoint, the same as the reverse above.
+    # M4-9d: a demo link opens only behind the demo gate (database RLS
+    # enforced, stubbed here) and only from the demo's own subdomain (session
+    # and browser Origin), so these requests come from there.
+    allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
+      .and_return({ phase: "enforced", enforced: true, kill_switch_bypass: false, enforced_tables: 1, protected_tables: 1 })
+    EmployeeAppSwitch::Enforcement.reset_cache!
+    demo_origin = "https://demo-iso.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
     enable_all_employee_features!(demo)
     demo_worker = create(:user, company: demo, organization: organization, role: :portal_employee,
       email: "demo.employee@demo-iso.example", name: "Kit Wren", clerk_id: "user_iso_demo_employee")
     own_demo_link = EmployeeAccountLink.create!(user: demo_worker, company: demo, employee: create(:employee, company: demo),
       status: "active", activated_at: 1.day.ago)
     get "/api/v1/employee/context",
-      headers: link_headers(own_demo_link, azp: EmployeeLinkHelpers::PAYROLL_ORIGIN)
+      headers: link_headers(own_demo_link, azp: demo_origin).merge("Origin" => demo_origin)
     expect(response).to have_http_status(:ok), "demo login's own demo link: #{response.status} #{response.body}"
 
     demo_emp = create(:employee, company: demo)
     live_into_demo = EmployeeAccountLink.create!(user: worker_a, company: demo, employee: demo_emp, status: "active", activated_at: 1.day.ago)
     resources_live_into_demo = seed_employee_resources(demo_emp, live_into_demo)
-    live_into_demo_headers = link_headers(live_into_demo, azp: EmployeeLinkHelpers::PAYROLL_ORIGIN)
+    live_into_demo_headers = link_headers(live_into_demo, azp: demo_origin).merge("Origin" => demo_origin)
     link_routes.each do |route|
       path = resolve_path(route, resources_live_into_demo)
       send_employee_request(route, path: path, headers: live_into_demo_headers, body: payload_for(route))
       expect_empty_not_found("live-to-demo #{route.join(' ')}")
     end
-    get "/api/v1/employee/links", headers: bearer(worker_a.clerk_id)
-    expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.fetch("links").pluck("id")).not_to include(live_into_demo.id)
+    [ bearer(worker_a.clerk_id), bearer(worker_a.clerk_id, azp: demo_origin).merge("Origin" => demo_origin) ].each do |headers|
+      get "/api/v1/employee/links", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("links").pluck("id")).not_to include(live_into_demo.id)
+    end
 
     expect(EmployeeLinks.demo_boundary_allows?(worker_a, demo)).to be(false)
     expect(EmployeeLinks.demo_boundary_allows?(demo_user, alpha)).to be(false)

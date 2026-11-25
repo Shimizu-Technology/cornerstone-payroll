@@ -214,6 +214,9 @@ RSpec.describe "Employee tax form notices", type: :request do
     end
 
     it "drops a recipient that isn't on the allow-list and sends to one that is" do
+      # The transport also rechecks the demo's employee app right before
+      # sending (M4-9d); open it to exercise the allow-list itself.
+      allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
       ENV[DemoOutbound::ENV_KEY] = "someone.else@example.net"
       expect(deliver_demo_notice).to have_attributes(status: "skipped", skip_reason: "recipient_not_allowed")
       expect(PortalNotifications::Transport.captured).to be_empty

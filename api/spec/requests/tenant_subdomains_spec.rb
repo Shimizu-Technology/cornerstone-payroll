@@ -312,6 +312,7 @@ RSpec.describe "Client subdomains", type: :request do
       allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
       enabled_profile.update!(employee_portal_enabled: true)
       disabled_profile.update!(employee_portal_enabled: true)
+      [ enabled, disabled ].each { |company| activate_employee_app!(company) }
       company_links = [ enabled, disabled ].map do |company|
         EmployeeAccountLink.create!(user: user, company: company, employee: create(:employee, company: company), status: :active)
       end

@@ -19,7 +19,7 @@ RSpec.describe "Employee context and help", type: :request do
       effective_on: today, version: 1, offering: "payroll_service", hours_source: "manual", employee_portal_enabled: true,
       options: { "employee_portal" => { "features" => { "stubs" => true, "profile_requests" => false } } }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(company)
   end
 
   def headers_for(target_link = link)

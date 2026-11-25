@@ -53,6 +53,15 @@ class StagingCloneContainment
         SQL
         ActiveRecord.after_all_transactions_commit { TenantSubdomainRegistry.invalidate! }
       end
+      # A copied Employee app switch activation (M4-9d) would reopen employee
+      # access on the clone; revoke each one (its only allowed change).
+      if table?("employee_app_activations")
+        connection.execute(<<~SQL)
+          UPDATE employee_app_activations
+          SET revoked_at = CURRENT_TIMESTAMP, revoke_reason = 'STAGING clone quarantine', updated_at = CURRENT_TIMESTAMP
+          WHERE revoked_at IS NULL
+        SQL
+      end
       mark!("__quarantine_complete__")
     end
     counts

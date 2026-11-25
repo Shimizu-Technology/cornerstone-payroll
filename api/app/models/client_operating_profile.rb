@@ -22,6 +22,7 @@ class ClientOperatingProfile < ApplicationRecord
   validate :intake_adapter_matches_hours_source
   validate :no_overlapping_versions
   validate :options_valid_against_catalog
+  validate :locked_switches_off
 
   after_commit { TenantSubdomainRegistry.invalidate! }
 
@@ -113,6 +114,22 @@ class ClientOperatingProfile < ApplicationRecord
     return unless overlaps.exists?
 
     errors.add(:base, "Operating profile effective dates overlap an existing version for this company")
+  end
+
+  # Bank changes (M4, D3) and the M5/M6 switches can't be turned on; the
+  # Employee app switch's own parts are gated by their activations instead
+  # (CompanyFeatures). Only a save that turns one on fails: a legacy row
+  # stored with one on can still be closed (its dates changed) or
+  # sanitized, so turning the employee app off always works. Such a flag
+  # reads as off anyway (CompanyFeatures::LOCKED_OFF).
+  def locked_switches_off
+    before = new_record? ? {} : (options_in_database || {})
+    CompanyFeatures::LOCKED_OFF.each do |key|
+      next unless option_value(key) == true
+      next if OperatingProfileCatalog.option_value(before, key) == true
+
+      errors.add(:options, "#{OperatingProfileCatalog.find(key)&.label || key} is locked until its milestone launches")
+    end
   end
 
   def options_valid_against_catalog

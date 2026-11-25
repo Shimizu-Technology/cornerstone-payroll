@@ -86,6 +86,10 @@ export function employeeAppSettingsPath(companyId: number): string {
   return `${companyPath(companyId)}/employee-app`;
 }
 
+export function employeeAppSwitchPath(companyId: number): string {
+  return `${companyPath(companyId)}/employee-app/switch`;
+}
+
 export function payrollGoLivePath(companyId: number): string {
   return `${companyPath(companyId)}/payroll-go-live`;
 }
