@@ -4,6 +4,10 @@ module Api
   module V1
     module Client
       class PayPeriodsController < BaseController
+        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError do |error|
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
         audit_actions :approve_review
         before_action :set_pay_period, only: %i[show approve_review request_changes preview_pdf]
 
@@ -123,7 +127,14 @@ module Api
 
         def set_pay_period
           scope = PayPeriod.reportable_periods.where(company_id: current_company_id)
-          @pay_period = scope.includes(payroll_items: :employee).find_by(id: params[:id])
+          @pay_period = scope.includes(
+            payroll_items: [
+              :employee,
+              :payroll_item_earnings,
+              { payroll_item_field_entries: :payroll_field_definition },
+              { payroll_item_deductions: :deduction_type }
+            ]
+          ).find_by(id: params[:id])
           @pay_period = nil unless client_visible_period?(@pay_period)
           return if @pay_period
 
@@ -168,27 +179,59 @@ module Api
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
             json[:payroll_review_history] = [] unless pay_period.company.client_payroll_approval_required?
             json[:payroll_items] = items.map do |item|
+              breakdown = PayrollStatementYtdBreakdown.new(item)
+              deduction_rows = breakdown.current_rows(:deduction)
+              non_taxable_additions_total = breakdown.current_rows(:other_pay).sum(0.to_d, &:current).round(2)
+
+              taxes_total = (
+                item.withholding_tax.to_d +
+                item.additional_withholding.to_d +
+                item.social_security_tax.to_d +
+                item.medicare_tax.to_d
+              ).round(2)
+              roth_retirement_total = deduction_rows
+                .select { |row| row.semantic == PayrollReportingGroups::GROUP_401K_AFTER_TAX.to_sym }
+                .sum(0.to_d, &:current).round(2)
+              retirement_total = deduction_rows
+                .select { |row| PayrollReportingGroups.retirement_group?(row.semantic.to_s) }
+                .sum(0.to_d, &:current).round(2)
+              traditional_retirement_total = (retirement_total - roth_retirement_total).round(2)
+              loans_total = deduction_rows
+                .select { |row| row.semantic == :loan }
+                .sum(0.to_d, &:current).round(2)
+              insurance_total = deduction_rows
+                .select { |row| row.semantic == :insurance }
+                .sum(0.to_d, &:current).round(2)
+              other_deductions_total = (
+                item.total_deductions.to_d - (taxes_total + retirement_total + loans_total + insurance_total)
+              ).round(2)
+
               {
                 id: item.id,
                 pay_stub_available: pay_period.client_finished? && EarningsStatementEligibility.printable?(item),
                 employee_id: item.employee_id,
                 employee_name: item.employee_full_name,
                 employment_type: item.employment_type,
+                salary_type: item.calculation_context_snapshot.to_h.dig("employee", "salary_type") || item.timekeeping_context_snapshot.to_h["salary_type"],
+                contractor_pay_type: item.calculation_context_snapshot.to_h.dig("employee", "contractor_pay_type"),
                 pay_rate: item.pay_rate,
                 total_hours: item.total_hours,
                 hours_worked: item.hours_worked,
                 overtime_hours: item.overtime_hours,
                 gross_pay: item.gross_pay,
+                non_taxable_additions_total: non_taxable_additions_total,
                 withholding_tax: item.withholding_tax,
+                additional_withholding: item.additional_withholding,
                 social_security_tax: item.social_security_tax,
                 medicare_tax: item.medicare_tax,
                 additional_medicare_tax: item.additional_medicare_tax,
                 state_withheld: 0,
-                retirement_payment: item.retirement_payment,
-                roth_retirement_payment: item.roth_retirement_payment,
-                loan_payment: item.loan_payment,
+                retirement_payment: traditional_retirement_total,
+                roth_retirement_payment: roth_retirement_total,
+                loan_payment: loans_total,
                 loan_deduction: item.loan_deduction,
-                insurance_payment: item.insurance_payment,
+                insurance_payment: insurance_total,
+                other_deductions: other_deductions_total,
                 custom_deductions: item.custom_deductions || [],
                 payroll_adjustments: item.payroll_adjustments || [],
                 total_deductions: item.total_deductions,
