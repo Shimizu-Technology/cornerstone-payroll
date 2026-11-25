@@ -30,6 +30,21 @@ RSpec.describe DatabaseMigrationStatus do
     expect(handler.retrieve_connection_pool("DatabaseMigrationStatus::migration_status_secondary")).to be_nil
   end
 
+  it "keeps a temporary pool off the shared connection handler while it is in use" do
+    shared = ActiveRecord::Base.connection_handler
+    seen = []
+    allow_any_instance_of(ActiveRecord::MigrationContext).to receive(:needs_migration?).and_wrap_original do |original|
+      seen << shared.connection_pool_list.map { |pool| pool.db_config.name }
+      original.call
+    end
+
+    with_extra_config(secondary_config(primary.migrations_paths || "db/migrate")) do
+      expect(described_class.current?).to be(true)
+    end
+    expect(seen).not_to be_empty
+    expect(seen.flatten).not_to include("migration_status_secondary")
+  end
+
   it "reports a database whose migrations have not all run" do
     Dir.mktmpdir("pending-migrations") do |path|
       File.write(File.join(path, "20000101000000_readiness_pending_probe.rb"),

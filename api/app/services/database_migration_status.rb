@@ -7,8 +7,10 @@
 # one database, that disconnects the connection that holds an active TenantScope
 # lease. Later queries in the same scope run on a new connection without tenant
 # settings, and the raise-mode RLS guard rejects them. This check reads each
-# database through the pool it already has, or through a separately named
-# temporary pool, and never replaces ActiveRecord::Base's pool.
+# database through the pool it already has, or through a temporary pool on a
+# private connection handler, and never replaces ActiveRecord::Base's pool.
+# Each call owns its temporary pool, so concurrent calls can't disconnect
+# each other's pools.
 module DatabaseMigrationStatus
   TEMPORARY_POOL_PREFIX = "DatabaseMigrationStatus"
 
@@ -25,10 +27,11 @@ module DatabaseMigrationStatus
     return yield existing if existing
 
     owner_name = "#{TEMPORARY_POOL_PREFIX}::#{db_config.name}"
+    private_handler = ActiveRecord::ConnectionAdapters::ConnectionHandler.new
     begin
-      yield handler.establish_connection(db_config, owner_name: owner_name)
+      yield private_handler.establish_connection(db_config, owner_name: owner_name)
     ensure
-      handler.remove_connection_pool(owner_name)
+      private_handler.remove_connection_pool(owner_name)
     end
   end
   private_class_method :with_pool
