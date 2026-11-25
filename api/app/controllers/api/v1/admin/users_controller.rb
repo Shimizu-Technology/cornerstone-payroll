@@ -38,18 +38,20 @@ module Api
 
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
-          # An invite that leaves out company_ids has always made the
-          # inviter's company the client's home company, which the access
-          # model falls back to. Keep that for a live, active client company;
-          # refuse only when no client can be determined, since the login
-          # could then sign in but open nothing. The web form always sends an
-          # explicit selection.
-          if requested_role == "client" && normalize_company_ids(company_ids).empty? &&
-              (company_ids_provided || !home_company_fallback_client?)
-            return render json: {
-              error: "Choose at least one client for a client portal user.",
-              code: "client_required"
-            }, status: :unprocessable_entity
+          # An invite that leaves out company_ids creates an explicit assignment
+          # to the inviter's company when it is a live, active client company;
+          # client logins never fall back to their home company without an
+          # active assignment. The web form always sends an explicit selection.
+          if requested_role == "client" && normalize_company_ids(company_ids).empty?
+            if !company_ids_provided && home_company_fallback_client?
+              company_ids = [ current_user.company_id ]
+              company_ids_provided = true
+            else
+              return render json: {
+                error: "Choose at least one client for a client portal user.",
+                code: "client_required"
+              }, status: :unprocessable_entity
+            end
           end
 
           user = User.new(permitted)
@@ -63,10 +65,12 @@ module Api
           user.name = user.email.split("@").first.titleize if user.name.blank?
 
           if user.client? && company_ids_provided
-            selected = Company.where(id: normalize_company_ids(company_ids))
+            normalized_ids = normalize_company_ids(company_ids)
+            selected_by_id = Company.where(id: normalized_ids).index_by(&:id)
+            selected = normalized_ids.filter_map { |id| selected_by_id[id] }
             if selected.any?(&:demo?)
               # A demo client login belongs to its demo companies only.
-              unless selected.all?(&:demo?) && (selected.map(&:id) - assignable_company_ids).empty?
+              unless selected.all?(&:demo?) && (normalized_ids - assignable_company_ids).empty?
                 user.errors.add(:base, "These clients can't share one login. Create a separate login for each.")
                 raise ActiveRecord::RecordInvalid, user
               end
@@ -77,6 +81,9 @@ module Api
                 raise ActiveRecord::RecordInvalid, user
               end
               user.practice_company = selected.first
+              user.company = selected.first
+            elsif selected.any? && (normalized_ids - assignable_company_ids).empty? &&
+                selected.first.organization_id == user.organization_id
               user.company = selected.first
             end
           end
@@ -133,9 +140,24 @@ module Api
               raise ActiveRecord::RecordInvalid, @user
             end
 
+            was_active_client = @user.client? && @user.active?
+            had_effective_grant = was_active_client && @user.has_effective_client_grant?
+
             @user.assign_attributes(permitted)
             @user.role = requested_role if role_changing
-            sync_company_assignments!(@user, company_ids: company_ids, role: @user.role, company_ids_provided: company_ids_provided)
+            # Validate immutable identity/role rules (such as fixed demo logins)
+            # before syncing assignments so callers receive the real identity
+            # validation message rather than a secondary client_required error.
+            unless @user.practice_company_id? && company_ids_provided
+              raise ActiveRecord::RecordInvalid, @user unless @user.valid?
+            end
+            sync_company_assignments!(
+              @user,
+              company_ids: company_ids,
+              role: @user.role,
+              company_ids_provided: company_ids_provided,
+              require_effective_grant: !was_active_client || had_effective_grant
+            )
             @user.save!
             @user.association(:company_assignments).reset
             record_user_audit!("updated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
@@ -151,12 +173,27 @@ module Api
         def activate
           return if reject_closed_practice_copy!
 
-          before_values = user_audit_snapshot(@user)
+          refused = false
           ActiveRecord::Base.transaction do
+            @user.lock!
+            before_values = user_audit_snapshot(@user)
             restore_practice_grant!(@user)
+            if @user.client? && !@user.has_effective_client_grant?
+              refused = true
+              next
+            end
+
             @user.update!(active: true)
             record_user_audit!("activated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
+
+          if refused
+            return render json: {
+              error: "Choose at least one client for an active client portal user before activating the login.",
+              code: "client_required"
+            }, status: :unprocessable_entity
+          end
+
           render json: { data: user_json(@user) }
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.record.errors.full_messages }, status: :unprocessable_entity
@@ -402,13 +439,19 @@ module Api
           params.dig(:user, :role).to_s
         end
 
-        def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:)
+        def sync_company_assignments!(user, company_ids:, role:, company_ids_provided:, require_effective_grant: true)
           unless role_requires_client_assignment?(role)
             user.company_assignments.destroy_all if user.company_assignments.exists?
             return
           end
 
-          return unless company_ids_provided
+          unless company_ids_provided
+            if require_effective_grant && user.client? && user.active? && !user.has_effective_client_grant?
+              user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
+              raise ActiveRecord::RecordInvalid, user
+            end
+            return
+          end
 
           normalized_company_ids = normalize_company_ids(company_ids)
           if user.practice_company_id? && normalized_company_ids != [ user.practice_company_id ]
@@ -432,6 +475,8 @@ module Api
               (assignment.expired? && (user.staff_member? || !assignment.company.practice_copy?) &&
                 !(user.client? && assignment.company.demo? != (user.company&.demo? || false)))
           end
+          new_company_ids = normalized_company_ids - existing_assignments.map(&:company_id)
+
           retained_assignments.each do |assignment|
             # Retention must not bypass role/organization validation after a
             # role change (for example, staff becoming a client portal user).
@@ -439,7 +484,6 @@ module Api
             raise ActiveRecord::RecordInvalid, assignment unless assignment.valid?
           end
           (existing_assignments - retained_assignments).each(&:destroy!)
-          new_company_ids = normalized_company_ids - existing_assignments.map(&:company_id)
           new_company_ids.each do |company_id|
             company = Company.find(company_id)
             user.company_assignments.create!(
@@ -447,6 +491,11 @@ module Api
               workspace_access_level: company.practice_copy? ? "operator" : nil,
               granted_by: current_user
             )
+          end
+
+          if require_effective_grant && user.client? && user.active? && !user.has_effective_client_grant?
+            user.errors.add(:base, "Choose at least one client for an active client portal user, or deactivate the login instead.")
+            raise ActiveRecord::RecordInvalid, user
           end
         end
 

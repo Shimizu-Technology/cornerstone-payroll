@@ -7,7 +7,7 @@ RSpec.describe "Portal request company scope", type: :request do
   let(:home) { create(:company, organization: organization) }
   let(:inaccessible) { create(:company, organization: organization) }
   let(:role) { "accountant" }
-  let(:user) { create(:user, company: home, organization: organization, role: role, platform_owner: false) }
+  let(:user) { create(:user, :with_client_assignment, company: home, organization: organization, role: role, platform_owner: false) }
   let(:thread) do
     ClientPortalThread.create!(company: home, created_by: user, subject: "Original home conversation",
       last_message_at: 1.minute.ago)
