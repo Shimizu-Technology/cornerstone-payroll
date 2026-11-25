@@ -25,19 +25,19 @@ RSpec.describe InvoicePdf::GlyphCheck do
     end
   end
 
-  it "flags CJK, emoji and tabs with the field they are in" do
+  it "accepts CJK and flags emoji and tabs with the field they are in" do
     problems = described_class.problems(snapshot(recipient_name: "Hagåtña Muñoz 東京 😀", description: "Fee\tdue"))
 
     expect(problems).to eq([
-      { "field" => "Customer name", "characters" => [ "東", "京", "😀" ] },
+      { "field" => "Customer name", "characters" => [ "😀" ] },
       { "field" => "Line 1 description", "characters" => [ "U+0009" ] }
     ])
-    expect(described_class.message(problems)).to include("Customer name (東 京 😀)", "Line 1 description (U+0009)",
+    expect(described_class.message(problems)).to include("Customer name (😀)", "Line 1 description (U+0009)",
                                                          "empty boxes", "Replace them")
   end
 
   it "flags only characters that no embedded font can draw" do
-    %w[東 京 😀 한].each do |char|
+    %w[😀 🦄].each do |char|
       expect(glyph_ids(char).values).to all(eq(0)), "#{char} has a glyph in #{glyph_ids(char).select { |_f, id| id.positive? }.keys}"
     end
   end

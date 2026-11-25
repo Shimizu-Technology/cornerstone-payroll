@@ -237,15 +237,15 @@ RSpec.describe QuarterlyComplianceOfficialForms::Sw2 do
 
   describe "#generate" do
     it "refuses to file a name the form would print as empty boxes" do
-      employee_rows.first[:name] = "王小明"
+      employee_rows.first[:name] = "🦄"
       expect { described_class.new(report: report).generate }
-        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "王小明"/)
+        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee "🦄"/)
     end
 
     it "refuses to file an address the form would print as empty boxes" do
-      employees.first.update!(address_line1: "12 마을 Rd")
+      employees.first.update!(address_line1: "12 🦄 Rd")
       expect { described_class.new(report: report).generate }
-        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address .*\(마 을\)/)
+        .to raise_error(PdfUnicodeFont::UnprintableName, /Employee address .*\(🦄\)/)
     end
 
     it "keeps each employee page independent when the official template has one page" do

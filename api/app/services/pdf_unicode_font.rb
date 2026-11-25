@@ -11,6 +11,8 @@
 # that select "Helvetica" or "Helvetica-Bold" explicitly get the same font.
 module PdfUnicodeFont
   FAMILY = "LiberationSans"
+  CJK_FAMILY = "PayrollCJK"
+  CJK_FILE = Rails.root.join("vendor/fonts/cjk/PayrollCJK-Regular.ttf").to_s
   FONT_DIR = Rails.root.join("vendor/fonts/liberation-sans")
   FILES = {
     normal: FONT_DIR.join("LiberationSans-Regular.ttf").to_s,
@@ -35,9 +37,95 @@ module PdfUnicodeFont
     end
   end
 
-  # Liberation Sans has no CJK or Hangul glyphs, so those characters print as
-  # empty boxes. Checks and tax filings refuse such a name instead of issuing
-  # a document whose payee or employee can't be read.
+  class CjkTTF < Prawn::Fonts::TTF
+    private
+
+    # Prawn 2.4 writes supplementary characters as five-digit code points.
+    # PDF ToUnicode maps require UTF-16BE, including both surrogate units.
+    def embed(reference, subset)
+      super
+      map = subsets[subset].to_unicode_map
+      return unless map.values.any? { |codepoint| codepoint > 0xFFFF }
+
+      blocks = map.sort.each_slice(100).map do |entries|
+        lines = entries.map do |code, codepoint|
+          format("<%02x><%s>", code, codepoint.chr(Encoding::UTF_16BE).unpack1("H*"))
+        end
+        [ "#{lines.length} beginbfchar", *lines, "endbfchar" ].join("\n")
+      end
+      stream = PDF::Core::Stream.new
+      stream << (UNICODE_CMAP_TEMPLATE % blocks.join("\n"))
+      stream.compress!
+      reference.data.fetch(:ToUnicode).stream = stream
+    end
+  end
+
+  # Prawn's positioned draw_text does not use the formatted-text fallback.
+  # Split only when needed so existing primary-font positioning stays intact.
+  module CjkText
+    def find_font(name, options = {})
+      return super unless name == PdfUnicodeFont::CJK_FAMILY
+
+      file = PdfUnicodeFont::CJK_FILE
+      font_registry["#{file}:0"] ||= CjkTTF.new(self, file, family: name)
+    end
+
+    def draw_text(text, options)
+      return super if text.to_s.ascii_only? || options[:at].nil?
+
+      font_options = options.slice(:style)
+      primary = font
+      font(primary.family, font_options) { primary = font } if options[:style]
+      runs = cjk_runs(text.to_s, primary)
+      return super unless runs.any?(&:first)
+
+      x, y = options.fetch(:at)
+      draw_options = options.except(:rotate, :style)
+      draw = lambda do
+        runs.each do |cjk, chars|
+          run = chars.join
+          run_options = draw_options.merge(at: [ x, y ])
+          width_options = draw_options.slice(:size, :kerning)
+          if cjk
+            font(PdfUnicodeFont::CJK_FAMILY) do
+              super(run, run_options)
+              x += width_of(run, **width_options)
+            end
+          else
+            super(run, run_options.merge(font_options))
+            x += primary.compute_width_of(run, **width_options.reverse_merge(size: font_size))
+          end
+        end
+      end
+      return draw.call unless options[:rotate]
+
+      rotate(options[:rotate], origin: [ x, y ], &draw)
+    end
+
+    private
+
+    def width_of_string(string, options = {})
+      return super if string.ascii_only?
+
+      runs = cjk_runs(string, font)
+      return super unless runs.any?(&:first)
+
+      runs.sum do |cjk, chars|
+        if cjk
+          width = nil
+          font(PdfUnicodeFont::CJK_FAMILY) { width = super(chars.join, options.except(:style)) }
+          width
+        else
+          super(chars.join, options)
+        end
+      end
+    end
+
+    def cjk_runs(text, primary)
+      text.each_char.chunk { |char| PdfUnicodeFont.cjk_codepoints.include?(char.ord) && !primary.glyph_present?(char) }.to_a
+    end
+  end
+
   class UnprintableName < StandardError
     def initialize(label, name, characters)
       super("#{label} \"#{name.to_s.squish}\" has characters checks and tax forms can't print " \
@@ -76,6 +164,8 @@ module PdfUnicodeFont
       "Helvetica-Oblique" => styles.merge(normal: styles[:italic], bold: styles[:bold_italic]),
       "Helvetica-BoldOblique" => styles.transform_values { styles[:bold_italic] }
     )
+    pdf.fallback_fonts = [ *pdf.fallback_fonts, CJK_FAMILY ]
+    pdf.extend(CjkText)
     pdf.font(FAMILY)
     pdf
   end
@@ -95,7 +185,15 @@ module PdfUnicodeFont
 
   def printable_codepoints
     # Glyph 0 is the .notdef box, so a code mapped to it can't print either.
-    @printable_codepoints ||= TTFunk::File.open(FILES[:normal]).cmap.unicode.first.code_map
+    @printable_codepoints ||= (codepoints_for(FILES[:normal]) | cjk_codepoints).freeze
+  end
+
+  def cjk_codepoints
+    @cjk_codepoints ||= codepoints_for(CJK_FILE).freeze
+  end
+
+  def codepoints_for(file)
+    TTFunk::File.open(file).cmap.unicode.max_by { |table| table.code_map.size }.code_map
       .select { |_code, glyph| glyph.positive? }.keys.to_set.freeze
   end
 end

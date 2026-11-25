@@ -49,16 +49,20 @@ RSpec.describe PdfUnicodeFont do
     expect(unicode_pdf_text(pdf.render)).to include("Wiśniewska", "Nguyễn", "Mañibusan", "Żółć")
   end
 
-  it "builds the PDF instead of failing when a name has no glyph in the font" do
-    pdf.text "王小明 김민수"
-    expect(pdf.render).to start_with("%PDF")
+  it "embeds CJK glyphs in regular, bold, table and positioned text" do
+    pdf.text "王小明 𠮷", style: :bold
+    pdf.table([ [ "さくら" ] ], cell_style: { font_style: :italic })
+    pdf.text_box "김민수", at: [ 0, 100 ], width: 200
+    pdf.draw_text "Suite 東京都 12", at: [ 0, 40 ], style: :bold
+
+    expect(unicode_pdf_text(pdf.render)).to include("王小明", "𠮷", "さくら", "김민수", "Suite 東京都 12")
   end
 
   it "lists only the characters the font has no glyph for" do
     expect(described_class.unprintable_characters("Wiśniewska Nguyễn Шевченко Keʻala")).to be_empty
-    expect(described_class.unprintable_characters("王小明 Kim 王")).to eq(%w[王 小 明])
+    expect(described_class.unprintable_characters("王小明 김민수 さくら")).to be_empty
     expect(described_class.unprintable_characters(nil)).to be_empty
-    expect(described_class.unprintable_characters("Taro\u3000Yamada")).to eq([ "\u3000" ])
+    expect(described_class.unprintable_characters("Taro\u3000Yamada")).to be_empty
     expect(described_class.unprintable_characters("12 Chalan\nHagåtña, GU\r\n")).to be_empty
     expect(described_class.unprintable_characters("Ana\tCruz")).to eq([ "\t" ])
   end
