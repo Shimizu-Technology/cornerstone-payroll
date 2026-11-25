@@ -9,6 +9,8 @@ const labels: Record<string, string> = {
   ssn_encrypted: 'Social Security number',
   contractor_ein: 'Employer identification number',
   w4_election_received: 'Withholding form received',
+  pay_statements_delivery: 'Pay statements delivery',
+  w2gu_delivery: 'Form W-2GU delivery',
 };
 
 function fieldLabel(field: string) {
