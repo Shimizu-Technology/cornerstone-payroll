@@ -167,6 +167,7 @@ describe('employee app shell', () => {
   it('asks the employee to refresh and confirm their address when it changed before an edit', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');
+    let requestCalls = 0;
     const address = { address_line1: '100 Example Lane', city: 'Example City', state: 'GU', zip: '96910' };
     vi.stubGlobal('fetch', respond({
       '/employee/links': () => Response.json([{ id: 3 }]),
@@ -175,14 +176,22 @@ describe('employee app shell', () => {
         address,
         address_request: { id: 8, status: 'pending', requested: { ...address, address_line1: '200 Example Lane' } },
       }),
-      '/employee/address_requests/8': () => Response.json({ code: 'address_on_file_changed' }, { status: 409 }),
+      '/employee/address_requests/8': () => (requestCalls++ === 0
+        ? Response.json({ code: 'address_on_file_changed' }, { status: 409 })
+        : Response.json({ address, address_request: { id: 8, status: 'cancelled', requested: { ...address, address_line1: '200 Example Lane' } } })),
     }));
     render(<EmployeeApp />);
 
     await userEvent.click(await screen.findByRole('button', { name: 'Edit request' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save request' }));
-    expect(await screen.findByText('Your address on file changed. Refresh the page and confirm the address before submitting a new request.')).toBeTruthy();
+    expect(await screen.findByText('Your address on file was updated after you sent this request. Cancel this request, then send a new one if your address still needs to change.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Save request' })).toBeTruthy();
+
+    // Recovery: close the form, cancel the stale request, then a new one can be sent.
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel request' }));
+    expect(await screen.findByText('Request cancelled.')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Request a change' })).toBeTruthy();
   });
 
   it('shows the daily limit in the email form without ending the session', async () => {

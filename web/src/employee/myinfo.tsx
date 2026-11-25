@@ -39,7 +39,7 @@ function changeMessage(error: unknown, what: string): string {
       case 'emergency_contact_limit': return 'You can save up to five emergency contacts.';
       case 'personal_email_required': return 'Use a personal email address that only you can access.';
       case 'invalid': return `Check your ${what} and try again.`;
-      case 'address_on_file_changed': return 'Your address on file changed. Refresh the page and confirm the address before submitting a new request.';
+      case 'address_on_file_changed': return 'Your address on file was updated after you sent this request. Cancel this request, then send a new one if your address still needs to change.';
       case 'conflict': return 'A change is already being reviewed. Try again after it is decided.';
       case 'offline': return "You're offline. Connect to Wi-Fi or data, then try again.";
       case 'rate_limited': return 'Too many tries. Wait a minute, then try again.';

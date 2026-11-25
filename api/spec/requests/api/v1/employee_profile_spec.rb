@@ -462,7 +462,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(response).to have_http_status(:conflict)
     expect(response.parsed_body).to eq(
       "code" => "address_on_file_changed",
-      "error" => "Your address on file changed. Refresh the page and confirm the address before submitting a new request."
+      "error" => "Your address on file was updated after you sent this request. Cancel this request, then send a new one if your address still needs to change."
     )
     expect(EmployeeChangeRequest.where(employee: employee).sole).to have_attributes(id: id.to_i, status: "pending")
     expect(employee.reload.address_line2).to eq("Unit 2")

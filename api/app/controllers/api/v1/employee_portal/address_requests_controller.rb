@@ -21,7 +21,7 @@ module Api
           change_request = profile.own_requests.pending.find(resource_id)
           unless normalize_address(change_request.original_values) == normalize_address(@employee)
             return render json: {
-              error: "Your address on file changed. Refresh the page and confirm the address before submitting a new request.",
+              error: "Your address on file was updated after you sent this request. Cancel this request, then send a new one if your address still needs to change.",
               code: "address_on_file_changed"
             }, status: :conflict
           end
