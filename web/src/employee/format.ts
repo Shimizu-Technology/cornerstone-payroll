@@ -133,15 +133,19 @@ function plural(n: number, one: string, many: string): string {
 
 /**
  * "$36.45 less than Nov 5. You worked 3.5 fewer hours." Null when it can't be
- * worked out: no earlier regular check in the list, missing amounts, or a
- * bonus, correction or voided check on either side.
+ * worked out: no earlier regular check (the API's `previous`, or the list
+ * when the API didn't say), missing amounts, or a bonus, correction or
+ * voided check on either side.
  */
 export function comparisonLine(current: StatementSummary, statements: StatementSummary[]): string | null {
   const comparable = (s: StatementSummary): boolean => s.source === 'payroll' && s.payment.status !== 'voided' && s.runPurpose === 'regular';
   if (!comparable(current)) return null;
-  const index = statements.findIndex((s) => s.id === current.id);
-  if (index < 0) return null;
-  const previous = statements.slice(index + 1).find(comparable);
+  // The API names the previous regular check, even one on another page.
+  let previous: Pick<StatementSummary, 'payDate' | 'netPay' | 'totalHours'> | null | undefined = current.previous;
+  if (previous === undefined) {
+    const index = statements.findIndex((s) => s.id === current.id);
+    previous = index < 0 ? null : statements.slice(index + 1).find(comparable);
+  }
   if (!previous) return null;
   const [now, before] = [toNumber(current.netPay), toNumber(previous.netPay)];
   if (now === null || before === null) return null;

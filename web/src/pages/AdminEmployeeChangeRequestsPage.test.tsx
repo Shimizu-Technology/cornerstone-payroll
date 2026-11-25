@@ -106,9 +106,14 @@ it('consumes the inbox deep link once so a new status filter selects its own req
   expect(screen.queryByText('Request #1')).toBeNull();
 });
 
-it.each(['approved', 'rejected'] as const)('shows a handled %s deep link in its initial all-status list', async status => {
+it.each(['approved', 'rejected', 'cancelled'] as const)('shows a handled %s deep link in its initial all-status list', async status => {
   vi.clearAllMocks();
-  const handled = request(8, 'Handled employee', 'Handled notes', status);
+  const handled = {
+    ...request(8, 'Handled employee', 'Handled notes', status),
+    profile_address: true,
+    original_values: { address_line1: '100 Example Lane' },
+    proposed_changes: { address_line1: '200 Example Lane' },
+  };
   apiMocks.list.mockImplementation(({ status: filter }: { status?: string }) => Promise.resolve({ data: filter === 'pending' ? [] : [handled] }));
   apiMocks.get.mockResolvedValue({ data: handled });
   render(<MemoryRouter initialEntries={['/companies/1/client-change-requests?request_id=8']}><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
@@ -117,6 +122,8 @@ it.each(['approved', 'rejected'] as const)('shows a handled %s deep link in its 
   expect(screen.getByRole('button', { name: /Handled employee/ })).toBeTruthy();
   expect(screen.queryByText('No requests found.')).toBeNull();
   expect(apiMocks.list).toHaveBeenCalledWith({ status: undefined });
+  expect(screen.getByRole('columnheader', { name: 'Before' })).toBeTruthy();
+  expect(screen.getByRole('columnheader', { name: status === 'approved' ? 'After' : 'Requested' })).toBeTruthy();
 });
 
 it('labels address requests and prevents review when the server says it is the reviewer’s own record', async () => {
@@ -133,4 +140,21 @@ it('labels address requests and prevents review when the server says it is the r
   expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reject' }).disabled).toBe(true);
   fireEvent.click(approve);
   expect(apiMocks.approve).not.toHaveBeenCalled();
+});
+
+it.each([
+  [true, "Note to the employee (they'll see this)"],
+  [false, 'Review note'],
+])('labels the optional staff note when employee visibility is %s', async (visible, label) => {
+  vi.clearAllMocks();
+  const address = { ...request(8, 'Example Worker', ''), profile_address: true, can_review: true, note_visible_to_employee: visible };
+  apiMocks.list.mockResolvedValue({ data: [address] });
+  apiMocks.get.mockResolvedValue({ data: address });
+  apiMocks.approve.mockResolvedValue({ data: { ...address, status: 'approved' } });
+
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  const note = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: label });
+  expect(note.required).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  await waitFor(() => expect(apiMocks.approve).toHaveBeenCalledWith(address.id, '', undefined));
 });

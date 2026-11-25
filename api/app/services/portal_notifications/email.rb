@@ -4,7 +4,7 @@ require "cgi"
 
 module PortalNotifications
   # Deliberately generic. No company, employee, conversation subject, message
-  # text, file name, amount, identifier or signed URL ever appears here.
+  # text, file name, amount, employee identifier or signed URL ever appears here.
   class Email
     SUBJECT = "New activity in Cornerstone Payroll"
     MESSAGE_LINE = "You have a new message in the portal."
@@ -79,6 +79,8 @@ module PortalNotifications
       return :pay_runs if event.event_type.start_with?("payroll_review_")
       return :file_requests if FILE_REQUEST_EVENTS.include?(event.event_type)
 
+      return [ :contact_confirmation, event.company_id ] if event.event_type == "employee_contact_confirmation_requested"
+
       case event.category
       when "payroll_submissions", "payroll_updates" then :payroll
       when "employee_changes", "employee_change_decisions", "address_approvals" then :changes
@@ -89,13 +91,8 @@ module PortalNotifications
     end
 
     def self.employee_portal_url(company)
-      slug = company.subdomain_slug
-      if slug&.match?(TenantSubdomainRegistry::SLUG_PATTERN) && !TenantSubdomainRegistry::RESERVED_SLUGS.include?(slug) &&
-          CompanyFeatures.for(company).subdomain_enabled?
-        return "https://#{slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
-      end
-
-      ENV["EMPLOYEE_PORTAL_URL"].presence&.delete_suffix("/")
+      EmployeeLinks::AppUrl.origin_for(company) ||
+        TenantSubdomainRegistry.https_url(ENV["EMPLOYEE_PORTAL_URL"].to_s.strip.delete_suffix("/"))
     end
 
     def self.frontend_url
@@ -107,6 +104,10 @@ module PortalNotifications
     def path_for(audience, events)
       groups = events.map { |event| self.class.destination_group(event) }.uniq
       group = groups.one? ? groups.first : :general
+      if group.is_a?(Array) && group.first == :contact_confirmation
+        return "/companies/#{group.last}/contact-changes-to-confirm"
+      end
+
       case [ audience == "staff", group ]
       when [ true, :pay_runs ], [ false, :pay_runs ] then "/pay-periods"
       when [ true, :payroll ], [ true, :file_requests ] then "/app/client-inbox"

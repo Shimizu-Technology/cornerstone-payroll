@@ -9,6 +9,8 @@ class EmployeeAccountLink < ApplicationRecord
   belongs_to :claim_user, class_name: "User", optional: true
   belongs_to :sign_up_reset_requested_by, class_name: "User", optional: true
 
+  encrypts :profile_email_challenge
+
   INVITE_LIFETIME = 14.days
   MAX_FAILED_ATTEMPTS = 5
   LOCK_DURATION = 24.hours
