@@ -73,6 +73,28 @@ RSpec.describe PdfUnicodeFont do
     expect(unicode_pdf_text(pdf.render)).to include("王小明", "𠮷", "さくら", "김민수", "Suite 東京都 12")
   end
 
+  it "validates and renders katakana names with kana marks" do
+    name = "ターナー・サトウ"
+    expect(described_class.unprintable_characters("#{name} カ\u3099ハ\u309A")).to be_empty
+    pdf.draw_text name, at: [ 0, 40 ]
+
+    expect(unicode_pdf_text(pdf.render)).to include(name)
+  end
+
+  it "refuses katakana names when the official copy disables CJK" do
+    expect { described_class.ensure_printable!("ターナー", label: "Employee", cjk: false) }
+      .to raise_error(PdfUnicodeFont::UnprintableName, /ターナー/)
+  end
+
+  it "measures spacing within and between mixed font runs" do
+    sample = "AB東京C"
+    unspaced_width = pdf.width_of(sample)
+
+    pdf.character_spacing(10) do
+      expect(pdf.width_of(sample)).to be_within(0.001).of(unspaced_width + 40)
+    end
+  end
+
   it "lists only the characters the font has no glyph for" do
     expect(described_class.unprintable_characters("Wiśniewska Nguyễn Шевченко Keʻala")).to be_empty
     expect(described_class.unprintable_characters("王小明 김민수 さくら")).to be_empty
