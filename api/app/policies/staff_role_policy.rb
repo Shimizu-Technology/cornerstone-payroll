@@ -83,6 +83,7 @@ class StaffRolePolicy
     "api/v1/admin/audit_logs" => :view_audit_history,
     "api/v1/admin/portal_notification_recipients" => :manage_client_administration,
     "api/v1/admin/employee_app_settings" => :manage_client_administration,
+    "api/v1/admin/employee_tax_forms" => :manage_client_administration,
     "api/v1/admin/payroll_submission_periods" => :payroll_operations,
     "api/v1/admin/record_activities" => :view_record_activity,
     "api/v1/admin/payroll_history_review_items" => :view_record_activity,

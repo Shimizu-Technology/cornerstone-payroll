@@ -316,6 +316,42 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "isolates employee document notices and rejects a notice for another company's document" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          notices = TenantScope.as_system(reason: "Create employee document notice fixtures") do
+            fixture = { tax_year: 2026, revision: 1, sha256: "b" * 64, storage_key: "fixture", posted_at: Time.current }
+            rows = create_list(:employee, 2).map do |employee|
+              document = EmployeeDocument.create!(**fixture, employee: employee, company_id: employee.company_id)
+              EmployeeDocumentNotice.create!(company_id: employee.company_id, employee: employee, employee_document: document,
+                kind: "w2gu_available")
+            end
+            local, foreign = rows
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeDocumentNotice.create!(company_id: local.company_id, employee_id: local.employee_id,
+                  employee_document_id: foreign.employee_document_id, kind: "w2gu_available")
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[employee_document_notices])
+            rows
+          end
+
+          local, foreign = notices
+          TenantScope.with_company(local.company_id) do
+            expect(EmployeeDocumentNotice.pluck(:id)).to eq([ local.id ])
+            expect(EmployeeDocumentNotice.where(id: foreign.id).update_all(delivery_status: "bounced")).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeDocumentNotice.insert_all!([ foreign.attributes.except("id", "created_at", "updated_at").merge("kind" => "w2gu_available") ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     it "lets tenants read shared rules and only maintain their own rules" do
       pool.with_connection do |connection|
         connection.transaction do
