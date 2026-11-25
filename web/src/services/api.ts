@@ -2803,6 +2803,7 @@ export interface EmployeePayrollSummary {
   payroll_count: number;
   imported_payroll_count: number;
   imported_opening_summary_count: number;
+  total_hours?: number;
   gross_pay: number;
   custom_earnings_total: number;
   payroll_field_taxable_additions_total: number;
@@ -2848,9 +2849,12 @@ export interface TaxSummaryReport {
   report: {
     type: string;
     period: PayrollReportPeriod;
+    source?: { label: string; statement: string };
     totals: {
       gross_wages: number;
       withholding_tax: number;
+      base_withholding_tax?: number;
+      additional_withholding?: number;
       social_security_employee: number;
       social_security_employer: number;
       medicare_employee: number;

@@ -28,6 +28,7 @@ class TaxSummaryCsvExporter
       csv << [ "Tax Summary Report" ]
       csv << [ "Client", report.dig(:meta, :company_name).to_s ] if report.dig(:meta, :company_name).present?
       csv << [ "Description", report.dig(:meta, :report_description).to_s ] if report.dig(:meta, :report_description).present?
+      csv << [ "Payroll Source", report.dig(:source, :statement) ] if report.dig(:source, :statement).present?
       csv << [ "Reporting Basis",    "Pay date" ]
       csv << [ "Period",             period_label(period) ]
       csv << [ "Period Start",      period[:start_date].to_s ]
@@ -39,6 +40,8 @@ class TaxSummaryCsvExporter
       # Totals table
       csv << [ "Category", "Amount" ]
       csv << [ "Gross Wages",                  format_currency(totals[:gross_wages]) ]
+      csv << [ "Base Withholding Tax", format_currency(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
+      csv << [ "Additional Withholding", format_currency(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
       csv << [ "Withholding Tax",              format_currency(totals[:withholding_tax]) ]
       csv << [ "Social Security (Employee)",   format_currency(totals[:social_security_employee]) ]
       csv << [ "Social Security (Employer)",   format_currency(totals[:social_security_employer]) ]
@@ -75,7 +78,7 @@ class TaxSummaryCsvExporter
   private
 
   def format_currency(value)
-    format("%.2f", value.to_f)
+    format("%.2f", value.to_d)
   end
 
   def period_label(period)

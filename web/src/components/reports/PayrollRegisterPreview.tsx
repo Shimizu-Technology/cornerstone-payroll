@@ -456,7 +456,8 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
     ...(historicalLoans ? [['Previous provider loans (type not recorded)', currency(total('historical_loan_deductions_unclassified'))]] : []),
     ['Employer contributions', currency(report.summary.total_employer_contributions)],
     ['Employer cost', currency(report.summary.total_employer_payroll_cost)],
-    ['Withholding', currency(report.summary.total_withholding)],
+    ['Base FIT', currency(report.summary.total_withholding)],
+    ['Additional FIT', currency(report.summary.total_additional_withholding)],
     ['Deductions', currency(report.summary.total_deductions)],
     ['Total net', currency(Number(report.summary.total_net) + Number(contractorNet))],
   ];

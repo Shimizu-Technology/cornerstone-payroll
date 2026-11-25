@@ -17,6 +17,7 @@ const apiMocks = vi.hoisted(() => ({
   quarterlyCompliancePacket: vi.fn(),
   payrollHistoryList: vi.fn(),
   employeePayHistory: vi.fn(),
+  taxSummary: vi.fn(),
   employeesList: vi.fn(),
 }));
 
@@ -24,6 +25,7 @@ vi.mock('@/services/api', () => ({
   reportsApi: {
     ytdSummary: apiMocks.ytdSummary,
     employeePayHistory: apiMocks.employeePayHistory,
+    taxSummary: apiMocks.taxSummary,
     quarterlyCompliancePacket: apiMocks.quarterlyCompliancePacket,
   },
   payrollHistoryApi: { list: apiMocks.payrollHistoryList },
@@ -467,17 +469,49 @@ describe('PayrollRegisterPanel', () => {
 });
 
 
+describe('Tax Withholding Summary', () => {
+  afterEach(cleanup);
+
+  it('shows the Cornerstone-only scope before exporting and displays base, additional, and total withholding', async () => {
+    apiMocks.taxSummary.mockResolvedValue({ report: {
+      period: { label: '2026' },
+      source: { label: 'Cornerstone', statement: 'Payroll run in Cornerstone only; QuickBooks history not included.' },
+      totals: {
+        gross_wages: 1000,
+        base_withholding_tax: 120.11,
+        additional_withholding: 50.22,
+        withholding_tax: 170.33,
+        social_security_employee: 62,
+        social_security_employer: 62,
+        medicare_employee: 14.5,
+        medicare_employer: 14.5,
+        total_employment_taxes: 323.33,
+      },
+      payroll_fields: { totals: [] },
+      pay_periods_included: 1,
+      employee_count: 1,
+    } });
+    renderReportPanel(<Reports />);
+    fireEvent.click(screen.getByRole('button', { name: 'Review taxes' }));
+    expect(await screen.findByText('Payroll run in Cornerstone only; QuickBooks history not included.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    expect((await screen.findByText('Base Withholding Tax')).nextElementSibling?.textContent).toBe('$120.11');
+    expect(screen.getByText('Additional Withholding').nextElementSibling?.textContent).toBe('$50.22');
+    expect(screen.getByText('Total Withholding Tax').nextElementSibling?.textContent).toBe('$170.33');
+  });
+});
+
 describe('EmployeePayHistoryPanel payment presentation', () => {
   afterEach(cleanup);
 
-  it('shows methods separately from check numbers in desktop and phone history', async () => {
+  it('shows payment details, combined hours and total FIT in desktop and phone history', async () => {
     apiMocks.employeesList.mockResolvedValue({ data: [{ id: 1, first_name: 'Avery', last_name: 'Example' }] });
     apiMocks.employeePayHistory.mockResolvedValue({ report: {
       employee: { name: 'Avery Example', employment_type: 'hourly', pay_rate: 15 },
       period: { label: '2026' }, summary: {}, payroll_fields: { totals: [] },
       history: [
         { key: 'native:1', record_type: 'native', pay_date: '2026-10-08', period_description: 'October',
-          gross_pay: 900, net_pay: 700, total_deductions: 200,
+          gross_pay: 900, net_pay: 700, total_deductions: 200, withholding_tax: 170.33, total_hours: 39.1, hours_worked: 30.11,
           payment_delivery_method: 'direct_deposit', check_number: null,
           source: { label: 'Cornerstone' } },
         { key: 'native:2', record_type: 'native', pay_date: '2026-09-24', period_description: 'September',
@@ -498,6 +532,8 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
     expect(screen.getAllByText('Direct deposit')).toHaveLength(2);
+    expect(screen.getAllByText('$170.33')).toHaveLength(2);
+    expect(screen.getAllByText('39.1')).toHaveLength(2);
     expect(screen.getAllByText('$0 net · earnings statement only')).toHaveLength(2);
     expect(screen.getAllByText('Paper check')).toHaveLength(2);
     expect(screen.getAllByText('Check #1007')).toHaveLength(2);
