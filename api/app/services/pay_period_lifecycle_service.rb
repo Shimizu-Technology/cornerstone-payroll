@@ -8,6 +8,14 @@ class PayPeriodLifecycleService
   class Error < StandardError; end
   class InvalidTransitionError < Error; end
   class EmptyPayPeriodError < Error; end
+  class DocumentsBlockedError < InvalidTransitionError
+    attr_reader :employees
+
+    def initialize(message = nil, employees: [])
+      @employees = employees
+      super(message)
+    end
+  end
   class CommitConflict < Error
     attr_reader :code
 
@@ -289,7 +297,7 @@ class PayPeriodLifecycleService
   def validate_employee_document_readiness!
     EmployeeDocumentReadiness.require_payroll_ready!(pay_period)
   rescue EmployeeDocumentReadiness::BlockedError => e
-    raise InvalidTransitionError, e.message
+    raise DocumentsBlockedError.new(e.message, employees: e.employees)
   end
 
   def validate_go_live_gate!
