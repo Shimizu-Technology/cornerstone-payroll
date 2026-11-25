@@ -181,7 +181,6 @@ describe('employee electronic-delivery consent screens', () => {
     window.history.pushState({}, '', '/taxes');
     let consented = false;
     let withdrawn = false;
-    let stepUpAsked = false;
     let lastConsentBody: Record<string, unknown> | null = null;
 
     const fetchMock = respond({
@@ -202,8 +201,8 @@ describe('employee electronic-delivery consent screens', () => {
         pdf_base64: SAMPLE_PDF_B64,
       }),
       'POST /employee/delivery_consents': (init) => {
-        if (!stepUpAsked) {
-          stepUpAsked = true;
+        const headers = new Headers(init?.headers);
+        if (headers.get('Authorization') !== 'Bearer dev-preview-token-verified') {
           return Response.json({
             clerk_error: { type: 'forbidden', reason: 'reverification-error', metadata: { reverification: { level: 'first_factor', afterMinutes: 10 } } },
           }, { status: 403 });
@@ -320,5 +319,32 @@ describe('employee electronic-delivery consent screens', () => {
     expect(document.body.classList.contains('emp-printing-disclosure')).toBe(false);
     expect(w2Card.getAttribute('data-print-target')).toBeNull();
     printSpy.mockRestore();
+  });
+
+  it('formats consent and withdrawal UTC timestamps as Guam calendar dates across midnight', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    // 2026-11-25T16:30:00Z is 2026-11-26 02:30 in Pacific/Guam (UTC+10).
+    const payload = makeConsentsPayload({ payStatus: 'consented', w2Status: 'withdrawn' });
+    payload.consents[0].active_consent!.given_at = '2026-11-25T16:30:00Z';
+    payload.consents[1].last_withdrawn_at = '2026-11-25T18:45:00Z';
+
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({ links: [{ id: 3, company_name: 'Harbor Finch', status: 'active' }] }),
+      '/employee/context': () => Response.json({
+        first_name: 'Jordan',
+        status: 'active',
+        features: { profile_requests: false, delivery_consent: true },
+      }),
+      'GET /employee/delivery_consents': () => Response.json(payload),
+    }));
+    render(<EmployeeApp />);
+
+    const payCard = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    const w2Card = screen.getByRole('region', { name: 'Electronic Form W-2GU' });
+    expect(payCard.textContent).toContain('Nov 26, 2026');
+    expect(payCard.textContent).not.toContain('Nov 25, 2026');
+    expect(w2Card.textContent).toContain('Nov 26, 2026');
+    expect(w2Card.textContent).not.toContain('Nov 25, 2026');
   });
 });

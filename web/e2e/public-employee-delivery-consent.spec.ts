@@ -97,7 +97,6 @@ for (const viewport of [
 
     let payStatus: 'not_consented' | 'consented' | 'withdrawn' = 'not_consented';
     let w2Status: 'not_consented' | 'consented' | 'withdrawn' = 'not_consented';
-    let stepUpPrompted = false;
 
     await mockEmployeeApi(page, {
       context: {
@@ -134,8 +133,7 @@ for (const viewport of [
         return;
       }
       if (request.method() === 'POST') {
-        if (!stepUpPrompted) {
-          stepUpPrompted = true;
+        if (request.headers().authorization !== 'Bearer dev-preview-token-verified') {
           await route.fulfill({
             status: 403,
             contentType: 'application/json',
