@@ -21,13 +21,16 @@ class EmployeeAccountLink < ApplicationRecord
 
   enum :status, { invited: "invited", active: "active", former: "former", revoked: "revoked" }, validate: true
 
-  validates :payroll_environment, inclusion: { in: %w[live] }
+  # A demo company's employees use the app like a real client's; a practice
+  # copy's never do (the database refuses one too).
+  validates :payroll_environment, inclusion: { in: %w[live migration_rehearsal] }
   validates :user, presence: true, if: -> { active? || former? }
   validates :invite_token_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
   validates :invite_code_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
   validates :invite_delivery, inclusion: { in: %w[email code] }, allow_nil: true
   validates :failed_activation_attempts, :invite_generation, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate :employee_belongs_to_live_company
+  before_validation :take_company_payroll_environment, on: :create
 
   scope :portal_eligible, -> {
     now = Time.current
@@ -212,8 +215,12 @@ class EmployeeAccountLink < ApplicationRecord
 
   private
 
+  def take_company_payroll_environment
+    self.payroll_environment = company.payroll_environment if company
+  end
+
   def employee_belongs_to_live_company
-    errors.add(:company, "must run live payroll") if company && !company.live_payroll?
+    errors.add(:company, "must run live payroll") if company && !(company.live_payroll? || company.demo?)
     errors.add(:employee, "must belong to the link's company") if employee && employee.company_id != company_id
   end
 end

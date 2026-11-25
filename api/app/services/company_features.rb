@@ -101,8 +101,10 @@ class CompanyFeatures
     option("client_portal.sensitive_documents_visible") == true
   end
 
+  # A practice copy never opens the employee app; a demo company follows its
+  # own profile like a live client (demo plan D6).
   def employee_portal_enabled?
-    return false if company.test_workspace?
+    return false if company.practice_copy?
 
     profile.employee_portal_enabled == true
   end
@@ -149,7 +151,7 @@ class CompanyFeatures
   end
 
   def subdomain_enabled?
-    return false if company.test_workspace?
+    return false if company.practice_copy?
 
     option("subdomain_enabled") == true
   end
