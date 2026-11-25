@@ -7,7 +7,7 @@ namespace :production do
   RlsTask.system readiness: :environment do
     report = ProductionReadiness.new.run(live: Rails.env.production?)
     report.checks.each do |check|
-      puts "#{check.passed ? 'PASS' : 'FAIL'}  #{check.name} (#{check.detail})"
+      puts "#{check.status}  #{check.name} (#{check.detail})"
     end
     puts "EVIDENCE #{JSON.generate(report.as_json)}"
 

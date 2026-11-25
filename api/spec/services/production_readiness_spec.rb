@@ -186,7 +186,7 @@ RSpec.describe ProductionReadiness do
     report = with_sample_token { readiness.run(live: true) }
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(33)
+    expect(report.checks.length).to eq(34)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
@@ -357,7 +357,21 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: false)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(20)
+    expect(report.checks.length).to eq(21)
+  end
+
+  it "warns when the Resend webhook secret is blank and reports only its presence when set" do
+    name = "Resend webhook signing secret is configured"
+    env["RESEND_WEBHOOK_SECRET"] = " "
+    report = readiness.run(live: false)
+
+    expect(report).to be_passed
+    expect(report.as_json[:checks]).to include(a_hash_including(name: name, passed: nil, status: "WARN"))
+
+    env["RESEND_WEBHOOK_SECRET"] = "fixture-signing-value"
+    evidence = readiness.run(live: false).as_json
+    expect(evidence[:checks]).to include(a_hash_including(name: name, passed: true, status: "PASS"))
+    expect(evidence.to_json).not_to include(env.fetch("RESEND_WEBHOOK_SECRET"))
   end
 
   it "fails closed when complete production encryption sources conflict" do
