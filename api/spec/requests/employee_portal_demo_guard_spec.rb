@@ -10,28 +10,30 @@ RSpec.describe "Employee portal demo guard", type: :request do
   include EmployeeLinkHelpers
 
   let(:organization) { create(:organization) }
-  let(:company) { create(:company, organization: organization, name: "Alpha Grill", subdomain_slug: "harborfinch") }
+  let(:company) { create_demo_company(organization: organization, subdomain_slug: "harborfinch") }
   let(:employee) { create(:employee, company: company, first_name: "Jordan", last_name: "Reyes") }
-  let(:worker) { create(:user, role: :portal_employee, company: company, organization: organization, clerk_id: "user_jordan") }
+  let(:worker) do
+    create(:user, role: :portal_employee, company: company, organization: organization, clerk_id: "user_jordan",
+      email: "reviewer+jordan@demo-mail.example")
+  end
   let!(:link) { EmployeeAccountLink.create!(user: worker, company: company, employee: employee, status: "active") }
-  let(:demo_origin) { "https://harborfinch.cornerstone-payroll.example" }
+  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::ROOT_DOMAIN}" }
   let(:shared_origin) { EmployeeLinkHelpers::PAYROLL_ORIGIN }
+
+  around do |example|
+    saved = ENV[DemoOutbound::ENV_KEY]
+    ENV[DemoOutbound::ENV_KEY] = "reviewer+jordan@demo-mail.example"
+    example.run
+  ensure
+    ENV[DemoOutbound::ENV_KEY] = saved
+  end
 
   before do
     enable_employee_app!(company, subdomain: true)
-    # Stands in for a demo company until demo employee logins land (PR #585):
-    # the request path only asks whether the link's company is a demo.
-    allow_any_instance_of(Company).to receive(:demo?).and_return(true)
     allow(EmployeeAppSwitch::Enforcement).to receive(:demo_open?).and_return(true)
     allow(EmployeeAppSwitch::Enforcement).to receive(:verified?).and_return(false)
     allow(EmployeeAppSwitch::Enforcement).to receive(:waiver_state?).and_return(true)
     allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
-    allow(TenantSubdomainRegistry).to receive(:client_origin?).and_call_original
-    allow(TenantSubdomainRegistry).to receive(:client_origin?).with(demo_origin).and_return(true)
-    allow(TenantSubdomainRegistry).to receive(:enabled_origin_company_id).and_call_original
-    allow(TenantSubdomainRegistry).to receive(:enabled_origin_company_id).with(demo_origin).and_return(company.id)
-    allow(TenantSubdomainRegistry).to receive(:allowed_origin?).and_call_original
-    allow(TenantSubdomainRegistry).to receive(:allowed_origin?).with(demo_origin).and_return(true)
   end
 
   def context!(azp: demo_origin, origin: demo_origin)
