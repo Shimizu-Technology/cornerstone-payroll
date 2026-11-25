@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_060700) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_060800) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1295,6 +1295,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060700) do
     t.integer "attempts", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.date "paper_bounced_on"
+    t.date "paper_due_on"
+    t.date "paper_mailed_on"
+    t.bigint "paper_mailed_by_id"
+    t.index [ "paper_mailed_by_id" ], name: "index_employee_document_notices_on_paper_mailed_by_id"
     t.index [ "company_id", "employee_document_id", "kind" ], name: "idx_employee_document_notices_once", unique: true
     t.index [ "company_id", "employee_id" ], name: "idx_employee_document_notices_employee"
     t.index [ "provider_message_id" ], name: "idx_employee_document_notices_provider_message", unique: true, where: "(provider_message_id IS NOT NULL)"
@@ -5455,6 +5460,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060700) do
   add_foreign_key "employee_document_notices", "companies"
   add_foreign_key "employee_document_notices", "employee_documents", column: [ "employee_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_notices_document"
   add_foreign_key "employee_document_notices", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_notices_employee"
+  add_foreign_key "employee_document_notices", "users", column: "paper_mailed_by_id"
   add_foreign_key "employee_document_requirement_events", "client_documents", column: [ "client_document_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_requirement_events_document_tenant"
   add_foreign_key "employee_document_requirement_events", "companies"
   add_foreign_key "employee_document_requirement_events", "employee_document_requirements", column: [ "employee_document_requirement_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_document_requirement_events_requirement_tenant"

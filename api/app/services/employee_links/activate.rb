@@ -40,7 +40,9 @@ module EmployeeLinks
     def call
       return Result.new(outcome: :failed, url: nil) unless EmployeeLinks.email_format?(@email)
 
-      prepared = Verify.call(**@check, request: @request) { |link| prepare(link) }
+      origin = @request&.headers&.[]("Origin")
+      admit = ->(link) { EmployeeLinks.activation_origin_allowed?(link.company, origin) }
+      prepared = Verify.call(**@check, request: @request, admit: admit) { |link| prepare(link) }
       return Result.new(outcome: :failed, url: nil) unless prepared
       return Result.new(outcome: :sign_in, url: nil) if prepared == :sign_in
 
