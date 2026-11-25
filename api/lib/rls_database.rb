@@ -83,6 +83,35 @@ module RlsDatabase
     end
   end
 
+  # Counts by phase, with the tables that differ from the majority, so a
+  # partial enforcement window reads at a glance.
+  def self.enforcement_summary(connection)
+    rows = table_status(connection)
+    enforced = rows.select { |row| row.fetch("enabled") && row.fetch("forced") }.map { |row| row.fetch("table") }
+    untouched = rows.reject { |row| row.fetch("enabled") || row.fetch("forced") }.map { |row| row.fetch("table") }
+    mixed = rows.map { |row| row.fetch("table") } - enforced - untouched
+    phase = if rows.size != RlsTables::PROTECTED_TABLES.size || rows.any? { |row| !row.fetch("policy") } then "not_installed"
+    elsif enforced.size == rows.size then "enforced"
+    elsif untouched.size == rows.size then "shadow"
+    else "partial"
+    end
+    {
+      "phase" => phase, "protected_tables" => RlsTables::PROTECTED_TABLES.size, "enforced_tables" => enforced.size,
+      "not_enforced" => (phase == "partial" ? untouched : []), "enabled_xor_forced" => mixed
+    }
+  end
+
+  # Fresh read of the kill switch: true, false, or nil when it is missing or
+  # unreadable. Operators and readiness use this; the guard uses bypass_state.
+  def self.kill_switch(connection)
+    return nil unless connection.select_value("SELECT to_regclass('#{SWITCH}') IS NOT NULL") == true
+
+    value = connection.select_value("SELECT bypass_enabled FROM #{SWITCH} WHERE singleton")
+    [ true, false ].include?(value) ? value : nil
+  rescue ActiveRecord::StatementInvalid
+    nil
+  end
+
   def self.login_link_decision_status(connection)
     row = connection.select_one(LOGIN_LINK_DECISION_STATUS)
     return { "installed" => false } unless row
