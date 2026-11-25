@@ -341,9 +341,16 @@ RSpec.describe DemoOutbound, :portal_notifications do
       relation = double(find_by: bind_link)
       allow(EmployeeAccountLink).to receive(:lock).and_return(relation)
       metadata = { "payroll_employee_link_id" => 1, "payroll_invite_generation" => 1 }
+      # A live login never binds a demo link (D5/D6 boundary), allow-listed or not.
       expect(EmployeeLinks::Bind.lock_link(outsider, metadata, azp: nil)).to be_nil
       outsider.update_columns(email: allowed)
-      expect(EmployeeLinks::Bind.lock_link(outsider.reload, metadata, azp: nil)).to eq(bind_link)
+      expect(EmployeeLinks::Bind.lock_link(outsider.reload, metadata, azp: nil)).to be_nil
+      outsider.update_columns(email: "elsewhere@client.example")
+
+      sign_up = create(:user, company: demo, organization: organization, role: "portal_employee", email: allowed)
+      expect(EmployeeLinks::Bind.lock_link(sign_up, metadata, azp: nil)).to eq(bind_link)
+      sign_up.update_columns(email: "unlisted@demo-mail.example")
+      expect(EmployeeLinks::Bind.lock_link(sign_up.reload, metadata, azp: nil)).to be_nil
     end
   end
 

@@ -1037,7 +1037,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060400) do
     t.check_constraint "failed_activation_attempts >= 0", name: "employee_account_links_failed_attempts_check"
     t.check_constraint "invite_delivery IS NULL OR (invite_delivery::text = ANY (ARRAY['email'::character varying::text, 'code'::character varying::text]))", name: "employee_account_links_invite_delivery_check"
     t.check_constraint "invite_generation >= 0", name: "employee_account_links_invite_generation_check"
-    t.check_constraint "payroll_environment::text = 'live'::text", name: "employee_account_links_live_only"
+    t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "employee_account_links_live_or_demo"
     t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
 

@@ -34,6 +34,9 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
   before do
     allow(EmployeeAppSwitch::Enforcement).to receive(:database_state) { database_state }
+    # This process stands in for the guarded employee service (a demo under
+    # the early-access waiver needs one).
+    allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
     allow(EmployeeAppSwitch::Readiness).to receive(:ping_employee_service) { @ping }
     observe!
     EmployeeTermsVersion.create!(version: "terms-1", status: terms_status, terms_url: "https://example.com/terms",
@@ -483,9 +486,6 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     let(:database_state) { shadow_state }
     let(:terms_status) { "draft" }
 
-    # This process stands in for the guarded employee service.
-    before { allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true) }
-
     def open_window!(company_ids: [ demo.id ], expires_on: PayrollBusinessClock.today + 7, user: owner, reason: "Owner approved rehearsal")
       put "#{path}/early_access", params: { expires_on: expires_on.iso8601, company_ids: company_ids, reason: reason },
         as: :json, headers: auth(user, target: demo)
@@ -761,15 +761,11 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "records Clerk revocations durably, retries them until confirmed, and a repeat stop queues no duplicates" do
       employee = create(:employee, company: demo)
-      login = build(:user, company: demo, organization: organization, role: :portal_employee, clerk_id: "user_demo_employee",
+      login = create(:user, company: demo, organization: organization, role: :portal_employee, clerk_id: "user_demo_employee",
         email: "demo.worker@demo-mail.example")
-      skip "Needs demo employee logins and links (demo D6, PR #585)" unless login.valid?
-
-      login.save!
-      probe = EmployeeAccountLink.new(company: demo, employee: employee, user: login, status: "active", activated_at: Time.current)
-      skip "Needs demo employee links (demo D6, PR #585)" unless probe.valid?
-
-      as_staff_in(demo) { probe.save! }
+      as_staff_in(demo) do
+        EmployeeAccountLink.create!(company: demo, employee: employee, user: login, status: "active", activated_at: Time.current)
+      end
       turn_on_directly!(demo, %w[employee_portal_enabled])
       clerk = instance_double(ClerkInvitationService)
       allow(ClerkInvitationService).to receive(:new).and_return(clerk)
@@ -822,9 +818,6 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "revokes pending demo invitations and their Clerk sign-up invitations" do
       employee = create(:employee, company: demo)
-      probe = EmployeeAccountLink.new(company: demo, employee: employee, status: "invited")
-      skip "Needs demo employee links (demo D6, PR #585)" unless probe.valid?
-
       # In shadow mode a demo's app is open only under an early-access window.
       EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ demo.id ], expires_on: PayrollBusinessClock.today + 5,
         reason: "Owner approved", set_by: owner)
@@ -852,8 +845,6 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
   describe "invitation issuance during a stop" do
     it "issues a demo invitation only under the company lock with the app still on" do
       employee = create(:employee, company: demo)
-      skip "Needs demo employee links (demo D6, PR #585)" unless EmployeeAccountLink.new(company: demo, employee: employee, status: "invited").valid?
-
       turn_on_directly!(demo, %w[employee_portal_enabled])
       locked = []
       allow(EmployeeLinks).to receive(:lock_for_issuance!).and_wrap_original { |original, company| locked << company.id; original.call(company) }

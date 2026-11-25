@@ -1139,6 +1139,27 @@ BEFORE UPDATE OF kind, version, title, text, digest, status, published_at ON del
 FOR EACH ROW
 EXECUTE FUNCTION prevent_delivery_disclosure_mutation();
 
+-- 20261126050000_allow_demo_employee_account_links.rb
+CREATE OR REPLACE FUNCTION employee_account_links_live_or_demo_company() RETURNS trigger AS $$
+BEGIN
+  IF NEW.payroll_environment <> 'live' AND NOT EXISTS (
+    SELECT 1 FROM companies
+    WHERE id = NEW.company_id AND payroll_environment = 'migration_rehearsal'
+      AND COALESCE(test_workspace_purpose, '') = 'demo'
+  ) THEN
+    RAISE EXCEPTION 'employee_account_links must belong to a live or demo company'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS employee_account_links_live_or_demo_company ON employee_account_links;
+CREATE TRIGGER employee_account_links_live_or_demo_company
+BEFORE INSERT OR UPDATE OF company_id, payroll_environment ON employee_account_links
+FOR EACH ROW
+EXECUTE FUNCTION employee_account_links_live_or_demo_company();
+
 -- 20261126060100_create_employee_app_early_access_windows.rb
 CREATE OR REPLACE FUNCTION protect_employee_app_early_access_window() RETURNS trigger AS $$
 BEGIN

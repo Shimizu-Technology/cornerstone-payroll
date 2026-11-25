@@ -492,16 +492,10 @@ RSpec.describe "View-only support sessions", type: :request do
         { user_id: client.id, company_id: demo.id }
       ])
       demo_employee = create(:employee, company: demo)
-      enable_employee_surface!(demo)
-      get "#{grant_path}/targets", headers: authenticated.merge("X-Company-Id" => demo.id.to_s)
-      expect(response).to have_http_status(:ok)
-      expect(response.parsed_body).to include("employees" => [], "employee_site_enabled" => false)
 
       start(demo_login, from: company)
       expect(response).to have_http_status(:not_found)
       start(client, from: demo)
-      expect(response).to have_http_status(:not_found)
-      start(demo_employee, from: demo, type: "employee")
       expect(response).to have_http_status(:not_found)
 
       headers = viewing(token_for(demo_login, from: demo))
@@ -550,6 +544,77 @@ RSpec.describe "View-only support sessions", type: :request do
       assignment.update!(expires_at: 1.minute.ago)
       get grant_path, headers: viewing(token)
       expect(response).to have_http_status(:not_found)
+    end
+
+    describe "employee views" do
+      let(:demo_origin) { "https://demo-view-fixture.shimizu-technology.com" }
+      let(:demo_employee) { create(:employee, company: demo, first_name: "Robin", last_name: "Lantern") }
+      let(:demo_worker) { create(:user, company: demo, role: :portal_employee, email: demo_email, clerk_id: "user_demo_worker") }
+
+      before do
+        # M4-9d: in shadow mode a demo opens only under the owner's early-access
+        # window, on a process running the RLS guard as the restricted role.
+        allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
+          .and_return({ phase: "shadow", enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 1 })
+        allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
+        owner = create(:user, role: :super_admin, company: company, organization: company.organization)
+        EmployeeAppEarlyAccessWindow.create!(organization: demo.organization, company_ids: [ demo.id ],
+          expires_on: PayrollBusinessClock.today + 7, reason: "Owner approved the demo rehearsal", set_by: owner)
+        enable_employee_surface!(demo)
+      end
+
+      it "views a demo employee like a live client's, inside the demo company only" do
+        link = EmployeeAccountLink.create!(user: demo_worker, company: demo, employee: demo_employee, status: "active")
+        get "#{grant_path}/targets", headers: authenticated.merge("X-Company-Id" => demo.id.to_s)
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body).to include("employee_site_enabled" => true)
+        expect(response.parsed_body.fetch("employees").pluck("id")).to eq([ demo_employee.id.to_s ])
+
+        start(demo_employee, from: company, type: "employee")
+        expect(response).to have_http_status(:not_found)
+
+        token = token_for(demo_employee, type: "employee", from: demo)
+        expect(response.parsed_body).to include("employee_url" => demo_origin)
+        expect(ViewAsGrant.last).to have_attributes(company_id: demo.id, target_employee_id: demo_employee.id)
+
+        headers = viewing(token, azp: demo_origin)
+        get grant_path, headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("link", "status")).to eq("active")
+        get "/api/v1/employee/context", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.body).not_to match(/demo|practice|test workspace/i)
+        get "/api/v1/employee/profile", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body).to include("legal_name" => demo_employee.full_name)
+        # View-only: the demo employee's link and login are untouched.
+        patch "/api/v1/employee/profile/phone", headers: headers, params: { phone: "6715550161" }, as: :json
+        expect(response.status).to be_between(400, 404)
+        expect(link.reload).to have_attributes(status: "active", user_id: demo_worker.id)
+
+        # The grant stays on the demo host; a live client's host never opens it.
+        enable_employee_surface!
+        get grant_path, headers: viewing(token, azp: employee_origin)
+        expect(response).to have_http_status(:not_found)
+        get "/api/v1/employee/context", headers: viewing(token, azp: employee_origin)
+        expect(response.status).to be_in([ 401, 404 ])
+      end
+
+      it "never crosses between demo and live employees" do
+        enable_employee_surface!
+        # A live employee from the demo company, or a demo employee from a live one.
+        start(employee, from: demo, type: "employee")
+        expect(response).to have_http_status(:not_found)
+        start(demo_employee, from: company, type: "employee")
+        expect(response).to have_http_status(:not_found)
+
+        # A demo employee reached through a link a live login holds.
+        live_worker = create(:user, company: company, role: :portal_employee, clerk_id: "user_live_worker")
+        EmployeeAccountLink.create!(user: live_worker, company: demo, employee: demo_employee, status: "active")
+        start(demo_employee, from: demo, type: "employee")
+        expect(response).to have_http_status(:not_found)
+        expect(ViewAsGrant.count).to eq(0)
+      end
     end
 
     it "refuses to view a live employee through a link held by a demo identity" do

@@ -22,7 +22,17 @@ class ProductionReadiness
     IPAddr.new("fe80::/10")
   ].freeze
 
-  Check = Data.define(:name, :passed, :detail)
+  Check = Data.define(:name, :passed, :detail, :advisory) do
+    def initialize(name:, passed:, detail:, advisory: false)
+      super(name: name, passed: passed, detail: detail, advisory: advisory)
+    end
+
+    def status
+      return "PASS" if passed
+
+      advisory ? "WARN" : "FAIL"
+    end
+  end
 
   class Report
     attr_reader :checks, :generated_at, :revision
@@ -35,11 +45,15 @@ class ProductionReadiness
     end
 
     def passed?
-      checks.all?(&:passed)
+      failures.empty?
     end
 
     def failures
-      checks.reject(&:passed)
+      checks.reject { |check| check.passed || check.advisory }
+    end
+
+    def warnings
+      checks.select { |check| !check.passed && check.advisory }
     end
 
     def as_json(*)
@@ -47,7 +61,7 @@ class ProductionReadiness
         generated_at: generated_at.iso8601,
         revision: revision,
         passed: passed?,
-        checks: checks.map { |check| { name: check.name, passed: check.passed, detail: check.detail } },
+        checks: checks.map { |check| check.to_h.merge(status: check.status) },
         connected_payroll: @connected_payroll
       }
     end
@@ -132,7 +146,20 @@ class ProductionReadiness
     :process_role, :route_paths, :cable_mount_path, :primary_pool_size, :rate_limit_store, :rate_limit_probe
 
   def configuration_checks
-    base_configuration_checks + employee_web_checks
+    checks = base_configuration_checks + employee_web_checks
+    checks << resend_webhook_check unless employee_web?
+    checks
+  end
+
+  def resend_webhook_check
+    secret = env["RESEND_WEBHOOK_SECRET"].to_s
+    configured = secret.start_with?("whsec_") && secret.length > "whsec_".length
+    Check.new(
+      name: "Resend webhook signing secret is configured",
+      passed: configured,
+      advisory: true,
+      detail: configured ? "configured" : "Set RESEND_WEBHOOK_SECRET to the signing secret from the Resend webhook details (starts with whsec_)"
+    )
   end
 
   def employee_web?

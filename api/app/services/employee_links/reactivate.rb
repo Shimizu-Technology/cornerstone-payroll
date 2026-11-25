@@ -19,6 +19,7 @@ module EmployeeLinks
       user.portal_employee? && !user.active? && user.deactivation_reason == "last_employee_link_closed" &&
         user.deactivated_at.present? && user.clerk_id.present? && !user.clerk_id.start_with?("pending_") &&
         user.invitation_status == "accepted" && user.organization&.active? && user.practice_company_id.nil? &&
+        EmployeeLinks.demo_login_allowed?(user) &&
         EmployeeAccountLink.where(user_id: user.id, employee_id: [ employee.id, employee.previous_employee_id ].compact,
           status: %w[former revoked]).exists?
     end
