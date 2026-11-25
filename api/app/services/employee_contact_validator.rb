@@ -587,6 +587,7 @@ class EmployeeContactValidator
   end
 
   def staff_can_confirm_login_email?(login_user)
+    return false if @source == "employee"
     return false unless @actor&.staff_member? && @company.present?
     return false unless @actor.can_access_company?(@company.id)
     return false unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @company)

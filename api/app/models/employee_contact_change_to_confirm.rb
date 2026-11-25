@@ -24,7 +24,7 @@ class EmployeeContactChangeToConfirm < ApplicationRecord
 
   # Called in the transaction that applies the employee change. The same entry
   # powers the client activity view and the payroll confirmation queue.
-  def self.record!(employee:, actor:, before_values:, after_values:, reviewer: nil)
+  def self.record!(employee:, actor:, before_values:, after_values:, reviewer: nil, notify_staff: false)
     return if employee.portal_pending_approval?
 
     before_values = before_values.stringify_keys.transform_values(&:presence)
@@ -37,7 +37,7 @@ class EmployeeContactChangeToConfirm < ApplicationRecord
         company_id: employee.company_id, employee: employee, changed_by: actor, change_kind: kind,
         before_values: changed.keys.index_with { |field| before_values[field] }, after_values: changed
       )
-      PortalNotifications.employee_contact_changed!(entry, actor: reviewer || actor)
+      PortalNotifications.employee_contact_changed!(entry, actor: reviewer || actor, notify_staff: notify_staff)
     end
   end
 

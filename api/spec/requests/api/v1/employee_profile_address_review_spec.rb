@@ -259,17 +259,17 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     expect(response.parsed_body.fetch("unconfirmed_contact_changes")).to eq(1)
   end
 
-  it "uses the verified employee address for an opt-in decision notice and rechecks it before send" do
+  it "uses the verified employee address for the decision notice and rechecks it before send" do
     change_request = system_read do
       @employee.update!(email: "worker@example.test", email_verified_at: Time.current)
       address_request_for(@employee)
     end
-    patch "#{requests_path}/#{change_request.id}/reject", headers: headers(@reviewer)
-    expect(response).to have_http_status(:ok), response.body
-
     with_portal_email do
+      patch "#{requests_path}/#{change_request.id}/reject", headers: headers(@reviewer)
+      expect(response).to have_http_status(:ok), response.body
+
       system_read do
-        event = PortalNotifications.employee_address_decided!(change_request.reload, actor: @reviewer)
+        event = PortalNotificationEvent.find_by!(subject: change_request, event_type: "employee_address_decided")
         delivery = event.deliveries.sole
         expect(delivery).to have_attributes(user_id: nil, recipient_email: "worker@example.test", status: "pending")
         expect(PortalNotifications::Email.new(audience: "employee", delivery_mode: "immediate", events: [ event ]).link)
