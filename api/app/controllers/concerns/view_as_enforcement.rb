@@ -8,7 +8,7 @@ module ViewAsEnforcement
   included do
     before_action :apply_view_as_grant
     around_action :prevent_view_as_writes
-    rescue_from ActiveRecord::ReadOnlyError, with: :deny_view_as_write
+    rescue_from ActiveRecord::ReadOnlyError, with: :view_as_side_effect_unavailable
   end
 
   private
@@ -50,7 +50,8 @@ module ViewAsEnforcement
         @current_user = target
       end
     end
-    Current.view_as_grant = grant
+    @view_as_real_user = Current.real_user
+    @applied_view_as_grant = Current.view_as_grant = grant
     Current.company_id = @current_company_id = grant.company_id
     Current.organization_id = grant.company.organization_id
     Current.user = @current_user
@@ -105,9 +106,14 @@ module ViewAsEnforcement
     render json: { error: "This support view is unavailable or has ended.", code: "view_as_unavailable" }, status: :not_found
   end
 
-  def deny_view_as_write(error = nil)
-    raise error if error && !view_as_requested?
+  def view_as_side_effect_unavailable(error)
+    raise error unless @applied_view_as_grant
 
+    render json: { error: "This action is unavailable while viewing as another user.", code: "view_as_read_only" },
+      status: :unprocessable_content
+  end
+
+  def deny_view_as_write
     render json: { error: "This support session is view only.", code: "view_as_read_only" }, status: :forbidden
   end
 end

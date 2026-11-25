@@ -10,9 +10,16 @@ class ViewAsEmployeeContext
   delegate :id, to: :employee, prefix: true
 
   def self.resolve(employee, company)
+    return unless EmployeeAccountLink.portal_enabled_for?(company)
+
     links = EmployeeAccountLink.where(company: company, employee: employee)
+    now = Time.current
+    return if links.where(status: %w[invited active former]).where("activation_locked_until > ?", now).exists?
+
     link = links.where(status: %w[active former]).order(created_at: :desc, id: :desc).first
     if link
+      return if link.former? && !(link.former_access_until && link.former_access_until > now)
+
       user = link.user
       return unless user&.active? && !user.staff_member? && user.organization_id == company.organization_id
     end
@@ -21,7 +28,7 @@ class ViewAsEmployeeContext
     end
 
     context = new(employee, company, link)
-    return if context.former? && context.former_access_until && context.former_access_until <= Time.current
+    return if context.former? && !(context.former_access_until && context.former_access_until > now)
 
     context
   end
@@ -33,8 +40,7 @@ class ViewAsEmployeeContext
     @status = employee.active? && !link&.former? ? "active" : "former"
     @former_access_until = link&.former_access_until
     if former? && @former_access_until.nil? && employee.termination_date
-      years = EmployeeLinks::Close.former_access_years(company)
-      @former_access_until = (employee.termination_date + years.years).in_time_zone(PayrollBusinessClock::TIME_ZONE).end_of_day
+      @former_access_until = EmployeeLinks::Close.former_access_deadline(company, employee.termination_date)
     end
   end
 
