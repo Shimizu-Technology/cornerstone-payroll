@@ -37,9 +37,21 @@ module EmployeeLinks
       )
       link_id = link.id
       ActiveRecord.after_all_transactions_commit do
-        SendEmployeeActivationNoticeJob.perform_later(link_id)
+        enqueue_delivery(link_id)
       end
       true
+    end
+
+    # Enqueues background delivery after the activation transaction commits.
+    # Solid Queue / DB enqueue errors must never fail an already-committed
+    # activation request; leave the notice pending for the recurring sweep.
+    def enqueue_delivery(link_id)
+      SendEmployeeActivationNoticeJob.perform_later(link_id)
+    rescue StandardError => error
+      Rails.logger.warn(
+        "[EmployeeLinks::ActivationNoticeEmail] Failed to enqueue activation notice for link #{link_id} " \
+        "(#{error.class}); leaving pending for recurring retry sweep"
+      )
     end
 
     # Dispatches a persisted pending/failed activation notice.

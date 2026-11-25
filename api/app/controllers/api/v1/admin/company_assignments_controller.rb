@@ -106,8 +106,9 @@ module Api
             current_assignment = user.company_assignments.find_by(id: assignment.id)
             next unless current_assignment
 
+            had_effective_grant = user.client? && user.active? && user.has_effective_client_grant?
             current_assignment.destroy!
-            if user.client? && user.active? && !user.has_effective_client_grant?
+            if had_effective_grant && !user.has_effective_client_grant?
               refused = true
               raise ActiveRecord::Rollback
             end
@@ -138,6 +139,7 @@ module Api
           refused = false
           CompanyAssignment.transaction do
             user.lock!
+            had_effective_grant = user.client? && user.active? && user.has_effective_client_grant?
             existing_assignments = user.company_assignments.includes(:company).to_a
             retained_assignments = existing_assignments.select { |assignment| company_ids.include?(assignment.company_id) }
             new_company_ids = company_ids - existing_assignments.map(&:company_id)
@@ -158,7 +160,7 @@ module Api
               )
             end
 
-            if user.client? && user.active? && !user.has_effective_client_grant?
+            if had_effective_grant && !user.has_effective_client_grant?
               refused = true
               raise ActiveRecord::Rollback
             end
