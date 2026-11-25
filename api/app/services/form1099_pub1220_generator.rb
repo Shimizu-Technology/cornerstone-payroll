@@ -34,6 +34,9 @@ class Form1099Pub1220Generator
   end
 
   def generate
+    # The GuamTax e-file is an electronic filing; a demo never produces one.
+    raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
+
     found = problems
     raise InvalidFile, found if found.any?
 
@@ -41,6 +44,14 @@ class Form1099Pub1220Generator
     records.each_with_index { |r, i| number(r, 500, 8, i + 1) }
     self_check!(records)
     records.join
+  end
+
+  # The 1096 totals for the payees the sign-off covers, without building the
+  # e-file (which also needs the firm's transmitter profile).
+  def payee_totals
+    { forms: @rows.length,
+      box1_cents: @rows.sum { |row| cents(row.fetch(:total_compensation)) },
+      box4_cents: @rows.sum { |row| cents(row.fetch(:federal_withheld)) } }
   end
 
   def problems

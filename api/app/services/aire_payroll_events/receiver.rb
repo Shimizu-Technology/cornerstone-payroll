@@ -73,6 +73,8 @@ module AirePayrollEvents
 
       source = calendar_period.time_tracking_source
       raise UnauthorizedError, "Invalid AIRE integration credentials" unless source.active?
+      # A demo company never accepts inbound AIRE events.
+      raise UnauthorizedError, "Invalid AIRE integration credentials" if source.company&.demo? || calendar_period.company&.demo?
 
       expected = source.shared_secret.to_s
       authenticated = expected.present? && @shared_secret.present? &&

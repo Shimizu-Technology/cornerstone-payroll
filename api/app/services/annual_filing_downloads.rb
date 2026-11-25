@@ -45,7 +45,7 @@ class AnnualFilingDownloads
   def final?(current)
     if @filing_type == "w2_gu_w3_ss"
       readiness = W2FilingReadiness.find_by(company_id: @company.id, year: @year)
-      !@company.test_workspace? && W2GuOfficialCopies.final?(company: @company, year: @year, readiness: readiness, fingerprint: current)
+      !@company.practice_copy? && W2GuOfficialCopies.final?(company: @company, year: @year, readiness: readiness, fingerprint: current)
     else
       Form1099Readiness.final?(company: @company, year: @year)
     end
