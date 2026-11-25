@@ -102,8 +102,8 @@ function SupportForm({ companyId, companyName }: { companyId: number; companyNam
             </select>
           </label>
           {targetError && (
-            <div id="support-target-error" role="alert" className="-mt-2 flex flex-wrap items-center gap-3 text-sm text-red-800">
-              <span>{targetError}</span>
+            <div role="alert" className="-mt-2 flex flex-wrap items-center gap-3 text-sm text-red-800">
+              <span id="support-target-error">{targetError}</span>
               <Button type="button" variant="outline" size="sm" onClick={retryLoad}>Try again</Button>
             </div>
           )}

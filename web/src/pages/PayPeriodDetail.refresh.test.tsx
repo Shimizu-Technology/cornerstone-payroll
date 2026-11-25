@@ -254,6 +254,33 @@ it('checks a committed run for a FIT deposit override without opening Checks', a
   expect(screen.queryByTestId('processing-check-list-refresh-token')).toBeNull();
 });
 
+it('rechecks the FIT deposit override after a void while Checks was never opened', async (): Promise<void> => {
+  vi.clearAllMocks();
+  mockCommittedRunReads();
+  const overridden = { id: 5, check_type: 'tax_deposit', auto_generated_type: 'fit_deposit', amount: '25.00', voided: false };
+  apiMocks.nonEmployeeChecksList.mockResolvedValueOnce({ non_employee_checks: [overridden] })
+    .mockResolvedValue({ non_employee_checks: [{ ...overridden, voided: true }] });
+  const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0, gross_pay: 64, net_pay: 44, withholding_tax: 20 };
+  const period = { ...initialPayPeriod, payroll_items: [item] } as unknown as PayPeriod;
+  const voided = { ...period, correction_status: 'voided' } as unknown as PayPeriod;
+  const view = (refreshToken: number) => (
+    <MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}>
+      <Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={
+        <PayPeriodDetailPage initialPayPeriod={period} activeTab="work" refreshToken={refreshToken} />
+      } /></Routes>
+    </MemoryRouter>
+  );
+  apiMocks.get.mockResolvedValue({ pay_period: voided });
+  const { rerender } = render(view(0));
+  expect(await screen.findByText('FIT deposit overridden')).toBeTruthy();
+
+  // The void from Activity reloads the run and bumps the check refresh token.
+  rerender(view(1));
+  await waitFor(() => expect(apiMocks.nonEmployeeChecksList).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(screen.queryByText('FIT deposit overridden')).toBeNull());
+  expect(screen.queryByTestId('processing-check-list-refresh-token')).toBeNull();
+});
+
 it('leaves the non-employee check list to the Checks tab when the run opens there', async (): Promise<void> => {
   vi.clearAllMocks();
   mockCommittedRunReads();

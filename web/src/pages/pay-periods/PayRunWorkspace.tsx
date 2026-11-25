@@ -503,7 +503,7 @@ function PayRunChecks({ externalRefreshToken = 0, showDraftPaymentControls = tru
       <PayrollPreviewCard key={payRun.id} payPeriod={payRun} onDownloaded={refreshPayRunSummary} />
       <PayrollItemReviewDialog companyId={companyId} payRunId={payRun.id} item={reviewingItem} returnTo={returnTo} onClose={() => setReviewingItem(null)} />
       {!readOnly && <Link to="/check-settings" className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-700">Check Settings ›</Link>}
-      <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />
+      {mockPreview && <PdfPreview artifact={mockPreview} onClose={() => setMockPreview(null)} />}
       {paymentNotice && (
         <ActionFeedback tone="success" message={paymentNotice}><strong>Ready to print.</strong> {paymentNotice}</ActionFeedback>
       )}
