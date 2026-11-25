@@ -57,6 +57,8 @@ interface PayrollItemEditModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
+  /** The payroll's pay date (YYYY-MM-DD); check dates must share its tax year. */
+  payDate?: string;
   item: PayrollItem | null;
   onSaved: (updated: PayrollItem) => void;
   onRemoved?: (id: number) => void;
@@ -99,6 +101,7 @@ export function PayrollItemEditModal({
   open,
   onOpenChange,
   payPeriodId,
+  payDate,
   item,
   onSaved,
   onRemoved,
@@ -106,6 +109,7 @@ export function PayrollItemEditModal({
   wageRates = EMPTY_WAGE_RATES,
 }: PayrollItemEditModalProps) {
   const inputId = useId();
+  const taxYear = payDate?.slice(0, 4);
   const [fields, setFields] = useState<EditableFields>({
     hours_worked: 0,
     overtime_hours: 0,
@@ -930,11 +934,16 @@ export function PayrollItemEditModal({
                   id={`${inputId}-check_date`}
                   type="date"
                   value={fields.check_date}
+                  min={taxYear ? `${taxYear}-01-01` : undefined}
+                  max={taxYear ? `${taxYear}-12-31` : undefined}
                   onChange={(e) => handleChange('check_date', e.target.value)}
                 />
                 <p className="text-xs text-gray-400 mt-0.5">
                   Overrides the pay date shown on this check
                 </p>
+                {taxYear && (
+                  <p className="text-xs text-gray-400">Must be in {taxYear}, the pay date&apos;s tax year</p>
+                )}
               </div>
               <div>
                 <label htmlFor={`${inputId}-check_memo`} className="block text-xs text-gray-500 mb-1">Check Memo</label>

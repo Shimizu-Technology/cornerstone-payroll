@@ -6,11 +6,14 @@ module EmployeeDocuments
 
     # Locked QuickBooks checks paid before the first native payday that still
     # stands, the same locked history staff reports and W-2GU count. A voided
-    # run never paid anyone, so it doesn't move the cutover; with no native
-    # run committed yet, every locked check shows.
+    # run never paid anyone, so it doesn't move the cutover, but its committed
+    # correction run did pay and its stubs show; with no native run committed
+    # yet, every locked check shows. Record-only promotions can't overlap a
+    # shown check: their pay dates must follow the YTD bridge's last
+    # QuickBooks pay date (PayPeriod#starts_after_historical_ytd_boundary).
     def self.scope(company_id)
       cutover = PayPeriod.reportable_committed
-        .where(company_id: company_id, source_pay_period_id: nil, test_workspace_role: nil, test_workspace_source_pay_period_id: nil)
+        .where(company_id: company_id, test_workspace_role: nil, test_workspace_source_pay_period_id: nil)
         .where("promotion_payment_disposition IS DISTINCT FROM 'record_only'").minimum(:pay_date)
 
       checks = HistoricalPaycheck.joins(:historical_import_batch, :historical_pay_period, :employee)

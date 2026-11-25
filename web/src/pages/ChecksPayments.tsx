@@ -25,7 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { PayrollLiabilityCenter } from '@/components/payroll/PayrollLiabilityCenter';
 import { CheckRegister } from '@/components/checks/CheckRegister';
 import { formatDateRange, formatGuamDate } from '@/lib/utils';
-import { guamBusinessDate } from '@/lib/payrollBusinessDate';
+import { guamBusinessDate, guamTaxPeriod } from '@/lib/payrollBusinessDate';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -94,15 +94,9 @@ interface FormState {
   liability_entry_ids: number[];
 }
 
-function localDateString() {
-  const date = new Date();
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function initialFormState(): FormState {
+// Defaults follow the Guam business date, like the register export.
+// eslint-disable-next-line react-refresh/only-export-components
+export function initialFormState(): FormState {
   const today = new Date();
   return {
     pay_period_id: null,
@@ -112,11 +106,9 @@ function initialFormState(): FormState {
     check_number: '',
     payment_method: 'check',
     payment_period_type: 'month',
-    tax_year: String(today.getFullYear()),
-    tax_quarter: String(Math.floor(today.getMonth() / 3) + 1),
-    tax_month: String(today.getMonth() + 1),
+    ...guamTaxPeriod(today),
     due_date: '',
-    payment_date: localDateString(),
+    payment_date: guamBusinessDate(today),
     confirmation_number: '',
     memo: '',
     reference_number: '',
@@ -179,7 +171,7 @@ export function ChecksPayments() {
   const [linkLoading, setLinkLoading] = useState(false);
   const [checkRegisterRefreshVersion, setCheckRegisterRefreshVersion] = useState(0);
   const [paymentConfirmation, setPaymentConfirmation] = useState('');
-  const [paymentDate, setPaymentDate] = useState(localDateString());
+  const [paymentDate, setPaymentDate] = useState(guamBusinessDate());
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -319,7 +311,7 @@ export function ChecksPayments() {
       tax_quarter: check.tax_quarter ? String(check.tax_quarter) : String(Math.floor(new Date().getMonth() / 3) + 1),
       tax_month: check.tax_month ? String(check.tax_month) : String(new Date().getMonth() + 1),
       due_date: check.due_date || '',
-      payment_date: localDateString(),
+      payment_date: guamBusinessDate(),
       confirmation_number: '',
       memo: check.memo || '',
       reference_number: check.reference_number || '',
@@ -893,7 +885,7 @@ export function ChecksPayments() {
                           size="sm"
                           onClick={() => {
                             setPayingCheck(check);
-                            setPaymentDate(check.payment_date || localDateString());
+                            setPaymentDate(check.payment_date || guamBusinessDate());
                             setPaymentConfirmation(check.confirmation_number || '');
                           }}
                           disabled={busyId === check.id || (check.payment_method === 'check' && !['prepared', 'printed'].includes(check.check_status))}

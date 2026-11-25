@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ClientReports } from './ClientReports';
 import { clientReportCatalog } from './clientReportCatalog';
+import { guamTaxPeriod } from '@/lib/payrollBusinessDate';
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 const api = vi.hoisted(() => ({ periods: vi.fn(), employees: vi.fn(), register: vi.fn(), taxSummary: vi.fn(), annual: vi.fn(), ytd: vi.fn() }));
 vi.mock('@/services/api', () => ({
@@ -46,7 +47,20 @@ it('shows the imported payroll exclusion only for the selected tax range', async
 
   fireEvent.change(quarter, { target: { value: '1' } });
   expect(screen.queryByText(statement)).toBeNull();
-  await waitFor(() => expect(api.taxSummary).toHaveBeenLastCalledWith({ year: new Date().getFullYear(), quarter: '1' }));
+  await waitFor(() => expect(api.taxSummary).toHaveBeenLastCalledWith({ year: Number(guamTaxPeriod().tax_year), quarter: '1' }));
+});
+
+it("opens on Guam's tax year, quarter and date while California is still on Dec 31", async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2025-12-31T14:30:00Z'));
+  try {
+    render(<ClientReports />);
+    await waitFor(() => expect(api.taxSummary).toHaveBeenCalledWith({ year: 2026, quarter: '1' }));
+    expect((screen.getByLabelText('Client report start date') as HTMLInputElement).value).toBe('2026-01-01');
+    expect((screen.getByLabelText('Client report end date') as HTMLInputElement).value).toBe('2026-01-01');
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('selects only committed and baseline payroll when newer runs await approval', async () => {

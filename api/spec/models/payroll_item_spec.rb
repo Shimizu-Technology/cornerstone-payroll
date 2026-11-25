@@ -18,6 +18,32 @@ RSpec.describe PayrollItem, type: :model do
         "W-2GU and year-to-date totals count this check in that year; change the payroll's pay date instead."
       )
     end
+
+    it "tells staff to keep a committed payroll's year or void and re-run it, since its pay date can't change year" do
+      item
+      pay_period.update_columns(status: "committed")
+
+      expect(item.reload.update(check_date: Date.new(2027, 1, 2))).to be(false)
+      expect(item.errors.full_messages).to include(
+        "Check date must be in 2026, the year of this payroll's pay date (Dec 31, 2026). " \
+        "W-2GU and year-to-date totals count this check in that year; " \
+        "use a check date in 2026, or void and re-run the payroll in 2027."
+      )
+    end
+
+    it "keeps an editable payroll's pay date from leaving a check date behind in the old year" do
+      item.update!(check_date: Date.new(2026, 12, 30))
+
+      expect(pay_period.reload.update(pay_date: Date.new(2027, 1, 2))).to be(false)
+      expect(pay_period.errors.full_messages).to include(
+        "Pay date can't move to 2027 while checks on this payroll are dated in another year. " \
+        "Clear or update those check dates first."
+      )
+      expect(pay_period.reload.pay_date).to eq(Date.new(2026, 12, 31))
+
+      item.update!(check_date: nil)
+      expect(pay_period.update(pay_date: Date.new(2027, 1, 2))).to be(true)
+    end
   end
 
   describe "pay precision normalization" do

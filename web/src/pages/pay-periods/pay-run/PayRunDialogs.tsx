@@ -165,6 +165,7 @@ export function PayRunDialogs({
         open={editingItem !== null}
         onOpenChange={(isOpen) => { if (!isOpen) setEditingItem(null); }}
         payPeriodId={payPeriod.id}
+        payDate={payPeriod.pay_date}
         item={editingItem}
         onSaved={handlePayrollItemSaved}
         onRemoved={(id) => {
