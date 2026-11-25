@@ -90,7 +90,9 @@ export function ClientDashboard(): ReactElement {
         )}
 
         <Card>
-          <CardHeader><CardTitle>Needs your attention</CardTitle></CardHeader>
+          <CardHeader>
+            <h2 className="font-display text-lg font-bold tracking-tight text-neutral-950">Needs your attention</h2>
+          </CardHeader>
           <CardContent className="space-y-3 text-sm">
             {loading ? <p role="status">Checking for payroll approvals…</p> : payroll && (
               attention.length ? (
