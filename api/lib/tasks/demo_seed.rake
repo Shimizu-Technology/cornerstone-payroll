@@ -42,3 +42,15 @@ namespace :demo do
     abort "FAIL  demo:invite_clients #{e.message}"
   end
 end
+
+namespace :demo do
+  desc "Give the demo employees their allow-listed email aliases in roster order (ORGANIZATION_ID, EMAILS comma separated). Safe to rerun."
+  task assign_employee_emails: :environment do
+    organization = TenantScope.as_system(reason: "Find the demo employee email organization") { Organization.find(ENV.fetch("ORGANIZATION_ID")) }
+    outcomes = DemoCompany::AssignEmployeeEmails.new(organization: organization, emails: ENV.fetch("EMAILS")).call
+    # Addresses are printed by domain only.
+    outcomes.each { |outcome| puts "OK    demo:assign_employee_emails #{outcome.name} #{outcome.email.split('@').last} #{outcome.status}" }
+  rescue DemoCompany::AssignEmployeeEmails::Refused, ActiveRecord::RecordInvalid, KeyError => e
+    abort "FAIL  demo:assign_employee_emails #{e.message}"
+  end
+end
