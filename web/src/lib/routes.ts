@@ -78,6 +78,10 @@ export function payRunsPath(companyId: number, query = ''): string {
   return `${companyPath(companyId)}/pay-runs${normalizeQuery(query)}`;
 }
 
+export function employeeAppRolloutPath(companyId: number): string {
+  return `${companyPath(companyId)}/employee-app/rollout`;
+}
+
 export function employeeAppSettingsPath(companyId: number): string {
   return `${companyPath(companyId)}/employee-app`;
 }

@@ -11,10 +11,10 @@ module RlsTables
     check_print_runs check_reconciliation_events check_signoff_sheets
     check_supersession_rollout_approvals client_documents client_operating_profiles
     client_portal_messages client_portal_threads company_help_contacts company_pay_schedules company_workweeks
-    company_ytd_totals daily_time_records deduction_types department_ytd_totals departments
+    company_ytd_totals daily_time_records deduction_types delivery_consents department_ytd_totals departments
     direct_deposit_payment_confirmations employee_account_links employee_change_requests
-    employee_compensation_changes employee_configuration_review_resolutions employee_deductions
-    employee_document_requirement_events employee_document_requirements employee_documents employee_loans employee_notes
+    employee_compensation_changes employee_configuration_review_resolutions employee_contact_changes_to_confirm employee_deductions
+    employee_document_notices employee_document_requirement_events employee_document_requirements employee_documents employee_emergency_contacts employee_loans employee_notes
     employee_payroll_fields employee_retirement_elections employee_retirement_year_inputs
     employee_status_events employee_tipped_occupations employee_w4_elections employee_wage_rate_versions
     employee_wage_rates employee_work_profiles employee_year_fica_source_reviews employee_ytd_totals
@@ -44,7 +44,7 @@ module RlsTables
     time_tracking_employee_mappings time_tracking_entry_allocations
     time_tracking_financial_correction_links time_tracking_imports time_tracking_late_hours_runs
     time_tracking_legacy_identity_bindings time_tracking_manual_allocations time_tracking_sources
-    timecards training_replay_benchmarks transmittals w2_filing_readinesses year_end_acknowledgements
+    timecards training_replay_benchmarks transmittals view_as_grants w2_filing_readinesses year_end_acknowledgements
   ].freeze
 
   # Child => [parent, foreign key]
@@ -74,7 +74,7 @@ module RlsTables
   ].freeze
 
   RLS_GLOBAL_TABLES = %w[
-    annual_retirement_limits annual_tax_configs filing_status_configs information_return_thresholds
+    annual_retirement_limits annual_tax_configs delivery_disclosures email_provider_events filing_status_configs information_return_thresholds
     operational_queue_probes solid_queue_blocked_executions solid_queue_claimed_executions
     solid_queue_failed_executions solid_queue_jobs solid_queue_pauses solid_queue_processes
     solid_queue_ready_executions solid_queue_recurring_executions solid_queue_recurring_tasks

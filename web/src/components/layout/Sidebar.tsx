@@ -33,7 +33,7 @@ import {
   PanelLeftOpen,
   Files,
   LogOut,
-  UserCircle,
+  ShieldCheck,
   ArchiveRestore,
   Route,
   MessagesSquare,
@@ -47,7 +47,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeeAppSettingsPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeAppRolloutPath, employeeAppSettingsPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -68,6 +68,7 @@ const clientNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Inbox', href: '/app/client-inbox', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app', href: '/employee-app/rollout', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Contact Details', href: '/contact-details', icon: <Mail className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
@@ -82,13 +83,14 @@ const portalNavigation: NavItem[] = [
   { name: 'Pay Period Files', href: '/payroll-files', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app', href: '/employee-app/rollout', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Contact Details', href: '/contact-details', icon: <Mail className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Documents', href: '/documents', icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Change Requests', href: '/change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Employee app', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Support access', href: '/support-access', icon: <ShieldCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 const toolsNavigation: NavItem[] = [
@@ -103,11 +105,12 @@ const toolsNavigation: NavItem[] = [
 ];
 
 const clientSettingsNavigation: NavItem[] = [
+  { name: 'Sign in as', href: '/app/sign-in-as', icon: <ShieldCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Standing Changes', href: '/standing-changes', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Time tracking account', href: '/app/aire-account-connection', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'How this client runs', href: '/operating-profile', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Employee app', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app settings', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'My Printer & Checks', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
@@ -282,6 +285,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const canUsePrinterProfiles = hasCapability('use_printer_profiles');
   const visibleClientSettingsNavigation = clientSettingsNavigation.filter((item) => {
     if (item.href === '/app/aire-account-connection') return hasCapability('manage_own_aire_account_link');
+    if (item.href === '/app/sign-in-as') return !!activeCompanyId && hasCapability('start_view_as');
     if (item.href === '/operating-profile') return !!activeCompanyId && hasCapability('payroll_operations');
     if (item.href === '/check-settings') return canUsePrinterProfiles;
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
@@ -302,9 +306,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/employees') return { ...item, href: employeesPath(activeCompanyId) };
     if (item.href === '/contact-details') return { ...item, href: employeeContactDetailsPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
-    if (item.href === '/employee-app') return { ...item, href: employeeAppSettingsPath(activeCompanyId) };
+    if (item.href === '/employee-app/rollout') return { ...item, href: employeeAppRolloutPath(activeCompanyId) };
     return item;
-  }).filter((item) => item.href !== '/employee-app');
+  }).filter((item) => item.href !== '/employee-app/rollout');
   const visibleToolsNavigation = toolsNavigation.filter((item) => {
     if (item.href === '/historical-payroll' || item.href === '/payroll-go-live') return historicalPayrollEnabled;
     if (item.href === '/tools/finance' || item.href === '/tools/invoices' || item.href === '/tools/expenses') return isAdmin;
@@ -514,14 +518,14 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
                   <p className="mt-1 truncate text-xs text-neutral-600">{user?.company_name}</p>
                 </div>
               )}
-              <button
-                type="button"
-                disabled
-                className="flex w-full cursor-not-allowed items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-400"
+              <NavLink
+                to="/app/account-security"
+                onClick={() => { setUserMenuOpen(false); onNavigate?.(); }}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-neutral-700 hover:bg-neutral-50"
               >
-                <UserCircle className="h-4 w-4" />
-                Profile
-              </button>
+                <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Account &amp; security
+              </NavLink>
               {user?.role !== 'employee' && (
                 <NavLink
                   to="/app/notifications"

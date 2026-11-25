@@ -10,6 +10,7 @@ module Api
         companies = Company.includes(:organization, :migration_source_company, :created_by).where(id: current_user.accessible_company_ids)
                            .yield_self { |scope| params[:active].present? ? scope.where(active: ActiveModel::Type::Boolean.new.cast(params[:active])) : scope }
                            .order(:name)
+        companies = companies.where(id: Current.view_as_grant.company_id) if Current.view_as_grant
         @creators = RecordCreator.for_companies(companies.to_a) if StaffRolePolicy.allowed?(current_user, :staff_workspace)
         company_ids = companies.pluck(:id)
         total_employee_counts = employee_counts_by_company(company_ids)
@@ -27,7 +28,10 @@ module Api
           # Matches Admin::CompaniesController#staff_client_access? so assigned
           # managers and accountants can find the client edit page.
           can_view_client_management: current_user.organization_admin? || current_user.manager? || current_user.accountant?,
-          can_switch_company: current_user.accessible_company_ids.size > 1,
+          can_switch_company: !Current.view_as_grant && current_user.accessible_company_ids.size > 1,
+          # Firm finance (books, invoices, customer links) may target live
+          # clients only; navigation keeps every accessible company.
+          billing_company_ids: companies.select(&:live_payroll?).map(&:id),
           current_company_id: company_ids.include?(current_company_id) ? current_company_id : company_ids.first
         }
       end
@@ -52,39 +56,27 @@ module Api
           historical_payroll_enabled: company.historical_payroll_enabled,
           client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
-          payroll_environment: company.payroll_environment,
-          test_workspace: company.test_workspace?,
+          **CompanyWorkspacePresentation.fields(company),
           practice_portal: current_user.client? && current_user.practice_company_id == company.id,
-          test_workspace_purpose: company.test_workspace_purpose,
-          test_workspace_purpose_label: company.test_workspace_purpose_label,
-          test_workspace_expires_at: company.test_workspace_expires_at,
-          test_workspace_archived_at: company.test_workspace_archived_at,
-          test_workspace_sealed_at: company.test_workspace_sealed_at,
-          test_workspace_expired: company.test_workspace_expired?,
-          test_workspace_read_only: company.test_workspace_read_only?,
           workspace_can_write: company_write_allowed?(company),
-          workspace_write_permissions: workspace_write_permissions(company),
-          migration_rehearsal_status: company.migration_rehearsal_status,
-          migration_source_company_id: company.migration_source_company_id,
-          migration_source_company_name: company.migration_source_company&.name,
-          migration_source_batch_id: company.migration_source_batch_id,
-          migration_rehearsal_completed_at: company.migration_rehearsal_completed_at,
-          migration_rehearsal_error: company.migration_rehearsal_error
+          workspace_write_permissions: workspace_write_permissions(company)
         }
         summary[:creator] = @creators[company.id] if @creators
         summary
       end
 
       def company_write_allowed?(company)
+        return false if Current.view_as_grant
+
         return false unless current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id)
-        return true unless company.test_workspace?
+        return true unless company.practice_copy?
 
         StaffRolePolicy.allowed?(current_user, :payroll_operations) &&
           TestWorkspaceAccessPolicy.allowed?(user: current_user, company: company, request_method: "POST", capability: :payroll_operations)
       end
 
       def workspace_write_permissions(company)
-        return nil unless company.test_workspace?
+        return nil unless company.practice_copy?
 
         accessible = !!(current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id))
         StaffRolePolicy::CAPABILITY_ROLES.keys.index_with do |capability|

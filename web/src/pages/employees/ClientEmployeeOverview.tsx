@@ -1,3 +1,4 @@
+import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
 import { ClientPayStubHistory } from '@/components/client-portal/ClientPayStubHistory';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
@@ -17,7 +18,7 @@ import type { Employee } from '@/types';
 export function ClientEmployeeOverview() {
   const { companyId: companyIdParam, id: idParam } = useParams<{ companyId: string; id: string }>();
   const [searchParams] = useSearchParams();
-  const { activeCompanyId } = useCompany();
+  const { activeCompanyId, activeCompany } = useCompany();
   const companyId = parsePositiveRouteId(companyIdParam);
   const employeeId = parsePositiveRouteId(idParam);
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -62,6 +63,7 @@ export function ClientEmployeeOverview() {
           <Badge variant={employee.status === 'active' ? 'success' : employee.status === 'terminated' ? 'danger' : 'default'}>{employeeStatusConfig[employee.status]?.label || employee.status}</Badge>
           <Badge variant={employee.payment_delivery_method ? 'info' : 'warning'}>{delivery.label}</Badge>
         </div>
+        <EmployeeAppPanel key={`${companyId}:${employeeId}`} companyId={companyId} companyName={activeCompany?.name || ""} employeeId={employeeId} audience="client" />
         <Card>
           <CardHeader><CardTitle>How this employee is paid</CardTitle></CardHeader>
           <CardContent>

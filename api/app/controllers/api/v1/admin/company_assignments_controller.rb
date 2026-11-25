@@ -40,8 +40,8 @@ module Api
           assignment = CompanyAssignment.new(
             user: user,
             company: company,
-            workspace_access_level: company.test_workspace? ? assignment_params[:workspace_access_level].presence || "operator" : nil,
-            expires_at: company.test_workspace? ? assignment_params[:expires_at] : nil,
+            workspace_access_level: company.practice_copy? ? assignment_params[:workspace_access_level].presence || "operator" : nil,
+            expires_at: company.practice_copy? ? assignment_params[:expires_at] : nil,
             granted_by: current_user
           )
 
@@ -131,7 +131,7 @@ module Api
               company = Company.find(cid)
               user.company_assignments.create!(
                 company: company,
-                workspace_access_level: company.test_workspace? ? "operator" : nil,
+                workspace_access_level: company.practice_copy? ? "operator" : nil,
                 granted_by: current_user
               )
             end
@@ -192,7 +192,7 @@ module Api
             user_email: assignment.user.email,
             company_id: assignment.company_id,
             company_name: assignment.company.name,
-            test_workspace: assignment.company.test_workspace?,
+            test_workspace: assignment.company.practice_copy?,
             workspace_access_level: assignment.workspace_access_level,
             client_management: assignment.client_management,
             expires_at: assignment.expires_at,

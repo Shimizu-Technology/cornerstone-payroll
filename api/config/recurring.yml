@@ -15,10 +15,23 @@ production:
     queue: default
     schedule: every 5 minutes
 
+  # Employee app invites last 14 days; former-employee access ends on its date.
+  expire_employee_links:
+    class: ExpireEmployeeLinksJob
+    queue: default
+    schedule: "15 3 * * * Pacific/Guam"
+
   expire_practice_portal_access:
     class: ExpirePracticePortalAccessJob
     queue: default
     schedule: every minute
+
+  # Sends W-2GU notices still pending (or failed) and matches stored email
+  # provider events to their notices (M4-5).
+  dispatch_employee_tax_form_notices:
+    class: DispatchEmployeeTaxFormNoticesJob
+    queue: default
+    schedule: every 10 minutes
 
   retry_portal_upload_cleanups:
     class: PortalUploadCleanupJob

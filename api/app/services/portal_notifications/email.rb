@@ -4,12 +4,13 @@ require "cgi"
 
 module PortalNotifications
   # Deliberately generic. No company, employee, conversation subject, message
-  # text, file name, amount, identifier or signed URL ever appears here.
+  # text, file name, amount, employee identifier or signed URL ever appears here.
   class Email
     SUBJECT = "New activity in Cornerstone Payroll"
     MESSAGE_LINE = "You have a new message in the portal."
     UPDATE_LINE = "You have a new message or update in the portal."
     DIGEST_LINE = "You have updates waiting in Cornerstone Payroll."
+    EMPLOYEE_FOOTER_LINE = "Replies to this email are not monitored."
     SIGN_IN_LINE = "Sign in to view it."
     FOOTER_LINE = "Please reply in the portal. Replies to this email are not monitored. " \
       "You can change these alerts under Notifications in your account menu."
@@ -23,13 +24,20 @@ module PortalNotifications
 
     def initialize(audience:, delivery_mode:, events:, app_user: true)
       @subject = SUBJECT
-      @footer = app_user ? FOOTER_LINE : EXTRA_ADDRESS_FOOTER_LINE
+      @footer = if audience == "employee" then EMPLOYEE_FOOTER_LINE
+      elsif app_user then FOOTER_LINE
+      else EXTRA_ADDRESS_FOOTER_LINE
+      end
       headline = if delivery_mode == "digest" then DIGEST_LINE
       elsif events.all?(&:message_event?) then MESSAGE_LINE
       else UPDATE_LINE
       end
       @lines = [ headline, SIGN_IN_LINE ]
-      @link = "#{self.class.frontend_url}#{path_for(audience, events)}"
+      @link = if audience == "employee"
+        self.class.employee_portal_url(events.first.company)
+      else
+        "#{self.class.frontend_url}#{path_for(audience, events)}"
+      end
     end
 
     def payload(from:, to:)
@@ -71,11 +79,20 @@ module PortalNotifications
       return :pay_runs if event.event_type.start_with?("payroll_review_")
       return :file_requests if FILE_REQUEST_EVENTS.include?(event.event_type)
 
+      return [ :contact_confirmation, event.company_id ] if event.event_type == "employee_contact_confirmation_requested"
+
       case event.category
       when "payroll_submissions", "payroll_updates" then :payroll
-      when "employee_changes", "employee_change_decisions" then :changes
+      when "employee_changes", "employee_change_decisions", "address_approvals" then :changes
+      when "contact_changes" then :contact_changes
+      when "employee_address_decisions" then [ :employee, event.company_id ]
       else :general
       end
+    end
+
+    def self.employee_portal_url(company)
+      EmployeeLinks::AppUrl.origin_for(company) ||
+        TenantSubdomainRegistry.https_url(ENV["EMPLOYEE_PORTAL_URL"].to_s.strip.delete_suffix("/"))
     end
 
     def self.frontend_url
@@ -87,12 +104,17 @@ module PortalNotifications
     def path_for(audience, events)
       groups = events.map { |event| self.class.destination_group(event) }.uniq
       group = groups.one? ? groups.first : :general
+      if group.is_a?(Array) && group.first == :contact_confirmation
+        return "/companies/#{group.last}/contact-changes-to-confirm"
+      end
+
       case [ audience == "staff", group ]
       when [ true, :pay_runs ], [ false, :pay_runs ] then "/pay-periods"
       when [ true, :payroll ], [ true, :file_requests ] then "/app/client-inbox"
       when [ false, :file_requests ] then "/messages"
       when [ false, :payroll ] then "/payroll-files"
       when [ true, :changes ] then "/settings/client-change-requests"
+      when [ false, :contact_changes ] then "/change-requests?view=contact"
       when [ false, :changes ] then "/change-requests"
       when [ true, :general ] then "/settings/client-documents"
       else "/documents"

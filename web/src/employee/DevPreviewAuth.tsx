@@ -1,7 +1,9 @@
 // Local development without a Clerk key, and the public Playwright suite.
 // EmployeeApp only mounts this when import.meta.env.DEV is true, so it is
 // tree-shaken out of every production build (appSurfaceBuild.test.ts checks).
-import { useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
+import { useNavigate } from 'react-router';
+import { StepUpCancelledError, StepUpRequiredError } from './api';
 import { EmployeeAuthContext, useEmployeeAuth, type EmployeeAuthValue } from './contexts';
 import { EmpButton } from './ui';
 
@@ -46,27 +48,104 @@ function DevPreviewSignInForm(): ReactElement {
   );
 }
 
+// Clerk's sign-up opens here from the invitation URL. Finishing signs in and
+// opens `redirectTo`, as Clerk's forceRedirectUrl does.
+function DevPreviewSignUpForm({ redirectTo }: { redirectTo: string }): ReactElement {
+  const { previewSignIn } = useEmployeeAuth();
+  const navigate = useNavigate();
+  return (
+    <div className="space-y-4 rounded-[18px] border border-dashed border-neutral-300 bg-neutral-50 p-4" data-testid="dev-preview-sign-up">
+      <h1 className="emp-h1">Create your account</h1>
+      <p className="text-neutral-600">Clerk's sign-up shows here. This local preview has no Clerk key.</p>
+      <EmpButton block onClick={() => { previewSignIn?.(); navigate(redirectTo, { replace: true }); }}>
+        Finish preview sign-up
+      </EmpButton>
+    </div>
+  );
+}
+
+/** Stands in for Clerk's "confirm it's you" prompt. Any code works. */
+function DevPreviewStepUp({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }): ReactElement {
+  return (
+    <div className="emp-dialog-backdrop">
+      <div role="dialog" aria-modal="true" aria-labelledby="dev-step-up-title" className="emp-dialog" data-testid="dev-preview-step-up">
+        <h2 id="dev-step-up-title" className="emp-h1 text-[1.4rem]">Confirm it's you</h2>
+        <p className="text-neutral-600">Clerk asks for your password or an emailed code here. This local preview has no Clerk key.</p>
+        <label className="emp-label" htmlFor="dev-step-up-code">Code</label>
+        <input id="dev-step-up-code" className="emp-input" inputMode="numeric" autoComplete="one-time-code" autoFocus />
+        <div className="emp-form-buttons">
+          <EmpButton onClick={onConfirm}>Confirm</EmpButton>
+          <EmpButton variant="quiet" onClick={onCancel}>Cancel</EmpButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Stands in for Clerk's account settings, where two-step sign-in is set up. */
+function DevPreviewAccountSettings({ onClose }: { onClose: () => void }): ReactElement {
+  return (
+    <div className="emp-dialog-backdrop">
+      <div role="dialog" aria-modal="true" aria-labelledby="dev-account-title" className="emp-dialog" data-testid="dev-preview-account-settings">
+        <h2 id="dev-account-title" className="emp-h1 text-[1.4rem]">Account settings</h2>
+        <p className="text-neutral-600">Clerk's account settings open here, where two-step sign-in is set up. This local preview has no Clerk key.</p>
+        <EmpButton onClick={onClose}>Close</EmpButton>
+      </div>
+    </div>
+  );
+}
+
 export function DevPreviewAuthProvider({ children }: { children: ReactNode }): ReactElement {
   const [signedIn, setSignedIn] = useState(readSignedIn);
   const signOutFailuresLeft = useRef<number | null>(null);
   signOutFailuresLeft.current ??= readSignOutFailures();
+  // After the preview prompt, tokens say so, the way a fresh Clerk token carries fva.
+  const verified = useRef(false);
+  const [prompt, setPrompt] = useState<{ confirm: () => void; cancel: () => void } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const stepUp = useCallback(async <T,>(attempt: () => Promise<T>): Promise<T> => {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!(error instanceof StepUpRequiredError)) throw error;
+    }
+    await new Promise<void>((resolve, reject) => {
+      setPrompt({
+        confirm: () => { verified.current = true; setPrompt(null); resolve(); },
+        cancel: () => { setPrompt(null); reject(new StepUpCancelledError()); },
+      });
+    });
+    return attempt();
+  }, []);
+
   const value = useMemo<EmployeeAuthValue>(() => ({
     isLoaded: true,
     isSignedIn: signedIn,
-    getToken: async () => (signedIn ? 'dev-preview-token' : null),
+    getToken: async () => (signedIn ? (verified.current ? 'dev-preview-token-verified' : 'dev-preview-token') : null),
     signOut: async (): Promise<void> => {
       if ((signOutFailuresLeft.current ?? 0) > 0) {
         signOutFailuresLeft.current = (signOutFailuresLeft.current ?? 0) - 1;
         throw new Error('Preview sign-out failed');
       }
       writeSignedIn(false);
+      verified.current = false;
       setSignedIn(false);
     },
     SignInForm: DevPreviewSignInForm,
+    SignUpForm: DevPreviewSignUpForm,
+    stepUp,
+    openAccountSettings: () => setSettingsOpen(true),
     previewSignIn: () => {
       writeSignedIn(true);
       setSignedIn(true);
     },
-  }), [signedIn]);
-  return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
+  }), [signedIn, stepUp]);
+  return (
+    <EmployeeAuthContext.Provider value={value}>
+      {children}
+      {prompt && <DevPreviewStepUp onConfirm={prompt.confirm} onCancel={prompt.cancel} />}
+      {settingsOpen && <DevPreviewAccountSettings onClose={() => setSettingsOpen(false)} />}
+    </EmployeeAuthContext.Provider>
+  );
 }

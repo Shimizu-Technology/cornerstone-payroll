@@ -91,6 +91,37 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:capabilities, :all_filing_ready_exports_allowed) == true
   end
 
+  # The report, sign-off and filing decision a set of copies is drawn from,
+  # shared by the staff download and the employee app's posting (M4-5).
+  # final: unwatermarked copies are allowed (never in a practice copy; a demo
+  # company prints like a live client). The callers hold the company lock,
+  # which mark-ready and preflight take to change the sign-off.
+  def self.snapshot(company, year)
+    responsibility = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
+    report = W2GuAggregator.new(company, year).generate if responsibility&.responsible_party == "cornerstone"
+    fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call if report
+    # Read after the fingerprint, so a sign-off change while it was computed is seen.
+    readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
+    {
+      cornerstone_files: report.present?,
+      report: report,
+      readiness: readiness,
+      fingerprint: fingerprint,
+      # Covers what the fingerprint doesn't, such as the employer's name and
+      # address and middle names.
+      input_revision: YearEnd::InputRevision.for(company.id, year)[company.id],
+      final: report.present? && !company.practice_copy? &&
+        final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
+    }
+  end
+
+  # What must not change between a snapshot and the finished file.
+  def self.snapshot_signature(snapshot)
+    readiness = snapshot[:readiness]
+    snapshot.slice(:cornerstone_files, :fingerprint, :input_revision, :final)
+      .merge(readiness: readiness && [ readiness.status, readiness.ready_fingerprint ])
+  end
+
   def self.supported_tax_year?(tax_year)
     SUPPORTED_TAX_YEARS.include?(tax_year.to_i)
   end
@@ -102,7 +133,9 @@ class W2GuOfficialCopies < OfficialPdfOverlay
 
   # report: unmodified W2GuAggregator output for company and its year.
   # practice: a test or practice workspace, whose copies are always drafts.
-  def initialize(company:, report:, kind:, draft:, practice: false)
+  # employee_id: one employee's Copy B and C only, for the employee app
+  # (M4-5). That path makes final copies only; a draft is refused.
+  def initialize(company:, report:, kind:, draft:, practice: false, employee_id: nil)
     raise ArgumentError, "Unknown W-2GU copy: #{kind}" unless KINDS.include?(kind.to_s)
 
     @company = company
@@ -110,7 +143,13 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     @kind = kind.to_s
     @practice = practice
     @draft = draft || practice
+    @employee_id = employee_id
     raise TemplateUnavailableError, self.class.unsupported_message(year) unless self.class.supported_tax_year?(year)
+    if employee_id
+      raise ArgumentError, "A single employee's W-2GU is only Copies B and C" unless @kind == "employee"
+      raise ArgumentError, "A single employee's W-2GU is made only when the W-2s are final" if @draft
+      raise ArgumentError, "No #{year} W-2 for that employee" if people.empty?
+    end
 
     super(template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
   end
@@ -140,9 +179,16 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     people.length
   end
 
+  # Refuses (DoesNotFit) when any value wouldn't print whole, before any page
+  # is drawn. The employee app's posting checks the whole report this way, so
+  # it posts only what the staff download would print.
+  def ensure_fits!
+    check_fit!
+  end
+
   private
 
-  attr_reader :company, :report, :kind, :draft, :practice
+  attr_reader :company, :report, :kind, :draft, :practice, :employee_id
 
   def year
     report.dig(:meta, :year).to_i
@@ -153,6 +199,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   def people
     @people ||= begin
       rows = Array(report[:employees]).index_by { |row| row[:employee_id] }
+      rows = rows.slice(employee_id) if employee_id
       Employee.where(company_id: company.id, id: rows.keys).to_a
         .sort_by { |employee| [ employee.last_name.to_s.downcase, employee.first_name.to_s.downcase, employee.id ] }
         .map do |employee|
@@ -257,7 +304,8 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     else
       employee = sheet.people.first[:employee]
       position = (page_number + 1) / 2
-      "#{employee.last_name}, #{employee.first_name} · #{company.name} · #{year} W-2GU · employee #{position} of #{people.length}"
+      label = "#{employee.last_name}, #{employee.first_name} · #{company.name} · #{year} W-2GU"
+      employee_id ? label : "#{label} · employee #{position} of #{people.length}"
     end
     pdf.fill_color "555555"
     pdf.text_box(note, at: [ MARGIN_NOTE[0], MARGIN_NOTE[3] ], width: MARGIN_NOTE[2] - MARGIN_NOTE[0],

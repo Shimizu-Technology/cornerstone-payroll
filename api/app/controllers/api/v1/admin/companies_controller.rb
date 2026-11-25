@@ -312,7 +312,7 @@ module Api
 
         def render_company_uniqueness_error(error)
           constraint = error.cause&.result&.error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME)
-          message = if constraint == "index_live_companies_on_lower_subdomain_slug"
+          message = if constraint.in?(%w[index_live_companies_on_lower_subdomain_slug index_live_and_demo_companies_on_lower_subdomain_slug])
             "Subdomain slug is already taken by another company"
           else
             "EIN is already taken by another company"
@@ -398,23 +398,10 @@ module Api
             client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
             client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
             client_payroll_approval_required: company.client_payroll_approval_required,
-            payroll_environment: company.payroll_environment,
-            test_workspace: company.test_workspace?,
-            test_workspace_purpose: company.test_workspace_purpose,
-            test_workspace_purpose_label: company.test_workspace_purpose_label,
-            test_workspace_manifest: company.test_workspace_manifest,
-            test_workspace_expires_at: company.test_workspace_expires_at,
-            test_workspace_archived_at: company.test_workspace_archived_at,
-            test_workspace_sealed_at: company.test_workspace_sealed_at,
-            test_workspace_expired: company.test_workspace_expired?,
-            test_workspace_read_only: company.test_workspace_read_only?,
-            migration_rehearsal_status: company.migration_rehearsal_status,
-            migration_source_company_id: company.migration_source_company_id,
-            migration_source_company_name: company.migration_source_company&.name,
-            migration_source_batch_id: company.migration_source_batch_id,
-            migration_rehearsal_completed_at: company.migration_rehearsal_completed_at,
-            migration_rehearsal_error: company.migration_rehearsal_error
+            **CompanyWorkspacePresentation.fields(company, manifest: true)
           }
+          company_type = CompanyWorkspacePresentation.company_type(company, viewer: current_user)
+          payload[:company_type] = company_type if company_type
 
           if detailed
             payload.merge!(
@@ -456,7 +443,7 @@ module Api
         # organization admins (archive and restore are the status path), as a
         # Client management grant never applies to a test workspace either.
         def full_company_management?(company)
-          return false if company.test_workspace? && !current_user&.organization_admin?
+          return false if company.practice_copy? && !current_user&.organization_admin?
 
           StaffRolePolicy.allowed?(current_user, :manage_client_administration, company: company)
         end

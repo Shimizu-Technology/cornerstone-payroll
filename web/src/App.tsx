@@ -15,8 +15,10 @@ import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { isPublicPath } from '@/lib/public-routes';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
+import { isMfaRequiredCode } from '@/services/api';
 
 const ClientOperatingProfile = lazy(() => import('@/pages/ClientOperatingProfile').then(module => ({ default: module.ClientOperatingProfile })));
+const EmployeeAppRollout = lazy(() => import('@/pages/EmployeeAppRollout').then(module => ({ default: module.EmployeeAppRollout })));
 const EmployeeAppSettings = lazy(() => import('@/pages/EmployeeAppSettings').then(module => ({ default: module.EmployeeAppSettings })));
 const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
 const ClientMessages = lazy(() => import('@/pages/client/ClientMessages').then(module => ({ default: module.ClientMessages })));
@@ -37,11 +39,17 @@ const PayrollItemDetail = lazy(() => import('@/pages/payroll-items/PayrollItemDe
 const Reports = lazy(() => import('@/pages/Reports').then((module) => ({ default: module.Reports })));
 const ClientProfitability = lazy(() => import('@/pages/ClientProfitability').then((module) => ({ default: module.ClientProfitability })));
 const ChecksPayments = lazy(() => import('@/pages/ChecksPayments').then((module) => ({ default: module.ChecksPayments })));
+import { ClientGrant, ClientSupportView } from '@/support/ClientSupportView';
+import { StartSupportView } from '@/support/StartSupportView';
+import { SupportAccessLogs } from '@/support/SupportAccessLogs';
+import { supportToken } from '@/support/grant';
+
 const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard').then((module) => ({ default: module.ClientDashboard })));
 const ClientPayPeriods = lazy(() => import('@/pages/client/ClientPayPeriods').then((module) => ({ default: module.ClientPayPeriods })));
 const ClientPayPeriodDetail = lazy(() => import('@/pages/client/ClientPayPeriodDetail').then((module) => ({ default: module.ClientPayPeriodDetail })));
 const ClientReports = lazy(() => import('@/pages/client/ClientReports').then((module) => ({ default: module.ClientReports })));
 const ClientDocuments = lazy(() => import('@/pages/client/ClientDocuments').then((module) => ({ default: module.ClientDocuments })));
+const EmployeeContactChangesToConfirm = lazy(() => import('@/pages/EmployeeContactChangesToConfirm').then((module) => ({ default: module.EmployeeContactChangesToConfirm })));
 const ClientChangeRequests = lazy(() => import('@/pages/client/ClientChangeRequests').then((module) => ({ default: module.ClientChangeRequests })));
 const Form500Page = lazy(() => import('@/pages/Form500Page').then((module) => ({ default: module.Form500Page })));
 const AdminClientDocumentsPage = lazy(() => import('@/pages/AdminClientDocumentsPage').then((module) => ({ default: module.AdminClientDocumentsPage })));
@@ -71,6 +79,7 @@ const TimeTrackingSources = lazy(() => import('@/pages/TimeTrackingSources').the
 const AireHistoryApproval = lazy(() => import('@/pages/AireHistoryApproval').then((module) => ({ default: module.AireHistoryApproval })));
 const AireAccountConnection = lazy(() => import('@/pages/AireAccountConnection').then((module) => ({ default: module.AireAccountConnection })));
 const NotificationSettings = lazy(() => import('@/pages/NotificationSettings').then((module) => ({ default: module.NotificationSettings })));
+const AccountSecurity = lazy(() => import('@/pages/AccountSecurity').then((module) => ({ default: module.AccountSecurity })));
 const PayScheduleSettings = lazy(() => import('@/pages/PayScheduleSettings').then((module) => ({ default: module.PayScheduleSettings })));
 const PriorProviderHistory = lazy(() => import('@/pages/PriorProviderHistory').then(module => ({ default: module.PriorProviderHistory })));
 const HistoricalPayroll = lazy(() => import('@/pages/HistoricalPayroll').then((module) => ({ default: module.HistoricalPayroll })));
@@ -88,7 +97,7 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, authProblem } = useAuth();
 
-  if (authProblem?.status === 403 && authProblem.code === 'mfa_required') {
+  if (authProblem?.status === 403 && isMfaRequiredCode(authProblem.code)) {
     return <Navigate to="/login" replace />;
   }
 
@@ -358,10 +367,13 @@ function AppRoutes() {
       >
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
         <Route path="/app/client-inbox" element={<StaffOnlyRoute><ClientInbox /></StaffOnlyRoute>} />
+        <Route path="/app/sign-in-as" element={<CapabilityRoute capability="start_view_as"><StartSupportView /></CapabilityRoute>} />
+        <Route path="/support-access" element={<ClientOnlyRoute><SupportAccessLogs /></ClientOnlyRoute>} />
         <Route path="/messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
         <Route path="/payroll-files" element={<PayrollFilesRoute><PayrollPeriodsList audience="client" /></PayrollFilesRoute>} />
         <Route path="/payroll-files/:ref" element={<PayrollFilesRoute><PayrollPeriodPage audience="client" /></PayrollFilesRoute>} />
         <Route path="/app/notifications" element={<NotificationSettings />} />
+        <Route path="/app/account-security" element={<AccountSecurity />} />
         <Route path="/app/aire-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/time-account-connection" element={<CapabilityRoute capability="manage_own_aire_account_link"><AireAccountConnection /></CapabilityRoute>} />
         <Route path="/app/aire-history-approval" element={<CapabilityRoute capability="payroll_operations"><AireHistoryApproval /></CapabilityRoute>} />
@@ -376,10 +388,12 @@ function AppRoutes() {
         <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
           <Route path="operating-profile" element={<StaffOnlyRoute><ClientOperatingProfile /></StaffOnlyRoute>} />
           <Route path="employee-app" element={<EmployeeAppSettings />} />
+          <Route path="employee-app/rollout" element={<EmployeeAppRollout audience={isClient ? 'client' : 'admin'} />} />
           <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
           <Route path="client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
           <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
           <Route path="payroll-submissions/:ref" element={<StaffOnlyRoute><PayrollPeriodPage audience="staff" /></StaffOnlyRoute>} />
+          <Route path="contact-changes-to-confirm" element={<StaffOnlyRoute><CapabilityRoute capability="payroll_operations"><EmployeeContactChangesToConfirm /></CapabilityRoute></StaffOnlyRoute>} />
           <Route path="client-change-requests" element={<CapabilityRoute capability="manage_client_configuration" clientCapability="manage_client_configuration"><AdminEmployeeChangeRequestsPage /></CapabilityRoute>} />
           <Route path="employees" element={<EmployeeList />} />
           <Route path="employees/contact-details" element={isClient ? <EmployeeContactDetails /> : <StaffEmployeeContactDetails />} />
@@ -463,17 +477,26 @@ function AppFeedback({ children }: { children: ReactNode }) {
   return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
 }
 
+const developmentToken = async () => null;
+
 function AppContents() {
+  const workspace = (
+    <AuthProvider>
+      {!supportToken && <PostHogIdentify />}
+      <CompanyProvider>
+        <AppFeedback><AppRoutes /></AppFeedback>
+      </CompanyProvider>
+    </AuthProvider>
+  );
   return (
     <>
-      <PostHogPageView />
+      {!supportToken && <PostHogPageView />}
       <AppWithClerk>
-        <AuthProvider>
-          <PostHogIdentify />
-          <CompanyProvider>
-            <AppFeedback><AppRoutes /></AppFeedback>
-          </CompanyProvider>
-        </AuthProvider>
+        {supportToken
+          ? clerkPubKey
+            ? <ClientSupportView>{workspace}</ClientSupportView>
+            : import.meta.env.DEV ? <ClientGrant getToken={developmentToken}>{workspace}</ClientGrant> : <p>Staff sign-in is unavailable.</p>
+          : workspace}
       </AppWithClerk>
     </>
   );

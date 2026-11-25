@@ -1,3 +1,4 @@
+import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
@@ -60,6 +61,7 @@ import { SavedHours } from '@/components/employees/SavedHours';
 import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
+import { EmployeeDeliveryConsentPanel } from '@/components/employees/EmployeeDeliveryConsentPanel';
 import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
@@ -345,6 +347,7 @@ export function EmployeeWorkspace(): ReactElement {
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <>
+            <EmployeeAppPanel key={`${companyId}:${employee.id}`} companyId={companyId} companyName={activeCompany?.name || ""} employeeId={employee.id} audience="admin" />
             <EmployeeOverview
               companyId={companyId}
               employee={employee}
@@ -454,6 +457,7 @@ function EmployeeOverview({
           </CardContent>
         </Card>
       </div>
+      <EmployeeDeliveryConsentPanel summary={employee.delivery_consents} />
     </>
   );
 }

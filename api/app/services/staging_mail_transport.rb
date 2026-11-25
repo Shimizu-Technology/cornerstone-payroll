@@ -1,8 +1,14 @@
 # frozen_string_literal: true
 
 class StagingMailTransport
+  SUPPRESSED = { "id" => nil, "suppressed" => true }.freeze
+
   def self.deliver(payload = nil, options: {}, **attributes)
     payload ||= attributes
+    # Inside DemoOutbound.scoped, only allow-listed recipients remain.
+    payload = DemoOutbound.filter_payload(payload)
+    return SUPPRESSED.dup if payload.nil?
+
     filtered = StagingOutboundPolicy.mail_payload(payload)
     if StagingOutboundPolicy.staging? && filtered.nil?
       Rails.logger.info("[STAGING] captured email; recipient/body/subject/attachments redacted")

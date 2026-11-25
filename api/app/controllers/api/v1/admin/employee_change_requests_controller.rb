@@ -9,6 +9,14 @@ module Api
         before_action :require_admin_or_manager!
         before_action :set_change_request, only: [ :show, :approve, :reject ]
 
+        rescue_from EmployeeChangeRequest::Cancelled do |error|
+          render json: { error: error.message }, status: :conflict
+        end
+
+        rescue_from EmployeeProfileIdentity::LinkCheckUnavailable do |error|
+          render json: { error: error.message }, status: :service_unavailable
+        end
+
         def index
           requests = EmployeeChangeRequest.for_company(current_company_id)
                                           .includes(:employee, :requested_by, :reviewed_by)
@@ -84,6 +92,8 @@ module Api
             id: change_request.id,
             status: change_request.status,
             request_kind: change_request.request_kind,
+            profile_address: change_request.profile_address?,
+            note_visible_to_employee: change_request.requested_by_link_id.present?,
             employee_id: change_request.employee_id,
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,
@@ -97,6 +107,9 @@ module Api
           }
 
           if include_payloads
+            payload[:can_review] = change_request.pending? &&
+              StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company) &&
+              (!change_request.profile_address_origin? || !change_request.same_person_reviewer?(current_user))
             payload[:proposed_compensation_effective_on] = change_request.proposed_compensation_effective_on
             payload[:proposed_changes] = sanitize_payload(change_request.proposed_changes)
             payload[:original_values] = sanitize_payload(change_request.original_values)

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type ReactElement, type ReactNode } fro
 import { CircleAlert } from 'lucide-react';
 import { SignOutContext, useEmployeeAuth, type SignOutValue } from './contexts';
 import { clearSigningOut, markSigningOut } from './routing';
+import { forgetInviteToken } from './signupState';
 import { EmpButton } from './ui';
 
 /**
@@ -17,6 +18,7 @@ export function SignOutProvider({ children }: { children: ReactNode }): ReactEle
   const signOut = useCallback(async (): Promise<boolean> => {
     setFailed(false);
     markSigningOut();
+    forgetInviteToken();
     try {
       await authSignOut();
       return true;

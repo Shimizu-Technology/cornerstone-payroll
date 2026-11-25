@@ -19,9 +19,10 @@ class Form1099FilingReadiness < ApplicationRecord
   # The single rule for "final" 1099 output: official copies without the
   # DRAFT watermark and the filing-ready e-file. The sign-off must match these
   # exact inputs, Cornerstone must file this client's 1099s for the year, and
-  # a test or practice workspace never produces final output.
+  # a practice workspace never produces final output. A demo's copies are
+  # final like a live client's; its e-file downloads are refused separately.
   def self.final?(company:, year:, readiness:, fingerprint:)
-    return false if company.test_workspace?
+    return false if company.practice_copy?
     return false unless readiness&.current?(fingerprint)
 
     company.payroll_filing_responsibilities

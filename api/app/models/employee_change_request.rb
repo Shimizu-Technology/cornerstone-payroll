@@ -2,6 +2,11 @@
 
 class EmployeeChangeRequest < ApplicationRecord
   include PortalInboxUpdates
+
+  class Cancelled < StandardError; end
+
+  PENDING_PROFILE_REQUEST_MESSAGE = "A change is already being reviewed"
+  ADDRESS_FIELDS = %w[address_line1 address_line2 city state zip].freeze
   IDENTIFIER_KEYS = %i[ssn ssn_encrypted contractor_ein].freeze
   PERMITTED_EMPLOYEE_UPDATE_KEYS = %i[
     first_name
@@ -55,16 +60,42 @@ class EmployeeChangeRequest < ApplicationRecord
   belongs_to :company
   belongs_to :employee
   belongs_to :requested_by, class_name: "User", optional: true
+  belongs_to :requested_by_link, class_name: "EmployeeAccountLink", optional: true
   belongs_to :reviewed_by, class_name: "User", optional: true
 
-  enum :status, { pending: 0, approved: 1, rejected: 2 }
+  enum :status, { pending: 0, approved: 1, rejected: 2, cancelled: 3 }
 
   validates :proposed_changes, presence: true
   validates :requested_by, presence: true, on: :create
   validates :request_kind, inclusion: { in: %w[create update] }
 
+  validate :validate_profile_address_origin, on: :create, if: :profile_address_origin?
+
   scope :recent_first, -> { order(created_at: :desc, id: :desc) }
   scope :for_company, ->(company_id) { where(company_id: company_id) }
+
+  scope :profile_addresses, -> {
+    where("own_record OR requested_by_link_id IS NOT NULL").where(request_kind: "update", sensitive_payload_encrypted: nil)
+      .where("jsonb_typeof(proposed_changes) = 'object' AND proposed_changes <> '{}'::jsonb")
+      .where("proposed_changes - ARRAY[?]::text[] = '{}'::jsonb", ADDRESS_FIELDS)
+      .where(%q{NOT jsonb_path_exists(proposed_changes, '$.* ? (@.type() != "string" && @.type() != "null")')})
+  }
+
+  def profile_address_origin?
+    own_record? || requested_by_link_id.present?
+  end
+
+  def profile_address?
+    profile_address_origin? && request_kind == "update" && sensitive_payload_encrypted_before_type_cast.nil? &&
+      proposed_changes.is_a?(Hash) && proposed_changes.present? &&
+      (proposed_changes.keys.map(&:to_s) - ADDRESS_FIELDS).empty? &&
+      proposed_changes.values.all? { |value| value.nil? || value.is_a?(String) }
+  end
+
+  def same_person_reviewer?(actor)
+    requested_by_id == actor.id || requested_by_link&.user_id == actor.id ||
+      EmployeeProfileIdentity.own_record?(employee, actor)
+  end
 
   def sensitive_payload
     return {} if sensitive_payload_encrypted.blank?
@@ -96,22 +127,31 @@ class EmployeeChangeRequest < ApplicationRecord
       lock!
       ensure_pending!
       employee.lock!
-      verify_original_values!
       actor = authorized_review_actor!(actor)
-      apply_proposed_changes!(actor: actor, effective_on: effective_on.presence || proposed_compensation_effective_on)
-      EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor) if request_kind == "create"
+      verify_original_values!
+      if profile_address?
+        apply_profile_address!(reviewer: actor)
+      else
+        apply_proposed_changes!(actor: actor, effective_on: effective_on.presence || proposed_compensation_effective_on)
+      end
+      if request_kind == "create"
+        record_new_hire_contact_changes!(reviewer: actor)
+        EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: actor)
+      end
       update!(
         status: :approved,
         reviewed_by: actor,
         review_notes: review_notes,
         reviewed_at: Time.current
       )
-      PortalNotifications.employee_change_decided!(self, actor: actor)
+      notify_decision!(actor)
     end
   end
 
   def reject!(actor:, review_notes:)
-    with_lock do
+    self.class.transaction do
+      Company.lock.find(company_id) if profile_address_origin?
+      lock!
       ensure_pending!
       actor = authorized_review_actor!(actor)
       update!(
@@ -120,24 +160,76 @@ class EmployeeChangeRequest < ApplicationRecord
         review_notes: review_notes,
         reviewed_at: Time.current
       )
-      PortalNotifications.employee_change_decided!(self, actor: actor)
+      notify_decision!(actor)
     end
   end
 
   private
 
+  def notify_decision!(actor)
+    if requested_by_link_id.present?
+      PortalNotifications.employee_address_decided!(self, actor: actor)
+    else
+      PortalNotifications.employee_change_decided!(self, actor: actor)
+    end
+  end
+
   def authorized_review_actor!(actor)
     actor = User.lock.find_by(id: actor&.id)
     company.company_assignments.where(user_id: actor&.id).lock.load
-    return actor if StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: company) &&
-      actor.payroll_access_allowed? && actor.can_access_company?(company_id)
+    if actor&.payroll_access_allowed? && actor.can_access_company?(company_id) &&
+        (StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: company) || client_address_reviewer?(actor))
+      return actor unless profile_address_origin? && same_person_reviewer?(actor)
 
-    errors.add(:base, "Client configuration access required")
+      errors.add(:base, "Someone else must review a change to your own record or a request you submitted")
+    else
+      errors.add(:base, "Client configuration access required")
+    end
     raise ActiveRecord::RecordInvalid, self
+  end
+
+  def client_address_reviewer?(actor)
+    actor.client? && actor.organization_id == company.organization_id && profile_address? &&
+      CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+  end
+
+  def validate_profile_address_origin
+    unless profile_address? && original_values.is_a?(Hash) &&
+        proposed_changes.keys.map(&:to_s).all? { |key| original_values.stringify_keys.key?(key) }
+      errors.add(:proposed_changes, "must contain only address fields and their original values")
+    end
+    if requested_by_link_id.present?
+      unless requested_by_link && requested_by_link.user_id == requested_by_id &&
+          requested_by_link.employee_id == employee_id && requested_by_link.company_id == company_id
+        errors.add(:requested_by_link, "must match the requester and employee")
+      end
+    elsif !requested_by&.client? || employee.company_id != company_id || !EmployeeProfileIdentity.own_record?(employee, requested_by)
+      errors.add(:own_record, "must be the client requester’s employee record")
+    end
+  end
+
+  def apply_profile_address!(reviewer:)
+    before_values = employee.slice(*proposed_changes.keys)
+    employee.update!(proposed_changes)
+    EmployeeContactChangeToConfirm.record!(
+      employee: employee, actor: requested_by, before_values: before_values,
+      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer, notify_staff: requested_by_link_id.present?
+    )
+  end
+
+  def record_new_hire_contact_changes!(reviewer:)
+    return unless CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+
+    fields = direct_changes_applied.keys & EmployeeContactChangeToConfirm::FIELDS.values.flatten
+    EmployeeContactChangeToConfirm.record!(
+      employee: employee, actor: requested_by, before_values: {},
+      after_values: employee.slice(*fields), reviewer: reviewer
+    )
   end
 
   def ensure_pending!
     return if pending?
+    raise Cancelled, "This request was cancelled. Refresh to see the latest requests." if cancelled?
 
     errors.add(:status, "must be pending before review actions can be applied")
     raise ActiveRecord::RecordInvalid, self

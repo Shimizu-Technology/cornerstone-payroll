@@ -4,6 +4,8 @@ class PayrollLiabilityPosting < ApplicationRecord
   POSTING_TYPES = %w[commit historical_backfill replacement reversal paycheck_reversal].freeze
 
   belongs_to :company
+  # Demo payroll never posts live liabilities; the database refuses these rows too.
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
   belongs_to :pay_period
   belongs_to :source_posting, class_name: "PayrollLiabilityPosting", optional: true
   belongs_to :posted_by, class_name: "User", optional: true

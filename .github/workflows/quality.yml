@@ -208,6 +208,12 @@ jobs:
         env:
           VITE_AUTH_ENABLED: "false"
           VITE_CLERK_PUBLISHABLE_KEY: ""
+      # The employee app on an iPhone profile (WebKit). It can't run on the Mac mini, so it runs here.
+      - name: Install Playwright WebKit
+        run: npx playwright install --with-deps webkit
+      - run: npm run test:e2e:employee-webkit
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ""
 
   # Stateful lanes stay serial within one runner; their fixtures remain isolated.
   browser:

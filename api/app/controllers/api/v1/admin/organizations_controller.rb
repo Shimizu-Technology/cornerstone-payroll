@@ -212,6 +212,8 @@ module Api
         def organization_json(organization, detailed: false)
           snapshot = organization_serializer_snapshot
           companies = organization.companies.sort_by(&:name)
+          # Client counts are firm totals, so a demo company is listed but not counted.
+          counted = companies.reject(&:demo?)
           admins = snapshot[:admins_by_org_id].fetch(organization.id, [])
 
           payload = {
@@ -224,8 +226,8 @@ module Api
             clients_limit: organization.client_limit,
             unlimited_clients: organization.unlimited_clients?,
             primary_company_id: organization.primary_company_id,
-            companies_count: companies.size,
-            active_companies_count: companies.count(&:active),
+            companies_count: counted.size,
+            active_companies_count: counted.count(&:active),
             users_count: snapshot[:users_count_by_org_id].fetch(organization.id, 0),
             org_admins: admins.map { |user| user_json(user) },
             created_at: organization.created_at,

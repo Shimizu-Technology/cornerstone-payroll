@@ -290,7 +290,8 @@ Set these up before anyone is invited. Until a tool is chosen, check by hand eve
 | Employee API down | Render notifications (deploy failed, instance unhealthy), plus an uptime monitor on `$API/health/dependencies` | any failure for 2 checks in a row |
 | Employee site down | Uptime monitor on `https://mosas.shimizu-technology.com/` and on the team address | any failure for 2 checks in a row |
 | Rate-limit hits | Render logs: `"event":"http.rate_limited.payroll"`. Look at the `throttle` field: `employee/…`, `auth/ip`, `tenant_branding/ip`. | more than 20 in 10 minutes |
-| Activation lockouts | M4-2 adds the lockout after 5 failed sign-ups and a staff alert. Add its event name here when M4-2 ships. | any lockout |
+| Activation lockouts | Render logs: `"event":"employee_links.activation_locked"` (warn, one per locked invite). An audit row `employee_links#activation_locked` is kept for each. | any lockout |
+| Activation lockout burst | Render logs: `"event":"employee_links.activation_lock_alert"` (error): 3 invites at one company locked within an hour. Audit row `employee_links#activation_lock_alert`; M4-9 shows it in the admin screens. | any |
 | Database pool pressure | Render logs: `"event":"db.pool_checkout"` | repeated, or `wait_ms` over 500 |
 | Redis fallback | Render logs: `Shared counters unavailable` | any (limits are per process while it lasts) |
 

@@ -51,7 +51,9 @@ class InvoiceBillingProfile < ApplicationRecord
         return existing_active
       end
 
-      primary_company = organization.primary_company || organization.companies.order(:id).first
+      # Firm contact details come from a live client only, never a demo or practice copy.
+      primary_company = organization.primary_company if organization.primary_company&.live_payroll?
+      primary_company ||= organization.companies.live_payroll.order(:id).first
       profile = profiles.find_or_initialize_by(name: finance_book.name)
       profile.update!(
         organization: organization,

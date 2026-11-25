@@ -212,16 +212,24 @@ RSpec.describe "Client subdomains", type: :request do
         expect(response).to have_http_status(:not_found)
       end
 
-      [ enabled_origin, disabled_origin ].each do |origin|
+      # A throttled answer stays readable on the enabled tenant site (M4-2),
+      # without credentials on the public branding path; others get no CORS.
+      [ [ enabled_origin, enabled_origin ], [ disabled_origin, nil ] ].each do |origin, allowed|
         get double_slash_path, params: { slug: "mosas" }, headers: { "Origin" => origin }, env: address
         expect(response).to have_http_status(:too_many_requests)
-        expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+        expect(response.headers["Access-Control-Allow-Origin"]).to eq(allowed)
+        expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
         expect(response.headers["Retry-After"]).to eq("60")
 
-        [ path, "/api/v1/auth/me", "/api/v1/employee/context" ].each do |request_path|
+        options path, headers: { "Origin" => origin, "Access-Control-Request-Method" => "GET" }, env: address
+        expect(response).to have_http_status(:too_many_requests)
+        expect(response.headers["Access-Control-Allow-Origin"]).to eq(allowed)
+
+        # Employee and auth preflights from one shared Wi-Fi have their own,
+        # much higher per-IP backstop instead of the branding limit.
+        [ "/api/v1/auth/me", "/api/v1/employee/context" ].each do |request_path|
           options request_path, headers: { "Origin" => origin, "Access-Control-Request-Method" => "GET" }, env: address
-          expect(response).to have_http_status(:too_many_requests)
-          expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+          expect(response).not_to have_http_status(:too_many_requests)
         end
       end
 
@@ -309,7 +317,7 @@ RSpec.describe "Client subdomains", type: :request do
       end
       token = token_for("https://#{enabled_host}")
 
-      company_links.zip([ :no_content, :not_found ]).each do |link, status|
+      company_links.zip([ :ok, :not_found ]).each do |link, status|
         get "/api/v1/employee/context", headers: {
           "Authorization" => "Bearer #{token}", "X-Employee-Link-Id" => link.id.to_s
         }

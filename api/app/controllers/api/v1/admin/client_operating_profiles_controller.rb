@@ -95,7 +95,7 @@ module Api
             controller_path: controller_path,
             action_name: action_name
           )
-            return render json: { error: "Your test workspace access does not allow this action" }, status: :forbidden
+            return render json: { error: @target_company.demo? ? Company::DEMO_ACCESS_DENIED_MESSAGE : "Your test workspace access does not allow this action" }, status: :forbidden
           end
 
           return if @target_company.migration_rehearsal_status == "ready"

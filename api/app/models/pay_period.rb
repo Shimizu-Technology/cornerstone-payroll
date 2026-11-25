@@ -332,11 +332,12 @@ class PayPeriod < ApplicationRecord
   # Finished payroll a client may see. A practice copy cannot commit, so its
   # copied "baseline" runs stand in for the source client's paid history.
   scope :client_finished, -> { reportable_committed.or(where(test_workspace_role: "baseline", correction_status: [ nil, "correction" ])) }
-  # A test workspace cannot commit or pay anyone. Its calculated runs are
-  # provisional inputs for testing reports and cumulative tax math only.
+  # A practice copy cannot commit or pay anyone. Its calculated runs are
+  # provisional inputs for testing reports and cumulative tax math only. A demo
+  # company reports its committed runs, like a live client.
   def self.reportable_for_company(company)
     base = where(company_id: company.id, correction_status: [ nil, "correction" ])
-    company.test_workspace? ? base.where(status: %w[calculated approved]) : base.committed
+    company.practice_copy? ? base.where(status: %w[calculated approved]) : base.committed
   end
   scope :for_year, ->(year) { where(pay_date: Date.new(year, 1, 1)..Date.new(year, 12, 31)) }
   # Dates are required for normal records; NULLS LAST is intentionally kept in
@@ -499,7 +500,7 @@ class PayPeriod < ApplicationRecord
   end
 
   def invalidate_later_rehearsal_calculations!
-    return unless test_workspace?
+    return unless company&.practice_copy?
 
     company.pay_periods.without_training_baselines
       .where(status: %w[calculated approved])
@@ -733,12 +734,14 @@ class PayPeriod < ApplicationRecord
     throw :abort
   end
 
+  # A demo has no source client to compare against; its runs are ordinary.
   def force_test_workspace_to_parallel
-    self.parallel_run = true if test_workspace?
+    self.parallel_run = true if company&.practice_copy?
   end
 
+  # A demo commits its own simulated payroll; every other workspace never does.
   def test_workspace_cannot_be_committed
-    return unless test_workspace? && status == "committed"
+    return unless company&.practice_copy? && status == "committed"
 
     errors.add(:status, "cannot be committed in a test workspace")
   end
@@ -806,7 +809,7 @@ class PayPeriod < ApplicationRecord
       return
     end
     return if company_id.blank?
-    return if test_workspace? && validation_context != :payroll_calculation && draft?
+    return if company&.practice_copy? && validation_context != :payroll_calculation && draft?
 
     batches = HistoricalImportBatch.where(
       company_id: company_id,
@@ -819,7 +822,7 @@ class PayPeriod < ApplicationRecord
 
     bridges = batches.filter_map(&:latest_applied_historical_ytd_bridge)
     unbridged_batch = batches.any? { |batch| batch.latest_applied_historical_ytd_bridge.nil? }
-    if test_workspace? && validation_context == :payroll_calculation && unbridged_batch
+    if company&.practice_copy? && validation_context == :payroll_calculation && unbridged_batch
       errors.add(:base, "Activate the verified historical YTD opening balances before calculating practice payroll")
       return
     end

@@ -12,6 +12,10 @@ module Api
               return render json: { error: "You do not have access to this company" }, status: :forbidden
             end
           end
+          # The selected company sets the scope, whatever the request names: a
+          # demo company's screen reports on that company alone, never on the
+          # live clients across the organization.
+          company_id = current_company.id if current_company&.demo?
 
           report = EmployeeContactHygiene::SharedEmailReport.new(
             actor: current_user,
@@ -103,7 +107,7 @@ module Api
           unless selected_id.present? && authorized_explicit_company_id(selected_id) == target_company.id &&
               !target_company.test_workspace?
             return render json: {
-              error: "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
+              error: target_company.demo? ? Company::DEMO_UNAVAILABLE_MESSAGE : "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
             }, status: :forbidden
           end
 

@@ -316,6 +316,42 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "isolates employee document notices and rejects a notice for another company's document" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          notices = TenantScope.as_system(reason: "Create employee document notice fixtures") do
+            fixture = { tax_year: 2026, revision: 1, sha256: "b" * 64, storage_key: "fixture", posted_at: Time.current }
+            rows = create_list(:employee, 2).map do |employee|
+              document = EmployeeDocument.create!(**fixture, employee: employee, company_id: employee.company_id)
+              EmployeeDocumentNotice.create!(company_id: employee.company_id, employee: employee, employee_document: document,
+                kind: "w2gu_available")
+            end
+            local, foreign = rows
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeDocumentNotice.create!(company_id: local.company_id, employee_id: local.employee_id,
+                  employee_document_id: foreign.employee_document_id, kind: "w2gu_available")
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[employee_document_notices])
+            rows
+          end
+
+          local, foreign = notices
+          TenantScope.with_company(local.company_id) do
+            expect(EmployeeDocumentNotice.pluck(:id)).to eq([ local.id ])
+            expect(EmployeeDocumentNotice.where(id: foreign.id).update_all(delivery_status: "bounced")).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeDocumentNotice.insert_all!([ foreign.attributes.except("id", "created_at", "updated_at").merge("kind" => "w2gu_available") ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     it "lets tenants read shared rules and only maintain their own rules" do
       pool.with_connection do |connection|
         connection.transaction do
@@ -575,6 +611,138 @@ RSpec.describe "Company RLS", :rls do
             end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
           end
           TenantScope.as_system(reason: "Verify Help contacts") { expect(CompanyHelpContact.where(id: [ own, foreign ]).count).to eq(2) }
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
+    it "isolates emergency contacts and enforces employee ownership" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company, other_company = create(:company), create(:company)
+          attrs = { name: "Example Contact", phone: "+16715550100" }
+          own, foreign = TenantScope.as_system(reason: "Create emergency contact RLS fixtures") do
+            contacts = [ company, other_company ].map do |owner|
+              EmployeeEmergencyContact.create!(company: owner, employee: create(:employee, company: owner), **attrs)
+            end
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeEmergencyContact.create!(company: company, employee_id: contacts.last.employee_id, **attrs)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[employee_emergency_contacts])
+            contacts
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(EmployeeEmergencyContact.order(:id).pluck(:id)).to eq([ own.id ])
+            expect(EmployeeEmergencyContact.where(id: foreign.id).update_all(name: "Changed")).to eq(0)
+            expect(EmployeeEmergencyContact.where(id: foreign.id).delete_all).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeEmergencyContact.insert_all!([ attrs.merge(company_id: other_company.id, employee_id: foreign.employee_id) ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
+    it "isolates payroll contact confirmations and rejects a mismatched employee company" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company, other_company = create(:company), create(:company)
+          own, foreign = TenantScope.as_system(reason: "Create contact confirmation policy fixtures") do
+            entries = [ company, other_company ].map do |owner|
+              EmployeeContactChangeToConfirm.create!(
+                company: owner, employee: create(:employee, company: owner), change_kind: "address"
+              )
+            end
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeContactChangeToConfirm.create!(
+                  company: company, employee_id: entries.last.employee_id, change_kind: "address"
+                )
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[employee_contact_changes_to_confirm])
+            entries
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(EmployeeContactChangeToConfirm.pluck(:id)).to eq([ own.id ])
+            expect(EmployeeContactChangeToConfirm.where(id: foreign.id).update_all(confirmed_at: Time.current)).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeContactChangeToConfirm.create!(
+                  company_id: other_company.id, employee_id: foreign.employee_id, change_kind: "address"
+                )
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
+    it "isolates delivery consents and enforces employee and link ownership" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company, other_company = create(:company), create(:company)
+          own, foreign = TenantScope.as_system(reason: "Create delivery consent RLS fixtures") do
+            disclosure = DeliveryDisclosures::DraftSeeds.seed!.find { |d| d.kind == "pay_statements" }
+            consents = [ company, other_company ].map do |owner|
+              employee = create(:employee, company: owner)
+              user = create(:user, company: owner, role: "portal_employee")
+              link = EmployeeAccountLink.create!(company: owner, employee: employee, user: user, status: "active")
+              DeliveryConsent.create!(
+                company: owner, user: user, employee: employee, employee_account_link: link,
+                delivery_disclosure: disclosure, kind: "pay_statements",
+                disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
+                given_at: Time.current, method: "employee_portal_checkbox"
+              )
+            end
+            expect do
+              connection.transaction(requires_new: true) do
+                DeliveryConsent.new(
+                  company: company, user: consents.first.user, employee: consents.last.employee,
+                  employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
+                  kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
+                  given_at: 1.minute.ago, withdrawn_at: Time.current, method: "employee_portal_checkbox"
+                ).save!(validate: false)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            expect do
+              connection.transaction(requires_new: true) do
+                DeliveryConsent.new(
+                  company: company, user: consents.first.user, employee: consents.first.employee,
+                  employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
+                  kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
+                  given_at: 1.minute.ago, withdrawn_at: Time.current, method: "employee_portal_checkbox"
+                ).save!(validate: false)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[delivery_consents], read_tables: %w[delivery_disclosures])
+            consents
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(DeliveryConsent.order(:id).pluck(:id)).to eq([ own.id ])
+            expect(DeliveryConsent.where(id: foreign.id).update_all(withdrawn_at: Time.current)).to eq(0)
+            expect(DeliveryConsent.where(id: foreign.id).delete_all).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                DeliveryConsent.insert_all!([
+                  foreign.attributes.except("id", "withdrawn_at").merge(
+                    "kind" => "w2gu",
+                    "access_proof_verified_at" => Time.current,
+                    "method" => "employee_portal_pdf_verified"
+                  )
+                ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
           raise ActiveRecord::Rollback
         end
       end

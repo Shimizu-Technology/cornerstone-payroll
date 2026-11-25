@@ -52,9 +52,11 @@ module ClerkAuthenticatable
       return render_write_maintenance("New Payroll sign-ins are paused during maintenance. Try again shortly using this same sign-in.")
     end
 
+    return head :unauthorized if !@current_user && view_as_requested?
+
     unless @current_user
       denied_user = nil
-      @current_user = PayrollInvitation.new.bind_from_metadata(clerk_id, request: request) do |candidate|
+      @current_user = PayrollInvitation.new.bind_from_metadata(clerk_id, request: request, azp: @clerk_token_payload["azp"]) do |candidate|
         denied_user = candidate if mfa_verification_required_for?(candidate)
         !denied_user
       end
@@ -74,7 +76,14 @@ module ClerkAuthenticatable
 
     unless @current_user.payroll_access_allowed?
       @current_user = nil
-      render json: { error: "Account inactive" }, status: :unauthorized
+      return render json: { error: "Account inactive" }, status: :unauthorized
+    end
+
+    # An employee-only login's sessions from before it was deactivated stay
+    # refused after it is reactivated (M4-2).
+    if EmployeeLinks::SessionFence.fenced?(@current_user, @clerk_token_payload)
+      @current_user = nil
+      render json: EmployeeLinks::SessionFence::SIGN_IN_AGAIN, status: :unauthorized
     end
   end
 

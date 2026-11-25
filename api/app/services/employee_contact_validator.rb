@@ -7,6 +7,7 @@ class EmployeeContactValidator
   ADDRESS_REQUIRED_FIELDS = %i[address_line1 city state zip].freeze
   MAX_EMAIL_LENGTH = 254
   CLIENT_GENERIC_LOGIN_EMAIL_ERROR = "This email can't be used here. Ask Cornerstone to set it."
+  EMPLOYEE_PERSONAL_EMAIL_ERROR = "Use a personal email address that only you can access."
   LOGIN_NAME_MISMATCH_ERROR = "The name on this login doesn't match this employee"
 
   # Structural placeholder local parts and domains (never put real addresses here).
@@ -277,6 +278,11 @@ class EmployeeContactValidator
       end
     end
 
+    # The same first-and-last-name rule a same-person email confirmation uses.
+    def login_name_matches?(login_user, employee)
+      new(employee: employee, company: employee.company).send(:login_name_matches_employee?, login_user)
+    end
+
     def validate_for_invite(employee, company: employee.company, allow_same_person_login: false, actor: nil)
       result = new(
         employee: employee,
@@ -351,8 +357,15 @@ class EmployeeContactValidator
     if @raw_email != :unchanged && normalized_email.present?
       if !valid_email_format?(normalized_email)
         add_error(errors, :email, "must be a valid email address")
+      elsif !DemoOutbound.contact_email_allowed?(@company, normalized_email)
+        # A demo contact may only be replaced with an allow-listed or
+        # non-delivering address, so a later notice can't leave the firm.
+        add_error(errors, :email, Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
       elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
-        add_error(errors, :email, "cannot be a placeholder or generic inbox address; enter the employee's own email")
+        add_error(errors, :email, @source == "employee" ? EMPLOYEE_PERSONAL_EMAIL_ERROR :
+          "cannot be a placeholder or generic inbox address; enter the employee's own email")
+      elsif @source == "employee" && self.class.structural_placeholder_email?(normalized_email)
+        add_error(errors, :email, EMPLOYEE_PERSONAL_EMAIL_ERROR)
       else
         if self.class.structural_placeholder_email?(normalized_email)
           warnings << {
@@ -373,7 +386,9 @@ class EmployeeContactValidator
 
         if errors[:email].blank?
           coworker_count = same_company_coworker_email_count(normalized_email)
-          if coworker_count >= 1
+          if coworker_count >= 1 && @source == "employee"
+            add_error(errors, :email, EMPLOYEE_PERSONAL_EMAIL_ERROR)
+          elsif coworker_count >= 1
             warnings << {
               code: "shared_company_email",
               field: "email",
@@ -416,6 +431,9 @@ class EmployeeContactValidator
   def check_login_email(normalized_email)
     login_user = User.where(self.class.normalized_email_node(User.arel_table[:email]).eq(normalized_email)).first
     return no_login_conflict unless login_user
+    # An unfinished employee app sign-up closed for this same employee holds
+    # the address for them; it's reused, not a conflict (M4-2).
+    return no_login_conflict if @employee && EmployeeLinks.closed_pending_sign_up_for?(login_user, @employee)
 
     # Check conflicting links FIRST via a narrow tenant-safe decision lookup
     # that sees links in other companies without leaking records. A login with
@@ -579,6 +597,7 @@ class EmployeeContactValidator
   end
 
   def staff_can_confirm_login_email?(login_user)
+    return false if @source == "employee"
     return false unless @actor&.staff_member? && @company.present?
     return false unless @actor.can_access_company?(@company.id)
     return false unless StaffRolePolicy.allowed?(@actor, :manage_client_configuration, company: @company)

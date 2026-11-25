@@ -10,6 +10,7 @@ module Api
           gate = PayrollGoLiveGate.new(company: current_company, pay_date: review&.effective_on || Date.current)
           render json: { data: result.data, meta: result.meta.merge(payroll_go_live: gate.state,
             prior_provider_history_available: PriorProviderHistory::Discovery.available?(current_company),
+            unconfirmed_contact_changes: EmployeeContactChangeToConfirm.unconfirmed_count(current_company),
             **recorded_history_meta) }
         end
 

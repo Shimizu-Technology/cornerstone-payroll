@@ -1,0 +1,76 @@
+# frozen_string_literal: true
+
+class EmployeeContactChangeToConfirm < ApplicationRecord
+  self.table_name = "employee_contact_changes_to_confirm"
+
+  FIELDS = {
+    "contact" => %w[email phone emergency_contacts].freeze,
+    "address" => %w[address_line1 address_line2 city state zip].freeze,
+    "delivery_consent" => %w[pay_statements_delivery w2gu_delivery].freeze
+  }.freeze
+
+  DELIVERY_FIELD_FOR_KIND = {
+    "pay_statements" => "pay_statements_delivery",
+    "w2gu" => "w2gu_delivery"
+  }.freeze
+
+  belongs_to :company
+  belongs_to :employee
+  belongs_to :changed_by, class_name: "User", optional: true
+  belongs_to :confirmed_by, class_name: "User", optional: true
+
+  scope :payroll_changes, -> { where.not("employee_contact_changes_to_confirm.after_values ? 'emergency_contacts'") }
+  scope :unconfirmed, -> { where(confirmed_at: nil) }
+  scope :recent_first, -> { order(id: :desc) }
+
+  def self.unconfirmed_count(company)
+    features = CompanyFeatures.for(company)
+    return unless features.employee_portal_feature?(:profile_requests) || features.employee_portal_feature?(:delivery_consent)
+
+    payroll_changes.where(company_id: company.id).unconfirmed.count
+  end
+
+  def self.record_delivery_consent_withdrawal!(consent:, actor:)
+    field = DELIVERY_FIELD_FOR_KIND.fetch(consent.kind)
+    entry = create!(
+      company_id: consent.company_id,
+      employee_id: consent.employee_id,
+      changed_by: actor,
+      change_kind: "delivery_consent",
+      before_values: { field => "Electronic consent on file (#{consent.disclosure_version})" },
+      after_values: { field => "Paper delivery required (consent withdrawn)" }
+    )
+    PortalNotifications.delivery_consent_withdrawn!(entry, actor: actor)
+    entry
+  end
+
+  # Called in the transaction that applies the employee change. The same entry
+  # powers client activity and, for payroll changes, the confirmation queue.
+  def self.record!(employee:, actor:, before_values:, after_values:, reviewer: nil, notify_staff: false)
+    return if employee.portal_pending_approval?
+
+    before_values = before_values.stringify_keys.transform_values(&:presence)
+    after_values = after_values.stringify_keys.transform_values(&:presence)
+    FIELDS.each do |kind, fields|
+      changed = after_values.slice(*fields).reject { |field, value| before_values[field] == value }
+      next if changed.empty?
+
+      entry = create!(
+        company_id: employee.company_id, employee: employee, changed_by: actor, change_kind: kind,
+        before_values: changed.keys.index_with { |field| before_values[field] }, after_values: changed
+      )
+      PortalNotifications.employee_contact_changed!(entry, actor: reviewer || actor, notify_staff: notify_staff)
+    end
+  end
+
+  def as_activity_json(include_confirmation: false)
+    data = {
+      id: id, employee_id: employee_id, employee_name: employee.full_name, changed_by_name: changed_by&.name,
+      change_kind: change_kind, before_values: before_values, after_values: after_values, created_at: created_at
+    }
+    if include_confirmation
+      data.merge!(confirmed_at: confirmed_at, confirmed_by_name: confirmed_by&.name)
+    end
+    data
+  end
+end
