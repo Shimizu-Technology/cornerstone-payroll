@@ -1,61 +1,49 @@
-import { isStaging } from '../lib/staging'
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import posthog from 'posthog-js';
 import { PostHogProvider as PHProvider, usePostHog } from 'posthog-js/react';
 import { useLocation } from 'react-router';
-import { supportToken } from '@/support/grant';
+import {
+  capturePageView,
+  currentSurface,
+  initAnalytics,
+  isPostHogEnabled,
+  type AnalyticsSurface,
+} from '@/lib/analytics';
 
-const POSTHOG_KEY = import.meta.env.VITE_PUBLIC_POSTHOG_KEY;
-const POSTHOG_HOST =
-  import.meta.env.VITE_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com';
-const isPostHogExplicitlyEnabled = import.meta.env.VITE_PUBLIC_POSTHOG_ENABLED === 'true';
-const isPostHogEnabled = Boolean(!supportToken && !isStaging && isPostHogExplicitlyEnabled && POSTHOG_KEY && POSTHOG_KEY !== 'YOUR_POSTHOG_KEY');
+initAnalytics();
 
-if (isPostHogEnabled && typeof window !== 'undefined') {
-  posthog.init(POSTHOG_KEY, {
-    api_host: POSTHOG_HOST,
-    capture_pageview: false,
-    capture_pageleave: false,
-    autocapture: false,
-    disable_session_recording: true,
-    disable_surveys: true,
-    advanced_disable_decide: true,
-    loaded: (ph) => {
-      if (import.meta.env.DEV) {
-        ph.opt_out_capturing();
-      }
-    },
-  });
+interface PostHogPageViewProps {
+  surface?: AnalyticsSurface;
 }
 
-export function PostHogPageView() {
+export function PostHogPageView({ surface = currentSurface() }: PostHogPageViewProps) {
   const location = useLocation();
   const ph = usePostHog();
 
   useEffect(() => {
     if (ph && isPostHogEnabled) {
-      ph.capture('$pageview', {
-        $current_url: window.location.href,
-        $pathname: location.pathname,
-      });
+      capturePageView(ph, location.pathname, surface);
     }
-  }, [location, ph]);
+  }, [location.pathname, ph, surface]);
 
   return null;
 }
 
 interface PostHogProviderProps {
-  children: React.ReactNode;
+  children: ReactNode;
+  surface?: AnalyticsSurface;
 }
 
-export function PostHogProvider({ children }: PostHogProviderProps) {
+export function PostHogProvider({ children, surface = currentSurface() }: PostHogProviderProps) {
   if (!isPostHogEnabled) {
     if (import.meta.env.DEV) {
       console.info('PostHog not configured — analytics disabled');
     }
     return <>{children}</>;
   }
+
+  initAnalytics({ surface });
 
   return <PHProvider client={posthog}>{children}</PHProvider>;
 }

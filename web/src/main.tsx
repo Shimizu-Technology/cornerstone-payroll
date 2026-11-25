@@ -16,7 +16,7 @@ createRoot(document.getElementById('root')!).render(
     {tenantHost ? (
       <TenantComingSoon host={tenantHost} />
     ) : supportToken ? <App /> : (
-      <PostHogProvider>
+      <PostHogProvider surface="staff">
         <App />
       </PostHogProvider>
     )}
