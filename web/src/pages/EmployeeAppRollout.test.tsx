@@ -9,7 +9,7 @@ import { EmployeeAppRollout } from './EmployeeAppRollout';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock('@/services/api', () => ({ apiClient: mocks }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Example Bakery' } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Example Bakery' }, companies: [] }) }));
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => false }));
 const auth = vi.hoisted(() => ({ capabilities: [] as string[] }));
 vi.mock('@/contexts/AuthContext', () => ({

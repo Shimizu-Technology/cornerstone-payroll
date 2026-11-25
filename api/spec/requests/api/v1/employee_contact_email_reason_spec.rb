@@ -68,5 +68,49 @@ RSpec.describe "Refused employee email reasons", type: :request do
       expect(reason).to eq("placeholder_email")
       expect(response.body).not_to match(/demo/i)
     end
+
+    context "with marked placeholders that pass the recipient check" do
+      around do |example|
+        saved = ENV[DemoOutbound::ENV_KEY]
+        ENV[DemoOutbound::ENV_KEY] = "approved.sample@sample-client.com"
+        example.run
+      ensure
+        ENV[DemoOutbound::ENV_KEY] = saved
+      end
+
+      before do
+        EmployeePlaceholderEmail.create!(organization: organization, email: "marked.sample@sample-client.test", marked_by: admin)
+        EmployeePlaceholderEmail.create!(organization: organization, email: "approved.sample@sample-client.com", marked_by: admin)
+      end
+
+      def saved_shape
+        body = response.parsed_body
+        [
+          response.status, body.key?("contact_validation"), body.dig("contact_validation", "email_error_code"),
+          body.dig("data", "contact_details_status", "email_issue"), body["contact_warnings"]
+        ]
+      end
+
+      it "answers a marked address exactly like an unmarked one" do
+        save_email(limited_employee, "unmarked.sample@sample-client.test")
+        expect(response).to have_http_status(:ok), response.body
+        unmarked = saved_shape
+        expect(response.parsed_body.dig("data", "contact_details_status")).to be_present
+
+        save_email(limited_employee, "marked.sample@sample-client.test")
+        expect(saved_shape).to eq(unmarked)
+        expect(limited_employee.reload.email).to eq("marked.sample@sample-client.test")
+
+        save_email(limited_employee, "approved.sample@sample-client.com")
+        expect(saved_shape).to eq(unmarked)
+        expect(response.body).not_to include("placeholder_email")
+      end
+
+      it "still names a marked address for a live company" do
+        save_email(employee, "marked.sample@sample-client.test")
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(reason).to eq("placeholder_email")
+      end
+    end
   end
 end
