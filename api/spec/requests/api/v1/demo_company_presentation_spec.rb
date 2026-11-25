@@ -24,7 +24,7 @@ RSpec.describe "Demo company presentation", type: :request do
   end
 
   before do
-    [ live, demo ].each { |company| CompanyAssignment.create!(user: accountant, company: company, workspace_access_level: (company.test_workspace? ? "operator" : nil)) }
+    [ live, demo ].each { |company| CompanyAssignment.create!(user: accountant, company: company) }
   end
 
   def sign_in(controller, user)

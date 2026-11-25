@@ -48,6 +48,20 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
   end
 
   %i[create_user resend create_organization create_admin].each do |path|
+    # Production Clerk is invite-only, and the first sign-in binds through the
+    # accepted invitation: the email must carry Clerk's invitation URL.
+    it "emails the Clerk invitation URL for #{path}, not a bare login link" do
+      queued = []
+      allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
+      request_invitation(path)
+      ENV["RESEND_API_KEY"] = "synthetic"
+      sent = []
+      allow(StagingMailTransport).to receive(:deliver) { |payload| sent << payload && { "id" => "synthetic" } }
+      SendUserInviteEmailJob.perform_now(*queued.sole)
+      expect(sent.sole.fetch(:html)).to include(%(href="https://synthetic.clerk.accounts.dev/invite"))
+      expect(sent.sole.fetch(:html)).not_to include(%(href="https://payroll-web-staging.example.test/login"))
+    end
+
     it "reports an ordinary #{path} enqueue as queued, never provider-submitted" do
       expect(SendUserInviteEmailJob).to receive(:perform_later).and_return(double("enqueued job"))
       request_invitation(path)

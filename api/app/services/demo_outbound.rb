@@ -75,9 +75,12 @@ module DemoOutbound
     outside_scope(-> { TenantScope.as_system(reason: "Find the demo company a login belongs to") { demo_company_lookup(user) } }) { demo_company_lookup(user) }
   end
 
+  # Only current ties count: an expired assignment or an inactive demo
+  # company never makes a login a demo login.
   def demo_company_lookup(user)
-    Company.demo.where(id: EmployeeAccountLink.where(user_id: user.id).select(:company_id))
-      .or(Company.demo.where(id: CompanyAssignment.where(user_id: user.id).select(:company_id))).order(:id).first
+    demo = Company.demo.active
+    demo.where(id: EmployeeAccountLink.where(user_id: user.id).select(:company_id))
+      .or(demo.where(id: CompanyAssignment.active_access.where(user_id: user.id).select(:company_id))).order(:id).first
   end
 
   # Enters a scope only when none is active; scopes never nest.

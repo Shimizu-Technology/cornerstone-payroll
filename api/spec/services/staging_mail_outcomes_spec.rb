@@ -24,24 +24,25 @@ RSpec.describe "Staging mail outcomes" do
   let(:company) { user.company }
   let(:config) { create(:payroll_reminder_config, company: company, enabled: true, recipients: [ user.email ]) }
   let(:period) { create(:pay_period, company: company, start_date: Date.current - 14, end_date: Date.current, pay_date: Date.current + 2) }
+  let(:invitation_url) { "https://clerk.payroll.example.test/v1/tickets/accept?ticket=tk_synthetic" }
 
   it "returns a distinct invite capture outcome with redacted evidence" do
     expect(Resend::Emails).not_to receive(:send)
-    expect(UserInviteEmailService.send_invite(user: user, invited_by: nil)).to eq(:captured)
+    expect(UserInviteEmailService.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to eq(:captured)
     expect(@output.string).to include("captured", "user_id=#{user.id}")
     expect(@output.string).not_to include(user.email, "Sent invite")
   end
 
   it "completes a captured invite job without claiming delivery or retrying" do
     expect(Resend::Emails).not_to receive(:send)
-    expect(SendUserInviteEmailJob.perform_now(user.id)).to eq(:captured)
+    expect(SendUserInviteEmailJob.perform_now(user.id, nil, invitation_url)).to eq(:captured)
     expect(@output.string).to include("captured", "user_id=#{user.id}")
     expect(@output.string).not_to include(user.email)
   end
 
   it "logs invite failures with IDs and class but no message or recipient" do
     allow(StagingMailTransport).to receive(:deliver).and_raise(RuntimeError, "PRIVATE_ERROR #{user.email}")
-    expect(UserInviteEmailService.send_invite(user: user, invited_by: nil)).to be(false)
+    expect(UserInviteEmailService.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to be(false)
     expect(@output.string).to include("RuntimeError", "user_id=#{user.id}")
     expect(@output.string).not_to include("PRIVATE_ERROR", user.email)
   end
@@ -133,7 +134,7 @@ RSpec.describe "Staging mail outcomes" do
       ENV["DEPLOYMENT_ENV"] = deployment
       ENV["RESEND_API_KEY"] = "synthetic"
       expect(Resend::Emails).to receive(:send).with(hash_including(to: user.email, html: a_string_including("Invitation"))).and_return({ "id" => "synthetic" })
-      expect(UserInviteEmailService.send_invite(user: user, invited_by: nil)).to be(true)
+      expect(UserInviteEmailService.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to be(true)
     end
   end
 end
