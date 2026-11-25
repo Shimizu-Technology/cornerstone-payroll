@@ -92,7 +92,7 @@ RSpec.describe "Api::V1::Admin::PayrollLiabilityCenter", type: :request do
   end
 
   it "requires a staff identity" do
-    client_user = create(:user, company:, organization: company.organization, role: "client")
+    client_user = create(:user, :with_client_assignment, company:, organization: company.organization, role: "client")
 
     get "/api/v1/admin/payroll_liability_center", headers: {
       "X-E2E-User-Email" => client_user.email,

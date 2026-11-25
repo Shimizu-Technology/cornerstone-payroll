@@ -133,6 +133,7 @@ RSpec.describe "Api::V1::Auth", type: :request do
       )
 
       client_user = create(:user, organization: organization, company: company_a, role: "client", active: true)
+      create(:company_assignment, user: client_user, company: company_a)
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
 
       get "/api/v1/auth/me"
@@ -159,6 +160,34 @@ RSpec.describe "Api::V1::Auth", type: :request do
         "intake_adapter" => nil,
         "client_portal_enabled" => false
       )
+    end
+
+    it "omits unauthorized home company metadata and features for a client whose grants expired" do
+      organization = create(:organization)
+      home_company = create(:company, organization: organization, name: "Secret Home Co")
+      ClientOperatingProfile.create!(
+        company: home_company,
+        effective_on: Date.new(2026, 1, 1),
+        version: 1,
+        offering: "payroll_portals",
+        hours_source: "manual",
+        client_portal_enabled: true,
+        employee_portal_enabled: true
+      )
+      client_user = create(:user, organization: organization, company: home_company, role: "client", active: true)
+      create(:company_assignment, user: client_user, company: home_company, expires_at: 1.minute.ago)
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(client_user)
+
+      get "/api/v1/auth/me"
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("user")).to include(
+        "company_id" => nil,
+        "company_name" => nil,
+        "home_company_id" => nil,
+        "assigned_company_ids" => []
+      )
+      expect(response.parsed_body.fetch("features")).to be_nil
     end
 
     it "exposes own AIRE account connection to accountants without configuration access" do

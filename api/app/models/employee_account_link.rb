@@ -18,6 +18,7 @@ class EmployeeAccountLink < ApplicationRecord
   CODE_ALPHABET = "ACDEFGHJKMNPQRTUVWXY34679".chars.freeze
   CODE_LENGTH = 10
   DIGEST_PATTERN = /\A[0-9a-f]{64}\z/
+  ACTIVATION_NOTICE_STATUSES = %w[pending sent skipped failed].freeze
 
   enum :status, { invited: "invited", active: "active", former: "former", revoked: "revoked" }, validate: true
 
@@ -28,7 +29,9 @@ class EmployeeAccountLink < ApplicationRecord
   validates :invite_token_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
   validates :invite_code_digest, format: { with: DIGEST_PATTERN }, allow_nil: true
   validates :invite_delivery, inclusion: { in: %w[email code] }, allow_nil: true
-  validates :failed_activation_attempts, :invite_generation, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validates :activation_notice_status, inclusion: { in: ACTIVATION_NOTICE_STATUSES }, allow_nil: true
+  validates :failed_activation_attempts, :invite_generation, :activation_notice_attempts,
+    numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validate :employee_belongs_to_live_company
   before_validation :take_company_payroll_environment, on: :create
 

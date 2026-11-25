@@ -8,6 +8,7 @@ RSpec.describe "Api::V1::Client::PortalThreads", type: :request do
   let(:staff_user) { create(:user, company: company, role: "accountant") }
 
   before do
+    CompanyAssignment.create!(user: client_user, company: company)
     allow_any_instance_of(Api::V1::Client::PortalThreadsController).to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Client::PortalThreadsController).to receive(:current_user).and_return(client_user)
     allow(ClientPortalThreadChannel).to receive(:broadcast_thread)

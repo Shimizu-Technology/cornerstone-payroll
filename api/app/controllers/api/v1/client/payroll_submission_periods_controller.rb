@@ -27,7 +27,8 @@ module Api
           payroll_actions.decide!(saved_period!, decision: params[:decision], draft_id: params[:draft_id], note: params[:note])
           render_period
         rescue ActiveRecord::RecordNotFound => error
-          render json: { error: error.message }, status: :not_found
+          Rails.logger.warn("[Client::PayrollSubmissionPeriodsController#decision] #{error.class}: #{error.message}")
+          render json: { error: "Payroll period or draft not found" }, status: :not_found
         end
         private
 

@@ -43,7 +43,8 @@ RSpec.describe "W-9 request log filtering", type: :request do
     expect(response.status).to be >= 400
     expect(params.dig("payee", "contractor", "tin")).to eq("[FILTERED]")
     expect(params.dig("payee", "contractor", "contractor_ein")).to eq("[FILTERED]")
-    expect(params.dig("payee", "contractor", "first_name")).to eq("Ana")
+    expect(params.dig("payee", "contractor", "first_name")).to eq("[FILTERED]")
+    expect(params.dig("payee", "contractor", "contractor_type")).to eq("individual")
     expect(log).to include("Parameters:", "[FILTERED]")
     expect(log).not_to include(tin, tin.delete("-"), "12-3456789", "123456789")
   end
