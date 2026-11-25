@@ -333,8 +333,8 @@ export function PayRunEmployeeResults({
                                   </span>
                                 </div>
                               ) : (
-                                <span className="text-xs font-medium text-warning-700" title="No salary timekeeping record was available for this payroll item">
-                                  Not recorded
+                                <span className="text-xs font-medium text-neutral-600" title="Paid by salary; no hours were recorded for this payroll item">
+                                  Salary
                                 </span>
                               )
                             ) : isContractorFlat ? (
