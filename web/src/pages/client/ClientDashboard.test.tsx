@@ -37,3 +37,19 @@ it.each([true, false])('offers a dashboard approval link only when decision acce
     expect(screen.queryByRole('link', { name: 'Open payroll preview' })).toBeNull();
   }
 });
+
+it('shows an open payroll whose pay date is still unset', async () => {
+  vi.mocked(clientPayPeriodsApi.list).mockResolvedValue({
+    pay_periods: [],
+    meta: { current_page: 1, per_page: 25, total_count: 0, total_pages: 0, statuses: {}, sources: {}, years: [] },
+    open_period: {
+      ref: '2026-11-01_2026-11-15',
+      start_date: '2026-11-01',
+      end_date: '2026-11-15',
+      pay_date: null,
+      client_payroll_status: 'preparing',
+    },
+  } as Awaited<ReturnType<typeof clientPayPeriodsApi.list>>);
+  render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
+  expect(await screen.findByText(/Pay date to be set/)).toBeTruthy();
+});

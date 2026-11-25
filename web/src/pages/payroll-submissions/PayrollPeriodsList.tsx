@@ -46,6 +46,9 @@ export function PayrollPeriodsList({ audience }: { audience: 'client' | 'staff' 
                   {row.current_revision ? ` · Revision ${row.current_revision} sent ${formatGuam(row.last_submitted_at)}` : ''}
                   {(row.accepts_files ?? canSend) && !row.open_for_files && row.status === 'waiting_for_files' ? ` · Opens ${formatDate(row.opens_on)}` : ''}
                 </span>
+                {audience === 'client' && row.status === 'in_review' && row.client_payroll_status === 'committed' && (
+                  <span className="mt-1 block text-sm text-neutral-700">{row.status_label}</span>
+                )}
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 {row.unread && <Badge variant="warning">New</Badge>}

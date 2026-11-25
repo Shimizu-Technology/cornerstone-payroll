@@ -110,7 +110,7 @@ export function ClientDashboard(): ReactElement {
             {open && !openReview?.can_decide_payroll_review && (
               <div className="border-t border-neutral-200 pt-3">
                 <p className="font-medium">Next payroll · {formatDateRange(open.start_date, open.end_date)}</p>
-                <p>Pay date {formatDate(open.pay_date)} · {clientPayrollStatus(open.client_payroll_status)}</p>
+                <p>{open.pay_date ? `Pay date ${formatDate(open.pay_date)}` : 'Pay date to be set'} · {clientPayrollStatus(open.client_payroll_status)}</p>
                 <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={open.review_pay_period_id ? payRunHref(open.review_pay_period_id) : `/payroll-files/${encodeURIComponent(open.ref)}`}>
                   {open.review_pay_period_id ? 'Open payroll preview' : 'Open Pay Period Files'}
                 </Link>

@@ -6500,7 +6500,7 @@ export interface ClientOpenPayrollPeriod {
   ref: string;
   start_date: string;
   end_date: string;
-  pay_date: string;
+  pay_date: string | null;
   review_pay_period_id?: number;
   client_payroll_status: string;
 }

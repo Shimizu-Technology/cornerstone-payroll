@@ -96,7 +96,10 @@ module Api
           entries = catalog.entries.select { |entry| entry.start_date <= catalog.today }
           catalog.preload_live_pay_periods(entries)
           open_entries = entries.select do |candidate|
-            catalog.pay_date_for(candidate) >= catalog.today && !catalog.live_pay_period(candidate)&.client_finished?
+            next false if catalog.voided_pay_period?(candidate)
+
+            date = catalog.pay_date_for(candidate) || candidate.end_date
+            date >= catalog.today && !catalog.live_pay_period(candidate)&.client_finished?
           end
           entry = open_entries.find { |candidate| catalog.open_for_files?(candidate) } || open_entries.first
           return unless entry

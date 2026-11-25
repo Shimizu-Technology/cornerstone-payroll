@@ -16,11 +16,16 @@ import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStat
 import { parsePositiveRouteId } from '@/lib/route-params';
 
 
+function periodStatusLabel(period: PayrollHistoryRecord): string {
+  if (period.test_workspace_role === 'baseline') return 'Paid (copied history)';
+  return period.status === 'locked' ? 'Locked' : clientPayRunStatus(period);
+}
+
 function PeriodStatusBadge({ period }: { period: PayrollHistoryRecord }): ReactElement {
   return (
     <div className="space-y-1">
-      <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
-        {clientPayRunStatus(period)}
+      <Badge variant={period.test_workspace_role === 'baseline' || period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
+        {periodStatusLabel(period)}
       </Badge>
       {period.can_decide_payroll_review && <p className="text-sm font-medium">Needs your approval</p>}
     </div>
@@ -86,7 +91,7 @@ export function ClientPayPeriods(): ReactElement {
       [
         formatDateRange(period.start_date, period.end_date),
         formatDate(period.pay_date),
-        clientPayRunStatus(period),
+        periodStatusLabel(period),
         period.can_decide_payroll_review ? "Needs your approval" : "",
         period.test_workspace_role === 'baseline' ? 'Paid (copied history)' : null,
         period.source.label,
@@ -114,7 +119,7 @@ export function ClientPayPeriods(): ReactElement {
         {!error && !loading && openPeriodSummary && !openPeriodSummary.review_pay_period_id && (
           <Card className="space-y-2 p-4">
             <h2 className="font-semibold">{formatDateRange(openPeriodSummary.start_date, openPeriodSummary.end_date)}</h2>
-            <p className="text-sm">Pay date {formatDate(openPeriodSummary.pay_date)} · {clientPayrollStatus(openPeriodSummary.client_payroll_status)}</p>
+            <p className="text-sm">{openPeriodSummary.pay_date ? `Pay date ${formatDate(openPeriodSummary.pay_date)}` : 'Pay date to be set'} · {clientPayrollStatus(openPeriodSummary.client_payroll_status)}</p>
             <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/payroll-files/${encodeURIComponent(openPeriodSummary.ref)}`}>
               Open Pay Period Files
             </Link>
