@@ -86,10 +86,6 @@ function inListOrder(statements: StatementSummary[]): StatementSummary[] {
   return [...statements.filter((s) => s.source === 'payroll'), ...statements.filter((s) => s.source === 'quickbooks')];
 }
 
-function yearOf(date: string): number {
-  return Number(date.slice(0, 4));
-}
-
 /** ?year=2025 from the address, or null. */
 function yearParam(search: string): number | null {
   const year = Number(new URLSearchParams(search).get('year'));
@@ -221,7 +217,7 @@ function YearSoFar({ latest }: { latest: StatementSummary }): ReactElement {
         <div><dt>Take-home pay</dt><dd><Money value={detail.ytdNet} /></dd></div>
         <div><dt>Pay before taxes <span className="emp-term">(gross)</span></dt><dd><Money value={detail.ytdGross} /></dd></div>
       </dl>
-      <p className="emp-hint">{yearOf(detail.payDate)} through {shortDate(detail.payDate)}</p>
+      <p className="emp-hint">{detail.taxYear} through {shortDate(detail.payDate)}</p>
     </div>
   );
 }
@@ -396,7 +392,7 @@ function useDefaultYear(): { year: number | null; newest: Statements } {
   const newest = useStatements(null);
   if (newest.state.status !== 'ready') return { year: null, newest };
   const first = newest.state.data.statements[0];
-  return { year: newest.state.data.years[0] ?? (first ? yearOf(first.payDate) : Number(today().slice(0, 4))), newest };
+  return { year: newest.state.data.years[0] ?? (first ? first.taxYear : Number(today().slice(0, 4))), newest };
 }
 
 /** /pay, /pay/all and /pay/:id. */
@@ -429,7 +425,8 @@ function PayDesktop(): ReactElement {
   // reload or Back keeps it. A stub opened without one (from Home or an
   // email) shows its own year's list.
   const selected = useStatement(statementId ?? null);
-  const stubYear = selected.state.status === 'ready' ? yearOf(selected.state.data.payDate) : null;
+  // The year the API lists the stub under, which a check date can't move.
+  const stubYear = selected.state.status === 'ready' ? selected.state.data.taxYear : null;
   const year = yearParam(location.search) ?? stubYear ?? (statementId && selected.state.status === 'loading' ? null : defaultYear);
   const { state } = useStatements(year);
 
@@ -720,6 +717,10 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
       {(quickbooks ? stub.originalPdf : stub.pdfAvailable) && (
         <StubPdfButton id={stub.id} filename={`${quickbooks ? 'original-pay-stub' : 'pay-stub'}-${stub.payDate}.pdf`}
           label={quickbooks ? 'View original stub (PDF)' : 'Download PDF'} />
+      )}
+      {/* A QuickBooks note is the recorded-adjustment note: the amounts above include it, the PDF doesn't. */}
+      {quickbooks && stub.originalPdf && stub.note && (
+        <p className="emp-hint">This PDF is the original QuickBooks stub from before the recorded adjustment, so its amounts differ from the ones above.</p>
       )}
       <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-bottom" newScreen={newScreen} />
     </article>

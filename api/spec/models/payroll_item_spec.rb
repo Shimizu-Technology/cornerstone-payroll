@@ -1,6 +1,25 @@
 require "rails_helper"
 
 RSpec.describe PayrollItem, type: :model do
+  describe "check date" do
+    let(:pay_period) do
+      create(:pay_period, start_date: Date.new(2026, 12, 14), end_date: Date.new(2026, 12, 27), pay_date: Date.new(2026, 12, 31))
+    end
+    let(:item) { create(:payroll_item, pay_period: pay_period, employee: create(:employee, company: pay_period.company)) }
+
+    it "may differ from the pay date within its tax year" do
+      expect(item.update(check_date: Date.new(2026, 12, 30))).to be(true)
+    end
+
+    it "is rejected in another year, since W-2GU and year-to-date totals count the check in its pay date's year" do
+      expect(item.update(check_date: Date.new(2027, 1, 2))).to be(false)
+      expect(item.errors.full_messages).to include(
+        "Check date must be in 2026, the year of this payroll's pay date (Dec 31, 2026). " \
+        "W-2GU and year-to-date totals count this check in that year; change the payroll's pay date instead."
+      )
+    end
+  end
+
   describe "pay precision normalization" do
     it "rounds pay_rate and stored wage rate entries to cents before validation" do
       payroll_item = build(

@@ -74,11 +74,13 @@ class EmployeeIntakePolicy
     }
   end
 
-  def self.payroll_ready?(employee, period_end)
+  # w4_on: the date withholding is calculated with, a pay period's pay_date
+  # (PayrollCalculator#w4_election_for_calculation). It defaults to period_end.
+  def self.payroll_ready?(employee, period_end, w4_on: period_end)
     employee.intake_exception.blank? || (
       employee.intake_payroll_confirmed_at.present? &&
       employee.intake_payroll_eligible_from.present? && employee.intake_payroll_eligible_from <= period_end &&
-      (employee.contractor? || employee.w4_election_on(period_end).present?)
+      (employee.contractor? || employee.w4_election_on(w4_on).present?)
     )
   end
 end

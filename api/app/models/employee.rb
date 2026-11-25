@@ -413,6 +413,12 @@ class Employee < ApplicationRecord
     [ first_name, middle_name, last_name ].compact_blank.join(" ")
   end
 
+  # The legal name with its suffix ("Jr.", "III"), for an employee reading
+  # their own record. W-2GU prints the coded suffix in its own box.
+  def legal_name
+    [ full_name, { "JR" => "Jr.", "SR" => "Sr." }.fetch(name_suffix.to_s, name_suffix) ].compact_blank.join(" ")
+  end
+
   def display_name
     contractor? && business_name.present? ? "#{full_name} (#{business_name})" : full_name
   end
