@@ -78,7 +78,9 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
               <p className="text-sm">Invitation {new Date(access.invite_expires_at).getTime() <= Date.now() ? 'expired' : 'expires'} {formatEmployeeAppDate(access.invite_expires_at)}.</p>
             )}
             {access.status === 'locked' && access.locked_until && <p className="text-sm">Sign-up locked until {formatEmployeeAppDate(access.locked_until, true)} (Guam time). {!access.staff_actions && "Ask Cornerstone if this employee needs help unlocking sign-up."}</p>}
-            {access.reset_pending && <p className="text-sm font-medium text-amber-800">Sign-up reset is waiting to finish. {access.staff_actions ? 'Choose Reset sign-up to finish it.' : 'Ask Cornerstone to finish the reset.'}</p>}
+            {access.reset_pending && <p className="text-sm font-medium text-amber-800">
+              Sign-up reset is waiting to finish. {actions.includes('reset_sign_up') ? 'Choose Reset sign-up to finish it.' : access.enabled && !access.staff_actions ? 'Ask Cornerstone to finish the reset.' : null}
+            </p>}
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="[overflow-wrap:anywhere]">{access.email || 'No email on file'}</span>
               <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={employeeEditPath(companyId, employeeId, { returnTo: location.pathname + location.search })}>Edit contact details</Link>

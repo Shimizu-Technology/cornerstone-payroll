@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatEmployeeAppDate, type PrintedInvite } from '@/services/employee-app-rollout-api';
@@ -8,10 +9,17 @@ export function PrintedInvites({ invites, companyName, onClose }: {
   companyName: string;
   onClose: () => void;
 }) {
+  const printClicked = useRef(false);
   if (!invites.length) return null;
 
+  function finish() {
+    if (!printClicked.current && !window.confirm('Close without printing? You will need to resend the invite to get a new code.')) return;
+    printClicked.current = false;
+    onClose();
+  }
+
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open dismissOnEscape={false} onOpenChange={() => {}}>
       <DialogContent className="employee-code-dialog max-h-[90dvh] overflow-y-auto">
         <DialogHeader className="print:hidden">
           <DialogTitle>Print sign-up {invites.length === 1 ? 'code' : 'codes'}</DialogTitle>
@@ -30,8 +38,8 @@ export function PrintedInvites({ invites, companyName, onClose }: {
           ))}
         </div>
         <DialogFooter className="print:hidden">
-          <Button type="button" variant="outline" onClick={onClose}>Done</Button>
-          <Button type="button" onClick={() => window.print()}>Print {invites.length === 1 ? 'code' : 'codes'}</Button>
+          <Button type="button" variant="outline" onClick={finish}>Done</Button>
+          <Button type="button" onClick={() => { printClicked.current = true; window.print(); }}>Print {invites.length === 1 ? 'code' : 'codes'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

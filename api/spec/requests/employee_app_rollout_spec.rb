@@ -23,12 +23,17 @@ RSpec.describe "Employee app rollout administration", type: :request do
     "/api/v1/#{actor.client? ? 'client' : 'admin'}/employees/#{employee.id}/employee_app"
   end
 
-  def headers(actor)
-    bearer(actor.clerk_id).merge("X-Company-Id" => actor.company_id.to_s)
+  def headers(actor, target: actor.company)
+    bearer(actor.clerk_id).merge("X-Company-Id" => target.id.to_s)
   end
 
-  def mutate(actor, action, **payload)
-    post "#{panel_path(actor)}/#{action}", headers: headers(actor), params: payload, as: :json
+  def mutate(actor, action, target: actor.company, **payload)
+    post "#{panel_path(actor)}/#{action}", headers: headers(actor, target: target), params: payload, as: :json
+  end
+
+  def invite_wave(actor, ids, delivery: "code", target: actor.company)
+    post "#{rollout_path(actor, target: target)}/invite", headers: headers(actor, target: target),
+      params: { employee_ids: ids, delivery: delivery }, as: :json
   end
 
   def get_panel(actor)
@@ -124,7 +129,7 @@ RSpec.describe "Employee app rollout administration", type: :request do
         expect(data).to eq([
           { "id" => other.id, "error" => "Employee not found in this company." },
           { "id" => employee.id, "email_status" => "failed" },
-          { "id" => no_email.id, "error" => "is required to send an email invite" }
+          { "id" => no_email.id, "error" => "Email is required to send an email invite" }
         ])
         expect(link_audits(employee.employee_account_links.sole, "invited").sole.user_id).to eq(actor.id)
         expect(other.employee_account_links).to be_empty
@@ -134,6 +139,75 @@ RSpec.describe "Employee app rollout administration", type: :request do
         expect(response).to have_http_status(:ok)
         expect(data.sole.dig("print", "code").length).to eq(10)
         expect(link_audits(no_email.employee_account_links.sole, "invited").sole.user_id).to eq(actor.id)
+      end
+    end
+
+    it "gives an assigned accountant without Client management read-only rollout access" do
+      accountant = create(:user, company: other_company, role: :accountant, clerk_id: "user_rollout_accountant")
+      create(:company_assignment, user: accountant, company: company, client_management: false)
+
+      get rollout_path(accountant), headers: headers(accountant, target: company)
+      expect(response).to have_http_status(:ok)
+      expect(data).to include("enabled" => true, "can_manage_invites" => false)
+
+      mutate(accountant, "invite", target: company, delivery: "code")
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to eq(StaffRolePolicy.error_message(:manage_client_configuration))
+      invite_wave(accountant, [ employee.id ], target: company)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["error"]).to eq(StaffRolePolicy.error_message(:manage_client_configuration))
+      expect(employee.employee_account_links).to be_empty
+    end
+
+    it "rejects empty, oversized, or malformed waves before inviting any employee" do
+      invalid_waves = [ [], Array.new(26, employee.id), [ employee.id, "2x" ], [ employee.id, 0 ],
+        [ employee.id, -1 ], [ employee.id, "9223372036854775808" ], [ employee.id, { id: employee.id } ] ]
+      invalid_waves.each do |ids|
+        invite_wave(staff, ids)
+        expect(response).to have_http_status(:unprocessable_content), ids.inspect
+        expect(response.parsed_body["error"]).to eq("Select between 1 and 25 employees.")
+      end
+      expect(employee.employee_account_links).to be_empty
+    end
+
+    it "keeps the original credential when a later wave includes an already-invited employee" do
+      invite_wave(staff, [ employee.id ])
+      expect(response).to have_http_status(:ok)
+      first_code = data.sole.fetch("print").fetch("code")
+      access = employee.employee_account_links.sole
+      next_employee = create(:employee, company: company)
+
+      invite_wave(client, [ employee.id, next_employee.id ])
+      expect(response).to have_http_status(:ok)
+      expect(data.first).to eq("id" => employee.id, "error" => "This employee already has an invite. Resend it instead.")
+      expect(data.last).to include("id" => next_employee.id, "print" => include("code" => be_present))
+      expect(employee.employee_account_links.reload.sole).to have_attributes(id: access.id, invite_generation: 1,
+        invite_code_digest: EmployeeAccountLink.code_digest(first_code))
+      expect(link_audits(access, "invited").size).to eq(1)
+    end
+
+    context "with outbound email restricted to demo recipients" do
+      let(:company) { create_demo_company(organization: create(:organization)) }
+
+      it "reports a DemoOutbound refusal for the row and continues checking the wave" do
+        # Demo workspaces normally keep the app off. Open only that feature gate
+        # to exercise the delivery guard behind it.
+        allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
+        other = create(:employee, company: other_company)
+        allow(DemoOutbound).to receive(:allowlist).and_return(Set.new)
+        allow(DemoOutbound).to receive(:permit?).and_call_original
+        allow(EmployeeLinks::InviteEmail).to receive(:deliver).and_return(:sent)
+
+        invite_wave(staff, [ employee.id, other.id ], delivery: "email")
+
+        expect(response).to have_http_status(:ok), response.body
+        expect(data).to eq([
+          { "id" => employee.id, "error" => Company::DEMO_RECIPIENT_REFUSED_MESSAGE },
+          { "id" => other.id, "error" => "Employee not found in this company." }
+        ])
+        expect(DemoOutbound).to have_received(:permit?).with(company: company, email: employee.email, channel: "employee_link_invite")
+        expect(employee.employee_account_links).to be_empty
+        expect(EmployeeLinks::InviteEmail).not_to have_received(:deliver)
       end
     end
 
@@ -213,6 +287,25 @@ RSpec.describe "Employee app rollout administration", type: :request do
       expect(link_audits(issued.link, "invite_resent")).to be_empty
     end
 
+    it "gives clients and staff different next steps for an accepted sign-up that can no longer finish" do
+      issued = invite!(employee, actor: staff, delivery: "code")
+      post_activation(activation_params(employee, code: issued.code))
+      expect_sign_up_started
+      accept_clerk_invitation!("user_stale_rollout")
+      issued.link.update!(invite_expires_at: 1.minute.ago)
+
+      mutate(client, "resend", access_id: issued.link.id, delivery: "code")
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body).to include("code" => "sign_up_accepted",
+        "error" => "This person already created their account, but that sign-up can no longer finish. Ask Cornerstone to reset it.")
+
+      mutate(staff, "resend", access_id: issued.link.id, delivery: "code")
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body).to include("code" => "sign_up_accepted", "error" => EmployeeLinks::Resend::ACCEPTED_STALE)
+      expect(issued.link.reload.invite_generation).to eq(1)
+      expect(link_audits(issued.link, "invite_resent")).to be_empty
+    end
+
     it "shows a failed staff reset as pending and audits a successful retry with a fresh code" do
       issued = invite!(employee, actor: staff, delivery: "code")
       post_activation(activation_params(employee, code: issued.code))
@@ -229,6 +322,12 @@ RSpec.describe "Employee app rollout administration", type: :request do
       expect(data["reset_pending"]).to be true
       expect(issued.link.reload.invite_code_digest).to be_nil
 
+      get rollout_path(staff), headers: headers(staff)
+      expect(data.dig("todo", "reset_pending")).to eq([ { "id" => employee.id, "name" => employee.display_name } ])
+      expect(data.dig("todo", "expiring")).to be_empty
+      get rollout_path(client), headers: headers(client)
+      expect(data.dig("todo", "reset_pending")).to be_empty
+
       allow(clerk).to receive(:revoke_invitation).and_return(success: true)
       mutate(staff, "reset_sign_up", access_id: issued.link.id, delivery: "code", reason: "Unfinished sign-up")
       expect(response).to have_http_status(:ok)
@@ -242,6 +341,57 @@ RSpec.describe "Employee app rollout administration", type: :request do
         expect(audit.user_id).to eq(staff.id)
         expect(audit.metadata["reason"]).to eq("Unfinished sign-up")
       end
+
+      get rollout_path(staff), headers: headers(staff)
+      expect(data.dig("todo", "reset_pending")).to be_empty
+    end
+
+    it "keeps expired, unswept invitations in the to-do list alongside upcoming expirations" do
+      expired = invite!(employee, actor: staff, delivery: "code").link
+      expired.update!(invite_expires_at: 1.minute.ago)
+      expiring = create(:employee, company: company)
+      invite!(expiring, actor: staff, delivery: "code").link.update!(invite_expires_at: 2.days.from_now)
+      invite!(create(:employee, company: company), actor: staff, delivery: "code")
+
+      get rollout_path(client), headers: headers(client)
+      expect(response).to have_http_status(:ok)
+      expect(data.dig("todo", "expiring")).to contain_exactly(
+        include("id" => employee.id, "expired" => true), include("id" => expiring.id, "expired" => false)
+      )
+      expect(expired.reload).to be_invited
+    end
+
+    it "keeps client-submitted new hires awaiting approval out of termination cleanup" do
+      cleanup = create(:employee, company: company, status: "inactive")
+      create(:employee, company: company, status: "inactive", portal_pending_approval: true, pay_rate: 0)
+
+      get rollout_path(staff), headers: headers(staff)
+      expect(response).to have_http_status(:ok)
+      expect(data.dig("todo", "cleanup").pluck("id")).to eq([ cleanup.id ])
+    end
+
+    it "requires employees sharing their payroll login email to be invited by email from their record" do
+      client.update!(email: employee.email, name: employee.display_name)
+      ready = create(:employee, company: company, email: "another.worker@example.test", phone: "671-555-0103")
+
+      [ staff, client ].each do |actor|
+        get rollout_path(actor), headers: headers(actor)
+        expect(response).to have_http_status(:ok)
+        expect(data.dig("counts", "ready_to_invite")).to eq(1)
+        expect(data["candidates"]).to contain_exactly(
+          include("id" => employee.id, "email_ready" => false, "email_review_required" => true),
+          include("id" => ready.id, "email_ready" => true, "email_review_required" => false)
+        )
+      end
+
+      invite_wave(client, [ employee.id ], delivery: "email")
+      expect(response).to have_http_status(:ok)
+      expect(data.sole).to include("id" => employee.id, "error" => include('Confirm "this is me"'))
+      expect(employee.employee_account_links).to be_empty
+
+      mutate(client, "invite", delivery: "email", confirm_same_person_email: true)
+      expect(response).to have_http_status(:ok)
+      expect(employee.employee_account_links.sole.claim_user).to eq(client)
     end
 
     it "counts current access, shows cleanup and pending work, and uses the existing lock alert" do

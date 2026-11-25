@@ -48,11 +48,12 @@ export interface EmployeeAppRollout {
   can_manage_invites: boolean;
   max_wave_size: number;
   counts: Record<RolloutCount, number>;
-  candidates: (EmployeeName & { email: string | null; email_ready: boolean })[];
+  candidates: (EmployeeName & { email: string | null; email_ready: boolean; email_review_required: boolean })[];
   todo: {
     locked: (EmployeeName & { locked_until: string })[];
     needs_contact_details: EmployeeName[];
-    expiring: (EmployeeName & { invite_expires_at: string })[];
+    expiring: (EmployeeName & { invite_expires_at: string; expired: boolean })[];
+    reset_pending: EmployeeName[];
     cleanup: EmployeeName[];
   };
   lock_alert: string | null;

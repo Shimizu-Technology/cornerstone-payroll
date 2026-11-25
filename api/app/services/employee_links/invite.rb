@@ -90,7 +90,12 @@ module EmployeeLinks
       validation = EmployeeContactValidator.validate_for_invite(
         @employee, company: @employee.company, allow_same_person_login: @confirm_same_person_email, actor: @actor
       )
-      raise Error, validation.errors.values.flatten.uniq.join("; ") unless validation.valid?
+      unless validation.valid?
+        messages = validation.errors.flat_map do |field, errors|
+          errors.map { |message| message.match?(/\A[[:lower:]]/) ? "#{field.to_s.humanize} #{message}" : message }
+        end
+        raise Error, messages.uniq.join("; ")
+      end
       raise Error, "The employee app address isn't set up for this company" unless AppUrl.origin_for(@employee.company)
 
       EmployeeContactValidator.record_same_person_confirmation_audit!(

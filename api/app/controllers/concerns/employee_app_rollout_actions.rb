@@ -37,7 +37,8 @@ module EmployeeAppRolloutActions
   end
 
   def show
-    render json: { data: rollout.summary.merge(can_manage_invites: can_manage_invites?, max_wave_size: MAX_WAVE_SIZE) }
+    summary = rollout.summary(actor: current_user)
+    render json: { data: summary.merge(can_manage_invites: can_manage_invites?, max_wave_size: MAX_WAVE_SIZE) }
   end
 
   def employee

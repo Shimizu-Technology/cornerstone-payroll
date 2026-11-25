@@ -18,10 +18,10 @@ const rollout: Rollout = {
   max_wave_size: 25,
   counts: { ready_to_invite: 2, invited: 0, active: 0, needs_contact_details: 0, locked: 0, former: 0 },
   candidates: [
-    { id: 21, name: 'Sample One', email: 'one@example.test', email_ready: true },
-    { id: 22, name: 'Sample Two', email: 'two@example.test', email_ready: true },
+    { id: 21, name: 'Sample One', email: 'one@example.test', email_ready: true, email_review_required: false },
+    { id: 22, name: 'Sample Two', email: 'two@example.test', email_ready: true, email_review_required: false },
   ],
-  todo: { locked: [], needs_contact_details: [], expiring: [], cleanup: [] },
+  todo: { locked: [], needs_contact_details: [], expiring: [], reset_pending: [], cleanup: [] },
   lock_alert: null,
 };
 
@@ -49,5 +49,44 @@ describe('Employee app rollout', () => {
     expect(results.getByRole('link', { name: 'Sample One' }).getAttribute('href')).toContain('/companies/7/employees/21/overview');
     expect(mocks.post).toHaveBeenCalledWith('/client/employee_app_rollout/7/invite',
       { employee_ids: [21, 22], delivery: 'email' }, { companyId: 7 });
+  });
+
+  it.each(['admin', 'client'] as const)('labels expired invites and only shows reset tasks to staff (%s)', async (audience) => {
+    mocks.get.mockResolvedValue({ data: {
+      ...rollout,
+      todo: {
+        ...rollout.todo,
+        expiring: [{ id: 31, name: 'Expired Worker', invite_expires_at: '2026-10-01T14:00:00Z', expired: true }],
+        reset_pending: [{ id: 32, name: 'Pending Reset Worker' }],
+      },
+    } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience={audience} /></MemoryRouter>);
+
+    await user.click(await screen.findByText('Expiring or expired invites (1)'));
+    expect(screen.getByText(/^Expired Oct 2, 2026/)).toBeTruthy();
+    if (audience === 'admin') {
+      await user.click(screen.getByText('Sign-up resets to finish (1)'));
+      expect(screen.getByRole('link', { name: 'Pending Reset Worker' }).getAttribute('href')).toContain('/employees/32/overview');
+    } else {
+      expect(screen.queryByText('Sign-up resets to finish (1)')).toBeNull();
+    }
+  });
+
+  it('offers a record-level email hint and keeps printed codes available for an employee with a login to review', async () => {
+    mocks.get.mockResolvedValue({ data: {
+      ...rollout,
+      candidates: [...rollout.candidates, {
+        id: 23, name: 'Existing Login', email: 'login@example.test', email_ready: false, email_review_required: true,
+      }],
+    } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+
+    const hint = await screen.findByText(/send the email invite from their employee record/);
+    expect(screen.queryByRole('checkbox', { name: /Existing Login/ })).toBeNull();
+    await user.click(screen.getByRole('radio', { name: 'Printed code' }));
+    expect(screen.getByRole('checkbox', { name: /Existing Login/ })).toBeTruthy();
+    expect(document.body.contains(hint)).toBe(false);
   });
 });
