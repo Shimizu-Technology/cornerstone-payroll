@@ -88,6 +88,7 @@ const portalNavigation: NavItem[] = [
   { name: 'Reports', href: '/reports', icon: <FileBarChart2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Documents', href: '/documents', icon: <FolderOpen className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Change Requests', href: '/change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Support access', href: '/support-access', icon: <ShieldCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
@@ -103,6 +104,7 @@ const toolsNavigation: NavItem[] = [
 ];
 
 const clientSettingsNavigation: NavItem[] = [
+  { name: 'Sign in as', href: '/app/sign-in-as', icon: <ShieldCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Standing Changes', href: '/standing-changes', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Time tracking account', href: '/app/aire-account-connection', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'How this client runs', href: '/operating-profile', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
@@ -282,6 +284,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
   const canUsePrinterProfiles = hasCapability('use_printer_profiles');
   const visibleClientSettingsNavigation = clientSettingsNavigation.filter((item) => {
     if (item.href === '/app/aire-account-connection') return hasCapability('manage_own_aire_account_link');
+    if (item.href === '/app/sign-in-as') return !!activeCompanyId && hasCapability('start_view_as');
     if (item.href === '/operating-profile') return !!activeCompanyId && hasCapability('payroll_operations');
     if (item.href === '/check-settings') return canUsePrinterProfiles;
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');

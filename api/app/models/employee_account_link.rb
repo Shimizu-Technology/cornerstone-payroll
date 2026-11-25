@@ -201,6 +201,10 @@ class EmployeeAccountLink < ApplicationRecord
   end
 
   def portal_enabled?
+    self.class.portal_enabled_for?(company)
+  end
+
+  def self.portal_enabled_for?(company)
     company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?
   end
 

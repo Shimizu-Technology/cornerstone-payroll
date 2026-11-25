@@ -9,7 +9,7 @@ module EmployeeProfiles
 
     def as_json
       pending = requests.pending.recent_first.first
-      own_pending = pending if pending&.requested_by_link_id == @link.id && pending.profile_address?
+      own_pending = pending if @link.id && pending&.requested_by_link_id == @link.id && pending.profile_address?
       last_decision = own_requests.where(status: %i[approved rejected]).order(reviewed_at: :desc, id: :desc).first unless own_pending
       {
         legal_name: @employee.full_name,
@@ -31,6 +31,8 @@ module EmployeeProfiles
     end
 
     def own_requests
+      return requests.none unless @link.id
+
       requests.profile_addresses.where(requested_by_link_id: @link.id)
     end
 

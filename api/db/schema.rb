@@ -308,6 +308,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.index [ "record_type", "record_id" ], name: "index_audit_logs_on_record_type_and_record_id"
     t.index [ "request_id" ], name: "index_audit_logs_on_request_id"
     t.index [ "user_id" ], name: "index_audit_logs_on_user_id"
+    t.bigint "real_user_id"
+    t.bigint "view_as_grant_id"
+    t.index [ "company_id", "created_at", "id" ], name: "idx_audit_logs_support_access", where: "((action)::text = 'view_as#started'::text)"
   end
 
   create_table "cable_connection_tickets", force: :cascade do |t|
@@ -5054,6 +5057,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
     t.check_constraint "deactivation_reason IS NULL OR (deactivation_reason::text = ANY (ARRAY['last_employee_link_closed'::character varying::text, 'pending_sign_up_closed'::character varying::text, 'deactivated'::character varying::text]))", name: "users_deactivation_reason_check"
     t.check_constraint "practice_company_id IS NULL OR company_id = practice_company_id AND role = 4", name: "users_practice_scope"
+    t.boolean "view_as_allowed", default: false, null: false
+  end
+
+  create_table "view_as_grants", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "staff_user_id", null: false
+    t.bigint "target_user_id"
+    t.bigint "target_employee_id"
+    t.string "mode", default: "view_only", null: false
+    t.string "reason", limit: 500, null: false
+    t.string "token_digest", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "ended_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "index_view_as_grants_on_company_id"
+    t.index [ "token_digest" ], name: "index_view_as_grants_on_token_digest", unique: true
+    t.check_constraint "expires_at > created_at AND expires_at <= (created_at + 'PT30M'::interval)", name: "view_as_grants_max_lifetime"
+    t.check_constraint "mode::text = 'view_only'::text", name: "view_as_grants_view_only"
+    t.check_constraint "num_nonnulls(target_user_id, target_employee_id) = 1", name: "view_as_grants_one_target"
   end
 
   create_table "w2_filing_readinesses", force: :cascade do |t|
@@ -5888,6 +5911,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
   add_foreign_key "users", "companies", column: "practice_company_id"
   add_foreign_key "users", "organizations"
   add_foreign_key "users", "users", column: "invited_by_id", on_delete: :nullify
+  add_foreign_key "view_as_grants", "companies", on_delete: :cascade
   add_foreign_key "w2_filing_readinesses", "companies"
   add_foreign_key "w2_filing_readinesses", "users", column: "marked_ready_by_id"
   add_foreign_key "work_hour_client_links", "companies", on_delete: :cascade

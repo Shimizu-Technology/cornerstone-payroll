@@ -22,6 +22,7 @@ class AuditLogPresenter
     "transmittal_log" => "transmittal log"
   }.freeze
   VERBS = {
+    "view_as#started" => "viewed as",
     "companies#create" => "created",
     "client_operating_profile.update" => "updated the operating profile for",
     "test_workspace#create" => "created the test workspace",

@@ -24,7 +24,7 @@ module Api
 
           result = statements.page(year: year, page: page)
           previous = statements.previous_regular_by_id(result.statements)
-          audit!("listed", record: @employee_link, metadata: { year: year, page: page, count: result.statements.size })
+          audit!("listed", record: @employee_link || @view_as_employee_context.link || employee_access_context.employee, metadata: { year: year, page: page, count: result.statements.size })
           render json: {
             statements: result.statements.map do |statement|
               EmployeeStatements::Presenter.new(statement, statements: statements, previous: previous[statement.id]).summary
@@ -53,8 +53,8 @@ module Api
 
           bytes = stored_bytes(document)
           return head :service_unavailable unless bytes
-          return head :not_found unless still_servable?(document, feature: :stubs) do |link, current|
-            EmployeeStatements.new(link: link).pdf_document(params[:id])&.id == current.id
+          return head :not_found unless still_servable?(document, feature: :stubs) do |context, current|
+            EmployeeStatements.new(context: context).pdf_document(params[:id])&.id == current.id
           end
 
           audit!("pdf_downloaded", record: document,
@@ -66,11 +66,11 @@ module Api
         private
 
         def require_stubs!
-          head :not_found unless CompanyFeatures.for(@employee_link.company).employee_portal_feature?(:stubs)
+          head :not_found unless CompanyFeatures.for(employee_access_context.company).employee_portal_feature?(:stubs)
         end
 
         def statements
-          @statements ||= EmployeeStatements.new(link: @employee_link)
+          @statements ||= EmployeeStatements.new(context: employee_access_context)
         end
 
         # nil when absent, :invalid when malformed, otherwise the integer.
@@ -90,10 +90,10 @@ module Api
         def audit!(event, record:, metadata: {})
           AuditLog.record!(
             actor: Current.actor, user: @current_user,
-            organization_id: @employee_link.company.organization_id, company_id: @employee_link.company_id,
+            organization_id: employee_access_context.company.organization_id, company_id: employee_access_context.company_id,
             action: "#{AUDIT_ACTION}##{event}", record_type: record.class.name, record_id: record.id,
-            subject_name: @employee_link.employee.display_name, event_category: "employee_portal",
-            metadata: metadata.merge(employee_account_link_id: @employee_link.id, employee_id: @employee_link.employee_id).compact
+            subject_name: employee_access_context.employee.display_name, event_category: "employee_portal",
+            metadata: metadata.merge(employee_account_link_id: employee_access_context.id, employee_id: employee_access_context.employee_id).compact
           )
           skip_default_audit_log!
         end
