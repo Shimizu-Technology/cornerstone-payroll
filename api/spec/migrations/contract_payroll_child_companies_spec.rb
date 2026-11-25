@@ -8,6 +8,14 @@ RSpec.describe ContractPayrollChildCompanies do
   let(:migration) { described_class.new.tap { |instance| instance.verbose = false } }
   let(:tables) { M3_7ChildCompanies::CHILDREN.keys.map(&:to_s) }
 
+  # Models read while a child column is nullable cache that column. The
+  # transaction rollback restores NOT NULL, but not the cache.
+  after do
+    M3_7ChildCompanies::CHILDREN.each_key do |table|
+      (table == :payroll_imports ? PayrollImportRecord : table.to_s.classify.constantize).reset_column_information
+    end
+  end
+
   def nullable
     RlsEnforcement.nullable_child_companies(connection)
   end
