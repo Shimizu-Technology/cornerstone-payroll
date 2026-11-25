@@ -352,8 +352,16 @@ class ClerkInvitationService
     req["Content-Type"] = "application/json"
     req.body = body.to_json if body
 
+    # The same shape as TimeTracking::Client#read_response: per-read timeouts
+    # reset on each chunk, so the whole call is capped too, with a
+    # Timeout::Error subclass the callers already rescue.
     Timeout.timeout(budget, RequestBudgetExceeded, "Clerk request budget exceeded") do
-      http.request(req) { |response| response.read_body(BoundedBody.new(MAX_RESPONSE_BYTES)) }
+      http.request(req) do |response|
+        declared = response["Content-Length"].presence&.to_i
+        raise ResponseTooLarge, "Clerk response exceeded #{MAX_RESPONSE_BYTES} bytes" if declared&.>(MAX_RESPONSE_BYTES)
+
+        response.read_body(BoundedBody.new(MAX_RESPONSE_BYTES))
+      end
     end
   rescue Timeout::Error => e
     # Cut off at the pass deadline (by the budget, or a socket timeout that
