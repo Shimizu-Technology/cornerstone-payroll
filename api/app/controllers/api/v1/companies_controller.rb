@@ -69,14 +69,14 @@ module Api
         return false if Current.view_as_grant
 
         return false unless current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id)
-        return true unless company.test_workspace?
+        return true unless company.practice_copy?
 
         StaffRolePolicy.allowed?(current_user, :payroll_operations) &&
           TestWorkspaceAccessPolicy.allowed?(user: current_user, company: company, request_method: "POST", capability: :payroll_operations)
       end
 
       def workspace_write_permissions(company)
-        return nil unless company.test_workspace?
+        return nil unless company.practice_copy?
 
         accessible = !!(current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id))
         StaffRolePolicy::CAPABILITY_ROLES.keys.index_with do |capability|

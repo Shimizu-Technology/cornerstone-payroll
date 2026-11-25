@@ -469,19 +469,99 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(response.parsed_body).to include("error" => "This action is unavailable while viewing as another user.")
   end
 
-  it "keeps the demo workspace client boundary and sends no messages" do
-    demo = create_demo_company(organization: organization)
-    # D5 will provision demo logins. Bind a fictional client to the demo in this fixture.
-    user = create(:user, company: company, role: :client, clerk_id: "user_demo")
-    user.update_columns(company_id: demo.id)
-    token = token_for(user, from: demo)
-    expect do
-      get "/api/v1/client/employees", headers: viewing(token)
-    end.not_to have_enqueued_job
-    expect(response).to have_http_status(:ok)
-    expect(PortalNotificationEvent.count).to eq(0)
-    get "/api/v1/client/employees", headers: viewing(token).merge("X-Company-Id" => company.id.to_s)
-    expect(response).to have_http_status(:not_found)
+  describe "the demo identity boundary" do
+    let(:demo) { create_demo_company(organization: organization, subdomain_slug: "demo-view-fixture") }
+    let(:demo_email) { "support-fixture@demo.example" }
+    let(:demo_login) { create(:user, company: demo, role: :client, email: demo_email, clerk_id: "user_demo") }
+
+    around do |example|
+      saved = ENV[DemoOutbound::ENV_KEY]
+      ENV[DemoOutbound::ENV_KEY] = demo_email
+      example.run
+    ensure
+      ENV[DemoOutbound::ENV_KEY] = saved
+    end
+
+    it "pins a demo client view to its demo company, even with other assignments" do
+      create(:company_assignment, user: demo_login, company: demo)
+      second_demo = create_demo_company(organization: organization, name: "Second Demo", fixture_key: "second-demo")
+      create(:company_assignment, user: demo_login, company: second_demo)
+      # Simulate stale assignments from before demo and live client grants were separated.
+      CompanyAssignment.insert_all!([
+        { user_id: demo_login.id, company_id: company.id },
+        { user_id: client.id, company_id: demo.id }
+      ])
+      demo_employee = create(:employee, company: demo)
+      enable_employee_surface!(demo)
+      get "#{grant_path}/targets", headers: authenticated.merge("X-Company-Id" => demo.id.to_s)
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include("employees" => [], "employee_site_enabled" => false)
+
+      start(demo_login, from: company)
+      expect(response).to have_http_status(:not_found)
+      start(client, from: demo)
+      expect(response).to have_http_status(:not_found)
+      start(demo_employee, from: demo, type: "employee")
+      expect(response).to have_http_status(:not_found)
+
+      headers = viewing(token_for(demo_login, from: demo))
+      expect do
+        get "/api/v1/auth/me", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.dig("user", "assigned_company_ids")).to eq([ demo.id ])
+        expect(response.parsed_body.dig("roles", "employee_links_count")).to eq(0)
+
+        get "/api/v1/companies", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.fetch("companies")).to match([ a_hash_including("id" => demo.id, "workspace_can_write" => false) ])
+        expect(response.parsed_body.fetch("can_switch_company")).to be(false)
+
+        get "/api/v1/client/employees", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.fetch("data").pluck("id")).to eq([ demo_employee.id ])
+
+        get "/api/v1/client/employees/#{employee.id}", headers: headers
+        expect(response).to have_http_status(:not_found)
+
+        [ company, second_demo ].each do |other|
+          get "/api/v1/client/employees", headers: headers.merge("X-Company-Id" => other.id.to_s)
+          expect(response).to have_http_status(:not_found)
+        end
+      end.not_to have_enqueued_job
+      expect(PortalNotificationEvent.count).to eq(0)
+    end
+
+    it "requires both the allow-list and an explicit demo assignment throughout a view" do
+      start(demo_login, from: demo)
+      expect(response).to have_http_status(:not_found)
+
+      assignment = create(:company_assignment, user: demo_login, company: demo)
+      token = token_for(demo_login, from: demo)
+      get grant_path, headers: viewing(token)
+      expect(response).to have_http_status(:ok)
+
+      ENV[DemoOutbound::ENV_KEY] = "somebody-else@demo.example"
+      get grant_path, headers: viewing(token)
+      expect(response).to have_http_status(:not_found)
+      start(demo_login, from: demo)
+      expect(response).to have_http_status(:not_found)
+
+      ENV[DemoOutbound::ENV_KEY] = demo_email
+      assignment.update!(expires_at: 1.minute.ago)
+      get grant_path, headers: viewing(token)
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "refuses to view a live employee through a link held by a demo identity" do
+      enable_employee_surface!
+      create(:company_assignment, user: demo_login, company: demo)
+      EmployeeAccountLink.create!(user: demo_login, company: company, employee: employee, status: "active")
+
+      start(employee, type: "employee")
+
+      expect(response).to have_http_status(:not_found)
+      expect(ViewAsGrant.count).to eq(0)
+    end
   end
 
   it "revokes access to an existing view when the employee link is locked" do

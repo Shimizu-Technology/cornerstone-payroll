@@ -121,6 +121,8 @@ module Api
       end
 
       def employee_site_enabled?
+        return false unless @support_company.live_payroll?
+
         features = CompanyFeatures.for(@support_company)
         features.employee_portal_enabled? && features.subdomain_enabled? &&
           TenantSubdomainRegistry::SLUG_PATTERN.match?(@support_company.subdomain_slug.to_s)

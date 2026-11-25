@@ -46,7 +46,7 @@ module Api
       private
 
       def employee_links_count
-        current_user.employee_account_links.portal_eligible.includes(company: :organization).count(&:portal_enabled?)
+        EmployeeLinks.openable_links(current_user, azp: @clerk_token_payload&.fetch("azp", nil)).size
       end
 
       def rls_system_reason
