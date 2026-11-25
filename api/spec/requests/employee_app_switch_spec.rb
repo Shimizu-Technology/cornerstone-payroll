@@ -653,6 +653,68 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response.parsed_body["error"]).to include("already enforces row-level security")
     end
 
+    it "pauses through the enforcement window within the cache delay, resumes once enforced, and reopens after a rollback " \
+       "only with a new owner window" do
+      open_window!
+      switch!({ "employee_portal_enabled" => true }, target: demo)
+      expect(response).to have_http_status(:ok), response.body
+      first = EmployeeAppEarlyAccessWindow.sole
+
+      # Each process caches the database state, so a transition shows up only
+      # once the cached read is CACHE_SECONDS old. Move the monotonic clock
+      # instead of resetting the cache.
+      offset = 0.0
+      allow(Process).to receive(:clock_gettime).and_wrap_original do |original, id, *args|
+        id == Process::CLOCK_MONOTONIC ? original.call(id, *args) + offset : original.call(id, *args)
+      end
+      age_cache = -> { offset += EmployeeAppSwitch::Enforcement::CACHE_SECONDS }
+      app_open = -> { EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"] }
+      EmployeeAppSwitch::Enforcement.reset_cache!
+      expect(app_open.call).to be(true)
+
+      # Mid-window (partial) and under the kill switch the waiver closes the
+      # app at read time once the shadow read ages out, but the window and
+      # the stored switches survive.
+      [ shadow_state.merge(phase: "partial"), shadow_state.merge(phase: "bypassed", kill_switch_bypass: true) ].each do |state|
+        allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(state)
+        expect(app_open.call).to be(true), "still the cached shadow read: #{state.inspect}"
+        age_cache.call
+        CloseExpiredDemoEarlyAccessJob.perform_now
+        expect(app_open.call).to be(false), state.inspect
+        expect(stored(demo)["employee_portal_enabled"]).to be(true), state.inspect
+        expect(first.reload.status).to eq("in_effect")
+
+        allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
+        age_cache.call
+        expect(app_open.call).to be(true), "back in shadow after #{state.inspect}"
+      end
+
+      # Verified enforcement needs no waiver: access resumes and the window retires.
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+      age_cache.call
+      expect(app_open.call).to be(true)
+      expect(first.reload.status).to eq("retired")
+
+      # Rolled back to shadow: the verified read keeps the app open until it
+      # ages out, then the sweep closes the demo, and a new owner window plus
+      # the switch admin turning the app back on restores it.
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
+      expect(app_open.call).to be(true)
+      age_cache.call
+      expect(app_open.call).to be(false)
+      CloseExpiredDemoEarlyAccessJob.perform_now
+      expect(stored(demo)["employee_portal_enabled"]).to be(false)
+
+      open_window!(reason: "Owner reopened after the RLS rollback")
+      expect(response).to have_http_status(:ok), response.body
+      expect(EmployeeAppEarlyAccessWindow.current_for(organization.id)).to have_attributes(set_by_id: owner.id)
+      expect(first.reload.status).to eq("retired")
+      switch!({ "employee_portal_enabled" => true }, reason: "Reopen after the RLS rollback", target: demo)
+      expect(response).to have_http_status(:ok), response.body
+      expect(stored(demo)["employee_portal_enabled"]).to be(true)
+      expect(app_open.call).to be(true)
+    end
+
     it "ends a window with a reason, and the row can't be edited afterwards" do
       open_window!
       delete "#{path}/early_access", params: { reason: "Rehearsal finished" }, as: :json, headers: auth(recent: false, target: demo)
