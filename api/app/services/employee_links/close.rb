@@ -48,7 +48,7 @@ module EmployeeLinks
       return link unless link.active?
 
       years = former_access_years(link.company)
-      access_until = (termination_date + years.years).in_time_zone(PayrollBusinessClock::TIME_ZONE).end_of_day
+      access_until = former_access_deadline(link.company, termination_date, years: years)
       link.update!(status: "former", former_at: now, former_access_until: access_until)
       EmployeeLinks.side_effect_audit do
         EmployeeLinks.audit!(link, "made_former", user: actor, actor: audit_actor, request: request,
@@ -57,6 +57,10 @@ module EmployeeLinks
       end
       deactivate_if_last!(link.user, closed_link: link, now: now) if access_until <= now
       link
+    end
+
+    def former_access_deadline(company, termination_date, years: former_access_years(company))
+      (termination_date + years.years).in_time_zone(PayrollBusinessClock::TIME_ZONE).end_of_day
     end
 
     def former_access_years(company)

@@ -41,6 +41,13 @@ RSpec.describe "View-only support sessions", type: :request do
     authenticated(user, **claims).merge(ViewAsGrant::HEADER => token)
   end
 
+  def expect_view_as_failure_audit(request_id, status:)
+    rows = AuditLog.where(request_id: request_id)
+    expect(rows.find_by!(action: "portal_access#failed").metadata).to include("status" => status)
+    expect(rows.distinct.pluck(:user_id, :real_user_id, :view_as_grant_id)).to eq([ [ staff.id, staff.id, ViewAsGrant.last.id ] ])
+    expect(AuditLog.exists?(user_id: client.id)).to be(false)
+  end
+
   def enable_employee_surface!(target = company)
     target.client_operating_profiles.create!(
       effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service", hours_source: "manual",
@@ -282,14 +289,52 @@ RSpec.describe "View-only support sessions", type: :request do
     allow(storage).to receive(:download).with(pending.file_key).and_return("fictional document")
 
     expect do
-      get "/api/v1/client/documents/#{pending.id}/preview", headers: viewing(token)
+      get "/api/v1/client/documents/#{pending.id}/preview", headers: viewing(token).merge("X-Request-Id" => "support-preview")
     end.not_to change { pending.reload.attributes }
     expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body.fetch("error")).to include("unavailable while viewing")
+    expect_view_as_failure_audit("support-preview", status: 422)
 
     get "/api/v1/client/documents/#{pending.id}/download", headers: viewing(token)
     expect(response).to have_http_status(:ok)
     row = AuditLog.find_by!(action: "portal_documents#download")
     expect(row).to have_attributes(user_id: staff.id, real_user_id: staff.id, view_as_grant_id: ViewAsGrant.last.id)
+  end
+
+  it "stamps a document download failure after the view-as context has reset" do
+    token = token_for
+    expect(R2StorageService).not_to receive(:new)
+
+    get "/api/v1/client/documents/0/download", headers: viewing(token).merge("X-Request-Id" => "support-download")
+
+    expect(response).to have_http_status(:not_found)
+    expect_view_as_failure_audit("support-download", status: 404)
+  end
+
+  it "reads a quarterly compliance packet without creating a workflow" do
+    token = token_for
+
+    expect do
+      get "/api/v1/client/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }, headers: viewing(token)
+    end.not_to change(QuarterlyCompliancePacket, :count)
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("report")).not_to have_key("workflow")
+    expect(QuarterlyComplianceTask.count).to eq(0)
+  end
+
+  it "returns a clear response if a read would enqueue a job" do
+    token = token_for
+    allow(QuarterlyCompliancePacketBuilder).to receive(:new) do
+      GenerateClientDocumentPreviewJob.perform_later(1)
+    end
+
+    expect do
+      get "/api/v1/client/reports/quarterly_compliance_packet", params: { year: 2026, quarter: 2 }, headers: viewing(token)
+    end.not_to have_enqueued_job
+
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body).to include("error" => "This action is unavailable while viewing as another user.")
   end
 
   it "keeps the demo workspace client boundary and sends no messages" do
@@ -304,6 +349,39 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(response).to have_http_status(:ok)
     expect(PortalNotificationEvent.count).to eq(0)
     get "/api/v1/client/employees", headers: viewing(token).merge("X-Company-Id" => company.id.to_s)
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "revokes access to an existing view when the employee link is locked" do
+    enable_employee_surface!
+    login = create(:user, role: :portal_employee, company: company)
+    link = EmployeeAccountLink.create!(employee: employee, company: company, user: login, status: "active")
+    token = token_for(employee, type: "employee")
+    link.update!(activation_locked_until: 1.hour.from_now)
+
+    get "/api/v1/employee/context", headers: viewing(token, azp: employee_origin)
+
+    expect(response).to have_http_status(:not_found)
+  end
+
+  it "refuses an inactive unlinked employee without a termination date" do
+    enable_employee_surface!
+    employee.update!(status: "inactive", termination_date: nil)
+
+    start(employee, type: "employee")
+
+    expect(response).to have_http_status(:not_found)
+    expect(ViewAsGrant.count).to eq(0)
+  end
+
+  it "refuses an employee view when the portal is disabled" do
+    enable_employee_surface!
+    token = token_for(employee, type: "employee")
+    company.client_operating_profiles.sole.update!(employee_portal_enabled: false)
+    TenantSubdomainRegistry.invalidate!
+
+    get "/api/v1/employee/context", headers: viewing(token, azp: employee_origin)
+
     expect(response).to have_http_status(:not_found)
   end
 

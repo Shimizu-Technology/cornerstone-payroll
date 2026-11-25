@@ -88,6 +88,11 @@ module Api
           @document.ensure_usable_for!(:preview)
           return preview_sheet if @document.sheet_preview?
 
+          if Current.view_as_grant && @document.preview_generation_required? && !@document.preview_ready?
+            return render json: { error: "This preview is unavailable while viewing as another user. Download the original instead." },
+              status: :unprocessable_content
+          end
+
           if WriteMaintenance.enabled? && @document.preview_generation_required? && !@document.preview_ready?
             return render_write_maintenance("Preview generation is paused during maintenance. Download the original or try the preview again shortly.")
           end
