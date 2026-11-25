@@ -6,11 +6,15 @@ module QuickbooksHistory
 
     ACKNOWLEDGEMENT = "PREPARE CLEAN CLIENT EMPLOYEES"
 
-    def initialize(bootstrap:, actor:, acknowledgement:, expected_apply_started_at: nil)
+    # w4_effective_on: only the demo seed passes it, so its W-4 elections cover
+    # the native payroll that follows the imported history. Real clients keep
+    # today's date.
+    def initialize(bootstrap:, actor:, acknowledgement:, expected_apply_started_at: nil, w4_effective_on: nil)
       @bootstrap = bootstrap
       @actor = actor
       @acknowledgement = acknowledgement
       @expected_apply_started_at = expected_apply_started_at
+      @w4_effective_on = w4_effective_on
     end
 
     def call
@@ -101,7 +105,7 @@ module QuickbooksHistory
       EmployeeW4ElectionChangeService.new(
         employee: employee,
         attributes: EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
-          .merge(w4_effective_on: Date.current),
+          .merge(w4_effective_on: @w4_effective_on || Date.current),
         actor: actor,
         source: "quickbooks_history",
         reason: "Initial W-4 election prepared from retained QuickBooks setup"
