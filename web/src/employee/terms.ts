@@ -25,16 +25,20 @@ export async function fetchEmployeeTerms(baseUrl: string, signal?: AbortSignal):
 
 export function useEmployeeTerms() {
   const [terms, setTerms] = useState<EmployeeTerms | null>();
+  const [loadFailed, setLoadFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    void fetchEmployeeTerms(API_BASE_URL, controller.signal).catch(() => null).then((value) => {
+    void fetchEmployeeTerms(API_BASE_URL, controller.signal).then((value) => {
       if (!controller.signal.aborted) setTerms(value);
+    }).catch(() => {
+      if (!controller.signal.aborted) setLoadFailed(true);
     });
     return () => controller.abort();
   }, [attempt]);
 
-  return { terms, reload: () => {
+  return { terms, loadFailed, reload: () => {
+    setLoadFailed(false);
     setTerms(undefined);
     setAttempt((value) => value + 1);
   } };

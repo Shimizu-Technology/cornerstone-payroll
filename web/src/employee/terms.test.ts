@@ -1,8 +1,24 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchEmployeeTerms } from './terms';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { fetchEmployeeTerms, useEmployeeTerms } from './terms';
 
 describe('employee terms', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('distinguishes a network error from missing terms and clears the error on retry', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(new Response(null, { status: 503 })));
+
+    const { result } = renderHook(() => useEmployeeTerms());
+    await waitFor(() => expect(result.current.loadFailed).toBe(true));
+    expect(result.current.terms).toBeUndefined();
+
+    act(() => result.current.reload());
+    await waitFor(() => expect(result.current.terms).toBeNull());
+    expect(result.current.loadFailed).toBe(false);
+  });
 
   it('loads the version and links from the public API', async () => {
     const fetch = vi.fn().mockResolvedValue(Response.json({

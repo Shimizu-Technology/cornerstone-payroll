@@ -97,7 +97,7 @@ class Rack::Attack
   end
 
   throttle("employee_terms/ip", limit: 60, period: 1.minute) do |request|
-    throttle_ip(request) if %r{\A/api/v1/public/employee_terms/?\z}.match?(throttle_path(request))
+    throttle_ip(request) if TenantSubdomainRegistry::TERMS_PATH.match?(throttle_path(request))
   end
 
   throttle("tenant_branding/ip", limit: 120, period: 1.minute) do |request|
