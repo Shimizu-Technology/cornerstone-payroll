@@ -29,7 +29,7 @@ test('client change request is selectable and readable at phone width', async ({
     new URL(route.request().url()).pathname.endsWith('/31') ? { data: request } : { data: [request] }));
 
   await page.goto('/change-requests');
-  await expect(page.getByRole('heading', { name: 'Change Requests' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Change requests' })).toBeVisible();
   await page.getByRole('button', { name: 'View request' }).click();
   await expect(page.getByText('Request #31')).toBeVisible();
   await expect(page.getByText('Please update the address.')).toBeVisible();
@@ -78,6 +78,7 @@ test('client document preview and conversation remain usable on a narrow phone',
   await page.screenshot({ path: testInfo.outputPath('client-preview-320.png') });
   await preview.getByRole('button', { name: 'Close preview' }).click();
 
+  await page.goto('/messages');
   await page.getByRole('button', { name: /September payroll question/ }).click();
   await expect(page.getByText('Please confirm the source file.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Back to conversations' })).toBeVisible();
