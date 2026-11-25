@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useState } from 'react';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
@@ -45,7 +46,7 @@ export function TaxYearVerification({ config, previous, onSaved, onReload }: {
       {' '}Copied values and the active/default flag do not establish verification. Review against sources for this year.
     </p>}
     <p className="break-words text-sm text-neutral-700">{config.source_references || 'No source references recorded.'}</p>
-    {config.verified_at && <p className="text-sm">Verified by {config.verified_by} on {new Date(config.verified_at).toLocaleString()}. Editing values requires verification again.</p>}
+    {config.verified_at && <p className="text-sm">Verified by {config.verified_by} on {formatGuamDateTime(config.verified_at)}. Editing values requires verification again.</p>}
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <caption className="mb-2 text-left font-medium">Compare with the prior year</caption>

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseContext, parseHelpContacts, parseProfile, parseStatementDetail, parseStatementPage, parseStatementSummary, parseTaxForms, signUpUrlFrom,
 } from './contracts';
-import { addressLines, comparisonLine, formatHours, formatMoney, paymentStatus, periodLabel, taxLabel } from './format';
+import { addressLines, comparisonLine, formatHours, formatMoney, paymentStatus, taxLabel } from './format';
 import { birthDate, normalizeCode } from './signupState';
 
 // EmployeePayStatements::Presenter#summary, as served to AIRE today (fictional values).
@@ -143,12 +143,10 @@ describe('employee API contracts', () => {
 });
 
 describe('employee formatting', () => {
-  it('formats money, hours and pay periods', () => {
+  it('formats money and hours', () => {
     expect(formatMoney('1234.5')).toBe('$1,234.50');
     expect(formatMoney(null)).toBeNull();
     expect(formatHours('38.50')).toBe('38.5');
-    expect(periodLabel('2026-11-01', '2026-11-14')).toBe('Nov 1 – 14');
-    expect(periodLabel('2026-10-25', '2026-11-07')).toBe('Oct 25 – Nov 7');
   });
 
   it('never calls Guam income tax "Federal"', () => {

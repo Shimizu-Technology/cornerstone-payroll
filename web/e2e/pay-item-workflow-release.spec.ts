@@ -182,7 +182,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     ] as const) {
       await openEmployee(page, fixture.companies.mosa, employeeId);
       if (employeeId === fixture.employees.inherited) {
-        await expect(page.getByTestId(`pay-item-${fixture.assignments.ended}`)).toContainText('Ended 2026-09-30');
+        await expect(page.getByTestId(`pay-item-${fixture.assignments.ended}`)).toContainText('Ended Sep 30, 2026');
         await page.getByRole('checkbox', { name: /^Show stopped items/ }).check();
         await expect(page.getByTestId(`pay-item-${fixture.assignments.paused}`)).toContainText('Paused');
       }
@@ -362,7 +362,7 @@ test.describe('Pay-item scope, accountant workflow, and saved payroll regression
     await dialog.getByLabel(/^First payday/).fill('2026-11-01');
     await saveAddition(page, dialog);
     const future = (await assignments(aireApi, fixture.employees.recipient)).find(row => row.payroll_field.name === 'Future allowance QA')!;
-    await expect(page.getByTestId(`pay-item-${future.id}`)).toContainText('Starts 2026-11-01');
+    await expect(page.getByTestId(`pay-item-${future.id}`)).toContainText('Starts Nov 1, 2026');
     const unaffected = await period(aireApi, fixture.periods.regular);
     expect(unaffected.status).toBe('calculated');
     expect(unaffected.payroll_items).toEqual(before.payroll_items);

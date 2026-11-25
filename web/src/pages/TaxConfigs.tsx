@@ -1,3 +1,4 @@
+import { formatGuamDate, formatGuamDateTime } from '@/lib/utils';
 import { useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
@@ -289,7 +290,7 @@ export default function TaxConfigs() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-lg font-semibold text-neutral-950">{config.tax_year}</p>
-                <p className="text-sm text-neutral-600">Updated {new Date(config.updated_at).toLocaleDateString()}</p>
+                <p className="text-sm text-neutral-600">Updated {formatGuamDate(config.updated_at)}</p>
               </div>
               {config.is_active ? (
                 <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">Active</span>
@@ -379,7 +380,7 @@ export default function TaxConfigs() {
                   )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-neutral-600">
-                  {new Date(config.updated_at).toLocaleDateString()}
+                  {formatGuamDate(config.updated_at)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <div className="flex justify-end space-x-2" onClick={(e) => e.stopPropagation()}>
@@ -867,7 +868,7 @@ export default function TaxConfigs() {
                         {log.field_name && `: ${log.field_name}`}
                       </span>
                       <span className="text-neutral-600">
-                        {new Date(log.created_at).toLocaleString()}
+                        {formatGuamDateTime(log.created_at)}
                       </span>
                     </div>
                     {log.old_value && (

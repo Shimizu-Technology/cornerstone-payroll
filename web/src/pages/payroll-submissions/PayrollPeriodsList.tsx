@@ -1,3 +1,4 @@
+import { formatDateRange } from '@/lib/display-date';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link, useParams } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -40,7 +41,7 @@ export function PayrollPeriodsList({ audience }: { audience: 'client' | 'staff' 
           {rows.map(row => <li key={row.ref}>
             <Link to={`${base}/${row.ref}`} className="flex min-h-11 flex-col gap-2 p-4 hover:bg-primary-50 focus-visible:outline-2 focus-visible:outline-offset-2 sm:flex-row sm:items-center sm:justify-between">
               <span className="min-w-0">
-                <span className="block font-semibold text-neutral-950">Payroll {row.label}</span>
+                <span className="block font-semibold text-neutral-950">Payroll {formatDateRange(row.start_date, row.end_date) || row.label}</span>
                 <span className="mt-1 block text-sm text-neutral-600">
                   {row.pay_date ? `Pay date ${formatDate(row.pay_date)}` : 'Pay date set by Cornerstone'}
                   {row.current_revision ? ` · Revision ${row.current_revision} sent ${formatGuam(row.last_submitted_at)}` : ''}

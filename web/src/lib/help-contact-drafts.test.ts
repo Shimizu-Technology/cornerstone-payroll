@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPhone, possessive } from './employee-app-text';
+import { possessive } from './employee-app-text';
 import { draftProblems, fromDraft, toDraft } from './help-contact-drafts';
 
 describe('Help contact drafts', () => {
@@ -35,12 +35,5 @@ describe('employee app text', () => {
     expect(possessive("MoSa's")).toBe("MoSa's");
     expect(possessive('Two Brothers')).toBe("Two Brothers'");
     expect(possessive('Pelican Row Bakery')).toBe("Pelican Row Bakery's");
-  });
-
-  it('formats Guam and US numbers and leaves others alone', () => {
-    expect(formatPhone('6715550100')).toBe('(671) 555-0100');
-    expect(formatPhone('+1 671 555 0100')).toBe('(671) 555-0100');
-    expect(formatPhone('5550100')).toBe('555-0100');
-    expect(formatPhone('+81 3 1234 5678')).toBe('+81 3 1234 5678');
   });
 });

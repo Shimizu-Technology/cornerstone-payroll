@@ -5,6 +5,7 @@
 import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Banknote, CalendarDays, ChevronLeft, ChevronRight, Download, FileText, House } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { formatDateRange } from '@/lib/display-date';
 import { formatGuamDateTime } from '@/lib/utils';
 import { EmployeeApiError } from './api';
 import { askManager } from './brand';
@@ -13,7 +14,7 @@ import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import {
-  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, periodLabel, shortDate, taxLabel, weekdayDate,
+  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, shortDate, taxLabel, weekdayDate,
 } from './format';
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
@@ -120,7 +121,7 @@ function Comparison({ statement, statements }: { statement: StatementSummary; st
 
 function StatementRow({ statement, selected, to, onSelect }: { statement: StatementSummary; selected?: boolean; to: string; onSelect?: () => void }): ReactElement {
   const hours = hoursLabel(statement.totalHours);
-  const period = periodLabel(statement.periodStart, statement.periodEnd);
+  const period = formatDateRange(statement.periodStart, statement.periodEnd);
   const status = paymentStatus(statement.payment);
   const details = [period, hours].filter(Boolean).join(' · ');
   return (
@@ -656,14 +657,14 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
   if (state.status === 'loading') return <SkeletonRows rows={6} label="Loading the pay stub" />;
   if (state.status === 'error') return <LoadProblem kind={state.kind} onRetry={reload} what="this pay stub" />;
   const stub = state.data;
-  const period = periodLabel(stub.periodStart, stub.periodEnd);
+  const period = formatDateRange(stub.periodStart, stub.periodEnd);
   const hours = hoursLabel(stub.totalHours);
   const quickbooks = stub.source === 'quickbooks';
   return (
     <article className="emp-stub" aria-labelledby={`emp-stub-${stub.id}`}>
       <header className="space-y-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <h2 id={`emp-stub-${stub.id}`} className="emp-stub-title">{period ?? longDate(stub.payDate)}</h2>
+          <h2 id={`emp-stub-${stub.id}`} className="emp-stub-title">{period || longDate(stub.payDate)}</h2>
           {/* Desktop: beside the heading. Phone: at the end of the stub, where the thumb is. */}
           <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-top" newScreen={newScreen} />
         </div>
