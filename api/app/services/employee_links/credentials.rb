@@ -27,6 +27,12 @@ module EmployeeLinks
     module_function
 
     def issue(link, delivery:, email: nil, now: Time.current)
+      # An emailed invite for a demo company is issued only to an
+      # allow-listed address; a printed code proves its address at bind.
+      if delivery == "email" && !DemoOutbound.permit?(company: link.company, email: email, channel: "employee_link_invite")
+        raise EmployeeLinks::Error, Company::DEMO_RECIPIENT_REFUSED_MESSAGE
+      end
+
       token = code = nil
       if delivery == "email"
         token = EmployeeAccountLink.generate_token

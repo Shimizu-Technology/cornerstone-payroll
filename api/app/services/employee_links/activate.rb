@@ -50,6 +50,9 @@ module EmployeeLinks
 
     def prepare(link)
       return :sign_in if link.claim_user_id.present?
+      # Answered like any other address that can't start a new account, and
+      # checked before a pending login is created or attached.
+      return :sign_in unless DemoOutbound.permit?(company: link.company, email: @email, channel: "employee_link_activation")
 
       pending = link.user
       # A pending login an admin deactivated never restarts a sign-up.

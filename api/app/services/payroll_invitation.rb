@@ -31,23 +31,31 @@ class PayrollInvitation
 
     snapshot = user.attributes.slice(*INVITATION_FIELDS)
     email = attributes.fetch(:email, snapshot.fetch("email"))
+    # A demo login is invited only at an allow-listed address, checked before
+    # any token or Clerk invitation exists and before an earlier one is closed.
+    demo_company = DemoOutbound.demo_company_for(user)
+    if demo_company && !DemoOutbound.permit?(company: demo_company, email: email, channel: "payroll_invitation", user: user)
+      return { success: false, error: Company::DEMO_RECIPIENT_REFUSED_MESSAGE, refused: :recipient_not_allowed }
+    end
     if user.clerk_invitation_id.present?
       failure = close_previous_invitation(user.clerk_invitation_id)
       return failure if failure
     end
 
     nonce = SecureRandom.hex(32)
-    result = @clerk.create_invitation(
-      email: email,
-      redirect_url: redirect_url,
-      public_metadata: metadata.merge(
-        role: snapshot.fetch("role"),
-        organization_id: snapshot.fetch("organization_id"),
-        payroll_user_id: user.id,
-        payroll_invite_nonce: nonce
-      ),
-      ignore_existing: ignore_existing
-    )
+    result = DemoOutbound.scoped(demo_company) do
+      @clerk.create_invitation(
+        email: email,
+        redirect_url: redirect_url,
+        public_metadata: metadata.merge(
+          role: snapshot.fetch("role"),
+          organization_id: snapshot.fetch("organization_id"),
+          payroll_user_id: user.id,
+          payroll_invite_nonce: nonce
+        ),
+        ignore_existing: ignore_existing
+      )
+    end
     return result unless result[:success]
 
     invitation_id = result.fetch(:invitation_id)
@@ -110,7 +118,8 @@ class PayrollInvitation
   rescue ActiveRecord::RecordNotUnique
     # Only resume the exact same binding if it won the race.
     User.find_by(id: id, clerk_id: subject)
-  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, BindingRefused
+    # A refused binding answers like any other unbound account.
     nil
   end
 
@@ -130,6 +139,8 @@ class PayrollInvitation
     unless confirm_email.is_a?(String) && account.fetch(:verified_emails).any? { |email| email.casecmp?(confirm_email.strip) }
       raise BindingRefused, "Confirm one of this Clerk account's verified email addresses"
     end
+
+    refuse_demo_binding!(user, [ user.email, confirm_email, account[:primary_email] ], channel: "payroll_invitation_recovery")
 
     invitation_id = user.with_lock do
       ensure_recoverable!(user, actor)
@@ -175,6 +186,7 @@ class PayrollInvitation
       next unless user.active? && (user.super_admin? || user.organization&.active?)
       next if user.practice_company_id? && !user.practice_portal_open?
       next if user.portal_employee? && !invited_identity?(user, binding.fetch(:identity))
+      refuse_demo_binding!(user, [ user.email, verified_primary_email(binding.fetch(:identity)) ], channel: "payroll_invitation_bind")
 
       # Check MFA against the locked invitation owner before binding or writing its audit.
       next if block_given? && !yield(user)
@@ -191,6 +203,20 @@ class PayrollInvitation
       end
       user if bound
     end
+  end
+
+  # A demo login binds only when every address involved is allow-listed: the
+  # login's own email and the Clerk account's verified primary email.
+  def refuse_demo_binding!(user, emails, channel:)
+    company = DemoOutbound.demo_company_for(user)
+    return unless company
+
+    allowed = emails.all? { |email| email.present? && DemoOutbound.permit?(company: company, email: email, channel: channel, user: user) }
+    raise BindingRefused, Company::DEMO_RECIPIENT_REFUSED_MESSAGE unless allowed
+  end
+
+  def verified_primary_email(identity)
+    identity[:primary_email] if identity[:primary_verified]
   end
 
   # A deadlock rolled back the whole transaction, which is safe to run again
