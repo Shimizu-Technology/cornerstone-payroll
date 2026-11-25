@@ -20,11 +20,19 @@ module Api
             next_payday: next_payday&.iso8601,
             # How paper W-2s reach employees: "mailed", "handed_out", or nil when not set (M4-5).
             w2_delivery: @employee_link.company.w2_delivery,
-            features: FEATURES.index_with { |feature| features.employee_portal_feature?(feature) }
+            features: FEATURES.index_with { |feature| feature_open?(features, feature) }
           }
         end
 
         private
+
+        # Profile cards close at a former link's original cutoff, even while a
+        # posted W-2GU copy keeps tax forms and stubs open (M4-5).
+        def feature_open?(features, feature)
+          return false unless features.employee_portal_feature?(feature)
+
+          feature != :profile_requests || @employee_link.profile_access_open?
+        end
 
         # The last Guam day of read-only access (former_access_until is the end of that day).
         def former_access_date

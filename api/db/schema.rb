@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_25_230300) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -916,6 +916,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_230300) do
     t.index [ "user_id" ], name: "index_direct_deposit_payment_confirmations_on_user_id"
   end
 
+  create_table "email_provider_events", force: :cascade do |t|
+    t.string "provider", default: "resend", null: false
+    t.string "event_id", null: false
+    t.string "event_type", null: false
+    t.string "provider_message_id"
+    t.string "delivery_status"
+    t.string "bounce_type"
+    t.datetime "occurred_at", null: false
+    t.datetime "applied_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "created_at" ], name: "idx_email_provider_events_unapplied", where: "((applied_at IS NULL) AND (delivery_status IS NOT NULL))"
+    t.index [ "provider", "event_id" ], name: "idx_email_provider_events_once", unique: true
+    t.index [ "provider_message_id", "occurred_at" ], name: "idx_email_provider_events_message"
+    t.check_constraint "delivery_status IS NULL OR (delivery_status::text = ANY (ARRAY['delivered'::character varying, 'delayed'::character varying, 'bounced'::character varying, 'complained'::character varying]::text[]))", name: "email_provider_events_delivery_status"
+  end
+
   create_table "employee_account_links", force: :cascade do |t|
     t.bigint "user_id"
     t.bigint "company_id", null: false
@@ -951,6 +968,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_25_230300) do
     t.date "profile_email_usage_date"
     t.integer "profile_email_daily_codes", default: 0, null: false
     t.integer "profile_email_daily_failures", default: 0, null: false
+    t.datetime "former_profile_access_until"
     t.index [ "claim_user_id" ], name: "index_employee_account_links_on_claim_user_id"
     t.index [ "company_id" ], name: "index_employee_account_links_on_company_id"
     t.index [ "employee_id" ], name: "idx_employee_account_links_open", unique: true, where: "((status)::text = ANY (ARRAY[('invited'::character varying)::text, ('active'::character varying)::text]))"

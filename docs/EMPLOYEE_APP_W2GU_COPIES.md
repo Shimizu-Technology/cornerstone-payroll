@@ -13,7 +13,7 @@ Staff post a company's copies for a tax year with `POST /api/v1/admin/employee_t
 - the W-2 readiness mark is current on these exact inputs, and the filing-responsibility gate allows filing-ready output (`W2GuOfficialCopies.snapshot`, shared with the staff download);
 - every value fits the form for the whole report.
 
-The PDFs are drawn outside the company lock. The lock is then taken again, the inputs are read again uncached, and nothing posts if they changed meanwhile. The job retries that case a few times.
+The PDFs are drawn and uploaded to storage before any lock is held. Posting then takes the company lock and a shared lock on the year's annual tax rules (the SS wage base is in the fingerprint), in the payroll lock order, reads the inputs again uncached, and commits the rows under those locks. If anything changed, nothing posts and the uploads are deleted. The job retries that case a few times.
 
 Each copy is the single-employee path of `W2GuOfficialCopies` (`employee_id:`), which only makes final copies. It's frozen once in `employee_documents` with `employee_id` and `tax_year` as its source and a SHA-256 fingerprint, like the pay stubs. A demo company's copy prints like a live client's, with no practice or draft stamp.
 
@@ -25,7 +25,7 @@ Each copy also records the W-2 inputs fingerprint it was drawn from. `GET /api/v
 
 - `GET /api/v1/employee/tax_forms`: `{ tax_forms: [{ id, tax_year, kind: "w2gu", status, corrected, posted_at, pdf_available, available_through }] }`, newest year first.
 - `GET /api/v1/employee/tax_forms/:id`: one of those rows.
-- `GET /api/v1/employee/tax_forms/:id/pdf`: the frozen file, `Cache-Control: no-store`, served only when its bytes still match the fingerprint.
+- `GET /api/v1/employee/tax_forms/:id/pdf`: the frozen file, `Cache-Control: no-store`, served only when its bytes still match the fingerprint. After the bytes come back from storage, the link, the switch and the copy are read again, so a withdrawal, a revoked link or a switch turned off during the fetch is still a 404.
 
 Every read is audited (`employee_tax_form#listed`, `#viewed`, `#pdf_downloaded`). Every failure, including a switch that's off, another employee's copy or another company's, is the same empty 404.
 
@@ -38,6 +38,8 @@ A former employee sees every copy posted for them, which covers each year they w
 - when a copy posts, the employee's open former links whose access would end sooner are extended to the end of that October 15 (Guam time), with an audit entry;
 - when a link becomes former after a copy posted, its end date is never earlier than that date.
 
+That longer window covers tax forms and pay stubs only. Profile reads (contact details, emergency contacts, address requests) end at the link's original cutoff, kept in `former_profile_access_until`, and the context then reports `profile_requests: false`.
+
 A link whose access already ended stays closed.
 
 ## Withdrawing a copy
@@ -46,17 +48,20 @@ A link whose access already ended stays closed.
 
 ## The notice email
 
-Each newly posted copy queues `SendEmployeeTaxFormNoticeJob`. The email's subject is "IMPORTANT TAX RETURN DOCUMENT AVAILABLE", and it carries the employer's name and a link to the app, never an amount or an SSN. It goes only to the employee's own `employees.email`, only once that address is verified, and only while the employee has app access. It's sent only while `PORTAL_EMAIL_NOTIFICATIONS_ENABLED=true`. For a demo company it goes through `DemoOutbound`, so an address that isn't on the allow-list is dropped.
+Each newly posted copy gets a `pending` notice row in the same transaction that posts it. After that commits, `DispatchEmployeeTaxFormNoticesJob` sends the company's pending notices, and the same job runs every 10 minutes for every company (`config/recurring.yml`), so a notice whose job was lost is still sent. Posting again also adds a pending notice for any posted copy that has none. The email's subject is "IMPORTANT TAX RETURN DOCUMENT AVAILABLE", and it carries the employer's name and a link to the app, never an amount or an SSN. It goes only to the employee's own `employees.email`, only once that address is verified, and only while the employee has app access. It's sent only while `PORTAL_EMAIL_NOTIFICATIONS_ENABLED=true`. For a demo company it goes through `DemoOutbound`, so an address that isn't on the allow-list is dropped.
 
-One `employee_document_notices` row per copy records the outcome: `sent`, `skipped` (with the reason) or `failed` (retried).
+One `employee_document_notices` row per copy records the outcome: `pending`, `sent`, `skipped` (with the reason, including `email_delivery_disabled` while notification email is off) or `failed`. The sweep retries a failed send after 10 minutes, up to 5 attempts in all.
 
 ## Bounces
 
 `delivery_status` on each notice starts as `unknown`. Resend reports delivery through signed webhooks, which `POST /api/v1/integrations/email_events` receives:
 
-- `email.delivered`, `email.delivery_delayed`, `email.bounced` and `email.complained` update the matching notice by its Resend message id;
+- every verified event is stored in `email_provider_events` before the endpoint answers, once per Svix event id, so a replay changes nothing. The row keeps the Resend message id, event type, mapped status, bounce type and time, never an address;
+- `email.delivered`, `email.delivery_delayed`, `email.bounced` and `email.complained` then update the notice with that Resend message id. An event that arrives before the notice records its id is applied when the send commits, or by the sweep;
+- events apply oldest first, and an event older than the one already applied never overwrites it;
 - a bounce or complaint is final and is audited for staff, without the address;
-- events for other email are ignored.
+- events for other email match no notice and are deleted after 90 days;
+- nothing in the webhook body is logged: the endpoint masks its parameters before Rails logs them, and the global log filter also hides `cc`, `bcc`, `recipients`, `reply_to`, and `to`/`from` inside a payload's `data`.
 
 **Needed before bounce tracking is live in production:**
 

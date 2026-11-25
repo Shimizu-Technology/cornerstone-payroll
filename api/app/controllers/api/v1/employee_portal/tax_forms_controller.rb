@@ -41,6 +41,9 @@ module Api
 
           bytes = stored_bytes(document)
           return head :service_unavailable unless bytes
+          return head :not_found unless still_servable?(document, feature: :tax_forms) do |link, current|
+            current.tax_form? && current.posted? && current.employee_id == link.employee_id
+          end
 
           audit!("pdf_downloaded", record: document,
             metadata: { tax_year: document.tax_year, revision: document.revision, sha256: document.sha256 })
