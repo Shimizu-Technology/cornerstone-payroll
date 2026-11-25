@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/api';
 import type { EmployeeChangeRequest } from '@/services/api';
 import { ClientChangeRequests } from './ClientChangeRequests';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), contactChanges: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn(), contactChanges: vi.fn(), decide: vi.fn() }));
 
 vi.mock('@/services/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/api')>()),
@@ -65,4 +65,43 @@ it('loads contact activity without fetching request details', async () => {
   open('/change-requests?view=contact&request_id=8');
   await screen.findByText('No contact changes found.');
   expect(api.get).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['pending', 'Current', 'Requested'],
+  ['cancelled', 'Before', 'Requested'],
+  ['rejected', 'Before', 'Requested'],
+  ['approved', 'Before', 'After'],
+] as const)('labels both address columns for a %s request', async (status, original, result) => {
+  const addressRequest = {
+    ...request,
+    status,
+    profile_address: true,
+    original_values: { address_line1: '100 Example Lane' },
+    proposed_changes: { address_line1: '200 Example Lane' },
+  };
+  api.list.mockResolvedValue({ data: [addressRequest], meta });
+  api.get.mockResolvedValue({ data: addressRequest });
+
+  open('/change-requests');
+  expect(await screen.findByRole('columnheader', { name: original })).toBeTruthy();
+  expect(screen.getByRole('columnheader', { name: result })).toBeTruthy();
+});
+
+it.each([
+  ['Approve', 'Approve address', 'approve', true, "Note to the employee (they'll see this)"],
+  ['Reject', 'Reject request', 'reject', true, "Note to the employee (they'll see this)"],
+  ['Approve', 'Approve address', 'approve', false, 'Review note'],
+])('labels the optional client note for %s (%s, %s, employee visibility %s)', async (action, confirmation, decision, visible, label) => {
+  const pendingAddress = { ...request, profile_address: true, can_review: true, note_visible_to_employee: visible };
+  api.list.mockResolvedValue({ data: [pendingAddress], meta });
+  api.get.mockResolvedValue({ data: pendingAddress });
+  api.decide.mockResolvedValue({ data: { ...pendingAddress, status: decision === 'approve' ? 'approved' : 'rejected' } });
+
+  open('/change-requests');
+  fireEvent.click(await screen.findByRole('button', { name: action }));
+  const note = screen.getByRole<HTMLInputElement>('textbox', { name: label });
+  expect(note.required).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: confirmation }));
+  await waitFor(() => expect(api.decide).toHaveBeenCalledWith(pendingAddress.id, decision, undefined));
 });

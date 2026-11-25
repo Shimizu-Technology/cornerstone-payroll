@@ -138,6 +138,82 @@ describe('employee app shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
   });
 
+  it.each([
+    [undefined, 'This is the address on file for your W-2.'],
+    ['handed_out', 'This is the address on file for your W-2.'],
+    ['mailed', 'Your W-2 will be mailed here.'],
+  ])('uses the reported W-2 delivery method (%s) on an approved address', async (delivery, expectedMessage) => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    const address = { address_line1: '100 Example Lane' };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ w2_delivery: delivery, features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        legal_name: 'Example Worker',
+        ssn_last4: '0001',
+        address,
+        address_request: { id: 8, status: 'approved', requested: address, decision_note: 'Thanks for updating your address.' },
+      }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText(`Your new address was approved. ${expectedMessage}`)).toBeTruthy();
+    expect(screen.getByText('Thanks for updating your address.')).toBeTruthy();
+    expect(screen.getByText('Contact Cornerstone')).toBeTruthy();
+    expect(screen.queryByText(/0001/)).toBeNull();
+  });
+
+  it('asks the employee to refresh and confirm their address when it changed before an edit', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    let requestCalls = 0;
+    const address = { address_line1: '100 Example Lane', city: 'Example City', state: 'GU', zip: '96910' };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        address,
+        address_request: { id: 8, status: 'pending', requested: { ...address, address_line1: '200 Example Lane' } },
+      }),
+      '/employee/address_requests/8': () => (requestCalls++ === 0
+        ? Response.json({ code: 'address_on_file_changed' }, { status: 409 })
+        : Response.json({ address, address_request: { id: 8, status: 'cancelled', requested: { ...address, address_line1: '200 Example Lane' } } })),
+    }));
+    render(<EmployeeApp />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit request' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save request' }));
+    expect(await screen.findByText('Your address on file was updated after you sent this request. Cancel this request, then send a new one if your address still needs to change.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save request' })).toBeTruthy();
+
+    // Recovery: close the form, cancel the stale request, then a new one can be sent.
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel request' }));
+    expect(await screen.findByText('Request cancelled.')).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Request a change' })).toBeTruthy();
+  });
+
+  it('shows the daily limit in the email form without ending the session', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({ email: 'old@example.test' }),
+      '/employee/profile/email': () => Response.json({ code: 'email_code_daily_limit' }, { status: 429 }),
+    }));
+    render(<EmployeeApp />);
+
+    const emailCard = await screen.findByRole('region', { name: 'Contact details' });
+    await userEvent.click(within(emailCard).getByRole('button', { name: 'Change personal email' }));
+    const address = within(emailCard).getByRole('textbox');
+    await userEvent.clear(address);
+    await userEvent.type(address, 'new@example.test');
+    await userEvent.click(within(emailCard).getByRole('button', { name: 'Send code' }));
+    expect(await within(emailCard).findByText('Too many verification tries today. Try again tomorrow.')).toBeTruthy();
+  });
+
   it('signs out from My info to the Welcome screen, not to sign-in', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');

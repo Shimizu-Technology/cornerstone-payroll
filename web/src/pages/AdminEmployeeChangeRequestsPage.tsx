@@ -134,6 +134,7 @@ export function AdminEmployeeChangeRequestsPage() {
             <option value="pending">Pending</option>
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
+            <option value="cancelled">Cancelled</option>
             <option value="">All Statuses</option>
           </Select>
         </div>
@@ -211,17 +212,24 @@ export function AdminEmployeeChangeRequestsPage() {
                     <StatusBadge status={selected.status} />
                     <span className="text-sm text-gray-500">Submitted by {selected.requested_by_name || 'Unknown'}</span>
                   </div>
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                  {selected.status === 'pending' && <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
                     {selected.request_kind === 'create'
                       ? 'Approving this request activates the new worker after applying the reviewed payroll details.'
                       : selected.profile_address
                         ? 'Approving this request updates the employee’s address and adds it to Changes to confirm.'
                         : 'Approving this request applies the reviewed payroll-sensitive changes.'}
-                  </div>
-                  <ChangeComparison before={selected.original_values} after={selected.proposed_changes} requested={selected.status === 'pending'} />
+                  </div>}
+                  <ChangeComparison
+                    before={selected.original_values}
+                    after={selected.proposed_changes}
+                    requested={selected.status !== 'approved'}
+                  />
                   <div>
-                    <p className="mb-1 text-sm font-medium text-gray-900">Review Notes</p>
-                    <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={4} />
+                    <label htmlFor="staff-review-note" className="mb-1 block text-sm font-medium text-gray-900">
+                      {selected.note_visible_to_employee ? "Note to the employee (they'll see this)" : 'Review note'}
+                      {selected.status === 'pending' && <span aria-hidden="true" className="font-normal text-gray-600"> (optional)</span>}
+                    </label>
+                    <Textarea id="staff-review-note" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} rows={4} readOnly={selected.status !== 'pending'} />
                   </div>
                   {selected.status === 'pending' && selected.proposed_compensation_effective_on && (
                     <label className="block text-sm font-medium text-neutral-800">
@@ -253,7 +261,7 @@ export function AdminEmployeeChangeRequestsPage() {
 }
 
 function StatusBadge({ status }: { status: EmployeeChangeRequest['status'] }) {
-  const variant = status === 'approved' ? 'success' : status === 'rejected' ? 'danger' : 'warning';
+  const variant = status === 'approved' ? 'success' : status === 'rejected' ? 'danger' : status === 'pending' ? 'warning' : 'default';
   return <Badge variant={variant}>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>;
 }
 
