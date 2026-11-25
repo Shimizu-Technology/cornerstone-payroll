@@ -18,7 +18,7 @@ class PayrollReportingPeriod
     )
   end
 
-  def self.from_params(params, default_year: Date.current.year)
+  def self.from_params(params, default_year: PayrollBusinessClock.today.year)
     start_value = params[:start_date].presence
     end_value = params[:end_date].presence
 
@@ -32,7 +32,7 @@ class PayrollReportingPeriod
     end
 
     year = Integer(params[:year].presence || default_year, exception: false)
-    raise ArgumentError, "year must be a valid 4-digit year" unless year&.between?(2000, Date.current.year + 1)
+    raise ArgumentError, "year must be a valid 4-digit year" unless year&.between?(2000, PayrollBusinessClock.today.year + 1)
 
     new(start_date: Date.new(year, 1, 1), end_date: Date.new(year, 12, 31), year: year)
   end

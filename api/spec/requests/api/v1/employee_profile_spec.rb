@@ -43,6 +43,12 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     expect(response.body).not_to include("999-00-0001")
   end
 
+  it "shows the legal name with its suffix, as W-2GU prints it" do
+    employee.update!(middle_name: "Lee", name_suffix: "JR")
+    get "#{base}/profile", headers: employee_headers
+    expect(response.parsed_body.fetch("legal_name")).to eq("Example Lee Worker Jr.")
+  end
+
   it "requires a second-factor step-up on every write for an employee-only login when MFA is on" do
     writes.each do |verb, path|
       public_send(verb, "#{base}/#{path}", headers: employee_headers(fva: [ 0, 11 ]))

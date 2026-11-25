@@ -145,6 +145,17 @@ RSpec.describe W2GuOfficialCopies do
       expect_boxes(page, boxes, dy: described_class::HALF_PAGE)
     end
 
+    it "prints a name suffix in Box e's Suff. box, apart from the last name" do
+      aguon.update!(name_suffix: "Jr.")
+      page = render(kind: "employee", draft: false).pages.first
+      suffix = [ 310.6, 588.0, 330.2, 600.0 + described_class::TEXT_LIFT ] # the template's Suff. widget
+
+      [ 0, described_class::HALF_PAGE ].each do |dy|
+        expect(text_in_box(page, shift_rect(suffix, dy))).to eq("JR")
+        expect(text_in_box(page, shift_rect(lift.(fields[:last_name]), dy))).to eq("Aguon")
+      end
+    end
+
     it "puts each value inside its box for both employees on a Copy 1 page" do
       page = render(kind: "drt", draft: false).pages.first
 

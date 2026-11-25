@@ -126,6 +126,16 @@ RSpec.describe MigrationPromotion::PreparePaymentIssuance do
     expect(AuditLog.where(company: company, action: "migration_promotion#payment_prepared", record_id: pay_period.id)).to exist
   end
 
+  it "rejects a check date in a different year than the pay date, which W-2GU and year-to-date totals use" do
+    next_year = described_class.new(
+      pay_period: pay_period, actor: admin, acknowledgement: described_class::ACKNOWLEDGEMENT,
+      starting_check_number: "5001", check_date: "2027-01-04"
+    )
+
+    expect { next_year.call }.to raise_error(ArgumentError, /Check date must be in 2026/)
+    expect(first_item.reload.check_number).to be_nil
+  end
+
   it "accepts a numeric JSON check number" do
     numeric_service = described_class.new(
       pay_period: pay_period,

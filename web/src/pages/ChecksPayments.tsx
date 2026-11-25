@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { PayrollLiabilityCenter } from '@/components/payroll/PayrollLiabilityCenter';
 import { CheckRegister } from '@/components/checks/CheckRegister';
 import { formatDateRange, formatGuamDate } from '@/lib/utils';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -549,7 +550,7 @@ export function ChecksPayments() {
     const blob = new Blob([stagingCsv(csv)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const date = new Date().toISOString().slice(0, 10);
+    const date = guamBusinessDate();
     link.href = url;
     link.download = stagingFilename(`checks_payments_register_${date}.csv`);
     document.body.appendChild(link);

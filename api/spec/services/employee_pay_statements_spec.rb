@@ -24,7 +24,9 @@ RSpec.describe EmployeePayStatements do
     row_only = paycheck(Date.new(2026, 1, 15))
     row_only.payroll_item_earnings.create!(category: "regular", label: "Offset earnings", amount: 10)
     paycheck(Date.new(2026, 1, 29), check_number: " \u00A0\u2007")
-    later_year = paycheck(Date.new(2027, 1, 1), gross_pay: 100, check_date: Date.new(2026, 12, 31))
+    later_year = paycheck(Date.new(2027, 1, 1), gross_pay: 100)
+    # A legacy cross-year check date (PayrollItem now rejects one) still files under its pay date's year.
+    later_year.update_columns(check_date: Date.new(2026, 12, 31))
 
     expect(statements.list).to eq([ later_year, row_only, replacement, original, prior_year ])
     expect(statements.list(year: 2026, page_size: 2)).to eq([ row_only, replacement ])
