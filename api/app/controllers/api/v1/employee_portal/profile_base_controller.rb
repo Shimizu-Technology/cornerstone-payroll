@@ -27,7 +27,7 @@ module Api
         end
 
         def current_company
-          @employee_link.company
+          employee_access_context.company
         end
 
         def require_profile_access!
@@ -36,7 +36,7 @@ module Api
         end
 
         def load_employee
-          @employee = Employee.where(company_id: current_company_id).find(@employee_link.employee_id)
+          @employee = Employee.where(company_id: current_company_id).find(employee_access_context.employee_id)
         end
 
         def require_active_link!
@@ -75,7 +75,7 @@ module Api
         end
 
         def profile
-          @profile ||= EmployeeProfiles::Profile.new(@employee_link, @employee)
+          @profile ||= EmployeeProfiles::Profile.new(employee_access_context, @employee)
         end
 
         def render_profile(status: :ok)

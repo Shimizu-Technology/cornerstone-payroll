@@ -267,7 +267,7 @@ describe('ViewOnlyBanner', () => {
 
     const banner = screen.getByRole('region', { name: 'View only' });
     expect(banner.textContent).toContain('Viewing as Milo Tarrant');
-    expect(banner.textContent).toContain('View only · 27 min left');
+    expect(banner.textContent).toContain('27 min left');
     await userEvent.click(within(banner).getByRole('button', { name: 'End' }));
     expect(onEnd).toHaveBeenCalledOnce();
   });

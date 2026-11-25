@@ -36,6 +36,7 @@ class StaffRolePolicy
     # Viewing the original body of a hidden staff note is restricted to
     # platform and organization admins.
     reveal_hidden_employee_notes: %w[super_admin org_admin],
+    start_view_as: %w[super_admin],
     manage_platform: %w[super_admin]
   }.freeze
 
@@ -63,6 +64,7 @@ class StaffRolePolicy
     manage_organization: "Admin access required",
     view_client_profitability: "Admin access required to see client profitability",
     reveal_hidden_employee_notes: "Only super admins and organization admins can view hidden staff notes",
+    start_view_as: "Support view permission required",
     manage_platform: "Super admin access required"
   }.freeze
 
@@ -260,6 +262,7 @@ class StaffRolePolicy
 
   def self.allowed?(user, capability, company: nil)
     return false unless user
+    return ViewAsGrant.allowed_staff?(user) if capability == :start_view_as
 
     return true if CAPABILITY_ROLES.fetch(capability).include?(user.role)
     return false unless DELEGATABLE_CAPABILITIES.include?(capability) && company

@@ -34,12 +34,12 @@ class EmployeeStatements
     end
   end
 
-  def initialize(link:)
-    @company_id = link.company_id
-    @employee_id = link.employee_id
+  def initialize(link: nil, context: link)
+    @company_id = context.company_id
+    @employee_id = context.employee_id
     # A former link without an end date isn't eligible (portal_eligible), so
     # it never gets here; an impossible one still sees nothing.
-    @access_until = (link.former_access_until&.in_time_zone(PayrollBusinessClock::TIME_ZONE)&.to_date || Date.new(1900) if link.former?)
+    @access_until = (context.former_access_until&.in_time_zone(PayrollBusinessClock::TIME_ZONE)&.to_date || Date.new(1900) if context.former?)
   end
 
   def page(year: nil, page: 1)

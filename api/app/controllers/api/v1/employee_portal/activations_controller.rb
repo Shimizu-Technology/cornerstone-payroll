@@ -26,6 +26,8 @@ module Api
         UNAVAILABLE = "Sign-up isn't available right now. Try again later."
 
         def create
+          return head :forbidden if request.headers[ViewAsGrant::HEADER]
+
           response.headers["Cache-Control"] = "no-store"
           return render_unavailable if WriteMaintenance.enabled?
 

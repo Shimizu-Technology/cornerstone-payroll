@@ -92,7 +92,7 @@ module Api
             return render_write_maintenance("Preview generation is paused during maintenance. Download the original or try the preview again shortly.")
           end
 
-          ensure_generated_preview!(@document)
+          ensure_generated_preview!(@document) unless Current.view_as_grant
           data, content_type, filename = preview_payload_for(@document)
           return render json: { error: public_preview_error(@document) }, status: :unprocessable_entity unless data
 

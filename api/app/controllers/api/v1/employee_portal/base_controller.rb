@@ -7,19 +7,29 @@ module Api
         include MfaEnforceable
         include EmployeePortalRequestContext
 
-        before_action :authenticate_employee_user!, :enforce_mfa!, :require_employee_link!
+        before_action :authenticate_employee_user!, :enforce_mfa!
+        include ViewAsEnforcement
+        before_action :require_employee_link!
         include CompanyRlsScoped
         # After the RLS scope, so audit rows are written inside the link's company.
         include Auditable
 
         private
 
+        attr_reader :current_user
+
+        # M4-5 and other employee reads may use either a real link or the
+        # grant-bound read context. Write paths always require a real link.
+        def employee_access_context
+          @view_as_employee_context || @employee_link
+        end
+
         def rls_company_id
-          @employee_link&.company_id
+          employee_access_context&.company_id
         end
 
         def current_company_id
-          @employee_link&.company_id
+          employee_access_context&.company_id
         end
 
         # Every successful employee view and download is audited, not only writes.
@@ -39,6 +49,8 @@ module Api
         end
 
         def require_employee_link!
+          return if Current.view_as_grant
+
           link_id = request.headers["X-Employee-Link-Id"]
           unless link_id&.match?(/\A[1-9]\d{0,18}\z/) && link_id.to_i <= 2**63 - 1
             return head :not_found

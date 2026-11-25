@@ -96,6 +96,8 @@ export function isMfaRequiredCode(code: unknown): code is 'mfa_required' | 'mfa_
   return typeof code === 'string' && MFA_REQUIRED_CODES.has(code);
 }
 
+import { SUPPORT_HEADER, supportToken } from '@/support/grant';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
 export function resolveApiUrl(baseUrl: string, endpoint: string, origin = globalThis.location?.origin || 'http://localhost'): URL {
@@ -139,6 +141,18 @@ function isReadOnlyRequest(init?: RequestInit): boolean {
 }
 
 async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (supportToken) {
+    if (!isReadOnlyRequest(init)) throw new ApiError('This support session is view only.', 403);
+
+    const base = new URL(API_BASE_URL, globalThis.location.origin);
+    const url = new URL(String(input), base.origin);
+    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname.replace(/\/$/, '') + '/')) {
+      throw new ApiError('This request is unavailable in a support view.', 403);
+    }
+    const headers = new Headers(init?.headers);
+    headers.set(SUPPORT_HEADER, supportToken);
+    init = { ...init, headers, cache: 'no-store', redirect: 'error' };
+  }
   try {
     return await fetch(input, init);
   } catch (error) {
@@ -4493,18 +4507,20 @@ export const companiesApi = {
   switchCompany: (companyId: number, organizationId?: number) => {
     api.setActiveCompanyId(companyId);
     api.setActiveOrganizationId(organizationId ?? null);
-    localStorage.setItem('activeCompanyId', String(companyId));
+    if (!supportToken) localStorage.setItem('activeCompanyId', String(companyId));
   },
   clearActiveCompanyId: () => {
     api.setActiveCompanyId(null);
     api.setActiveOrganizationId(null);
-    localStorage.removeItem('activeCompanyId');
+    if (!supportToken) localStorage.removeItem('activeCompanyId');
   },
   getActiveCompanyId: (): number | null => {
+    if (supportToken) return api.getActiveCompanyId();
     const stored = localStorage.getItem('activeCompanyId');
     return stored ? parseInt(stored, 10) : null;
   },
   initFromStorage: () => {
+    if (supportToken) return;
     const stored = localStorage.getItem('activeCompanyId');
     if (stored) {
       api.setActiveCompanyId(parseInt(stored, 10));

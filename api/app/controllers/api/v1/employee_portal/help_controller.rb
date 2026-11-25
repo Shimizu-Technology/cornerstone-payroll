@@ -10,7 +10,7 @@ module Api
       class HelpController < BaseController
         def show
           response.headers["Cache-Control"] = "no-store"
-          contacts = CompanyHelpContact.where(company_id: @employee_link.company_id).order(:position, :id)
+          contacts = CompanyHelpContact.where(company_id: employee_access_context.company_id).order(:position, :id)
           render json: { help_contacts: contacts.map(&:as_help_json) }
         end
       end

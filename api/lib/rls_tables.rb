@@ -44,7 +44,7 @@ module RlsTables
     time_tracking_employee_mappings time_tracking_entry_allocations
     time_tracking_financial_correction_links time_tracking_imports time_tracking_late_hours_runs
     time_tracking_legacy_identity_bindings time_tracking_manual_allocations time_tracking_sources
-    timecards training_replay_benchmarks transmittals w2_filing_readinesses year_end_acknowledgements
+    timecards training_replay_benchmarks transmittals view_as_grants w2_filing_readinesses year_end_acknowledgements
   ].freeze
 
   # Child => [parent, foreign key]
