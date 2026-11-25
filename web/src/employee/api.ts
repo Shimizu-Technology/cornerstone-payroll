@@ -25,7 +25,7 @@ export type EmployeeApiErrorKind =
   | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
   | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
-  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent';
+  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'terms_updated';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -132,6 +132,7 @@ export function errorForStatus(status: number, retryAfterHeader: string | null =
     return new EmployeeApiError(code, status);
   }
   if (status === 429) return new EmployeeApiError('rate_limited', status, retryAfter(retryAfterHeader));
+  if (status === 409 && code === 'terms_updated') return new EmployeeApiError(code, status);
   if (status === 409) return new EmployeeApiError(code === 'address_on_file_changed' ? code : 'conflict', status);
   if (status === 422 || status === 400) return new EmployeeApiError('invalid', status);
   return new EmployeeApiError('server', status);
