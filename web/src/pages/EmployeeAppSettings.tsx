@@ -9,7 +9,7 @@ import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmployeeAppPreview, type PreviewDevice, type PreviewScreen } from '@/components/employee-app/EmployeeAppPreview';
 import { HelpContactsEditor } from '@/components/employee-app/HelpContactsEditor';
-import { formatPhone } from '@/lib/employee-app-text';
+import { formatPhone } from '@/lib/display-phone';
 import { draftProblems, fromDraft, toDraft, type HelpContactDraft } from '@/lib/help-contact-drafts';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';

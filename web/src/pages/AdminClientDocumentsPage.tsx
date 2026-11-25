@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { SubmissionDocumentGroups } from '@/components/documents/SubmissionDocumentGroups';
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useSearchParams } from 'react-router';
@@ -482,7 +483,7 @@ export function AdminClientDocumentsPage() {
                             <MobileField label="Category" value={categoryLabel(document.category)} />
                             <MobileField label="Employee" value={document.employee_name || 'General'} />
                             <MobileField label="Uploaded by" value={document.uploaded_by_name || '—'} />
-                            <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
+                            <MobileField label="Uploaded" value={formatGuamDateTime(document.created_at)} />
                           </div>
                           {document.notes && (
                             <p className="mt-3 whitespace-pre-wrap rounded-xl bg-neutral-50 p-3 text-sm text-neutral-600">{document.notes}</p>
@@ -534,7 +535,7 @@ export function AdminClientDocumentsPage() {
                       <TableCell>{document.employee_name || 'General company document'}</TableCell>
                       <TableCell>{document.uploaded_by_name || '—'}</TableCell>
                       <TableCell className="max-w-xs whitespace-pre-wrap text-sm text-neutral-600">{document.notes || '—'}</TableCell>
-                      <TableCell>{new Date(document.created_at).toLocaleString()}</TableCell>
+                      <TableCell>{formatGuamDateTime(document.created_at)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button variant="outline" size="sm" onClick={() => void previewDocumentFile(document)}>

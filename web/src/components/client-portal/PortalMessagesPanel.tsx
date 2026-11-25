@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -54,7 +55,7 @@ const noDocumentsApi: PortalDocumentsApi = {
 
 function formatDateTime(value?: string | null) {
   if (!value) return 'No messages yet';
-  return new Date(value).toLocaleString('en-US', { timeZone: 'Pacific/Guam' });
+  return formatGuamDateTime(value);
 }
 
 function upsertThread(threads: ClientPortalThread[], next: ClientPortalThread): ClientPortalThread[] {

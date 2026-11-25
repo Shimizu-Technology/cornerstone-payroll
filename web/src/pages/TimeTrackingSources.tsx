@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { stagingNavigationUrl } from '@/lib/staging';
 import { supportsSourceOperation } from '@/lib/time-tracking';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -590,7 +591,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                       <Badge variant={source.active ? 'success' : 'default'}>{source.active ? 'Active' : 'Inactive'}</Badge>
                     </div>
                     <p className="mt-3 break-all text-xs text-neutral-600">{source.base_url}</p>
-                    <p className="mt-2 text-xs text-neutral-500">Last sync: {source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : 'Never'}</p>
+                    <p className="mt-2 text-xs text-neutral-500">Last sync: {source.last_synced_at ? formatGuamDateTime(source.last_synced_at) : 'Never'}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {!source.shared_secret_configured && <Badge variant="warning">Missing secret</Badge>}
                       <Badge variant={source.identity_verified ? 'success' : 'warning'}>{source.identity_verified ? 'Source verified' : 'Test source'}</Badge>
@@ -642,7 +643,7 @@ function ClientTimeTrackingSources({ navigateToAuthorization }: Required<TimeTra
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-gray-600">{source.last_synced_at ? new Date(source.last_synced_at).toLocaleString() : 'Never'}</td>
+                        <td className="px-4 py-3 text-gray-600">{source.last_synced_at ? formatGuamDateTime(source.last_synced_at) : 'Never'}</td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex justify-end gap-2">
                             <Button variant="outline" size="sm" onClick={() => editSource(source)} disabled={saving}>Edit</Button>

@@ -48,7 +48,7 @@ test.describe('employee screens on a desktop', () => {
 
     const list = page.getByRole('region', { name: 'Your pay' });
     const stub = page.getByRole('region', { name: 'Pay stub' });
-    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14' })).toBeVisible();
+    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14, 2026' })).toBeVisible();
     await expect(stub).toContainText('Paid Nov 20, 2026');
     const [listBox, stubBox] = [(await list.boundingBox())!, (await stub.boundingBox())!];
     expect(Math.round(listBox.width)).toBe(360);
@@ -62,10 +62,10 @@ test.describe('employee screens on a desktop', () => {
 
     await stub.getByRole('link', { name: /^Older:/ }).click();
     await expect(page).toHaveURL(/\/pay\/905\?year=2026$/);
-    await expect(stub.getByRole('heading', { name: 'Oct 18 – 31' })).toBeVisible();
+    await expect(stub.getByRole('heading', { name: 'Oct 18 – 31, 2026' })).toBeVisible();
     await expect(list.getByRole('link', { name: /Nov 6/ })).toHaveAttribute('aria-current', 'page');
     await stub.getByRole('link', { name: /^Newer:/ }).click();
-    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14' })).toBeVisible();
+    await expect(stub.getByRole('heading', { name: 'Nov 1 – 14, 2026' })).toBeVisible();
 
     await list.getByRole('link', { name: /Oct 23/ }).click();
     await expect(stub).toContainText('Check #2187');
