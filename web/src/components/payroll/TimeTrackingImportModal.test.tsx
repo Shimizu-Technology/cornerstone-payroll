@@ -204,7 +204,7 @@ describe('TimeTrackingImportModal payroll-first review', () => {
   it('leads with payroll context, payable hours and exclusions while audit details start collapsed', async () => {
     await review({ exclusions: [{ source_time_entry_id: 'held-1', source_user_id: 'user-7', display_name: 'Test Direct', reason: 'pending_approval', exclusion_category: 'needs_action', original_work_date: '2026-10-02', held_total_hours: 4, held_regular_hours: 4, held_overtime_hours: 0 }] });
     expect(screen.getByText('Mosa Restaurant')).toBeTruthy();
-    expect(screen.getByText('Work period: Oct 1 - 15, 2026')).toBeTruthy();
+    expect(screen.getByText('Work period: Oct 1 – 15, 2026')).toBeTruthy();
     expect(screen.getByText('Pay date: Oct 31, 2026')).toBeTruthy();
     expect(screen.getByText('Verified cutoff:')).toBeTruthy();
     const summary = screen.getByRole('region', { name: 'Hours included in this review' });

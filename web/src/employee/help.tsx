@@ -8,7 +8,8 @@ import { askManager, possessive } from './brand';
 import { useEmployeeTerms } from './terms';
 import type { HelpContact } from './contracts';
 import { useBrand, useReadySession } from './contexts';
-import { formatPhone, smsHref, telHref } from './format';
+import { formatPhone } from '@/lib/display-phone';
+import { smsHref, telHref } from './format';
 import { Card, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
 import { isSessionError } from './useEmployeeData';
 

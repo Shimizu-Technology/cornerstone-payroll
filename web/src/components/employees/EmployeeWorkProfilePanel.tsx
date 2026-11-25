@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarRange, CheckCircle2, Clock3, History, Scale, Settings2 } from 'lucide-react';
@@ -149,7 +150,7 @@ export function EmployeeWorkProfilePanel({ employee, canManage: roleCanManage, o
               <div className="rounded-2xl border border-neutral-200 bg-white p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Classification</p>
                 <p className="mt-2 text-sm font-semibold text-neutral-900">{statusLabel(current)}</p>
-                <p className="mt-1 text-xs text-neutral-600">Effective {current.effective_on}</p>
+                <p className="mt-1 text-xs text-neutral-600">Effective {formatDate(current.effective_on)}</p>
               </div>
               <div className="rounded-2xl border border-neutral-200 bg-white p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Standard time</p>

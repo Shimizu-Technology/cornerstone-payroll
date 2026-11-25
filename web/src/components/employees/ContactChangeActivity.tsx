@@ -1,3 +1,4 @@
+import { formatGuamDate } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { Button } from '@/components/ui/button';
@@ -150,7 +151,7 @@ export function ContactChangeActivity({ staffCompanyId, companyName }: { staffCo
             <div className="min-w-0">
               <CardTitle className="break-words text-base">{entry.employee_name}</CardTitle>
               <p className="mt-1 break-words text-sm text-neutral-600">
-                {entry.change_kind === 'address' ? 'Address' : entry.change_kind === 'delivery_consent' ? 'Delivery consent' : 'Contact details'} · {entry.changed_by_name || 'Account unavailable'} · {new Date(entry.created_at).toLocaleDateString()}
+                {entry.change_kind === 'address' ? 'Address' : entry.change_kind === 'delivery_consent' ? 'Delivery consent' : 'Contact details'} · {entry.changed_by_name || 'Account unavailable'} · {formatGuamDate(entry.created_at)}
               </p>
             </div>
             {staffCompanyId && !entry.confirmed_at && (
@@ -160,7 +161,7 @@ export function ContactChangeActivity({ staffCompanyId, companyName }: { staffCo
             )}
             {entry.confirmed_at && (
               <p className="break-words text-sm text-success-700">
-                Confirmed {new Date(entry.confirmed_at).toLocaleDateString()}{entry.confirmed_by_name ? ` by ${entry.confirmed_by_name}` : ''}
+                Confirmed {formatGuamDate(entry.confirmed_at)}{entry.confirmed_by_name ? ` by ${entry.confirmed_by_name}` : ''}
               </p>
             )}
           </CardHeader>

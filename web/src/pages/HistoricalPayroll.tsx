@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
@@ -35,7 +36,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
-import { formatCurrency, formatDateRange } from '@/lib/utils';
+import { formatCurrency, formatGuamDate } from '@/lib/utils';
 import {
   ApiError,
   historicalImportsApi,
@@ -73,8 +74,7 @@ function dollars(value?: string | number | null): string {
 }
 
 function shortDate(value?: string | null): string {
-  if (!value) return '—';
-  return new Date(`${value}T00:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return formatDate(value) || '—';
 }
 
 function fileSize(bytes: number): string {
@@ -1481,7 +1481,7 @@ export function HistoricalPayroll(): ReactElement {
                       {canMutate && clientBootstrapMutable && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && <Button variant="outline" onClick={() => void previewClientBootstrap()} disabled={action !== null}>{action === 'bootstrap_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
                       {canMutate && clientBootstrapMutable && (clientBootstrap.status === 'previewed' || clientBootstrap.status === 'failed') && clientBootstrap.ready_to_apply && <Button onClick={() => { setBootstrapAcknowledgement(''); setBootstrapApplyError(null); setBootstrapApplyBatchId(selectedBatch.id); setBootstrapApplyOpen(true); }} disabled={action !== null}><UsersRound className="mr-2 h-4 w-4" />{clientBootstrap.status === 'previewed' ? 'Create employee records' : 'Try again'}</Button>}
                       {clientBootstrap.status === 'pending' && <p className="flex items-center text-sm font-semibold text-neutral-700"><RefreshCw className="mr-2 h-4 w-4 animate-spin" />Creating employee records…</p>}
-                      {clientBootstrap.status === 'applied' && <p className="text-sm font-semibold text-success-700">Prepared {shortDate(clientBootstrap.applied_at?.slice(0, 10))}{clientBootstrap.applied_by_name ? ` by ${clientBootstrap.applied_by_name}` : ''}</p>}
+                      {clientBootstrap.status === 'applied' && <p className="text-sm font-semibold text-success-700">Prepared {(formatGuamDate(clientBootstrap.applied_at) || '—')}{clientBootstrap.applied_by_name ? ` by ${clientBootstrap.applied_by_name}` : ''}</p>}
                     </div>
                   </div>
                   {clientBootstrap.status === 'failed' && clientBootstrap.apply_error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">{clientBootstrap.apply_error}</div>}
@@ -1511,7 +1511,7 @@ export function HistoricalPayroll(): ReactElement {
                         : cutoverReview?.status === 'pending'
                           ? <Badge variant="default"><RefreshCw className="mr-1 h-3 w-3 animate-spin" />Verification running</Badge>
                           : <Badge variant="default">Not verified</Badge>}
-                  {cutoverReview?.approved_by_name && <p className="mt-2 text-xs text-neutral-600">by {cutoverReview.approved_by_name} on {shortDate(cutoverReview.approved_at?.slice(0, 10))}</p>}
+                  {cutoverReview?.approved_by_name && <p className="mt-2 text-xs text-neutral-600">by {cutoverReview.approved_by_name} on {(formatGuamDate(cutoverReview.approved_at) || '—')}</p>}
                 </div>
               </div>
             </CardHeader>
@@ -1660,7 +1660,7 @@ export function HistoricalPayroll(): ReactElement {
                       {canMutate && ytdBridge.status === 'previewed' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Refresh preview</Button>}
                       {canMutate && ytdBridge.status === 'applied' && <Button variant="outline" onClick={() => void previewYtdBridge()} disabled={action !== null}>{action === 'ytd_preview' && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}Check for YTD revision</Button>}
                       {canMutate && ytdBridge.status === 'previewed' && ytdBridge.ready_to_apply && <Button onClick={() => { setYtdAcknowledgement(''); setYtdApplyError(null); setYtdApplyBatchId(selectedBatch.id); setYtdApplyOpen(true); }} disabled={action !== null}><CheckCircle2 className="mr-2 h-4 w-4" />Activate historical YTD</Button>}
-                      {ytdBridge.status === 'applied' && <p className="text-sm font-semibold text-success-700">Active {shortDate(ytdBridge.applied_at?.slice(0, 10))}{ytdBridge.applied_by_name ? ` by ${ytdBridge.applied_by_name}` : ''}</p>}
+                      {ytdBridge.status === 'applied' && <p className="text-sm font-semibold text-success-700">Active {(formatGuamDate(ytdBridge.applied_at) || '—')}{ytdBridge.applied_by_name ? ` by ${ytdBridge.applied_by_name}` : ''}</p>}
                     </div>
                   </div>
                 </>
