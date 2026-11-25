@@ -214,13 +214,18 @@ function ReadinessSummary({ master, checks, names }: { master: SwitchRow; checks
   const title = master.on ? 'The employee app is on'
     : ready ? 'Ready to turn on'
       : `Not ready yet: ${blocking.length} ${blocking.length === 1 ? 'thing' : 'things'} to fix`;
-  // Only the database check can be waived, for a demo company in an
-  // early-access window, so "passes" would overstate a waived check.
-  const waived = checks.filter((check) => check.status === 'waived').map((check) => check.key === 'rls_database' ? 'database check' : names[check.key] ?? check.key);
-  const waiver = waived.length ? `demo early access (${waived.join(', ')} waived)` : '';
+  // A waived check doesn't pass, so "every check passes" would overstate it.
+  // Only a demo in an early-access window waives the database check; two-step
+  // sign-in is waived for every company until it's turned on for everyone.
+  const waived = checks.filter((check) => check.status === 'waived');
+  const earlyAccess = waived.some((check) => check.key === 'rls_database') ? ' under demo early access (database check waived)' : '';
+  const notes = waived.filter((check) => check.key !== 'rls_database')
+    .map((check) => check.key === 'mfa' ? "Two-step sign-in isn't required yet." : `${names[check.key] ?? check.key} is waived.`).join(' ');
+  const noteText = notes ? ` ${notes}` : '';
   const summary = master.on
-    ? failing ? `${failing} ${failing === 1 ? 'check needs' : 'checks need'} attention. Parts that depend on ${failing === 1 ? 'it' : 'them'} can't turn on.` : waiver ? `On under ${waiver}.` : 'Every check passes.'
-    : ready ? `${waiver ? `Ready to turn on under ${waiver}.` : 'Every check the employee app needs passes.'} Turn it on under Switches below.`
+    ? failing ? `${failing} ${failing === 1 ? 'check needs' : 'checks need'} attention. Parts that depend on ${failing === 1 ? 'it' : 'them'} can't turn on.`
+      : earlyAccess ? `On${earlyAccess}.${noteText}` : notes ? `Every other check passes.${noteText}` : 'Every check passes.'
+    : ready ? `${earlyAccess ? `Ready to turn on${earlyAccess}.` : notes ? 'Every other check passes.' : 'Every check the employee app needs passes.'}${noteText} Turn it on under Switches below.`
       : 'These checks must pass before the employee app can turn on:';
   return (
     <section aria-labelledby="readiness-summary" className={`rounded-xl border p-4 ${ready ? 'border-success-200 bg-success-50' : 'border-warning-200 bg-warning-50'}`}>

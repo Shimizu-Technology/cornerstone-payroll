@@ -240,6 +240,31 @@ describe('EmployeeAppSwitch', () => {
     expect(within(summary).queryByText(/Every check .* passes/)).toBeNull();
   });
 
+  it('describes the two-step sign-in waiver without calling a live company a demo', async () => {
+    mocks.get.mockResolvedValue({ data: state({}, [
+      passed('company', 'This is a live client or a demo company'),
+      { key: 'mfa', name: 'Two-step sign-in is required', status: 'waived', detail: "Two-step sign-in isn't required yet." },
+    ]) });
+    renderPage();
+
+    const summary = (await screen.findByRole('heading', { name: 'Ready to turn on' })).closest('section') as HTMLElement;
+    expect(within(summary).getByText("Every other check passes. Two-step sign-in isn't required yet. Turn it on under Switches below.")).toBeTruthy();
+    expect(within(summary).queryByText(/demo early access/)).toBeNull();
+  });
+
+  it('names both waivers for a demo under early access', async () => {
+    mocks.get.mockResolvedValue({ data: state({}, [
+      passed('company', 'This is a live client or a demo company'),
+      { key: 'mfa', name: 'Two-step sign-in is required', status: 'waived', detail: "Two-step sign-in isn't required yet." },
+      { key: 'rls_database', name: 'The database enforces company separation (row-level security on)', status: 'waived',
+        detail: 'Waived for this demo company under early access.' },
+    ]) });
+    renderPage();
+
+    const summary = (await screen.findByRole('heading', { name: 'Ready to turn on' })).closest('section') as HTMLElement;
+    expect(within(summary).getByText("Ready to turn on under demo early access (database check waived). Two-step sign-in isn't required yet. Turn it on under Switches below.")).toBeTruthy();
+  });
+
   it('lists the blocker the server names even when every listed check passed', async () => {
     const data = state({}, [passed('company', 'This is a live client or a demo company')]);
     data.switches = data.switches.map((row) => ({ ...row, blocked_by: ['terms'] }));
