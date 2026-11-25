@@ -22,7 +22,7 @@ describe('employee API contracts', () => {
   it('reads an empty context as everything off', () => {
     expect(parseContext(null)).toEqual({
       firstName: null, status: 'active', formerAccessUntil: null, nextPayday: null, w2Delivery: null,
-      features: { stubs: false, taxForms: false, profileRequests: false },
+      features: { stubs: false, taxForms: false, profileRequests: false, deliveryConsent: false },
     });
   });
 

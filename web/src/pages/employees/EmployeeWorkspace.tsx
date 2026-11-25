@@ -60,6 +60,7 @@ import { SavedHours } from '@/components/employees/SavedHours';
 import { EmployeeHoursPayroll } from '@/components/employees/EmployeeHoursPayroll';
 import { payrollPaymentLabel } from '@/lib/payroll-payment-label';
 import { EmployeeIntakePanel } from '@/components/employees/EmployeeIntakePanel';
+import { EmployeeDeliveryConsentPanel } from '@/components/employees/EmployeeDeliveryConsentPanel';
 import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { EmployeePaymentMethodPanel } from '@/components/employees/EmployeePaymentMethodPanel';
 import { EmployeeRetirementElectionPanel } from '@/components/employees/EmployeeRetirementElectionPanel';
@@ -454,6 +455,7 @@ function EmployeeOverview({
           </CardContent>
         </Card>
       </div>
+      <EmployeeDeliveryConsentPanel summary={employee.delivery_consents} />
     </>
   );
 }

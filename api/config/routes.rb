@@ -75,6 +75,10 @@ Rails.application.routes.draw do
         post "profile/email/confirm", to: "profile#confirm_email", format: false
         resources :emergency_contacts, only: %i[create update destroy], format: false
         resources :address_requests, only: %i[create update destroy], format: false
+        get :delivery_consents, to: "delivery_consents#show", format: false
+        post :delivery_consents, to: "delivery_consents#create", format: false
+        post "delivery_consents/withdraw", to: "delivery_consents#withdraw", format: false
+        post "delivery_consents/w2gu_access_proof/pdf", to: "delivery_consents#w2gu_access_proof", format: false
         get :help, to: "help#show", format: false
         resources :statements, only: [ :index, :show ], format: false do
           get :pdf, on: :member

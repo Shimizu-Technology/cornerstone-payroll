@@ -8,10 +8,11 @@
 // Response shapes live in contracts.ts.
 import { SUPPORT_HEADER } from '@/support/grant';
 import {
-  accessDay, addressBody, identityBody, parseActivation, parseContext, parseHelpContacts, parseProfile, parseStatementDetail,
-  parseStatementPage, parseTaxForms, verificationIdFrom,
-  type ActivationOutcome, type Address, type EmployeeContextInfo, type EmployeeProfile, type HelpContact, type IdentityCheck,
-  type StatementDetail, type StatementPage, type TaxForm,
+  accessDay, addressBody, identityBody, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts,
+  parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, parseW2GuAccessProof, verificationIdFrom,
+  type ActivationOutcome, type Address, type DeliveryConsentKind, type DeliveryConsentsState, type EmployeeContextInfo,
+  type EmployeeProfile, type HelpContact, type IdentityCheck, type StatementDetail, type StatementPage, type TaxForm,
+  type W2GuAccessProofChallenge,
 } from './contracts';
 
 /**
@@ -23,7 +24,8 @@ import {
 export type EmployeeApiErrorKind =
   | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
-  | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed';
+  | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
+  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -120,7 +122,15 @@ export function errorForStatus(status: number, retryAfterHeader: string | null =
   // Any other 403 is treated like 404 so nothing leaks.
   if (status === 403 || status === 404) return new EmployeeApiError('not_found', status);
   if (status === 429 && code === 'email_code_daily_limit') return new EmployeeApiError(code, status);
-  if (status === 422 && (code === 'emergency_contact_limit' || code === 'personal_email_required')) return new EmployeeApiError(code, status);
+  if (status === 422 && (
+    code === 'emergency_contact_limit'
+    || code === 'personal_email_required'
+    || code === 'access_proof_invalid'
+    || code === 'disclosure_outdated'
+    || code === 'no_active_consent'
+  )) {
+    return new EmployeeApiError(code, status);
+  }
   if (status === 429) return new EmployeeApiError('rate_limited', status, retryAfter(retryAfterHeader));
   if (status === 409) return new EmployeeApiError(code === 'address_on_file_changed' ? code : 'conflict', status);
   if (status === 422 || status === 400) return new EmployeeApiError('invalid', status);
@@ -254,7 +264,7 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
 
     if (!response.ok) {
       let code: unknown = null;
-      if (response.status === 403 || (stepUp && [409, 422, 429].includes(response.status))) {
+      if (response.status === 403 || ((stepUp || method !== 'GET') && [409, 422, 429].includes(response.status))) {
         const body: unknown = await response.json().catch(() => null);
         const hint = stepUp && response.status === 403 ? reverificationHint(body) : null;
         if (hint) throw new StepUpRequiredError(hint);
@@ -340,6 +350,37 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
     },
     async cancelAddressRequest(linkId: string, requestId: string): Promise<EmployeeProfile> {
       return parseProfile(await request<unknown>(`/employee/address_requests/${pathId(requestId)}`, { linkId, method: 'DELETE', stepUp: true }));
+    },
+    async deliveryConsents(linkId: string, signal?: AbortSignal): Promise<DeliveryConsentsState> {
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents', { linkId, signal }));
+    },
+    async startW2GuAccessProof(linkId: string): Promise<W2GuAccessProofChallenge> {
+      const challenge = parseW2GuAccessProof(await request<unknown>('/employee/delivery_consents/w2gu_access_proof/pdf', { linkId, method: 'POST' }));
+      if (!challenge) throw new EmployeeApiError('server');
+      return challenge;
+    },
+    async giveDeliveryConsent(
+      linkId: string,
+      payload: {
+        kind: DeliveryConsentKind;
+        disclosureVersion: string;
+        disclosureDigest: string;
+        accessProofToken?: string;
+        accessProofCode?: string;
+      },
+    ): Promise<DeliveryConsentsState> {
+      const body: Record<string, unknown> = {
+        kind: payload.kind,
+        acknowledged: true,
+        disclosure_version: payload.disclosureVersion,
+        disclosure_digest: payload.disclosureDigest,
+      };
+      if (payload.accessProofToken) body.access_proof_token = payload.accessProofToken;
+      if (payload.accessProofCode) body.access_proof_code = payload.accessProofCode.trim();
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents', { linkId, method: 'POST', body, stepUp: true }));
+    },
+    async withdrawDeliveryConsent(linkId: string, kind: DeliveryConsentKind): Promise<DeliveryConsentsState> {
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents/withdraw', { linkId, method: 'POST', body: { kind } }));
     },
     /**
      * Sign-up, before any session: the invite check and the email in one call.
