@@ -72,7 +72,12 @@ function PhoneAccountMenu(): ReactElement {
       ref={wrapRef}
       className="emp-header-account-wrap"
       // A disclosure, not a menu: it closes once focus moves past its last link.
-      onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false); }}
+      // Safari doesn't focus a clicked button, so a blur with no new target is
+      // left to the outside-click handler and never swallows the click.
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (next && !event.currentTarget.contains(next)) setOpen(false);
+      }}
     >
       <button
         ref={buttonRef}
