@@ -51,6 +51,21 @@ RSpec.describe EmployeeDocumentReadiness do
     expect(described_class.summary(employee)).to include(required: 2, satisfied: 0, ready_for_payroll: false)
   end
 
+  it "names each blocked employee and their missing documents for staff to open" do
+    employee = create(:employee, company: company, first_name: "Juniper", last_name: "Moss", document_readiness_required: true)
+    period = create(:pay_period, company: company)
+    create(:payroll_item, company: company, employee: employee, pay_period: period)
+    create(:employee_document_requirement, company: company, employee: employee)
+
+    expect { described_class.require_payroll_ready!(period) }.to raise_error(described_class::BlockedError) { |error|
+      expect(error.employees).to eq([
+        { employee_id: employee.id, employee_name: "Juniper Moss",
+          missing: [ "Signed withholding election", "Identity and work authorization" ] }
+      ])
+    }
+    expect(described_class.summary(employee)[:missing]).to contain_exactly("Signed withholding election", "Identity and work authorization")
+  end
+
   it "grandfathers employees created before the checklist rollout" do
     employee = create(:employee, company: company, document_readiness_required: false)
     period = create(:pay_period, company: company)

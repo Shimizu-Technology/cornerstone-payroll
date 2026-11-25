@@ -11,6 +11,7 @@ import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { clientPayrollSubmissionsApi } from '@/services/payrollSubmissions';
 import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { ClientPayrollReview } from '@/components/client-portal/ClientPayrollReview';
 import { ClientPayStubButton } from '@/components/client-portal/ClientPayStubButton';
 import type { PayrollItem } from '@/types';
@@ -126,7 +127,7 @@ export function ClientPayPeriodDetail(): ReactElement {
               <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
               <SummaryCard label="Gross Pay" value={formatCurrency(resolvedPayPeriod.total_gross ?? 0)} />
               <SummaryCard label="Net Pay" value={formatCurrency(resolvedPayPeriod.total_net ?? 0)} />
-              <SummaryCard label="Status" value={resolvedPayPeriod.test_workspace_role === 'baseline' ? 'Paid (copied history)' : resolvedPayPeriod.status === 'approved' ? (resolvedPayPeriod.payroll_review?.status === 'approved' ? 'Client approved' : resolvedPayPeriod.payroll_review?.status === 'changes_requested' ? 'Changes requested' : 'Ready for your review') : resolvedPayPeriod.status.charAt(0).toUpperCase() + resolvedPayPeriod.status.slice(1)} />
+              <SummaryCard label="Status" value={clientPayRunStatus({ ...resolvedPayPeriod, client_review_status: resolvedPayPeriod.payroll_review?.status })} />
             </div>
 
 

@@ -18,9 +18,10 @@ class PayrollHistoryQuery
 
   Result = Data.define(:data, :meta)
 
-  def initialize(company_id:, params:, audience: :staff)
+  def initialize(company_id:, params:, audience: :staff, client_actor: nil)
     @company_id = Integer(company_id)
     @audience = audience.to_sym
+    @client_actor = client_actor
     raise ArgumentError, "Unknown payroll history audience" unless @audience.in?(%i[staff client])
     @page = [ params.fetch(:page, 1).to_i, 1 ].max
     @per_page = params.fetch(:per_page, DEFAULT_PER_PAGE).to_i.clamp(1, MAX_PER_PAGE)
@@ -204,6 +205,7 @@ class PayrollHistoryQuery
   def result_sql
     offset = (@page - 1) * @per_page
     order = "#{SORT_COLUMNS.fetch(@sort)} #{@direction} NULLS LAST, record_type ASC, id DESC"
+    order = "(status = 'approved' AND NOT practice_history) DESC, #{order}" if @audience == :client && !@register_eligible
     <<~SQL.squish
       WITH payroll_history AS MATERIALIZED (#{union_sql}),
       filtered_history AS (
@@ -248,6 +250,15 @@ class PayrollHistoryQuery
     JSON.parse(value)
   end
 
+  def client_review_fields(period, package)
+    return {} unless @audience == :client && period&.approved? && period.company.client_payroll_approval_required? && package&.published_at
+
+    {
+      client_review_status: package.changes_requested_at ? "changes_requested" : package.status,
+      can_decide_payroll_review: PayrollReview::RevisionService.client_can_decide?(package, @client_actor)
+    }
+  end
+
   def serialize(row, native_periods:)
     imported = row.fetch("record_type") == "imported"
     parallel_run = !imported && native_periods[row.fetch("id").to_i]&.parallel_run?
@@ -287,6 +298,7 @@ class PayrollHistoryQuery
         detail: row.fetch("source_label"),
         locked: ActiveModel::Type::Boolean.new.cast(row.fetch("source_locked"))
       },
+      **client_review_fields(native_period, current_package),
       capabilities: {
         view: true,
         edit: editable,
