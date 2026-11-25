@@ -21,6 +21,7 @@ RSpec.describe "Pay-period submissions", type: :request do
     travel_to Time.zone.parse("2026-11-17 02:00:00 UTC") # Nov 17, noon in Guam
     allow(ClientPortalThreadChannel).to receive(:broadcast_thread)
     create(:company_assignment, user: staff, company: company)
+    create(:company_assignment, user: client, company: company)
     as_client
   end
 

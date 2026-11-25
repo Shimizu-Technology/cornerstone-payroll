@@ -252,6 +252,7 @@ RSpec.describe "Portal file requests", type: :request do
     request_file
     request_id = data.fetch("id")
     other_client = create(:user, company: other_company, organization: org, role: "client")
+    create(:company_assignment, user: other_client, company: other_company)
     as_client(other_client, other_company)
     respond_with(request_id, [ create(:client_document, company: other_company, uploaded_by: other_client) ])
     expect(response).to have_http_status(:not_found)

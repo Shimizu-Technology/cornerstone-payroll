@@ -8,8 +8,16 @@ RSpec.describe "Employee app rollout administration", type: :request do
   let(:company) { create(:company, name: "Example Bakery") }
   let(:other_company) { create(:company, organization: company.organization, name: "Example Bookshop") }
   let(:staff) { create(:user, company: company, role: :admin, clerk_id: "user_rollout_staff") }
-  let(:client) { create(:user, company: company, role: :client, clerk_id: "user_rollout_client") }
-  let(:outsider) { create(:user, company: other_company, role: :client, clerk_id: "user_rollout_outsider") }
+  let(:client) do
+    create(:user, company: company, role: :client, clerk_id: "user_rollout_client").tap do |user|
+      CompanyAssignment.create!(user: user, company: company)
+    end
+  end
+  let(:outsider) do
+    create(:user, company: other_company, role: :client, clerk_id: "user_rollout_outsider").tap do |user|
+      CompanyAssignment.create!(user: user, company: other_company)
+    end
+  end
   let(:employee) do
     create(:employee, company: company, first_name: "Sample", last_name: "Worker",
       email: "worker@example.test", phone: "671-555-0101", date_of_birth: Date.new(1991, 1, 2))

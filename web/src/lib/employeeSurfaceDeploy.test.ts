@@ -294,9 +294,29 @@ describe('shared Netlify configuration', () => {
     expect(scripts.postbuild).toBe('node scripts/finalize-surface-dist.mjs');
   });
 
-  it('keeps Payroll site redirects and sets Referrer-Policy: no-referrer without affecting employee output', () => {
+  it('keeps Payroll site redirects and sets full staff security headers and Report-Only CSP without affecting employee output', () => {
     expect(read('public', '_redirects')).toContain('/*    /index.html   200');
     const staffHeaders = read('public', '_headers');
     expect(staffHeaders).toContain('Referrer-Policy: no-referrer');
+    expect(staffHeaders).toContain('X-Frame-Options: DENY');
+    expect(staffHeaders).toContain("Content-Security-Policy: frame-ancestors 'none'");
+    expect(staffHeaders).toContain('X-Content-Type-Options: nosniff');
+    expect(staffHeaders).toContain('Permissions-Policy:');
+
+    const reportOnlyLine = staffHeaders
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.startsWith('Content-Security-Policy-Report-Only:'));
+    expect(reportOnlyLine).toBeDefined();
+    expect(reportOnlyLine).toContain('https://clerk.shimizu-technology.com');
+    expect(reportOnlyLine).toContain('https://img.clerk.com');
+    expect(reportOnlyLine).toContain('https://cornerstone-payroll-api.onrender.com');
+    expect(reportOnlyLine).toContain('wss://cornerstone-payroll-api.onrender.com');
+    expect(reportOnlyLine).toContain('https://*.r2.cloudflarestorage.com');
+    expect(reportOnlyLine).toContain('https://us.i.posthog.com');
+    expect(reportOnlyLine).toContain('https://us-assets.i.posthog.com');
+    expect(reportOnlyLine).toContain('https://fonts.googleapis.com');
+    expect(reportOnlyLine).toContain('https://fonts.gstatic.com');
+    expect(reportOnlyLine).toContain("frame-ancestors 'none'");
   });
 });

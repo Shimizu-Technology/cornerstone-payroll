@@ -72,9 +72,8 @@ module ClientOperatingProfiles
     # nothing reads client_portal_enabled yet). Mirrors User#accessible_company_ids:
     # practice-only logins count only on their open sandbox, while regular client
     # users match organization-scoped unexpired assignments to unarchived companies
-    # or fall back to their home company when no such assignment exists.
+    # (no fallback to home company when no active assignment exists).
     def active_client_portal_users?
-      now = Time.current
       client_role = User.roles.fetch("client")
 
       if company.sandbox? && company.active? && company.test_workspace_ready? && !company.test_workspace_read_only?
@@ -93,39 +92,18 @@ module ClientOperatingProfiles
         return true if practice_login_exists
       end
 
-      if company.test_workspace_archived_at.nil?
-        active_assignment_exists = CompanyAssignment.active_access
-          .joins(:user)
-          .where(
-            company_id: company.id,
-            users: {
-              role: client_role,
-              active: true,
-              practice_company_id: nil,
-              organization_id: company.organization_id
-            }
-          )
-          .exists?
-        return true if active_assignment_exists
-      end
+      return false unless company.test_workspace_archived_at.nil?
 
-      User.where(
-        company_id: company.id,
-        organization_id: company.organization_id,
-        role: client_role,
-        active: true,
-        practice_company_id: nil
-      )
+      CompanyAssignment.active_access
+        .joins(:user)
         .where(
-          "NOT EXISTS (" \
-          "SELECT 1 FROM company_assignments " \
-          "INNER JOIN companies assigned_companies ON assigned_companies.id = company_assignments.company_id " \
-          "WHERE company_assignments.user_id = users.id " \
-          "AND (company_assignments.expires_at IS NULL OR company_assignments.expires_at > ?) " \
-          "AND assigned_companies.test_workspace_archived_at IS NULL " \
-          "AND assigned_companies.organization_id = users.organization_id" \
-          ")",
-          now
+          company_id: company.id,
+          users: {
+            role: client_role,
+            active: true,
+            practice_company_id: nil,
+            organization_id: company.organization_id
+          }
         )
         .exists?
     end

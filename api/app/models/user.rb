@@ -154,7 +154,8 @@ class User < ApplicationRecord
   # Returns all companies this user can access:
   # - super admins: all companies across all organizations
   # - org admins / legacy admins: every company in their organization
-  # - managers/accountants/clients: explicitly assigned companies (or home company)
+  # - managers/accountants: explicitly assigned companies (or home company)
+  # - clients: explicitly assigned companies only (never falls back to home company)
   # - employee-only identities: no staff/client company access
   def accessible_company_ids
     @accessible_company_ids ||= begin
@@ -191,7 +192,9 @@ class User < ApplicationRecord
         end
         assigned_ids &= organization_company_ids
 
-        client_company_boundary(assigned_ids).presence || client_company_boundary(Array(company_id))
+        return client_company_boundary(assigned_ids) if client?
+
+        assigned_ids.presence || Array(company_id)
       end
     end
   end
