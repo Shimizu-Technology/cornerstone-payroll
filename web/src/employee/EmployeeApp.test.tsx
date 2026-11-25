@@ -136,6 +136,18 @@ describe('employee app shell', () => {
     expect(window.location.pathname).toBe('/');
   });
 
+  it('asks an enrolled login that skipped the second step to sign in again, not to set it up', async () => {
+    signedIn();
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({ error: 'Multi-factor authentication is required.', code: 'mfa_required' }, { status: 403 }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Complete two-step sign-in' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign out and sign in again' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Set up two-step sign-in' })).toBeNull();
+  });
+
   it('links My info to Sign-in & security', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');

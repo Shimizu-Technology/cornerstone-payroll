@@ -53,8 +53,14 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
     end
   end
 
-  it "refuses an employee-only login with no second factor when MFA is on" do
+  it "sends an employee-only login with no second factor to enrollment when MFA is on" do
     get "#{base}/profile", headers: employee_headers(fva: [ 0, -1 ], two_factor_enabled: false)
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("code")).to eq("mfa_enrollment_required")
+  end
+
+  it "asks an enrolled employee login that skipped the second step to finish it" do
+    get "#{base}/profile", headers: employee_headers(fva: [ 0, -1 ], two_factor_enabled: true)
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body.fetch("code")).to eq("mfa_required")
   end
@@ -78,6 +84,10 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
 
     headers = bearer(reviewer.clerk_id).merge("X-Employee-Link-Id" => dual_link.id.to_s)
     patch "#{base}/profile/phone", headers: headers
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body.fetch("code")).to eq("mfa_enrollment_required")
+
+    patch "#{base}/profile/phone", headers: bearer(reviewer.clerk_id, two_factor_enabled: true).merge("X-Employee-Link-Id" => dual_link.id.to_s)
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body.fetch("code")).to eq("mfa_required")
 
@@ -247,7 +257,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
   end
 
   it "allows five codes per link per Guam day, including confirmation of the fifth code" do
-    travel_to Time.iso8601("2026-11-25T23:50:00+10:00")
+    travel_to guam_late_evening
     other_link = link_to(worker, create(:employee, company: company))
     with_portal_email do
       4.times do
@@ -267,13 +277,13 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       post "#{base}/profile/email", headers: employee_headers(other_link), params: { email: "other-link@example.test" }, as: :json
       expect(response).to have_http_status(:accepted), response.body
 
-      travel_to Time.iso8601("2026-11-26T00:00:00+10:00")
+      travel_to guam_late_evening.tomorrow.beginning_of_day
       start_email("tomorrow@example.test")
     end
   end
 
   it "caps wrong attempts across codes without revealing whether an ID is active" do
-    travel_to Time.iso8601("2026-11-25T23:50:00+10:00")
+    travel_to guam_late_evening
     with_portal_email do
       2.times do
         id, code = start_email
@@ -299,7 +309,7 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
       expect_daily_limit
       expect(employee.reload.email).to eq("original@example.test")
 
-      travel_to Time.iso8601("2026-11-26T00:00:00+10:00")
+      travel_to guam_late_evening.tomorrow.beginning_of_day
       id, code = start_email
       confirm_email(id, code)
       expect(response).to have_http_status(:ok), response.body
@@ -615,6 +625,12 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
 
   def audits(action)
     AuditLog.where(company: company, action: "employee_portal/#{action}").order(:id)
+  end
+
+  # 23:50 on a coming Guam day: after the links the before block makes, so
+  # the spec doesn't depend on today's date.
+  def guam_late_evening
+    @guam_late_evening ||= Time.current.in_time_zone("Pacific/Guam").tomorrow.change(hour: 23, min: 50)
   end
 
   def start_email(email = "new@example.test")

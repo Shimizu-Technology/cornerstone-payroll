@@ -25,7 +25,12 @@ module MfaEnforceable
     render_mfa_required
   end
 
+  # One denial for every surface (staff, client and employee APIs, invitation
+  # binding, cable tickets), split by what the person has to do next. A login
+  # with no second factor yet gets mfa_enrollment_required, so the apps send it
+  # to set one up; an enrolled login whose session skipped the second step gets
+  # mfa_required, so it signs in again and finishes it.
   def render_mfa_required
-    render json: { error: MfaPolicy::ERROR_MESSAGE, code: MfaPolicy::ERROR_CODE }, status: :forbidden
+    render json: MfaPolicy.denial_body(@clerk_token_payload), status: :forbidden
   end
 end
