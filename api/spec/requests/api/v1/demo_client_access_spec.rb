@@ -201,6 +201,26 @@ RSpec.describe "Demo company staff and client access", type: :request do
       expect(response.body).not_to include("retired-inbox")
     end
 
+    it "scopes the shared-email report to the selected demo company, whatever the request names" do
+      department = create(:department, company: live)
+      2.times { create(:employee, company: live, department: department, email: "office@live-grill.example") }
+      demo_department = create(:department, company: demo)
+      2.times { create(:employee, company: demo, department: demo_department, email: "front@kitchen.example") }
+      sign_in(admin)
+
+      [ {}, { company_id: live.id } ].each do |params|
+        get "/api/v1/admin/employee_contact_hygiene/shared_emails", params: params, headers: { "X-Company-Id" => demo.id.to_s }
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body.fetch("companies").map { |company| company["company_id"] }).to eq([ demo.id ])
+        expect(response.body).to include("front@kitchen.example")
+        expect(response.body).not_to include("office@live-grill.example", "Live Client")
+      end
+
+      get "/api/v1/admin/employee_contact_hygiene/shared_emails", headers: { "X-Company-Id" => live.id.to_s }
+      expect(response.body).to include("office@live-grill.example")
+      expect(response.body).not_to include("front@kitchen.example")
+    end
+
     it "creates a client login for a demo company on that company" do
       sign_in(admin)
       allow_any_instance_of(PayrollInvitation).to receive(:send_invite).and_return(success: false, error: "not sent in tests")
@@ -268,9 +288,11 @@ RSpec.describe "Demo company staff and client access", type: :request do
     end
 
     def issue_invitations!
+      issued = 0
       allow(invitation).to receive(:send_invite) do |login, **|
-        login.update!(clerk_invitation_id: "inv_#{login.id}")
-        { success: true, url: "https://payroll.example.test/login" }
+        issued += 1
+        login.update!(clerk_invitation_id: "inv_#{issued}")
+        { success: true, invitation_id: "inv_#{issued}", url: "https://clerk.payroll.example.test/v1/tickets/accept?ticket=tk_#{issued}" }
       end
     end
 
@@ -289,14 +311,17 @@ RSpec.describe "Demo company staff and client access", type: :request do
       expect(outcomes).to all(be_complete)
       expect(User.where(company: demo).order(:name).pluck(:name, :role)).to eq([ [ "Maren Fable", "client" ], [ "Tessa Vale", "client" ] ])
       expect(CompanyAssignment.where(company: demo).count).to eq(2)
+      # Each email carries its own invitation's acceptance URL (with the ticket).
+      %w[tk_1 tk_2].each do |ticket|
+        expect(UserInviteEmailService).to have_received(:send_invite).with(hash_including(invitation_url: a_string_including("ticket=#{ticket}")))
+      end
 
       expect(invite.map(&:status)).to eq(%w[already_invited already_invited])
       expect(invitation).to have_received(:send_invite).twice
       expect(UserInviteEmailService).to have_received(:send_invite).twice
-      expect(clerk).not_to have_received(:invitation_status)
     end
 
-    it "tracks the email apart from the invitation and retries it against the still-open invitation" do
+    it "retries an undelivered email with a fresh invitation, so the new link works" do
       issue_invitations!
       allow(UserInviteEmailService).to receive(:send_invite).and_return(false)
       outcomes = invite
@@ -305,23 +330,25 @@ RSpec.describe "Demo company staff and client access", type: :request do
 
       allow(UserInviteEmailService).to receive(:send_invite).and_return(true)
       expect(invite.map(&:status)).to eq(%w[invited invited])
-      # The existing invitations were reused, not replaced.
-      expect(invitation).to have_received(:send_invite).twice
-      expect(User.where(company: demo).pluck(:clerk_invitation_id)).to all(start_with("inv_"))
+      expect(invitation).to have_received(:send_invite).exactly(4).times
+      expect(User.where(company: demo).order(:name).pluck(:clerk_invitation_id)).to eq(%w[inv_3 inv_4])
+      expect(UserInviteEmailService).to have_received(:send_invite).with(hash_including(invitation_url: a_string_including("ticket=tk_4")))
       expect(invite.map(&:status)).to eq(%w[already_invited already_invited])
     end
 
-    it "issues a new invitation when the undelivered one closed, and leaves an accepted one alone" do
+    it "reissues a delivered invitation that expired or was revoked, and leaves an accepted one alone" do
       issue_invitations!
-      allow(UserInviteEmailService).to receive(:send_invite).and_return(false)
       invite
       maren = User.find_by!(name: "Maren Fable")
+      tessa = User.find_by!(name: "Tessa Vale")
       allow(clerk).to receive(:invitation_status).with(maren.clerk_invitation_id).and_return("expired")
-      allow(clerk).to receive(:invitation_status).with(User.find_by!(name: "Tessa Vale").clerk_invitation_id).and_return("accepted")
-      allow(UserInviteEmailService).to receive(:send_invite).and_return(true)
-
+      allow(clerk).to receive(:invitation_status).with(tessa.clerk_invitation_id).and_return("accepted")
       expect(invite.map(&:status)).to eq(%w[invited already_accepted])
-      expect(invitation).to have_received(:send_invite).exactly(3).times
+
+      allow(clerk).to receive(:invitation_status).with(maren.reload.clerk_invitation_id).and_return("revoked")
+      expect(invite.map(&:status)).to eq(%w[invited already_accepted])
+      expect(invitation).to have_received(:send_invite).exactly(4).times
+      expect(UserInviteEmailService).to have_received(:send_invite).with(hash_including(invitation_url: a_string_including("ticket=tk_4")))
     end
 
     it "reports a Clerk failure by code only" do

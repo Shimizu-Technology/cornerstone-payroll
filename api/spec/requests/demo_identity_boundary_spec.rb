@@ -94,6 +94,74 @@ RSpec.describe "Demo identity boundary", type: :request do
     end
   end
 
+  describe "live eligibility from the home company" do
+    it "keeps live employee access for a live login with a leftover demo grant, and still refuses demo links" do
+      live_login
+      CompanyAssignment.insert_all!([ { user_id: live_login.id, company_id: demo.id, expires_at: 1.day.ago,
+        created_at: Time.current, updated_at: Time.current } ])
+      expect(DemoOutbound.demo_company_for(User.find(live_login.id))).to be_nil
+      expect(EmployeeLinks.demo_boundary_allows?(live_login, live)).to be(true)
+      expect(EmployeeLinks.demo_boundary_allows?(live_login, demo)).to be(false)
+
+      employee = employee_at(live)
+      invite = invite!(employee, actor: admin, delivery: "code")
+      claim("user_live", employee, invite.code)
+      expect(response).to have_http_status(:created)
+      get "/api/v1/employee/links", headers: bearer("user_live")
+      expect(response.parsed_body.fetch("links").map { |link| link["id"] }).to eq([ invite.link.id ])
+    end
+
+    it "drops an expired demo grant when a staff login becomes a client on the Users screen" do
+      accountant = create(:user, role: :accountant, company: live, organization: organization, email: "former-staff@firm.example")
+      CompanyAssignment.create!(user: accountant, company: live)
+      CompanyAssignment.create!(user: accountant, company: demo).update_columns(expires_at: 1.day.ago)
+      admin.update!(clerk_id: "user_admin")
+
+      patch "/api/v1/admin/users/#{accountant.id}", params: { user: { role: "client", company_ids: [ live.id ] } }.to_json,
+        headers: bearer("user_admin", fva: [ 0, 0 ], two_factor_enabled: true).merge("CONTENT_TYPE" => "application/json")
+      expect(response).to have_http_status(:ok), response.body
+      expect(accountant.reload.company_assignments.pluck(:company_id)).to eq([ live.id ])
+      expect(EmployeeLinks.demo_boundary_allows?(accountant, live)).to be(true)
+    end
+
+    it "ignores an inactive demo company when deciding a login's demo ties" do
+      live_login
+      CompanyAssignment.insert_all!([ { user_id: live_login.id, company_id: demo.id, created_at: Time.current, updated_at: Time.current } ])
+      expect(DemoOutbound.demo_company_for(User.find(live_login.id))).to eq(demo)
+      demo.update_columns(active: false)
+      expect(DemoOutbound.demo_company_for(User.find(live_login.id))).to be_nil
+    end
+  end
+
+  describe "the under-lock check" do
+    it "refuses a link that changed sides before the lock without counting the attempt" do
+      employee = employee_at(live)
+      invite = invite!(employee, actor: admin, delivery: "code")
+      before = untouched(invite.link)
+      answers = [ true, false ]
+      outcome = EmployeeLinks::Verify.call(token: nil, code: invite.code, date_of_birth: employee.date_of_birth.iso8601,
+        ssn_last4: "0000", admit: ->(_link) { answers.shift }) { |link| link }
+      expect(outcome).to be_nil
+      expect(answers).to be_empty
+      expect(untouched(invite.link)).to eq(before)
+      expect(AuditLog.where(company_id: live.id, action: "employee_links#activation_failed")).to be_empty
+    end
+  end
+
+  describe "/auth/me" do
+    it "counts only the links the login can open" do
+      live_login
+      EmployeeAccountLink.create!(user: demo_login, company: live, employee: employee_at(live), status: "active")
+      EmployeeAccountLink.create!(user: live_login, company: live, employee: employee_at(live), status: "active")
+
+      get "/api/v1/auth/me", headers: bearer("user_demo")
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("roles", "employee_links_count")).to eq(0)
+      get "/api/v1/auth/me", headers: bearer("user_live")
+      expect(response.parsed_body.dig("roles", "employee_links_count")).to eq(1)
+    end
+  end
+
   describe "access at sign-in" do
     def companies_status
       get "/api/v1/companies", headers: bearer("user_demo")

@@ -8,18 +8,25 @@ class UserInviteEmailService
   class << self
     # Returns true, :captured, :refused (a demo login's address is not on the
     # allow-list, so nothing is sent) or false.
+    #
+    # invitation_url is the Clerk invitation's own URL. Production Clerk is
+    # invite-only and the first Payroll sign-in binds through the accepted
+    # invitation, so the email links there: Clerk accepts the ticket and
+    # forwards to the app's /login with __clerk_ticket, where the embedded
+    # Clerk widget finishes sign-up. Without a usable URL nothing is sent.
     def send_invite(user:, invited_by:, invitation_url: nil)
       demo_company = DemoOutbound.demo_company_for(user)
       if demo_company && !DemoOutbound.permit?(company: demo_company, email: user.email, channel: "user_invite_email", user: user)
         return :refused
       end
+      unless acceptance_url?(invitation_url)
+        Rails.logger.error("[InviteEmail] Not sent user_id=#{user.id}: no invitation acceptance URL")
+        return false
+      end
       return false unless configured?
 
-      # Always link to the app's login page, not Clerk's hosted invitation URL.
-      # Users sign up via the Clerk widget embedded in the app, which is less confusing
-      # than being redirected through clerk.com first.
-      button_link = "#{frontend_url}/login"
-      display_url = frontend_url
+      button_link = invitation_url
+      display_url = invitation_url
 
       response = DemoOutbound.scoped(demo_company) do
         StagingMailTransport.deliver(
@@ -49,6 +56,13 @@ class UserInviteEmailService
       false
     end
 
+    def acceptance_url?(url)
+      uri = URI.parse(url.to_s)
+      %w[https http].include?(uri.scheme) && uri.host.present?
+    rescue URI::InvalidURIError
+      false
+    end
+
     def configured?
       if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank?
         Rails.logger.warn("[InviteEmail] RESEND_API_KEY not configured; skipping invite email")
@@ -67,10 +81,6 @@ class UserInviteEmailService
 
     def from_email
       ENV["RESEND_FROM_EMAIL"].presence || ENV["MAILER_FROM_EMAIL"].presence
-    end
-
-    def frontend_url
-      ENV.fetch("FRONTEND_URL") { ENV.fetch("ALLOWED_ORIGINS", "http://localhost:5173").split(",").first.strip }
     end
 
     def h(value)

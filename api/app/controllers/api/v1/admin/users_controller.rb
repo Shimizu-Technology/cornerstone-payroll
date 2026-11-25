@@ -412,8 +412,11 @@ module Api
           retained_assignments = existing_assignments.select do |assignment|
             normalized_company_ids.include?(assignment.company_id) ||
               # The Users payload lists active grants only. A name edit must
-              # not erase hidden expired grants or renew their access.
-              (assignment.expired? && (user.staff_member? || !assignment.company.practice_copy?))
+              # not erase hidden expired grants or renew their access. A
+              # client keeps none on the other side of the demo boundary (a
+              # staff login's old demo grant after a role change).
+              (assignment.expired? && (user.staff_member? || !assignment.company.practice_copy?) &&
+                !(user.client? && assignment.company.demo? != (user.company&.demo? || false)))
           end
           retained_assignments.each do |assignment|
             # Retention must not bypass role/organization validation after a
