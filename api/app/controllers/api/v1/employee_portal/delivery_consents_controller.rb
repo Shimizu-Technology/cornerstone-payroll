@@ -237,15 +237,16 @@ module Api
         end
 
         def writable_link?
-          @current_user.payroll_access_allowed? && @employee_link.active? &&
+          @current_user.payroll_access_allowed? && @employee_link.active? && !@employee_link.activation_locked? &&
             @employee_link.user_id == @current_user.id &&
             @employee_link.employee_id == @employee.id &&
             @employee_link.company_id == @employee.company_id
         end
 
         def withdrawable_link?
-          link_eligible = @employee_link.active? ||
-            (@employee_link.former? && @employee_link.former_access_until.present? && @employee_link.former_access_until > Time.current)
+          link_eligible = (@employee_link.active? ||
+            (@employee_link.former? && @employee_link.former_access_until.present? && @employee_link.former_access_until > Time.current)) &&
+            !@employee_link.activation_locked?
           @current_user.payroll_access_allowed? && link_eligible &&
             @employee_link.user_id == @current_user.id &&
             @employee_link.employee_id == @employee.id &&

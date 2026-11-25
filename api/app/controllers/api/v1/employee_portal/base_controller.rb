@@ -7,6 +7,7 @@ module Api
         include MfaEnforceable
         include EmployeePortalRequestContext
 
+        before_action :set_employee_portal_no_store
         before_action :authenticate_employee_user!, :enforce_mfa!
         include ViewAsEnforcement
         before_action :require_employee_link!
@@ -18,6 +19,12 @@ module Api
         private
 
         attr_reader :current_user
+
+        # Set no-store before auth/link/feature checks so every non-enumerating
+        # 404 returns identical caching headers regardless of where it failed.
+        def set_employee_portal_no_store
+          response.headers["Cache-Control"] = "no-store"
+        end
 
         # M4-5 and other employee reads may use either a real link or the
         # grant-bound read context. Write paths always require a real link.

@@ -90,9 +90,11 @@ module EmployeeLinkHelpers
       email: "own.address@example.net" }.merge(overrides)
   end
 
-  def post_activation(params, headers: {})
-    post "/api/v1/employee/activation", params: params.to_json,
-      headers: { "CONTENT_TYPE" => "application/json" }.merge(headers)
+  # origin: the browser Origin the sign-up page sends (a client subdomain).
+  def post_activation(params, headers: {}, origin: nil)
+    request_headers = { "CONTENT_TYPE" => "application/json" }
+    request_headers["Origin"] = origin if origin
+    post "/api/v1/employee/activation", params: params.to_json, headers: request_headers.merge(headers)
   end
 
   # What Clerk reports once the person finishes sign-up with the invitation:

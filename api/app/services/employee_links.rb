@@ -169,8 +169,9 @@ module EmployeeLinks
   end
 
   def self.openable?(user, link, azp:, origin: nil)
-    link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company) &&
-      demo_request_allowed?(link.company, azp) && demo_origin_allowed?(link.company, origin)
+    !link.activation_locked? && link.portal_enabled? && origin_allows_company?(azp, link.company_id) &&
+      demo_boundary_allows?(user, link.company) && demo_request_allowed?(link.company, azp) &&
+      demo_origin_allowed?(link.company, origin)
   end
 
   # A request with no Origin header (not from a browser page) is judged by
