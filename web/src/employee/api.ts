@@ -1,10 +1,31 @@
-// Client for /api/v1/employee/*. Every call carries the Clerk session token;
-// every call except GET /employee/links also carries X-Employee-Link-Id.
+// Client for /api/v1/employee/*. Every call carries the Clerk session token
+// (except sign-up's activation, made before any session); every call except
+// links, claim and reactivate also carries X-Employee-Link-Id.
 // The API answers every employee failure with a bare 404 so it never reveals
 // whether a person or record exists, and this client keeps it that way: a 404
-// only ever becomes "unavailable" or "access ended", never a reason.
+// only ever becomes "unavailable" or "access ended", never a reason. The one
+// 403 it reads is two-step sign-in (MfaEnforceable, RecentVerification).
+// Response shapes live in contracts.ts.
+import { SUPPORT_HEADER } from '@/support/grant';
+import {
+  accessDay, addressBody, identityBody, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts,
+  parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, parseW2GuAccessProof, verificationIdFrom,
+  type ActivationOutcome, type Address, type DeliveryConsentKind, type DeliveryConsentsState, type EmployeeContextInfo,
+  type EmployeeProfile, type HelpContact, type IdentityCheck, type StatementDetail, type StatementPage, type TaxForm,
+  type W2GuAccessProofChallenge,
+} from './contracts';
 
-export type EmployeeApiErrorKind = 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server';
+/**
+ * - invalid: a 422 or 400. For sign-up it is the one generic "couldn't match" answer (claim's is a 404).
+ * - conflict: 409, for example another change is already being reviewed.
+ * - mfa_enrollment_required: 403, this login must set up two-step sign-in first (staff and client logins).
+ * - mfa_required: 403, this session didn't finish two-step sign-in.
+ */
+export type EmployeeApiErrorKind =
+  | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
+  | 'mfa_enrollment_required' | 'mfa_required'
+  | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
+  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -20,6 +41,37 @@ export class EmployeeApiError extends Error {
   }
 }
 
+/** Clerk's reverification hint, as RecentVerification#require_recent_verification! sends it. */
+export interface ReverificationHint {
+  type: string;
+  reason: string;
+  metadata?: { reverification?: { level?: string; afterMinutes?: number } };
+}
+
+/** The API wants a fresh sign-in check before this change. The auth provider prompts and retries. */
+export class StepUpRequiredError extends Error {
+  readonly hint: ReverificationHint;
+
+  constructor(hint: ReverificationHint) {
+    super('Step-up verification required');
+    this.name = 'StepUpRequiredError';
+    this.hint = hint;
+  }
+}
+
+/** The person closed the "confirm it's you" prompt. Nothing was changed. */
+export class StepUpCancelledError extends Error {
+  constructor() {
+    super('Step-up verification cancelled');
+    this.name = 'StepUpCancelledError';
+  }
+}
+
+function reverificationHint(body: unknown): ReverificationHint | null {
+  const hint = record(record(body)?.clerk_error);
+  return hint && hint.reason === 'reverification-error' && typeof hint.type === 'string' ? hint as unknown as ReverificationHint : null;
+}
+
 /** M4-2 "Finding links": GET /api/v1/employee/links, the signed-in user's eligible links. */
 export interface EmployeeLink {
   id: string;
@@ -31,7 +83,9 @@ export interface EmployeeLink {
 
 export interface EmployeeApiOptions {
   baseUrl: string;
-  getToken: () => Promise<string | null>;
+  /** `fresh` skips Clerk's token cache, so a just-finished reverification counts. */
+  getToken: (options?: { fresh?: boolean }) => Promise<string | null>;
+  grantToken?: string;
   fetchImpl?: typeof fetch;
   isOnline?: () => boolean;
 }
@@ -41,6 +95,10 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   signal?: AbortSignal;
+  /** A change behind step-up: a reverification 403 throws StepUpRequiredError, and the token is fresh. */
+  stepUp?: boolean;
+  /** Before sign-in (sign-up checks): no Authorization header. */
+  anonymous?: boolean;
 }
 
 // Same bounds the API checks before it looks anything up (base_controller.rb).
@@ -56,11 +114,26 @@ function retryAfter(header: string | null): number | null {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
-export function errorForStatus(status: number, retryAfterHeader: string | null = null): EmployeeApiError {
+/** Only known codes affect the user-facing error. */
+export function errorForStatus(status: number, retryAfterHeader: string | null = null, code: unknown = null): EmployeeApiError {
   if (status === 401) return new EmployeeApiError('unauthorized', status);
-  // 403 is not expected from employee routes; treat it like 404 so nothing leaks.
+  if (status === 403 && code === 'mfa_enrollment_required') return new EmployeeApiError('mfa_enrollment_required', status);
+  if (status === 403 && code === 'mfa_required') return new EmployeeApiError('mfa_required', status);
+  // Any other 403 is treated like 404 so nothing leaks.
   if (status === 403 || status === 404) return new EmployeeApiError('not_found', status);
+  if (status === 429 && code === 'email_code_daily_limit') return new EmployeeApiError(code, status);
+  if (status === 422 && (
+    code === 'emergency_contact_limit'
+    || code === 'personal_email_required'
+    || code === 'access_proof_invalid'
+    || code === 'disclosure_outdated'
+    || code === 'no_active_consent'
+  )) {
+    return new EmployeeApiError(code, status);
+  }
   if (status === 429) return new EmployeeApiError('rate_limited', status, retryAfter(retryAfterHeader));
+  if (status === 409) return new EmployeeApiError(code === 'address_on_file_changed' ? code : 'conflict', status);
+  if (status === 422 || status === 400) return new EmployeeApiError('invalid', status);
   return new EmployeeApiError('server', status);
 }
 
@@ -82,7 +155,11 @@ function linkIdFrom(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
-/** Accepts `{ links: [...] }` or a bare array, and drops entries without a usable id. */
+/**
+ * GET /employee/links (AccountController#links, served):
+ * { links: [{ id, company_name, subdomain_slug, status, former_access_until }] }.
+ * Also accepts a bare array, and drops entries without a usable id.
+ */
 export function parseLinks(data: unknown): EmployeeLink[] {
   const list = Array.isArray(data) ? data : record(data)?.links;
   if (!Array.isArray(list)) return [];
@@ -95,7 +172,8 @@ export function parseLinks(data: unknown): EmployeeLink[] {
       companyName: text(entry.company_name) ?? '',
       subdomainSlug: text(entry.subdomain_slug),
       status: text(entry.status) ?? 'active',
-      formerAccessUntil: text(entry.former_access_until),
+      // An instant at the end of the last Guam day; kept as that day.
+      formerAccessUntil: accessDay(entry.former_access_until),
     }];
   });
 }
@@ -126,13 +204,29 @@ export function employeeUrl(base: EmployeeApiBase, path: string): URL {
   return url;
 }
 
-export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => fetch(...args), isOnline = () => navigator.onLine }: EmployeeApiOptions) {
+/** The one route outside /employee/ this client calls: /auth/me, which binds a new sign-up (M4-2). */
+export function authMeUrl(base: EmployeeApiBase): URL {
+  return new URL(`${base.path}/auth/me`, base.origin);
+}
+
+function statementsQuery(year: number | null, page: number): string {
+  const query = new URLSearchParams({ page: String(page) });
+  if (year) query.set('year', String(year));
+  return query.toString();
+}
+
+function pathId(value: string): string {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(value)) throw new EmployeeApiError('not_found');
+  return value;
+}
+
+export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (...args) => fetch(...args), isOnline = () => navigator.onLine }: EmployeeApiOptions) {
   const base = parseApiBase(baseUrl);
 
-  async function sessionToken(): Promise<string> {
+  async function sessionToken(fresh = false): Promise<string> {
     let token: string | null;
     try {
-      token = await getToken();
+      token = await getToken(fresh ? { fresh } : undefined);
     } catch {
       // Clerk rejects (ClerkOfflineError) when the connection drops mid-refresh.
       throw new EmployeeApiError(isOnline() ? 'server' : 'offline');
@@ -141,14 +235,14 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
     return token;
   }
 
-  async function request<T>(path: string, { linkId, method = 'GET', body, signal }: RequestOptions = {}): Promise<T | null> {
-    const url = employeeUrl(base, path);
+  async function send(url: URL, { linkId, method = 'GET', body, signal, stepUp = false, anonymous = false }: RequestOptions, accept: string): Promise<Response> {
     if (linkId !== undefined && !isLinkId(linkId)) throw new EmployeeApiError('not_found');
     if (!isOnline()) throw new EmployeeApiError('offline');
 
-    const token = await sessionToken();
-    const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token}` };
-    if (linkId !== undefined) headers['X-Employee-Link-Id'] = linkId;
+    const headers: Record<string, string> = { Accept: accept };
+    if (!anonymous) headers.Authorization = `Bearer ${await sessionToken(stepUp)}`;
+    if (grantToken) headers[SUPPORT_HEADER] = grantToken;
+    else if (linkId !== undefined) headers['X-Employee-Link-Id'] = linkId;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
 
     let response: Response;
@@ -168,10 +262,33 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
       throw new EmployeeApiError(isOnline() ? 'server' : 'offline');
     }
 
-    if (!response.ok) throw errorForStatus(response.status, response.headers.get('Retry-After'));
+    if (!response.ok) {
+      let code: unknown = null;
+      if (response.status === 403 || ((stepUp || method !== 'GET') && [409, 422, 429].includes(response.status))) {
+        const body: unknown = await response.json().catch(() => null);
+        const hint = stepUp && response.status === 403 ? reverificationHint(body) : null;
+        if (hint) throw new StepUpRequiredError(hint);
+        code = record(body)?.code ?? null;
+      }
+      throw errorForStatus(response.status, response.headers.get('Retry-After'), code);
+    }
+    return response;
+  }
+
+  async function readJson<T>(response: Response): Promise<T | null> {
     if (response.status === 204) return null;
     const contentType = response.headers.get('Content-Type') ?? '';
     return contentType.includes('application/json') ? await response.json() as T : null;
+  }
+
+  async function request<T>(path: string, options: RequestOptions = {}): Promise<T | null> {
+    return readJson<T>(await send(employeeUrl(base, path), options, 'application/json'));
+  }
+
+  /** A PDF, held only in memory as a Blob. */
+  async function pdf(path: string, linkId: string): Promise<Blob> {
+    const response = await send(employeeUrl(base, path), { linkId }, 'application/pdf');
+    return response.blob();
   }
 
   return {
@@ -179,8 +296,121 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
     async links(signal?: AbortSignal): Promise<EmployeeLink[]> {
       return parseLinks(await request<unknown>('/employee/links', { signal }));
     },
-    async context(linkId: string, signal?: AbortSignal): Promise<void> {
-      await request<unknown>('/employee/context', { linkId, signal });
+    async context(linkId: string, signal?: AbortSignal): Promise<EmployeeContextInfo> {
+      return parseContext(await request<unknown>('/employee/context', { linkId, signal }));
+    },
+    async statements(linkId: string, { year = null, page = 1 }: { year?: number | null; page?: number } = {}, signal?: AbortSignal): Promise<StatementPage> {
+      return parseStatementPage(await request<unknown>(`/employee/statements?${statementsQuery(year, page)}`, { linkId, signal }));
+    },
+    async statement(linkId: string, statementId: string, signal?: AbortSignal): Promise<StatementDetail> {
+      const detail = parseStatementDetail(await request<unknown>(`/employee/statements/${pathId(statementId)}`, { linkId, signal }));
+      if (!detail) throw new EmployeeApiError('server');
+      return detail;
+    },
+    statementPdf(linkId: string, statementId: string): Promise<Blob> {
+      return pdf(`/employee/statements/${pathId(statementId)}/pdf`, linkId);
+    },
+    async taxForms(linkId: string, signal?: AbortSignal): Promise<TaxForm[]> {
+      return parseTaxForms(await request<unknown>('/employee/tax_forms', { linkId, signal }));
+    },
+    taxFormPdf(linkId: string, formId: string): Promise<Blob> {
+      return pdf(`/employee/tax_forms/${pathId(formId)}/pdf`, linkId);
+    },
+    async helpContacts(linkId: string, signal?: AbortSignal): Promise<HelpContact[]> {
+      return parseHelpContacts(await request<unknown>('/employee/help', { linkId, signal }));
+    },
+    async profile(linkId: string, signal?: AbortSignal): Promise<EmployeeProfile> {
+      return parseProfile(await request<unknown>('/employee/profile', { linkId, signal }));
+    },
+    async updatePhone(linkId: string, phone: string): Promise<EmployeeProfile> {
+      return parseProfile(await request<unknown>('/employee/profile/phone', { linkId, method: 'PATCH', body: { phone }, stepUp: true }));
+    },
+    /** Emails a code to the new address. Returns the id to confirm it with. */
+    async startEmailChange(linkId: string, email: string): Promise<string> {
+      const verificationId = verificationIdFrom(await request<unknown>('/employee/profile/email', { linkId, method: 'POST', body: { email }, stepUp: true }));
+      if (!verificationId) throw new EmployeeApiError('server');
+      return verificationId;
+    },
+    async confirmEmailChange(linkId: string, verificationId: string, code: string): Promise<EmployeeProfile> {
+      return parseProfile(await request<unknown>('/employee/profile/email/confirm', {
+        linkId, method: 'POST', body: { verification_id: verificationId, code }, stepUp: true,
+      }));
+    },
+    async saveEmergencyContact(linkId: string, contact: { id?: string; name: string; relationship: string; phone: string }): Promise<EmployeeProfile> {
+      const body = { name: contact.name.trim(), relationship: contact.relationship.trim(), phone: contact.phone.trim() };
+      const path = contact.id ? `/employee/emergency_contacts/${pathId(contact.id)}` : '/employee/emergency_contacts';
+      return parseProfile(await request<unknown>(path, { linkId, method: contact.id ? 'PATCH' : 'POST', body, stepUp: true }));
+    },
+    async removeEmergencyContact(linkId: string, contactId: string): Promise<EmployeeProfile> {
+      return parseProfile(await request<unknown>(`/employee/emergency_contacts/${pathId(contactId)}`, { linkId, method: 'DELETE', stepUp: true }));
+    },
+    async requestAddressChange(linkId: string, address: Address, requestId?: string): Promise<EmployeeProfile> {
+      const path = requestId ? `/employee/address_requests/${pathId(requestId)}` : '/employee/address_requests';
+      return parseProfile(await request<unknown>(path, { linkId, method: requestId ? 'PATCH' : 'POST', body: { address: addressBody(address) }, stepUp: true }));
+    },
+    async cancelAddressRequest(linkId: string, requestId: string): Promise<EmployeeProfile> {
+      return parseProfile(await request<unknown>(`/employee/address_requests/${pathId(requestId)}`, { linkId, method: 'DELETE', stepUp: true }));
+    },
+    async deliveryConsents(linkId: string, signal?: AbortSignal): Promise<DeliveryConsentsState> {
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents', { linkId, signal }));
+    },
+    async startW2GuAccessProof(linkId: string): Promise<W2GuAccessProofChallenge> {
+      const challenge = parseW2GuAccessProof(await request<unknown>('/employee/delivery_consents/w2gu_access_proof/pdf', { linkId, method: 'POST' }));
+      if (!challenge) throw new EmployeeApiError('server');
+      return challenge;
+    },
+    async giveDeliveryConsent(
+      linkId: string,
+      payload: {
+        kind: DeliveryConsentKind;
+        disclosureVersion: string;
+        disclosureDigest: string;
+        accessProofToken?: string;
+        accessProofCode?: string;
+      },
+    ): Promise<DeliveryConsentsState> {
+      const body: Record<string, unknown> = {
+        kind: payload.kind,
+        acknowledged: true,
+        disclosure_version: payload.disclosureVersion,
+        disclosure_digest: payload.disclosureDigest,
+      };
+      if (payload.accessProofToken) body.access_proof_token = payload.accessProofToken;
+      if (payload.accessProofCode) body.access_proof_code = payload.accessProofCode.trim();
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents', { linkId, method: 'POST', body, stepUp: true }));
+    },
+    async withdrawDeliveryConsent(linkId: string, kind: DeliveryConsentKind): Promise<DeliveryConsentsState> {
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents/withdraw', { linkId, method: 'POST', body: { kind } }));
+    },
+    /**
+     * Sign-up, before any session: the invite check and the email in one call.
+     * `sign_up` opens Clerk's sign-up; `sign_in` means this email can't start
+     * a new account here (it may already have one).
+     */
+    async activate(check: IdentityCheck, account: { email: string; useForNotices: boolean; termsVersion: string | null }, pageOrigin: string): Promise<ActivationOutcome> {
+      const body = {
+        ...identityBody(check),
+        email: account.email.trim(),
+        use_for_notices: account.useForNotices,
+        ...(account.termsVersion ? { terms_version: account.termsVersion } : {}),
+      };
+      const outcome = parseActivation(await request<unknown>('/employee/activation', { method: 'POST', body, anonymous: true }), pageOrigin);
+      if (!outcome) throw new EmployeeApiError('server');
+      return outcome;
+    },
+    /** Adds employee access to the login the person is signed in with. Behind step-up. */
+    async claimLink(check: IdentityCheck, termsVersion: string | null): Promise<EmployeeLink | null> {
+      const body = { ...identityBody(check), ...(termsVersion ? { terms_version: termsVersion } : {}) };
+      return parseLinks([record(await request<unknown>('/employee/links/claim', { method: 'POST', body, stepUp: true }))?.link])[0] ?? null;
+    },
+    /** A rehired employee's login, turned off when their last job ended, opened again for the new invite. Behind step-up. */
+    async reactivate(check: IdentityCheck, termsVersion: string | null): Promise<EmployeeLink | null> {
+      const body = { ...identityBody(check), ...(termsVersion ? { terms_version: termsVersion } : {}) };
+      return parseLinks([record(await request<unknown>('/employee/links/reactivate', { method: 'POST', body, stepUp: true }))?.link])[0] ?? null;
+    },
+    /** After Clerk sign-up: /auth/me runs the invitation bind (M4-2 step 3). */
+    async bindAccount(): Promise<void> {
+      await readJson<unknown>(await send(authMeUrl(base), {}, 'application/json'));
     },
   };
 }
@@ -188,7 +418,7 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
 export type EmployeeApi = ReturnType<typeof createEmployeeApi>;
 
 /** What the signed-in shell shows when it can't open the employee's pay. */
-export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'error';
+export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'error' | 'mfa_setup' | 'mfa_required';
 
 /**
  * A 404 before the shell has opened means the app is off for this employer or
@@ -200,6 +430,8 @@ export function problemFor(error: unknown, { opened }: { opened: boolean }): Emp
   switch (error.kind) {
     case 'not_found': return opened ? 'ended' : 'unavailable';
     case 'unauthorized': return 'signed_out';
+    case 'mfa_enrollment_required': return 'mfa_setup';
+    case 'mfa_required': return 'mfa_required';
     case 'rate_limited': return 'rate_limited';
     case 'offline': return 'offline';
     default: return 'error';
@@ -207,16 +439,31 @@ export function problemFor(error: unknown, { opened }: { opened: boolean }): Emp
 }
 
 /**
- * Picks the link to open. On a client subdomain (`tenantSlug`) only that
- * client's link counts, even if the API returns others, and with none the app
- * is "unavailable" there: it never opens another company's pay under this
- * company's branding. The employer picker waits for a shared host (M4-8 plan
- * change 9). Former links stay usable until their access date passes.
+ * The links this person can open here. On a client subdomain (`tenantSlug`)
+ * only that client's links count, even if the API returns others, and with
+ * none the app is "unavailable" there: it never opens another company's pay
+ * under this company's branding. Former links stay usable until their access
+ * date passes.
  */
-export function chooseLink(links: EmployeeLink[], today: string, tenantSlug: string | null): EmployeeLink | EmployeeProblem {
+export function usableLinks(links: EmployeeLink[], today: string, tenantSlug: string | null): EmployeeLink[] | EmployeeProblem {
   const here = tenantSlug ? links.filter((link) => link.subdomainSlug === tenantSlug) : links;
   if (here.length === 0) return 'unavailable';
   const usable = here.filter((link) => link.status !== 'former' || !link.formerAccessUntil || link.formerAccessUntil >= today);
   if (usable.length === 0) return 'ended';
-  return usable.find((link) => link.status === 'active') ?? usable[0];
+  // Current jobs first, then former ones.
+  return [...usable].sort((a, b) => Number(a.status === 'former') - Number(b.status === 'former'));
+}
+
+/**
+ * Picks the link to open, or 'choose' when the person has more than one
+ * employer on a shared host and should pick (the employer picker). A client
+ * subdomain never shows the picker: it opens that client's link.
+ */
+export function chooseLink(links: EmployeeLink[], today: string, tenantSlug: string | null, chosenId: string | null = null): EmployeeLink | EmployeeProblem | 'choose' {
+  const usable = usableLinks(links, today, tenantSlug);
+  if (typeof usable === 'string') return usable;
+  const chosen = chosenId ? usable.find((link) => link.id === chosenId) : undefined;
+  if (chosen) return chosen;
+  if (!tenantSlug && usable.length > 1) return 'choose';
+  return usable[0];
 }

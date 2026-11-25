@@ -58,9 +58,10 @@ module Api
         payload = {
           email_delivery_enabled: PortalNotifications.delivery_enabled?,
           digest_time_label: PortalNotifications::DIGEST_TIME_LABEL,
-          categories: PortalNotifications::Preferences.categories_for(current_user).map do |key, category|
+          categories: modes.map do |key, mode|
+            category = PortalNotifications::CATEGORIES.fetch(key)
             { key: key, label: category[:label], description: category[:description],
-              delivery_mode: modes.fetch(key), default_mode: category[:default_mode] }
+              delivery_mode: mode, default_mode: category[:default_mode] }
           end,
           recent_alerts: recent_alerts
         }
@@ -70,14 +71,16 @@ module Api
 
       # Generic labels only; the person can open the item itself in the portal.
       def recent_alerts
-        deliveries = current_user.portal_notification_deliveries.recent_first.limit(RECENT_LIMIT)
+        # Only companies the person can still open; access may have ended.
+        deliveries = current_user.portal_notification_deliveries.where(company_id: current_user.accessible_company_ids)
+          .recent_first.limit(RECENT_LIMIT)
           .includes(:company, :portal_notification_event).to_a
         deliveries.map do |delivery|
           event = delivery.event
           {
             id: delivery.id, category: event.category,
             label: PortalNotifications::CATEGORIES.dig(event.category, :label),
-            company_name: current_user.can_access_company?(delivery.company_id) ? delivery.company.name : nil,
+            company_name: delivery.company.name,
             status: delivery.status, delivery_mode: delivery.delivery_mode, skip_reason: delivery.skip_reason,
             occurred_at: event.occurred_at, deliver_after: delivery.deliver_after, sent_at: delivery.sent_at,
             attempts: delivery.attempts

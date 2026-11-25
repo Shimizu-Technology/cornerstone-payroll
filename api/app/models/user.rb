@@ -42,13 +42,20 @@ class User < ApplicationRecord
   validates :name, presence: true
   validates :role, presence: true
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
+  # Why the login was last deactivated (M4-2). Only last_employee_link_closed
+  # lets a rehired employee reactivate it themselves; an admin's deactivation
+  # (any path that doesn't name a reason) never can.
+  DEACTIVATION_REASONS = %w[last_employee_link_closed pending_sign_up_closed deactivated].freeze
+  validates :deactivation_reason, inclusion: { in: DEACTIVATION_REASONS }, allow_nil: true
   validate :company_must_belong_to_organization
   validate :migration_rehearsal_company_requires_staff_role
   validate :practice_scope_is_isolated
   validate :platform_owner_requirements
   validate :platform_owner_identity_is_immutable, on: :update
+  validate :demo_client_identity_is_fixed, on: :update
 
   before_validation :default_organization_from_company
+  before_save :record_deactivation, if: :will_save_change_to_active?
   before_destroy :prevent_platform_owner_destroy
   after_update_commit :disconnect_cable_after_deactivation, if: :saved_change_to_active?
 
@@ -114,7 +121,19 @@ class User < ApplicationRecord
         TestWorkspace::PortalAccess.deactivate_if_closed!(self)
       end
     end
-    active? && (super_admin? || organization&.active?)
+    active? && (super_admin? || organization&.active?) && (!demo_client? || demo_client_access_open?)
+  end
+
+  # A client login whose home company is a demo (D5).
+  def demo_client?
+    client? && practice_company_id.nil? && company&.demo? == true
+  end
+
+  # A demo client login works only while its address is on the current
+  # allow-list and it holds an explicit, unexpired grant to an active, ready
+  # demo company. Its home company is never a fallback.
+  def demo_client_access_open?
+    DemoOutbound.allowed?(email) && demo_client_company_ids.any?
   end
 
   def organization_admin?
@@ -140,6 +159,8 @@ class User < ApplicationRecord
         Company.ids
       elsif organization_admin?
         organization_company_ids
+      elsif demo_client?
+        demo_client_access_open? ? demo_client_company_ids : []
       else
         assigned_ids = if association(:company_assignments).loaded?
           active_assignments = company_assignments.reject(&:expired?)
@@ -163,13 +184,14 @@ class User < ApplicationRecord
         end
         assigned_ids &= organization_company_ids
 
-        assigned_ids.presence || Array(company_id)
+        client_company_boundary(assigned_ids).presence || client_company_boundary(Array(company_id))
       end
     end
   end
 
   def reload(...)
     @accessible_company_ids = nil
+    @demo_client_company_ids = nil
     super
   end
 
@@ -197,6 +219,17 @@ class User < ApplicationRecord
   end
 
   private
+
+  # deactivated_at stays after reactivation: sessions from before it remain
+  # refused (EmployeeLinks::SessionFence).
+  def record_deactivation
+    if active?
+      self.deactivation_reason = nil
+    elsif persisted?
+      self.deactivated_at = ApplicationRecord.database_now unless will_save_change_to_deactivated_at?
+      self.deactivation_reason = "deactivated" unless will_save_change_to_deactivation_reason?
+    end
+  end
 
   def practice_scope_is_isolated
     if practice_company_id_in_database.present? && will_save_change_to_practice_company_id?
@@ -254,10 +287,40 @@ class User < ApplicationRecord
     errors.add(:company, "must belong to the user's organization")
   end
 
+  # A live client login never sees a demo company, whatever its assignments
+  # or home company say (demo client logins: demo_client_company_ids).
+  def client_company_boundary(ids)
+    return ids unless client? && ids.any?
+
+    ids - Company.demo.where(id: ids).ids
+  end
+
+  def demo_client_company_ids
+    @demo_client_company_ids ||= company_assignments.active_access.joins(:company)
+      .merge(Company.demo.active)
+      .where(companies: { organization_id: organization_id, migration_rehearsal_status: "ready", test_workspace_archived_at: nil })
+      .order(:company_id).pluck(:company_id)
+  end
+
   def migration_rehearsal_company_requires_staff_role
     return if company.blank? || !company.test_workspace? || staff_member? || (client? && practice_company_id == company_id)
+    # A demo company's client logins are its own: only allow-listed addresses
+    # (private configuration), never a practice login. Deactivating one is
+    # always allowed, even after its address left the allow-list.
+    return if client? && company.demo? && practice_company_id.nil? && ((persisted? && !active?) || DemoOutbound.allowed?(email))
 
     errors.add(:company, "requires a practice-only client login or payroll staff")
+  end
+
+  # A demo client identity stays a client of a demo: a role edit can't turn
+  # its Clerk identity into firm staff, and its home can't move to a live
+  # client.
+  def demo_client_identity_is_fixed
+    return unless role_in_database == "client" && practice_company_id_in_database.nil? &&
+      Company.find_by(id: company_id_in_database)&.demo?
+
+    errors.add(:role, "can't be changed for this login. Create a separate login for staff access.") unless client?
+    errors.add(:company, "can't be changed for this login") unless company&.demo?
   end
 
   def organization_company_ids

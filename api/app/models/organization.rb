@@ -81,6 +81,10 @@ class Organization < ApplicationRecord
 
   def primary_company_must_belong_to_organization
     return if primary_company.blank? || id.blank?
+    if primary_company.demo?
+      errors.add(:primary_company, "must be a live client")
+      return
+    end
     return if primary_company.organization_id == id
 
     errors.add(:primary_company, "must belong to this organization")

@@ -190,11 +190,11 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
 
           allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
           employee_context(fva: caller_role == :portal_employee ? [ 5, -1 ] : [ 5, 1 ], enrollment: caller_role != :portal_employee)
-          expect(response).to have_http_status(:no_content)
+          expect(response).to have_http_status(:ok)
 
           ENV["REQUIRE_MFA"] = "false"
           expect { employee_context(fva: [ 5, -1 ]) }.not_to change(denials, :count)
-          expect(response).to have_http_status(:no_content)
+          expect(response).to have_http_status(:ok)
           expect(jwks_fetch).to have_received(:call).once
         end
       end

@@ -7,6 +7,8 @@ class PayrollFilingRecord < ApplicationRecord
   STATUSES = %w[submitted accepted accepted_with_errors rejected needs_correction].freeze
 
   belongs_to :company
+  # A demo company never files; the database refuses these rows too.
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
   has_many :events,
            -> { order(:occurred_at, :id) },
            class_name: "PayrollFilingEvent",

@@ -1043,3 +1043,98 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- 20261125160000_add_demo_test_workspace_purpose.rb
+CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
+BEGIN
+  IF (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
+    OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo' AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
+    RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF COALESCE(OLD.test_workspace_purpose, '') = 'demo'
+    AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
+    RAISE EXCEPTION 'demo fixture keys are immutable'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS companies_demo_shape_immutable ON companies;
+CREATE TRIGGER companies_demo_shape_immutable
+BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_conversion();
+
+-- 20261125180000_refuse_demo_company_external_records.rb
+CREATE OR REPLACE FUNCTION prevent_demo_company_external_records() RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND COALESCE(test_workspace_purpose, '') = 'demo') THEN
+    RAISE EXCEPTION '% cannot belong to a demo company', TG_TABLE_NAME
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS payroll_filing_records_refuse_demo_company ON payroll_filing_records;
+CREATE TRIGGER payroll_filing_records_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_filing_records
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS payroll_filing_events_refuse_demo_company ON payroll_filing_events;
+CREATE TRIGGER payroll_filing_events_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_filing_events
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS payroll_liability_postings_refuse_demo_company ON payroll_liability_postings;
+CREATE TRIGGER payroll_liability_postings_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_liability_postings
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS payroll_liability_entries_refuse_demo_company ON payroll_liability_entries;
+CREATE TRIGGER payroll_liability_entries_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON payroll_liability_entries
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+DROP TRIGGER IF EXISTS time_tracking_sources_refuse_demo_company ON time_tracking_sources;
+CREATE TRIGGER time_tracking_sources_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON time_tracking_sources
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+-- 20261125210000_refuse_demo_company_non_employee_checks.rb
+DROP TRIGGER IF EXISTS non_employee_checks_refuse_demo_company ON non_employee_checks;
+CREATE TRIGGER non_employee_checks_refuse_demo_company
+BEFORE INSERT OR UPDATE OF company_id ON non_employee_checks
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_company_external_records();
+
+-- 20261126000400_prevent_delivery_disclosure_mutation.rb
+CREATE OR REPLACE FUNCTION prevent_delivery_disclosure_mutation() RETURNS trigger AS $$
+BEGIN
+  IF NEW.kind IS DISTINCT FROM OLD.kind
+    OR NEW.version IS DISTINCT FROM OLD.version
+    OR NEW.title IS DISTINCT FROM OLD.title
+    OR NEW.text IS DISTINCT FROM OLD.text
+    OR NEW.digest IS DISTINCT FROM OLD.digest
+    OR NEW.status IS DISTINCT FROM OLD.status
+    OR NEW.published_at IS DISTINCT FROM OLD.published_at
+  THEN
+    RAISE EXCEPTION 'delivery_disclosures rows are immutable; insert a new version instead'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS delivery_disclosures_immutable ON delivery_disclosures;
+CREATE TRIGGER delivery_disclosures_immutable
+BEFORE UPDATE OF kind, version, title, text, digest, status, published_at ON delivery_disclosures
+FOR EACH ROW
+EXECUTE FUNCTION prevent_delivery_disclosure_mutation();

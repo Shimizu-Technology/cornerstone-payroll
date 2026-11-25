@@ -344,7 +344,11 @@ class Invoice < ApplicationRecord
   private
 
   def source_company_is_live
-    errors.add(:company, "practice copies cannot be used for real invoices") if company&.test_workspace?
+    if company&.demo?
+      errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE)
+    elsif company&.test_workspace?
+      errors.add(:company, "practice copies cannot be used for real invoices")
+    end
   end
 
   def finance_book_parent

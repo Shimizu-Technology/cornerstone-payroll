@@ -67,8 +67,9 @@ export interface PlaceholderEmailMutationResponse {
 }
 
 export const staffContactHygieneApi = {
-  sharedEmails: (params?: { company_id?: number }) =>
-    api.get<SharedEmailReportResponse>('/admin/employee_contact_hygiene/shared_emails', params),
+  // Sent as the selected company, which sets the report's scope on the server.
+  sharedEmails: (selectedCompanyId?: number) =>
+    api.get<SharedEmailReportResponse>('/admin/employee_contact_hygiene/shared_emails', undefined, { companyId: selectedCompanyId }),
   markPlaceholderEmail: (data: { email: string; reason?: string }) =>
     api.post<PlaceholderEmailMutationResponse>('/admin/employee_contact_hygiene/placeholder_emails', data),
   unmarkPlaceholderEmail: (data: { email: string }) =>

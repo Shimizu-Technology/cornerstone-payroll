@@ -122,6 +122,7 @@ module AirePayrollCalendar
     end
 
     def validate_source!
+      raise Error, Company::DEMO_UNAVAILABLE_MESSAGE if @pay_period.company.demo? || @source.company&.demo?
       raise Error, "This client does not have an active compatible time source" unless @source.active?
       @source.connector.require!(:payroll_calendar_v2)
       raise Error, "The time tracking source does not belong to this client" unless @source.company_id == @pay_period.company_id

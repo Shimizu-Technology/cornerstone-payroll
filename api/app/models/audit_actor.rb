@@ -6,7 +6,7 @@ class AuditActor < Data.define(:type, :id, :name, :email, :role)
   def self.for_user(user)
     type = case user.role
     when "client" then "client_user"
-    when "employee" then "employee"
+    when "employee", "portal_employee" then "employee"
     else "staff_user"
     end
     new(type: type, id: user.id.to_s, name: user.name,

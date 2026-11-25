@@ -34,6 +34,8 @@ class EmployeeClassificationTransitionService
         status: "terminated",
         termination_date: effective_date - 1.day
       )
+      # The old record's link becomes former; the new record gets a new invite.
+      EmployeeLinks::Retire.terminated!(employee, termination_date: employee.termination_date, actor: actor)
 
       audit_metadata = {
         previous_employee_id: employee.id,

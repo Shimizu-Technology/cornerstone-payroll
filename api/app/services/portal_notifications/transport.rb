@@ -23,6 +23,9 @@ module PortalNotifications
       end
 
       def deliver(payload, idempotency_key:)
+        # Inside DemoOutbound.scoped, only allow-listed recipients remain.
+        payload = DemoOutbound.filter_payload(payload)
+        return StagingMailTransport::SUPPRESSED.dup if payload.nil?
         return capture!(payload, idempotency_key) if capture?
 
         StagingMailTransport.deliver(payload, options: { idempotency_key: idempotency_key })

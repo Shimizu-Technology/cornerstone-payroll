@@ -16,6 +16,39 @@ RSpec.describe ApplicationJob do
     end)
   end
 
+  it "blocks job enqueue and inline execution while viewing" do
+    Current.set(view_as_grant: ViewAsGrant.new) do
+      expect { AuditContextProbeJob.perform_later }.to raise_error(ActiveRecord::ReadOnlyError)
+      expect { AuditContextProbeJob.perform_now }.to raise_error(ActiveRecord::ReadOnlyError)
+    end
+    expect(AuditContextProbeJob).not_to have_been_enqueued
+    expect(AuditLog.where(action: "audit_probe#performed")).to be_empty
+    expect { AuditContextProbeJob.perform_later }.to have_enqueued_job(AuditContextProbeJob)
+  end
+
+  it "blocks the bulk enqueue API which skips job callbacks" do
+    Current.set(view_as_grant: ViewAsGrant.new) do
+      expect { ActiveJob.perform_all_later(AuditContextProbeJob.new) }.to raise_error(ActiveRecord::ReadOnlyError)
+    end
+
+    expect(AuditContextProbeJob).not_to have_been_enqueued
+    expect { ActiveJob.perform_all_later(AuditContextProbeJob.new) }.to have_enqueued_job(AuditContextProbeJob)
+  end
+
+  it "blocks deferred jobs before registering work for after commit" do
+    stub_const("DeferredAuditProbeJob", Class.new(AuditContextProbeJob) do
+      self.enqueue_after_transaction_commit = true
+    end)
+
+    ApplicationRecord.transaction(requires_new: true) do
+      Current.set(view_as_grant: ViewAsGrant.new) do
+        expect { DeferredAuditProbeJob.perform_later }.to raise_error(ActiveRecord::ReadOnlyError)
+        expect { ActiveJob.perform_all_later(DeferredAuditProbeJob.new) }.to raise_error(ActiveRecord::ReadOnlyError)
+      end
+    end
+    expect(DeferredAuditProbeJob).not_to have_been_enqueued
+  end
+
   it "keeps the job actor in a discard handler and restores the caller" do
     stub_const("DiscardAuditProbeJob", Class.new(described_class) do
       self.rls_mode = :system

@@ -13,7 +13,8 @@ class TestWorkspaceAccessPolicy
   }.freeze
 
   def self.allowed?(user:, company:, request_method:, capability: nil, controller_path: nil, action_name: nil)
-    return true unless company&.test_workspace?
+    # A demo company follows the normal staff and client rules.
+    return true unless company&.practice_copy?
     if user&.client? && controller_path.in?(%w[api/v1/client/reports api/v1/client/departments])
       return (controller_path == "api/v1/client/departments" || request_method.in?(%w[GET HEAD])) && user.practice_company_id == company.id && user.practice_portal_open?
     end

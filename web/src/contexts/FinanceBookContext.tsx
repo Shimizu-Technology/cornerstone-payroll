@@ -1,4 +1,4 @@
-import { isTestWorkspaceCompany } from '@/lib/company-write-access';
+import { isBillingClient, isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -118,7 +118,7 @@ export function useFinanceBook() {
 
 export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }) {
   const { user } = useAuth();
-  const { companies, activeOrganizationId, activeCompany } = useCompany();
+  const { companies, activeOrganizationId, activeCompany, billingCompanyIds } = useCompany();
   const { books, activeBook, switchBook, createBook } = useFinanceBook();
   const [showSetup, setShowSetup] = useState(false);
   const [name, setName] = useState('');
@@ -130,7 +130,7 @@ export function FinanceBookSelector({ disabled = false }: { disabled?: boolean }
   const canManage = !isTestWorkspaceCompany(activeCompany) && ['super_admin', 'org_admin', 'admin'].includes(user?.role || '');
   const canCreatePersonal = canManage && (user?.role === 'super_admin' || activeOrganizationId === user?.organization_id);
   const eligibleCompanies = companies.filter((company) => company.organization_id === activeBook.organization_id
-    && !company.test_workspace && !books.some((book) => book.company_id === company.id));
+    && isBillingClient(company, billingCompanyIds) && !books.some((book) => book.company_id === company.id));
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);

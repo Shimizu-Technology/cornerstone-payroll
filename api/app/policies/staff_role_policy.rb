@@ -36,6 +36,7 @@ class StaffRolePolicy
     # Viewing the original body of a hidden staff note is restricted to
     # platform and organization admins.
     reveal_hidden_employee_notes: %w[super_admin org_admin],
+    start_view_as: %w[super_admin],
     manage_platform: %w[super_admin]
   }.freeze
 
@@ -63,6 +64,7 @@ class StaffRolePolicy
     manage_organization: "Admin access required",
     view_client_profitability: "Admin access required to see client profitability",
     reveal_hidden_employee_notes: "Only super admins and organization admins can view hidden staff notes",
+    start_view_as: "Support view permission required",
     manage_platform: "Super admin access required"
   }.freeze
 
@@ -81,6 +83,7 @@ class StaffRolePolicy
     "api/v1/admin/audit_logs" => :view_audit_history,
     "api/v1/admin/portal_notification_recipients" => :manage_client_administration,
     "api/v1/admin/employee_app_settings" => :manage_client_administration,
+    "api/v1/admin/employee_tax_forms" => :manage_client_administration,
     "api/v1/admin/payroll_submission_periods" => :payroll_operations,
     "api/v1/admin/record_activities" => :view_record_activity,
     "api/v1/admin/payroll_history_review_items" => :view_record_activity,
@@ -100,6 +103,7 @@ class StaffRolePolicy
     "api/v1/admin/tax_configs" => :manage_organization,
     "api/v1/admin/annual_retirement_limits" => :payroll_operations,
     "api/v1/admin/employee_retirement_year_inputs" => :payroll_operations,
+    "api/v1/admin/employee_contact_changes_to_confirm" => :payroll_operations,
     "api/v1/admin/employee_retirement_elections" => :payroll_operations,
     "api/v1/admin/invoices" => :manage_organization,
     "api/v1/admin/invoice_billing_profiles" => :manage_organization,
@@ -208,6 +212,8 @@ class StaffRolePolicy
     "api/v1/admin/employee_change_requests#show" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#approve" => :manage_client_configuration,
     "api/v1/admin/employee_change_requests#reject" => :manage_client_configuration,
+    "api/v1/admin/employee_app_rollouts#change" => :manage_client_configuration,
+    "api/v1/admin/employee_app_rollouts#bulk_invite" => :manage_client_configuration,
     "api/v1/admin/employee_intake_settings#update" => :manage_client_administration,
     "api/v1/admin/reports#w2_gu_mark_ready" => :manage_client_administration,
     # Full SSNs: the same access as the W-2 sign-off.
@@ -259,6 +265,7 @@ class StaffRolePolicy
 
   def self.allowed?(user, capability, company: nil)
     return false unless user
+    return ViewAsGrant.allowed_staff?(user) if capability == :start_view_as
 
     return true if CAPABILITY_ROLES.fetch(capability).include?(user.role)
     return false unless DELEGATABLE_CAPABILITIES.include?(capability) && company
@@ -276,7 +283,7 @@ class StaffRolePolicy
       actor = User.find_by(id: user&.id)
       target = Company.includes(:organization).find_by(id: company&.id)
       next false unless actor&.accountant? && actor.payroll_access_allowed? &&
-        target&.active? && target.organization&.active? && target.live_payroll? &&
+        target&.active? && target.organization&.active? && (target.live_payroll? || target.demo?) &&
         target.test_workspace_archived_at.nil? && actor.organization_id == target.organization_id
 
       CompanyAssignment.active_access.exists?(user_id: actor.id, company_id: target.id, client_management: true)

@@ -59,6 +59,6 @@ RSpec.describe "Employee identity access", type: :request do
     expect(response.parsed_body.dig("roles", "employee_links_count")).to eq(1)
 
     get "/api/v1/employee/context", headers: headers
-    expect(response).to have_http_status(:no_content)
+    expect(response).to have_http_status(:ok)
   end
 end

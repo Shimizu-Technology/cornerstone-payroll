@@ -46,10 +46,16 @@ Rails.application.routes.draw do
         namespace :aire do
           post :events, to: "events#create"
         end
+        # Resend delivery and bounce events for employee document notices (M4-5).
+        post :email_events, to: "email_events#create", format: false
       end if payroll_routes
 
       # Auth - current user info (Clerk JWT verified in ApplicationController)
       get "auth/me", to: "auth#me"
+      get "auth/view_as", to: "view_as_grants#show", format: false
+      delete "auth/view_as", to: "view_as_grants#destroy", format: false
+      post "auth/view_as", to: "view_as_grants#create", format: false if payroll_routes
+      get "auth/view_as/targets", to: "view_as_grants#targets", format: false if payroll_routes
       post "cable_ticket", to: "cable_tickets#create" if payroll_routes
       resource :notification_settings, only: [ :show, :update ] if payroll_routes
       get "companies", to: "companies#index" if payroll_routes
@@ -65,12 +71,39 @@ Rails.application.routes.draw do
 
       namespace :employee, module: :employee_portal do
         get :context, to: "context#show"
+        get :profile, to: "profile#show", format: false
+        patch "profile/phone", to: "profile#update_phone", format: false
+        post "profile/email", to: "profile#start_email", format: false
+        post "profile/email/confirm", to: "profile#confirm_email", format: false
+        resources :emergency_contacts, only: %i[create update destroy], format: false
+        resources :address_requests, only: %i[create update destroy], format: false
+        get :delivery_consents, to: "delivery_consents#show", format: false
+        post :delivery_consents, to: "delivery_consents#create", format: false
+        post "delivery_consents/withdraw", to: "delivery_consents#withdraw", format: false
+        post "delivery_consents/w2gu_access_proof/pdf", to: "delivery_consents#w2gu_access_proof", format: false
+        get :help, to: "help#show", format: false
+        resources :statements, only: [ :index, :show ], format: false do
+          get :pdf, on: :member
+        end
+        resources :tax_forms, only: [ :index, :show ], format: false do
+          get :pdf, on: :member
+        end
+        post :activation, to: "activations#create", format: false
+        get :links, to: "account#links", format: false
+        post "links/claim", to: "account#claim", format: false
+        post "links/reactivate", to: "reactivations#create", format: false
       end if employee_routes
 
       # Mount future kiosk routes under this same employee_routes guard.
 
       namespace :client do
+        resources :support_access_logs, only: :index
         resource :employee_intake_settings, only: :show
+        get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
+        post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
+        get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
+        post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",
+          constraints: { operation: /invite|resend|unlock|revoke|reset_sign_up/ }
         resource :employee_app_settings, only: [ :show ] do
           patch :branding, action: :update_branding
           put :help_contacts, action: :update_help_contacts
@@ -101,7 +134,11 @@ Rails.application.routes.draw do
         resources :portal_file_requests, only: [] do
           post :respond, on: :member
         end
-        resources :employee_change_requests, only: [ :index, :show ]
+        resources :employee_change_requests, only: [ :index, :show ] do
+          get :contact_changes, on: :collection
+          patch :approve, on: :member
+          patch :reject, on: :member
+        end
         resources :pay_periods, only: [ :index, :show ] do
           post :approve_review, on: :member
           post :request_changes, on: :member
@@ -330,6 +367,10 @@ Rails.application.routes.draw do
             get :pdf
           end
         end
+        resources :employee_contact_changes_to_confirm, only: :index do
+          patch :confirm, on: :member
+          patch :confirm_all, on: :collection
+        end
         resources :employee_change_requests, only: [ :index, :show ] do
           member do
             patch :approve
@@ -347,12 +388,22 @@ Rails.application.routes.draw do
           end
         end
         resource :portal_notification_recipients, only: [ :show, :update ]
+        get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
+        post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
+        get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
+        post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",
+          constraints: { operation: /invite|resend|unlock|revoke|reset_sign_up/ }
         resource :employee_app_settings, only: [ :show ] do
           patch :branding, action: :update_branding
           put :help_contacts, action: :update_help_contacts
+          patch :w2_delivery, action: :update_w2_delivery
           get :logo
           post :logo, action: :upload_logo
           delete :logo, action: :remove_logo
+        end
+        resources :employee_tax_forms, only: [ :index ], format: false do
+          post :post_copies, on: :collection
+          post :withdraw, on: :member
         end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do

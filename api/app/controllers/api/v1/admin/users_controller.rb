@@ -50,7 +50,14 @@ module Api
 
           if user.client? && company_ids_provided
             selected = Company.where(id: normalize_company_ids(company_ids))
-            if selected.any?(&:test_workspace?)
+            if selected.any?(&:demo?)
+              # A demo client login belongs to its demo companies only.
+              unless selected.all?(&:demo?) && (selected.map(&:id) - assignable_company_ids).empty?
+                user.errors.add(:base, "These clients can't share one login. Create a separate login for each.")
+                raise ActiveRecord::RecordInvalid, user
+              end
+              user.company = selected.first
+            elsif selected.any?(&:test_workspace?)
               unless selected.one? && assignable_company_ids.include?(selected.first.id) && selected.first.sandbox?
                 user.errors.add(:base, "Choose one practice copy for a separate practice-only login")
                 raise ActiveRecord::RecordInvalid, user
@@ -155,9 +162,16 @@ module Api
             end
           end
 
-          before_values = user_audit_snapshot(@user)
           ActiveRecord::Base.transaction do
-            @user.update!(active: false)
+            # Locked and re-read first, so a reactivation that committed in
+            # between can't keep the login active: every field is written
+            # from the current row. Recorded even when the login was already
+            # closed (an employee login whose last link ended): an admin's
+            # deactivation is never lifted by the employee's own rehire
+            # reactivation (M4-2). Same login lock as EmployeeLinks.
+            @user.lock!("FOR NO KEY UPDATE")
+            before_values = user_audit_snapshot(@user)
+            @user.update!(active: false, deactivated_at: ApplicationRecord.database_now, deactivation_reason: "deactivated")
             record_user_audit!("deactivated", @user, before_values: before_values, after_values: user_audit_snapshot(@user))
           end
           render json: { data: user_json(@user) }
@@ -210,6 +224,10 @@ module Api
 
           unless @user.invitation_pending?
             return render json: { error: "User has already accepted their invitation" }, status: :unprocessable_entity
+          end
+          # An employee app sign-up binds only through its link (EmployeeLinks).
+          if @user.portal_employee?
+            return render json: { error: "Employee app sign-ups are resent from the employee's record" }, status: :unprocessable_entity
           end
 
           before_values = user_audit_snapshot(@user)
@@ -394,8 +412,11 @@ module Api
           retained_assignments = existing_assignments.select do |assignment|
             normalized_company_ids.include?(assignment.company_id) ||
               # The Users payload lists active grants only. A name edit must
-              # not erase hidden expired grants or renew their access.
-              (assignment.expired? && (user.staff_member? || !assignment.company.test_workspace?))
+              # not erase hidden expired grants or renew their access. A
+              # client keeps none on the other side of the demo boundary (a
+              # staff login's old demo grant after a role change).
+              (assignment.expired? && (user.staff_member? || !assignment.company.practice_copy?) &&
+                !(user.client? && assignment.company.demo? != (user.company&.demo? || false)))
           end
           retained_assignments.each do |assignment|
             # Retention must not bypass role/organization validation after a
@@ -409,7 +430,7 @@ module Api
             company = Company.find(company_id)
             user.company_assignments.create!(
               company: company,
-              workspace_access_level: company.test_workspace? ? "operator" : nil,
+              workspace_access_level: company.practice_copy? ? "operator" : nil,
               granted_by: current_user
             )
           end
@@ -522,7 +543,7 @@ module Api
               {
                 id: company.id,
                 name: company.name,
-                test_workspace: company.test_workspace?,
+                test_workspace: company.practice_copy?,
                 workspace_access_level: user.company_assignments.find { |assignment| assignment.company_id == company.id }&.workspace_access_level
               }
             end

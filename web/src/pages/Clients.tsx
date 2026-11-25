@@ -187,6 +187,7 @@ export function Clients() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editableFields, setEditableFields] = useState<string[] | null>(null);
+  const [editingCompanyType, setEditingCompanyType] = useState<'client' | 'demo' | null>(null);
   const canEditField = (field: keyof CompanyFormData) => editableFields ? editableFields.includes(field) : canManageClients || ['phone', 'email', 'address_line1', 'address_line2', 'city', 'state', 'zip'].includes(field);
   const canEditCore = canEditField('bank_name') || canEditField('check_stock_type') || canEditField('simple_payroll_register_enabled');
   const [form, setForm] = useState<CompanyFormData>({ ...emptyForm });
@@ -569,6 +570,7 @@ export function Clients() {
       const data = await companiesApi.get(id);
       const c = data.company;
       setEditableFields(c.editable_fields ?? null);
+      setEditingCompanyType(c.company_type ?? null);
       setForm({
         name: c.name || '',
         ein: c.ein || '',
@@ -664,6 +666,7 @@ export function Clients() {
   const handleCancel = () => {
     setShowForm(false);
     setEditableFields(null);
+    setEditingCompanyType(null);
     setEditingId(null);
     setForm({ ...emptyForm });
     setFormError(null);
@@ -1206,6 +1209,15 @@ export function Clients() {
                   </Select>
                 </div>
               </div>
+              {editingId && editingCompanyType === 'demo' && (
+                <div>
+                  <p className="text-xs font-medium text-neutral-600">Company type</p>
+                  <p className="mt-1 text-sm font-medium text-neutral-950">Demo</p>
+                  <p className="mt-1 text-xs text-neutral-600">
+                    Not a real client. Filings, payments, outside email, integrations, billing and firm totals stay off. Only organization admins see this.
+                  </p>
+                </div>
+              )}
 
               {/* Contact */}
               <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Contact</h4>

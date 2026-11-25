@@ -70,7 +70,8 @@ export function apiErrorMessage(
       : 'The server could not complete this request. Check whether your changes were saved before retrying. If it keeps failing, contact support with the page and action.')
     : `The request could not be completed (HTTP ${status}). Refresh the page and try again.`);
   const message = explanations.join('; ');
-  if (status === 403 && payload.code === 'mfa_required') return message;
+  if (status === 403 && isMfaRequiredCode(payload.code)) return message;
+  if (status === 409 && payload.code === 'sign_up_accepted') return message;
   // These outcomes have a definite recovery step regardless of the endpoint.
   const recovery: Record<number, string> = {
     401: 'Sign in again, then retry.',
@@ -90,6 +91,13 @@ import type { ConnectorHealth } from '@/lib/connector-health';
 import { WRITE_MAINTENANCE_EVENT } from './write-maintenance';
 
 export const MFA_REQUIRED_EVENT = 'payroll:mfa-required';
+export const MFA_REQUIRED_CODES = new Set(['mfa_required', 'mfa_enrollment_required']);
+
+export function isMfaRequiredCode(code: unknown): code is 'mfa_required' | 'mfa_enrollment_required' {
+  return typeof code === 'string' && MFA_REQUIRED_CODES.has(code);
+}
+
+import { SUPPORT_HEADER, supportToken } from '@/support/grant';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1';
 
@@ -134,6 +142,18 @@ function isReadOnlyRequest(init?: RequestInit): boolean {
 }
 
 async function fetchWithFeedback(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  if (supportToken) {
+    if (!isReadOnlyRequest(init)) throw new ApiError('This support session is view only.', 403);
+
+    const base = new URL(API_BASE_URL, globalThis.location.origin);
+    const url = new URL(String(input), base.origin);
+    if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname.replace(/\/$/, '') + '/')) {
+      throw new ApiError('This request is unavailable in a support view.', 403);
+    }
+    const headers = new Headers(init?.headers);
+    headers.set(SUPPORT_HEADER, supportToken);
+    init = { ...init, headers, cache: 'no-store', redirect: 'error' };
+  }
   try {
     return await fetch(input, init);
   } catch (error) {
@@ -156,8 +176,8 @@ async function readApiError(response: Response, options?: { readOnly?: boolean; 
   const retryAfterSeconds = [headerSeconds, payloadSeconds].find((value) => Number.isSafeInteger(value) && value > 0);
   const message = apiErrorMessage(data, response.status, { ...options, retryAfterSeconds });
   const error = new ApiError(message, response.status, payload.details as ApiError['details'], data);
-  if (response.status === 403 && payload.code === 'mfa_required') {
-    globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: message }));
+  if (response.status === 403 && isMfaRequiredCode(payload.code)) {
+    globalThis.window?.dispatchEvent(new CustomEvent(MFA_REQUIRED_EVENT, { detail: { code: payload.code, message } }));
   }
   if (error.isWriteMaintenance) {
     const seconds = Number(response.headers.get('Retry-After'));
@@ -1454,6 +1474,7 @@ export interface PayPeriodListResponse {
 }
 
 export interface PayPeriodResponse {
+  unconfirmed_contact_changes?: number | null;
   pay_period: PayPeriod & { payroll_items?: PayrollItem[] };
 }
 
@@ -4322,6 +4343,8 @@ export interface CompanyDetail extends CompanyListItem {
   simple_payroll_register_enabled?: boolean;
   can_update?: boolean;
   editable_fields?: string[];
+  // Sent to organization admins only.
+  company_type?: 'client' | 'demo';
 }
 
 export interface CompanyFormData {
@@ -4352,6 +4375,8 @@ interface CompanyListResponse {
   can_view_client_management?: boolean;
   can_switch_company: boolean;
   current_company_id: number;
+  // Live clients that firm finance may bill or link, filtered on the server.
+  billing_company_ids?: number[];
 }
 
 interface AuthApiUser {
@@ -4483,18 +4508,20 @@ export const companiesApi = {
   switchCompany: (companyId: number, organizationId?: number) => {
     api.setActiveCompanyId(companyId);
     api.setActiveOrganizationId(organizationId ?? null);
-    localStorage.setItem('activeCompanyId', String(companyId));
+    if (!supportToken) localStorage.setItem('activeCompanyId', String(companyId));
   },
   clearActiveCompanyId: () => {
     api.setActiveCompanyId(null);
     api.setActiveOrganizationId(null);
-    localStorage.removeItem('activeCompanyId');
+    if (!supportToken) localStorage.removeItem('activeCompanyId');
   },
   getActiveCompanyId: (): number | null => {
+    if (supportToken) return api.getActiveCompanyId();
     const stored = localStorage.getItem('activeCompanyId');
     return stored ? parseInt(stored, 10) : null;
   },
   initFromStorage: () => {
+    if (supportToken) return;
     const stored = localStorage.getItem('activeCompanyId');
     if (stored) {
       api.setActiveCompanyId(parseInt(stored, 10));
@@ -4735,9 +4762,12 @@ export interface ClientPortalThread {
 }
 
 export interface EmployeeChangeRequest {
+  profile_address?: boolean;
+  note_visible_to_employee?: boolean;
+  can_review?: boolean;
   proposed_compensation_effective_on?: string | null;
   id: number;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   request_kind: 'create' | 'update';
   employee_id: number;
   employee_name: string;
@@ -5014,11 +5044,50 @@ export const adminPortalFileRequestsApi = {
     api.post<PortalFileRequestStep>(`/admin/portal_file_requests/${id}/withdraw`, data),
 };
 
+export interface EmployeeContactActivity {
+  id: number;
+  employee_id: number;
+  employee_name: string;
+  changed_by_name: string | null;
+  change_kind: 'contact' | 'address' | 'delivery_consent';
+  before_values: Record<string, unknown>;
+  after_values: Record<string, unknown>;
+  created_at: string;
+  confirmed_at?: string | null;
+  confirmed_by_name?: string | null;
+}
+
+export type ContactActivityFilters = {
+  search?: string;
+  kind?: 'contact' | 'address' | 'delivery_consent';
+  status?: 'unconfirmed' | 'confirmed';
+};
+
+type EmployeeContactActivityResponse = {
+  data: EmployeeContactActivity[];
+  meta: BoundedListMeta & { through_id?: number | null };
+};
+
 export const clientEmployeeChangeRequestsApi = {
   list: (params?: { status?: string; search?: string } & BoundedListParams) =>
-    api.get<{ data: EmployeeChangeRequest[]; meta: BoundedListMeta }>('/client/employee_change_requests', params),
+    api.get<{ data: EmployeeChangeRequest[]; meta?: BoundedListMeta & { profile_requests_enabled?: boolean } }>('/client/employee_change_requests', params),
   get: (id: number) =>
     api.get<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}`),
+  decide: (id: number, decision: 'approve' | 'reject', reviewNotes?: string) =>
+    api.patch<{ data: EmployeeChangeRequest }>(`/client/employee_change_requests/${id}/${decision}`, { review_notes: reviewNotes }),
+  contactChanges: (page: number) =>
+    api.get<EmployeeContactActivityResponse>('/client/employee_change_requests/contact_changes', { page, per_page: 25 }),
+};
+
+export const staffEmployeeContactChangesApi = {
+  list: (companyId: number, filters: ContactActivityFilters, page: number) =>
+    api.get<EmployeeContactActivityResponse>('/admin/employee_contact_changes_to_confirm', { ...filters, page, per_page: 25 }, { companyId }),
+  confirm: (companyId: number, id: number) =>
+    api.patch<{ confirmed_count: number }>(`/admin/employee_contact_changes_to_confirm/${id}/confirm`, {}, { companyId }),
+  confirmAll: (companyId: number, filters: ContactActivityFilters, throughId: number) =>
+    api.patch<{ confirmed_count: number }>('/admin/employee_contact_changes_to_confirm/confirm_all', {
+      ...filters, through_id: throughId,
+    }, { companyId }),
 };
 
 export const adminEmployeeChangeRequestsApi = {
@@ -6439,8 +6508,8 @@ export const payrollHistoryApi = {
   list: (
     params: { page?: number; per_page?: number; status?: string; year?: number; search?: string; sort?: string; direction?: 'asc' | 'desc'; source?: 'all' | 'cornerstone' | 'quickbooks' | 'prior_provider'; register_eligible?: boolean },
     companyId: number,
-  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }> =>
-    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }>('/admin/payroll_history', params, { companyId }),
+  ): Promise<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; unconfirmed_contact_changes?: number | null; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }> =>
+    api.get<{ data: PayrollHistoryRecord[]; meta: PaginationMeta & { statuses: Record<string, number>; sources: Record<string, number>; years: number[]; payroll_go_live?: PayrollGoLiveGateState; unconfirmed_contact_changes?: number | null; prior_provider_history_available?: boolean; prior_provider_history_recorded?: { period_count: number } } }>('/admin/payroll_history', params, { companyId }),
   importedPayPeriod: (
     id: number,
     params: { page?: number; per_page?: number },

@@ -44,7 +44,11 @@ class FinanceBook < ApplicationRecord
   private
 
   def source_company_is_live
-    errors.add(:company, "practice copies cannot have real financial books") if company&.test_workspace?
+    if company&.demo?
+      errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE)
+    elsif company&.test_workspace?
+      errors.add(:company, "practice copies cannot have real financial books")
+    end
   end
 
   def company_belongs_to_organization
