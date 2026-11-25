@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe "Clerk MFA enforcement", type: :request do
-  let(:user) { create(:user, role: role, clerk_id: "user_mfa_spec") }
+  let(:user) { create(:user, :with_client_assignment, role: role, clerk_id: "user_mfa_spec") }
   let(:role) { :admin }
   let(:issuer) { "https://payroll-mfa.clerk.accounts.dev" }
   let(:origin) { "https://payroll.example.test" }

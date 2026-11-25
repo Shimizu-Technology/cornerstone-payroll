@@ -480,9 +480,10 @@ Rails.application.routes.draw do
         end
 
         # Employee Bulk Import
-        get  "employee_bulk_imports/template", to: "employee_bulk_imports#template"
-        post "employee_bulk_imports/preview",  to: "employee_bulk_imports#preview"
-        post "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
+        get    "employee_bulk_imports/template", to: "employee_bulk_imports#template"
+        post   "employee_bulk_imports/preview",  to: "employee_bulk_imports#preview"
+        delete "employee_bulk_imports/preview/:preview_id", to: "employee_bulk_imports#cancel_preview"
+        post   "employee_bulk_imports/apply_json", to: "employee_bulk_imports#apply_json"
 
         # Employee Contact Hygiene (shared & placeholder email cleanup)
         get    "employee_contact_hygiene/shared_emails", to: "employee_contact_hygiene#shared_emails"

@@ -31,7 +31,9 @@ class OrganizationCompanyTransfer
       assistant_sessions_to_unlink: source_invoice_sessions.count,
       home_users_to_move: home_users.where(role: %w[client employee]).count,
       staff_home_users_to_rehome: home_users.where.not(role: %w[client employee]).count,
-      assignments_to_remove: CompanyAssignment.where(company_id: company.id).count,
+      assignments_to_remove: CompanyAssignment.where(company_id: company.id)
+                                              .where.not(id: moving_client_valid_assignments.select(:id))
+                                              .count,
       blockers: blockers
     }
   end
@@ -55,14 +57,22 @@ class OrganizationCompanyTransfer
       source_session_ids = source_invoice_sessions.pluck(:id)
       fallback_company_id = source.primary_company_id
       moving_user_ids = home_users.where(role: %w[client employee]).pluck(:id)
+      preserved_assignment_ids = moving_client_valid_assignments.pluck(:id)
       home_users.where.not(role: %w[client employee]).update_all(company_id: fallback_company_id)
-      CompanyAssignment.where(company_id: company.id).delete_all
+      CompanyAssignment.where(company_id: company.id).where.not(id: preserved_assignment_ids).delete_all
 
       company.update!(organization: destination)
       destination.update!(primary_company: company)
       destination_book = destination.finance_books.find_by!(is_default: true)
       destination_book.update!(company: company)
       User.where(id: moving_user_ids).update_all(organization_id: destination.id)
+      if preserved_assignment_ids.any?
+        replacement_grantor_id = actor&.super_admin? ? actor.id : nil
+        CompanyAssignment.where(id: preserved_assignment_ids)
+          .where.not(granted_by_id: nil)
+          .where.not(granted_by_id: User.where(role: User.roles.fetch("super_admin")).select(:id))
+          .update_all(granted_by_id: replacement_grantor_id)
+      end
 
       transfer_invoices!(destination, destination_book: destination_book, issuer_legal_name: issuer_legal_name)
       # Legacy invoice creation used the selected payroll company even when the
@@ -90,6 +100,13 @@ class OrganizationCompanyTransfer
 
   def home_users
     User.where(organization_id: source.id, company_id: company.id)
+  end
+
+  def moving_client_valid_assignments
+    CompanyAssignment.active_access.where(
+      company_id: company.id,
+      user_id: home_users.where(role: "client").select(:id)
+    )
   end
 
   def selected_invoices

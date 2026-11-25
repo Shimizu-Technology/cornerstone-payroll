@@ -16,7 +16,8 @@ module PortalFileRequestActions
       render json: { error: "Please check the details", details: error.record.errors.messages }, status: :unprocessable_entity
     end
     rescue_from ActiveRecord::RecordNotFound do |error|
-      render json: { error: error.message }, status: :not_found
+      Rails.logger.warn("[PortalFileRequestActions] #{error.class}: #{error.message}")
+      render json: { error: "Requested record not found" }, status: :not_found
     end
   end
 
