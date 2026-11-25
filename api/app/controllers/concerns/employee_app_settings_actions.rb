@@ -232,6 +232,8 @@ module EmployeeAppSettingsActions
         external_logo_url: TenantSubdomainRegistry.https_url(branding["logo_url"])
       },
       main_phone: company.phone.to_s.strip.presence,
+      # How paper W-2s reach employees (M4-5); only Cornerstone staff change it.
+      w2_delivery: company.w2_delivery,
       subdomain: {
         slug: company.subdomain_slug,
         host: company.subdomain_slug && "#{company.subdomain_slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"

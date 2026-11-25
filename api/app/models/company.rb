@@ -148,6 +148,9 @@ class Company < ApplicationRecord
   validate :subdomain_requires_live_payroll, if: -> { !subdomain_slug.nil? && !live_payroll? }
   validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :test_workspace?
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
+  # How paper W-2s reach employees (M4-5, §8a); nil when not set.
+  W2_DELIVERY_OPTIONS = %w[mailed handed_out].freeze
+  validates :w2_delivery, inclusion: { in: W2_DELIVERY_OPTIONS }, allow_nil: true
   validates :payroll_environment, inclusion: { in: PAYROLL_ENVIRONMENTS }
   validates :migration_rehearsal_status, inclusion: { in: MIGRATION_REHEARSAL_STATUSES }, allow_nil: true
   validates :test_workspace_purpose, inclusion: { in: TEST_WORKSPACE_PURPOSES }, allow_nil: true
