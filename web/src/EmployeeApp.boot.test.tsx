@@ -43,7 +43,7 @@ vi.mock('@clerk/react', () => ({
 const enabledBrand = () => Response.json({ name: 'Example Employer' });
 const never = () => new Promise<Response>(() => undefined);
 const tenantUnavailableTitle = "This employee app isn't available yet";
-const connectionErrorTitle = "We couldn't reach the app";
+const connectionErrorTitle = "We couldn't open the app";
 
 function expectFocusedAlert(title: string) {
   const heading = screen.getByRole('heading', { name: title });
@@ -119,7 +119,7 @@ it.each([
 
   await screen.findByRole('heading', { name: connectionErrorTitle });
   expectFocusedAlert(connectionErrorTitle);
-  expect(screen.getByText('Check your connection and try again.')).toBeTruthy();
+  expect(screen.getByText('Check your connection and try again. If this keeps happening, contact your employer.')).toBeTruthy();
   expect(mounted).not.toHaveBeenCalled();
 });
 
