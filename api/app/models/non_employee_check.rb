@@ -17,6 +17,9 @@ class NonEmployeeCheck < ApplicationRecord
 
   belongs_to :pay_period, optional: true
   belongs_to :company
+  # Non-employee and FIT deposit checks pay real outside parties; a demo
+  # company never has one (the database refuses them too).
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :paid_by, class_name: "User", optional: true
   # The contractor record a one-off contractor check paid, set from the
