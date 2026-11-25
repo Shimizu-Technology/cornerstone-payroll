@@ -25,8 +25,15 @@ const account = {
     company_id: 1, company_name: 'Payroll QA', home_company_id: 1, assigned_company_ids: [1], capabilities: [],
   },
 };
-const mfaPending = { mfa_required: true, mfa_verified: false } as const;
-const requiredTitle = 'Multi-factor authentication required';
+// The /auth/me bootstrap for each MFA denial, as the API sends it.
+const mfaSetup = {
+  mfa_required: true, mfa_verified: false, code: 'mfa_enrollment_required', error: 'Set up two-step sign-in before accessing payroll.',
+} as const;
+const mfaSignIn = {
+  mfa_required: true, mfa_verified: false, code: 'mfa_required', error: 'Multi-factor authentication is required before accessing payroll.',
+} as const;
+const setupTitle = 'Set up two-step sign-in';
+const signInTitle = 'Finish two-step sign-in';
 
 beforeEach(() => {
   clerk.isSignedIn = true;
@@ -63,13 +70,13 @@ async function renderLogin() {
 
 it('opens Clerk account security, keeps the session on denial, and retries with a fresh token only on demand', async () => {
   const fetch = vi.fn<typeof globalThis.fetch>()
-    .mockResolvedValueOnce(Response.json(mfaPending))
-    .mockResolvedValueOnce(Response.json(mfaPending))
+    .mockResolvedValueOnce(Response.json(mfaSetup))
+    .mockResolvedValueOnce(Response.json(mfaSetup))
     .mockResolvedValueOnce(Response.json({ ...account, mfa_required: true, mfa_verified: true }));
   vi.stubGlobal('fetch', fetch);
   await renderLogin();
 
-  expect(await screen.findByRole('heading', { name: requiredTitle })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: setupTitle })).toBeTruthy();
   expect(screen.getAllByText(/authenticator app/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Save your backup codes/i)).toBeTruthy();
   expect(screen.getByText(/Ask your Cornerstone administrator/i)).toBeTruthy();
@@ -89,7 +96,7 @@ it('opens Clerk account security, keeps the session on denial, and retries with 
   fireEvent.click(screen.getByRole('button', { name: 'Check verification' }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'Check verification' }) as HTMLButtonElement).disabled).toBe(false));
   expect(clerk.sessionReload).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole('heading', { name: requiredTitle })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: setupTitle })).toBeTruthy();
   expect(screen.getByRole('status').textContent).toMatch(/still needs a fresh two-step check/i);
   expect(screen.getByRole('button', { name: 'Sign out and sign back in' })).toBeTruthy();
 
@@ -103,26 +110,27 @@ it('opens Clerk account security, keeps the session on denial, and retries with 
   expect(clerk.signOut).not.toHaveBeenCalled();
 });
 
-it('offers sign-out and re-authentication for the stable MFA 403 contract', async () => {
+it('asks an enrolled login to sign in again for the stable mfa_required 403', async () => {
   vi.spyOn(authApi, 'me').mockRejectedValue(
     new ApiError('Multi-factor authentication is required before accessing payroll.', 403, undefined, { code: 'mfa_required' }),
   );
   await renderLogin();
 
-  expect(await screen.findByRole('heading', { name: requiredTitle })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: signInTitle })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Open account settings' })).toBeNull();
   expect(clerk.signOut).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole('button', { name: 'Sign out and sign back in' }));
   expect(clerk.signOut).toHaveBeenCalledTimes(1);
 });
 
-it('shows the same MFA prompt when the API returns mfa_enrollment_required', async () => {
+it('shows the authenticator setup steps when the API returns mfa_enrollment_required', async () => {
   vi.spyOn(authApi, 'me').mockRejectedValue(
     new ApiError('Set up two-step sign-in to make this change.', 403, undefined, { code: 'mfa_enrollment_required' }),
   );
   await renderLogin();
 
-  expect(await screen.findByRole('heading', { name: requiredTitle })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: setupTitle })).toBeTruthy();
   expect(screen.getAllByText(/authenticator app/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/Ask your Cornerstone administrator/i)).toBeTruthy();
   expect(clerk.signOut).not.toHaveBeenCalled();
@@ -130,10 +138,10 @@ it('shows the same MFA prompt when the API returns mfa_enrollment_required', asy
 
 it('keeps the MFA prompt available when Clerk sign-out fails', async () => {
   clerk.signOut.mockRejectedValueOnce(new Error('Synthetic sign-out failure'));
-  vi.spyOn(authApi, 'me').mockResolvedValue(mfaPending);
+  vi.spyOn(authApi, 'me').mockResolvedValue(mfaSetup);
   await renderLogin();
 
-  await screen.findByRole('heading', { name: requiredTitle });
+  await screen.findByRole('heading', { name: setupTitle });
   fireEvent.click(screen.getByRole('button', { name: 'Sign out and sign back in' }));
 
   expect((await screen.findByRole('alert')).textContent).toContain('Could not sign out');
@@ -141,15 +149,15 @@ it('keeps the MFA prompt available when Clerk sign-out fails', async () => {
 });
 
 it('clears the MFA prompt when the user signs out of Clerk elsewhere', async () => {
-  vi.spyOn(authApi, 'me').mockResolvedValue(mfaPending);
+  vi.spyOn(authApi, 'me').mockResolvedValue(mfaSetup);
   const rerender = await renderLogin();
-  await screen.findByRole('heading', { name: requiredTitle });
+  await screen.findByRole('heading', { name: setupTitle });
 
   clerk.isSignedIn = false;
   rerender();
 
   expect(await screen.findByTestId('clerk-sign-in')).toBeTruthy();
-  await waitFor(() => expect(screen.queryByRole('heading', { name: requiredTitle })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole('heading', { name: setupTitle })).toBeNull());
 });
 
 it('keeps the 401 account notice after Clerk signs out', async () => {
@@ -170,7 +178,7 @@ it('clears a user restored by a concurrent refresh when MFA sign-out fails', asy
   let rejectSignOut!: (error: Error) => void;
   const signingOut = new Promise<void>((_, reject) => { rejectSignOut = reject; });
   clerk.signOut.mockReturnValueOnce(signingOut);
-  vi.spyOn(authApi, 'me').mockResolvedValueOnce(mfaPending).mockResolvedValue(account);
+  vi.spyOn(authApi, 'me').mockResolvedValueOnce(mfaSignIn).mockResolvedValue(account);
 
   function Probe() {
     const { isAuthenticated, user, authProblem, refreshUser, signOut } = useAuth();
@@ -199,7 +207,7 @@ it('keeps the normal sign-in path when the API switch is off', async () => {
   await renderLogin();
 
   expect(await screen.findByRole('heading', { name: 'Payroll workspace' })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: requiredTitle })).toBeNull();
+  expect(screen.queryByRole('heading', { name: setupTitle })).toBeNull();
   expect(clerk.getToken.mock.calls).toEqual([[]]);
   expect(me).toHaveBeenCalledTimes(1);
   expect(clerk.openUserProfile).not.toHaveBeenCalled();
@@ -237,13 +245,50 @@ it.each([
 
 it('still force-refreshes the token and guides sign-out when Clerk session reload throws', async () => {
   clerk.sessionReload.mockRejectedValueOnce(new Error('Offline session reload'));
-  vi.spyOn(authApi, 'me').mockResolvedValue(mfaPending);
+  vi.spyOn(authApi, 'me').mockResolvedValue(mfaSetup);
   await renderLogin();
 
-  await screen.findByRole('heading', { name: requiredTitle });
+  await screen.findByRole('heading', { name: setupTitle });
   clerk.getToken.mockClear();
   fireEvent.click(screen.getByRole('button', { name: 'Check verification' }));
 
   await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/still needs a fresh two-step check/i));
   expect(clerk.getToken).toHaveBeenCalledWith({ skipCache: true });
+});
+
+it('sends an enrolled login that skipped the second step to sign in again, not to add an authenticator', async () => {
+  vi.spyOn(authApi, 'me').mockResolvedValue(mfaSignIn);
+  await renderLogin();
+
+  expect(await screen.findByRole('heading', { name: signInTitle })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: setupTitle })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Open account settings' })).toBeNull();
+  expect(screen.queryByText(/Save your backup codes/i)).toBeNull();
+  expect(screen.getByText(/enter the 6-digit code from your authenticator app, or one of your backup codes/i)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Check verification' }));
+  await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/still hasn.t finished two-step sign-in/i));
+  expect(clerk.sessionReload).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Sign out and sign back in' }));
+  expect(clerk.signOut).toHaveBeenCalledTimes(1);
+  expect(clerk.openUserProfile).not.toHaveBeenCalled();
+});
+
+it.each([
+  [mfaSetup, 'mfa_enrollment_required', 'Set up two-step sign-in before accessing payroll.'],
+  [mfaSignIn, 'mfa_required', 'Multi-factor authentication is required before accessing payroll.'],
+  [{ mfa_required: true, mfa_verified: false } as const, 'mfa_required', 'Multi-factor authentication is required before accessing payroll.'],
+])('keeps the /auth/me denial code and message in the auth problem (%o)', async (body, code, message) => {
+  vi.stubEnv('VITE_CLERK_PUBLISHABLE_KEY', 'pk_test_synthetic');
+  const { AuthProvider, useAuth } = await import('./AuthContext');
+  vi.spyOn(authApi, 'me').mockResolvedValue(body);
+
+  function Probe() {
+    const { authProblem } = useAuth();
+    return <p>{authProblem ? `${authProblem.status} ${authProblem.code}: ${authProblem.message}` : 'none'}</p>;
+  }
+
+  render(<AuthProvider><Probe /></AuthProvider>);
+  expect(await screen.findByText(`403 ${code}: ${message}`)).toBeTruthy();
 });

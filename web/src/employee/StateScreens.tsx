@@ -2,9 +2,10 @@ import type { ReactElement, ReactNode } from 'react';
 import { CircleAlert, LoaderCircle, Lock, Power, RefreshCw, ShieldCheck, Timer, WifiOff, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { askManager } from './brand';
-import { useBrand, useEmployeeAuth } from './contexts';
+import { useBrand } from './contexts';
 import { useDocumentTitle } from './hooks';
-import { EmpButton } from './ui';
+import { SECURITY_PATH } from './security';
+import { EmpButton, EmpButtonLink } from './ui';
 
 function StateIcon({ icon: Icon, tone = 'neutral' }: { icon: LucideIcon; tone?: 'neutral' | 'bad' }): ReactElement {
   return (
@@ -158,22 +159,28 @@ export function AccessEndedScreen({ onSignOut }: { onSignOut: () => void }): Rea
 }
 
 /**
- * The API wants two-step sign-in before it shows pay: a staff or client login
- * that is also an employee (MfaEnforceable). Never "access ended".
- * - setup: the login has no second step yet; set it up, then try again.
- * - verify: it has one, but this sign-in didn't use it; sign in again.
+ * The API wants two-step sign-in before it shows pay (MfaEnforceable, every
+ * login once REQUIRE_MFA is on). Never "access ended".
+ * - setup (mfa_enrollment_required): the login has no second step yet; set it
+ *   up on Sign-in & security, then try again.
+ * - verify (mfa_required): it has one, but this sign-in didn't use it; sign in
+ *   again. That's also where a login lands right after setting one up, since
+ *   the sign-in it set it up from didn't use it.
  */
 export function TwoStepScreen({ kind, onRetry, onSignOut }: { kind: 'setup' | 'verify'; onRetry: () => void; onSignOut: () => void }): ReactElement {
   const brand = useBrand();
-  const { openAccountSettings } = useEmployeeAuth();
   if (kind === 'setup') {
     return (
       <FullScreenState icon={ShieldCheck} title="Set up two-step sign-in" actions={<>
-        <EmpButton block onClick={openAccountSettings}>Set up two-step sign-in</EmpButton>
+        <EmpButtonLink block to={SECURITY_PATH}>Set up two-step sign-in</EmpButtonLink>
         <EmpButton block variant="secondary" onClick={onRetry}>I've set it up, try again</EmpButton>
         <EmpButton block variant="quiet" onClick={onSignOut}>Sign out</EmpButton>
       </>}>
         <p className="emp-lead">Your account needs a second sign-in step, like a code from an app, before it can show pay.</p>
+        <p className="text-neutral-700">
+          Set it up on the next screen. When you're done, come back and try again. You may be asked to sign out and sign
+          in once more with your new code.
+        </p>
         <p className="text-neutral-600">{askManager(brand, 'Need help? Ask your manager')}</p>
       </FullScreenState>
     );
