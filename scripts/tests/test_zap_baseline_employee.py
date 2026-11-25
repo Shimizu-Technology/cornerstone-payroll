@@ -267,6 +267,43 @@ class ZapBaselineEmployeeScriptTest(unittest.TestCase):
             self.assertIn("destination symlink", result_link.stderr)
             self.assertEqual(victim.read_text(encoding="utf-8"), "untouched")
 
+    def test_publish_outputs_stops_when_errexit_is_disabled(self) -> None:
+        # The cleanup trap calls publish_outputs with `|| true`, which disables
+        # errexit inside it, so each validation failure must stop on its own.
+        with tempfile.TemporaryDirectory() as tmp:
+            stage_dir = Path(tmp) / "stage"
+            logs_dir = Path(tmp) / "logs"
+            stage_dir.mkdir(mode=0o700)
+            logs_dir.mkdir(mode=0o700)
+            (stage_dir / "employee-web-local-report.md").write_text("# Report\n", encoding="utf-8")
+
+            bad_parent = Path(tmp) / "bad-parent"
+            bad_parent.mkdir()
+            os.chmod(bad_parent, 0o775)
+            bad_out = bad_parent / "reports"
+            bad_out.mkdir()
+            os.chmod(bad_out, 0o755)
+
+            result = run_bash(
+                'publish_outputs "$OUT" "$STAGE" "$LOGS" || echo "refused=$?"',
+                env={"OUT": str(bad_out), "STAGE": str(stage_dir), "LOGS": str(logs_dir)},
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("refused=1", result.stdout)
+            self.assertFalse((bad_out / "employee-web-local-report.md").exists())
+
+            target = Path(tmp) / "link-target"
+            target.mkdir(mode=0o755)
+            link_out = Path(tmp) / "link-out"
+            link_out.symlink_to(target)
+
+            result_link = run_bash(
+                'publish_outputs "$OUT" "$STAGE" "$LOGS" || echo "refused=$?"',
+                env={"OUT": str(link_out), "STAGE": str(stage_dir), "LOGS": str(logs_dir)},
+            )
+            self.assertIn("refused=1", result_link.stdout)
+            self.assertFalse((target / "employee-web-local-report.md").exists())
+
     def test_script_keeps_server_logs_inside_private_run_dir(self) -> None:
         script = SCRIPT_PATH.read_text(encoding="utf-8")
         self.assertNotIn('>"${OUTPUT_DIR}/web-server.log"', script)

@@ -120,7 +120,7 @@ validate_ancestor_chain() {
   fi
 
   while true; do
-    check_dir_safety "$cur" "$role"
+    check_dir_safety "$cur" "$role" || return 1
     if [[ "$cur" == "/" ]]; then
       break
     fi
@@ -211,19 +211,19 @@ validate_output_dir() {
   local probe_canon
   probe_canon="$(cd "$probe" && pwd -P)"
   if [[ "$probe" == "$abs_dir" ]]; then
-    validate_ancestor_chain "$probe_canon" "leaf"
+    validate_ancestor_chain "$probe_canon" "leaf" || return 1
     return 0
   fi
 
-  validate_ancestor_chain "$probe_canon" "ancestor"
-  (umask 0022 && mkdir -p -m 0755 "$abs_dir")
+  validate_ancestor_chain "$probe_canon" "ancestor" || return 1
+  (umask 0022 && mkdir -p -m 0755 "$abs_dir") || return 1
   if [[ ! -d "$abs_dir" || -L "$abs_dir" ]]; then
     echo "Invalid --output-dir: ${abs_dir}" >&2
     return 1
   fi
   local leaf_canon
-  leaf_canon="$(cd "$abs_dir" && pwd -P)"
-  validate_ancestor_chain "$leaf_canon" "leaf"
+  leaf_canon="$(cd "$abs_dir" && pwd -P)" || return 1
+  validate_ancestor_chain "$leaf_canon" "leaf" || return 1
 }
 
 # Copy a regular file into a destination path without following source or
@@ -242,8 +242,12 @@ safe_copy_file() {
   fi
   local dest_dir
   dest_dir="$(dirname "$dest")"
+  if [[ ! -d "$dest_dir" || -L "$dest_dir" ]]; then
+    echo "Refusing to copy into a missing or symlinked directory: ${dest_dir}" >&2
+    return 1
+  fi
   local tmp_dest
-  tmp_dest="$(mktemp "${dest_dir}/.$(basename "$dest").XXXXXX")"
+  tmp_dest="$(mktemp "${dest_dir}/.$(basename "$dest").XXXXXX")" || return 1
   if ! cat "$src" >"$tmp_dest" || ! chmod 0644 "$tmp_dest"; then
     rm -f "$tmp_dest"
     return 1
@@ -266,15 +270,18 @@ publish_outputs() {
   local stage_dir="$2"
   local logs_dir="$3"
 
-  validate_output_dir "$out_dir"
-  out_dir="$(cd "$out_dir" && pwd -P)"
-  validate_output_dir "$out_dir"
+  # Callers may run this with errexit disabled (the cleanup trap uses
+  # `|| true`), so every validation failure must stop publication explicitly.
+  validate_output_dir "$out_dir" || return 1
+  out_dir="$(cd "$out_dir" && pwd -P)" || return 1
+  validate_output_dir "$out_dir" || return 1
 
-  local file
+  local file status=0
   for file in "${stage_dir}"/* "${logs_dir}"/*; do
     [[ -e "$file" || -L "$file" ]] || continue
-    safe_copy_file "$file" "${out_dir}/$(basename "$file")"
+    safe_copy_file "$file" "${out_dir}/$(basename "$file")" || status=1
   done
+  return "$status"
 }
 
 validate_output_dir "$OUTPUT_DIR"
