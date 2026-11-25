@@ -204,14 +204,16 @@ export default function EmployeeApp({ viewAs }: { viewAs?: ViewOnlyGrant | null 
   const { branding, retry } = useTenantBranding();
   const brand = useMemo(() => brandFrom(branding?.status === 'enabled' ? branding.branding : null), [branding]);
   const grant = viewAs ?? (PREVIEW_VIEW_AS ? { name: PREVIEW_VIEW_AS, minutesLeft: 27, onEnd: () => window.location.assign('/') } : null);
+  // The neutral brand still supplies --action, so the retry buttons on the
+  // startup error screens don't render white on white.
+  const style = brandStyle(brand) as CSSProperties;
   if (TENANT_HOST && !branding) return <BootScreen />;
   if (branding?.status === 'disabled') {
-    return <div className="employee-app"><TenantUnavailableScreen onRetry={retry} /></div>;
+    return <div className="employee-app" style={style}><TenantUnavailableScreen onRetry={retry} /></div>;
   }
   if (branding?.status === 'error') {
-    return <div className="employee-app"><TenantConnectionErrorScreen onRetry={retry} /></div>;
+    return <div className="employee-app" style={style}><TenantConnectionErrorScreen onRetry={retry} /></div>;
   }
-  const style = brandStyle(brand) as CSSProperties;
   return (
     <BrandContext.Provider value={brand}>
       <div className="employee-app" style={style}>

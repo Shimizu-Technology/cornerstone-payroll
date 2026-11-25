@@ -332,6 +332,12 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
 
       await expect(page.getByRole('heading', { name: "We couldn't open the app" })).toBeFocused();
       await expect(page.getByRole('alert')).toContainText('If this keeps happening, contact your employer.');
+      const retryColors = await page.getByRole('button', { name: 'Try again' }).evaluate((button) => {
+        const style = getComputedStyle(button);
+        return { color: style.color, background: style.backgroundColor };
+      });
+      expect(retryColors.background).not.toBe('rgba(0, 0, 0, 0)');
+      expect(retryColors.background).not.toBe(retryColors.color);
       brandingAvailable = true;
       await page.getByRole('button', { name: 'Try again' }).click();
 

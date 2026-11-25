@@ -114,6 +114,15 @@ it('asks the signed-in Clerk user to sign out and keeps the invitation URL', asy
   expect(auth.signOut.mock.calls).toEqual([[{ redirectUrl: `/login${search}` }], [{ redirectUrl: `/login${search}` }]]);
 });
 
+it('keeps the access notice for a signed-in invitee alongside the sign-out prompt', async () => {
+  clerk.isSignedIn = true;
+  auth.authProblem = { status: 503, code: 'write_maintenance', message: 'Payroll is in a short maintenance window.' };
+  await renderLogin('?__clerk_status=sign_up&__clerk_ticket=fake-ticket');
+
+  expect(screen.getByRole('status').textContent).toContain('maintenance notice');
+  expect(screen.getByText('Sign out to accept this invitation.')).toBeTruthy();
+});
+
 it('links to the privacy policy and terms from the sign-in card', async () => {
   await renderLogin();
   expect(screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href')).toBe('/privacy');
