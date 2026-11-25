@@ -124,7 +124,7 @@ describe('fetchTenantBranding', () => {
     ['a color that isn\'t a string', async () => Response.json({ name: 'Acme', logo_url: null, primary_color: ['#1898cf'], accent_color: null })],
     ['a logo that isn\'t a string', async () => Response.json({ name: 'Acme', logo_url: { href: 'https://x' }, primary_color: null, accent_color: null })],
     ['an array body', async () => Response.json([{ name: 'Acme' }])],
-  ])('returns null for %s, so the app uses the fallback', async (_label, impl) => {
+  ])('returns null when branding is unavailable for %s', async (_label, impl) => {
     expect(await fetchTenantBranding('mosas.shimizu-technology.com', { baseUrl, fetchImpl: vi.fn<typeof fetch>(impl) })).toBeNull();
   });
 });

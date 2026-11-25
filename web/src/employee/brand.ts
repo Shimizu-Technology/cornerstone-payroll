@@ -1,6 +1,6 @@
 // Tenant branding for the employee app. GET /api/v1/public/tenant_branding
 // returns { name, app_name, logo_url, primary_color, accent_color, main_phone }
-// for an enabled client subdomain, or 404 (TenantSubdomainRegistry.branding_for). Anything else falls back to a neutral Cornerstone brand.
+// for an enabled client subdomain, or 404 (TenantSubdomainRegistry.branding_for).
 //
 // A client's colors become roles, never raw paint:
 // - action: buttons, links and the active tab. Always passes 4.5:1 under white text.
@@ -208,12 +208,13 @@ function stringOrNull(value: unknown): boolean {
 function isTenantBranding(value: unknown): value is TenantBranding {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const branding = value as Record<string, unknown>;
-  return typeof branding.name === 'string' && branding.name.trim() !== ''
+  return (branding.subdomain_enabled === undefined || branding.subdomain_enabled === true)
+    && typeof branding.name === 'string' && branding.name.trim() !== ''
     && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color)
     && stringOrNull(branding.app_name) && stringOrNull(branding.main_phone);
 }
 
-/** Returns null on 404, a network failure or a malformed response, so the caller falls back. */
+/** Returns null when the tenant is disabled or its branding could not be resolved. */
 export async function fetchTenantBranding(
   host: string,
   { baseUrl, signal, fetchImpl = fetch }: { baseUrl: string; signal?: AbortSignal; fetchImpl?: typeof fetch },

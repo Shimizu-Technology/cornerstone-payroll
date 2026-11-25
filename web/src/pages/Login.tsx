@@ -1,6 +1,6 @@
-import { Show, SignIn, useClerk } from '@clerk/react';
-import { useState } from 'react';
-import { Link, Navigate } from 'react-router';
+import { Show, SignIn, SignUp, useClerk } from '@clerk/react';
+import { useState, type ComponentProps } from 'react';
+import { Link, Navigate, useLocation } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { isMfaRequiredCode } from '@/services/api';
@@ -9,6 +9,38 @@ import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/ca
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+const touchTarget = { minHeight: '44px' };
+const actionLink = {
+  ...touchTarget, display: 'inline-flex', alignItems: 'center',
+  color: 'var(--color-primary-700)', '&:hover': { color: 'var(--color-primary-800)' },
+};
+const clerkAppearance: ComponentProps<typeof SignIn>['appearance'] = {
+  elements: {
+    rootBox: 'mx-auto w-full max-w-full',
+    cardBox: 'w-full max-w-full',
+    card: 'w-full max-w-full shadow-none border border-neutral-200 rounded-2xl',
+    headerTitle: 'text-neutral-900',
+    headerSubtitle: 'text-neutral-500',
+    // Clerk's unlayered styles can take precedence over Tailwind utilities.
+    socialButtonsBlockButton: { ...touchTarget, borderRadius: '0.75rem' },
+    socialButtonsIconButton: touchTarget,
+    alternativeMethodsBlockButton: touchTarget,
+    formButtonPrimary: {
+      ...touchTarget, borderRadius: '0.75rem', backgroundColor: 'var(--color-primary-600)',
+      '&:hover': { backgroundColor: 'var(--color-primary-700)' },
+    },
+    formButtonReset: touchTarget,
+    formFieldInput: { ...touchTarget, borderRadius: '0.75rem', fontSize: '16px' },
+    formFieldInput__password: { paddingInlineEnd: '48px' },
+    otpCodeFieldInput: { ...touchTarget, fontSize: '16px' },
+    formFieldInputShowPasswordButton: { ...touchTarget, minWidth: '44px' },
+    formFieldAction: actionLink,
+    formResendCodeLink: actionLink,
+    footerActionLink: actionLink,
+    footerPagesLink: actionLink,
+  },
+};
 
 const highlights = [
   {
@@ -221,6 +253,7 @@ function MfaEnrollmentPrompt() {
 
 export function Login() {
   const { isAuthenticated, isLoading, authProblem, refreshUser, signOut } = useAuth();
+  const { search } = useLocation();
 
   if (isLoading) {
     return (
@@ -250,6 +283,11 @@ export function Login() {
   }
 
   const mfaRequired = authProblem?.status === 403 && isMfaRequiredCode(authProblem.code);
+  const params = new URLSearchParams(search);
+  // Clerk reads the ticket from the current URL. For sign_in it exchanges the
+  // ticket in SignIn, and a completed Clerk session follows the normal auth path.
+  const needsInviteSignUp = params.get('__clerk_status') === 'sign_up' && Boolean(params.get('__clerk_ticket'));
+  const ClerkForm = needsInviteSignUp ? SignUp : SignIn;
 
   return (
     <div className="min-h-screen bg-transparent px-3 py-4 sm:px-4 sm:py-10 lg:px-8">
@@ -268,8 +306,8 @@ export function Login() {
               Payroll operations built for Guam teams.
             </h1>
             <p className="mt-4 max-w-lg text-sm leading-relaxed text-primary-100 lg:text-base">
-              A dedicated payroll workspace for Cornerstone Tax Services: company setup, employee records, pay periods,
-              check printing, and year-end reporting.
+              Cornerstone staff and client managers can use this workspace to review payroll, find reports, and keep
+              employee records up to date.
             </p>
 
             <div className="mt-8 hidden space-y-4 sm:block lg:mt-10">
@@ -290,14 +328,6 @@ export function Login() {
         </section>
 
         <section className="cornerstone-sign-in order-1 min-w-0 overflow-hidden rounded-3xl border border-neutral-200/80 bg-white/90 p-4 shadow-xl shadow-neutral-200/50 backdrop-blur-sm sm:p-6 lg:order-2 lg:p-8">
-          {!mfaRequired && (
-            <div className="mb-6">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Welcome back</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Sign in to Cornerstone Payroll</h2>
-              <p className="mt-2 text-sm text-neutral-500">Use your Cornerstone account to continue.</p>
-            </div>
-          )}
-
           {mfaRequired ? (
             <MfaPrompt />
           ) : authProblem && (
@@ -309,36 +339,20 @@ export function Login() {
             />
           )}
 
-          {/* An already-signed-in Clerk session (e.g. an invite accepted during
-              maintenance) keeps the notice up; mounting SignIn would bounce to /app. */}
+          {/* Keep any access notice visible for a session that Clerk has already signed in. */}
           <Show when="signed-out">
-          <SignIn
-            routing="hash"
-            forceRedirectUrl="/app"
-            fallbackRedirectUrl="/app"
-            appearance={{
-              elements: {
-                rootBox: 'mx-auto w-full max-w-full',
-                cardBox: 'w-full max-w-full',
-                card: 'w-full max-w-full shadow-none border border-neutral-200 rounded-2xl',
-                headerTitle: 'text-neutral-900',
-                headerSubtitle: 'text-neutral-500',
-                socialButtonsBlockButton:
-                  'rounded-xl border-neutral-200 hover:bg-neutral-50 transition-colors',
-                formButtonPrimary:
-                  'rounded-xl bg-primary-600 hover:bg-primary-700 text-white shadow-sm transition-colors',
-                formFieldInput:
-                  'rounded-xl border-neutral-300 focus:border-primary-500 focus:ring-primary-200',
-                footerActionLink: 'text-primary-700 hover:text-primary-800',
-              },
-            }}
-          />
+            <ClerkForm
+              routing="hash"
+              signInUrl="/login"
+              forceRedirectUrl="/app"
+              appearance={clerkAppearance}
+            />
           </Show>
-          <p className="mt-6 text-center text-xs text-neutral-500">
-            <Link to="/privacy" className="font-semibold hover:text-primary-700">Privacy Policy</Link>
-            <span aria-hidden="true" className="mx-2">·</span>
-            <Link to="/terms" className="font-semibold hover:text-primary-700">Terms of Service</Link>
-          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-center text-xs text-neutral-500">
+            <Link to="/privacy" className="inline-flex min-h-11 items-center px-2 font-semibold hover:text-primary-700">Privacy Policy</Link>
+            <span aria-hidden="true">·</span>
+            <Link to="/terms" className="inline-flex min-h-11 items-center px-2 font-semibold hover:text-primary-700">Terms of Service</Link>
+          </div>
         </section>
       </div>
     </div>

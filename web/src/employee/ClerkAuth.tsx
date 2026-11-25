@@ -1,4 +1,4 @@
-import { useCallback, useMemo, type ComponentProps, type ReactNode, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type ReactElement } from 'react';
 import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, UserProfile, useReverification } from '@clerk/react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
@@ -6,9 +6,11 @@ import { ui as clerkUi } from '@clerk/ui';
 import type { EmployeeBrand } from './brand';
 import { EmployeeApiError, StepUpCancelledError, StepUpRequiredError } from './api';
 import { EmployeeAuthContext, type EmployeeAuthValue } from './contexts';
+import { BootScreen, SignInLoadErrorScreen } from './StateScreens';
 
 type ClerkProviderProps = ComponentProps<typeof ClerkProvider>;
 
+const CLERK_BOOT_TIMEOUT_MS = 15_000;
 const DISPLAY_FONT = '"Plus Jakarta Sans", "Source Sans 3", system-ui, sans-serif';
 const BODY_FONT = '"Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif';
 
@@ -73,7 +75,7 @@ type Attempt = () => Promise<unknown>;
 
 /** Exported for tests. */
 export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
-  const { isLoaded, isSignedIn, getToken, signOut } = useAuth();
+  const { isSignedIn, getToken, signOut } = useAuth();
   const { openUserProfile } = useClerk();
   // Clerk shows its "confirm it's you" prompt when the fetcher returns the
   // API's reverification hint, at the level the hint names (first_factor
@@ -99,7 +101,6 @@ export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactEle
     }
   }, [reverify]);
   const value = useMemo<EmployeeAuthValue>(() => ({
-    isLoaded,
     isSignedIn: Boolean(isSignedIn),
     getToken: (options) => getToken(options?.fresh ? { skipCache: true } : undefined),
     signOut: () => signOut({ redirectUrl: '/' }),
@@ -108,8 +109,30 @@ export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactEle
     stepUp,
     openAccountSettings: () => openUserProfile(),
     AccountSecurityPanel: ClerkAccountSecurityPanel,
-  }), [isLoaded, isSignedIn, getToken, signOut, stepUp, openUserProfile]);
+  }), [isSignedIn, getToken, signOut, stepUp, openUserProfile]);
   return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
+}
+
+function ClerkBoot({ children }: { children: ReactNode }): ReactElement {
+  const clerk = useClerk();
+  const { isLoaded, isSignedIn } = useAuth();
+  const subscribe = useCallback((onChange: () => void) => {
+    clerk.on('status', onChange);
+    return () => clerk.off('status', onChange);
+  }, [clerk]);
+  const status = useSyncExternalStore(subscribe, () => clerk.status);
+  const loadFailed = status === 'error' || (status === 'degraded' && !isSignedIn);
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (isLoaded || loadFailed) return;
+    const timer = window.setTimeout(() => setTimedOut(true), CLERK_BOOT_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [isLoaded, loadFailed]);
+
+  if (loadFailed || timedOut) return <SignInLoadErrorScreen />;
+  if (!isLoaded) return <BootScreen />;
+  return <ClerkAuthBridge>{children}</ClerkAuthBridge>;
 }
 
 export function ClerkAuthProvider({ publishableKey, brand, children }: { publishableKey: string; brand: EmployeeBrand; children: ReactNode }): ReactElement {
@@ -140,7 +163,7 @@ export function ClerkAuthProvider({ publishableKey, brand, children }: { publish
       signUpUrl="/sign-up"
       afterSignOutUrl="/"
     >
-      <ClerkAuthBridge>{children}</ClerkAuthBridge>
+      <ClerkBoot>{children}</ClerkBoot>
     </ClerkProvider>
   );
 }

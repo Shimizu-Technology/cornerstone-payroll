@@ -112,7 +112,7 @@ export function RateLimitedState(actions: StateActions): ReactElement {
 }
 
 /** A full-screen message outside the shell: the app is off, or access has ended. */
-function FullScreenState({ icon, title, children, actions }: { icon: LucideIcon; title: string; children: ReactNode; actions: ReactNode }): ReactElement {
+function FullScreenState({ icon, title, children, actions }: { icon: LucideIcon; title: string; children?: ReactNode; actions?: ReactNode }): ReactElement {
   useDocumentTitle(title);
   return (
     <main className="emp-auth">
@@ -121,8 +121,24 @@ function FullScreenState({ icon, title, children, actions }: { icon: LucideIcon;
         <h1 className="emp-h1">{title}</h1>
         {children}
       </div>
-      <div className="space-y-2">{actions}</div>
+      {actions && <div className="space-y-2">{actions}</div>}
     </main>
+  );
+}
+
+export function TenantUnavailableScreen(): ReactElement {
+  return (
+    <FullScreenState icon={Power} title="This employee app isn't available yet">
+      <p className="emp-lead">If you were expecting access, contact your employer.</p>
+    </FullScreenState>
+  );
+}
+
+export function SignInLoadErrorScreen(): ReactElement {
+  return (
+    <FullScreenState icon={CircleAlert} title="We couldn't load sign-in" actions={
+      <EmpButton block onClick={() => window.location.reload()}>Try again</EmpButton>
+    } />
   );
 }
 
