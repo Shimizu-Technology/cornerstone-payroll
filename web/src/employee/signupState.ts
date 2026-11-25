@@ -37,6 +37,12 @@ export function takeInviteToken(location: { hash: string }): void {
   window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
 }
 
+/** Strips any initial #token= fragment before analytics (posthog-js) initializes. */
+export function captureInitialInviteToken(): void {
+  if (typeof window === 'undefined') return;
+  takeInviteToken(window.location);
+}
+
 export function currentInviteToken(): string | null {
   if (inviteToken) return inviteToken;
   let stored: string | null = null;

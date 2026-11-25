@@ -8,7 +8,7 @@ RSpec.describe PortalNotifications::Recipients, :portal_notifications do
   let(:organization) { create(:organization) }
   let(:company) { create(:company, organization: organization) }
   let(:other_company) { create(:company, organization: organization) }
-  let(:client) { create(:user, company: company, role: "client") }
+  let(:client) { create(:user, :with_client_assignment, company: company, role: "client") }
   let(:thread) { create(:client_portal_thread, company: company, created_by: client) }
 
   def client_message_event(actor: client)

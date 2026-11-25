@@ -124,6 +124,7 @@ module EmployeeLinks
           pending&.clerk_invitation_id == closed.fetch(:invitation_id)
 
         @link.claim_user = route_login(@link.employee)
+        @link.invited_by = @actor
         credentials = Credentials.issue(@link, delivery: @delivery, email: @link.employee.email)
         requested = { requested_at: @link.sign_up_reset_requested_at.iso8601, requested_by_id: @link.sign_up_reset_requested_by_id,
                       requested_reason: @link.sign_up_reset_reason }

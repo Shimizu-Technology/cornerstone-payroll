@@ -155,7 +155,7 @@ module Api
         end
 
         def set_owned_document
-          @document = ClientDocument.find_by(
+          @document = ClientDocument.client_visible.find_by(
             id: params[:id],
             company_id: current_company_id,
             uploaded_by_id: current_user.id

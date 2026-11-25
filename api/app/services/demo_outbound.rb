@@ -23,8 +23,8 @@ module DemoOutbound
   # that demo's employee app is on, so the demo kill switch (M4-9d), which
   # turns it off, also stops every queued or retried employee notification.
   EMPLOYEE_CHANNELS = %w[
-    employee_link_invite employee_link_claim employee_link_activation employee_link_bind employee_tax_form_notice
-    employee_portal_notification
+    employee_link_invite employee_link_claim employee_link_activation employee_link_bind
+    employee_link_activation_notice employee_tax_form_notice employee_portal_notification
   ].freeze
 
   module_function

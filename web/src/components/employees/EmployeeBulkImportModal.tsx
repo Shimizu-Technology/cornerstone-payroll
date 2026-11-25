@@ -58,6 +58,22 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const cancelPendingPreview = useCallback(() => {
+    if (previewId && step !== 'done') {
+      void employeeBulkImportApi.cancelPreview(previewId).catch(() => { /* Best-effort server cache cleanup. */ });
+    }
+  }, [previewId, step]);
+
+  const handleBackToUpload = useCallback(() => {
+    cancelPendingPreview();
+    setPreviewId(null);
+    setStep('upload');
+    setRows([]);
+    setExpandedId(null);
+    setNewDepartments([]);
+    setError(null);
+  }, [cancelPendingPreview, setError]);
+
   const reset = useCallback(() => {
     setStep('upload');
     setFile(null);
@@ -71,6 +87,7 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
   }, [setError]);
 
   const handleClose = () => {
+    cancelPendingPreview();
     if (step === 'done') onComplete();
     reset();
     onClose();
@@ -99,8 +116,12 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
     if (!file) return;
     setLoading(true);
     setError(null);
+    const previousPreviewId = previewId;
     try {
       const data: BulkImportPreviewResult = await employeeBulkImportApi.preview(file);
+      if (previousPreviewId && previousPreviewId !== data.preview_id) {
+        void employeeBulkImportApi.cancelPreview(previousPreviewId).catch(() => { /* Best-effort server cache cleanup. */ });
+      }
       const editableRows: EditableRow[] = data.rows.map((r) => ({
         id: `row-${r.row_number}`,
         data: { ...r.data },
@@ -431,7 +452,7 @@ export function EmployeeBulkImportModal({ open, readOnly = false, onClose, onCom
         <div className="border-t px-6 py-4 flex items-center justify-between shrink-0 bg-neutral-50 rounded-b-xl">
           <div>
             {step === 'preview' && (
-              <Button variant="outline" onClick={() => { setStep('upload'); setRows([]); setNewDepartments([]); }}>
+              <Button variant="outline" onClick={handleBackToUpload}>
                 Back
               </Button>
             )}

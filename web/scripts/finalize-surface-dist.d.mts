@@ -3,7 +3,13 @@ export interface PostHogOrigins {
   assetsOrigin: string
 }
 
+export interface StaffApiOrigins {
+  httpOrigin: string
+  wsOrigin: string
+}
+
 export function apiOrigin(apiUrl: unknown): string
+export function staffApiOrigins(apiUrl: unknown): StaffApiOrigins
 export function clerkFrontendOrigin(publishableKey: unknown, options?: { production?: boolean }): string
 export function posthogOrigins(env?: Record<string, string | undefined>): PostHogOrigins | null
 export function contentSecurityPolicy(origins: {
@@ -11,13 +17,29 @@ export function contentSecurityPolicy(origins: {
   clerkOrigin: string
   posthog?: PostHogOrigins | null
 }): string
+export function staffReportOnlyCsp(origins: {
+  apiOrigin: string
+  apiWsOrigin: string
+  clerkOrigin: string
+  posthog?: PostHogOrigins | null
+}): string
 export function renderHeaders(
   template: string,
   origins: { apiOrigin: string; clerkOrigin: string; posthog?: PostHogOrigins | null },
 ): string
+export function renderStaffHeaders(origins: {
+  apiOrigin: string
+  apiWsOrigin: string
+  clerkOrigin: string
+  posthog?: PostHogOrigins | null
+}): string
 export function finalizeEmployeeDist(options: {
   distDir: string
   deployDir: string
   env: Record<string, string | undefined>
 }): { apiOrigin: string; clerkOrigin: string; posthog: PostHogOrigins | null }
-export function main(env?: Record<string, string | undefined>): void
+export function finalizeStaffDist(options: {
+  distDir: string
+  env: Record<string, string | undefined>
+}): { apiOrigin: string; apiWsOrigin: string; clerkOrigin: string; posthog: PostHogOrigins | null }
+export function main(env?: Record<string, string | undefined>, options?: { distDir?: string }): void
