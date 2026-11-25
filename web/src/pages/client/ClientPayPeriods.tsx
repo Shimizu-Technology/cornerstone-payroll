@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import { Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card } from '@/components/ui/card';
@@ -9,20 +9,21 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { clientPayPeriodsApi, type PayrollHistoryRecord } from '@/services/api';
-import { formatCurrency, formatDate, formatDateRange, payPeriodStatusConfig } from '@/lib/utils';
+import { clientPayPeriodsApi, type PayrollHistoryRecord, type ClientOpenPayrollPeriod } from '@/services/api';
+import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import { currentAppPath, importedPayRunPath, payRunPath } from '@/lib/routes';
+import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { parsePositiveRouteId } from '@/lib/route-params';
 
 
-// A practice copy's copied history stands for payroll the real client was
-// already paid; it is approved there only because a practice copy cannot commit.
 function PeriodStatusBadge({ period }: { period: PayrollHistoryRecord }): ReactElement {
-  if (period.test_workspace_role === 'baseline') return <Badge variant="success">Paid (copied history)</Badge>;
   return (
-    <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
-      {period.status === 'locked' ? 'Locked' : payPeriodStatusConfig[period.status]?.label || period.status}
-    </Badge>
+    <div className="space-y-1">
+      <Badge variant={period.status === 'committed' ? 'success' : period.status === 'locked' ? 'warning' : 'default'}>
+        {clientPayRunStatus(period)}
+      </Badge>
+      {period.can_decide_payroll_review && <p className="text-sm font-medium">Needs your approval</p>}
+    </div>
   );
 }
 
@@ -33,6 +34,7 @@ export function ClientPayPeriods(): ReactElement {
   const companyId = parsePositiveRouteId(companyIdParam) ?? 0;
   const returnTo = currentAppPath(location.pathname, location.search);
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
+  const [openPeriodSummary, setOpenPeriodSummary] = useState<ClientOpenPayrollPeriod | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -51,7 +53,10 @@ export function ClientPayPeriods(): ReactElement {
       setLoading(true);
       setError(null);
       const response = await clientPayPeriodsApi.list(undefined, companyId);
-      if (isCurrentRequest()) setPayPeriods(response.pay_periods);
+      if (isCurrentRequest()) {
+        setPayPeriods(response.pay_periods);
+        setOpenPeriodSummary(response.open_period ?? null);
+      }
     } catch (err) {
       if (isCurrentRequest()) setError(err instanceof Error ? err.message : 'Failed to load pay periods');
     } finally {
@@ -61,6 +66,7 @@ export function ClientPayPeriods(): ReactElement {
 
   useLayoutEffect((): void => {
     loadRequestIdRef.current += 1;
+    setOpenPeriodSummary(null);
     setPayPeriods([]);
     setError(null);
     setLoading(true);
@@ -80,7 +86,8 @@ export function ClientPayPeriods(): ReactElement {
       [
         formatDateRange(period.start_date, period.end_date),
         formatDate(period.pay_date),
-        period.status,
+        clientPayRunStatus(period),
+        period.can_decide_payroll_review ? "Needs your approval" : "",
         period.test_workspace_role === 'baseline' ? 'Paid (copied history)' : null,
         period.source.label,
         period.source.detail,
@@ -104,9 +111,15 @@ export function ClientPayPeriods(): ReactElement {
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
-        <div className="rounded-xl border border-primary-200 bg-primary-50/70 px-4 py-3 text-sm text-primary-800">
-          Review-ready Cornerstone payrolls appear here before processing when your approval is required. Finalized Cornerstone payrolls and locked imported payrolls remain available as read-only history.
-        </div>
+        {!error && !loading && openPeriodSummary && !openPeriodSummary.review_pay_period_id && (
+          <Card className="space-y-2 p-4">
+            <h2 className="font-semibold">{formatDateRange(openPeriodSummary.start_date, openPeriodSummary.end_date)}</h2>
+            <p className="text-sm">Pay date {formatDate(openPeriodSummary.pay_date)} · {clientPayrollStatus(openPeriodSummary.client_payroll_status)}</p>
+            <Link className="inline-flex min-h-11 items-center text-primary-800 underline" to={`/payroll-files/${encodeURIComponent(openPeriodSummary.ref)}`}>
+              Open Pay Period Files
+            </Link>
+          </Card>
+        )}
 
         <div className="flex flex-col gap-4 md:flex-row">
           <div className="relative max-w-md flex-1">
@@ -138,8 +151,8 @@ export function ClientPayPeriods(): ReactElement {
                     <MobileField label="Employees" value={period.employee_count} />
                     <MobileField label="Source" value={period.source.label} />
                   </div>
-                  <Button className="mt-4 w-full" variant={period.status === 'calculated' ? 'primary' : 'outline'} onClick={() => openPeriod(period)}>
-                    {period.status === 'calculated' ? 'Review & Approve' : 'View Payroll'}
+                  <Button className="mt-4 w-full" variant={period.can_decide_payroll_review ? 'primary' : 'outline'} onClick={() => openPeriod(period)}>
+                    {period.can_decide_payroll_review ? 'Review & Approve' : 'View Payroll'}
                   </Button>
                 </MobileRecordCard>
               ))}
@@ -172,7 +185,7 @@ export function ClientPayPeriods(): ReactElement {
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="sm" onClick={() => openPeriod(period)}>
-                        {period.status === 'calculated' ? 'Review & Approve' : 'View'}
+                        {period.can_decide_payroll_review ? 'Review & Approve' : 'View'}
                       </Button>
                     </TableCell>
                   </TableRow>

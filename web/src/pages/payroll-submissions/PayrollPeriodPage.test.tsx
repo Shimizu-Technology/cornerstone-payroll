@@ -86,7 +86,7 @@ it('keeps earlier drafts readable and directs decisions to the pay run preview',
   const draft = { id: 4, revision: 1, current: true, superseded: false, posted: true, paycheck_document: doc(201, 'MHI paychecks.pdf') };
   mocks.get.mockResolvedValue({ data: period({ review_pay_period_id: 12, drafts: [draft] }) });
   renderAt('client');
-  expect(await screen.findByRole('link', { name: 'Open payroll preview review' })).toHaveProperty('href', 'http://localhost:3000/companies/2/pay-runs/12');
+  expect(await screen.findByRole('link', { name: 'Open payroll preview' })).toHaveProperty('href', 'http://localhost:3000/companies/2/pay-runs/12/overview');
   expect(screen.getByText('MHI paychecks.pdf')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Approve draft/ })).toBeNull();
 });

@@ -4,6 +4,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { clientPayrollStatus } from '@/lib/clientPayrollStatus';
 import { formatDate, formatGuam, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { adminPayrollSubmissionsApi, clientPayrollSubmissionsApi, type PeriodSummary } from '@/services/payrollSubmissions';
 
@@ -48,7 +49,7 @@ export function PayrollPeriodsList({ audience }: { audience: 'client' | 'staff' 
               </span>
               <span className="flex shrink-0 items-center gap-2">
                 {row.unread && <Badge variant="warning">New</Badge>}
-                <Badge variant={statusVariant(row.status)}>{row.status_label}</Badge>
+                <Badge variant={statusVariant(row.status)}>{audience === 'client' && row.client_payroll_status ? clientPayrollStatus(row.client_payroll_status) : row.status_label}</Badge>
               </span>
             </Link>
           </li>)}

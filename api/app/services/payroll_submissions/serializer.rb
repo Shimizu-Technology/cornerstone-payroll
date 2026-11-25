@@ -64,6 +64,14 @@ module PayrollSubmissions
           end
         end
       end
+      unless @staff
+        payload[:client_payroll_status] = case payload[:status]
+        when "paid" then "committed"
+        when "draft_ready" then payload[:review_pay_period_id] ? "pending" : "preparing"
+        when "approved", "changes_requested" then payload[:review_pay_period_id] ? payload[:status] : "preparing"
+        else "preparing"
+        end
+      end
       if payload[:status] == "paid" && record && record.file_requests.any?(&:outstanding?)
         payload[:status] = "in_review"
         payload[:status_label] = "Requested files outstanding"

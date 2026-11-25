@@ -1500,6 +1500,7 @@ export interface PayPeriod {
   outstanding_file_requests?: { id: number; title: string; status: string; status_label: string }[];
   client_payroll_approval_required?: boolean;
   payroll_review?: PayrollReviewPackage | null;
+  can_decide_payroll_review?: boolean;
   payroll_review_history?: PayrollReviewPackage[];
   last_preview_download?: { revision: number; downloaded_at: string } | null;
   time_tracking?: {

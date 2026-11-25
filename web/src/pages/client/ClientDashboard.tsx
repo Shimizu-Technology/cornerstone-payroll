@@ -1,15 +1,16 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useState, type ReactElement } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { CalendarDays, FileBarChart2, FolderOpen, Users } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PayrollFilesEntry } from '@/components/payroll-submissions/PayrollFilesEntry';
-import { clientDocumentsApi, clientReportsApi } from '@/services/api';
-import { formatCurrency } from '@/lib/utils';
+import { clientDocumentsApi, clientPayPeriodsApi, clientReportsApi, type ClientPayrollHistoryResponse } from '@/services/api';
+import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
-import { employeesPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
+import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStatus';
+import { employeesPath, importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
 import { supportToken } from '@/support/grant';
 
@@ -19,6 +20,7 @@ interface ClientDashboardPayload {
   companyId: number | null;
   stats: ClientDashboardStats;
   documentCount: number;
+  payroll: ClientPayrollHistoryResponse;
 }
 
 export function ClientDashboard(): ReactElement {
@@ -29,11 +31,15 @@ export function ClientDashboard(): ReactElement {
   const [dashboardPayload, setDashboardPayload] = useState<ClientDashboardPayload | null>(null);
   const stats = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.stats : null;
   const documentCount = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.documentCount : 0;
+  const payroll = dashboardPayload?.companyId === activeCompanyId ? dashboardPayload.payroll : null;
+  const attention = payroll?.pay_periods.filter(period => period.can_decide_payroll_review) ?? [];
+  const open = payroll?.open_period;
+  const openReview = payroll?.pay_periods.find(period => period.id === open?.review_pay_period_id);
   const employeeListHref = activeCompanyId ? employeesPath(activeCompanyId) : '/employees';
   const newEmployeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
   const payRunListHref = activeCompanyId ? payRunsPath(activeCompanyId) : '/pay-periods';
-  const payRunHref = (payRunId: number): string => activeCompanyId
-    ? payRunPath(activeCompanyId, payRunId, 'overview')
+  const payRunHref = (payRunId: number, imported = false): string => activeCompanyId
+    ? imported ? importedPayRunPath(activeCompanyId, payRunId) : payRunPath(activeCompanyId, payRunId)
     : `/pay-periods/${payRunId}`;
 
   useEffect((): (() => void) => {
@@ -45,14 +51,16 @@ export function ClientDashboard(): ReactElement {
       setError(null);
       setDashboardPayload(null);
       try {
-        const [dashboard, documents] = await Promise.all([
+        const [dashboard, documents, payroll] = await Promise.all([
           clientReportsApi.dashboard(),
           clientDocumentsApi.list({ per_page: 1 }),
+          clientPayPeriodsApi.list({ status: 'approved', per_page: 100 }, requestedCompanyId ?? undefined),
         ]);
         if (cancelled) return;
         setDashboardPayload({
           companyId: requestedCompanyId,
           stats: dashboard.stats,
+          payroll,
           documentCount: documents.meta.total_count,
         });
       } catch (err) {
@@ -81,6 +89,36 @@ export function ClientDashboard(): ReactElement {
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
 
+        <Card>
+          <CardHeader><CardTitle>Needs your attention</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            {loading ? <p role="status">Checking for payroll approvals…</p> : payroll && (
+              attention.length ? (
+                <ul className="space-y-3">
+                  {attention.map(period => (
+                    <li key={period.key}>
+                      <p className="font-medium">Payroll for {formatDateRange(period.start_date, period.end_date)} is ready for your approval.</p>
+                      <p>Pay date {formatDate(period.pay_date)} · {clientPayRunStatus(period)}</p>
+                      <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={payRunHref(period.id)}>
+                        Open payroll preview
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p>No payroll needs your approval right now.</p>
+            )}
+            {open && !openReview?.can_decide_payroll_review && (
+              <div className="border-t border-neutral-200 pt-3">
+                <p className="font-medium">Next payroll · {formatDateRange(open.start_date, open.end_date)}</p>
+                <p>Pay date {formatDate(open.pay_date)} · {clientPayrollStatus(open.client_payroll_status)}</p>
+                <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={open.review_pay_period_id ? payRunHref(open.review_pay_period_id) : `/payroll-files/${encodeURIComponent(open.ref)}`}>
+                  {open.review_pay_period_id ? 'Open payroll preview' : 'Open Pay Period Files'}
+                </Link>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         <PayrollFilesEntry />
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
@@ -91,7 +129,7 @@ export function ClientDashboard(): ReactElement {
             icon={<Users className="h-5 w-5" />}
           />
           <PortalStat
-            label="YTD Payroll"
+            label="YTD net pay"
             value={loading ? '—' : formatCurrency(stats?.ytd_totals?.net_pay ?? 0)}
             sublabel={loading ? undefined : `${stats?.ytd_totals?.payroll_count ?? 0} pay periods`}
             icon={<CalendarDays className="h-5 w-5" />}
@@ -105,34 +143,10 @@ export function ClientDashboard(): ReactElement {
           <PortalStat
             label="Recent Payrolls"
             value={loading ? '—' : String(stats?.recent_payrolls?.length ?? 0)}
-            sublabel="Committed payrolls ready to review"
+            sublabel="Finalized and imported payrolls"
             icon={<FolderOpen className="h-5 w-5" />}
           />
         </div>
-
-        <Card className="border-primary-200/70 bg-gradient-to-r from-white to-primary-50/60">
-          <CardContent className="py-7">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Current payroll</p>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">
-                  {stats?.current_pay_period ? stats.current_pay_period.period_description : 'No active pay period'}
-                </h2>
-                <p className="mt-2 text-sm text-neutral-600">
-                  {stats?.current_pay_period
-                    ? `Pay date ${new Date(stats.current_pay_period.pay_date).toLocaleDateString()} • ${stats.current_pay_period.employee_count} employees • ${formatCurrency(stats.current_pay_period.total_net)} net`
-                    : 'When a pay period is available, you can review it here and download payroll reports.'}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <Button variant="secondary" onClick={() => navigate('/documents')}>
-                  Upload Documents
-                </Button>
-                <Button onClick={() => navigate('/reports')}>Open Reports</Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           <QuickLink
@@ -163,15 +177,15 @@ export function ClientDashboard(): ReactElement {
             <CardContent className="space-y-3">
               {stats.recent_payrolls.map((payroll) => (
                 <button
-                  key={payroll.id}
+                  key={payroll.key ?? payroll.id}
                   type="button"
-                  onClick={() => navigate(payRunHref(payroll.id))}
+                  onClick={() => navigate(payRunHref(payroll.id, payroll.record_type === 'imported'))}
                   className="flex w-full flex-wrap items-start justify-between gap-2 rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary-200 hover:bg-primary-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                 >
                   <div className="min-w-0">
                     <p className="font-medium text-neutral-900">{payroll.period_description}</p>
                     <p className="text-sm text-neutral-500">
-                      {new Date(payroll.pay_date).toLocaleDateString()} • {payroll.employee_count} employees
+                      {formatDate(payroll.pay_date)} · {payroll.employee_count} employees · {clientPayrollStatus(payroll.record_type === 'imported' ? 'locked' : 'committed')}
                     </p>
                   </div>
                   <p className="font-semibold text-success-600">{formatCurrency(payroll.total_net)}</p>
