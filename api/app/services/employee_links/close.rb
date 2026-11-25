@@ -48,8 +48,9 @@ module EmployeeLinks
       return link unless link.active?
 
       years = former_access_years(link.company)
-      access_until = former_access_deadline(link.company, termination_date, years: years)
-      link.update!(status: "former", former_at: now, former_access_until: access_until)
+      profile_until = former_access_deadline(link.company, termination_date, years: years)
+      access_until = EmployeeDocuments::TaxFormRetention.access_until(link.employee, profile_until: profile_until)
+      link.update!(status: "former", former_at: now, former_access_until: access_until, former_profile_access_until: profile_until)
       EmployeeLinks.side_effect_audit do
         EmployeeLinks.audit!(link, "made_former", user: actor, actor: audit_actor, request: request,
           metadata: { termination_date: termination_date.iso8601, former_access_until: access_until.iso8601,

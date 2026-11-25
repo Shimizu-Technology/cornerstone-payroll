@@ -52,7 +52,7 @@ RSpec.describe "View-only support sessions", type: :request do
     target.client_operating_profiles.create!(
       effective_on: PayrollBusinessClock.today, version: 1, offering: "payroll_service", hours_source: "manual",
       employee_portal_enabled: true, options: {
-        subdomain_enabled: true, employee_portal: { features: { stubs: true, profile_requests: true, delivery_consent: true } }
+        subdomain_enabled: true, employee_portal: { features: { stubs: true, profile_requests: true, delivery_consent: true, tax_forms: true } }
       }
     )
     TenantSubdomainRegistry.invalidate!
@@ -265,6 +265,119 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(response).to have_http_status(:no_content)
     get "/api/v1/employee/context", headers: headers
     expect(response).to have_http_status(:not_found)
+  end
+
+  def posted_tax_copy(person = employee, bytes: "%PDF-1.4 fixture")
+    EmployeeDocument.create!(company: person.company, employee: person, tax_year: 2026, revision: 1, status: "posted",
+      storage_key: "employee_documents/spec/w2gu-#{person.id}.pdf", sha256: Digest::SHA256.hexdigest(bytes), posted_at: Time.current)
+  end
+
+  it "lists, shows and downloads only the selected employee's frozen W-2GU copy" do
+    enable_employee_surface!
+    bytes = "%PDF-1.4 fixture"
+    form = posted_tax_copy(bytes: bytes)
+    other = posted_tax_copy(create(:employee, company: company))
+    token = token_for(employee, type: "employee")
+    headers = viewing(token, azp: employee_origin)
+    storage = instance_double(R2StorageService)
+    allow(R2StorageService).to receive(:new).and_return(storage)
+    expect(storage).to receive(:download).with(form.storage_key).once.and_return(bytes)
+
+    expect do
+      get "/api/v1/employee/tax_forms", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("tax_forms").pluck("id")).to eq([ form.id.to_s ])
+
+      get "/api/v1/employee/tax_forms/#{form.id}", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include("tax_year" => 2026, "pdf_available" => true, "available_through" => "2027-10-15")
+
+      get "/api/v1/employee/tax_forms/#{form.id}/pdf", headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.body).to eq(bytes)
+      expect(response.headers["Cache-Control"]).to eq("no-store")
+
+      get "/api/v1/employee/tax_forms/#{other.id}/pdf", headers: headers
+      expect(response).to have_http_status(:not_found)
+    end.not_to have_enqueued_job
+
+    expect(form.reload).to have_attributes(status: "posted", revision: 1)
+    expect(EmployeeDocument.count).to eq(2)
+    expect(EmployeeDocumentNotice.count).to eq(0)
+    expect(EmployeeAccountLink.count).to eq(0)
+    audits = AuditLog.where("action LIKE 'employee_tax_form#%'").order(:id)
+    expect(audits.pluck(:action)).to eq(%w[employee_tax_form#listed employee_tax_form#viewed employee_tax_form#pdf_downloaded])
+    expect(audits.reorder(nil).distinct.pluck(:user_id, :real_user_id, :view_as_grant_id)).to eq([ [ staff.id, staff.id, ViewAsGrant.last.id ] ])
+    expect(audits.map { |row| row.metadata.fetch("employee_id") }.uniq).to eq([ employee.id ])
+  end
+
+  it "discards downloaded W-2GU bytes if the support grant expires during the storage read" do
+    freeze_time do
+      enable_employee_surface!
+      bytes = "%PDF-1.4 fixture"
+      form = posted_tax_copy(bytes: bytes)
+      token = token_for(employee, type: "employee")
+      storage = instance_double(R2StorageService)
+      allow(R2StorageService).to receive(:new).and_return(storage)
+      allow(storage).to receive(:download).with(form.storage_key) do
+        travel 31.minutes
+        bytes
+      end
+
+      get "/api/v1/employee/tax_forms/#{form.id}/pdf", headers: viewing(token, azp: employee_origin)
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.body).to be_empty
+      expect(AuditLog.exists?(action: "employee_tax_form#pdf_downloaded")).to be(false)
+    end
+  end
+
+  [ false, true ].each do |linked|
+    it "keeps W-2GU access open after the profile cutoff for a #{linked ? 'linked' : 'synthetic'} former context" do
+      travel_to(Time.find_zone!("Pacific/Guam").local(2027, 1, 15, 12)) do
+        enable_employee_surface!
+        company.update!(w2_delivery: "mailed")
+        employee.update!(status: "inactive", termination_date: Date.new(2024, 12, 31))
+        form = posted_tax_copy
+        if linked
+          login = create(:user, role: :portal_employee, company: company)
+          link = EmployeeAccountLink.create!(employee: employee, company: company, user: login, status: "active")
+          TenantScope.with_company(company.id) do
+            EmployeeLinks::Close.make_former!(link, termination_date: employee.termination_date, actor: staff)
+          end
+        end
+        headers = viewing(token_for(employee, type: "employee"), azp: employee_origin)
+
+        get "/api/v1/employee/context", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body).to include("w2_delivery" => "mailed", "status" => "former", "former_access_until" => "2027-10-15")
+        expect(response.parsed_body.fetch("features")).to include("profile_requests" => false, "tax_forms" => true)
+
+        get "/api/v1/employee/profile", headers: headers
+        expect(response).to have_http_status(:not_found)
+
+        get "/api/v1/employee/tax_forms", headers: headers
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body.fetch("tax_forms").pluck("id")).to eq([ form.id.to_s ])
+      end
+    end
+  end
+
+  it "downloads a posted pay stub through the same grant-aware PDF check" do
+    enable_employee_surface!
+    period = create(:pay_period, :committed, company: company)
+    item = create(:payroll_item, pay_period: period, employee: employee)
+    bytes = "%PDF-1.4 fixture stub"
+    stub = EmployeeDocument.create!(company: company, payroll_item: item, revision: 1, status: "posted",
+      storage_key: "employee_documents/spec/stub.pdf", sha256: Digest::SHA256.hexdigest(bytes), posted_at: Time.current)
+    storage = instance_double(R2StorageService)
+    allow(R2StorageService).to receive(:new).and_return(storage)
+    expect(storage).to receive(:download).with(stub.storage_key).and_return(bytes)
+
+    get "/api/v1/employee/statements/#{stub.id}/pdf", headers: viewing(token_for(employee, type: "employee"), azp: employee_origin)
+
+    expect(response).to have_http_status(:ok)
+    expect(response.body).to eq(bytes)
   end
 
   it "reads an unlinked employee's delivery consent status without changing it" do

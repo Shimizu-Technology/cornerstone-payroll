@@ -6,7 +6,7 @@ module Api
       class ProfileBaseController < BaseController
         include RecentVerification
 
-        before_action :require_profile_access!, :load_employee
+        before_action :require_profile_access!, :require_profile_window!, :load_employee
         before_action :require_active_link!, if: :profile_write?
         around_action :with_profile_write, if: :profile_write?
 
@@ -33,6 +33,12 @@ module Api
         def require_profile_access!
           response.set_header("Cache-Control", "no-store")
           head :not_found unless CompanyFeatures.for(current_company).employee_portal_feature?(:profile_requests)
+        end
+
+        # A former link's profile closes at its original cutoff, even while a
+        # posted W-2GU copy keeps tax forms and stubs open longer.
+        def require_profile_window!
+          head :not_found unless employee_access_context.profile_access_open?
         end
 
         def load_employee

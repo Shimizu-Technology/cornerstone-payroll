@@ -4887,34 +4887,14 @@ module Api
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
-        # The report, sign-off and filing decision one download is drawn from.
-        # final: unwatermarked copies are allowed (never in a test workspace).
+        # The report, sign-off and filing decision one download is drawn from
+        # (W2GuOfficialCopies.snapshot, shared with the employee app's posting).
         def w2_official_copies_snapshot(company, year)
-          responsibility = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
-          report = W2GuAggregator.new(company, year).generate if responsibility&.responsible_party == "cornerstone"
-          fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call if report
-          # Read after the fingerprint, so a sign-off change while it was
-          # computed is seen. The callers hold the company lock, which
-          # mark-ready and preflight take to change the sign-off.
-          readiness = W2FilingReadiness.find_by(company_id: company.id, year: year)
-          {
-            cornerstone_files: report.present?,
-            report: report,
-            readiness: readiness,
-            fingerprint: fingerprint,
-            # Covers what the fingerprint doesn't, such as the employer's
-            # name and address and middle names.
-            input_revision: YearEnd::InputRevision.for(company.id, year)[company.id],
-            final: report.present? && !company.practice_copy? &&
-              W2GuOfficialCopies.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
-          }
+          W2GuOfficialCopies.snapshot(company, year)
         end
 
-        # What must not change between the snapshot and the finished file.
         def w2_official_copies_signature(snapshot)
-          readiness = snapshot[:readiness]
-          snapshot.slice(:cornerstone_files, :fingerprint, :input_revision, :final)
-            .merge(readiness: readiness && [ readiness.status, readiness.ready_fingerprint ])
+          W2GuOfficialCopies.snapshot_signature(snapshot)
         end
 
         # Writes the download's audit entry, or refuses the file when it can't:

@@ -3,7 +3,7 @@
 # The read interface shared with EmployeeAccountLink. A worker without a
 # login needs no synthetic database row, even when support views a former job.
 class ViewAsEmployeeContext
-  attr_reader :employee, :company, :link, :status, :former_access_until
+  attr_reader :employee, :company, :link, :status, :former_access_until, :former_profile_access_until
 
   delegate :id, :user, to: :link, allow_nil: true
   delegate :id, to: :company, prefix: true
@@ -39,9 +39,18 @@ class ViewAsEmployeeContext
     @link = link
     @status = employee.active? && !link&.former? ? "active" : "former"
     @former_access_until = link&.former_access_until
+    @former_profile_access_until = link&.former_profile_access_until
     if former? && @former_access_until.nil? && employee.termination_date
-      @former_access_until = EmployeeLinks::Close.former_access_deadline(company, employee.termination_date)
+      @former_profile_access_until = EmployeeLinks::Close.former_access_deadline(company, employee.termination_date)
+      @former_access_until = EmployeeDocuments::TaxFormRetention.access_until(employee, profile_until: @former_profile_access_until)
     end
+  end
+
+  def profile_access_open?(now = Time.current)
+    return true unless former?
+
+    cutoff = former_profile_access_until || former_access_until
+    cutoff.present? && cutoff > now
   end
 
   def former?
