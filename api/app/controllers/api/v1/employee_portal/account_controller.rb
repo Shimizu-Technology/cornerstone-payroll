@@ -29,8 +29,11 @@ module Api
         def claim
           return render_write_maintenance if WriteMaintenance.enabled?
 
+          terms_version = require_current_employee_terms
+          return unless terms_version
+
           link_check_started!
-          link = EmployeeLinks::Claim.call(user: @current_user, **link_check_params, azp: azp, request: request)
+          link = EmployeeLinks::Claim.call(user: @current_user, **link_check_params, azp: azp, request: request, terms_version: terms_version)
           response.headers["Cache-Control"] = "no-store"
           unless link
             wait_for_response_floor
