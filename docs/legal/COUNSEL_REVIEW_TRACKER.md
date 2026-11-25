@@ -28,3 +28,12 @@ The demo company uses the same draft wording, so it can be tested end to end bef
 - Build plan: `docs/MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md` (§3 gates, §4 M4-6, M4-8, §8a)
 - Demo company plan: `docs/DEMO_COMPANY_PLAN_2026-11-25.md`
 - Go-live runbook (where each item gates a step): `docs/rollout/M4_GO_LIVE_RUNBOOK.md` §1 and G1
+
+## Paper follow-up after an undeliverable tax form notice
+
+Confirm the Guam-specific requirements for Form W-2GU, including whether a
+mailed availability notice alone suffices and how a verified corrected address
+affects the obligation. Pending counsel review, staff should mail the paper
+form and its availability notice within 30 calendar days of the
+undeliverable event. The app keeps the employee's consent and records mailing
+through the Year-end checklist. See [26 CFR 31.6051-1(j)(5)(ii)](https://www.govinfo.gov/content/pkg/CFR-2025-title26-vol17/pdf/CFR-2025-title26-vol17-sec31-6051-1.pdf).

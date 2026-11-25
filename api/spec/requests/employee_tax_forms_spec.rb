@@ -41,6 +41,29 @@ RSpec.describe "Employee tax forms", type: :request do
     [ employee, coworker ].each { |person| pay(person, Date.new(2026, 3, 6)) }
   end
 
+  it "marks an overdue paper copy mailed once and records the staff actor" do
+    today = PayrollBusinessClock.today
+    copy = nil
+    TenantScope.as_system(reason: "Spec creates a posted copy with paper follow-up") do
+      copy = EmployeeDocument.create!(company: company, employee: employee, tax_year: 2026, revision: 1,
+        storage_key: "employee_documents/test/copy.pdf", sha256: "a" * 64, posted_at: 32.days.ago)
+      copy.notices.create!(company: company, employee: employee, kind: "w2gu_available", status: "sent",
+        delivery_status: "bounced", paper_bounced_on: today - 31, paper_due_on: today - 1)
+    end
+
+    get "/api/v1/admin/employee_tax_forms", headers: staff_headers, params: { year: 2026 }
+    expect(response.parsed_body.dig("documents", 0, "paper_follow_up", "status")).to eq("overdue")
+
+    2.times do
+      post "/api/v1/admin/employee_tax_forms/#{copy.id}/mark_paper_mailed", headers: staff_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("document", "paper_follow_up")).to include(
+        "status" => "mailed", "mailed_on" => today.iso8601, "mailed_by" => staff.name)
+    end
+    audit = AuditLog.where(action: "employee_tax_forms#paper_mailed").sole
+    expect(audit).to have_attributes(record_id: copy.id, user_id: staff.id)
+  end
+
   def enable_tax_forms!(target, tax_forms: true, profile_requests: false)
     target.client_operating_profiles.where(effective_on: PayrollBusinessClock.today).delete_all
     target.client_operating_profiles.create!(

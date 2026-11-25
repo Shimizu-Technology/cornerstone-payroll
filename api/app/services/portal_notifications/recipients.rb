@@ -76,6 +76,10 @@ module PortalNotifications
         end
 
         case subject
+        when EmployeeDocumentNotice
+          event.event_type == "tax_form_paper_required" && subject.company_id == event.company_id &&
+            subject.paper_due_on.present? && subject.paper_mailed_on.nil? &&
+            CompanyFeatures.for(event.company).employee_portal_feature?(:tax_forms)
         when ClientDocument then !subject.archived? && (event.audience == "staff" || subject.visible_to_client?)
         when ClientPortalThread, EmployeeChangeRequest, EmployeeContactChangeToConfirm, PayrollSubmissionPeriod, PayPeriod then subject.company_id == event.company_id
         else false
