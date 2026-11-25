@@ -119,6 +119,7 @@ RSpec.describe Rack::Attack do
       [ "employee/activation_ip", :post, "/api/v1/employee/activate.json", 150, 900 ],
       [ "employee/activation_token", :post, "/api/v1/employee/invitations/activate", 5, 900 ],
       [ "employee/pdf", :get, "/api/v1/employee/pay_stubs/1/pdf", 15, 60 ],
+      [ "employee/pdf", :get, "/api/v1/employee/statements/qb-1/pdf", 15, 60 ],
       [ "kiosk/ip", :post, "/api/v1/kiosk/punches", 60, 60 ]
     ].each do |throttle, method, path, limit, period|
       it "enforces #{throttle} and logs and counts each 429" do

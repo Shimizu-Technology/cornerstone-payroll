@@ -65,6 +65,10 @@ Rails.application.routes.draw do
 
       namespace :employee, module: :employee_portal do
         get :context, to: "context#show"
+        get :help, to: "help#show", format: false
+        resources :statements, only: [ :index, :show ], format: false do
+          get :pdf, on: :member
+        end
         post :activation, to: "activations#create", format: false
         get :links, to: "account#links", format: false
         post "links/claim", to: "account#claim", format: false
