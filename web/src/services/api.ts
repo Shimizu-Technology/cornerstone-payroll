@@ -4170,6 +4170,8 @@ export interface CompanyListItem {
   payroll_environment: 'live' | 'migration_rehearsal';
   test_workspace?: boolean;
   practice_portal?: boolean;
+  /** The employee app switch's company rule: an active live client or demo company. */
+  employee_app_switch_eligible?: boolean;
   test_workspace_purpose?: 'sandbox' | 'migration_rehearsal' | 'training_replay' | 'backup_snapshot' | null;
   test_workspace_purpose_label?: string;
   test_workspace_manifest?: Record<string, unknown>;

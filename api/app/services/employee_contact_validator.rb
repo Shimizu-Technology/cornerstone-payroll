@@ -206,7 +206,10 @@ class EmployeeContactValidator
     end
 
     def contact_details_context(company:)
-      flagged = marked_placeholder_emails(organization_id: company.organization_id)
+      # A demo never sees the organization's private placeholder list, so a
+      # demo record's status can't reveal which addresses are marked.
+      hide_private = company.demo?
+      flagged = hide_private ? Set.new : marked_placeholder_emails(organization_id: company.organization_id)
       company_email_counts = Employee.where(company_id: company.id)
         .where(present_node(Employee.arel_table[:email]))
         .group(normalized_email_node)
@@ -214,7 +217,8 @@ class EmployeeContactValidator
 
       {
         flagged_emails: flagged,
-        company_email_counts: company_email_counts
+        company_email_counts: company_email_counts,
+        private_placeholders_hidden: hide_private
       }
     end
 
@@ -234,7 +238,8 @@ class EmployeeContactValidator
       shared_count = normalized_email.present? ? company_email_counts.fetch(normalized_email, 0).to_i : 0
       email_issue = if normalized_email.blank?
         nil
-      elsif placeholder_email?(normalized_email, organization_id: employee.company&.organization_id, marked_placeholders: flagged_emails)
+      elsif !ctx[:private_placeholders_hidden] &&
+          placeholder_email?(normalized_email, organization_id: employee.company&.organization_id, marked_placeholders: flagged_emails)
         "placeholder"
       elsif structural_placeholder_email?(normalized_email)
         "placeholder_pattern"
@@ -368,12 +373,14 @@ class EmployeeContactValidator
       elsif !DemoOutbound.contact_email_allowed?(@company, normalized_email)
         # A demo contact may only be replaced with an allow-listed or
         # non-delivering address, so a later notice can't leave the firm.
-        # This runs before the organization's marked placeholders so a demo
-        # never reveals that list; only the built-in placeholder patterns,
-        # which hold no client data, are named as not a real email.
+        # A demo never consults the organization's marked or configured
+        # placeholders (see private_placeholders_hidden?); only the built-in
+        # placeholder patterns, which hold no client data, are named as not
+        # a real email.
         email_error_code = self.class.structural_placeholder_email?(normalized_email) ? "placeholder_email" : "recipient_not_allowed"
         add_error(errors, :email, Company::DEMO_RECIPIENT_REFUSED_MESSAGE)
-      elsif self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
+      elsif !private_placeholders_hidden? &&
+          self.class.placeholder_email?(normalized_email, organization_id: @company&.organization_id, marked_placeholders: @flagged_emails)
         email_error_code = @source == "employee" ? "personal_email_required" : "placeholder_email"
         add_error(errors, :email, @source == "employee" ? EMPLOYEE_PERSONAL_EMAIL_ERROR :
           "cannot be a placeholder or generic inbox address; enter the employee's own email")
@@ -431,6 +438,15 @@ class EmployeeContactValidator
   end
 
   private
+
+  # A demo company, or a login that belongs to one, must not be able to
+  # learn which addresses the organization marked as placeholders: that list
+  # is private firm data. Only the built-in patterns apply there.
+  def private_placeholders_hidden?
+    return @private_placeholders_hidden if defined?(@private_placeholders_hidden)
+
+    @private_placeholders_hidden = DemoOutbound.demo_target?(@company, @actor)
+  end
 
   def add_error(errors, field, message)
     errors[field] ||= []

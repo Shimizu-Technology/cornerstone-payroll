@@ -38,8 +38,14 @@ module Api
 
           company_ids_provided = permitted.key?(:company_ids)
           company_ids = permitted.delete(:company_ids)
-          if requested_role == "client" && normalize_company_ids(company_ids).empty?
-            # Without a client the login could sign in but open nothing.
+          # An invite that leaves out company_ids has always made the
+          # inviter's company the client's home company, which the access
+          # model falls back to. Keep that for a live, active client company;
+          # refuse only when no client can be determined, since the login
+          # could then sign in but open nothing. The web form always sends an
+          # explicit selection.
+          if requested_role == "client" && normalize_company_ids(company_ids).empty? &&
+              (company_ids_provided || !home_company_fallback_client?)
             return render json: {
               error: "Choose at least one client for a client portal user.",
               code: "client_required"
@@ -458,6 +464,15 @@ module Api
 
             value.to_i
           end.uniq
+        end
+
+        # The inviter's own company, when it is a live, active client company
+        # in their firm that they can assign.
+        def home_company_fallback_client?
+          company = current_user.company
+          company.present? && company.active? && company.live_payroll? &&
+            company.organization_id == current_user.organization_id &&
+            assignable_company_ids.include?(company.id)
         end
 
         def assignable_company_ids

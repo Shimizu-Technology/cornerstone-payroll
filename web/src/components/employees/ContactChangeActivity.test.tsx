@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ContactChangeActivity } from './ContactChangeActivity';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), confirmAll: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), confirm: vi.fn(), confirmAll: vi.fn() }));
 vi.mock('@/services/api', () => ({ staffEmployeeContactChangesApi: api }));
 const auth = vi.hoisted(() => ({ capabilities: [] as string[] }));
 vi.mock('@/contexts/AuthContext', () => ({
@@ -70,4 +70,30 @@ it('still shows other load errors as errors', async () => {
 
   expect(await screen.findByText('The server could not complete this request.')).toBeTruthy();
   expect(screen.queryByText(/aren't turned on/)).toBeNull();
+});
+
+it.each([
+  ['Confirmed on payroll', () => api.confirm],
+  ['Confirm all', () => api.confirmAll],
+])('shows the turned-off message when %s finds updates were switched off', async (label, action) => {
+  api.list.mockResolvedValue({
+    data: [{
+      id: 9, employee_id: 1, employee_name: 'Example Worker', change_kind: 'contact',
+      before_values: {}, after_values: { phone: '555-0100' }, created_at: '2026-11-25T00:00:00Z',
+    }],
+    meta: { current_page: 1, total_pages: 1, total_count: 1, through_id: 9 },
+  });
+  action().mockRejectedValue(featureOffError());
+  render(<MemoryRouter><ContactChangeActivity staffCompanyId={2} companyName="Example Bakery" /></MemoryRouter>);
+  await screen.findByText('Example Worker');
+
+  fireEvent.click(screen.getByRole('button', { name: label }));
+  if (label === 'Confirm all') fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirm all' }));
+
+  expect(await screen.findByText("Employee contact and address updates aren't turned on for Example Bakery.")).toBeTruthy();
+  expect(screen.queryByText(/could not be found/)).toBeNull();
+  expect(screen.queryByText('Example Worker')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Confirmed on payroll' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Confirm all' })).toBeNull();
+  expect(screen.queryByRole('dialog')).toBeNull();
 });

@@ -77,8 +77,16 @@ export function ContactChangeActivity({ staffCompanyId, companyName }: { staffCo
       setReload((value) => value + 1);
       setConfirmAllOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not confirm these changes.');
       setConfirmAllOpen(false);
+      // Updates were switched off after this list loaded: show the same
+      // turned-off message and drop the stale rows and controls.
+      if (apiErrorCode(err) === 'feature_off') {
+        setRows([]);
+        setMeta(undefined);
+        setFeatureOff(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Could not confirm these changes.');
+      }
     } finally {
       setSaving(false);
     }
