@@ -29,7 +29,7 @@ module Api
           snapshot = W2GuOfficialCopies.snapshot(company, year) if W2GuOfficialCopies.supported_tax_year?(year)
           blocker = posting_blocker(company, year, snapshot)
           documents = EmployeeDocument.tax_forms.where(company_id: company.id, tax_year: year)
-            .includes(:employee, :withdrawn_by, :notices).order(:employee_id, revision: :desc, id: :desc)
+            .includes(:employee, :withdrawn_by, notices: :paper_mailed_by).order(:employee_id, revision: :desc, id: :desc)
           @current_fingerprint = snapshot&.dig(:fingerprint)
           render json: {
             tax_year: year,
@@ -93,6 +93,30 @@ module Api
           render json: { document: document_payload(outcome) }
         end
 
+        # POST /api/v1/admin/employee_tax_forms/:id/mark_paper_mailed
+        def mark_paper_mailed
+          return head :not_found unless DOCUMENT_ID.match?(params[:id].to_s)
+
+          company = current_company
+          skip_default_audit_log!
+          document = company.with_lock do
+            revalidate_current_company_write_access!(company: company, capability: CAPABILITY)
+            copy = EmployeeDocument.tax_forms.find_by(company_id: company.id, id: params[:id])
+            notice = copy&.notices&.lock&.find_by(kind: EmployeeDocuments::TaxFormNotice::KIND)
+            next unless notice&.paper_due_on
+
+            unless notice.paper_mailed_on
+              date = PayrollBusinessClock.today
+              notice.update!(paper_mailed_on: date, paper_mailed_by: current_user)
+              audit!(company, "paper_mailed", record: copy, metadata: { notice_id: notice.id, mailed_on: date.iso8601 })
+            end
+            copy
+          end
+          return head :not_found unless document
+
+          render json: { document: document_payload(document) }
+        end
+
         private
 
         # nil when posting can run now. Reads the W-2 sign-off as the staff
@@ -131,11 +155,22 @@ module Api
             # The year's W-2 inputs no longer match the ones this copy was drawn
             # from: staff decide whether to withdraw it for a corrected form.
             inputs_changed_since_posting: inputs_changed?(document),
+            paper_follow_up: paper_follow_up_payload(notice),
             notice: notice && {
               status: notice.status, skip_reason: notice.skip_reason, sent_at: notice.sent_at&.iso8601,
               delivery_status: notice.delivery_status, bounce_type: notice.bounce_type,
               delivery_event_at: notice.delivery_event_at&.iso8601
             }
+          }
+        end
+
+        def paper_follow_up_payload(notice)
+          return unless notice&.paper_due_on
+
+          {
+            status: notice.paper_follow_up_state, bounced_on: notice.paper_bounced_on.iso8601,
+            due_on: notice.paper_due_on.iso8601, mailed_on: notice.paper_mailed_on&.iso8601,
+            mailed_by: notice.paper_mailed_by&.name
           }
         end
 
