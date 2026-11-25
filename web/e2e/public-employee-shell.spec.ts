@@ -105,11 +105,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await snap(page, `${tag}-03-home`);
 
       const nav = page.getByRole('navigation', { name: 'Main' });
-      const wide = viewport.width >= 600;
       const tabs = [
         { label: 'Home', path: '/', heading: 'Welcome', text: 'Your latest pay will show here' },
         { label: 'Pay', path: '/pay', heading: 'Pay stubs', text: 'Your pay stubs will show here' },
-        { label: wide ? 'Tax forms' : 'Taxes', path: '/taxes', heading: 'Tax forms', text: 'Your tax forms will show here' },
+        { label: 'Tax forms', path: '/taxes', heading: 'Tax forms', text: 'Your tax forms will show here' },
         { label: 'My info', path: '/my-info', heading: 'My info', text: 'Your contact details will show here' },
         { label: 'Help', path: '/help', heading: 'Help', text: 'Questions about your pay or this app?' },
       ];
@@ -127,7 +126,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       }
 
       await expect(page.getByRole('main')).not.toContainText('Cornerstone');
-      await nav.getByRole('link', { name: wide ? 'Tax forms' : 'Taxes' }).click();
+      await nav.getByRole('link', { name: 'Tax forms' }).click();
       await page.reload();
       await expect(page).toHaveURL(/\/taxes$/);
       await expect(page.getByRole('heading', { level: 1, name: 'Tax forms' })).toBeVisible();
@@ -331,6 +330,7 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       const latest = page.getByRole('region', { name: 'Latest pay' });
       const year = page.getByRole('region', { name: 'This year so far' });
       const signOut = page.getByRole('banner').getByRole('button', { name: 'Sign out' });
+      const account = page.getByRole('banner').getByRole('button', { name: /^Account/ });
       if (viewport.width < 600) {
         expect(Math.round(navBox.y + navBox.height)).toBe(viewport.height);
         const home = nav.getByRole('link', { name: 'Home' });
@@ -338,9 +338,15 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
         expect(await home.evaluate((node) => getComputedStyle(node).color)).toBe('rgb(19, 122, 167)');
         await expect(year).toBeHidden();
         await expect(signOut).toBeHidden();
+        await expect(account).toBeVisible();
+        await account.click();
+        await expect(page.getByRole('navigation', { name: 'Account' }).getByRole('button', { name: 'Sign out' })).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(page.getByRole('navigation', { name: 'Account' })).toHaveCount(0);
       } else {
         expect(navBox.y).toBeLessThan(80);
         await expect(signOut).toBeVisible();
+        await expect(account).toBeHidden();
         const [left, right] = [(await latest.boundingBox())!, (await year.boundingBox())!];
         expect(right.x).toBeGreaterThan(left.x + left.width);
         expect(Math.abs(right.y - left.y)).toBeLessThan(2);
