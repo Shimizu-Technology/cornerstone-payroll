@@ -13,7 +13,8 @@ import { useBrand, useEmployeeAuth, useReadySession } from './contexts';
 import { DeliveryConsentSection } from './consent';
 import { addressLines, formatPhone, longDate } from './format';
 import { useSignOut } from './hooks';
-import { Card, Chip, EmpButton, Field, FormMessage, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
+import { SECURITY_PATH } from './security';
+import { Card, Chip, EmpButton, EmpButtonLink, Field, FormMessage, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
 import { isSessionError, useEmployeeData } from './useEmployeeData';
 
 const PHONE_DIGITS = /^\+?[\d\s().-]+$/;
@@ -549,10 +550,17 @@ function PaymentCard({ profile }: { profile: EmployeeProfile }): ReactElement | 
 
 function AccountCard(): ReactElement {
   const signOut = useSignOut();
-  const { state, chooseLink } = useReadySession();
+  const { state, chooseLink, isViewOnly } = useReadySession();
   return (
     <div className="emp-form-buttons">
       {state.links.length > 1 && <EmpButton variant="secondary" onClick={() => chooseLink(null)}>Switch employer</EmpButton>}
+      {/* A support view is someone else's account: no account settings there. */}
+      {!isViewOnly && (
+        <EmpButtonLink variant="secondary" to={SECURITY_PATH}>
+          <ShieldCheck aria-hidden="true" className="size-6" />
+          Sign-in &amp; security
+        </EmpButtonLink>
+      )}
       <EmpButton variant="secondary" className="emp-narrow-button" onClick={() => { void signOut(); }}>
         <LogOut aria-hidden="true" className="size-6" />
         Sign out
