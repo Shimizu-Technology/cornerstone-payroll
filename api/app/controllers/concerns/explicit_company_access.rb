@@ -6,6 +6,8 @@ module ExplicitCompanyAccess
   private
 
   def require_explicit_company_access
+    return if Current.view_as_grant
+
     requested_company = request.headers["X-Company-Id"]
     return if requested_company.nil?
     return unless current_user

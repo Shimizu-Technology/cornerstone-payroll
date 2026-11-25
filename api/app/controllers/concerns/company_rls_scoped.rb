@@ -23,6 +23,8 @@ module CompanyRlsScoped
 
   def in_action_rls_scope(&action)
     return yield unless RlsContextGuard.enabled?
+    return TenantScope.with_company(Current.view_as_grant.company_id, &action) if Current.view_as_grant
+
     return TenantScope.as_system(reason: rls_system_reason, &action) if rls_system_reason
 
     company_id = rls_company_id

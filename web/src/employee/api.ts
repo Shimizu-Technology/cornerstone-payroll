@@ -6,6 +6,7 @@
 // only ever becomes "unavailable" or "access ended", never a reason. The one
 // 403 it reads is two-step sign-in (MfaEnforceable, RecentVerification).
 // Response shapes live in contracts.ts.
+import { SUPPORT_HEADER } from '@/support/grant';
 import {
   accessDay, addressBody, identityBody, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts,
   parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, parseW2GuAccessProof, verificationIdFrom,
@@ -84,6 +85,7 @@ export interface EmployeeApiOptions {
   baseUrl: string;
   /** `fresh` skips Clerk's token cache, so a just-finished reverification counts. */
   getToken: (options?: { fresh?: boolean }) => Promise<string | null>;
+  grantToken?: string;
   fetchImpl?: typeof fetch;
   isOnline?: () => boolean;
 }
@@ -218,7 +220,7 @@ function pathId(value: string): string {
   return value;
 }
 
-export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => fetch(...args), isOnline = () => navigator.onLine }: EmployeeApiOptions) {
+export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (...args) => fetch(...args), isOnline = () => navigator.onLine }: EmployeeApiOptions) {
   const base = parseApiBase(baseUrl);
 
   async function sessionToken(fresh = false): Promise<string> {
@@ -239,7 +241,8 @@ export function createEmployeeApi({ baseUrl, getToken, fetchImpl = (...args) => 
 
     const headers: Record<string, string> = { Accept: accept };
     if (!anonymous) headers.Authorization = `Bearer ${await sessionToken(stepUp)}`;
-    if (linkId !== undefined) headers['X-Employee-Link-Id'] = linkId;
+    if (grantToken) headers[SUPPORT_HEADER] = grantToken;
+    else if (linkId !== undefined) headers['X-Employee-Link-Id'] = linkId;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
 
     let response: Response;

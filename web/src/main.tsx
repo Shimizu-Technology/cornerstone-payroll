@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PostHogProvider } from './providers/PostHogProvider';
 import App from './App.tsx';
+import { supportToken } from './support/grant';
 import { clientSubdomainHost } from './lib/tenant-subdomain';
 import { TenantComingSoon } from './pages/tenant/TenantComingSoon';
 import './index.css';
@@ -14,7 +15,7 @@ createRoot(document.getElementById('root')!).render(
     <StagingContext />
     {tenantHost ? (
       <TenantComingSoon host={tenantHost} />
-    ) : (
+    ) : supportToken ? <App /> : (
       <PostHogProvider>
         <App />
       </PostHogProvider>
@@ -22,7 +23,7 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>
 );
 
-if (!tenantHost && 'serviceWorker' in navigator && !import.meta.env.DEV) {
+if (!tenantHost && !supportToken && 'serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', () => {
     navigator.serviceWorker
       .register('/sw.js')

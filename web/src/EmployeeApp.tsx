@@ -1,6 +1,6 @@
 // Employee surface entry (VITE_APP_SURFACE=employee). Vite resolves `./App`
 // to this file, so none of the staff app is in this bundle.
-import { useEffect, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import { brandFrom, brandStyle, employerBrand, fetchTenantBranding, type EmployeeBrand } from './employee/brand';
 import { ClerkAuthProvider } from './employee/ClerkAuth';
@@ -24,6 +24,9 @@ import { SignInScreen, WelcomeScreen } from './employee/screens';
 import { ActivateScreen, FinishSignUpScreen, LinkCheckScreen, SignedInInvite, SignInFirst, SignUpAccountScreen } from './employee/signup';
 import { TaxesTab } from './employee/taxes';
 import type { ViewOnlyGrant } from './employee/ViewOnlyBanner';
+import { parseLinks } from './employee/api';
+import { supportToken } from './support/grant';
+import { useSupportView } from './support/useSupportView';
 import './employee/employee.css';
 
 const BRANDING_TIMEOUT_MS = 6000;
@@ -68,6 +71,13 @@ function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactEl
   const signOutAsync = useSignOut();
   const signOut = (): void => { void signOutAsync(); };
 
+  if (viewAs && state.status === 'problem') return (
+    <EmployeeShell viewAs={viewAs} showNav={false}>
+      {state.problem === 'ended' || state.problem === 'unavailable'
+        ? <p role="status" className="p-4">This support view is unavailable or has ended.</p>
+        : <ErrorState onRetry={retry} onSignOut={signOut} />}
+    </EmployeeShell>
+  );
   if (state.status === 'problem' && state.problem === 'unavailable') return <UnavailableScreen onRetry={retry} onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'ended') return <AccessEndedScreen onSignOut={signOut} />;
   if (state.status === 'problem' && state.problem === 'signed_out') return <BootScreen />;
@@ -110,6 +120,7 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
   if (!isLoaded) return <BootScreen />;
 
   const path = location.pathname.replace(/\/+$/, '') || '/';
+  if (supportToken) return isSignedIn ? <EmployeeSupportView token={supportToken} /> : <SupportSignIn />;
 
   // The invite links (EmployeeLinks::AppUrl) are /activate, /claim and
   // /reactivate, each with #token=…; Clerk's invitation lands on /sign-up.
@@ -138,6 +149,42 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
     <EmployeeSessionProvider viewOnly={Boolean(viewAs)}>
       <SignedInApp viewAs={viewAs} />
     </EmployeeSessionProvider>
+  );
+}
+
+function SupportSignIn(): ReactElement {
+  const { SignInForm } = useEmployeeAuth();
+  return (
+    <main className="emp-auth emp-auth-top">
+      <p className="mb-4 font-semibold">Sign in with your staff account to open the support view.</p>
+      <SignInForm redirectTo="/" />
+    </main>
+  );
+}
+
+function EmployeeSupportView({ token }: { token: string }): ReactElement {
+  const { getToken } = useEmployeeAuth();
+  const { grant, loadError, endError, ending, end, retry, leave } = useSupportView(API_BASE_URL, getToken, '/');
+  const support = useMemo(() => {
+    const link = parseLinks([grant?.link])[0];
+    return link ? { token, link } : null;
+  }, [grant, token]);
+
+  if (grant && support) return (
+    <EmployeeSessionProvider support={support}>
+      <SignedInApp viewAs={{ name: grant.name, onEnd: () => { void end(); }, ending, error: endError }} />
+    </EmployeeSessionProvider>
+  );
+  return (
+    <main className="emp-auth emp-auth-top space-y-4">
+      <p role="status">{loadError || (grant ? 'This support view is unavailable.' : 'Loading support view…')}</p>
+      {(loadError || grant) && (
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="emp-btn" onClick={retry}>Try again</button>
+          <button type="button" className="emp-btn" onClick={leave}>Leave support view</button>
+        </div>
+      )}
+    </main>
   );
 }
 
