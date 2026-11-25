@@ -51,11 +51,11 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil)
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, w4_profile: w4_election&.profile_attributes, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil)
       {
         "version" => VERSION,
         "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee, rates_on: rates_on) : nil,
-        "employee" => employee_snapshot(employee, w4_election: w4_election).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
+        "employee" => employee_snapshot(employee, w4_profile: w4_profile).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
         "employee_deductions" => deduction_snapshots(employee_deductions),
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
         "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
@@ -166,10 +166,10 @@ class PayrollCalculationContext
       end
     end
 
-    def employee_snapshot(employee, w4_election:)
+    def employee_snapshot(employee, w4_profile:)
       SCALAR_ATTRIBUTES.index_with do |attribute|
-        value = if w4_election && EmployeeW4Election::PROFILE_ATTRIBUTES.include?(attribute.to_sym)
-          w4_election.profile_attributes.fetch(attribute.to_sym)
+        value = if w4_profile&.key?(attribute.to_sym)
+          w4_profile.fetch(attribute.to_sym)
         else
           employee.public_send(attribute)
         end
