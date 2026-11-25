@@ -6,7 +6,7 @@ import { clientPayPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
 vi.mock('@/services/api', () => ({ clientPayPeriodsApi: { approveReview: vi.fn(), requestChanges: vi.fn(), previewPdf: vi.fn() } }));
 vi.mock('@/components/documents/PdfPreview', () => ({ PdfPreview: () => null }));
-const period = { id: 5, status: 'approved', total_gross: 1200, total_net: 1100,
+const period = { id: 5, status: 'approved', can_decide_payroll_review: true, total_gross: 1200, total_net: 1100,
   payroll_review: { id: 11, revision: 2, status: 'pending', published_at: '2026-11-17T00:00:00Z', checksum_short: 'abc123', acknowledgement: 'I approve this exact payroll review revision for processing.' },
 } as PayPeriod;
 const onDone = vi.fn();
@@ -83,4 +83,11 @@ it('offers all pay stubs explicitly and preserves a failed download for retry', 
   expect(await screen.findByText('Download failed. Try again.')).toBeTruthy();
   expect(clientPayPeriodsApi.previewPdf).toHaveBeenCalledWith(5, 3, 11, 'all_stubs');
   expect((screen.getByRole('button', { name: 'All pay stubs (including paper-check employees)' }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('shows the published preview without decision controls when access is read-only', () => {
+  render(<ClientPayrollReview payPeriod={{ ...period, can_decide_payroll_review: false }} companyId={3} onDone={onDone} />);
+  expect(screen.getByRole('button', { name: 'View preview' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
 });
