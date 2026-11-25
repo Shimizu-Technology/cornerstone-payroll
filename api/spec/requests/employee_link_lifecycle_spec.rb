@@ -67,7 +67,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
         "subdomain_slug" => nil, "status" => "active", "former_access_until" => nil } ])
 
       get "/api/v1/employee/context", headers: bearer("user_riley").merge("X-Employee-Link-Id" => link.id.to_s)
-      expect(response).to have_http_status(:no_content)
+      expect(response).to have_http_status(:ok)
       view = AuditLog.where(action: "employee_portal/context#show").order(:id).last
       expect(view).to have_attributes(actor_type: "employee", user_id: pending_user.id, company_id: company.id)
 

@@ -38,7 +38,8 @@ RSpec.describe "Clerk MFA route coverage" do
     expect(clerk_routes).to include(
       "/api/v1/auth/me(.:format)", "/api/v1/companies(.:format)", "/api/v1/cable_ticket(.:format)",
       "/api/v1/employee/context(.:format)", "/api/v1/employee/links", "/api/v1/employee/links/claim",
-      "/api/v1/employee/links/reactivate"
+      "/api/v1/employee/links/reactivate", "/api/v1/employee/help", "/api/v1/employee/statements",
+      "/api/v1/employee/statements/:id", "/api/v1/employee/statements/:id/pdf"
     )
   end
 
