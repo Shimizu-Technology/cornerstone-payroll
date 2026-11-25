@@ -2148,7 +2148,7 @@ export function EmployeeForm() {
                     This W-4 applies to paychecks dated on or after {form.w4_signed_on}, when it was signed. Earlier paychecks use the previous W-4, or default withholding (single, no adjustments) if there isn't one.
                   </p>
                 ))}
-                <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. The effective date controls which paychecks use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
+                <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. Paychecks dated on or after both the effective date and the signed date use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
               </div>
 
               {/* Step 2: Multiple Jobs */}

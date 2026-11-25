@@ -100,6 +100,21 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
     if (target instanceof HTMLDetailsElement) target.open = true;
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });
+    // Lazy panels above the target can still be loading and push it down, so
+    // keep it aligned until they settle or the user starts scrolling.
+    const section = target?.closest('section');
+    if (!target || !section || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => target.scrollIntoView?.({ block: 'start' }));
+    const stop = () => observer.disconnect();
+    observer.observe(section);
+    const timer = window.setTimeout(stop, 3000);
+    const userEvents = ['wheel', 'touchmove', 'keydown', 'pointerdown'] as const;
+    userEvents.forEach((type) => window.addEventListener(type, stop, { passive: true, once: true }));
+    return () => {
+      window.clearTimeout(timer);
+      stop();
+      userEvents.forEach((type) => window.removeEventListener(type, stop));
+    };
   }, [activeTab, location.hash, state.status]);
   if (state.status !== 'ready') return state.fallback;
   const sections = state.sections;

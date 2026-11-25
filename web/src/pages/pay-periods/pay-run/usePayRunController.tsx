@@ -458,9 +458,11 @@ export function usePayRunController({
 
   // The Checks tab mounts only when opened, but the Results FIT-deposit
   // check needs its non-employee checks first. Once the panel reports its
-  // own list, that list wins.
+  // own list, that list wins. A void or check-print refresh while Checks is
+  // still unopened refetches, so the Results warning can't go stale.
   const nonEmployeeChecksPeriodId = loadsNonEmployeeChecks && payPeriod?.status === 'committed'
     && activeCompany?.payroll_environment !== 'migration_rehearsal' ? payPeriod.id : null;
+  const nonEmployeeChecksCorrectionStatus = payPeriod?.correction_status ?? null;
   useEffect(() => {
     if (nonEmployeeChecksPeriodId === null) return;
     let current = true;
@@ -468,7 +470,7 @@ export function usePayRunController({
       .then((response) => { if (current && !nonEmployeeChecksLoadedRef.current) setNonEmployeeChecks(response.non_employee_checks); })
       .catch(() => {});
     return () => { current = false; };
-  }, [nonEmployeeChecksPeriodId]);
+  }, [nonEmployeeChecksPeriodId, nonEmployeeChecksCorrectionStatus, checkPrintRefreshToken]);
 
   const updateHours = (employeeId: number, field: 'regular' | 'overtime', value: number) => {
     if (capturedSourceHoursLocked(payrollItems.find(item => item.employee_id === employeeId))) return;
