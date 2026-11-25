@@ -28,6 +28,7 @@ function SupportForm({ companyId, companyName }: { companyId: number; companyNam
   const [error, setError] = useState('');
   const [targetError, setTargetError] = useState('');
   const [starting, setStarting] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -37,7 +38,7 @@ function SupportForm({ companyId, companyName }: { companyId: number; companyNam
         .catch(() => { if (!abort.signal.aborted) setTargetError('Could not load people for this company.'); });
     }, 200);
     return () => { abort.abort(); window.clearTimeout(timer); };
-  }, [companyId, query]);
+  }, [companyId, query, loadAttempt]);
 
   const request = useStepUpRequest((token: string) => fetch(`${getApiBaseUrl()}/auth/view_as`, {
     method: 'POST', cache: 'no-store', redirect: 'error',
@@ -70,6 +71,9 @@ function SupportForm({ companyId, companyName }: { companyId: number; companyNam
   };
 
   const people = type === 'client' ? targets?.clients : targets?.employees;
+  const retryLoad = () => { setTargetError(''); setTargets(null); setLoadAttempt((attempt) => attempt + 1); };
+  const missing = [!target && 'choose a person', !reason.trim() && 'enter a reason'].filter(Boolean).join(' and ');
+  const missingHint = !starting && missing ? `${missing[0].toUpperCase()}${missing.slice(1)}.` : '';
   return (
     <>
       <Header title="Sign in as" description={companyName} />
@@ -91,17 +95,29 @@ function SupportForm({ companyId, companyName }: { companyId: number; companyNam
             }} />
           </label>
           <label className="block text-sm font-medium">Person
-            <select required className={controlClass} value={target} onChange={(event) => setTarget(event.target.value)}>
-              <option value="">{targetError || (!people ? 'Loading…' : people.length ? 'Select a person' : 'No matching people')}</option>
+            <select required className={controlClass} value={target} aria-invalid={targetError ? true : undefined}
+              aria-describedby={targetError ? 'support-target-error' : undefined} onChange={(event) => setTarget(event.target.value)}>
+              <option value="">{targetError ? 'People not loaded' : !people ? 'Loading…' : people.length ? 'Select a person' : 'No matching people'}</option>
               {people?.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
             </select>
           </label>
+          {targetError && (
+            <div id="support-target-error" role="alert" className="-mt-2 flex flex-wrap items-center gap-3 text-sm text-red-800">
+              <span>{targetError}</span>
+              <Button type="button" variant="outline" size="sm" onClick={retryLoad}>Try again</Button>
+            </div>
+          )}
           <label className="block text-sm font-medium">Reason
             <textarea className={controlClass} rows={3} required maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} />
           </label>
         </fieldset>
         {error && <p role="alert" className="text-sm text-red-800">{error}</p>}
-        <Button type="submit" disabled={starting || !target || !reason.trim()}>{starting ? 'Opening…' : 'Start view-only session'}</Button>
+        <div>
+          <Button type="submit" disabled={starting || !target || !reason.trim()} aria-describedby={missingHint ? 'support-start-hint' : undefined}>
+            {starting ? 'Opening…' : 'Start view-only session'}
+          </Button>
+          {missingHint && <p id="support-start-hint" className="mt-2 text-sm text-neutral-600">{missingHint}</p>}
+        </div>
       </form>
     </>
   );
