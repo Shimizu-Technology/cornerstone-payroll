@@ -92,6 +92,8 @@ class EmployeeAppRollout
 
   def status_of(access)
     return :not_invited unless access
+    # Activation locks are only written while a link is still invited and are
+    # cleared on bind/claim, so an active link never carries one.
     return :locked if access.invited? && access.activation_locked?(@now)
 
     access.status.to_sym
