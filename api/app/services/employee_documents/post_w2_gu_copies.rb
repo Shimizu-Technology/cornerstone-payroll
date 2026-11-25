@@ -14,10 +14,18 @@ module EmployeeDocuments
   #
   # Idempotent: an employee who already has a copy for the year (posted or
   # withdrawn) is skipped, so a rerun posts only what is missing and a
-  # withdrawn copy stays withdrawn until W-2c exists. The PDFs are drawn
-  # outside the company lock; the lock is then taken again (mark-ready and
-  # preflight take it too), the inputs are read again uncached, and nothing
-  # posts if they changed meanwhile.
+  # withdrawn copy stays withdrawn until W-2c exists.
+  #
+  # The PDFs are drawn and uploaded before any lock is held. Then the company
+  # lock (mark-ready and preflight take it too) and a shared lock on the
+  # year's annual tax rules (whose SS wage base is in the fingerprint) are
+  # taken in the payroll lock order, the inputs are read again uncached, and
+  # the rows commit under those locks. If anything changed, nothing posts and
+  # the uploads are removed.
+  #
+  # Each new copy's pending notice row commits with it; after commit the
+  # notice dispatcher sends it (and its sweep retries anything left). A
+  # rerun also adds a pending notice for any posted copy that has none.
   class PostW2GuCopies
     Result = Struct.new(:status, :documents, :problems, keyword_init: true) do
       def posted_count
@@ -54,7 +62,7 @@ module EmployeeDocuments
       report = snapshot[:report]
       copies(report).ensure_fits!
       pdfs = pending_employee_ids(report).index_with { |employee_id| copies(report, employee_id).generate }
-      documents = post!(snapshot, pdfs)
+      documents = with_staged_uploads(pdfs) { |staged| post!(snapshot, staged) }
       return result(:changed) if documents == :changed
 
       result(:posted, documents)
@@ -81,32 +89,58 @@ module EmployeeDocuments
       Array(report[:employees]).map { |row| row[:employee_id] }.reject { |id| done.include?(id) }.sort
     end
 
-    def post!(snapshot, pdfs)
+    # Uploads each copy before the locks, then removes every upload that
+    # didn't end up in a committed row (a change, a rerun that raced this
+    # one, or an error).
+    def with_staged_uploads(pdfs)
+      employees = Employee.where(company_id: @company.id, id: pdfs.keys).index_by(&:id)
+      staged = {}
+      kept = []
+      begin
+        pdfs.each do |employee_id, bytes|
+          employee = employees[employee_id]
+          next unless employee
+
+          staged[employee_id] = FreezePdf.stage(bytes: bytes, source: employee, revision: 1, tax_year: @year)
+        end
+        outcome = yield staged
+        kept = outcome.map(&:storage_key) if outcome.is_a?(Array)
+        outcome
+      ensure
+        staged.each_value { |upload| FreezePdf.remove_uncommitted_object(upload.key) unless kept.include?(upload.key) }
+      end
+    end
+
+    def post!(snapshot, staged)
       @company.with_lock do
+        # Payroll lock order: company, then the year's annual rules.
+        AnnualTaxConfig.where(tax_year: @year).order(:id).lock("FOR SHARE").load
         recheck = ActiveRecord::Base.uncached { W2GuOfficialCopies.snapshot(@company, @year) }
         next :changed if W2GuOfficialCopies.snapshot_signature(recheck) != W2GuOfficialCopies.snapshot_signature(snapshot)
         # Feature or year could have changed while the PDFs were drawn.
         next :changed if blocker
 
         done = documented_employee_ids
-        employees = Employee.where(company_id: @company.id, id: pdfs.keys).order(:id).index_by(&:id)
+        employees = Employee.where(company_id: @company.id, id: staged.keys).order(:id).index_by(&:id)
         posted_at = Time.current
-        documents = pdfs.filter_map do |employee_id, bytes|
+        documents = staged.sort.filter_map do |employee_id, upload|
           employee = employees[employee_id]
           next if employee.nil? || done.include?(employee_id)
 
           # The W-2 inputs the copy was drawn from, so staff can see when
           # the figures change after posting (a copy is never reposted).
           facts = { payroll_facts_sha256: snapshot[:fingerprint], payroll_facts_checked_at: posted_at }
-          document = FreezePdf.call(bytes: bytes, source: employee, tax_year: @year, posted_at: posted_at, revision: 1,
-            payroll_facts: facts) do |key|
-            EmployeeDocument.current_transaction.after_rollback { FreezePdf.remove_uncommitted_object(key) }
-          end
+          document = FreezePdf.record_staged!(upload, source: employee, tax_year: @year, posted_at: posted_at, revision: 1,
+            payroll_facts: facts)
           TaxFormRetention.extend_former_access!(employee: employee, tax_year: @year, actor: @actor, user: @user)
           document
         end
+        # An outer transaction that rolls back takes the rows with it.
+        keys = documents.map(&:storage_key)
+        EmployeeDocument.current_transaction.after_rollback { keys.each { |key| FreezePdf.remove_uncommitted_object(key) } }
         audit!(documents, snapshot) if documents.any?
-        EmployeeDocument.current_transaction.after_commit { enqueue_notices(documents) } if documents.any?
+        unsent = TaxFormNotice.ensure_pending!(company: @company, tax_year: @year)
+        EmployeeDocument.current_transaction.after_commit { DispatchEmployeeTaxFormNoticesJob.perform_later(@company.id) } if unsent.positive?
         documents
       end
     end
@@ -122,10 +156,6 @@ module EmployeeDocuments
           ready_fingerprint: snapshot[:readiness]&.ready_fingerprint
         }
       )
-    end
-
-    def enqueue_notices(documents)
-      documents.each { |document| SendEmployeeTaxFormNoticeJob.perform_later(@company.id, document.id) }
     end
   end
 end

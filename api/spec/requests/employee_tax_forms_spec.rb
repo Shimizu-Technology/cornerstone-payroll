@@ -41,12 +41,12 @@ RSpec.describe "Employee tax forms", type: :request do
     [ employee, coworker ].each { |person| pay(person, Date.new(2026, 3, 6)) }
   end
 
-  def enable_tax_forms!(target, tax_forms: true)
+  def enable_tax_forms!(target, tax_forms: true, profile_requests: false)
     target.client_operating_profiles.where(effective_on: PayrollBusinessClock.today).delete_all
     target.client_operating_profiles.create!(
       effective_on: PayrollBusinessClock.today, version: target.client_operating_profiles.count + 1,
       offering: "payroll_service", hours_source: "manual", employee_portal_enabled: true,
-      options: { "employee_portal" => { "features" => { "tax_forms" => tax_forms } } }
+      options: { "employee_portal" => { "features" => { "tax_forms" => tax_forms, "profile_requests" => profile_requests } } }
     )
     TenantSubdomainRegistry.invalidate!
   end
@@ -192,6 +192,57 @@ RSpec.describe "Employee tax forms", type: :request do
       expect(EmployeeDocument.count).to eq(0)
     end
 
+    it "uploads before taking the locks, holds the annual rules through the commit, and discards uploads when the wage base changes" do
+      rules = create(:annual_tax_config, tax_year: 2026, ss_wage_base: 184_500)
+      final!
+      steps = []
+      record = lambda do |event|
+        sql = event.payload[:sql]
+        steps << :company_lock if sql.match?(/FROM "companies".*FOR UPDATE/)
+        steps << :rules_lock if sql.match?(/FROM "annual_tax_configs".*FOR SHARE/)
+        steps << :insert if sql.include?('INSERT INTO "employee_documents"')
+      end
+      allow(storage).to receive(:upload) { |key, bytes, **| steps << :upload && stored[key] = bytes.dup.b }
+
+      ActiveSupport::Notifications.subscribed(record, "sql.active_record") do
+        expect(EmployeeDocuments::PostW2GuCopies.new(company: company, year: 2026, user: staff).call.status).to eq(:posted)
+      end
+      expect(steps.chunk_while { |a, b| a == b }.map(&:first)).to eq(%i[company_lock upload company_lock rules_lock insert])
+      expect(stored.keys).to match_array(EmployeeDocument.tax_forms.pluck(:storage_key))
+
+      # The SS wage base is in the fingerprint; a change while the copies upload posts nothing.
+      EmployeeDocumentNotice.delete_all
+      EmployeeDocument.delete_all
+      stored.clear
+      allow(storage).to receive(:upload) do |key, bytes, **|
+        stored[key] = bytes.dup.b
+        rules.update_columns(ss_wage_base: 190_000)
+      end
+      expect(EmployeeDocuments::PostW2GuCopies.new(company: company, year: 2026, user: staff).call.status).to eq(:changed)
+      expect(EmployeeDocument.count).to eq(0)
+      expect(stored).to be_empty
+    end
+
+    it "commits a pending notice with each copy, and a rerun recovers a missing one" do
+      final!
+      poster = EmployeeDocuments::PostW2GuCopies.new(company: company, year: 2026, user: staff)
+      expect { poster.call }.to have_enqueued_job(DispatchEmployeeTaxFormNoticesJob).with(company.id)
+      notices = EmployeeDocumentNotice.where(company_id: company.id)
+      expect(notices.pluck(:employee_document_id, :status)).to contain_exactly([ copy_of(employee).id, "pending" ], [ copy_of(coworker).id, "pending" ])
+
+      # The dispatch job was lost and a notice row is gone: posting again restores and queues it.
+      notices.where(employee_document: copy_of(coworker)).delete_all
+      expect { expect(poster.call.documents).to be_empty }.to have_enqueued_job(DispatchEmployeeTaxFormNoticesJob).with(company.id)
+      expect(notices.where(status: "pending").count).to eq(2)
+
+      # The periodic sweep sends what is pending; with notification email off, each is saved as skipped.
+      DispatchEmployeeTaxFormNoticesJob.perform_now
+      expect(notices.reload.pluck(:employee_document_id, :status, :skip_reason)).to contain_exactly(
+        [ copy_of(employee).id, "skipped", "email_delivery_disabled" ], [ copy_of(coworker).id, "skipped", "no_app_access" ]
+      )
+      expect { poster.call }.not_to have_enqueued_job(DispatchEmployeeTaxFormNoticesJob)
+    end
+
     it "is refused while the tax forms switch is off" do
       final!
       enable_tax_forms!(company, tax_forms: false)
@@ -243,6 +294,28 @@ RSpec.describe "Employee tax forms", type: :request do
       expect(audits.map(&:action)).to eq(%w[employee_tax_form#listed employee_tax_form#viewed employee_tax_form#pdf_downloaded])
       expect(audits.map(&:user_id).uniq).to eq([ worker.id ])
       expect(audits.last.metadata).to include("employee_account_link_id" => link.id, "sha256" => mine.sha256, "tax_year" => 2026)
+    end
+
+    it "refuses the PDF when the copy is withdrawn, the link revoked or the switch turned off while storage answers" do
+      mine = copy_of(employee)
+      {
+        withdrawn: -> { mine.update_columns(status: "withdrawn") },
+        revoked: -> { link.update_columns(status: "revoked", revoked_at: Time.current, revoked_reason: "spec") },
+        switch_off: -> { enable_tax_forms!(company, tax_forms: false) }
+      }.each do |name, change|
+        allow(storage).to receive(:download) { |key| change.call && stored[key] }
+        get "/api/v1/employee/tax_forms/#{mine.id}/pdf", headers: employee_headers
+        expect([ name, response.status, response.body ]).to eq([ name, 404, "" ])
+
+        mine.update_columns(status: "posted")
+        link.update_columns(status: "active", revoked_at: nil, revoked_reason: nil)
+        enable_tax_forms!(company)
+      end
+      expect(AuditLog.where(action: "employee_tax_form#pdf_downloaded").count).to eq(0)
+
+      allow(storage).to receive(:download) { |key| stored[key] }
+      get "/api/v1/employee/tax_forms/#{mine.id}/pdf", headers: employee_headers
+      expect(response).to have_http_status(:ok)
     end
 
     it "keeps a coworker's copy out with the same empty 404" do
@@ -378,6 +451,34 @@ RSpec.describe "Employee tax forms", type: :request do
       allow(EmployeeLinks::Close).to receive(:former_access_years).and_return(1)
       EmployeeLinks::Close.make_former!(link, termination_date: Date.new(2026, 1, 15), actor: staff)
       expect(link.reload.former_access_until).to be_within(1.second).of(EmployeeDocuments::TaxFormRetention.available_through(2026))
+      expect(link.former_profile_access_until).to be_within(1.second).of(Time.find_zone!("Pacific/Guam").local(2027, 1, 15).end_of_day)
+    end
+
+    it "keep profile reads to their original cutoff while the copy stays open" do
+      enable_tax_forms!(company, profile_requests: true)
+      final!
+      cutoff = Time.zone.parse("2027-03-01T13:59:59Z")
+      # Made former before the original cutoff was recorded separately.
+      link.update!(status: "former", former_at: Time.current, former_access_until: cutoff)
+      post_copies!
+      expect(link.reload.former_access_until).to be_within(1.second).of(EmployeeDocuments::TaxFormRetention.available_through(2026))
+      expect(link.former_profile_access_until).to eq(cutoff)
+
+      travel_to(Time.zone.parse("2027-02-01T00:00:00Z")) do
+        get "/api/v1/employee/profile", headers: employee_headers
+        expect(response).to have_http_status(:ok), response.body
+        get "/api/v1/employee/context", headers: employee_headers
+        expect(response.parsed_body["features"]).to include("profile_requests" => true, "tax_forms" => true)
+      end
+      travel_to(Time.zone.parse("2027-04-01T00:00:00Z")) do
+        get "/api/v1/employee/profile", headers: employee_headers
+        expect_empty_not_found
+        get "/api/v1/employee/context", headers: employee_headers
+        expect(response.parsed_body["features"]).to include("profile_requests" => false, "tax_forms" => true)
+        expect(forms.fetch("tax_forms").size).to eq(1)
+        get "/api/v1/employee/tax_forms/#{copy_of(employee).id}/pdf", headers: employee_headers
+        expect(response).to have_http_status(:ok)
+      end
     end
   end
 
@@ -425,7 +526,7 @@ RSpec.describe "Employee tax forms", type: :request do
     end
 
     def post_with_notices!
-      perform_enqueued_jobs(only: [ PostEmployeeW2GuCopiesJob, SendEmployeeTaxFormNoticeJob ]) do
+      perform_enqueued_jobs(only: [ PostEmployeeW2GuCopiesJob, DispatchEmployeeTaxFormNoticesJob ]) do
         post "/api/v1/admin/employee_tax_forms/post_copies", headers: staff_headers, as: :json, params: { year: 2026 }
       end
     end
@@ -446,7 +547,7 @@ RSpec.describe "Employee tax forms", type: :request do
       # The coworker has no app link (and no email).
       expect(EmployeeDocumentNotice.find_by!(employee_document: copy_of(coworker))).to have_attributes(status: "skipped", skip_reason: "no_app_access")
 
-      expect { SendEmployeeTaxFormNoticeJob.perform_now(company.id, copy_of(employee).id) }
+      expect { DispatchEmployeeTaxFormNoticesJob.perform_now(company.id) }
         .not_to(change { PortalNotifications::Transport.captured.size })
     end
 
@@ -465,6 +566,33 @@ RSpec.describe "Employee tax forms", type: :request do
       post_with_notices!
       expect(PortalNotifications::Transport.captured).to be_empty
       expect(EmployeeDocumentNotice.find_by!(employee_document: copy_of(employee)).skip_reason).to eq("email_delivery_disabled")
+    end
+
+    it "retries a failed send from the sweep after a pause" do
+      final!
+      allow(PortalNotifications::Transport).to receive(:deliver).and_raise(Timeout::Error)
+      post_with_notices!
+      mine = EmployeeDocumentNotice.find_by!(employee_document: copy_of(employee))
+      expect(mine).to have_attributes(status: "failed", attempts: 1)
+
+      allow(PortalNotifications::Transport).to receive(:deliver).and_call_original
+      DispatchEmployeeTaxFormNoticesJob.perform_now
+      expect(mine.reload).to have_attributes(status: "failed", attempts: 1)
+      travel(DispatchEmployeeTaxFormNoticesJob::RETRY_AFTER + 1.minute) { DispatchEmployeeTaxFormNoticesJob.perform_now }
+      expect(mine.reload).to have_attributes(status: "sent", attempts: 2)
+      expect(PortalNotifications::Transport.captured.size).to eq(1)
+    end
+
+    it "applies a bounce that arrived before the send committed" do
+      ENV["PORTAL_EMAIL_TRANSPORT"] = nil
+      allow(PortalNotifications::Transport).to receive(:configured?).and_return(true)
+      allow(Resend::Emails).to receive(:send).and_return({ "id" => "re_msg_1" })
+      EmployeeDocuments::NoticeDeliveryEvent.store!(event_id: "msg_early", event_type: "email.bounced", message_id: "re_msg_1",
+        status: "bounced", bounce_type: "Permanent", occurred_at: Time.current.iso8601)
+      final!
+      post_with_notices!
+      expect(EmployeeDocumentNotice.find_by!(employee_document: copy_of(employee)))
+        .to have_attributes(status: "sent", provider_message_id: "re_msg_1", delivery_status: "bounced", bounce_type: "Permanent")
     end
 
     it "records the provider id when Resend accepts it" do

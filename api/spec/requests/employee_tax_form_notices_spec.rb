@@ -34,8 +34,23 @@ RSpec.describe "Employee tax form notices", type: :request do
       ENV["RESEND_WEBHOOK_SECRET"] = previous
     end
 
-    def deliver_event(type, email_id: "re_msg_1", bounce: nil, timestamp: Time.current.to_i, key: secret_key, id: "msg_#{SecureRandom.hex(4)}")
-      body = { type: type, created_at: "2027-01-31T10:00:00.000Z", data: { email_id: email_id, bounce: bounce }.compact }.to_json
+    # The shape Resend sends (https://resend.com/docs/dashboard/webhooks/event-types),
+    # recipient addresses included.
+    def resend_payload(type, email_id:, created_at:, bounce: nil)
+      {
+        type: type, created_at: created_at,
+        data: {
+          broadcast_id: nil, created_at: "2027-01-31T09:59:58.123Z", email_id: email_id,
+          from: "Cornerstone Payroll <notices@cornerstone.example>", to: [ "worker.own@example.net" ],
+          cc: [ "copy.person@example.net" ], bcc: [ "hidden.person@example.net" ], reply_to: [ "help.desk@example.net" ],
+          subject: "IMPORTANT TAX RETURN DOCUMENT AVAILABLE", tags: { category: "employee_tax_form_notice" }, bounce: bounce
+        }.compact
+      }
+    end
+
+    def deliver_event(type, email_id: "re_msg_1", bounce: nil, timestamp: Time.current.to_i, key: secret_key, id: "msg_#{SecureRandom.hex(4)}",
+      created_at: "2027-01-31T10:00:00.000Z")
+      body = resend_payload(type, email_id: email_id, created_at: created_at, bounce: bounce).to_json
       signature = Base64.strict_encode64(OpenSSL::HMAC.digest("SHA256", key, "#{id}.#{timestamp}.#{body}"))
       post "/api/v1/integrations/email_events", params: body,
         headers: { "CONTENT_TYPE" => "application/json", "svix-id" => id, "svix-timestamp" => timestamp.to_s,
@@ -89,6 +104,78 @@ RSpec.describe "Employee tax form notices", type: :request do
 
       post "/api/v1/integrations/email_events", params: "[]", headers: { "CONTENT_TYPE" => "application/json" }
       expect(response).to have_http_status(:unauthorized)
+    end
+
+    it "logs none of the payload, and the global filter hides recipient addresses" do
+      TenantScope.as_system(reason: "Spec fixture") { notice_for(employee) }
+      logged = []
+      io = StringIO.new
+      previous_logger = ActionController::Base.logger
+      ActionController::Base.logger = ActiveSupport::Logger.new(io).tap { |logger| logger.level = :debug }
+      ActiveSupport::Notifications.subscribed(->(event) { logged << event.payload[:params] }, "start_processing.action_controller") do
+        deliver_event("email.bounced", bounce: { type: "Permanent", subType: "General", message: "worker.own@example.net does not exist" })
+      end
+      expect(response).to have_http_status(:no_content)
+      expect(logged.sole).to include("type" => "[FILTERED]", "data" => "[FILTERED]")
+      expect(io.string).to include("EmailEventsController#create")
+      [ logged.to_json, io.string ].each do |output|
+        expect(output).not_to include("@example.net", "@cornerstone.example", "IMPORTANT TAX")
+      end
+
+      filter = ActiveSupport::ParameterFilter.new(Rails.application.config.filter_parameters)
+      filtered = filter.filter(resend_payload("email.bounced", email_id: "re_msg_1", created_at: "2027-01-31T10:00:00Z").deep_stringify_keys)
+      expect(filtered.to_json).not_to include("@example.net", "@cornerstone.example")
+      expect(filtered.dig("data", "subject")).to eq("IMPORTANT TAX RETURN DOCUMENT AVAILABLE")
+      # A bare from/to is a date range elsewhere and stays readable.
+      expect(filter.filter("from" => "2026-01-01", "to" => "2026-12-31", "cc" => "a@example.net"))
+        .to eq("from" => "2026-01-01", "to" => "2026-12-31", "cc" => "[FILTERED]")
+    ensure
+      ActionController::Base.logger = previous_logger
+    end
+
+    it "keeps an event that arrives before its notice has the provider id, and the sweep applies it" do
+      notice = TenantScope.as_system(reason: "Spec fixture") { notice_for(employee, message_id: nil) }
+
+      deliver_event("email.bounced", email_id: "re_fast", bounce: { type: "Permanent" }, id: "msg_fast_bounce")
+      expect(response).to have_http_status(:no_content)
+      stored = EmailProviderEvent.sole
+      expect(stored).to have_attributes(event_id: "msg_fast_bounce", provider_message_id: "re_fast", delivery_status: "bounced",
+        bounce_type: "Permanent", applied_at: nil)
+      expect(stored.attributes.values.join(" ")).not_to include("@example.net")
+      expect(reload_notice(notice).delivery_status).to eq("unknown")
+
+      TenantScope.as_system(reason: "Spec: the send commits") { notice.update_columns(provider_message_id: "re_fast") }
+      DispatchEmployeeTaxFormNoticesJob.perform_now
+      expect(reload_notice(notice)).to have_attributes(delivery_status: "bounced", bounce_type: "Permanent")
+      expect(stored.reload.applied_at).to be_present
+      expect(TenantScope.as_system(reason: "Spec reads audits") { AuditLog.where(action: "employee_tax_forms#notice_bounced").count }).to eq(1)
+    end
+
+    it "stores each event once, so a replay changes nothing" do
+      notice = TenantScope.as_system(reason: "Spec fixture") { notice_for(employee) }
+      2.times do
+        deliver_event("email.bounced", bounce: { type: "Permanent" }, id: "msg_replayed")
+        expect(response).to have_http_status(:no_content)
+      end
+      expect(EmailProviderEvent.where(event_id: "msg_replayed").count).to eq(1)
+      expect(reload_notice(notice).delivery_status).to eq("bounced")
+      expect(TenantScope.as_system(reason: "Spec reads audits") { AuditLog.where(action: "employee_tax_forms#notice_bounced").count }).to eq(1)
+    end
+
+    it "never lets an older event overwrite a newer one, and applies stored events oldest first" do
+      notice = TenantScope.as_system(reason: "Spec fixture") { notice_for(employee) }
+      deliver_event("email.delivery_delayed", created_at: "2027-01-31T10:05:00Z")
+      deliver_event("email.delivered", created_at: "2027-01-31T10:00:00Z")
+      expect(reload_notice(notice)).to have_attributes(delivery_status: "delayed", delivery_event_at: Time.zone.parse("2027-01-31T10:05:00Z"))
+
+      # Arriving newest first before the notice has its id, they still apply in order.
+      later = TenantScope.as_system(reason: "Spec fixture") { notice_for(create(:employee, company: company, department: employee.department), message_id: nil) }
+      deliver_event("email.delivered", email_id: "re_later", created_at: "2027-01-31T10:05:00Z")
+      deliver_event("email.delivery_delayed", email_id: "re_later", created_at: "2027-01-31T10:00:00Z")
+      TenantScope.as_system(reason: "Spec: the send commits") { later.update_columns(provider_message_id: "re_later") }
+      EmployeeDocuments::NoticeDeliveryEvent.reconcile!("re_later")
+      expect(reload_notice(later)).to have_attributes(delivery_status: "delivered", delivery_event_at: Time.zone.parse("2027-01-31T10:05:00Z"))
+      expect(EmailProviderEvent.where(provider_message_id: "re_later").pluck(:applied_at)).to all(be_present)
     end
 
     it "is a 404 until the signing secret is configured" do

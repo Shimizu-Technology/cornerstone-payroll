@@ -53,6 +53,9 @@ module Api
 
           bytes = stored_bytes(document)
           return head :service_unavailable unless bytes
+          return head :not_found unless still_servable?(document, feature: :stubs) do |link, current|
+            EmployeeStatements.new(link: link).pdf_document(params[:id])&.id == current.id
+          end
 
           audit!("pdf_downloaded", record: document,
             metadata: { statement_id: params[:id].to_s, revision: document.revision, sha256: document.sha256 })
