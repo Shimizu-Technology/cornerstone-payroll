@@ -279,6 +279,12 @@ export function InvoiceCenter() {
   const { activeCompany, activeOrganizationId, activeOrganizationName, companies, billingCompanyIds } = useCompany();
   const financeReadOnly = isTestWorkspaceCompany(activeCompany);
   const invoiceOrganizationId = activeOrganizationId || user?.organization_id;
+  // A customer's payroll client is copied into the draft only when the
+  // Payroll client selector offers it, so the two always agree.
+  const billableCompanyId = (companyId: number | string | null | undefined) => {
+    const value = String(companyId || '');
+    return value && companies.some((c) => String(c.id) === value && c.organization_id === invoiceOrganizationId && isBillingClient(c, billingCompanyIds)) ? value : '';
+  };
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [recipients, setRecipients] = useState<InvoiceRecipient[]>([]);
   const [profiles, setProfiles] = useState<InvoiceBillingProfile[]>([]);
@@ -1052,7 +1058,7 @@ export function InvoiceCenter() {
           <div className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm font-medium">From<select value={draft.invoice_billing_profile_id} onChange={(e) => { const continuing = profiles.find((p) => String(p.id) === e.target.value)?.numbering_style === 'continuing'; setDraft({ ...draft, invoice_billing_profile_id: e.target.value, ...(!draft.servicePeriodEdited ? continuing && draft.invoice_date ? serviceMonth(draft.invoice_date) : { service_period_start: '', service_period_end: '' } : {}) }); }} className={controlClassName('mt-1')}><option value="">Choose billing profile</option>{activeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>
-              <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => { const customer = recipients.find((r) => String(r.id) === e.target.value); setDraft(withDueDate(customerDefaults({ ...draft, invoice_recipient_id: e.target.value, company_id: !draft.company_id || draft.company_id === String(recipients.find((r) => String(r.id) === draft.invoice_recipient_id)?.company_id || '') ? String(customer?.company_id || '') : draft.company_id }, customer))); }} className={controlClassName('mt-1')}><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
+              <label className="text-sm font-medium">Bill to<select value={draft.invoice_recipient_id} onChange={(e) => { const customer = recipients.find((r) => String(r.id) === e.target.value); setDraft(withDueDate(customerDefaults({ ...draft, invoice_recipient_id: e.target.value, company_id: !draft.company_id || draft.company_id === String(recipients.find((r) => String(r.id) === draft.invoice_recipient_id)?.company_id || '') ? billableCompanyId(customer?.company_id) : draft.company_id }, customer))); }} className={controlClassName('mt-1')}><option value="">Choose customer</option>{recipients.map((recipient) => <option key={recipient.id} value={recipient.id}>{recipient.name}</option>)}</select></label>
               <label className="text-sm font-medium">Payroll client (optional)<select className={controlClassName('mt-1')} value={draft.company_id} onChange={(e) => setDraft({ ...draft, company_id: e.target.value })}><option value="">Unallocated</option>{companies.filter((c) => c.organization_id === invoiceOrganizationId && isBillingClient(c, billingCompanyIds)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
               <label className="text-sm font-medium">Service month<Input className="mt-1" type="month" value={draft.service_period_start.slice(0, 7)} onChange={(e) => { if (e.target.value) setDraft({ ...withPeriod(draft, serviceMonth(`${e.target.value}-01`).service_period_start, serviceMonth(`${e.target.value}-01`).service_period_end), servicePeriodEdited: true }); }} /></label>
               <label className="text-sm font-medium">Service period start<Input className="mt-1" type="date" value={draft.service_period_start} onChange={(e) => setDraft({ ...withPeriod(draft, e.target.value, draft.service_period_end), servicePeriodEdited: true })} /></label>

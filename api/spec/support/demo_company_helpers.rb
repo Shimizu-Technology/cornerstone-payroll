@@ -22,7 +22,7 @@ module DemoCompanyHelpers
     period.update_columns(status: "committed", committed_at: Time.current)
     create(:payroll_item,
       company: company, employee: employee, pay_period: period,
-      gross_pay: gross_pay, net_pay: gross_pay * 0.8, withholding_tax: 150,
+      gross_pay: gross_pay, net_pay: gross_pay.to_d * "0.8".to_d, withholding_tax: 150,
       social_security_tax: 124, employer_social_security_tax: 124,
       medicare_tax: 29, employer_medicare_tax: 29,
       social_security_taxable_wages: gross_pay, social_security_taxable_tips: 0, medicare_taxable_wages: gross_pay,
