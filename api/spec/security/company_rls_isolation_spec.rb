@@ -673,7 +673,7 @@ RSpec.describe "Company RLS", :rls do
                   company: company, user: consents.first.user, employee: consents.last.employee,
                   employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
                   kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
-                  given_at: Time.current, method: "employee_portal_checkbox"
+                  given_at: 1.minute.ago, withdrawn_at: Time.current, method: "employee_portal_checkbox"
                 ).save!(validate: false)
               end
             end.to raise_error(ActiveRecord::InvalidForeignKey)
@@ -683,7 +683,7 @@ RSpec.describe "Company RLS", :rls do
                   company: company, user: consents.first.user, employee: consents.first.employee,
                   employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
                   kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
-                  given_at: Time.current, method: "employee_portal_checkbox"
+                  given_at: 1.minute.ago, withdrawn_at: Time.current, method: "employee_portal_checkbox"
                 ).save!(validate: false)
               end
             end.to raise_error(ActiveRecord::InvalidForeignKey)

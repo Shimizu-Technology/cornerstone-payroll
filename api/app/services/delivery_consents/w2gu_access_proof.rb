@@ -90,8 +90,7 @@ module DeliveryConsents
     end
 
     def self.render_pdf(code:, company_name:, disclosure_version:, issued_at:)
-      Prawn::Document.new(page_size: "LETTER", margin: 54) do |pdf|
-        pdf.font("Helvetica")
+      PdfUnicodeFont.document(page_size: "LETTER", margin: 54) do |pdf|
         pdf.text "Form W-2GU PDF Access Check", size: 20, style: :bold
         pdf.move_down 8
         pdf.text company_name.to_s, size: 12, color: "475569"
