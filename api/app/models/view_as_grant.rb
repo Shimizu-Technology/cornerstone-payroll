@@ -56,8 +56,11 @@ class ViewAsGrant < ApplicationRecord
     user if user.can_access_company?(company_id)
   end
 
+  # A demo company's employees can be viewed like a live client's, always
+  # inside that company (the grant is pinned to it, and the context keeps
+  # the demo boundary); never a practice copy's.
   def employee_context
-    return unless employee_view? && company.live_payroll?
+    return unless employee_view? && (company.live_payroll? || company.demo?)
 
     features = CompanyFeatures.for(company)
     return unless features.employee_portal_enabled? && features.subdomain_enabled?
