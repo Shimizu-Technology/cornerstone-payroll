@@ -13,10 +13,9 @@ import { MobileCardActions, MobileField, MobileRecordCard } from '@/components/u
 import { LoadMoreFooter } from '@/components/ui/load-more';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
-import { PortalMessagesPanel } from '@/components/client-portal/PortalMessagesPanel';
 import { prepareDocumentPreview } from '@/lib/documentPreview';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
-import { clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi } from '@/services/api';
+import { clientDocumentsApi, clientEmployeesApi } from '@/services/api';
 import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import type { Employee } from '@/types';
 
@@ -220,7 +219,7 @@ export function ClientDocuments() {
 
   return (
     <div>
-      <Header title="Documents" description="Securely upload and manage client documents." />
+      <Header title="Documents" description="Upload and store company or employee files like W-4s, tax notices, and onboarding paperwork." />
 
       <div className="space-y-8 p-4 sm:p-6 lg:p-8">
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
@@ -249,9 +248,9 @@ export function ClientDocuments() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Upload Document</CardTitle>
+            <CardTitle>Upload document</CardTitle>
             <CardDescription>
-              Share payroll source files, onboarding documents, tax notices, and supporting records in one secure place.
+              Share onboarding paperwork, tax notices, and supporting records with your payroll team.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -393,18 +392,9 @@ export function ClientDocuments() {
           </CardContent>
         </Card>
 
-        <PortalMessagesPanel
-          api={clientPortalThreadsApi}
-          documentsApi={clientDocumentsApi}
-          audience="client"
-          documents={documents}
-          audienceLabel="to your payroll team"
-          description="Ask questions, send corrections, and tie follow-up notes to uploaded files."
-        />
-
         <Card>
           <CardHeader>
-            <CardTitle>Uploaded Documents</CardTitle>
+            <CardTitle>Uploaded documents</CardTitle>
             <CardDescription>
               Review everything shared with payroll, including company-wide files and employee-specific documents.
             </CardDescription>
@@ -466,7 +456,7 @@ export function ClientDocuments() {
                     <TableHead>Title</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Employee</TableHead>
-                    <TableHead>Uploaded By</TableHead>
+                    <TableHead>Uploaded by</TableHead>
                     <TableHead>Uploaded</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>

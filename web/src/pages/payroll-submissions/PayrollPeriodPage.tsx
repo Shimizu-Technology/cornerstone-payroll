@@ -111,9 +111,16 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const canSendFiles = period.accepts_files ?? activeCompany?.payroll_intake_source_types?.includes('mosa_revel');
   const canSubmit = canSendFiles && period.allowed_actions.includes('submit');
   const reviewCompanyId = companyId ? Number(companyId) : activeCompanyId;
+  const headerDescription = audience === 'client'
+    ? period.pay_date
+      ? `Send and review files for this pay period · Pay date ${formatDate(period.pay_date)}`
+      : 'Send and review files for this pay period · Pay date set by Cornerstone'
+    : period.pay_date
+      ? `Pay date ${formatDate(period.pay_date)}`
+      : 'Pay date set by Cornerstone';
   return (
     <div>
-      <Header title={`Payroll ${period.label}`} description={period.pay_date ? `Pay date ${formatDate(period.pay_date)}` : 'Pay date set by Cornerstone'} />
+      <Header title={`Payroll ${period.label}`} description={headerDescription} />
       <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6 lg:p-8">
         {hasInboxReturn ? <InboxReturnLink /> : <Link to={listPath} className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline">All pay periods</Link>}
         <section aria-labelledby="period-status" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
@@ -138,7 +145,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
             {audience === 'client' && canSubmit && current && !editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}>Send an update or replace a file</Button>}
           </div>
           {period.submissions.length ? period.submissions.filter(revision => revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)
-            : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : audience === 'staff' ? 'Use this period for source files and messages. Review payroll in the preview section.' : 'Use this period for source files and messages.'}</p>}
+            : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : audience === 'staff' ? 'Use this period for source files and messages. Review payroll in the preview section.' : 'Review files and payroll previews for this period.'}</p>}
         </section>
 
         {audience === 'staff' && <section aria-labelledby="next-step" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
@@ -177,7 +184,20 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
         </section>}
         {audience === 'client' && canSendFiles && !canSubmit && !current && <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">{period.status === 'paid' ? 'This period is paid.' : `This period opens for files on ${formatDate(period.opens_on)}.`}</p>}
 
-        <PeriodConversation api={api} periodRef={period.id ? String(period.id) : period.ref} threadId={period.thread_id} onThreadCreated={() => void load()} />
+        {audience === 'staff' ? (
+          <PeriodConversation api={api} periodRef={period.id ? String(period.id) : period.ref} threadId={period.thread_id} onThreadCreated={() => void load()} />
+        ) : (
+          <section aria-labelledby="period-conversation-link" className="space-y-2 rounded-xl border border-neutral-200 bg-white p-4">
+            <h2 id="period-conversation-link" className="text-base font-semibold text-neutral-950">Messages</h2>
+            <p className="text-sm text-neutral-600">Questions, replies, and file requests for this pay period live in Messages.</p>
+            <Link
+              to={period.thread_id ? `/messages?thread_id=${period.thread_id}` : '/messages'}
+              className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline"
+            >
+              {period.thread_id ? 'Open this period’s conversation in Messages' : 'Open Messages'}
+            </Link>
+          </section>
+        )}
 
         {(period.history.length > 0 || period.submissions.length > 1) && <section aria-labelledby="history" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="history" className="text-base font-semibold text-neutral-950">History</h2>

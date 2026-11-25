@@ -117,6 +117,170 @@ RSpec.describe "Client pay stubs", type: :request do
     expect(rows.find { |row| row["id"] == item.id }["pay_stub_available"]).to be(true)
   end
 
+  it "includes locked QuickBooks checks only for the client's own company employee without exposing sensitive fields" do
+    batch = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "QuickBooks 2026",
+      bundle_digest: "qb-client-stubs-#{company.id}",
+      importer_version: "quickbooks-online-payroll-v5",
+      status: "locked",
+      locked_at: Time.zone.parse("2026-03-21 09:00"),
+      locked_by: user
+    )
+    historical_period = HistoricalPayPeriod.create!(
+      historical_import_batch: batch,
+      company: company,
+      external_key: "qb-period-1",
+      source_label: "Feb 2026",
+      start_date: Date.new(2026, 2, 1),
+      end_date: Date.new(2026, 2, 14),
+      pay_date: Date.new(2026, 2, 19),
+      paycheck_count: 1
+    )
+    worker = HistoricalWorker.create!(
+      historical_import_batch: batch,
+      company: company,
+      employee: employee,
+      external_key: "qb-worker-1",
+      source_name: employee.full_name,
+      normalized_name: employee.full_name.downcase,
+      source_status: "active",
+      mapping_status: "exact_match"
+    )
+    qb_check = HistoricalPaycheck.create!(
+      historical_import_batch: batch,
+      historical_pay_period: historical_period,
+      historical_worker: worker,
+      company: company,
+      employee: employee,
+      external_key: "qb-check-1",
+      source_employee_name: employee.full_name,
+      source_row_number: 1,
+      source_status: "paid",
+      reconciliation_status: "matched",
+      period_start: historical_period.start_date,
+      period_end: historical_period.end_date,
+      pay_date: historical_period.pay_date,
+      check_number: "QB-9991",
+      payment_method: "Direct deposit",
+      hours_total: 80,
+      gross_pay: 1600,
+      net_pay: 1320.50,
+      source_metadata: { "private_note" => "internal only" }
+    )
+
+    unlocked_batch = HistoricalImportBatch.create!(
+      company: company,
+      source_label: "QuickBooks Draft",
+      bundle_digest: "qb-client-stubs-draft-#{company.id}",
+      importer_version: "quickbooks-online-payroll-v5",
+      status: "applied"
+    )
+    unlocked_period = HistoricalPayPeriod.create!(
+      historical_import_batch: unlocked_batch,
+      company: company,
+      external_key: "qb-period-draft",
+      source_label: "Jan 2026",
+      start_date: Date.new(2026, 1, 1),
+      end_date: Date.new(2026, 1, 14),
+      pay_date: Date.new(2026, 1, 19),
+      paycheck_count: 1
+    )
+    unlocked_worker = HistoricalWorker.create!(
+      historical_import_batch: unlocked_batch,
+      company: company,
+      employee: employee,
+      external_key: "qb-worker-draft",
+      source_name: employee.full_name,
+      normalized_name: employee.full_name.downcase,
+      source_status: "active",
+      mapping_status: "exact_match"
+    )
+    HistoricalPaycheck.create!(
+      historical_import_batch: unlocked_batch,
+      historical_pay_period: unlocked_period,
+      historical_worker: unlocked_worker,
+      company: company,
+      employee: employee,
+      external_key: "qb-check-draft",
+      source_employee_name: employee.full_name,
+      source_row_number: 1,
+      source_status: "paid",
+      reconciliation_status: "matched",
+      period_start: unlocked_period.start_date,
+      period_end: unlocked_period.end_date,
+      pay_date: unlocked_period.pay_date,
+      gross_pay: 1500,
+      net_pay: 1200
+    )
+
+    other_company = create(:company)
+    other_employee = create(:employee, company: other_company)
+    create(:pay_period, :committed, company: other_company, start_date: Date.new(2026, 4, 1), end_date: Date.new(2026, 4, 14), pay_date: Date.new(2026, 4, 18))
+    other_batch = HistoricalImportBatch.create!(
+      company: other_company,
+      source_label: "Other QuickBooks",
+      bundle_digest: "qb-other-#{other_company.id}",
+      importer_version: "quickbooks-online-payroll-v5",
+      status: "locked",
+      locked_at: Time.zone.parse("2026-03-21 09:00")
+    )
+    other_period = HistoricalPayPeriod.create!(
+      historical_import_batch: other_batch,
+      company: other_company,
+      external_key: "other-period",
+      source_label: "Feb 2026",
+      start_date: Date.new(2026, 2, 1),
+      end_date: Date.new(2026, 2, 14),
+      pay_date: Date.new(2026, 2, 19),
+      paycheck_count: 1
+    )
+    other_worker = HistoricalWorker.create!(
+      historical_import_batch: other_batch,
+      company: other_company,
+      employee: other_employee,
+      external_key: "other-worker",
+      source_name: other_employee.full_name,
+      normalized_name: other_employee.full_name.downcase,
+      source_status: "active",
+      mapping_status: "exact_match"
+    )
+    HistoricalPaycheck.create!(
+      historical_import_batch: other_batch,
+      historical_pay_period: other_period,
+      historical_worker: other_worker,
+      company: other_company,
+      employee: other_employee,
+      external_key: "other-check",
+      source_employee_name: other_employee.full_name,
+      source_row_number: 1,
+      source_status: "paid",
+      reconciliation_status: "matched",
+      period_start: other_period.start_date,
+      period_end: other_period.end_date,
+      pay_date: other_period.pay_date,
+      gross_pay: 2100,
+      net_pay: 1700
+    )
+
+    get "/api/v1/client/pay_stubs/employee/#{employee.id}", headers: headers
+    expect(response).to have_http_status(:ok)
+    qb_rows = response.parsed_body.fetch("quickbooks_paychecks")
+    expect(qb_rows.size).to eq(1)
+    expect(qb_rows.first).to include(
+      "id" => qb_check.id,
+      "pay_date" => "2026-02-19",
+      "period_start" => "2026-02-01",
+      "period_end" => "2026-02-14",
+      "source_label" => "From QuickBooks records"
+    )
+    expect(qb_rows.first["net_pay"].to_d).to eq(1320.50.to_d)
+    expect(response.body).not_to include("QB-9991", "internal only")
+
+    get "/api/v1/client/pay_stubs/employee/#{other_employee.id}", headers: headers
+    expect(response).to have_http_status(:not_found)
+  end
+
   it "refuses staff in the client namespace" do
     user.update!(role: "accountant")
     get "/api/v1/client/pay_stubs/#{item.id}/download", headers: headers

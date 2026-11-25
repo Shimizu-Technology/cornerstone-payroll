@@ -310,6 +310,46 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     )
   end
 
+  it "exposes pay type metadata and other_deductions so client row columns reconcile with total_deductions" do
+    salaried = create(:employee, company: company, first_name: "Sam", last_name: "Salary",
+      employment_type: "salary", salary_type: "annual", pay_rate: 68_000)
+    item = create(:payroll_item,
+      pay_period: committed_pay_period,
+      company: company,
+      employee: salaried,
+      employment_type: "salary",
+      pay_rate: 68_000,
+      hours_worked: 0,
+      gross_pay: 2615.38,
+      withholding_tax: 220,
+      additional_withholding: 10,
+      social_security_tax: 162.15,
+      medicare_tax: 37.92,
+      retirement_payment: 100,
+      roth_retirement_payment: 25,
+      loan_payment: 50,
+      insurance_payment: 40,
+      custom_deductions: [ { "label" => "Uniform", "amount" => 15.0 } ],
+      total_deductions: 660.07,
+      net_pay: 1955.31)
+
+    get "/api/v1/client/pay_periods/#{committed_pay_period.id}"
+
+    expect(response).to have_http_status(:ok)
+    row = response.parsed_body.dig("pay_period", "payroll_items").find { |entry| entry["id"] == item.id }
+    expect(row).to include(
+      "employment_type" => "salary",
+      "salary_type" => "annual",
+      "additional_withholding" => "10.0",
+      "other_deductions" => "15.0",
+      "total_deductions" => "660.07"
+    )
+    sum = row.values_at("withholding_tax", "additional_withholding", "social_security_tax", "medicare_tax",
+      "retirement_payment", "roth_retirement_payment", "loan_payment", "insurance_payment", "other_deductions")
+      .sum(&:to_d)
+    expect(sum).to eq(row["total_deductions"].to_d)
+  end
+
   it "does not treat a receipt-only reply as payroll approval" do
     company.update!(client_payroll_approval_required: true)
     draft_pay_period.update!(status: "calculated", calculated_at: Time.current)

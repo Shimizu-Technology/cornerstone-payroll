@@ -17,8 +17,30 @@ it('opens a finished stub and reports a download failure with retry', async () =
   expect(mocks.download).toHaveBeenLastCalledWith(9);
 });
 it('shows an empty state without download controls', async () => {
-  mocks.history.mockResolvedValue({ pay_stubs: [] });
+  mocks.history.mockResolvedValue({ pay_stubs: [], quickbooks_paychecks: [] });
   render(<ClientPayStubHistory employeeId={8} />);
   expect(await screen.findByText(/No finished payroll/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Download pay stub' })).toBeNull();
+});
+
+it('shows imported checks under a From QuickBooks records heading', async () => {
+  mocks.history.mockResolvedValue({
+    pay_stubs: [{ id: 9, pay_period_id: 2, period_description: 'Aug 1 – 14', pay_date: '2026-08-19', net_pay: 1100 }],
+    quickbooks_paychecks: [
+      {
+        id: 501,
+        pay_date: '2026-02-19',
+        period_start: '2026-02-01',
+        period_end: '2026-02-14',
+        gross_pay: 1400,
+        net_pay: 1125.5,
+        source_label: 'From QuickBooks records',
+        adjustment_note: null,
+      },
+    ],
+  });
+  render(<ClientPayStubHistory employeeId={10} />);
+  expect(await screen.findByRole('heading', { name: 'From QuickBooks records' })).toBeTruthy();
+  expect(screen.getByText(/Pay date 2026-02-19/)).toBeTruthy();
+  expect(screen.getByText(/\$1,125\.50/)).toBeTruthy();
 });
