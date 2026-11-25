@@ -6,6 +6,7 @@ class MfaPolicy
   ERROR_MESSAGE = "Multi-factor authentication is required before accessing payroll."
   ERROR_CODE = "mfa_required"
   ENROLLMENT_REQUIRED_CODE = "mfa_enrollment_required"
+  ENROLLMENT_REQUIRED_MESSAGE = "Set up two-step sign-in before accessing payroll."
   STEP_UP_MAX_AGE_MINUTES = 10
   ENROLLMENT_CLAIM = "two_factor_enabled"
   TRUTHY_VALUES = %w[1 true t yes y on].freeze
@@ -32,11 +33,11 @@ class MfaPolicy
   # employee portal's protected changes). With MFA on, a second factor
   # verified within the window; with it off, a first factor (password or
   # email code) re-verified through Clerk within the window.
-  def self.recently_step_up_verified?(payload, env: ENV, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
+  def self.recently_step_up_verified?(payload, env: ENV, max_age_minutes: STEP_UP_MAX_AGE_MINUTES, now: Time.current)
     if enabled?(env: env)
-      recently_verified_second_factor?(payload, max_age_minutes: max_age_minutes)
+      recently_verified_second_factor?(payload, max_age_minutes: max_age_minutes, now: now)
     else
-      recently_verified_first_factor?(payload, max_age_minutes: max_age_minutes)
+      recently_verified_first_factor?(payload, max_age_minutes: max_age_minutes, now: now)
     end
   end
 
@@ -48,28 +49,58 @@ class MfaPolicy
     payload.is_a?(Hash) && payload[ENROLLMENT_CLAIM] == true
   end
 
-  # fva counts whole minutes, so an inclusive limit accepts a verification up to
-  # about a minute older than Clerk's own afterMinutes check. That only makes the
-  # server slightly more lenient than the prompt; it never asks for a factor twice.
-  def self.recently_verified_second_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
-    return false unless valid_window?(max_age_minutes)
+  # The 403 body when a session lacks the second factor MFA requires: set one
+  # up first (not enrolled), or sign in again and finish it (enrolled).
+  def self.denial_body(payload)
+    if second_factor_enrolled?(payload)
+      { error: ERROR_MESSAGE, code: ERROR_CODE }
+    else
+      { error: ENROLLMENT_REQUIRED_MESSAGE, code: ENROLLMENT_REQUIRED_CODE }
+    end
+  end
 
-    verified_second_factor?(payload) && payload["fva"][1] <= max_age_minutes
+  def self.recently_verified_second_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES, now: Time.current)
+    verified_second_factor?(payload) && fresh_factor?(payload, 1, max_age_minutes, now)
   end
 
   # fva[0]: minutes since the first factor (password, email code) was last
   # verified, which Clerk's first_factor reverification resets.
-  def self.recently_verified_first_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES)
-    return false unless valid_window?(max_age_minutes)
-
-    age = factor_ages(payload)&.first || -1
-    age.between?(0, max_age_minutes)
+  def self.recently_verified_first_factor?(payload, max_age_minutes: STEP_UP_MAX_AGE_MINUTES, now: Time.current)
+    fresh_factor?(payload, 0, max_age_minutes, now)
   end
 
-  def self.valid_window?(max_age_minutes)
-    max_age_minutes.is_a?(Integer) && max_age_minutes >= 0
+  # How old a factor is now, in whole minutes rounded up, or nil when the
+  # token can't say. fva is the age when Clerk issued the token (iat), so the
+  # time since iat is added on top. Clerk floors fva to whole minutes, so a
+  # factor with age n is really under n + 1 minutes old.
+  def self.factor_age_minutes(payload, index, now: Time.current)
+    fva = factor_ages(payload)&.fetch(index)
+    return nil if fva.nil? || fva.negative?
+
+    elapsed = token_age_seconds(payload, now)
+    elapsed && fva + (elapsed / 60.0).ceil
   end
-  private_class_method :valid_window?
+
+  # Accepts only an age strictly under the window, like Clerk's own
+  # afterMinutes check (afterMinutes > age), so with the rounding above the
+  # verification is always less than max_age_minutes old.
+  def self.fresh_factor?(payload, index, max_age_minutes, now)
+    return false unless max_age_minutes.is_a?(Integer) && max_age_minutes.positive?
+
+    age = factor_age_minutes(payload, index, now: now)
+    !age.nil? && age < max_age_minutes
+  end
+  private_class_method :fresh_factor?
+
+  # A missing, non-integer or future iat can't date the verification.
+  def self.token_age_seconds(payload, now)
+    iat = payload["iat"]
+    return nil unless iat.is_a?(Integer)
+
+    elapsed = now.to_i - iat
+    elapsed unless elapsed.negative?
+  end
+  private_class_method :token_age_seconds
 
   def self.factor_ages(payload)
     ages = payload["fva"] if payload.is_a?(Hash)

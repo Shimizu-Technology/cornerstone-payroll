@@ -26,6 +26,10 @@ export function SecurityScreen(): ReactElement {
             Open <span className="font-semibold">Security &rarr; Two-step verification</span> below and add an
             authenticator app. Then save your backup codes somewhere safe, not only on this phone.
           </p>
+          <p className="text-neutral-700">
+            When you're done, select <span className="font-semibold">Done</span>. If the app asks you to sign in
+            again, sign out and sign back in with your new code.
+          </p>
           <p className="text-neutral-600">{askManager(brand, 'Need help? Ask your manager')}</p>
         </div>
       </div>

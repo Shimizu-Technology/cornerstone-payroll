@@ -159,10 +159,13 @@ export function AccessEndedScreen({ onSignOut }: { onSignOut: () => void }): Rea
 }
 
 /**
- * The API wants two-step sign-in before it shows pay: a staff or client login
- * that is also an employee (MfaEnforceable). Never "access ended".
- * - setup: the login has no second step yet; set it up, then try again.
- * - verify: it has one, but this sign-in didn't use it; sign in again.
+ * The API wants two-step sign-in before it shows pay (MfaEnforceable, every
+ * login once REQUIRE_MFA is on). Never "access ended".
+ * - setup (mfa_enrollment_required): the login has no second step yet; set it
+ *   up on Sign-in & security, then try again.
+ * - verify (mfa_required): it has one, but this sign-in didn't use it; sign in
+ *   again. That's also where a login lands right after setting one up, since
+ *   the sign-in it set it up from didn't use it.
  */
 export function TwoStepScreen({ kind, onRetry, onSignOut }: { kind: 'setup' | 'verify'; onRetry: () => void; onSignOut: () => void }): ReactElement {
   const brand = useBrand();
@@ -174,6 +177,10 @@ export function TwoStepScreen({ kind, onRetry, onSignOut }: { kind: 'setup' | 'v
         <EmpButton block variant="quiet" onClick={onSignOut}>Sign out</EmpButton>
       </>}>
         <p className="emp-lead">Your account needs a second sign-in step, like a code from an app, before it can show pay.</p>
+        <p className="text-neutral-700">
+          Set it up on the next screen. When you're done, come back and try again. You may be asked to sign out and sign
+          in once more with your new code.
+        </p>
         <p className="text-neutral-600">{askManager(brand, 'Need help? Ask your manager')}</p>
       </FullScreenState>
     );

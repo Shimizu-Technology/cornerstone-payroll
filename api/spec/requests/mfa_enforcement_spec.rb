@@ -102,7 +102,7 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
   it "rejects a new-device email code without second-factor enrollment" do
     get "/api/v1/companies", headers: headers(fva: [ 1, 0 ])
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("code")).to eq("mfa_required")
+    expect(response.parsed_body).to eq("code" => "mfa_enrollment_required", "error" => MfaPolicy::ENROLLMENT_REQUIRED_MESSAGE)
 
     get "/api/v1/companies", headers: headers(fva: [ 1, 0 ], enrollment: true)
     expect(response).to have_http_status(:ok)
@@ -176,7 +176,13 @@ RSpec.describe "Clerk MFA enforcement", type: :request do
         let(:role) { caller_role }
 
         it "applies global MFA to every role, employees included, before the company feature, and nothing when off" do
-          employee_context(fva: [ 5, -1 ], enrollment: caller_role != :portal_employee)
+          # Not enrolled yet: sent to set up two-step sign-in, never to sign in again.
+          employee_context(fva: [ 5, -1 ], enrollment: false)
+          expect(response).to have_http_status(:forbidden)
+          expect(response.parsed_body.fetch("code")).to eq("mfa_enrollment_required")
+
+          # Enrolled, but this session skipped the second step: finish it.
+          employee_context(fva: [ 5, -1 ], enrollment: true)
           expect(response).to have_http_status(:forbidden)
           expect(response.parsed_body.fetch("code")).to eq("mfa_required")
           expect(denials.last).to have_attributes(

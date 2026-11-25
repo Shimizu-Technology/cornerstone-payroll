@@ -198,11 +198,15 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         .to raise_error(ArgumentError, /readiness/)
 
       expect { update.call(nil).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
-      expect { update.call({ "fva" => [ 30, 30 ], "two_factor_enabled" => true }).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect { update.call({ "fva" => [ 30, 30 ], "two_factor_enabled" => true, "iat" => Time.current.to_i }).call }
+        .to raise_error(EmployeeAppSwitch::StepUpRequired)
+      # A fresh-looking fva in a token issued too long ago isn't a recent verification.
+      expect { update.call({ "fva" => [ 1, 1 ], "two_factor_enabled" => true, "iat" => 9.minutes.ago.to_i }).call }
+        .to raise_error(EmployeeAppSwitch::StepUpRequired)
       expect(stored["employee_portal_enabled"]).to be(false)
 
       @ping = { configured: false, ok: false, observation: nil, attestation_error: :not_configured }
-      fresh = { "fva" => [ 1, 1 ], "two_factor_enabled" => true }
+      fresh = { "fva" => [ 1, 1 ], "two_factor_enabled" => true, "iat" => Time.current.to_i }
       expect { update.call(fresh).call }.to raise_error(EmployeeAppSwitch::NotReady)
       observe!
       expect(update.call(fresh).call).to include(turned_on: [ "employee_portal_enabled" ])
@@ -529,8 +533,10 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
           reason: "Direct call", session_claims: claims)
       end
       expect { update.call(nil).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
-      expect { update.call({ "fva" => [ 30, 0 ], "two_factor_enabled" => true }).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
-      expect(update.call({ "fva" => [ 2, -1 ] }).call).to include(turned_on: [ "employee_portal_enabled" ])
+      expect { update.call({ "fva" => [ 30, 0 ], "two_factor_enabled" => true, "iat" => Time.current.to_i }).call }
+        .to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect { update.call({ "fva" => [ 2, -1 ] }).call }.to raise_error(EmployeeAppSwitch::StepUpRequired)
+      expect(update.call({ "fva" => [ 2, -1 ], "iat" => Time.current.to_i }).call).to include(turned_on: [ "employee_portal_enabled" ])
     end
 
     it "lets the owner set demo early access with a fresh first factor" do
@@ -549,9 +555,10 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "requires the second factor again, and the two-step check with evidence, once REQUIRE_MFA=true" do
       ENV.update("REQUIRE_MFA" => "true", "CLERK_MFA_ATTESTED_INSTANCE_ID" => "ins_example", "CLERK_MFA_EVIDENCE_REF" => "evidence-ref")
+      # A Clerk Free session has no second factor enrolled, so it's sent to set one up.
       switch_with_first_factor!({ "employee_portal_enabled" => true }, target: demo)
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body["code"]).to eq("mfa_required")
+      expect(response.parsed_body["code"]).to eq("mfa_enrollment_required")
 
       switch!({ "employee_portal_enabled" => true }, target: demo)
       expect(response).to have_http_status(:unprocessable_entity)

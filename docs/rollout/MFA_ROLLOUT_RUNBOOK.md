@@ -6,7 +6,7 @@
 **Gate:** G3 in [the M4 build plan](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md). Clerk Pro is bought at this gate.
 **Cost:** Clerk Pro $25/month, or $20/month billed annually ([Clerk pricing](https://clerk.com/pricing), checked 2026-11-25).
 
-This repo is public. Do not write names, emails, tokens, instance secrets or backup codes into this file, a PR, a ticket or a chat. Record them in the access-controlled evidence location and refer to them by role.
+This repo is public. Do not write names, emails, tokens, instance secrets or backup codes into this file, a PR, a ticket or a chat. Record names, results and screenshots in the access-controlled evidence location and refer to people by role. Backup codes are a second factor, so they never go in the evidence location either: they stay with the account holder (for a test account, in its custodian's credential vault), and the evidence records only that recovery was verified.
 
 **Turning it on is configuration only:** Clerk dashboard settings (Steps 1–3), then `REQUIRE_MFA=true` with the two evidence variables on every API service (Step 6). No code change or deploy of new code.
 
@@ -38,9 +38,9 @@ Because the switch doesn't block real companies while MFA is off, **turning MFA 
 | MFA is required for **every** user, every role, employees included. | `MfaPolicy.required_for?` |
 | A session counts as verified only if the token has the claim `two_factor_enabled == true` **and** `fva[1] >= 0`. A new-device email code alone (`fva` like `[1,0]` with no claim) is refused. | `MfaPolicy.verified_second_factor?`; spec `api/spec/requests/mfa_enforcement_spec.rb` |
 | Every Clerk-authenticated request runs `enforce_mfa!`, and so does the employee API. A route-enumeration spec fails if any Clerk route lacks it. | `concerns/clerk_authenticatable.rb`, `concerns/mfa_enforceable.rb`, `employee_portal/base_controller.rb`, `api/spec/routing/clerk_mfa_coverage_spec.rb` |
-| A denial returns `403 {code: "mfa_required"}` and writes a `security` audit event `authentication#mfa_required_denied`. | `mfa_enforceable.rb`, `MfaPolicy.record_denial!` |
+| A denial returns 403 and writes a `security` audit event `authentication#mfa_required_denied`. The code says what to do next: `mfa_enrollment_required` when the login has no second factor yet (the apps send it to set one up), `mfa_required` when it has one but this session didn't use it (sign in again). | `mfa_enforceable.rb`, `MfaPolicy.denial_body`, `MfaPolicy.record_denial!` |
 | `GET /api/v1/auth/me` returns `200 {mfa_required: true, mfa_verified: false}` (not a 403) so the staff app can show its prompt. | `auth_controller.rb` |
-| Step-up needs a fresh **second** factor (`level: "second_factor"`); an unenrolled session gets `mfa_enrollment_required`. | `recent_verification.rb` |
+| Step-up needs a fresh **second** factor (`level: "second_factor"`); an unenrolled session gets `mfa_enrollment_required`. "Fresh" is measured when the request arrives: `fva` plus the time since the token was issued (`iat`), rounded up, strictly under 10 minutes. A token without a usable `iat` doesn't count. | `recent_verification.rb`, `MfaPolicy.factor_age_minutes` |
 | The switch readiness MFA check is a hard check again: Payroll web **and** the employee service must both report `REQUIRE_MFA` with recorded evidence. | `readiness.rb` (`mfa_check`) |
 | WebSocket tickets are refused without a verified second factor. | `cable_ticket_service.rb`; `application_cable/connection.rb` |
 
@@ -128,7 +128,7 @@ Also confirm, under the same Clerk instance, that **User & authentication → Em
 Use dedicated test accounts that are not a real person's login: one staff account (for example a manager or accountant) and one employee login on a demo company (Harbor Finch).
 
 1. Sign in on the production site. The app still lets you in (the flag is off).
-2. Open the account settings: on Payroll, **Account & security** (`/app/account-security`); on the employee app, **My info → Sign-in & security** (`/security`). Go to **Security → Two-step verification → Authenticator app**. Scan the QR code, enter the code, and **save the backup codes** in the evidence location.
+2. Open the account settings: on Payroll, **Account & security** (`/app/account-security`); on the employee app, **My info → Sign-in & security** (`/security`). Go to **Security → Two-step verification → Authenticator app**. Scan the QR code, enter the code, and **save the backup codes in the test-account custodian's credential vault** (the password manager entry that holds that test account's login). Backup codes are a second factor: never put them in the evidence location, a screenshot, a ticket or a chat. The evidence records only that recovery was verified (for example "backup-code sign-in passed on <date>", Step 8 row 2).
 3. Get a fresh session token and decode it **locally**. Do not paste it into a website. In the browser console on that site: `await window.Clerk.session.getToken({skipCache: true})`. Check:
    - `two_factor_enabled` is the JSON boolean `true`;
    - `fva` has two integers, for example `[3, -1]` right after a password sign-in.
@@ -193,6 +193,8 @@ Do these together, within a few minutes:
 
 The employee API must get the values at the same time as Payroll web: it enforces sign-in for employees itself, and the switch readiness MFA check stays failed until both services report `REQUIRE_MFA` with evidence. The Clerk instance does not change in this rollout, so no JWKS cache clear is needed.
 
+**Between item 1 and item 2** (Render is on, Clerk's toggle isn't yet), Clerk doesn't ask anyone to set up a second step at sign-in, so the app does. An unenrolled employee who signs in, or is already signed in, gets `403 mfa_enrollment_required` from the employee API and sees **Set up two-step sign-in**, which opens **Sign-in & security** (`/security`). That page works without the employee session, so they can enroll there, then select **Done** and **I've set it up, try again**; if the app then shows **Complete two-step sign-in**, they sign out and back in with the new code. Unenrolled staff and client users get the staff prompt on the login page, which links to account settings. An enrolled person whose session predates their second factor gets `mfa_required` (**Complete two-step sign-in**, or the staff prompt's **Sign out and sign back in**). Nobody is stuck on a screen with no way to enroll, so the gap is safe, but keep it to minutes.
+
 ### Step 7: Readiness runs (owner or recovery admin)
 
 In a Render shell on Payroll web, and again on the employee API, with a fresh token from the enrolled test account (as in Step 4 item 6):
@@ -216,11 +218,11 @@ Use real browsers (a private window each). Record the result of each row in the 
 |---|---|---|
 | 1 | Test staff account, enrolled, signed in with password + authenticator | App loads; `GET /api/v1/auth/me` has `mfa_required: true, mfa_verified: true`. |
 | 2 | Same account, sign in with a backup code instead of the authenticator | App loads. (Burns that code; regenerate afterwards.) |
-| 3 | Test staff account with **no** second factor, signs in fresh | Clerk asks it to set up the second step during sign-in. If a session somehow reaches the app, it shows "Multi-factor authentication required"; every other API route returns 403 `mfa_required`, with one `authentication#mfa_required_denied` audit event. |
-| 4 | Staff account that was signed in before the flip, with a new-device email code but no authenticator | Denied (`mfa_required`). The email code is not accepted as a second factor. |
+| 3 | Test staff account with **no** second factor, signs in fresh | Clerk asks it to set up the second step during sign-in. If a session somehow reaches the app, it shows "Multi-factor authentication required" with the set-up steps; every other API route returns 403 `mfa_enrollment_required`, with one `authentication#mfa_required_denied` audit event. |
+| 4 | Staff account that was signed in before the flip, with a new-device email code but no authenticator | Denied (`mfa_enrollment_required`). The email code is not accepted as a second factor. |
 | 5 | A client user, enrolled | Loads on its client subdomain; company scope unchanged. |
 | 6 | Employee test account (demo company), enrolled | Pay screens load after password + authenticator. |
-| 7 | Employee test account with **no** second factor | Clerk's set-up step at sign-in; a pre-flip session sees **Complete two-step sign-in** or **Set up two-step sign-in** (→ Sign-in & security), and `/api/v1/employee/*` returns 403 `mfa_required`. |
+| 7 | Employee test account with **no** second factor | Clerk's set-up step at sign-in; a pre-flip session sees **Set up two-step sign-in** (→ Sign-in & security), and `/api/v1/employee/*` returns 403 `mfa_enrollment_required`. After enrolling there, **Try again** shows **Complete two-step sign-in** (403 `mfa_required`) until it signs out and back in with the code. |
 | 8 | Step-up: turn on a switch, start a view-as, or edit a phone number on the employee app | Clerk asks for the **second** factor (`level: "second_factor"`), not a password. |
 | 9 | Live updates (WebSocket) for an enrolled staff user | Connects; for a non-enrolled user the ticket request returns 403. |
 | 10 | A deactivated user | Still refused, unchanged. |
@@ -299,7 +301,7 @@ Notes:
 
 | # | Gap | Severity | Effect | Suggested follow-up |
 |---|---|---|---|---|
-| 1 | **Enrolling probably does not refresh an existing session.** The check needs `fva[1] >= 0`, which Clerk sets when a second factor is used. Someone who enrolls from inside a pre-flip session may need to sign out and in. Confirm in the rehearsal. | Medium | A new enrollee is blocked and confused after doing everything right. | The staff prompt and the employee "Set up two-step sign-in" screen say to try again; if the rehearsal shows a sign-out is needed, reword them to say so. |
+| 1 | **Enrolling probably does not refresh an existing session.** The check needs `fva[1] >= 0`, which Clerk sets when a second factor is used. Someone who enrolls from inside a pre-flip session may need to sign out and in. Confirm in the rehearsal. | Medium | A new enrollee is blocked and confused after doing everything right. | The staff prompt, the employee **Set up two-step sign-in** screen and **Sign-in & security** all say they may need to sign out and back in with the new code; the API then answers `mfa_required`, which shows **Complete two-step sign-in**. |
 | 2 | **Clerk's set-up step on our sign-in forms.** With Clerk's Require MFA on, the embedded `<SignIn>` (staff `Login.tsx`, employee `ClerkAuth.tsx`, both `routing="hash"`) must show Clerk's set-up step for an unenrolled user. | Medium | If it doesn't, unenrolled users land on the app's own prompt instead, which still works. | Rehearse on the development instance (precondition). |
 | 3 | **Invited users who have not enrolled can't reach the bind step until they do.** | Low | Their first visit includes the set-up step. | Add a line to invitation emails and the notice. |
 | 4 | **Readiness checks the attestation, not the provider.** It cannot tell whether TOTP/backup codes are on in Clerk or who has enrolled. | Low–medium | The roster in Step 5 is manual. | Show enrolled/not enrolled in the staff user list from `two_factor_enabled`. |

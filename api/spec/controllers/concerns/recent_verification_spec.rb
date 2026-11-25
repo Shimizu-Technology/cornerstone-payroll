@@ -32,9 +32,9 @@ RSpec.describe RecentVerification, type: :controller do
     allow(ClerkTokenVerifier).to receive(:new).and_return(verifier)
   end
 
-  def submit(role:, ages:, enrollment: nil)
+  def submit(role:, ages:, enrollment: nil, issued: Time.current)
     user = create(:user, role: role, clerk_id: "user_step_up")
-    claims = { sub: user.clerk_id, iss: issuer, azp: origin, exp: 5.minutes.from_now.to_i, fva: ages }
+    claims = { sub: user.clerk_id, iss: issuer, azp: origin, iat: issued&.to_i, exp: 5.minutes.from_now.to_i, fva: ages }.compact
     claims[:two_factor_enabled] = enrollment unless enrollment.nil?
     token = JWT.encode(claims, signing_key, "RS256", kid: jwk.kid)
     request.headers["Authorization"] = "Bearer #{token}"
@@ -82,6 +82,16 @@ RSpec.describe RecentVerification, type: :controller do
       expect_reverification("first_factor")
     end
 
+    it "counts the time since the token was issued, so a reused token doesn't stretch the window" do
+      submit(role: :admin, ages: [ 0, -1 ], issued: 10.minutes.ago)
+      expect_reverification("first_factor")
+    end
+
+    it "treats a token with no usable issue time as not recently verified" do
+      submit(role: :admin, ages: [ 0, -1 ], issued: nil)
+      expect_reverification("first_factor")
+    end
+
     it "asks for a first factor even when the session holds a fresh second factor" do
       submit(role: :admin, ages: [ 25, 0 ], enrollment: true)
       expect_reverification("first_factor")
@@ -98,8 +108,13 @@ RSpec.describe RecentVerification, type: :controller do
       end
 
       it "permits a fresh second factor for enrolled #{role} users" do
-        submit(role: role, ages: [ 25, 10 ], enrollment: true)
+        submit(role: role, ages: [ 25, 9 ], enrollment: true)
         expect(response).to have_http_status(:no_content)
+      end
+
+      it "asks enrolled #{role} users again once the second factor reaches ten minutes" do
+        submit(role: role, ages: [ 25, 10 ], enrollment: true)
+        expect_reverification("second_factor")
       end
     end
 
