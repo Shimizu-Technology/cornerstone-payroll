@@ -68,9 +68,22 @@ RSpec.describe "Employee context and help", type: :request do
       # The next run's date isn't settled, so nothing shows rather than a later date.
       expect(context.fetch("next_payday")).to be_nil
 
-      CompanyPaySchedule.find(unconfirmed.company_pay_schedule_id).update!(source: "operator_confirmed",
+      # Confirmed, but a manual-dates schedule's draft date is still tentative.
+      schedule = CompanyPaySchedule.find(unconfirmed.company_pay_schedule_id)
+      schedule.update!(source: "operator_confirmed",
         confirmation_status: "confirmed", confirmed_by: create(:user, role: :admin, company: company),
         confirmed_at: Time.current, notes: "Confirmed biweekly calendar")
+      expect(context.fetch("next_payday")).to be_nil
+
+      schedule.update!(frequency: "semimonthly", period_rule: "semimonthly", pay_date_rule: "semimonthly_15th_and_month_end")
+      expect(context.fetch("next_payday")).to eq((today + 9).iso8601)
+    end
+
+    it "gives the date of a committed correction run that replaced a voided upcoming run" do
+      voided = period_on(today + 9, status: "committed", correction_status: "voided")
+      period_on(today + 9, status: "committed", correction_status: "correction", source_pay_period_id: voided.id)
+      period_on(today + 23, status: "committed")
+
       expect(context.fetch("next_payday")).to eq((today + 9).iso8601)
     end
 

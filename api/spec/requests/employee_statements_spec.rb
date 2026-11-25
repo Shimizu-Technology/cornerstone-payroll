@@ -307,6 +307,65 @@ RSpec.describe "Employee statements", type: :request do
       expect(response.headers["Content-Disposition"]).to include("pay-stub-2026-08-20-corrected.pdf")
     end
 
+    it "never treats a delta check as the replacement for the check it corrects" do
+      post!(Time.utc(2026, 8, 20))
+      original = EmployeeDocument.where(payroll_item: item).sole
+      delta_item = item_for(period_on(Date.new(2026, 8, 27)), net: 80, correction_for_payroll_item: item)
+      travel_to(Time.utc(2026, 8, 27, 1)) { EmployeeDocuments::PostPayStub.new(delta_item.reload).call }
+      delta = EmployeeDocument.where(payroll_item: delta_item).sole
+      expect(delta).to have_attributes(status: "posted", replaces_document_id: original.id)
+      expect(original.reload).to be_posted
+      expect(listed_ids).to eq([ delta.id.to_s, original.id.to_s ])
+
+      # Void and redo the original run: the redo replaces the original.
+      period.update_columns(correction_status: "voided")
+      post!(Time.utc(2026, 8, 28))
+      redo_period = period_on(Date.new(2026, 8, 20), correction_status: "correction", source_pay_period_id: period.id)
+      redo_item = item_for(redo_period, net: 950, financial_correction_origin_item: item)
+      travel_to(Time.utc(2026, 8, 28, 1)) { EmployeeDocuments::PostPayStub.new(redo_item.reload).call }
+      redo_document = EmployeeDocument.where(payroll_item: redo_item).sole
+      expect(redo_document).to have_attributes(status: "posted", replaces_document_id: original.id)
+      expect(original.reload).to be_replaced
+      expect(listed_ids).to eq([ delta.id.to_s, redo_document.id.to_s ])
+
+      # The delta's link to the original isn't an earlier version of the delta.
+      get "/api/v1/employee/statements/#{delta.id}", headers: headers_for
+      expect(response.parsed_body.fetch("earlier_versions")).to eq([])
+      get "/api/v1/employee/statements/#{redo_document.id}", headers: headers_for
+      expect(response.parsed_body.fetch("earlier_versions").map { |row| row["id"] }).to eq([ original.id.to_s ])
+      get "/api/v1/employee/statements/#{original.id}", headers: headers_for
+      expect(response.parsed_body.fetch("id")).to eq(redo_document.id.to_s)
+
+      # Withdraw the redo: the original has no active replacement, so it's
+      # gone again, and the delta doesn't stand in for it.
+      redo_period.update_columns(correction_status: "voided")
+      travel_to(Time.utc(2026, 8, 29)) { EmployeeDocuments::PostPayStub.new(redo_item.reload).call }
+      expect(redo_document.reload).to be_withdrawn
+      expect(listed_ids).to eq([ delta.id.to_s ])
+      [ "", "/pdf" ].each do |suffix|
+        get "/api/v1/employee/statements/#{original.id}#{suffix}", headers: headers_for
+        expect([ response.status, response.body ]).to eq([ 404, "" ]), suffix
+      end
+      get "/api/v1/employee/statements/#{delta.id}", headers: headers_for
+      expect(response.parsed_body.fetch("earlier_versions")).to eq([])
+    end
+
+    it "resolves an original to its void+redo replacement even when a delta revision on it is newer" do
+      original = post_stub!(item, status: "replaced")
+      redo_period = period_on(Date.new(2026, 8, 20), correction_status: "correction", source_pay_period_id: period.id)
+      redo_document = post_stub!(item_for(redo_period, financial_correction_origin_item: item), replaces: original)
+      delta_item = item_for(period_on(Date.new(2026, 8, 27)), net: 80, correction_for_payroll_item: item)
+      # A repaired legacy delta copy: revision 2, linked straight to the original.
+      post_stub!(delta_item, status: "replaced")
+      delta = post_stub!(delta_item, revision: 2, replaces: original)
+      period.update_columns(correction_status: "voided")
+
+      get "/api/v1/employee/statements/#{original.id}", headers: headers_for
+      expect(response.parsed_body.fetch("id")).to eq(redo_document.id.to_s)
+      get "/api/v1/employee/statements/#{delta.id}", headers: headers_for
+      expect(response.parsed_body.fetch("earlier_versions")).to eq([])
+    end
+
     it "hides a replaced original again when its replacement is withdrawn" do
       original = post_stub!(item, status: "replaced")
       replacement = post_stub!(item, revision: 2, replaces: original)
@@ -359,6 +418,38 @@ RSpec.describe "Employee statements", type: :request do
       stored[document.storage_key] = "%PDF-1.4 tampered".b
       get "/api/v1/employee/statements/#{document.id}/pdf", headers: headers_for
       expect(response).to have_http_status(:service_unavailable)
+    end
+
+    it "is a bare 503 when storage can't be read" do
+      document = stub_on(Date.new(2026, 10, 8))
+      allow(storage).to receive(:download).and_raise(R2StorageService::DownloadError, "storage unavailable")
+      allow(Rails.error).to receive(:report)
+
+      get "/api/v1/employee/statements/#{document.id}/pdf", headers: headers_for
+      expect([ response.status, response.body ]).to eq([ 503, "" ])
+      expect(Rails.error).to have_received(:report).with(an_instance_of(R2StorageService::DownloadError), handled: true)
+      expect(AuditLog.where(action: "employee_statement#pdf_downloaded")).to be_empty
+    end
+
+    it "loads a statement's detail rows without a query per row" do
+      period = period_on(Date.new(2026, 10, 8))
+      item = item_for(period)
+      2.times do |n|
+        deduction_type = company.deduction_types.create!(name: "Plan #{n}", category: "post_tax")
+        item.payroll_item_deductions.create!(deduction_type: deduction_type, label: "Plan #{n}", amount: 10 + n, category: "post_tax")
+      end
+      document = post_stub!(item)
+      get "/api/v1/employee/statements/#{document.id}", headers: headers_for
+      expect(response).to have_http_status(:ok)
+
+      queries = []
+      callback = ->(*, payload) { queries << payload[:sql] if payload[:sql].include?("deduction_types") }
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+        get "/api/v1/employee/statements/#{document.id}", headers: headers_for
+      end
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("deductions").size).to be >= 2
+      expect(queries.size).to eq(1)
     end
   end
 
@@ -418,6 +509,41 @@ RSpec.describe "Employee statements", type: :request do
       expect(body).to include("gross_pay" => "1050.00", "net_pay" => "940.00", "note" => "Includes recorded payroll adjustments.")
       expect(body.fetch("earnings")).to eq([ { "label" => "Gross pay", "hours" => "40.00", "rate" => nil, "pay_basis" => nil,
         "amount" => "1050.00", "ytd" => nil, "kind" => nil } ])
+    end
+
+    it "shows adjusted hours on a voided or partly adjusted check" do
+      admin = create(:user, role: :admin, company: company)
+      adjust = lambda do |check, kind, key, **amounts|
+        HistoricalPaycheckAdjustment.insert_all!([ {
+          company_id: company.id, historical_paycheck_id: check.id, kind: kind, effective_pay_date: check.pay_date,
+          filing_year: 2026, filing_quarter: 3, reason: "Recorded #{kind}", idempotency_key: key,
+          created_by_id: admin.id, created_at: Time.current, updated_at: Time.current, **amounts
+        } ])
+      end
+      voided = quickbooks_check!(pay_date: Date.new(2026, 8, 27), gross_pay: 1_000, net_pay: 900, hours_total: 40)
+      adjust.call(voided, "void", "spec-void", gross_pay: -1_000, net_pay: -900, hours_total: -40)
+      partial = quickbooks_check!(pay_date: Date.new(2026, 8, 13), gross_pay: 1_000, net_pay: 900, hours_total: 40)
+      adjust.call(partial, "correction", "spec-partial", gross_pay: 100, net_pay: 80, hours_total: 4.5)
+
+      rows = list.fetch("statements").index_by { |row| row["id"] }
+      expect(rows.fetch("qb-#{voided.id}")).to include("total_hours" => "0.00", "gross_pay" => "0.00")
+      expect(rows.fetch("qb-#{partial.id}")).to include("total_hours" => "44.50", "gross_pay" => "1100.00")
+
+      get "/api/v1/employee/statements/qb-#{voided.id}", headers: headers_for
+      expect(response.parsed_body).to include("total_hours" => "0.00")
+      expect(response.parsed_body.fetch("earnings").sole).to include("hours" => "0.00", "amount" => "0.00")
+      get "/api/v1/employee/statements/qb-#{partial.id}", headers: headers_for
+      expect(response.parsed_body).to include("total_hours" => "44.50")
+      expect(response.parsed_body.fetch("earnings").sole).to include("hours" => "44.50", "amount" => "1100.00")
+    end
+
+    it "reads the QuickBooks cutover once per list" do
+      quickbooks_check!(pay_date: Date.new(2026, 8, 27))
+      cutovers = 0
+      callback = ->(*, payload) { cutovers += 1 if payload[:sql].match?(/MIN\("pay_periods"\."pay_date"\)/) }
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") { list }
+      expect(response).to have_http_status(:ok)
+      expect(cutovers).to eq(1)
     end
   end
 end

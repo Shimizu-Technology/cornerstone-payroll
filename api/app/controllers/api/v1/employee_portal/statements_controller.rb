@@ -49,11 +49,8 @@ module Api
           document = statements.pdf_document(params[:id])
           return head :not_found unless document
 
-          bytes = R2StorageService.new.download(document.storage_key)
-          unless bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
-            Rails.error.report(StandardError.new("Employee document #{document.id} is missing or changed in storage"), handled: true)
-            return head :service_unavailable
-          end
+          bytes = stored_bytes(document)
+          return head :service_unavailable unless bytes
 
           audit!("pdf_downloaded", record: document,
             metadata: { statement_id: params[:id].to_s, revision: document.revision, sha256: document.sha256 })
@@ -82,6 +79,19 @@ module Api
           return :invalid unless value.is_a?(String) && value.match?(pattern)
 
           value.to_i
+        end
+
+        # The frozen bytes, or nil (reported) when storage can't return the
+        # exact file that was posted.
+        def stored_bytes(document)
+          bytes = R2StorageService.new.download(document.storage_key)
+          return bytes if bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
+
+          Rails.error.report(StandardError.new("Employee document #{document.id} is missing or changed in storage"), handled: true)
+          nil
+        rescue R2StorageService::DownloadError => e
+          Rails.error.report(e, handled: true)
+          nil
         end
 
         def pdf_filename(document)

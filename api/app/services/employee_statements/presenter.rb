@@ -99,7 +99,7 @@ class EmployeeStatements
         check_date: check.pay_date.iso8601,
         gross_pay: money(total.call(:gross_pay)),
         net_pay: money(total.call(:net_pay)),
-        total_hours: hours(check.hours_total),
+        total_hours: hours(total.call(:hours_total)),
         # The app records no payment evidence for QuickBooks checks.
         payment: {
           method: quickbooks_method(check.payment_method), status: nil, issued_on: nil,
