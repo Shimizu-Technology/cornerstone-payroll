@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -52,6 +53,13 @@ class ServeEmployeeDistTest(unittest.TestCase):
                     ("Cache-Control", "no-store"),
                 ],
             )
+
+    def test_write_ready_file_records_own_pid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ready = Path(tmp) / "web.pid"
+            serve_employee_dist.write_ready_file(ready)
+            self.assertEqual(ready.read_text(encoding="utf-8").strip(), str(os.getpid()))
+            self.assertFalse((Path(tmp) / "web.pid.tmp").exists())
 
     def test_zap_api_seed_hook_seeds_employee_and_404_paths(self) -> None:
         zap = FakeZap()

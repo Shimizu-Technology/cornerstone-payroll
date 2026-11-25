@@ -268,45 +268,70 @@ RSpec.describe "Employee enumeration resistance", type: :request do
       active_link = EmployeeAccountLink.create!(user: worker, company: alpha, employee: employee, status: "active", activated_at: 1.day.ago)
       colleague_emp = create(:employee, company: alpha)
       colleague_link = EmployeeAccountLink.create!(user: colleague, company: alpha, employee: colleague_emp, status: "active", activated_at: 1.day.ago)
-      revoked_link = EmployeeAccountLink.create!(user: worker, company: alpha, employee: create(:employee, company: alpha), status: "revoked")
-      locked_link = EmployeeAccountLink.create!(user: worker, company: alpha, employee: create(:employee, company: alpha), status: "active",
-        activation_locked_until: 24.hours.from_now)
-      expired_link = EmployeeAccountLink.create!(user: worker, company: alpha, employee: create(:employee, company: alpha), status: "former",
-        former_access_until: 1.day.ago)
-      colleague_tax_form = EmployeeDocument.create!(company: alpha, employee: colleague_emp, tax_year: 2026, revision: 1,
-        status: "posted", storage_key: "employee_documents/enum/w2.pdf", sha256: "a" * 64, posted_at: Time.current)
+      # Each restricted link starts as an ordinary active link to its own employee.
+      revoked_link, locked_link, expired_link = Array.new(3) do
+        EmployeeAccountLink.create!(user: worker, company: alpha, employee: create(:employee, company: alpha), status: "active",
+          activated_at: 1.day.ago)
+      end
 
+      # Every link's own employee has a posted document, so each probe asks for
+      # a record that link could read but for the restriction under test.
+      posted_form = lambda do |emp|
+        EmployeeDocument.create!(company: alpha, employee: emp, tax_year: 2026, revision: 1, status: "posted",
+          storage_key: "employee_documents/enum/w2-#{emp.id}.pdf", sha256: "a" * 64, posted_at: Time.current)
+      end
+      own_form = posted_form.call(employee)
+      colleague_form = posted_form.call(colleague_emp)
+      revoked_form, locked_form, expired_form = [ revoked_link, locked_link, expired_link ].map { |link| posted_form.call(link.employee) }
+
+      form_path = ->(form) { "/api/v1/employee/tax_forms/#{form.id}" }
+      link_auth = ->(user, link, azp: alpha_origin) { bearer(user.clerk_id, azp: azp).merge("X-Employee-Link-Id" => link.id.to_s) }
       probe = lambda do |path, headers|
         get path, headers: headers
         response_signature
       end
 
+      # Access works before any restriction is applied.
+      [
+        [ worker, active_link, own_form ], [ colleague, colleague_link, colleague_form ], [ worker, revoked_link, revoked_form ],
+        [ worker, locked_link, locked_form ], [ worker, expired_link, expired_form ]
+      ].each do |user, link, form|
+        expect(probe.call(form_path.call(form), link_auth.call(user, link))[:status]).to eq(200),
+          "link #{link.id} could not read its own employee's document before the restriction"
+      end
+
+      revoked_link.update_columns(status: "revoked", revoked_at: 1.minute.ago)
+      locked_link.update_columns(failed_activation_attempts: 5, activation_locked_at: Time.current, activation_locked_until: 24.hours.from_now)
+      expired_link.update_columns(status: "former", former_at: 2.days.ago, former_access_until: 1.day.ago)
+
       results = [
-        [ :missing_auth, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", {}) ],
-        [ :invalid_token, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", { "Authorization" => "Bearer bad.jwt.token", "X-Employee-Link-Id" => active_link.id.to_s }) ],
-        [ :unknown_clerk_user, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer("user_nobody", azp: alpha_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ],
-        [ :missing_link_header, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin)) ],
-        [ :malformed_link_header, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => "abc")) ],
-        [ :other_user_link, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => colleague_link.id.to_s)) ],
-        [ :wrong_subdomain_link, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: bravo_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ],
-        [ :revoked_link, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => revoked_link.id.to_s)) ],
-        [ :locked_link, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => locked_link.id.to_s)) ],
-        [ :expired_former_link, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => expired_link.id.to_s)) ],
-        [ :other_employee_record, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ],
-        [ :nonexistent_record, probe.call("/api/v1/employee/tax_forms/999999999", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ]
+        [ :missing_auth, probe.call(form_path.call(own_form), {}) ],
+        [ :invalid_token, probe.call(form_path.call(own_form), { "Authorization" => "Bearer bad.jwt.token", "X-Employee-Link-Id" => active_link.id.to_s }) ],
+        [ :unknown_clerk_user, probe.call(form_path.call(own_form), bearer("user_nobody", azp: alpha_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ],
+        [ :missing_link_header, probe.call(form_path.call(own_form), bearer(worker.clerk_id, azp: alpha_origin)) ],
+        [ :malformed_link_header, probe.call(form_path.call(own_form), bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => "abc")) ],
+        [ :other_user_link, probe.call(form_path.call(colleague_form), link_auth.call(worker, colleague_link)) ],
+        [ :wrong_subdomain_link, probe.call(form_path.call(own_form), link_auth.call(worker, active_link, azp: bravo_origin)) ],
+        [ :revoked_link, probe.call(form_path.call(revoked_form), link_auth.call(worker, revoked_link)) ],
+        [ :locked_link, probe.call(form_path.call(locked_form), link_auth.call(worker, locked_link)) ],
+        [ :expired_former_link, probe.call(form_path.call(expired_form), link_auth.call(worker, expired_link)) ],
+        [ :other_employee_record, probe.call(form_path.call(colleague_form), link_auth.call(worker, active_link)) ],
+        [ :nonexistent_record, probe.call("/api/v1/employee/tax_forms/999999999", link_auth.call(worker, active_link)) ]
       ]
 
       # Feature-off 404 must ALSO have identical status, body, and headers (no Cache-Control oracle).
-      @alpha_profile.update!(options: {
-        "subdomain_enabled" => true,
-        "employee_portal" => { "features" => { "stubs" => false, "tax_forms" => false, "profile_requests" => false, "delivery_consent" => false } }
-      })
+      features = { "stubs" => true, "tax_forms" => true, "profile_requests" => true, "delivery_consent" => true }
+      @alpha_profile.update!(options: { "subdomain_enabled" => true, "employee_portal" => { "features" => features.merge("tax_forms" => false) } })
       TenantSubdomainRegistry.invalidate!
-      results << [ :feature_off, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ]
+      results << [ :feature_off, probe.call(form_path.call(own_form), link_auth.call(worker, active_link)) ]
 
+      # Portal off: every feature back on, only the master switch off.
+      @alpha_profile.update!(options: { "subdomain_enabled" => true, "employee_portal" => { "features" => features } })
+      TenantSubdomainRegistry.invalidate!
+      expect(probe.call(form_path.call(own_form), link_auth.call(worker, active_link))[:status]).to eq(200)
       @alpha_profile.update!(employee_portal_enabled: false)
       TenantSubdomainRegistry.invalidate!
-      results << [ :portal_off, probe.call("/api/v1/employee/tax_forms/#{colleague_tax_form.id}", bearer(worker.clerk_id, azp: alpha_origin).merge("X-Employee-Link-Id" => active_link.id.to_s)) ]
+      results << [ :portal_off, probe.call(form_path.call(own_form), link_auth.call(worker, active_link)) ]
 
       expect_identical_signatures!(results, expected_status: 404)
       expect(results.first.last[:body]).to eq("")

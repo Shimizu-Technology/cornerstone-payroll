@@ -54,10 +54,24 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
-# Container runs as the `zap` user (UID 1000), while CI runners (e.g. GitHub Actions
-# ubuntu-24.04) run as UID 1001. Make the mounted report directory writable by the
-# container user so ZAP can write HTML, JSON, and Markdown reports to /zap/wrk.
-chmod 0777 "$OUTPUT_DIR"
+
+# The ZAP container runs as the `zap` user (UID 1000), while CI runners (e.g.
+# GitHub Actions ubuntu-24.04) run as UID 1001, so the directory mounted at
+# /zap/wrk must be writable by another UID. Stage it inside a private (0700)
+# per-run parent: other local accounts can't reach it, and the sticky 1777
+# mode lets the container add reports without being able to replace the
+# config and hook files staged there. Reports are copied to OUTPUT_DIR after
+# each scan. The bind mount resolves the host path as the Docker daemon, so
+# the container needs no access to the private parent.
+RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zap-baseline.XXXXXX")"
+chmod 0700 "$RUN_DIR"
+ZAP_WRK="${RUN_DIR}/wrk"
+mkdir "$ZAP_WRK"
+chmod 1777 "$ZAP_WRK"
+# Per-run readiness markers: each server writes its PID here only after it
+# has bound its port, so a stale server from another run can't pass.
+RUN_MARKERS="${RUN_DIR}/markers"
+mkdir -m 0700 "$RUN_MARKERS"
 
 PIDS=()
 CREATED_DB=""
@@ -72,20 +86,49 @@ cleanup() {
   if [[ -n "$CREATED_DB" ]]; then
     dropdb --if-exists --host 127.0.0.1 --username "${PGUSER:-postgres}" "$CREATED_DB" >/dev/null 2>&1 || true
   fi
+  # Files ZAP wrote are owned by its UID; the sticky directory's owner may still remove them.
+  rm -rf "$RUN_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-wait_for_http() {
+# Refuse to start if anything already answers on a port, so the scan can only
+# reach the servers this run starts.
+require_free_port() {
+  local port="$1"
+  local label="$2"
+  if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:${port}/"; then
+    echo "Port ${port} for ${label} is already in use (another harness or server?). Stop it or set a different port." >&2
+    exit 1
+  fi
+}
+
+# Waits until `url` answers AND this run's own server is the one listening:
+# the child process is still alive and its marker file (written only after a
+# successful bind) names a live process started by this run.
+wait_for_own_server() {
   local url="$1"
   local label="$2"
-  local attempts=45
+  local child_pid="$3"
+  local marker_file="$4"
+  local log_file="$5"
+  local attempts=90
+  local marker_pid=""
   for ((i=1; i<=attempts; i++)); do
-    if curl -sS -o /dev/null --max-time 2 "$url"; then
-      return 0
+    if ! kill -0 "$child_pid" 2>/dev/null; then
+      echo "${label} exited before it was ready. Last log lines (${log_file}):" >&2
+      tail -n 20 "$log_file" >&2 || true
+      return 1
+    fi
+    if [[ -s "$marker_file" ]]; then
+      marker_pid="$(tr -dc '0-9' <"$marker_file")"
+      if [[ -n "$marker_pid" ]] && kill -0 "$marker_pid" 2>/dev/null &&
+        curl -sS -o /dev/null --max-time 2 "$url" 2>/dev/null; then
+        return 0
+      fi
     fi
     sleep 1
   done
-  echo "Timed out waiting for ${label} at ${url}" >&2
+  echo "Timed out waiting for ${label} (this run's server) at ${url}" >&2
   return 1
 }
 
@@ -107,11 +150,12 @@ run_zap_baseline() {
     fi
   fi
 
-  cp "$conf_file" "${OUTPUT_DIR}/${prefix}.conf"
+  # Staged read-only for the container user (0644 in a sticky directory).
+  install -m 0644 "$conf_file" "${ZAP_WRK}/${prefix}.conf"
   if [[ -n "$hook_file" ]]; then
     local hook_basename
     hook_basename="$(basename "$hook_file")"
-    cp "$hook_file" "${OUTPUT_DIR}/${hook_basename}"
+    install -m 0644 "$hook_file" "${ZAP_WRK}/${hook_basename}"
     hook_args=(--hook "/zap/wrk/${hook_basename}")
   fi
 
@@ -119,7 +163,7 @@ run_zap_baseline() {
   local status=0
   docker run --rm \
     "${docker_net_args[@]}" \
-    -v "${OUTPUT_DIR}:/zap/wrk:rw" \
+    -v "${ZAP_WRK}:/zap/wrk:rw" \
     "$ZAP_IMAGE" \
     zap-baseline.py \
       -t "$zap_target" \
@@ -130,6 +174,13 @@ run_zap_baseline() {
       -w "${prefix}-report.md" \
       -m 2 \
       -I || status=$?
+
+  # Copy whatever reports exist (also after a failure) so CI uploads them.
+  cp "${ZAP_WRK}/${prefix}.conf" "${OUTPUT_DIR}/${prefix}.conf"
+  local report
+  for report in "${ZAP_WRK}/${prefix}"-report.*; do
+    [[ -f "$report" ]] && cp "$report" "${OUTPUT_DIR}/"
+  done
 
   # ZAP baseline exit codes: 0 = pass, 2 = warn only (ignored with -I), 1/3 = fail/error.
   if [[ "$status" -ne 0 ]]; then
@@ -163,13 +214,23 @@ if [[ "$MODE" == "local" ]]; then
     )
   fi
 
+  require_free_port "$WEB_PORT" "employee web server"
+  require_free_port "$API_PORT" "employee API server"
+
   echo "==> Starting employee static server with _headers on 127.0.0.1:${WEB_PORT}"
   python3 "${ROOT_DIR}/scripts/security/serve_employee_dist.py" \
     --dir "${ROOT_DIR}/web/dist" \
     --host "127.0.0.1" \
-    --port "$WEB_PORT" >"${OUTPUT_DIR}/web-server.log" 2>&1 &
-  PIDS+=("$!")
-  wait_for_http "http://127.0.0.1:${WEB_PORT}/" "employee web server"
+    --port "$WEB_PORT" \
+    --ready-file "${RUN_MARKERS}/web.pid" >"${OUTPUT_DIR}/web-server.log" 2>&1 &
+  web_pid="$!"
+  PIDS+=("$web_pid")
+  wait_for_own_server "http://127.0.0.1:${WEB_PORT}/" "employee web server" "$web_pid" \
+    "${RUN_MARKERS}/web.pid" "${OUTPUT_DIR}/web-server.log"
+  if [[ "$(tr -dc '0-9' <"${RUN_MARKERS}/web.pid")" != "$web_pid" ]]; then
+    echo "Employee web server marker does not match the process this run started" >&2
+    exit 1
+  fi
 
   if [[ -z "${TEST_DATABASE_URL:-}" ]]; then
     CREATED_DB="cornerstone_payroll_zap_$$_test"
@@ -189,7 +250,7 @@ if [[ "$MODE" == "local" ]]; then
   echo "==> Starting employee API (APP_PROCESS_ROLE=employee_web, RAILS_ENV=production, FORCE_SSL=false) on 127.0.0.1:${API_PORT}"
   (
     cd "${ROOT_DIR}/api"
-    APP_PROCESS_ROLE=employee_web \
+    exec env APP_PROCESS_ROLE=employee_web \
     RAILS_ENV=production \
     DEPLOYMENT_ENV=production \
     FORCE_SSL=false \
@@ -201,15 +262,18 @@ if [[ "$MODE" == "local" ]]; then
     RLS_CONTEXT_GUARD_MODE=off \
     CLERK_ISSUER="https://clerk.example.test" \
     CLERK_AUTHORIZED_PARTIES="https://payroll.example.test" \
-    DATABASE_URL="${DATABASE_URL:-$TEST_DATABASE_URL}" \
+    DATABASE_URL="$TEST_DATABASE_URL" \
     SECRET_KEY_BASE="zap-local-scan-secret-key-base-0123456789abcdef0123456789abcdef" \
     ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY="zap-local-scan-primary-key-0123456789" \
     ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY="zap-local-scan-determ-key-0123456789" \
     ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT="zap-local-scan-salt-0123456789abcdef" \
-    bundle exec puma -b "tcp://127.0.0.1:${API_PORT}" -w 0 -t 2:2
+    bundle exec puma -b "tcp://127.0.0.1:${API_PORT}" -w 0 -t 2:2 --pidfile "${RUN_MARKERS}/api.pid"
   ) >"${OUTPUT_DIR}/api-server.log" 2>&1 &
-  PIDS+=("$!")
-  wait_for_http "http://127.0.0.1:${API_PORT}/up" "employee API server"
+  api_pid="$!"
+  PIDS+=("$api_pid")
+  # Puma writes its pidfile only after binding the listener; a bind failure exits.
+  wait_for_own_server "http://127.0.0.1:${API_PORT}/up" "employee API server" "$api_pid" \
+    "${RUN_MARKERS}/api.pid" "${OUTPUT_DIR}/api-server.log"
 
   # Smoke-verify employee_web process isolation before scanning.
   admin_status="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${API_PORT}/api/v1/admin/companies")"

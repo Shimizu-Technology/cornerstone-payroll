@@ -161,7 +161,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       "RLS_CONTEXT_GUARD_MODE" => "raise",
       "AUTH_ENABLED" => "true",
       "REQUIRE_MFA" => "true",
-      DemoOutbound::ENV_KEY => "demo.worker@demo-iso.example"
+      DemoOutbound::ENV_KEY => "demo.worker@demo-iso.example,demo.employee@demo-iso.example"
     )
     example.run
   ensure
@@ -280,6 +280,28 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     self.class.mounted_employee_routes.select { |route| ENDPOINT_MANIFEST.fetch(route)[:kind] == :link }
   end
 
+  def seed_active_consent!(employee, link, kind: "pay_statements")
+    disclosure = DeliveryDisclosure.current_for(kind)
+    DeliveryConsent.create!(
+      company: employee.company, user: link.user, employee: employee, employee_account_link: link,
+      delivery_disclosure: disclosure, kind: kind, disclosure_version: disclosure.version,
+      disclosure_digest: disclosure.digest, given_at: 1.hour.ago, method: "employee_portal_checkbox"
+    )
+  end
+
+  # Everything an employee-app write can change for one employee and link.
+  def employee_write_snapshot(employee, link)
+    employee.reload
+    {
+      employee: employee.attributes.except("updated_at"),
+      link: link.reload.attributes.except("updated_at"),
+      emergency_contacts: EmployeeEmergencyContact.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") },
+      change_requests: EmployeeChangeRequest.where(employee_id: employee.id).order(:id).map { |r| r.attributes.except("updated_at") },
+      delivery_consents: DeliveryConsent.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") },
+      changes_to_confirm: EmployeeContactChangeToConfirm.where(employee_id: employee.id).order(:id).pluck(:id)
+    }
+  end
+
   def expect_empty_not_found(context_label)
     expect(response).to have_http_status(:not_found), "#{context_label}: expected 404, got #{response.status} (#{response.body.inspect})"
     expect(response.body).to eq(""), "#{context_label}: expected empty body, got #{response.body.inspect}"
@@ -327,10 +349,15 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
       path = resolve_path(route, resources)
       send_employee_request(route, path: path, headers: headers, body: payload_for(route))
-      # confirm_email returns 422 for a dummy verification_id (proving it passed auth, link, feature, and step-up).
-      allowed_statuses = route.last == "/api/v1/employee/profile/email/confirm" ? [ 422 ] : [ 200, 201, 202 ]
-      expect(allowed_statuses).to include(response.status),
-        "Baseline #{route.join(' ')} returned #{response.status} (#{response.body})"
+      if route.last == "/api/v1/employee/profile/email/confirm"
+        # The dummy verification_id reaches the code check itself, so this
+        # specific error proves auth, link, feature, and step-up all passed.
+        expect(response).to have_http_status(:unprocessable_content), "Baseline confirm returned #{response.status} (#{response.body})"
+        expect(response.parsed_body).to eq("error" => "The verification code is invalid or expired.")
+      else
+        expect([ 200, 201, 202 ]).to include(response.status),
+          "Baseline #{route.join(' ')} returned #{response.status} (#{response.body})"
+      end
     end
   end
 
@@ -403,10 +430,39 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     expect(response).to have_http_status(:not_found)
     expect(rehire_user.reload).not_to be_active
 
-    # POST /api/v1/employee/activation rejects cross-company DOB/SSN mismatch and cross-subdomain bind.
-    post_activation(activation_params(emp_a, code: bravo_invite.code, ssn_last4: emp_a.ssn_digits.last(4)))
+    # POST /api/v1/employee/activation refuses an Alpha employee's details against Bravo's invite.
+    # (Bravo's own details from Alpha's subdomain are covered by the example below.)
+    post_activation(activation_params(emp_a, code: bravo_invite.code, ssn_last4: emp_a.ssn_digits.last(4)), origin: alpha_origin)
     expect(response).to have_http_status(:unprocessable_content)
+    expect(response.parsed_body).to eq("error" => Api::V1::EmployeePortal::ActivationsController::FAILED, "code" => "activation_failed")
+    expect(bravo_invite.link.reload).to have_attributes(status: "invited", user_id: nil)
     end
+  end
+
+  # Sign-up itself does not read the browser Origin: Bravo's own invitee with
+  # Bravo's correct DOB and SSN-4 starts a sign-up from any page. The subdomain
+  # binding is that the sign-up returns to Bravo's subdomain only, and Bind
+  # (/auth/me) refuses a token whose azp names another company's subdomain.
+  it "binds an activation from another company's subdomain only on the invite company's own subdomain" do
+    bravo_emp = create(:employee, company: bravo, first_name: "Riley", last_name: "Santos", date_of_birth: Date.new(1990, 4, 12))
+    bravo_invite = invite!(bravo_emp, actor: create(:user, role: :admin, company: bravo, organization: organization), delivery: "code")
+
+    post_activation(activation_params(bravo_emp, code: bravo_invite.code), origin: alpha_origin)
+    expect_sign_up_started
+    link = bravo_invite.link.reload
+    expect(link).to have_attributes(status: "invited", company_id: bravo.id)
+    expect(link.user).to have_attributes(company_id: bravo.id, clerk_id: nil)
+    expect(clerk_invitations.last.fetch(:redirect_url)).to eq("#{bravo_origin}/sign-up")
+
+    metadata = { "payroll_employee_link_id" => link.id, "payroll_invite_generation" => link.invite_generation }
+    bind = lambda do |azp|
+      TenantScope.as_system(reason: "Check the employee bind subdomain rule") do
+        ApplicationRecord.transaction { EmployeeLinks::Bind.lock_link(link.user, metadata, azp: azp) }
+      end
+    end
+    expect(bind.call(alpha_origin)).to be_nil
+    expect(bind.call(bravo_origin)).to eq(link)
+    expect(link.reload).to have_attributes(status: "invited", user_id: link.user_id)
   end
 
   # 3. Cross-employee isolation (same company) across EVERY employee endpoint.
@@ -460,6 +516,65 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     post_activation(activation_params(emp_a, code: stranger_invite.code))
     expect(response).to have_http_status(:unprocessable_content)
+    end
+  end
+
+  # 3b. Writes without a resource ID take their employee from the link alone:
+  # with A's link, each one changes A and never B, even when the body names B.
+  it "applies same-company writes without a resource ID to the presenting link's employee only" do
+    seed_employee_resources(emp_a, link_a)
+    seed_employee_resources(emp_b, link_b)
+    seed_active_consent!(emp_b, link_b)
+    EmployeeChangeRequest.where(employee_id: emp_a.id, status: :pending).delete_all
+    headers_a = link_headers(link_a, azp: alpha_origin)
+    a_before = employee_write_snapshot(emp_a, link_a)
+    b_before = employee_write_snapshot(emp_b, link_b)
+    consent_audits = ->(link, event) { AuditLog.where(action: "employee_delivery_consents##{event}", record_id: link.id) }
+
+    # Ordered: consent is given before it is withdrawn.
+    effects = {
+      [ "PATCH", "/api/v1/employee/profile/phone" ] => lambda {
+        expect(emp_a.reload.phone).not_to eq(a_before[:employee]["phone"])
+        expect(emp_a.phone).to end_with("5550199")
+      },
+      [ "POST", "/api/v1/employee/profile/email" ] => lambda {
+        expect(link_a.reload.profile_email_challenge).to be_present
+        expect(a_before[:link]["profile_email_challenge"]).to be_nil
+      },
+      [ "POST", "/api/v1/employee/profile/email/confirm" ] => lambda {
+        expect(response.parsed_body).to eq("error" => "The verification code is invalid or expired.")
+        expect(emp_a.reload.email).to eq(a_before[:employee]["email"])
+      },
+      [ "POST", "/api/v1/employee/emergency_contacts" ] => lambda {
+        expect(EmployeeEmergencyContact.where(employee_id: emp_a.id, name: "Sam Santos").count).to eq(1)
+      },
+      [ "POST", "/api/v1/employee/address_requests" ] => lambda {
+        expect(EmployeeChangeRequest.where(employee_id: emp_a.id, status: :pending).sole.proposed_changes)
+          .to include("address_line1" => "450 Updated Ln")
+      },
+      [ "POST", "/api/v1/employee/delivery_consents" ] => lambda {
+        expect(DeliveryConsent.active.where(employee_id: emp_a.id, kind: "pay_statements").count).to eq(1)
+      },
+      [ "POST", "/api/v1/employee/delivery_consents/w2gu_access_proof/pdf" ] => lambda {
+        expect(response.parsed_body["access_proof_token"]).to be_present
+        expect(consent_audits.call(link_a, "w2gu_access_proof").count).to eq(1)
+        expect(consent_audits.call(link_b, "w2gu_access_proof")).to be_empty
+      },
+      [ "POST", "/api/v1/employee/delivery_consents/withdraw" ] => lambda {
+        expect(DeliveryConsent.where(employee_id: emp_a.id, kind: "pay_statements").sole.withdrawn_at).to be_present
+      }
+    }
+    no_id_writes = link_routes.select { |route| ENDPOINT_MANIFEST.fetch(route).values_at(:access, :resource) == [ :write, nil ] }
+    expect(effects.keys.sort).to eq(no_id_writes.sort), "Every link-scoped write without a resource ID needs an effect check here"
+
+    effects.each do |route, expect_effect_on_a|
+      # None of these routes takes a target selector; the body names B anyway.
+      body = payload_for(route).merge(employee_id: emp_b.id, employee_account_link_id: link_b.id)
+      send_employee_request(route, path: route.last, headers: headers_a, body: body)
+      expected = route.last == "/api/v1/employee/profile/email/confirm" ? [ 422 ] : [ 200, 201, 202 ]
+      expect(expected).to include(response.status), "#{route.join(' ')} returned #{response.status} (#{response.body})"
+      expect_effect_on_a.call
+      expect(employee_write_snapshot(emp_b, link_b)).to eq(b_before), "#{route.join(' ')} with A's link changed Employee B"
     end
   end
 
@@ -529,6 +644,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
         sha256: Digest::SHA256.hexdigest(stub_pdf_bytes), posted_at: Time.current
       )
 
+      # Consent given while active, so the former-window withdrawal has a real record to withdraw.
+      prior_consent = seed_active_consent!(emp_a, link_a)
       link_a.update!(status: "former", former_at: Time.current, former_access_until: cutoff, former_profile_access_until: cutoff)
       headers = link_headers(link_a, azp: alpha_origin)
 
@@ -544,6 +661,12 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
           expect_empty_not_found("open former write #{route.join(' ')}")
         end
       end
+
+      # The one-tap withdrawal in the open window actually withdrew the consent.
+      expect(prior_consent.reload).to have_attributes(withdrawn_by_user_id: worker_a.id)
+      expect(prior_consent.withdrawn_at).to be_present
+      expect(DeliveryConsent.active.where(employee_id: emp_a.id)).to be_empty
+      expect(EmployeeContactChangeToConfirm.where(employee_id: emp_a.id, change_kind: "delivery_consent").count).to eq(1)
 
       # Post-cutoff statement is hidden from list, detail, and PDF.
       get "/api/v1/employee/statements", headers: headers
@@ -662,6 +785,58 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     end
   end
 
+  # 7b. The activation-lock checks that run after the write transaction
+  # reloads the link (profile writes, consent create, consent withdrawal).
+  # No supported path puts an activation lock on an active link: locks are
+  # written only while a link is invited and are cleared on bind/claim
+  # (EmployeeAppRollout#status_of). These guards are therefore defensive, so
+  # this example simulates a concurrent lock landing between admission (which
+  # saw the link unlocked) and the transactional reload (which sees it locked).
+  it "refuses employee writes when the link is locked between admission and the transactional reload" do
+    seed_employee_resources(emp_a, link_a)
+    EmployeeChangeRequest.where(employee_id: emp_a.id, status: :pending).delete_all
+    consent = seed_active_consent!(emp_a, link_a)
+    headers = link_headers(link_a, azp: alpha_origin)
+    lock_columns = %w[failed_activation_attempts activation_locked_at activation_locked_until]
+    unlock = -> { link_a.update_columns(failed_activation_attempts: 0, activation_locked_at: nil, activation_locked_until: nil) }
+    guarded = [
+      [ "PATCH", "/api/v1/employee/profile/phone" ],
+      [ "POST", "/api/v1/employee/profile/email" ],
+      [ "POST", "/api/v1/employee/emergency_contacts" ],
+      [ "POST", "/api/v1/employee/address_requests" ],
+      [ "POST", "/api/v1/employee/delivery_consents/withdraw" ],
+      [ "POST", "/api/v1/employee/delivery_consents" ]
+    ]
+
+    # Success control: an unchanged, unlocked link passes the same reload.
+    send_employee_request(guarded.first, path: guarded.first.last, headers: headers, body: payload_for(guarded.first))
+    expect(response).to have_http_status(:ok), response.body
+    emp_a.update_columns(phone: "+16715550100")
+
+    locked_at_reload = 0
+    allow_any_instance_of(EmployeeAccountLink).to receive(:lock!).and_wrap_original do |original, *args|
+      if original.receiver.id == link_a.id
+        locked_at_reload += 1
+        EmployeeAccountLink.where(id: link_a.id)
+          .update_all(failed_activation_attempts: 5, activation_locked_at: Time.current, activation_locked_until: 24.hours.from_now)
+      end
+      original.call(*args)
+    end
+
+    guarded.each do |route|
+      unlock.call
+      before = employee_write_snapshot(emp_a, link_a)
+      expect do
+        send_employee_request(route, path: route.last, headers: headers, body: payload_for(route))
+      end.to change { locked_at_reload }.by(1)
+      expect_empty_not_found("locked at reload #{route.join(' ')}")
+      after = employee_write_snapshot(emp_a, link_a)
+      expect(after.except(:link)).to eq(before.except(:link)), "#{route.join(' ')} changed state after the reload saw a lock"
+      expect(after[:link].except(*lock_columns)).to eq(before[:link].except(*lock_columns))
+    end
+    expect(consent.reload.withdrawn_at).to be_nil
+  end
+
   # 8. Feature off (404) across EVERY employee endpoint.
   it "returns 404 when the portal or individual feature switch is off across every employee endpoint" do
     require_all_non_link_routes_exercised!(:feature_off) do
@@ -762,11 +937,41 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     expect(response.parsed_body["next"]).to eq("sign_in")
     expect(live_invite.link.reload.user_id).to be_nil
 
-    # Demo companies cannot host EmployeeAccountLink records at all.
+    # Since #585 a demo company holds employee links like a live client, for
+    # demo logins only. The boundary is the login's home company, checked on
+    # every use (EmployeeLinks.demo_boundary_allows? via openable?, Bind,
+    # claim), not on the stored row, so a live login's link into a demo
+    # company is refused by every endpoint, the same as the reverse above.
+    enable_all_employee_features!(demo)
+    demo_worker = create(:user, company: demo, organization: organization, role: :portal_employee,
+      email: "demo.employee@demo-iso.example", name: "Kit Wren", clerk_id: "user_iso_demo_employee")
+    own_demo_link = EmployeeAccountLink.create!(user: demo_worker, company: demo, employee: create(:employee, company: demo),
+      status: "active", activated_at: 1.day.ago)
+    get "/api/v1/employee/context",
+      headers: link_headers(own_demo_link, azp: EmployeeLinkHelpers::PAYROLL_ORIGIN)
+    expect(response).to have_http_status(:ok), "demo login's own demo link: #{response.status} #{response.body}"
+
     demo_emp = create(:employee, company: demo)
-    expect(EmployeeAccountLink.new(user: worker_a, company: demo, employee: demo_emp, status: "active")).not_to be_valid
+    live_into_demo = EmployeeAccountLink.create!(user: worker_a, company: demo, employee: demo_emp, status: "active", activated_at: 1.day.ago)
+    resources_live_into_demo = seed_employee_resources(demo_emp, live_into_demo)
+    live_into_demo_headers = link_headers(live_into_demo, azp: EmployeeLinkHelpers::PAYROLL_ORIGIN)
+    link_routes.each do |route|
+      path = resolve_path(route, resources_live_into_demo)
+      send_employee_request(route, path: path, headers: live_into_demo_headers, body: payload_for(route))
+      expect_empty_not_found("live-to-demo #{route.join(' ')}")
+    end
+    get "/api/v1/employee/links", headers: bearer(worker_a.clerk_id)
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("links").pluck("id")).not_to include(live_into_demo.id)
+
     expect(EmployeeLinks.demo_boundary_allows?(worker_a, demo)).to be(false)
     expect(EmployeeLinks.demo_boundary_allows?(demo_user, alpha)).to be(false)
+    expect(EmployeeLinks.demo_boundary_allows?(demo_worker, demo)).to be(true)
+
+    # A practice copy (non-demo test workspace) still can't hold a link at all.
+    practice = create(:company, organization: organization, payroll_environment: "migration_rehearsal",
+      test_workspace_purpose: "sandbox", migration_source_company: alpha, migration_rehearsal_status: "ready")
+    expect(EmployeeAccountLink.new(company: practice, employee: create(:employee, company: practice))).not_to be_valid
     end
   end
 
@@ -785,6 +990,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
 
     view_headers = bearer(staff.clerk_id, azp: alpha_origin, fva: [ 0, 0 ], two_factor_enabled: true)
       .merge(ViewAsGrant::HEADER => grant_token)
+    a_before = employee_write_snapshot(emp_a, link_a)
+    b_before = employee_write_snapshot(emp_b, link_b)
 
     self.class.mounted_employee_routes.each do |route|
       meta = ENDPOINT_MANIFEST.fetch(route)
@@ -796,6 +1003,9 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
         end.not_to have_enqueued_job
         expect(response).to have_http_status(:forbidden),
           "view-only write #{route.join(' ')} returned #{response.status}: #{response.body}"
+        # A rejected write must not have changed anything before answering 403.
+        expect(employee_write_snapshot(emp_a, link_a)).to eq(a_before), "view-only write #{route.join(' ')} changed Employee A"
+        expect(employee_write_snapshot(emp_b, link_b)).to eq(b_before), "view-only write #{route.join(' ')} changed Employee B"
       elsif meta[:kind] == :account
         # GET /api/v1/employee/links is not part of an employee support view surface.
         send_employee_request(route, path: path, headers: view_headers)
