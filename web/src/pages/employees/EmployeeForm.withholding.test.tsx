@@ -78,6 +78,28 @@ describe('Received-election draft preservation and default safeguards', () => {
     await screen.findByText('Saved employee');
   });
 
+  it('blocks an effective date before signature and accepts the signature date', async () => {
+    view();
+    await screen.findByText('Approved default withholding');
+    fireEvent.click(toggle());
+    const effectiveDate = screen.getByLabelText(/^Effective date/);
+    fireEvent.change(effectiveDate, { target: { value: '2026-06-01' } });
+    fireEvent.change(screen.getByLabelText('Signed date on source W-4 (optional)'), { target: { value: '2026-06-10' } });
+    fireEvent.change(document.querySelector('[name="w4_change_reason"]')!, { target: { value: 'Synthetic signed form' } });
+
+    submit();
+
+    expect(await screen.findByText('Set the effective date on or after the date the W-4 was signed.')).toBeTruthy();
+    expect(effectiveDate.getAttribute('aria-invalid')).toBe('true');
+    expect(mocks.update).not.toHaveBeenCalled();
+
+    fireEvent.change(effectiveDate, { target: { value: '2026-06-10' } });
+    submit();
+
+    await screen.findByText('Saved employee');
+    expect(mocks.update.mock.calls[0][1]).toMatchObject({ w4_effective_on: '2026-06-10', w4_signed_on: '2026-06-10' });
+  });
+
   it('restores evidence metadata and allows an ordinary address-only save after check and uncheck', async () => {
     view(); await screen.findByText('Approved default withholding');
     fireEvent.click(toggle());

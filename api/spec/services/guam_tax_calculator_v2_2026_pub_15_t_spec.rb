@@ -97,10 +97,13 @@ RSpec.describe GuamTaxCalculatorV2, "2026 IRS Publication 15-T" do
       department: department,
       filing_status: "single",
       pay_frequency: "biweekly",
-      pay_rate: 20,
-      additional_withholding: 25
+      pay_rate: 20
     )
     pay_period = create(:pay_period, company: company, pay_date: Date.new(2026, 1, 16))
+    employee.employee_w4_elections.create!(
+      **EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(additional_withholding: 25, w4_form_version: 2026),
+      company: company, effective_on: pay_period.pay_date, source: "staff", reason: "Synthetic W-4"
+    )
     payroll_item = create(
       :payroll_item,
       employee: employee,

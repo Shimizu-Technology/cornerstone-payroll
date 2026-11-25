@@ -11,8 +11,8 @@ RSpec.describe PayrollCalculator do
   let(:payroll_item) { create(:payroll_item, employee: employee, pay_period: pay_period) }
 
   describe "effective-dated W-4 elections" do
-    it "uses the election effective on the pay date and snapshots that version" do
-      base_attributes = {
+    let(:base_attributes) do
+      {
         company: company,
         employee: employee,
         allowances: 0,
@@ -25,6 +25,9 @@ RSpec.describe PayrollCalculator do
         source: "staff",
         reason: "Signed W-4"
       }
+    end
+
+    it "uses the election effective on the pay date and snapshots that version" do
       first = EmployeeW4Election.create!(
         **base_attributes,
         effective_on: Date.new(2024, 1, 1),
@@ -47,6 +50,46 @@ RSpec.describe PayrollCalculator do
       expect(calculator.send(:employee_w4_snapshot).dig("w4", "signed_on")).to eq("2023-12-20")
       expect(calculator.send(:employee_w4_snapshot).dig("w4", "source_reference")).to eq("Signed source W4.pdf")
       expect(payroll_item.calculation_context_snapshot.dig("employee", "w4_signed_on")).to eq("2023-12-20")
+    end
+    context "when a June 1 election was signed June 10" do
+      let(:pay_period) { create(:pay_period, company: company, pay_date: Date.new(2024, 6, 5)) }
+      let!(:later_election) do
+        election = EmployeeW4Election.create!(
+          **base_attributes.merge(additional_withholding: 100),
+          effective_on: Date.new(2024, 6, 10), w4_signed_on: Date.new(2024, 6, 10),
+          filing_status: "married"
+        )
+        # Reproduce a record and its cache as saved before the date validation.
+        election.update_columns(effective_on: Date.new(2024, 6, 1))
+        employee.update_columns(election.profile_attributes)
+        election
+      end
+
+      it "uses the earlier signed election for the June 5 paycheck" do
+        earlier = EmployeeW4Election.create!(
+          **base_attributes.merge(additional_withholding: 10),
+          effective_on: Date.new(2024, 5, 1), w4_signed_on: Date.new(2024, 5, 1),
+          filing_status: "single"
+        )
+        employee.employee_w4_elections.load
+
+        described_class.for(employee, payroll_item).calculate
+
+        expect(payroll_item.additional_withholding).to eq(10)
+        expect(payroll_item.tax_rule_snapshot.dig("w4", "election_id")).to eq(earlier.id)
+      end
+
+      it "uses and snapshots default withholding when the only election was signed later" do
+        described_class.for(employee, payroll_item).calculate
+
+        expect(payroll_item.additional_withholding).to eq(0)
+        expect(payroll_item.tax_rule_snapshot.fetch("w4")).to include(
+          "election_id" => nil, "filing_status_entered" => "single", "signed_on" => nil
+        )
+        expect(payroll_item.calculation_context_snapshot.fetch("employee")).to include(
+          "filing_status" => "single", "additional_withholding" => 0, "w4_signed_on" => nil
+        )
+      end
     end
   end
 
@@ -954,7 +997,10 @@ RSpec.describe PayrollCalculator do
     end
 
     it "lets a payroll item override the employee's W-4 Step 4(c) amount for one pay period" do
-      employee.update!(additional_withholding: 12.50)
+      employee.employee_w4_elections.create!(
+        **EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(additional_withholding: 12.50),
+        company: company, effective_on: pay_period.pay_date, source: "staff", reason: "Synthetic W-4"
+      )
       payroll_item.additional_withholding_override = 0
 
       described_class.for(employee, payroll_item).calculate
@@ -986,7 +1032,10 @@ RSpec.describe PayrollCalculator do
     end
 
     it "reapplies W-4 extra withholding when hours arrive after a zero-pay calculation" do
-      employee.update!(additional_withholding: 66.0)
+      employee.employee_w4_elections.create!(
+        **EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(additional_withholding: 66.0),
+        company: company, effective_on: pay_period.pay_date, source: "staff", reason: "Synthetic W-4"
+      )
       payroll_item.update!(
         hours_worked: 0,
         overtime_hours: 0,
