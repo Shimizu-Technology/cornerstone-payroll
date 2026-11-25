@@ -32,6 +32,10 @@ module PortalNotifications
       elsif events.all?(&:message_event?) then MESSAGE_LINE
       else UPDATE_LINE
       end
+      if events.any? { |event| event.event_type == "tax_form_paper_required" }
+        @subject = "Paper tax form follow-up required"
+        headline = "A tax form email could not be delivered. Review the paper copy deadline in the Year-end checklist."
+      end
       @lines = [ headline, SIGN_IN_LINE ]
       @link = if audience == "employee"
         self.class.employee_portal_url(events.first.company)
@@ -76,6 +80,7 @@ module PortalNotifications
     def self.destination_group(event)
       # Keyed on the event, not its shared category: a file request is
       # answered or reviewed where the request card is.
+      return [ :tax_form_paper, event.company_id, event.metadata["tax_year"] ] if event.event_type == "tax_form_paper_required"
       return :pay_runs if event.event_type.start_with?("payroll_review_")
       return :file_requests if FILE_REQUEST_EVENTS.include?(event.event_type)
 
@@ -106,6 +111,10 @@ module PortalNotifications
       group = groups.one? ? groups.first : :general
       if group.is_a?(Array) && group.first == :contact_confirmation
         return "/companies/#{group.last}/contact-changes-to-confirm"
+      end
+
+      if group.is_a?(Array) && group.first == :tax_form_paper
+        return "/companies/#{group[1]}/year-end?year=#{group[2]}"
       end
 
       case [ audience == "staff", group ]
