@@ -56,12 +56,10 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
     )
   end
 
-  def employee_headers(target_link = link, subject: target_link.user.clerk_id, fva: [ 0, -1 ], **claims)
-    extra = claims
-    if target_link.user && !target_link.user.portal_employee? && !claims.key?(:two_factor_enabled)
-      extra = { two_factor_enabled: true }.merge(claims)
-      fva = [ 0, 0 ] if fva == [ 0, -1 ]
-    end
+  # REQUIRE_MFA is on here, so every login, employee-only ones included, has
+  # an enrolled, freshly verified second factor unless a test says otherwise.
+  def employee_headers(target_link = link, subject: target_link.user.clerk_id, fva: [ 0, 0 ], **claims)
+    extra = { two_factor_enabled: true }.merge(claims)
     bearer(subject, fva: fva, **extra).merge(
       "X-Employee-Link-Id" => target_link.id.to_s,
       "User-Agent" => "TestPhone/1.0"
@@ -158,7 +156,7 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       post "#{base}/w2gu_access_proof/pdf", headers: employee_headers, as: :json
       expect_not_found
 
-      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, -1 ]), as: :json
+      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, 25 ]), as: :json
       expect(response).to have_http_status(:ok)
       pay_item = response.parsed_body.fetch("consents").find { |c| c["kind"] == "pay_statements" }
       expect(pay_item["status"]).to eq("withdrawn")
@@ -220,11 +218,11 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
         acknowledged: true,
         disclosure_version: disclosure.version,
         disclosure_digest: disclosure.digest
-      }, headers: employee_headers(fva: [ 15, -1 ]), as: :json
+      }, headers: employee_headers(fva: [ 15, 15 ]), as: :json
 
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.dig("clerk_error", "metadata", "reverification")).to eq(
-        "level" => "first_factor",
+        "level" => "second_factor",
         "afterMinutes" => 10
       )
       expect(DeliveryConsent.count).to eq(0)
@@ -416,7 +414,7 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       expect(response).to have_http_status(:created)
 
       # Withdraw in one tap even with an older fva (no step-up gate on withdrawal)
-      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, -1 ]), as: :json
+      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, 25 ]), as: :json
       expect(response).to have_http_status(:ok)
 
       pay_item = response.parsed_body.fetch("consents").find { |c| c["kind"] == "pay_statements" }

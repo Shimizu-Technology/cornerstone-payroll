@@ -265,14 +265,15 @@ describe('employee API calls (M4-2, M4-4, M4-5, M4-7 contracts)', () => {
     expect(problemFor(new EmployeeApiError('mfa_required', 403), { opened: false })).toBe('mfa_required');
   });
 
-  it('turns a reverification 403 into StepUpRequiredError, with a fresh token', async () => {
-    const hint = { clerk_error: { type: 'forbidden', reason: 'reverification-error', metadata: { reverification: { level: 'first_factor', afterMinutes: 10 } } } };
+  // first_factor while REQUIRE_MFA is off, second_factor once it's on: the level is the API's, passed through.
+  it.each(['first_factor', 'second_factor'])('turns a %s reverification 403 into StepUpRequiredError, with a fresh token', async (level) => {
+    const hint = { clerk_error: { type: 'forbidden', reason: 'reverification-error', metadata: { reverification: { level, afterMinutes: 10 } } } };
     const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(hint, 403));
     const getToken = vi.fn(async () => 'tok');
     const api = createEmployeeApi({ baseUrl: 'https://api.example.test/api/v1', getToken, fetchImpl, isOnline: () => true });
     const error = await api.updatePhone('42', '671-555-0100').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(StepUpRequiredError);
-    expect((error as StepUpRequiredError).hint.metadata?.reverification?.level).toBe('first_factor');
+    expect((error as StepUpRequiredError).hint.metadata?.reverification?.level).toBe(level);
     expect(getToken).toHaveBeenCalledWith({ fresh: true });
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('PATCH');
   });
