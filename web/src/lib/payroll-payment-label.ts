@@ -25,6 +25,22 @@ export function payrollPaymentLabel(record: PayrollPaymentRecord): string {
   return source || (record.check_number ? 'Paper check' : 'Not recorded');
 }
 
+interface PaymentEvidenceRecord {
+  payment_delivery_method?: string | null;
+  payment_evidence?: { status: string; label: string } | null;
+}
+
+/**
+ * Cornerstone confirms bank transfers outside the app, so an unconfirmed
+ * direct deposit is the normal state, not a problem. Say so neutrally.
+ */
+export function paymentEvidenceLabel(record: PaymentEvidenceRecord): string {
+  const evidence = record.payment_evidence;
+  if (!evidence) return 'Payment evidence not available';
+  if (record.payment_delivery_method === 'direct_deposit' && evidence.status === 'unissued') return 'Bank transfer handled outside the app';
+  return evidence.label;
+}
+
 interface PayRunPaymentDisplay {
   method: string;
   description: string;
