@@ -204,7 +204,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
         .sort_by { |employee| [ employee.last_name.to_s.downcase, employee.first_name.to_s.downcase, employee.id ] }
         .map do |employee|
           [ employee.full_name, employee.address_line1, employee.address_line2, employee.city ].each do |value|
-            PdfUnicodeFont.ensure_printable!(value, label: "Employee")
+            PdfUnicodeFont.ensure_printable!(value, label: "Employee", cjk: false)
           end
           { employee: employee, row: rows.fetch(employee.id) }
         end
@@ -276,7 +276,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   # entries than the form holds also need a second W-2, which these copies
   # don't make.
   def check_fit!
-    pdf = PdfUnicodeFont.document(page_size: PAGE_SIZE, margin: 0)
+    pdf = PdfUnicodeFont.document(cjk: false, page_size: PAGE_SIZE, margin: 0)
     pdf.font("Helvetica")
     problems = []
     unless text_fits?(pdf, FIELDS[:employer], employer_lines.join("\n"), **EMPLOYER_TEXT.except(:lift))
@@ -374,7 +374,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
 
   def employer_lines
     @employer_lines ||= begin
-      PdfUnicodeFont.ensure_printable!(company.name, label: "Employer")
+      PdfUnicodeFont.ensure_printable!(company.name, label: "Employer", cjk: false)
       [ company.name, company.address_line1, company.address_line2, city_line(company) ].compact_blank
     end
   end
