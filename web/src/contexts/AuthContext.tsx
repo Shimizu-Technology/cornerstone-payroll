@@ -204,8 +204,12 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
 
       const res = options?.skipTokenCache ? await authApi.me(token) : await authApi.me();
       if (res.mfa_required === true && res.mfa_verified === false) {
+        // The bootstrap carries the same code as every MFA 403: set up a
+        // second factor (mfa_enrollment_required) or finish it (mfa_required).
         setUser(null);
-        setAuthProblem(mfaRequiredProblem);
+        setAuthProblem(isMfaRequiredCode(res.code)
+          ? { status: 403, code: res.code, message: typeof res.error === 'string' && res.error ? res.error : mfaRequiredProblem.message }
+          : mfaRequiredProblem);
         return;
       }
 
