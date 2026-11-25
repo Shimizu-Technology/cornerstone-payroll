@@ -142,7 +142,7 @@ RSpec.describe ProductionReadiness do
   end
 
   before do
-    allow(ActiveRecord::Migration).to receive(:check_all_pending!).and_return(nil)
+    allow(DatabaseMigrationStatus).to receive(:current?).and_return(true)
   end
 
   def with_sample_token(claims: sample_claims, key: signing_key)
@@ -757,6 +757,89 @@ RSpec.describe ProductionReadiness do
       failure = report.failures.find { |check| check.name.start_with?("employee_web: process role") }
 
       expect(failure.detail).to eq("RuntimeError while verifying")
+    end
+  end
+
+  # The rake task holds one TenantScope.as_system lease for the whole run.
+  # Production has four database configs (primary, cache, queue, cable), so the
+  # migration check also sees a second config here. Only two kinds of check may
+  # fail: the RLS runtime role check, because the suite connects as the owner,
+  # and the tax table checks, because the test schema has no verified tables.
+  describe "the full production:readiness run under the raise-mode guard", :rls do
+    let(:task) { Rake::Task["production:readiness"] }
+    let(:shared_store) { RackAttackStore::Failover.new(ActiveSupport::Cache::MemoryStore.new, RackAttackStore::MEMORY) }
+    let(:employee_env) do
+      env.merge(
+        "APP_PROCESS_ROLE" => "employee_web",
+        "DB_POOL_MAX" => "3",
+        "RACK_ATTACK_REDIS_URL" => "rediss://cache.example:6379",
+        "TIME_TRACKING_ALLOWED_HOSTS" => "time.example.com",
+        "RLS_CONTEXT_GUARD_MODE" => "raise",
+        "RLS_DATABASE_URL" => "postgres://payroll_app@localhost/test"
+      )
+    end
+    let(:secondary_config) do
+      primary = ActiveRecord::Base.connection_db_config
+      ActiveRecord::DatabaseConfigurations::HashConfig.new(
+        primary.env_name, "readiness_secondary",
+        primary.configuration_hash.merge(migrations_paths: primary.migrations_paths || "db/migrate")
+      )
+    end
+    let(:full_readiness) do
+      described_class.new(
+        env: employee_env, environment: environment, config: config,
+        cache: cache, queue_process: queue_process,
+        job_adapter: FakeSolidQueueAdapter.new, cable_adapter: "solid_cable",
+        storage_factory: -> { storage }, encryption_credentials: encryption_credentials,
+        tax_configuration_valid: -> { true }, http_get: http_get,
+        process_role: -> { "employee_web" },
+        route_paths: -> { %w[/up(.:format) /api/v1/employee/context(.:format)] },
+        cable_mount_path: -> { nil }, primary_pool_size: -> { 3 },
+        rate_limit_store: -> { shared_store }, rate_limit_probe: -> { true }
+      )
+    end
+
+    before do
+      require "rake"
+      Rails.application.load_tasks unless Rake::Task.task_defined?("production:readiness")
+      task.reenable
+      TenantScope.as_system(reason: "Create readiness fixture") do
+        create(:time_tracking_source, base_url: "https://time.example.com")
+      end
+      allow(Resolv).to receive(:getaddresses).with("time.example.com").and_return([ "93.184.216.34" ])
+      allow(DatabaseMigrationStatus).to receive(:current?).and_call_original
+      configurations = ActiveRecord::Base.configurations
+      allow(configurations).to receive(:configs_for).and_wrap_original do |original, **options|
+        configs = original.call(**options)
+        all_configs = options.key?(:env_name) && options[:name].nil? && !options[:include_hidden]
+        all_configs ? [ *configs, secondary_config ] : configs
+      end
+    end
+
+    it "runs every check inside the task's system scope without an unscoped query" do
+      report = nil
+      pool = ActiveRecord::Base.connection_pool
+
+      with_sample_token do
+        allow(described_class).to receive(:new).and_return(full_readiness)
+        allow(full_readiness).to receive(:run).and_wrap_original { |original, **| report = original.call(live: true) }
+        expect { task.invoke }.to raise_error(SystemExit).and output.to_stdout.and output.to_stderr
+      end
+
+      expect(report.checks.map(&:detail).grep(/TenantScope|RlsConnection/)).to be_empty
+      expect(report.failures.map(&:name).grep_v(/\A\d{4} payroll tax tables are verified\z/))
+        .to eq([ "RLS runtime role and kill switch privileges" ])
+      expect(report.checks.find { |check| check.name == "time tracking destinations resolve only to public addresses" })
+        .to have_attributes(passed: true)
+      expect(ActiveRecord::Base.connection_pool).to equal(pool)
+    end
+
+    it "scopes each check itself when run outside the task" do
+      report = with_sample_token { full_readiness.run(live: true) }
+
+      expect(report.checks.map(&:detail).grep(/TenantScope|RlsConnection/)).to be_empty
+      expect(report.failures.map(&:name).grep_v(/\A\d{4} payroll tax tables are verified\z/))
+        .to eq([ "RLS runtime role and kill switch privileges" ])
     end
   end
 end

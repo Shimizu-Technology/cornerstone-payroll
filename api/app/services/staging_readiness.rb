@@ -16,7 +16,7 @@ class StagingReadiness
     if live
       checks.concat([
         check("primary database accepts a query") { ActiveRecord::Base.connection.select_value("SELECT 1").to_i == 1 },
-        check("all database migrations are current") { ActiveRecord::Migration.check_all_pending!; true },
+        check("all database migrations are current") { DatabaseMigrationStatus.current? },
         check("persisted encrypted data can be decrypted") { decryptable? },
         check("Solid Queue worker has a recent heartbeat") { SolidQueue::Process.where(kind: "Worker", last_heartbeat_at: 5.minutes.ago..).exists? }
       ])

@@ -272,7 +272,7 @@ class ProductionReadiness
     [
       check("primary database accepts a query") { select_one(primary_record) },
       check("persisted encrypted data can be decrypted") { encrypted_data_probe.call },
-      check("all database migrations are current") { ActiveRecord::Migration.check_all_pending!; true },
+      check("all database migrations are current") { DatabaseMigrationStatus.current? },
       check("Solid Cache round trip succeeds") { cache_round_trip },
       check("Solid Queue database accepts a query") { select_one(queue_record) },
       check("a Solid Queue worker has a recent heartbeat") do
