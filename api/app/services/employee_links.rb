@@ -206,4 +206,20 @@ module EmployeeLinks
 
     TenantSubdomainRegistry.enabled_origin_company_id(azp) == company_id
   end
+
+  # Browser activation (when Origin is sent) must come from the invite
+  # company's own subdomain when that company has an enabled subdomain, and
+  # never from another client's subdomain. Requests without an Origin header
+  # keep working for live companies (demos still require their own subdomain
+  # via demo_request_allowed?).
+  def self.activation_origin_allowed?(company, origin)
+    return true if origin.blank?
+
+    if AppUrl.subdomain_live?(company)
+      return TenantSubdomainRegistry.client_origin?(origin) &&
+        TenantSubdomainRegistry.enabled_origin_company_id(origin) == company.id
+    end
+
+    origin_allows_company?(origin, company.id)
+  end
 end

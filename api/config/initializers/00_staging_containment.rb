@@ -22,7 +22,7 @@ ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.singleton_class.prepend(Stag
 
 module StagingHttpGuard
   def request(request, *args, &block)
-    StagingOutboundPolicy.http_request!(self, request)
+    StagingOutboundPolicy.http_request!(self, request, body: args.first)
     super
   end
 
