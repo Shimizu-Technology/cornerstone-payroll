@@ -311,10 +311,33 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await mockApi(page, { branding: (route) => route.fulfill({ status: 404 }) });
       await page.goto('/sign-in?tenantHost=example-employer.shimizu-technology.com');
 
-      await expect(page.getByRole('heading', { name: "This employee app isn't available yet" })).toBeVisible();
-      await expect(page.getByText('If you were expecting access, contact your employer.')).toBeVisible();
+      const heading = page.getByRole('heading', { name: "This employee app isn't available yet" });
+      await expect(heading).toBeFocused();
+      await expect(page.getByRole('alert')).toContainText('If you were expecting access, contact your employer.');
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await expect(heading).toBeFocused();
       await expect(page.getByTestId('dev-preview-sign-in')).toHaveCount(0);
       await expectNoHorizontalScroll(page);
+    });
+
+    test('a branding 503 offers a retry and keeps the sign-in address', async ({ page }) => {
+      let brandingAvailable = false;
+      await mockApi(page, { branding: (route) => brandingAvailable
+        ? json(route, { name: 'Example Employer' })
+        : route.fulfill({ status: 503 }),
+      });
+      await page.goto('/sign-in?tenantHost=example-employer.shimizu-technology.com');
+      const url = page.url();
+      const documentStart = await page.evaluate(() => performance.timeOrigin);
+
+      await expect(page.getByRole('heading', { name: "We couldn't reach the app" })).toBeFocused();
+      await expect(page.getByRole('alert')).toContainText('Check your connection and try again.');
+      brandingAvailable = true;
+      await page.getByRole('button', { name: 'Try again' }).click();
+
+      await expect(page.getByTestId('dev-preview-sign-in')).toBeVisible();
+      await expect(page).toHaveURL(url);
+      expect(await page.evaluate(() => performance.timeOrigin)).toBe(documentStart);
     });
 
     test('a too-light brand color is darkened so white text stays readable', async ({ page }) => {
