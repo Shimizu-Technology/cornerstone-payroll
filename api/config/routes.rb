@@ -46,6 +46,8 @@ Rails.application.routes.draw do
         namespace :aire do
           post :events, to: "events#create"
         end
+        # Resend delivery and bounce events for employee document notices (M4-5).
+        post :email_events, to: "email_events#create", format: false
       end if payroll_routes
 
       # Auth - current user info (Clerk JWT verified in ApplicationController)
@@ -77,6 +79,9 @@ Rails.application.routes.draw do
         post "delivery_consents/w2gu_access_proof/pdf", to: "delivery_consents#w2gu_access_proof", format: false
         get :help, to: "help#show", format: false
         resources :statements, only: [ :index, :show ], format: false do
+          get :pdf, on: :member
+        end
+        resources :tax_forms, only: [ :index, :show ], format: false do
           get :pdf, on: :member
         end
         post :activation, to: "activations#create", format: false
@@ -386,9 +391,14 @@ Rails.application.routes.draw do
         resource :employee_app_settings, only: [ :show ] do
           patch :branding, action: :update_branding
           put :help_contacts, action: :update_help_contacts
+          patch :w2_delivery, action: :update_w2_delivery
           get :logo
           post :logo, action: :upload_logo
           delete :logo, action: :remove_logo
+        end
+        resources :employee_tax_forms, only: [ :index ], format: false do
+          post :post_copies, on: :collection
+          post :withdraw, on: :member
         end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do

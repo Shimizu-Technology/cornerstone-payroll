@@ -244,6 +244,42 @@ describe('employee app shell', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Welcome' })).toBeTruthy();
   });
 
+  it('shows posted and withdrawn W-2GU copies from the tax forms API, with how the paper copy arrives', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/taxes');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ w2_delivery: 'mailed', features: { tax_forms: true } }),
+      '/employee/tax_forms': () => Response.json({ tax_forms: [
+        { id: '12', tax_year: 2026, kind: 'w2gu', status: 'withdrawn', corrected: false, posted_at: '2027-01-20T00:00:00Z',
+          pdf_available: false, available_through: '2027-10-15' },
+        { id: '9', tax_year: 2025, kind: 'w2gu', status: 'posted', corrected: false, posted_at: '2026-01-20T00:00:00Z',
+          pdf_available: true, available_through: '2026-10-15' },
+      ] }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('heading', { name: '2026 W-2GU' })).toBeTruthy();
+    expect(screen.getByText('A corrected form is being prepared')).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: 'Download W-2GU (PDF)' })).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: '2025 W-2GU' })).toBeTruthy();
+    expect(screen.getAllByText('Your paper copy is mailed to your home address.')).toHaveLength(2);
+  });
+
+  it('keeps the tax forms list closed while the switch is off', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/taxes');
+    const fetchMock = respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ w2_delivery: 'handed_out', features: { tax_forms: false } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText('Your tax forms will show here')).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/employee/tax_forms'))).toBe(false);
+  });
+
   it('sends a signed-out deep link to sign-in and back', async () => {
     window.history.pushState({}, '', '/taxes');
     vi.stubGlobal('fetch', respond({
