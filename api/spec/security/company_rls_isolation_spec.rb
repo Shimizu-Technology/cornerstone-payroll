@@ -669,12 +669,22 @@ RSpec.describe "Company RLS", :rls do
             end
             expect do
               connection.transaction(requires_new: true) do
-                DeliveryConsent.create!(
+                DeliveryConsent.new(
                   company: company, user: consents.first.user, employee: consents.last.employee,
                   employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
                   kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
                   given_at: Time.current, method: "employee_portal_checkbox"
-                )
+                ).save!(validate: false)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            expect do
+              connection.transaction(requires_new: true) do
+                DeliveryConsent.new(
+                  company: company, user: consents.first.user, employee: consents.first.employee,
+                  employee_account_link: consents.last.employee_account_link, delivery_disclosure: disclosure,
+                  kind: "pay_statements", disclosure_version: disclosure.version, disclosure_digest: disclosure.digest,
+                  given_at: Time.current, method: "employee_portal_checkbox"
+                ).save!(validate: false)
               end
             end.to raise_error(ActiveRecord::InvalidForeignKey)
             setup_step_three(connection, tables: %w[delivery_consents], read_tables: %w[delivery_disclosures])

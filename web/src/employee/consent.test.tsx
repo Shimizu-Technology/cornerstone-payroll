@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -249,10 +249,76 @@ describe('employee electronic-delivery consent screens', () => {
     });
     expect(within(card).getByText(/Tax document availability email notices stay on/)).toBeTruthy();
 
-    // Step 3: One-tap withdraw with confirmation (no step-up dialog!)
+    // Step 3: One-tap withdraw with neutral confirmation (no step-up dialog, no Cornerstone wording)
     await userEvent.click(within(card).getByRole('button', { name: 'Switch back to paper (withdraw consent)' }));
-    await userEvent.click(within(card).getByRole('button', { name: 'Confirm paper delivery' }));
-    expect(await screen.findByText(/Consent withdrawn for Form W-2GU/)).toBeTruthy();
+    const confirmRegion = within(card).getByRole('region', { name: 'Confirm paper delivery' });
+    expect(confirmRegion.textContent).not.toMatch(/Cornerstone/i);
+    await userEvent.click(within(confirmRegion).getByRole('button', { name: 'Confirm paper delivery' }));
+    expect(await screen.findByText("Saved. You'll get paper copies.")).toBeTruthy();
     expect(screen.queryByTestId('dev-preview-step-up')).toBeNull();
+  });
+
+  it('lets a former employee withdraw an active consent while hiding new opt-in forms', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    let payStatus: 'consented' | 'withdrawn' = 'consented';
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({
+        links: [{ id: 3, company_name: 'Harbor Finch', status: 'former', former_access_until: '2028-11-25' }],
+      }),
+      '/employee/context': () => Response.json({
+        first_name: 'Jordan',
+        status: 'former',
+        former_access_until: '2028-11-25',
+        features: { profile_requests: false, delivery_consent: true },
+      }),
+      'GET /employee/delivery_consents': () => Response.json(makeConsentsPayload({ payStatus, w2Status: 'not_consented' })),
+      'POST /employee/delivery_consents/withdraw': () => {
+        payStatus = 'withdrawn';
+        return Response.json(makeConsentsPayload({ payStatus: 'withdrawn', w2Status: 'not_consented' }));
+      },
+    }));
+    render(<EmployeeApp />);
+
+    const payCard = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    const w2Card = screen.getByRole('region', { name: 'Electronic Form W-2GU' });
+    // Former employees cannot give new consent
+    expect(within(w2Card).queryByRole('button', { name: /Consent to electronic/ })).toBeNull();
+    // Former employees CAN withdraw an active consent
+    await userEvent.click(within(payCard).getByRole('button', { name: 'Switch back to paper (withdraw consent)' }));
+    await userEvent.click(within(payCard).getByRole('button', { name: 'Confirm paper delivery' }));
+    expect(await screen.findByText("Saved. You'll get paper copies.")).toBeTruthy();
+  });
+
+  it('targets only the clicked disclosure card when printing', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json({ links: [{ id: 3, company_name: 'Harbor Finch', status: 'active' }] }),
+      '/employee/context': () => Response.json({
+        first_name: 'Jordan',
+        status: 'active',
+        features: { profile_requests: false, delivery_consent: true },
+      }),
+      'GET /employee/delivery_consents': () => Response.json(makeConsentsPayload()),
+    }));
+    render(<EmployeeApp />);
+
+    const payCard = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    const w2Card = screen.getByRole('region', { name: 'Electronic Form W-2GU' });
+
+    await userEvent.click(within(w2Card).getByRole('button', { name: 'Print' }));
+    expect(printSpy).toHaveBeenCalledOnce();
+    expect(document.body.classList.contains('emp-printing-disclosure')).toBe(true);
+    expect(w2Card.getAttribute('data-print-target')).toBe('true');
+    expect(payCard.getAttribute('data-print-target')).toBeNull();
+
+    act(() => {
+      window.dispatchEvent(new Event('afterprint'));
+    });
+    expect(document.body.classList.contains('emp-printing-disclosure')).toBe(false);
+    expect(w2Card.getAttribute('data-print-target')).toBeNull();
+    printSpy.mockRestore();
   });
 });

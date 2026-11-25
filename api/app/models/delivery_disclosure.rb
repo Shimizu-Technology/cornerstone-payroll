@@ -2,6 +2,13 @@
 
 require "digest"
 
+# Versioned electronic-delivery disclosure texts (M4-6).
+#
+# Persisted disclosure rows are immutable (enforced by both #readonly? and the
+# delivery_disclosures_immutable database trigger). Counsel approval or wording
+# replacement ALWAYS inserts a new version row rather than mutating an existing
+# draft or published row, so every historical DeliveryConsent stays pinned to the
+# exact wording and status the employee saw.
 class DeliveryDisclosure < ApplicationRecord
   KINDS = %w[pay_statements w2gu].freeze
   STATUSES = %w[draft approved].freeze
@@ -9,7 +16,7 @@ class DeliveryDisclosure < ApplicationRecord
 
   has_many :delivery_consents, dependent: :restrict_with_exception
 
-  before_validation :compute_digest
+  before_validation :compute_digest, on: :create
 
   validates :kind, presence: true, inclusion: { in: KINDS }
   validates :version, presence: true, uniqueness: { scope: :kind }
@@ -24,6 +31,10 @@ class DeliveryDisclosure < ApplicationRecord
   scope :approved, -> { where(status: "approved") }
   scope :draft, -> { where(status: "draft") }
   scope :latest_first, -> { order(published_at: :desc, id: :desc) }
+
+  def readonly?
+    persisted?
+  end
 
   def self.digest_for(text)
     Digest::SHA256.hexdigest(text.to_s)
