@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFooter } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
-import { employeePath } from '@/lib/routes';
+import { employeeDocumentsPath, employeePath } from '@/lib/routes';
 import { priorPeriodHours } from '@/lib/captured-source-worksheet';
 import type { PayrollItem } from '@/types';
 import type { PayRunSectionProps } from './usePayRunController';
@@ -51,8 +51,18 @@ export function PayRunResultsView(props: Props) {
     </div>
   </details>;
   const documentsNeeded = new Map((payPeriod.new_hire_document_gaps || []).map(gap => [gap.employee_id, gap.missing.length]));
-  const documentFlag = (item: PayrollItem) => { const count = documentsNeeded.get(item.employee_id); return count ? `${count} document${count === 1 ? '' : 's'} needed` : ''; };
-  const flags = (item: PayrollItem) => [item.voided ? 'Voided' : '', documentFlag(item), item.correction_pay_basis_hold ? 'Pay setup held' : '', item.withholding_tax_override != null ? 'FIT override' : '', Number(item.withholding_tax_adjustment) ? 'FIT adjustment' : '', item.employment_type === 'contractor' ? '1099' : '', item.time_tracking_provenance ? 'Time tracking linked' : '', priorPeriodHours(item) !== 0 ? `${priorPeriodHours(item).toFixed(2)} prior-period hrs` : '', (item.wage_rate_hours || []).length > 1 ? 'Multiple rates' : '', Number(item.net_pay) < 0 ? 'Negative net' : ''].filter(Boolean).join(' · ') || '—';
+  const documentFlag = (item: PayrollItem): ReactNode => {
+    const count = documentsNeeded.get(item.employee_id);
+    if (!count) return null;
+    return <Link className="font-semibold text-warning-800 underline" to={employeeDocumentsPath(companyId, item.employee_id, { returnTo: currentPath })} aria-label={`${count} document${count === 1 ? '' : 's'} needed for ${item.employee_name}: open documents`}>{count} document{count === 1 ? '' : 's'} needed</Link>;
+  };
+  const otherFlags = (item: PayrollItem) => [item.voided ? 'Voided' : '', item.correction_pay_basis_hold ? 'Pay setup held' : '', item.withholding_tax_override != null ? 'FIT override' : '', Number(item.withholding_tax_adjustment) ? 'FIT adjustment' : '', item.employment_type === 'contractor' ? '1099' : '', item.time_tracking_provenance ? 'Time tracking linked' : '', priorPeriodHours(item) !== 0 ? `${priorPeriodHours(item).toFixed(2)} prior-period hrs` : '', (item.wage_rate_hours || []).length > 1 ? 'Multiple rates' : '', Number(item.net_pay) < 0 ? 'Negative net' : ''].filter(Boolean).join(' · ');
+  const flags = (item: PayrollItem): ReactNode => {
+    const documents = documentFlag(item);
+    const others = otherFlags(item);
+    if (!documents) return others || '—';
+    return <>{documents}{others && ` · ${others}`}</>;
+  };
   return <Card ref={root} className="min-w-0 overflow-visible">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-3 py-2 sm:px-4">
       <div className="flex flex-wrap items-center gap-3"><h3 className="font-semibold text-neutral-950">Employee payroll</h3>{props.primaryAction}</div>

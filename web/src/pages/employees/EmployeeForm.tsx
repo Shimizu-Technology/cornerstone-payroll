@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
 import { intakeAllowsBlank, intakeFieldLabels } from '@/lib/employee-intake';
-import { employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
+import { employeeDocumentsPath, employeeEditPath, employeePath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { filingStatusLabels, formatCurrency } from '@/lib/utils';
 import { PayChangeEffectiveDate } from '@/components/employees/PayChangeEffectiveDate';
 import {
@@ -531,15 +531,6 @@ export function EmployeeForm() {
         return newErrors;
       });
     }
-  };
-
-  // A new hire's W-4 usually takes effect on the hire date, so suggest it
-  // until staff pick a different date.
-  const handleHireDateChange = (value: string): void => {
-    const followsHireDate = !isEditing && form.employment_type !== 'contractor' && !allowsUnverifiedBlank('withholding_election')
-      && (!form.w4_effective_on || form.w4_effective_on === form.hire_date);
-    handleChange('hire_date', value);
-    if (followsHireDate) handleChange('w4_effective_on', value || null);
   };
 
   const handleW4CurrencyDraftChange = (field: W4MonetaryField, value: string): void => {
@@ -1151,9 +1142,13 @@ export function EmployeeForm() {
       }
 
       if (!isCurrentSubmission()) return;
-      notify({ tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : createdMissingDocuments.length
-        ? `Employee created. Before their first payroll is approved, upload and verify: ${createdMissingDocuments.join(', ')}.`
-        : 'Employee created.') });
+      const createdDocumentsMessage = `Employee created. Before their first payroll is approved, upload and verify: ${createdMissingDocuments.join(', ')}.`;
+      notify(!portalNotice && !isEditing && createdMissingDocuments.length
+        ? { tone: 'success', message: createdDocumentsMessage, children: <>
+          {createdDocumentsMessage}{' '}
+          <Link className="font-semibold text-primary-700" to={employeeDocumentsPath(companyId, savedEmployeeId, { returnTo })}>Open documents</Link>
+        </> }
+        : { tone: 'success', message: portalNotice || (isEditing ? 'Employee updated.' : 'Employee created.') });
       // Warnings owned by this form are cleared when it navigates away; an
       // info notice stays with the employee list.
       compensationWarnings.forEach((message) => notify({ tone: 'info', message }));
@@ -1232,6 +1227,7 @@ export function EmployeeForm() {
   }
 
   const documentReadiness = loadedEmployee?.document_readiness;
+  const w4SignedAfterEffective = Boolean(form.w4_signed_on && form.w4_effective_on && form.w4_signed_on > form.w4_effective_on);
   const documentsNeeded = documentReadiness && !documentReadiness.ready_for_payroll ? documentReadiness.required - documentReadiness.satisfied : 0;
 
   if (isLoading) {
@@ -1484,7 +1480,7 @@ export function EmployeeForm() {
                   required={!allowsUnverifiedBlank('hire_date')}
                   type="date"
                   value={form.hire_date}
-                  onChange={(e) => handleHireDateChange(e.target.value)}
+                  onChange={(e) => handleChange('hire_date', e.target.value)}
                   error={getFieldError('hire_date')}
                 />
               </div>
@@ -2116,6 +2112,12 @@ export function EmployeeForm() {
                       aria-invalid={Boolean(getFieldError('w4_effective_on'))}
                     />
                     <p className="mt-1 text-xs text-gray-500">{allowsUnverifiedBlank('withholding_election') ? 'Leave blank if the employee withholding election has not been received. Payroll needs a separate reviewed withholding decision.' : 'Record the date this withholding election became effective.'}</p>
+                    {/* Staff accept the hire date explicitly; a silent default could date the election before the W-4 was signed. */}
+                    {!isEditing && form.hire_date && form.w4_effective_on !== form.hire_date && (
+                      <button type="button" className="mt-1 inline-flex min-h-9 items-center text-sm font-semibold text-primary-700 underline" onClick={() => handleChange('w4_effective_on', form.hire_date)}>
+                        Use hire date ({form.hire_date})
+                      </button>
+                    )}
                     {getFieldError('w4_effective_on') && <p className="mt-1 text-sm text-danger-600">{getFieldError('w4_effective_on')}</p>}
                   </div>
                 </div>
@@ -2128,6 +2130,11 @@ export function EmployeeForm() {
                 <label className="text-sm font-medium text-gray-700">Source document / reference (optional)
                   <Input maxLength={255} value={form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
                 </label>
+                {w4SignedAfterEffective && (
+                  <p role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900 md:col-span-2">
+                    This W-4 was signed on {form.w4_signed_on}, after its effective date of {form.w4_effective_on}. Paychecks dated before the signature would use an election the employee had not made yet. Check both dates; the effective date is usually on or after the signed date.
+                  </p>
+                )}
                 <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. The effective date controls which paychecks use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
               </div>
 
