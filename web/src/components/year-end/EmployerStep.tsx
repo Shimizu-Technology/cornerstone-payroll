@@ -1,3 +1,4 @@
+import { formatPhone } from '@/lib/display-phone';
 import { EmployerFilingSettings } from './EmployerFilingSettings';
 import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
@@ -71,7 +72,7 @@ export function EmployerStep({ checklist, step, onSaved }: {
       <div><dt className="text-xs font-semibold text-neutral-600">Employer</dt><dd className="text-neutral-950 [overflow-wrap:anywhere]">{step.data.name}</dd></div>
       <div><dt className="text-xs font-semibold text-neutral-600">EIN</dt><dd className="text-neutral-950">{step.data.ein || 'Missing'}</dd></div>
       <div><dt className="text-xs font-semibold text-neutral-600">Address</dt><dd className="text-neutral-950 [overflow-wrap:anywhere]">{address || 'Missing'}</dd></div>
-      <div><dt className="text-xs font-semibold text-neutral-600">Contact</dt><dd className="text-neutral-950 [overflow-wrap:anywhere]">{[step.data.phone, step.data.email].filter(Boolean).join(' · ') || 'Missing'}</dd></div>
+      <div><dt className="text-xs font-semibold text-neutral-600">Contact</dt><dd className="text-neutral-950 [overflow-wrap:anywhere]">{[formatPhone(step.data.phone), step.data.email].filter(Boolean).join(' · ') || 'Missing'}</dd></div>
     </dl>
   );
   if (fields.length === 0) return <>{summary}<IssueList issues={step.issues} />{checklist.files_w2 && <EmployerFilingSettings initialKind={step.data.kind_of_employer} companyId={checklist.company.id} onSaved={onSaved} />}</>;

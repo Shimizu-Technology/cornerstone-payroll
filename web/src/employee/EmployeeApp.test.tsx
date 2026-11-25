@@ -406,6 +406,28 @@ describe('employee app shell', () => {
     expect(within(contact).queryByText('Confirmed by you')).toBeNull();
   });
 
+  it('keeps the entered emergency contact phone when it matches the saved number', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen', status: 'active' }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        emergency_contacts: [{ id: 1, name: 'Avery Example', relationship: 'Sibling', phone: '+16715550142' }],
+      }),
+    }));
+    render(<EmployeeApp />);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Edit Avery Example' }));
+    const phone = screen.getByLabelText<HTMLInputElement>('Phone', { exact: true });
+    expect(phone.value).toBe('(671) 555-0142');
+
+    await user.clear(phone);
+    await user.type(phone, '+16715550142');
+    expect(phone.value).toBe('+16715550142');
+  });
+
   it('opens Pay directly on the full list by year, titles stubs with the pay period, and uses Older/Newer', async () => {
     signedIn();
     window.history.pushState({}, '', '/pay');
@@ -450,12 +472,12 @@ describe('employee app shell', () => {
     // Opening a stub titles it with the pay period and navigates via Older / Newer (E8, E9).
     await userEvent.click(within(list).getByRole('link', { name: /Nov 20/ }));
     const stub = await screen.findByRole('article');
-    expect(within(stub).getByRole('heading', { level: 2, name: 'Nov 1 – 14' })).toBeTruthy();
+    expect(within(stub).getByRole('heading', { level: 2, name: 'Nov 1 – 14, 2026' })).toBeTruthy();
     expect(within(stub).getByText('Paid Nov 20, 2026')).toBeTruthy();
-    expect(within(stub).queryByText('Pay period Nov 1 – 14')).toBeNull();
+    expect(within(stub).queryByText('Pay period Nov 1 – 14, 2026')).toBeNull();
     await userEvent.click(within(stub).getAllByRole('link', { name: /^Older:/ })[0]);
     const olderStub = await screen.findByRole('article');
-    expect(within(olderStub).getByRole('heading', { level: 2, name: 'Oct 18 – 31' })).toBeTruthy();
+    expect(within(olderStub).getByRole('heading', { level: 2, name: 'Oct 18 – 31, 2026' })).toBeTruthy();
     expect(within(olderStub).getAllByRole('link', { name: /^Newer:/ }).length).toBeGreaterThan(0);
   });
 

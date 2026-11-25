@@ -1,3 +1,4 @@
+import { formatDateRange } from '@/lib/display-date';
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -56,7 +57,7 @@ function EnabledPayrollFilesEntry(): ReactElement {
             {period && (
               <div className="mt-2 space-y-1">
                 <p className="flex flex-wrap items-center gap-2 text-base font-semibold text-neutral-900">
-                  <span>Payroll {period.label}</span>
+                  <span>Payroll {formatDateRange(period.start_date, period.end_date) || period.label}</span>
                   <Badge variant={statusVariant(period.status)}>{period.client_payroll_status && period.client_payroll_status !== 'preparing' ? clientPayrollStatus(period.client_payroll_status) : period.status_label}</Badge>
                   {period.unread && <Badge variant="warning">New</Badge>}
                 </p>

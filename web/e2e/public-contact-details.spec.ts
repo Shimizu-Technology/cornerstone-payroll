@@ -210,7 +210,7 @@ test('Use theirs drops only the conflicting email draft and keeps the phone edit
 
   await table.getByRole('button', { name: 'Save Maria Cruz' }).click();
   await expect(table.getByText('Saved')).toBeVisible();
-  await expect(table.getByText('+1 671 555-0177')).toBeVisible();
+  await expect(table.getByText('(671) 555-0177')).toBeVisible();
   expect(patchBodies[1]).toEqual({
     employee: { phone: '555-0177' },
     row_revision: '2026-11-24T01:00:00.000000Z',
@@ -498,7 +498,7 @@ for (const width of [1280, 390]) {
 
     await page.goto('/companies/6/employees/contact-details');
     const email = page.getByText('milo.tarrant.long.address@seabreeze-kitchen.example.com', { exact: true });
-    const phone = page.getByText('+1 671 555-0142', { exact: true });
+    const phone = page.getByText('(671) 555-0142', { exact: true });
     await expect(email).toBeVisible();
     await expect(phone).toBeVisible();
     await expect(page.getByText('214 Seabreeze Lane, Apt 3')).toBeVisible();
@@ -513,7 +513,7 @@ for (const width of [1280, 390]) {
     // Edit (or a tap on the card) opens the row editor with the full values.
     await openRow(page, 'Milo Tarrant');
     await expect(page.getByLabel('Email for Milo Tarrant')).toHaveValue('milo.tarrant.long.address@seabreeze-kitchen.example.com');
-    await expect(page.getByLabel('Mobile for Milo Tarrant')).toHaveValue('+16715550142');
+    await expect(page.getByLabel('Mobile for Milo Tarrant')).toHaveValue('(671) 555-0142');
     await expect(page.getByLabel('City for Milo Tarrant')).toHaveValue('Tamuning');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 
