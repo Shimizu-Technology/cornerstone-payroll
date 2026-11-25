@@ -16,6 +16,7 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       namespace :public do
+        get :employee_terms, to: "employee_terms#show", format: false if employee_routes
         get :tenant_branding, to: "tenant_branding#show", format: false
         get "tenant_branding/logo/:slug/:file", to: "tenant_branding#logo", format: false,
             constraints: { slug: /[a-z0-9-]+/, file: /[0-9a-f]{16}\.(?:png|webp)/ }
