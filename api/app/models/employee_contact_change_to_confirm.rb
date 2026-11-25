@@ -5,7 +5,13 @@ class EmployeeContactChangeToConfirm < ApplicationRecord
 
   FIELDS = {
     "contact" => %w[email phone emergency_contacts].freeze,
-    "address" => %w[address_line1 address_line2 city state zip].freeze
+    "address" => %w[address_line1 address_line2 city state zip].freeze,
+    "delivery_consent" => %w[pay_statements_delivery w2gu_delivery].freeze
+  }.freeze
+
+  DELIVERY_FIELD_FOR_KIND = {
+    "pay_statements" => "pay_statements_delivery",
+    "w2gu" => "w2gu_delivery"
   }.freeze
 
   belongs_to :company
@@ -18,9 +24,24 @@ class EmployeeContactChangeToConfirm < ApplicationRecord
   scope :recent_first, -> { order(id: :desc) }
 
   def self.unconfirmed_count(company)
-    return unless CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+    features = CompanyFeatures.for(company)
+    return unless features.employee_portal_feature?(:profile_requests) || features.employee_portal_feature?(:delivery_consent)
 
     payroll_changes.where(company_id: company.id).unconfirmed.count
+  end
+
+  def self.record_delivery_consent_withdrawal!(consent:, actor:)
+    field = DELIVERY_FIELD_FOR_KIND.fetch(consent.kind)
+    entry = create!(
+      company_id: consent.company_id,
+      employee_id: consent.employee_id,
+      changed_by: actor,
+      change_kind: "delivery_consent",
+      before_values: { field => "Electronic consent on file (#{consent.disclosure_version})" },
+      after_values: { field => "Paper delivery required (consent withdrawn)" }
+    )
+    PortalNotifications.delivery_consent_withdrawn!(entry, actor: actor)
+    entry
   end
 
   # Called in the transaction that applies the employee change. The same entry

@@ -351,8 +351,8 @@ RSpec.describe CompanyFeatures do
       service_snapshots = ClientOperatingProfile.where(company_id: target_ids).order(:company_id).map do |profile|
         profile.attributes.slice(
           "company_id", "effective_on", "ends_on", "version", "offering", "hours_source",
-          "intake_adapter", "client_portal_enabled", "employee_portal_enabled", "options"
-        )
+          "intake_adapter", "client_portal_enabled", "employee_portal_enabled"
+        ).merge("options" => profile.resolved_options)
       end
 
       # Clear and run the migration's self-contained backfill twice to verify parity and idempotency.
@@ -369,8 +369,8 @@ RSpec.describe CompanyFeatures do
       migration_snapshots = ClientOperatingProfile.where(company_id: target_ids).order(:company_id).map do |profile|
         profile.attributes.slice(
           "company_id", "effective_on", "ends_on", "version", "offering", "hours_source",
-          "intake_adapter", "client_portal_enabled", "employee_portal_enabled", "options"
-        )
+          "intake_adapter", "client_portal_enabled", "employee_portal_enabled"
+        ).merge("options" => profile.resolved_options)
       end
 
       expect(migration_snapshots).to eq(service_snapshots)
