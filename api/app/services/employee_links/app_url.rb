@@ -24,12 +24,17 @@ module EmployeeLinks
         company.organization.active? && CompanyFeatures.for(company).subdomain_enabled?
     end
 
-    def invite_url(company, path:, secret:)
+    def entry_url(company, path:)
       origin = origin_for(company)
       return unless origin
 
       page = { "claim" => "claim", "reactivate" => "reactivate" }.fetch(path, "activate")
-      "#{origin}/#{page}#token=#{CGI.escape(secret)}"
+      "#{origin}/#{page}"
+    end
+
+    def invite_url(company, path:, secret:)
+      url = entry_url(company, path: path)
+      "#{url}#token=#{CGI.escape(secret)}" if url
     end
 
     def sign_up_redirect_url(company)
