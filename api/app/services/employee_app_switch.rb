@@ -99,6 +99,27 @@ module EmployeeAppSwitch
     end
   end
 
+  # What the switch shows as on: the stored value today AND an unrevoked
+  # activation (a flag written around the switch isn't on).
+  def switched_on_values(company, today: PayrollBusinessClock.today)
+    activated = EmployeeAppActivation.open_parts_for(company.id)
+    stored_values(company, today: today).to_h { |key, value| [ key, value && activated.include?(key) ] }
+  end
+
+  # Parts with anything left to turn off: on today, on in a later scheduled
+  # version, or still holding an unrevoked activation.
+  def on_anywhere(company, today: PayrollBusinessClock.today)
+    profiles = company.client_operating_profiles.where("ends_on IS NULL OR ends_on >= ?", today).to_a
+    activated = EmployeeAppActivation.open_parts_for(company.id)
+    KEYS.select do |key|
+      activated.include?(key) || profiles.any? { |profile| profile_value(profile, key) }
+    end
+  end
+
+  def profile_value(profile, key)
+    (key == MASTER ? profile.employee_portal_enabled : profile.option_value(key)) == true
+  end
+
   # Whether each part is actually open today, as the employee API decides.
   def effective_values(company, today: PayrollBusinessClock.today)
     features = CompanyFeatures.for(company, on: today)

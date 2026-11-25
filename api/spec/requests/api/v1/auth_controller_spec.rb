@@ -87,7 +87,8 @@ RSpec.describe "Api::V1::Auth", type: :request do
         intake_adapter: "mosa_revel",
         client_portal_enabled: true,
         employee_portal_enabled: false,
-        options: { "time_module_enabled" => true }
+        # The time module stays locked until Milestone 6, so it can't be stored on.
+        options: {}
       )
       user = create(:user, company: company, organization: company.organization, role: "admin")
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
@@ -102,7 +103,7 @@ RSpec.describe "Api::V1::Auth", type: :request do
         "client_portal_enabled" => true,
         "employee_portal_enabled" => false,
         "subdomain_enabled" => false,
-        "time_module_enabled" => true
+        "time_module_enabled" => false
       )
     end
 

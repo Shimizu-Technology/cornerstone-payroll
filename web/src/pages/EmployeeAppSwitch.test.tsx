@@ -57,12 +57,13 @@ function state(overrides: Partial<EmployeeAppSwitchState> = {}, checks?: Readine
         consent: passed('consent', 'Electronic delivery consent wording is approved by counsel'),
       },
       switch_checks: {},
-      observed: { reported: true, fresh: true, observed_at: '2026-11-25T00:59:00Z', revision: 'abc', rls_guard_mode: 'log',
-        rls_runtime_role_verified: true, dependencies_healthy: true, answered_health_check: true, health_check_configured: true },
-      database: { phase: 'shadow', enforced: false, enforced_tables: 0, protected_tables: 120 },
+      observed: { reported: true, fresh: true, verified: true, observed_at: '2026-11-25T00:59:00Z', revision: 'abc', rls_guard_mode: 'log',
+        rls_runtime_role_verified: true, rls_kill_switch_bypass: false, dependencies_healthy: true, answered_health_check: true,
+        health_check_configured: true },
+      database: { phase: 'shadow', enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 120 },
       early_access: null,
     },
-    early_access: { name: 'Demo early access before database enforcement', max_days: 31, max_companies: 2, demo_companies: [], windows: [] },
+    early_access: { name: 'Demo early access before database enforcement', can_set: false, max_days: 30, max_companies: 2, demo_companies: [], windows: [] },
     ...overrides,
   };
 }
@@ -139,7 +140,7 @@ describe('EmployeeAppSwitch', () => {
   it('shows demo early access and the kill switch only for a demo company', async () => {
     const demo = state({
       company: { id: 6, name: 'Harbor Finch Kitchen', demo: true, live: false, subdomain_slug: 'harborfinch' },
-      early_access: { name: 'Demo early access before database enforcement', max_days: 31, max_companies: 2,
+      early_access: { name: 'Demo early access before database enforcement', can_set: true, max_days: 30, max_companies: 2,
         demo_companies: [{ id: 6, name: 'Harbor Finch Kitchen' }], windows: [] },
     });
     mocks.get.mockResolvedValue({ data: demo });
@@ -147,12 +148,26 @@ describe('EmployeeAppSwitch', () => {
     renderPage();
 
     expect(await screen.findByText('Demo early access before database enforcement')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Set early access' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Stop demo employee access' }));
     const dialog = await screen.findByRole('dialog');
     await userEvent.type(within(dialog).getByLabelText('Reason'), 'Leak suspected');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Stop demo access' }));
     await waitFor(() => expect(mocks.send).toHaveBeenCalledWith({ method: 'POST', suffix: '/demo_stop', body: { reason: 'Leak suspected' } }));
     expect(await screen.findByText('Demo employee access stopped.')).toBeTruthy();
+  });
+
+  it('lets only the owner set or extend early access', async () => {
+    const demo = state({
+      company: { id: 6, name: 'Harbor Finch Kitchen', demo: true, live: false, subdomain_slug: 'harborfinch' },
+      early_access: { name: 'Demo early access before database enforcement', can_set: false, max_days: 30, max_companies: 2,
+        demo_companies: [{ id: 6, name: 'Harbor Finch Kitchen' }], windows: [] },
+    });
+    mocks.get.mockResolvedValue({ data: demo });
+    renderPage();
+
+    expect(await screen.findByText('Only the owner (a super admin) can set or extend early access.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Set early access' })).toBeNull();
   });
 
   it('hides demo tools for a real company', async () => {

@@ -42,7 +42,7 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       employee_portal_enabled: true,
       options: { "employee_portal" => { "features" => { "delivery_consent" => enabled } } }
     )
-    TenantSubdomainRegistry.invalidate!
+    activate_employee_app!(target_company)
     profile
   end
 

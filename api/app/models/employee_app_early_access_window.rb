@@ -5,12 +5,15 @@
 # An owner-approved, dated window during which the named demo companies may
 # turn the employee app on before the database enforces row-level security,
 # provided the employee service runs its RLS guard in raise mode. It never
-# applies to a real company. Rows record who set them and when, are never
-# edited except to end them once, and stop applying after expires_on (a
-# Guam business date) without anyone acting.
+# applies to a real company. Only a super_admin (the owner) sets one, for at
+# most MAX_DAYS; an extension is a new window with its own approval and
+# reason. set_by is that approver. Rows are never edited except to end them,
+# or retire them once the database enforces RLS, once. A window stops
+# applying after expires_on (a Guam business date) without anyone acting,
+# and a retired one never applies again, even back in shadow mode.
 class EmployeeAppEarlyAccessWindow < ApplicationRecord
   NAME = "Demo early access before database enforcement"
-  MAX_DAYS = 31
+  MAX_DAYS = 30
   MAX_COMPANIES = 2
   REASON_MAX = 500
 
@@ -23,15 +26,29 @@ class EmployeeAppEarlyAccessWindow < ApplicationRecord
   validates :end_reason, length: { maximum: REASON_MAX }
   validate :company_ids_shape
 
-  scope :open, -> { where(ended_at: nil) }
+  scope :open, -> { where(ended_at: nil, retired_at: nil) }
   scope :history_order, -> { order(created_at: :desc, id: :desc) }
 
   def self.current_for(organization_id)
     open.where(organization_id: organization_id).order(:id).first
   end
 
+  # Retires every open window once the database is verified to enforce
+  # RLS. Idempotent; returns the number retired.
+  def self.retire_open!(now: Time.current)
+    open.update_all(retired_at: now, updated_at: now)
+  end
+
+  def approved_by
+    set_by
+  end
+
   def ended?
     ended_at.present?
+  end
+
+  def retired?
+    retired_at.present?
   end
 
   def expired?(today: PayrollBusinessClock.today)
@@ -39,7 +56,7 @@ class EmployeeAppEarlyAccessWindow < ApplicationRecord
   end
 
   def in_effect?(today: PayrollBusinessClock.today)
-    !ended? && !expired?(today: today)
+    !ended? && !retired? && !expired?(today: today)
   end
 
   # True only for a still-demo company named in this open, unexpired window
@@ -51,6 +68,7 @@ class EmployeeAppEarlyAccessWindow < ApplicationRecord
 
   def status(today: PayrollBusinessClock.today)
     return "ended" if ended?
+    return "retired" if retired?
     return "expired" if expired?(today: today)
 
     "in_effect"

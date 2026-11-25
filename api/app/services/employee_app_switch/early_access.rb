@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
 module EmployeeAppSwitch
-  # Sets or ends the demo early-access window for an organization. Setting a
-  # new window ends the open one. Org admins record the owner-approved expiry
-  # and the exact demo companies; the row keeps who set it and when.
+  # Sets or ends the demo early-access window for an organization. Only a
+  # super_admin (the owner) may set one: the row records that approver, the
+  # exact demo company ids, the reason and when. The deadline is at most
+  # MAX_DAYS out; extending it means setting a new window, which needs a new
+  # super_admin approval with its own reason and ends the open one. Nothing
+  # can be set once the database enforces RLS (windows retire then).
+  # Ending a window early is open to any switch admin: it only closes.
   module EarlyAccess
     SET_ACTION = "employee_app_early_access#set"
     END_ACTION = "employee_app_early_access#ended"
@@ -20,6 +24,10 @@ module EmployeeAppSwitch
       window = EmployeeAppEarlyAccessWindow.transaction do
         organization.lock!
         authorize!(actor, organization)
+        approver!(actor)
+        if Enforcement.database_state[:enforced]
+          raise Invalid, "The database already enforces row-level security, so demo early access isn't needed."
+        end
         demos = Company.demo.active.where(organization_id: organization.id, id: ids).order(:id).to_a
         unless demos.size == ids.size
           raise Invalid, "Choose only active demo companies in this organization. Real companies can't use early access."
@@ -30,7 +38,8 @@ module EmployeeAppSwitch
         window = EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: ids, expires_on: date,
           reason: reason, set_by: actor)
         audit!(actor, organization, SET_ACTION, window,
-          { reason: reason, expires_on: date.iso8601, company_ids: ids, replaced_window_id: previous&.id }.compact)
+          { reason: reason, expires_on: date.iso8601, company_ids: ids, approved_by_id: actor.id,
+            replaced_window_id: previous&.id, extension: previous.present? || nil }.compact)
         window
       end
       # A demo the new window no longer names closes now, not at the next sweep.
@@ -64,6 +73,11 @@ module EmployeeAppSwitch
       allowed = fresh && StaffRolePolicy.allowed?(fresh, :manage_employee_app_switch) && fresh.payroll_access_allowed? &&
         (fresh.super_admin? || fresh.organization_id == organization.id)
       raise Forbidden, "Only organization admins can change demo early access." unless allowed
+    end
+
+    # Setting or extending early access is the owner's call.
+    def approver!(actor)
+      raise Forbidden, "Only the owner (a super admin) can set or extend demo early access." unless User.find_by(id: actor&.id)&.super_admin?
     end
 
     def parse_date(value)

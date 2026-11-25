@@ -4,6 +4,10 @@
 # In M3-5a (dual-read), existing callers keep reading legacy columns while new code
 # and parity checks read through CompanyFeatures.for(company, on:).
 class CompanyFeatures
+  # Forthcoming switches the Employee app switch can't turn on: they read as
+  # off at read time, as ClientOperatingProfile also refuses to store them on.
+  LOCKED_OFF = (OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS - OperatingProfileCatalog::EMPLOYEE_APP_SWITCH_IDS).freeze
+
   attr_reader :company, :as_of, :profile
 
   def self.for(company, on: PayrollBusinessClock.today)
@@ -101,10 +105,17 @@ class CompanyFeatures
     option("client_portal.sensitive_documents_visible") == true
   end
 
+  # A practice copy never opens the employee app; a demo company follows its
+  # own profile like a live client (demo plan D6), behind the demo gate.
+  #
+  # M4-9d: a profile flag alone opens nothing. A part is on only while its
+  # flag is on AND the Employee app switch's activation for it is unrevoked,
+  # so a direct profile write or a future-dated row never skips the
+  # readiness checks.
   def employee_portal_enabled?
-    return false if company.test_workspace?
+    return false if company.practice_copy?
 
-    profile.employee_portal_enabled == true
+    profile.employee_portal_enabled == true && switch_activated?(EmployeeAppSwitch::MASTER)
   end
   alias_method :employee_portal?, :employee_portal_enabled?
 
@@ -113,9 +124,12 @@ class CompanyFeatures
     unless OperatingProfileCatalog::EMPLOYEE_PORTAL_FEATURES.include?(key)
       raise ArgumentError, "Unknown employee portal feature: #{feature}"
     end
+    option_key = "employee_portal.features.#{key}"
+    # Bank changes (M4) and the M5 features stay off whatever a row says.
+    return false if LOCKED_OFF.include?(option_key)
     return false unless employee_portal_enabled?
 
-    option("employee_portal.features.#{key}") == true
+    option(option_key) == true && switch_activated?(option_key)
   end
 
   def employee_stubs_enabled_since
@@ -149,12 +163,15 @@ class CompanyFeatures
   end
 
   def subdomain_enabled?
-    return false if company.test_workspace?
+    return false if company.practice_copy?
 
-    option("subdomain_enabled") == true
+    option("subdomain_enabled") == true && switch_activated?(EmployeeAppSwitch::SUBDOMAIN)
   end
 
+  # Locked until Milestone 6, whatever a row says.
   def time_module_enabled?
+    return false if LOCKED_OFF.include?("time_module_enabled")
+
     option("time_module_enabled") == true
   end
 
@@ -172,5 +189,24 @@ class CompanyFeatures
       subdomain_enabled: subdomain_enabled?,
       time_module_enabled: time_module_enabled?
     }
+  end
+
+  private
+
+  def switch_activated?(part)
+    activated_parts.include?(part) && demo_gate_open?
+  end
+
+  def activated_parts
+    @activated_parts ||= company.persisted? ? EmployeeAppActivation.open_parts_for(company.id) : []
+  end
+
+  # A demo company's employee app opens only while the database enforces
+  # RLS or an in-effect early-access window names it (today, Guam time).
+  def demo_gate_open?
+    return true unless company.demo?
+    return @demo_gate_open if defined?(@demo_gate_open)
+
+    @demo_gate_open = EmployeeAppSwitch::Enforcement.demo_open?(company)
   end
 end

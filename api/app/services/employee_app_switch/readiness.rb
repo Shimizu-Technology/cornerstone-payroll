@@ -6,10 +6,15 @@ require "uri"
 
 module EmployeeAppSwitch
   # The M4-9 checks every turn-on must pass, named in plain language. Real
-  # companies need every check, including database row-level security. A
-  # demo company named in an in-effect early-access window may have only the
-  # database check waived, and only while the employee service's guard runs
-  # in raise mode (docs/DEMO_COMPANY_PLAN_2026-11-25.md §4).
+  # companies need every check, including database row-level security with
+  # the global kill switch not bypassing. A demo company named in an
+  # in-effect early-access window may have only the database check waived,
+  # only in the intended shadow state, and only while the employee service's
+  # guard runs in raise mode (docs/DEMO_COMPANY_PLAN_2026-11-25.md §4).
+  #
+  # What the employee service runs comes from its live, signed health
+  # response (ServiceAttestation), read once per check, never from a
+  # stored report.
   class Readiness
     Check = Data.define(:key, :name, :status, :detail) do
       def blocking?
@@ -26,7 +31,6 @@ module EmployeeAppSwitch
     ].freeze
 
     def initialize(company:, env: ENV, now: Time.current, today: PayrollBusinessClock.date_for(now),
-      observation: -> { EmployeeServiceObservation.current },
       database_state: -> { Readiness.database_state },
       ping: -> { Readiness.ping_employee_service(env) },
       window: nil)
@@ -34,7 +38,6 @@ module EmployeeAppSwitch
       @env = env
       @now = now
       @today = today
-      @observation_source = observation
       @database_state_source = database_state
       @ping_source = ping
       @window_source = window || -> { EmployeeAppEarlyAccessWindow.current_for(company.organization_id) }
@@ -73,33 +76,30 @@ module EmployeeAppSwitch
       }
     end
 
-    # Actual policy state of the protected tables, read on this process.
+    # Actual policy and kill-switch state, read on this process.
     def self.database_state
-      rows = ActiveRecord::Base.connection_pool.with_connection { |connection| RlsDatabase.table_status(connection) }
-      total = RlsTables::PROTECTED_TABLES.size
-      installed = rows.size == total && rows.all? { |row| row.fetch("policy") }
-      enforced_count = rows.count { |row| row.fetch("enabled") && row.fetch("forced") }
-      enforced = installed && enforced_count == total
-      { phase: enforced ? "enforced" : (installed ? "shadow" : "not_installed"),
-        enforced: enforced, enforced_tables: enforced_count, protected_tables: total }
-    rescue StandardError => error
-      Rails.logger.warn("[EmployeeAppSwitch] database state unavailable: #{error.class}")
-      { phase: "unknown", enforced: false, enforced_tables: 0, protected_tables: RlsTables::PROTECTED_TABLES.size }
+      Enforcement.database_state
     end
 
-    # Asks the employee service for its dependency health, which also makes
-    # it record a fresh observation. EMPLOYEE_API_URL is its base URL.
-    def self.ping_employee_service(env = ENV)
+    # Asks the employee service for its live dependency health and its signed
+    # statement about its own process. EMPLOYEE_API_URL is its base URL
+    # (configuration only; HTTPS in production). Redirects are never
+    # followed: anything but the answer itself counts as no answer.
+    def self.ping_employee_service(env = ENV, now: Time.current)
       uri = employee_health_uri(env["EMPLOYEE_API_URL"])
-      return { configured: false, ok: false } unless uri
+      return { configured: false, ok: false, observation: nil, attestation_error: :not_configured } unless uri
 
+      nonce = ServiceAttestation.new_nonce
+      headers = { "Accept" => "application/json" }.merge(ServiceAttestation.request_headers(nonce, env: env))
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 2, read_timeout: 4) do |http|
-        http.request(Net::HTTP::Get.new(uri, "Accept" => "application/json"))
+        http.request(Net::HTTP::Get.new(uri, headers))
       end
-      { configured: true, ok: response.code.to_i == 200 && health_status(response.body) == "ok" }
+      code = response.code.to_i
+      observation, error = [ 200, 503 ].include?(code) ? ServiceAttestation.verify(response.body, nonce: nonce, env: env, now: now) : [ nil, :unsigned ]
+      { configured: true, ok: code == 200 && health_status(response.body) == "ok", observation: observation, attestation_error: error }
     rescue StandardError => error
       Rails.logger.warn("[EmployeeAppSwitch] employee service ping failed: #{error.class}")
-      { configured: true, ok: false }
+      { configured: true, ok: false, observation: nil, attestation_error: :unreachable }
     end
 
     def self.health_status(body)
@@ -123,15 +123,9 @@ module EmployeeAppSwitch
 
     attr_reader :company, :env
 
-    def observation
-      return @observation if defined?(@observation)
-
-      ping # the ping refreshes the observation first
-      @observation = @observation_source.call
-    end
-
+    # The verified statement from this check's own ping, or nil.
     def fresh_observation
-      observation if observation&.fresh?(now: @now)
+      ping[:observation]
     end
 
     def ping
@@ -157,7 +151,16 @@ module EmployeeAppSwitch
     end
 
     def unreported
-      "The employee service hasn't reported its settings in the last #{EmployeeServiceObservation::FRESH_FOR.inspect}."
+      case ping[:attestation_error]
+      when :not_configured
+        "EMPLOYEE_SERVICE_ATTESTATION_SECRET isn't set on Payroll, so the employee service's settings can't be verified."
+      when :bad_signature, :wrong_process
+        "The employee service's health response didn't verify (signature, nonce or process), so it doesn't count."
+      when :stale
+        "The employee service's signed health response is too old or its clock is off."
+      else
+        "The employee service didn't return a signed health response (is EMPLOYEE_SERVICE_ATTESTATION_SECRET set on it?)."
+      end
     end
 
     def company_check
@@ -186,15 +189,21 @@ module EmployeeAppSwitch
         unreported
       elsif obs.rls_guard_mode != "raise"
         "The employee service's guard is set to #{obs.rls_guard_mode}, not raise."
-      else
+      elsif !obs.rls_runtime_role_verified
         "The employee service isn't connected as the restricted database role."
+      else
+        "The employee service sees the RLS kill switch bypassing (or can't read it), which silences its guard."
       end
       check(:rls_guard, name, obs&.rls_guard_raise? == true, detail)
     end
 
     def rls_database_check
       name = "The database enforces company separation (row-level security on)"
-      return check(:rls_database, name, true, nil) if database_state[:enforced]
+      if database_state[:enforced]
+        # Verified enforcement retires early access for good.
+        Enforcement.retire_windows!
+        return check(:rls_database, name, true, nil)
+      end
 
       if demo_exception_applies?
         return Check.new(key: "rls_database", name: name, status: "waived",
@@ -202,20 +211,32 @@ module EmployeeAppSwitch
             "#{EmployeeAppEarlyAccessWindow::NAME.downcase} rule, while the employee service's guard is in raise mode.")
       end
 
-      detail = "The database isn't enforcing row-level security yet (#{database_state[:phase].tr('_', ' ')})."
-      detail += " #{demo_exception_detail}" if demo?
-      check(:rls_database, name, false, detail)
+      check(:rls_database, name, false, rls_database_detail)
+    end
+
+    def rls_database_detail
+      detail = case database_state[:phase]
+      when "bypassed" then "The RLS kill switch is bypassing, so the database isn't enforcing row-level security."
+      when "unknown" then "The database's row-level security state (or its kill switch) can't be read, so it doesn't count."
+      else "The database isn't enforcing row-level security yet (#{database_state[:phase].to_s.tr('_', ' ')})."
+      end
+      demo? ? "#{detail} #{demo_exception_detail}" : detail
     end
 
     def demo_exception_applies?
-      demo? && window&.covers?(company, today: @today) && fresh_observation&.rls_guard_raise? == true
+      demo? && window&.covers?(company, today: @today) && Enforcement.shadow?(database_state) &&
+        fresh_observation&.rls_guard_raise? == true
     end
 
     def demo_exception_detail
       if window.nil? || !Array(window.company_ids).include?(company.id)
         "No demo early-access window covers this company."
+      elsif window.retired?
+        "The demo early-access window retired when the database began enforcing row-level security."
       elsif !window.in_effect?(today: @today)
         "The demo early-access window ended on #{window.expires_on.iso8601}."
+      elsif !Enforcement.shadow?(database_state)
+        "The demo early-access rule applies only in shadow mode with the kill switch off."
       else
         "The demo early-access rule needs the employee service's guard in raise mode."
       end
@@ -297,14 +318,16 @@ module EmployeeAppSwitch
     end
 
     def observed_payload
-      obs = observation
+      obs = fresh_observation
       {
         reported: obs.present?,
-        fresh: obs&.fresh?(now: @now) == true,
-        observed_at: obs&.observed_at&.utc&.iso8601,
+        fresh: obs.present?,
+        verified: obs.present?,
+        observed_at: obs&.issued_at&.utc&.iso8601,
         revision: obs&.revision,
         rls_guard_mode: obs&.rls_guard_mode,
         rls_runtime_role_verified: obs&.rls_runtime_role_verified == true,
+        rls_kill_switch_bypass: obs&.rls_kill_switch_bypass,
         dependencies_healthy: obs&.dependencies_healthy == true,
         answered_health_check: ping[:ok] == true,
         health_check_configured: ping[:configured] != false

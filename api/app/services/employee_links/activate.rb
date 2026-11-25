@@ -50,6 +50,8 @@ module EmployeeLinks
 
     def prepare(link)
       return :sign_in if link.claim_user_id.present?
+      # A demo link signs up only from its own subdomain, on a guarded process.
+      return :sign_in unless EmployeeLinks.demo_request_allowed?(link.company, @request&.headers&.[]("Origin"))
       # Answered like any other address that can't start a new account, and
       # checked before a pending login is created or attached.
       return :sign_in unless DemoOutbound.permit?(company: link.company, email: @email, channel: "employee_link_activation")
@@ -104,7 +106,23 @@ module EmployeeLinks
         changes: { email: @email, name: link.employee.display_name, active: true, deactivated_at: nil })
     end
 
+    # A demo's Clerk invitation is issued under the company's issuance lock
+    # (EmployeeLinks.lock_for_issuance!), re-checking the app is still on, so
+    # the demo kill switch never runs halfway through one.
     def start_clerk_sign_up(prepared)
+      return issue_clerk_sign_up(prepared) unless prepared.link.company.demo?
+
+      ApplicationRecord.transaction do
+        EmployeeLinks.lock_for_issuance!(prepared.link.company)
+        if EmployeeAccountLink.portal_enabled_for?(prepared.link.company.reload)
+          issue_clerk_sign_up(prepared)
+        else
+          Result.new(outcome: :unavailable, url: nil)
+        end
+      end
+    end
+
+    def issue_clerk_sign_up(prepared)
       link = prepared.link
       redirect_url = AppUrl.sign_up_redirect_url(link.company)
       return Result.new(outcome: :unavailable, url: nil) unless redirect_url

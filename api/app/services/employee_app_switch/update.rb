@@ -3,8 +3,11 @@
 module EmployeeAppSwitch
   # Turns parts of one company's employee app on or off, with a reason, and
   # audits the change with the readiness result it was checked against.
-  # Turning on requires every applicable check; turning off always works.
-  # Turning the employee app off also turns off every feature under it.
+  # Turning on requires every applicable check and records an activation
+  # (EmployeeAppActivation) with the checks it passed; turning off always
+  # works, revokes the activation and clears today's and every later
+  # scheduled version. Turning the employee app off also turns off every
+  # feature under it.
   class Update
     attr_reader :company, :actor
 
@@ -34,7 +37,7 @@ module EmployeeAppSwitch
     def preflight!
       reason = EmployeeAppSwitch.reason!(@raw_reason)
       authorize!(actor)
-      plan(EmployeeAppSwitch.stored_values(company, today: @today))
+      plan(*state)
       reason
     end
 
@@ -45,11 +48,15 @@ module EmployeeAppSwitch
         company.company_assignments.where(user_id: fresh_actor&.id).lock.load
         authorize!(fresh_actor)
 
-        before = EmployeeAppSwitch.stored_values(company, today: @today)
-        after, turned_on, turned_off = plan(before)
+        after, turned_on, turned_off = plan(*state)
         ProfileWriter.apply!(company: company, actor: fresh_actor, values: after.slice(*(turned_on + turned_off)),
           reason: "Employee app switch: #{reason}", today: @today)
-        audit!(fresh_actor, reason, turned_on, turned_off)
+        window = early_access_window(turned_on)
+        turned_on.each do |key|
+          EmployeeAppActivation.activate!(company: company, part: key, actor: fresh_actor, early_access_window: window,
+            checks: readiness.checks_for(key).map { |check| check.as_json.slice(:key, :status) })
+        end
+        audit!(fresh_actor, reason, turned_on, turned_off, window)
         { turned_on: turned_on, turned_off: turned_off, values: after }
       end
     end
@@ -76,14 +83,24 @@ module EmployeeAppSwitch
       end
     end
 
-    def plan(before)
+    # before: what's on today (stored and activated). on_anywhere: parts with
+    # anything left to turn off, today or in a later scheduled version.
+    def state
+      [ EmployeeAppSwitch.switched_on_values(company, today: @today), EmployeeAppSwitch.on_anywhere(company, today: @today) ]
+    end
+
+    def plan(before, on_anywhere)
       after = before.merge(changes)
       if changes.any? { |key, value| value && FEATURES.include?(key) } && !after.fetch(MASTER)
         raise Invalid, "Turn on the employee app before turning on its features."
       end
-      after = after.merge(FEATURES.index_with(false)) unless after.fetch(MASTER)
+      off = changes.select { |_key, value| value == false }.keys
+      unless after.fetch(MASTER)
+        after = after.merge(FEATURES.index_with(false))
+        off |= FEATURES
+      end
       turned_on = KEYS.select { |key| after[key] && !before[key] }
-      turned_off = KEYS.select { |key| !after[key] && before[key] }
+      turned_off = KEYS.select { |key| off.include?(key) && on_anywhere.include?(key) }
       raise Invalid, "Nothing to change: those switches are already set that way." if turned_on.empty? && turned_off.empty?
 
       if turned_on.any?
@@ -93,9 +110,12 @@ module EmployeeAppSwitch
       [ after, turned_on, turned_off ]
     end
 
-    def audit!(user, reason, turned_on, turned_off)
+    def early_access_window(turned_on)
+      turned_on.any? && readiness.exception_applied? ? EmployeeAppEarlyAccessWindow.current_for(company.organization_id) : nil
+    end
+
+    def audit!(user, reason, turned_on, turned_off, window)
       checks = turned_on.any? ? turned_on.flat_map { |key| readiness.checks_for(key) }.uniq(&:key) : []
-      window = turned_on.any? && readiness.exception_applied? ? EmployeeAppEarlyAccessWindow.current_for(company.organization_id) : nil
       AuditLog.record!(
         user: user, company_id: company.id, organization_id: company.organization_id,
         action: AUDIT_ACTION, record_type: "Company", record_id: company.id, subject_name: company.name,

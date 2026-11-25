@@ -18,6 +18,7 @@ module DemoOutbound
   # Reserved names (RFC 2606) never deliver, so a demo record may hold them.
   NON_DELIVERING_DOMAIN = /\.(example|test|invalid)\z/
   SCOPE_KEY = :demo_outbound_company_id
+  CHANNEL_KEY = :demo_outbound_channel
   # Employee app mail and sign-up steps. For a demo these go out only while
   # that demo's employee app is on, so the demo kill switch (M4-9d), which
   # turns it off, also stops every queued or retried employee notification.
@@ -105,13 +106,20 @@ module DemoOutbound
 
   # Marks the code inside the block as sending for this company, so the
   # transports filter the final recipients too. A nested scope for a non-demo
-  # company keeps an outer demo scope.
-  def scoped(company)
+  # company keeps an outer demo scope. With an employee channel, the
+  # transport also rechecks, right before sending, that the demo's employee
+  # app is still on (the demo kill switch may have run since enqueue).
+  def scoped(company, channel: nil)
     previous = Thread.current[SCOPE_KEY]
-    Thread.current[SCOPE_KEY] = company.id if company&.demo?
+    previous_channel = Thread.current[CHANNEL_KEY]
+    if company&.demo?
+      Thread.current[SCOPE_KEY] = company.id
+      Thread.current[CHANNEL_KEY] = channel&.to_s
+    end
     yield
   ensure
     Thread.current[SCOPE_KEY] = previous
+    Thread.current[CHANNEL_KEY] = previous_channel
   end
 
   def scope_company
@@ -131,7 +139,7 @@ module DemoOutbound
       values = [ filtered.delete(key), filtered.delete(key.to_s) ].flatten.compact
       next if values.empty?
 
-      kept = filter(company: company, emails: values, channel: "mail_transport").uniq
+      kept = filter(company: company, emails: values, channel: Thread.current[CHANNEL_KEY] || "mail_transport").uniq
       filtered[key] = kept if kept.any?
     end
     Array(filtered[:to]).any? ? filtered : nil

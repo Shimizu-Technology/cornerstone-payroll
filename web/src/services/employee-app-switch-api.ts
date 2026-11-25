@@ -21,12 +21,14 @@ export interface SwitchRow {
 
 export interface EarlyAccessWindow {
   id: number;
-  status: 'in_effect' | 'expired' | 'ended';
+  status: 'in_effect' | 'expired' | 'ended' | 'retired';
   expires_on: string;
   companies: { id: number; name: string | null }[];
   reason: string;
   set_by: string | null;
+  approved_by: string | null;
   set_at: string;
+  retired_at: string | null;
   ended_at: string | null;
   ended_by: string | null;
   end_reason: string | null;
@@ -44,19 +46,28 @@ export interface EmployeeAppSwitchState {
     observed: {
       reported: boolean;
       fresh: boolean;
+      verified: boolean;
       observed_at: string | null;
       revision: string | null;
       rls_guard_mode: 'off' | 'log' | 'raise' | null;
       rls_runtime_role_verified: boolean;
+      rls_kill_switch_bypass: boolean | null;
       dependencies_healthy: boolean;
       answered_health_check: boolean;
       health_check_configured: boolean;
     };
-    database: { phase: 'enforced' | 'shadow' | 'not_installed' | 'unknown'; enforced: boolean; enforced_tables: number; protected_tables: number };
+    database: {
+      phase: 'enforced' | 'shadow' | 'partial' | 'bypassed' | 'not_installed' | 'unknown';
+      enforced: boolean;
+      kill_switch_bypass: boolean | null;
+      enforced_tables: number;
+      protected_tables: number;
+    };
     early_access: { id: number; status: string; expires_on: string; covers_company: boolean; applied: boolean } | null;
   };
   early_access: {
     name: string;
+    can_set: boolean;
     max_days: number;
     max_companies: number;
     demo_companies: { id: number; name: string }[];

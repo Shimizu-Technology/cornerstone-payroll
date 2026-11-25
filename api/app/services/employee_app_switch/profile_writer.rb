@@ -15,7 +15,10 @@ module EmployeeAppSwitch
   #   the editor does, so the baseline itself never changes;
   # - later scheduled versions get the same values in place.
   # Turning on refuses to split ahead of a scheduled version, which would
-  # number versions out of date order. Turning off always proceeds.
+  # number versions out of date order. Turning off always proceeds, and
+  # revokes the part's activation (EmployeeAppActivation) even when no row
+  # changes, so a part turned off can't come back through a profile write.
+  # Locked forthcoming switches are written off on every row it touches.
   class ProfileWriter
     def self.apply!(company:, actor:, values:, reason:, today: PayrollBusinessClock.today)
       new(company: company, actor: actor, values: values, reason: reason, today: today).apply!
@@ -42,6 +45,7 @@ module EmployeeAppSwitch
       written = []
       written << write_today!(current, profiles, later) if current
       later.each { |profile| written << amend!(profile) }
+      revoke_turned_off!
       written.compact
     end
 
@@ -49,6 +53,13 @@ module EmployeeAppSwitch
 
     def turning_on?
       @values.value?(true)
+    end
+
+    def revoke_turned_off!
+      parts = @values.select { |_key, value| value == false }.keys
+      return if parts.empty?
+
+      EmployeeAppActivation.revoke!(company: @company, parts: parts, actor: @actor, reason: @reason)
     end
 
     def create_baseline!
@@ -102,7 +113,7 @@ module EmployeeAppSwitch
     end
 
     def merged_values(profile)
-      OperatingProfileCatalog.values_for(profile).merge(@values)
+      OperatingProfileCatalog.values_for(profile).merge(@values).merge(CompanyFeatures::LOCKED_OFF.index_with(false))
     end
 
     def validated(profile)

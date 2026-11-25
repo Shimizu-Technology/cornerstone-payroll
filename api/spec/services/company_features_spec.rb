@@ -13,6 +13,7 @@ RSpec.describe CompanyFeatures do
         options: { "employee_portal" => { "features" => { "stubs" => enabled } } }
       )
     end
+    activate_employee_app!(company)
     expect(described_class.for(company, on: start + 2.days).employee_stubs_enabled_since).to eq(start + 1.day)
     expect(described_class.for(company, on: start + 3.days).employee_stubs_enabled_since).to be_nil
     expect(described_class.for(company, on: start + 4.days).employee_stubs_enabled_since).to eq(start + 4.days)
@@ -208,7 +209,10 @@ RSpec.describe CompanyFeatures do
         options: OperatingProfileCatalog.default_options.merge(
           "subdomain_enabled" => true,
           "employee_portal" => {
-            "features" => OperatingProfileCatalog::EMPLOYEE_PORTAL_FEATURES.index_with(true),
+            # Locked switches can't be stored on at all (M4-9d).
+            "features" => OperatingProfileCatalog::EMPLOYEE_PORTAL_FEATURES.index_with do |feature|
+              !CompanyFeatures::LOCKED_OFF.include?("employee_portal.features.#{feature}")
+            end,
             "former_access_years" => 6
           }
         )
@@ -471,6 +475,9 @@ RSpec.describe CompanyFeatures do
       expect(described_class.for(company, on: Date.new(2026, 2, 1)).employee_portal_feature?(:stubs)).to be(false)
 
       profile.update!(employee_portal_enabled: true)
+      # The flags alone open nothing; the switch's activation does (M4-9d).
+      expect(described_class.for(company, on: Date.new(2026, 2, 1)).employee_portal_feature?(:stubs)).to be(false)
+      activate_employee_app!(company)
       features = described_class.for(company, on: Date.new(2026, 2, 1))
       expect(features.employee_portal_feature?(:stubs)).to be(true)
       expect(features.employee_portal_feature?(:bank_requests)).to be(false)

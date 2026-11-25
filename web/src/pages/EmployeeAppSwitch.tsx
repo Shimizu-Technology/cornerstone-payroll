@@ -214,17 +214,20 @@ function CheckRow({ check, scope }: { check: ReadinessCheck; scope: string | nul
 
 function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
   const { observed, database } = state.readiness;
-  const guard = !observed.reported ? 'Not reported yet'
+  const guard = !observed.reported ? 'No signed answer'
     : observed.rls_guard_mode === 'raise' ? 'Raise (refuses reads without a company)'
       : observed.rls_guard_mode === 'log' ? 'Log only' : 'Off';
   const phase = database.phase === 'enforced' ? 'Enforced'
     : database.phase === 'shadow' ? 'Shadow (policies installed, not enforced)'
-      : database.phase === 'not_installed' ? 'Policies not installed' : 'Unknown';
+      : database.phase === 'partial' ? 'Partly enforced'
+        : database.phase === 'bypassed' ? 'Bypassed by the kill switch'
+          : database.phase === 'not_installed' ? 'Policies not installed' : 'Unknown';
+  const killSwitch = database.kill_switch_bypass === false ? 'Off' : database.kill_switch_bypass ? 'Bypassing' : 'Unknown';
   return (
     <Card>
       <CardHeader>
         <CardTitle>What the system sees</CardTitle>
-        <CardDescription>The employee service's guard and the database are separate. Both are shown as observed.</CardDescription>
+        <CardDescription>The employee service's guard and the database are separate. The employee service's settings come from its signed answer to this check.</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-2">
         <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-service">
@@ -233,7 +236,7 @@ function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
             <Fact term="RLS guard" value={guard} good={observed.rls_guard_mode === 'raise'} />
             <Fact term="Database role" value={observed.rls_runtime_role_verified ? 'Restricted role verified' : 'Not verified'} good={observed.rls_runtime_role_verified} />
             <Fact term="Health check" value={!observed.health_check_configured ? 'Not set up on Payroll' : observed.answered_health_check ? 'Answered' : 'No answer'} good={observed.answered_health_check} />
-            <Fact term="Last report" value={observed.reported ? `${formatDateTime(observed.observed_at)}${observed.fresh ? '' : ' (out of date)'}` : 'None'} good={observed.fresh} />
+            <Fact term="Signed answer" value={observed.verified ? `Verified${observed.revision ? ` (revision ${observed.revision.slice(0, 12)})` : ''}` : 'Not verified'} good={observed.verified} />
           </dl>
         </section>
         <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-database">
@@ -241,6 +244,7 @@ function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
           <dl className="mt-2 space-y-2 text-sm">
             <Fact term="Row-level security" value={phase} good={database.enforced} />
             <Fact term="Protected tables enforced" value={`${database.enforced_tables} of ${database.protected_tables}`} good={database.enforced} />
+            <Fact term="RLS kill switch" value={killSwitch} good={database.kill_switch_bypass === false} />
           </dl>
         </section>
       </CardContent>
@@ -398,7 +402,7 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
       <CardHeader>
         <CardTitle>{info.name}</CardTitle>
         <CardDescription>
-          With the owner's approval, the named demo companies can turn on before the database enforces row-level security, as long as the employee service's guard is in raise mode. Every other check still applies. After the expiry date it stops applying on its own, and any demo parts that relied on it turn off.
+          With the owner's approval, the named demo companies can turn on before the database enforces row-level security, as long as the employee service's guard is in raise mode. Every other check still applies. After the expiry date the demo's employee app closes on its own. Once the database enforces row-level security the window retires for good.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -406,15 +410,19 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
           <div className="rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
             <p className="font-semibold">In effect through {formatDate(current.expires_on)}</p>
             <p className="mt-1 [overflow-wrap:anywhere]">Covers {current.companies.map((company) => company.name ?? `Company ${company.id}`).join(' and ')}.</p>
-            <p className="mt-1 [overflow-wrap:anywhere]">Set by {current.set_by ?? 'an admin'} on {formatDateTime(current.set_at)}: {current.reason}</p>
+            <p className="mt-1 [overflow-wrap:anywhere]">Approved by {current.approved_by ?? 'the owner'} on {formatDateTime(current.set_at)}: {current.reason}</p>
             <Button variant="outline" size="sm" className="mt-3" onClick={() => setEnding(true)}>End early access now</Button>
           </div>
         ) : (
           <p className="text-sm text-neutral-700">No early-access window is in effect.</p>
         )}
 
+        {!info.can_set && (
+          <p className="text-sm text-neutral-700">Only the owner (a super admin) can set or extend early access.</p>
+        )}
+        {info.can_set && (
         <form className="space-y-4 rounded-xl border border-neutral-200 p-4" onSubmit={(event) => void submit(event)}>
-          <h3 className="font-semibold text-neutral-900">{current ? 'Replace the window' : 'Set a window'}</h3>
+          <h3 className="font-semibold text-neutral-900">{current ? 'Extend or replace the window' : 'Set a window'}</h3>
           <fieldset disabled={busy} className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor={dateId} className="text-sm font-semibold">Owner-approved expiry date</label>
@@ -440,6 +448,7 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
             {current ? 'Replace early access' : 'Set early access'}
           </Button>
         </form>
+        )}
 
         {info.windows.length > 0 && (
           <div>
@@ -447,8 +456,8 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
             <ul className="mt-2 space-y-2 text-sm">
               {info.windows.map((window) => (
                 <li key={window.id} className="rounded-lg bg-neutral-50 p-3 [overflow-wrap:anywhere]">
-                  <span className="font-medium">{window.status === 'in_effect' ? 'In effect' : window.status === 'expired' ? 'Expired' : 'Ended'}</span>
-                  {' '}· through {formatDate(window.expires_on)} · set by {window.set_by ?? 'an admin'} on {formatDateTime(window.set_at)}
+                  <span className="font-medium">{window.status === 'in_effect' ? 'In effect' : window.status === 'expired' ? 'Expired' : window.status === 'retired' ? 'Retired' : 'Ended'}</span>
+                  {' '}· through {formatDate(window.expires_on)} · approved by {window.approved_by ?? 'the owner'} on {formatDateTime(window.set_at)}
                   {window.ended_at && <> · ended by {window.ended_by ?? 'an admin'}: {window.end_reason}</>}
                 </li>
               ))}
