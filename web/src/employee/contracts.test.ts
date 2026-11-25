@@ -1,7 +1,7 @@
 /** @vitest-environment node */
 import { describe, expect, it } from 'vitest';
 import {
-  parseContext, parseHelpContacts, parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, signUpUrlFrom,
+  parseContext, parseHelpContacts, parseProfile, parseStatementDetail, parseStatementPage, parseStatementSummary, parseTaxForms, signUpUrlFrom,
 } from './contracts';
 import { addressLines, comparisonLine, formatHours, formatMoney, paymentStatus, periodLabel, taxLabel } from './format';
 import { birthDate, normalizeCode } from './signupState';
@@ -19,14 +19,14 @@ const summary = {
 };
 
 describe('employee API contracts', () => {
-  it('reads today\'s 204 context as everything off', () => {
+  it('reads an empty context as everything off', () => {
     expect(parseContext(null)).toEqual({
       firstName: null, status: 'active', formerAccessUntil: null, nextPayday: null, w2Delivery: null,
       features: { stubs: false, taxForms: false, profileRequests: false },
     });
   });
 
-  it('reads the assumed context shape', () => {
+  it('reads the served context shape', () => {
     const info = parseContext({
       first_name: 'Tala', status: 'former', former_access_until: '2028-03-01', next_payday: '2026-12-04', w2_delivery: 'handed_out',
       features: { stubs: true, tax_forms: true, profile_requests: false },
@@ -134,6 +134,19 @@ describe('employee formatting', () => {
     expect(comparisonLine(bonus, page.statements)).toBeNull();
     expect(comparisonLine(first, page.statements)).toBeNull();
     expect(comparisonLine({ ...latest, totalHours: null }, page.statements)).toBe('$36.45 less than Nov 6.');
+  });
+
+  it('uses the API\'s previous check, even from another page, and hides when the API says there is none', () => {
+    const page = parseStatementPage({ statements: [
+      { ...summary, id: 3, check_date: '2026-11-20', net_pay: '534.18', total_hours: '38.50',
+        previous: { id: '1', pay_date: '2026-11-06', check_date: '2026-11-06', net_pay: '570.63', total_hours: '42.00' } },
+      { ...summary, id: 1, check_date: '2026-11-06', net_pay: '570.63', total_hours: '42.00', previous: null },
+    ] });
+    const [latest, first] = page.statements;
+    expect(latest.previous).toEqual({ id: '1', payDate: '2026-11-06', netPay: '570.63', totalHours: '42.00' });
+    expect(comparisonLine(latest, [latest])).toBe('$36.45 less than Nov 6. You worked 3.5 fewer hours.');
+    expect(comparisonLine(first, [first, { ...latest, id: '0' }])).toBeNull();
+    expect(parseStatementSummary({ ...summary, previous: { id: 'bad id!', pay_date: '2026-11-06' } })?.previous).toBeNull();
   });
 
   it('writes an address on as few lines as it needs', () => {
