@@ -52,24 +52,10 @@ module Api
           historical_payroll_enabled: company.historical_payroll_enabled,
           client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
-          payroll_environment: company.payroll_environment,
-          test_workspace: company.test_workspace?,
+          **CompanyWorkspacePresentation.fields(company),
           practice_portal: current_user.client? && current_user.practice_company_id == company.id,
-          test_workspace_purpose: company.test_workspace_purpose,
-          test_workspace_purpose_label: company.test_workspace_purpose_label,
-          test_workspace_expires_at: company.test_workspace_expires_at,
-          test_workspace_archived_at: company.test_workspace_archived_at,
-          test_workspace_sealed_at: company.test_workspace_sealed_at,
-          test_workspace_expired: company.test_workspace_expired?,
-          test_workspace_read_only: company.test_workspace_read_only?,
           workspace_can_write: company_write_allowed?(company),
-          workspace_write_permissions: workspace_write_permissions(company),
-          migration_rehearsal_status: company.migration_rehearsal_status,
-          migration_source_company_id: company.migration_source_company_id,
-          migration_source_company_name: company.migration_source_company&.name,
-          migration_source_batch_id: company.migration_source_batch_id,
-          migration_rehearsal_completed_at: company.migration_rehearsal_completed_at,
-          migration_rehearsal_error: company.migration_rehearsal_error
+          workspace_write_permissions: workspace_write_permissions(company)
         }
         summary[:creator] = @creators[company.id] if @creators
         summary

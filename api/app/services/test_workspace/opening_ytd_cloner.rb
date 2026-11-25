@@ -10,6 +10,9 @@ module TestWorkspace
     end
 
     def call
+      raise ArgumentError, "Demo companies are provisioned from their own fixture, never copied from a client" if company.demo?
+      raise ArgumentError, "Target must be a test workspace copied from this client" unless company.practice_copy? && company.migration_source_company_id == source_company.id
+
       errors = self.class.validation_errors(source_company: source_company, cutoff: cutoff, before_cutoff: before_cutoff)
       raise ArgumentError, errors.join("; ") if errors.any?
 

@@ -13,13 +13,18 @@ class Company < ApplicationRecord
   PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email mosa_revel].freeze
   PAYROLL_ENVIRONMENTS = %w[live migration_rehearsal].freeze
   MIGRATION_REHEARSAL_STATUSES = %w[pending ready failed].freeze
-  TEST_WORKSPACE_PURPOSES = %w[sandbox migration_rehearsal training_replay backup_snapshot].freeze
+  TEST_WORKSPACE_PURPOSES = %w[sandbox migration_rehearsal training_replay backup_snapshot demo].freeze
   TEST_WORKSPACE_PURPOSE_LABELS = {
     "sandbox" => "General test workspace",
     "migration_rehearsal" => "Migration rehearsal",
     "training_replay" => "Training replay",
-    "backup_snapshot" => "Backup snapshot"
+    "backup_snapshot" => "Backup snapshot",
+    "demo" => "Demo company"
   }.freeze
+  # Shown wherever a demo company refuses an action a live client could take
+  # (filing transmission, payments, firm billing). It reads like an ordinary
+  # unavailable state so the demo never announces itself to clients or staff.
+  DEMO_UNAVAILABLE_MESSAGE = "This option isn't available for this client yet."
 
   before_destroy :protect_retained_portal_documents, prepend: true
 
@@ -130,7 +135,7 @@ class Company < ApplicationRecord
   validates :subdomain_slug,
             format: { with: TenantSubdomainRegistry::SLUG_PATTERN },
             exclusion: { in: TenantSubdomainRegistry::RESERVED_SLUGS },
-            uniqueness: { case_sensitive: false, conditions: -> { live_payroll } },
+            uniqueness: { case_sensitive: false, conditions: -> { where("companies.payroll_environment = 'live' OR companies.test_workspace_purpose = 'demo'") } },
             allow_nil: true
   validate :subdomain_slug_change_requires_disabled_profile, if: -> { persisted? && will_save_change_to_subdomain_slug? }
   validate :valid_public_branding
@@ -142,9 +147,11 @@ class Company < ApplicationRecord
   validates :payroll_environment, inclusion: { in: PAYROLL_ENVIRONMENTS }
   validates :migration_rehearsal_status, inclusion: { in: MIGRATION_REHEARSAL_STATUSES }, allow_nil: true
   validates :test_workspace_purpose, inclusion: { in: TEST_WORKSPACE_PURPOSES }, allow_nil: true
-  validates :migration_source_company, presence: true, if: :test_workspace?
+  validates :migration_source_company, presence: true, if: :practice_copy?
   validates :migration_rehearsal_status, presence: true, if: :test_workspace?
   validate :test_workspace_source_is_valid
+  validate :demo_shape_is_permanent, if: :demo?
+  validate :company_type_is_unchanged, on: :update
   validates :check_stock_type, inclusion: { in: CHECK_STOCK_TYPES }
   validates :check_offset_x, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
   validates :check_offset_y, numericality: { greater_than_or_equal_to: -2.0, less_than_or_equal_to: 2.0 }
@@ -156,6 +163,8 @@ class Company < ApplicationRecord
   scope :live_payroll, -> { where(payroll_environment: "live") }
   scope :migration_rehearsal, -> { where(payroll_environment: "migration_rehearsal") }
   scope :test_workspace, -> { where(payroll_environment: "migration_rehearsal") }
+  scope :demo, -> { test_workspace.where(test_workspace_purpose: "demo") }
+  scope :not_demo, -> { where(test_workspace_purpose: nil).or(where.not(test_workspace_purpose: "demo")) }
 
   def test_workspace?
     payroll_environment == "migration_rehearsal"
@@ -181,6 +190,20 @@ class Company < ApplicationRecord
     test_workspace? && test_workspace_purpose == "backup_snapshot"
   end
 
+  # A permanent, source-free company for staff training and client demos. It
+  # is a test workspace for containment (filings, payments, integrations and
+  # firm totals stay closed) but presents and behaves like a live client.
+  def demo?
+    test_workspace? && test_workspace_purpose == "demo"
+  end
+
+  # A copied or replayed workspace that is visibly labelled as practice: every
+  # test workspace except a demo. Use this, not test_workspace?, for labels,
+  # practice stamps, expiry/read-only rules and source lineage.
+  def practice_copy?
+    test_workspace? && !demo?
+  end
+
   def test_workspace_ready?
     test_workspace? && migration_rehearsal_status == "ready" && test_workspace_archived_at.nil?
   end
@@ -194,7 +217,7 @@ class Company < ApplicationRecord
   end
 
   def test_workspace_purpose_label
-    return unless test_workspace?
+    return unless practice_copy?
 
     TEST_WORKSPACE_PURPOSE_LABELS.fetch(test_workspace_purpose, "Test workspace")
   end
@@ -411,7 +434,28 @@ class Company < ApplicationRecord
   end
 
   def subdomain_requires_live_payroll
-    errors.add(:subdomain_slug, "is only available to live companies")
+    errors.add(:subdomain_slug, "is only available to live companies") unless demo?
+  end
+
+  def demo_shape_is_permanent
+    errors.add(:migration_source_company, "must be blank for a demo company") if migration_source_company_id.present?
+    errors.add(:migration_source_batch, "must be blank for a demo company") if migration_source_batch_id.present?
+    errors.add(:test_workspace_expires_at, "must be blank for a demo company") if test_workspace_expires_at.present?
+    errors.add(:test_workspace_archived_at, "must be blank for a demo company") if test_workspace_archived_at.present?
+    errors.add(:test_workspace_sealed_at, "must be blank for a demo company") if test_workspace_sealed_at.present?
+    if test_workspace_manifest.to_h["demo_fixture_key"].blank?
+      errors.add(:test_workspace_manifest, "must name the demo fixture")
+    end
+  end
+
+  def company_type_is_unchanged
+    was_demo = test_workspace_purpose_in_database == "demo"
+    if was_demo != (test_workspace_purpose == "demo") || (was_demo && will_save_change_to_payroll_environment?)
+      errors.add(:base, "A demo company cannot be converted to or from another company type")
+    end
+    if was_demo && test_workspace_manifest_in_database.to_h["demo_fixture_key"] != test_workspace_manifest.to_h["demo_fixture_key"]
+      errors.add(:test_workspace_manifest, "demo fixture key cannot change")
+    end
   end
 
   def test_workspace_source_is_valid
@@ -419,7 +463,7 @@ class Company < ApplicationRecord
       errors.add(:base, "Production clients cannot reference a test workspace source")
       return
     end
-    return unless test_workspace? && migration_source_company
+    return unless practice_copy? && migration_source_company
 
     errors.add(:migration_source_company, "must be a production client") unless migration_source_company.live_payroll?
     errors.add(:migration_source_company, "must belong to the same organization") if migration_source_company.organization_id != organization_id

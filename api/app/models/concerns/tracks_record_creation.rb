@@ -18,7 +18,7 @@ module TracksRecordCreation
   def record_creation_actor
     return Current.user if Current.user
     return migration_rehearsal_created_by if is_a?(Company) && migration_rehearsal_created_by
-    company.migration_rehearsal_created_by if !is_a?(Company) && company&.test_workspace?
+    company.migration_rehearsal_created_by if !is_a?(Company) && company&.practice_copy?
   end
 
   def assign_record_creator
