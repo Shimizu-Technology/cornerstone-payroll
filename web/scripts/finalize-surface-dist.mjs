@@ -3,7 +3,7 @@
 // the Payroll site's output is unchanged. For VITE_APP_SURFACE=employee it
 // writes the employee site's _headers and _redirects into dist and removes
 // staff-only static files. Pay data never goes through a cache or a crawler.
-import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { loadEnv } from 'vite'
@@ -157,6 +157,7 @@ export function finalizeEmployeeDist({ distDir, deployDir, env }) {
     path.join(distDir, '_headers'),
     renderHeaders(readFileSync(path.join(deployDir, '_headers.template'), 'utf8'), origins),
   )
+  cpSync(path.join(deployDir, 'legal'), path.join(distDir, 'legal'), { recursive: true })
   copyFileSync(path.join(deployDir, '_redirects'), path.join(distDir, '_redirects'))
   writeFileSync(path.join(distDir, 'robots.txt'), ROBOTS_TXT)
   for (const file of STAFF_ONLY_FILES) rmSync(path.join(distDir, file), { force: true })
