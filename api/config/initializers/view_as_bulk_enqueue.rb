@@ -9,4 +9,8 @@ module ViewAsBulkEnqueueGuard
   end
 end
 
-ActiveJob.singleton_class.prepend(ViewAsBulkEnqueueGuard)
+ActiveSupport.on_load(:active_job) do
+  ActiveSupport.on_load(:active_record) do
+    ActiveJob.singleton_class.prepend(ViewAsBulkEnqueueGuard)
+  end
+end
