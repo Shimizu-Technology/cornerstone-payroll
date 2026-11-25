@@ -64,8 +64,12 @@ module EmployeeLinks
       if pending && !(pending.portal_employee? && pending.awaiting_clerk_binding? && pending.active?)
         return :sign_in
       end
-      return :sign_in if EmployeeContactValidator.placeholder_email?(@email, organization_id: link.company.organization_id) ||
-        EmployeeContactValidator.structural_placeholder_email?(@email)
+      # A demo address already passed the allow-list, and a demo never
+      # consults the organization's private placeholder list, so the answer
+      # can't reveal which addresses are marked.
+      return :sign_in if EmployeeContactValidator.structural_placeholder_email?(@email)
+      return :sign_in if !link.company.demo? &&
+        EmployeeContactValidator.placeholder_email?(@email, organization_id: link.company.organization_id)
       if EmployeeLinks.login_email_taken?(@email, except_user_id: pending&.id)
         reused = EmployeeLinks.reusable_pending_login(@email, link.employee) unless pending
         return :sign_in unless reused
