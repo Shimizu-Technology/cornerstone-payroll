@@ -8,9 +8,10 @@ module EmployeeAppSwitch
   class Error < StandardError; end
   class Forbidden < Error; end
   class Invalid < Error; end
-  # Turning on needs a second factor verified within the step-up window.
+  # Turning on needs a fresh step-up (MfaPolicy.recently_step_up_verified?):
+  # a second factor with REQUIRE_MFA on, a first factor while it's off.
   class StepUpRequired < Error
-    def initialize(message = "Verify your second factor again to turn this on.")
+    def initialize(message = "Confirm it's you again to turn this on.")
       super
     end
   end

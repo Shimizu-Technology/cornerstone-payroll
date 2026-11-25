@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+# Step-up before a sensitive change. MfaPolicy decides what counts: a fresh
+# second factor with REQUIRE_MFA on, a fresh first factor (password or email
+# code, through Clerk reverification) while it's off. The 403 tells Clerk
+# which level to prompt for.
 module RecentVerification
   extend ActiveSupport::Concern
 
@@ -7,25 +11,20 @@ module RecentVerification
 
   def require_recent_verification!
     return head :unauthorized unless @current_user
+    return if MfaPolicy.recently_step_up_verified?(@clerk_token_payload)
 
-    enrolled = MfaPolicy.second_factor_enrolled?(@clerk_token_payload)
-    if MfaPolicy.employee_only?(@current_user) && !enrolled
-      return if MfaPolicy.recently_verified_any_factor?(@clerk_token_payload)
-      level = "first_factor"
-    else
-      return if MfaPolicy.recently_verified_second_factor?(@clerk_token_payload)
-      # Clerk would accept a fresh password for an unenrolled user and retry,
-      # and this check would refuse it again. Send them to enrollment instead.
-      return render_enrollment_required unless enrolled
-
-      level = "second_factor"
+    # With MFA on, Clerk would accept a fresh password for an unenrolled user
+    # and retry, and this check would refuse it again. Send them to
+    # enrollment instead. With MFA off nobody needs to enroll.
+    if MfaPolicy.enabled? && !MfaPolicy.second_factor_enrolled?(@clerk_token_payload)
+      return render_enrollment_required
     end
 
     render json: {
       clerk_error: {
         type: "forbidden",
         reason: "reverification-error",
-        metadata: { reverification: { level: level, afterMinutes: MfaPolicy::STEP_UP_MAX_AGE_MINUTES } }
+        metadata: { reverification: { level: MfaPolicy.step_up_level, afterMinutes: MfaPolicy::STEP_UP_MAX_AGE_MINUTES } }
       }
     }, status: :forbidden
   end

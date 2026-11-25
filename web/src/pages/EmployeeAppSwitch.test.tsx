@@ -98,6 +98,22 @@ describe('EmployeeAppSwitch', () => {
     expect(screen.getByText('Shadow (policies installed, not enforced)')).toBeTruthy();
   });
 
+  it('shows two-step sign-in as not required yet while MFA is off, without blocking turn-on', async () => {
+    const detail = "Two-step sign-in isn't required yet; it will be turned on for everyone before real employees use the app.";
+    mocks.get.mockResolvedValue({ data: state({}, [
+      passed('company', 'This is a live client or a demo company'),
+      { key: 'mfa', name: 'Two-step sign-in is required (REQUIRE_MFA=true with the two-step claim)', status: 'waived', detail },
+      passed('rls_database', 'The database enforces company separation (row-level security on)'),
+    ]) });
+    renderPage();
+
+    const check = (await screen.findByText(detail)).closest('li') as HTMLElement;
+    expect(within(check).getByText('Not required yet')).toBeTruthy();
+    expect(screen.queryByText('Waived for demo')).toBeNull();
+    const row = screen.getByText('Employee app', { selector: 'p' }).closest('li') as HTMLElement;
+    expect((within(row).getByRole('button', { name: 'Turn on' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('turns a part off with a reason, without needing the checks', async () => {
     const on = state();
     on.switches[0] = { ...on.switches[0], on: true, open_today: true };
