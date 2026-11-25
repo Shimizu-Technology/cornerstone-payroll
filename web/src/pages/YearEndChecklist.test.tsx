@@ -6,12 +6,14 @@ import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { YearEndChecklist } from './YearEndChecklist';
 import * as yearEnd from '@/lib/year-end';
 import { ApiError } from '@/services/api';
+import type { EmployeeTaxFormCopy } from '@/services/employee-tax-forms-api';
 import type { ActiveYearEndStep, YearEndChecklist as Checklist, YearEndIssue, YearEndStep } from '@/lib/year-end';
 
 const mocks = vi.hoisted(() => ({
   checklist: vi.fn(), acknowledge: vi.fn(), downloadDocument: vi.fn(), updateResponsibility: vi.fn(), preflight: vi.fn(), markReady: vi.fn(),
   linkPayee: vi.fn(), addContractor: vi.fn(), unlinkPayee: vi.fn(), mark1099Ready: vi.fn(),
   filingRecord: vi.fn(async () => ({ filing: null })),
+  canManageCopies: vi.fn(() => false), listCopies: vi.fn(),
   companyGet: vi.fn(), companyUpdate: vi.fn(), employeeUpdate: vi.fn(),
 }));
 vi.mock('@/services/api', () => ({
@@ -34,6 +36,14 @@ vi.mock('@/services/api', () => ({
   },
 }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Tumon Bakery' }, activeCompanyId: 7 }) }));
+
+vi.mock('@/hooks/useSelectedCompanyCapability', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/hooks/useSelectedCompanyCapability')>(),
+  useOptionalSelectedCompanyCapability: () => mocks.canManageCopies(),
+}));
+vi.mock('@/services/employee-tax-forms-api', () => ({
+  employeeTaxFormsApi: () => ({ list: mocks.listCopies }),
+}));
 
 const employerData: ActiveYearEndStep<'employer'>['data'] = {
   name: 'Tumon Bakery', ein: '98-7654321', address_line1: '1 Marine Dr', address_line2: null,
@@ -166,9 +176,36 @@ describe('Year-end checklist', () => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-19T12:00:00+10:00'));
+    mocks.canManageCopies.mockReturnValue(false);
     mocks.updateResponsibility.mockResolvedValue({ data: [] });
   });
   afterEach(() => vi.useRealTimers());
+
+  it('renders copy revisions and notice details alongside payroll history without duplicate keys', async () => {
+    const consoleError = vi.spyOn(console, 'error');
+    mocks.canManageCopies.mockReturnValue(true);
+    const posted: EmployeeTaxFormCopy = {
+      id: 51, employee_id: 71, employee_name: 'Fictional Worker A', revision: 2, status: 'posted',
+      posted_at: '2027-01-22T22:00:00Z', withdrawn_at: null, withdrawn_by: null, withdrawal_note: null,
+      inputs_changed_since_posting: false, notice: { status: 'skipped', skip_reason: 'no_app_access', delivery_status: 'unknown' },
+    };
+    mocks.checklist.mockResolvedValue(checklist([]));
+    mocks.listCopies.mockResolvedValue({
+      can_post: true, w2_delivery: null, documents: [
+        posted,
+        { ...posted, id: 50, revision: 1, status: 'withdrawn', withdrawn_at: '2027-01-23T22:00:00Z', withdrawn_by: 'Demo Staff',
+          notice: { status: 'skipped', skip_reason: 'email_not_verified', delivery_status: 'unknown' } },
+        { ...posted, id: 52, employee_id: 72, employee_name: 'Fictional Worker B', revision: 1, notice: null },
+      ],
+    });
+    renderPage();
+    await screen.findByText('Revision 2', { exact: false });
+    expect(screen.getAllByText('Revision 1', { exact: false })).toHaveLength(1);
+    expect(screen.getByText(/Withdrawn Jan 24, 2027 by Demo Staff.*Email not verified/)).toBeTruthy();
+    expect(screen.getByText(/Skipped · No app access yet/)).toBeTruthy();
+    expect(screen.getByText(/Not scheduled yet/)).toBeTruthy();
+    expect(consoleError.mock.calls.flat()).not.toContainEqual(expect.stringContaining('same key'));
+  });
 
   it.each([2025, 2026])('composes the correct W-2 filing panels for %i', async (year) => {
     // Supply each year directly to test composition independently of route normalization.

@@ -5,9 +5,10 @@
 import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Banknote, CalendarDays, ChevronLeft, ChevronRight, Download, FileText, House } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { formatGuamDateTime } from '@/lib/utils';
 import { EmployeeApiError } from './api';
 import { askManager } from './brand';
-import type { AmountLine, EarningLine, StatementDetail, StatementPage, StatementSummary } from './contracts';
+import type { AmountLine, EarlierVersion, EarningLine, StatementDetail, StatementPage, StatementSummary } from './contracts';
 import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
@@ -548,24 +549,45 @@ function StubScreen({ id }: { id: string }): ReactElement {
 
 // ---------- The stub ----------
 
-function DownloadButton({ statement }: { statement: StatementDetail }): ReactElement | null {
+function StubPdfButton({ id, filename, label }: { id: string; filename: string; label: string }): ReactElement {
   const { api, state: session } = useReadySession();
   const linkId = session.link.id;
-  const fetchPdf = useCallback(() => api.statementPdf(linkId, statement.id), [api, linkId, statement.id]);
-  const quickbooks = statement.source === 'quickbooks';
-  const filename = `${quickbooks ? 'original-pay-stub' : 'pay-stub'}-${statement.payDate}.pdf`;
+  const fetchPdf = useCallback(() => api.statementPdf(linkId, id), [api, linkId, id]);
   const { state, start } = useDownload(fetchPdf, filename);
-  // QuickBooks checks offer the original only when it was posted, and say nothing otherwise (§8a).
-  if (quickbooks ? !statement.originalPdf : !statement.pdfAvailable) return null;
   return (
     <div className="space-y-2">
       <EmpButton variant="secondary" block className="emp-narrow-button" onClick={start} disabled={state === 'working'} aria-busy={state === 'working'}>
         <Download aria-hidden="true" className="size-6" />
-        {state === 'working' ? 'Downloading…' : quickbooks ? 'View original stub (PDF)' : 'Download PDF'}
+        {state === 'working' ? 'Downloading…' : label}
       </EmpButton>
       {state === 'failed' && <p className="emp-field-error" role="alert">Couldn't download the PDF. Try again.</p>}
       {state === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to download the PDF.</p>}
     </div>
+  );
+}
+
+function EarlierStubs({ versions, payDate }: { versions: EarlierVersion[]; payDate: string }): ReactElement {
+  return (
+    <details className="rounded-xl border border-neutral-200 px-3">
+      <summary className="min-h-11 cursor-pointer py-2.5 font-semibold">Corrected — see the original</summary>
+      <p className="pb-3 text-sm text-neutral-700">Earlier stubs are available as they were issued.</p>
+      <ul className="divide-y divide-neutral-200">
+        {versions.map((version, index) => {
+          const original = index === versions.length - 1;
+          const title = original ? 'Original pay stub' : 'Earlier correction';
+          return (
+            <li key={version.id} className="space-y-2 py-3">
+              <h3 className="emp-h3">{title}</h3>
+              {version.postedAt && <p className="text-sm text-neutral-700">Posted {formatGuamDateTime(version.postedAt, { second: undefined })}</p>}
+              {version.paymentLine && <p className="text-sm text-neutral-700">{version.paymentLine}</p>}
+              <StubPdfButton id={version.id}
+                filename={original ? `original-pay-stub-${payDate}.pdf` : `earlier-pay-stub-${payDate}-${version.id}.pdf`}
+                label={original ? 'Download original PDF' : 'Download earlier PDF'} />
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }
 
@@ -675,6 +697,8 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
         {(period || hours) && <p className="text-neutral-700">{[period && `Pay period ${period}`, hours].filter(Boolean).join(' · ')}</p>}
       </header>
 
+      {stub.earlierVersions.length > 0 && <EarlierStubs key={stub.id} versions={stub.earlierVersions} payDate={stub.payDate} />}
+
       <div className="emp-net">
         <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>
         <p className="emp-hero-amount"><Money value={stub.netPay} /></p>
@@ -717,7 +741,10 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
         </section>
       )}
 
-      <DownloadButton statement={stub} />
+      {(quickbooks ? stub.originalPdf : stub.pdfAvailable) && (
+        <StubPdfButton id={stub.id} filename={`${quickbooks ? 'original-pay-stub' : 'pay-stub'}-${stub.payDate}.pdf`}
+          label={quickbooks ? 'View original stub (PDF)' : 'Download PDF'} />
+      )}
       <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-bottom" newScreen={newScreen} />
     </article>
   );

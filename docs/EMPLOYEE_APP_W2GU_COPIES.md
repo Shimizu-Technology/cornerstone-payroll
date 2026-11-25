@@ -6,7 +6,9 @@ Plan reference: [Milestone 4 build plan](MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_202
 
 ## When a copy posts
 
-Staff post a company's copies for a tax year with `POST /api/v1/admin/employee_tax_forms/post_copies { year }` (client administration access). That queues `PostEmployeeW2GuCopiesJob`, which runs `EmployeeDocuments::PostW2GuCopies`. Nothing posts unless the staff download would print the same copies as final:
+Staff with client administration access can post and review copies in **Employee app W-2 copies** on the client's **Year-end checklist**. Select the tax year, mark the W-2s ready on the current figures, then choose **Post 2026 copies**. Posting runs in the background. Use **Refresh list** to see the copies and email notices. The same panel lets staff record how paper copies are delivered or withdraw an individual copy with a reason.
+
+The screen calls `POST /api/v1/admin/employee_tax_forms/post_copies { year }`. The endpoint queues `PostEmployeeW2GuCopiesJob`, which runs `EmployeeDocuments::PostW2GuCopies`. Nothing posts unless the staff download would print the same copies as final:
 
 - the `tax_forms` switch is on, and the year has an IRS template (2026 only);
 - Cornerstone files the year's W-2s for the client;
@@ -63,9 +65,11 @@ One `employee_document_notices` row per copy records the outcome: `pending`, `se
 - events for other email match no notice and are deleted after 90 days;
 - nothing in the webhook body is logged: the endpoint masks its parameters before Rails logs them, and the global log filter also hides `cc`, `bcc`, `recipients`, `reply_to`, and `to`/`from` inside a payload's `data`.
 
-**Needed before bounce tracking is live in production:**
+### Set up and verify bounce tracking
 
-1. In Resend, add a webhook for `https://<payroll API host>/api/v1/integrations/email_events` with those four events.
-2. Set `RESEND_WEBHOOK_SECRET` to the webhook's signing secret (`whsec_...`) on the payroll API service.
+1. In the Resend dashboard, open **Webhooks** and add an endpoint at `https://<payroll-api-host>/api/v1/integrations/email_events`. Use the payroll API's public HTTPS host. Select `email.delivered`, `email.delivery_delayed`, `email.bounced` and `email.complained`. [Resend webhook setup](https://resend.com/docs/webhooks/introduction)
+2. Open the endpoint's details and copy its **Signing Secret** (`whsec_…`) into the payroll API service's secret environment as `RESEND_WEBHOOK_SECRET`. Reload the API with the new setting. [Resend signature verification](https://resend.com/docs/webhooks/verify-webhooks-requests)
+3. Run `bin/rails production:readiness` on the payroll API. The signing-secret check reports `PASS` when the setting has the expected `whsec_` prefix and `WARN` when it is missing or has the wrong format. Verify delivery separately in Resend.
+4. Send a generic test message to Resend's simulated bounce address. In the webhook's event log, confirm the signed `email.bounced` request received HTTP `204`. For an end-to-end notice test, use an isolated test company with a fictional employee and explicitly allowed test delivery, then refresh the W-2 copy list and confirm the notice shows **Bounced**. A test message sent directly through Resend has no payroll notice to update. [Resend test addresses](https://resend.com/changelog/sending-test-emails)
 
-Until then the endpoint is a 404 and every notice's delivery stays `unknown`. That's fine for the pilot, because paper goes out anyway. Before electronic-only W-2s are switched on, bounce tracking must be live and a bounce must lead to a mailed paper notice within 30 days. That follow-up isn't built yet (M4-6).
+Without the secret the endpoint returns `404` and notice delivery stays unknown. Keep sending paper W-2s throughout the pilot. Electronic-only delivery still requires live bounce tracking and a mailed paper notice within 30 days of a bounce. The mailed follow-up is part of M4-6.
