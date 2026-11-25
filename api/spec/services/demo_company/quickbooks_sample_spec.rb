@@ -39,6 +39,22 @@ RSpec.describe DemoCompany::QuickbooksSample do
     end
   end
 
+  it "keeps every roster and QuickBooks figure as exact BigDecimal money" do
+    DemoCompany::Roster::PEOPLE.each do |person|
+      expect(person[:rate]).to be_a(BigDecimal)
+      Array(person[:tips]).each { |tip| expect(tip).to be_a(BigDecimal) }
+      expect(person[:uniform_deduction]).to be_a(BigDecimal) if person[:uniform_deduction]
+      expect(person.dig(:raise, :rate)).to be_a(BigDecimal) if person[:raise]
+    end
+    described_class.paychecks.each do |paycheck|
+      %i[gross fit ss med net].each do |field|
+        expect(paycheck[field]).to be_a(BigDecimal)
+        expect(paycheck[field]).to eq(paycheck[field].round(2))
+      end
+      expect(paycheck[:gross] - paycheck[:fit] - paycheck[:ss] - paycheck[:med]).to eq(paycheck[:net])
+    end
+  end
+
   it "ends the history before the first native payday" do
     expect(described_class.paychecks.map { |paycheck| paycheck[:pay_date] }.max).to be < DemoCompany::Roster.native_periods.first[:pay_date]
     expect(described_class.paychecks.map { |paycheck| paycheck[:pay_date] }.max).to be <= Date.new(2026, 7, 31)
