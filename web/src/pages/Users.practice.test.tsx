@@ -79,7 +79,7 @@ describe('Invite User with a practice copy', () => {
     await waitFor(() => expect(apiMocks.companies.list).toHaveBeenCalledTimes(1));
 
     await user.click(await screen.findByRole('button', { name: 'Invite User' }));
-    await user.type(screen.getByPlaceholderText('Email address *'), 'practice-b@example.invalid');
+    await user.type(screen.getByLabelText('Email address'), 'practice-b@example.invalid');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Role' }), 'client');
 
     // On the stale list, copy B was pending and so vanished for the client role.

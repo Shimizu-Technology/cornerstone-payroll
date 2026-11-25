@@ -171,6 +171,57 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(response.parsed_body.fetch("error")).to include("Email can't be blank")
     end
 
+    it "keeps an invite without company_ids on the inviter's live client company" do
+      expect {
+        post "/api/v1/admin/users", params: { user: { email: "legacy-portal@example.com", role: "client" } }
+      }.to change(User, :count).by(1)
+
+      expect(response).to have_http_status(:created), response.body
+      created = User.find_by!(email: "legacy-portal@example.com")
+      expect(created.company_id).to eq(company.id)
+      expect(created.accessible_company_ids).to eq([ company.id ])
+    end
+
+    it "refuses an invite without company_ids when the inviter's company can't be the client" do
+      inactive = create(:company, organization: organization, name: "Closed Client", active: false)
+      practice_copy = create(
+        :company, organization: organization, name: "Client A practice", payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "sandbox", migration_source_company_id: client_company.id, migration_rehearsal_status: "ready"
+      )
+      demo = create_demo_company(organization: organization)
+
+      [ inactive, practice_copy, demo ].each do |home|
+        admin_user.update_columns(company_id: home.id)
+        admin_user.association(:company).reset
+
+        expect {
+          post "/api/v1/admin/users", params: { user: { email: "portal-user@example.com", role: "client" } }
+        }.not_to change(User, :count)
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body.fetch("code")).to eq("client_required")
+      end
+    end
+
+    it "requires at least one client when an explicit selection is empty" do
+      [ { company_ids: [] }, { company_ids: [ "" ] } ].each do |assignment|
+        expect {
+          post "/api/v1/admin/users",
+            params: { user: { email: "portal-user@example.com", role: "client", **assignment } }
+        }.not_to change(User, :count)
+
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(response.parsed_body).to eq(
+          "error" => "Choose at least one client for a client portal user.",
+          "code" => "client_required"
+        )
+      end
+
+      post "/api/v1/admin/users",
+        params: { user: { email: "portal-user@example.com", role: "client", company_ids: [ client_company.id ] } }
+      expect(response).to have_http_status(:created), response.body
+      expect(User.find_by!(email: "portal-user@example.com").company_assignments.pluck(:company_id)).to eq([ client_company.id ])
+    end
+
     it "prevents organization admins from creating platform super admins" do
       expect {
         post "/api/v1/admin/users",
