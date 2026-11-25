@@ -61,9 +61,10 @@ module PayrollSubmissions
     end
 
     # A question or answer about this period, in its own conversation.
-    def post_message!(entry, body:, idempotency_key:)
+    def post_message!(entry, body:, idempotency_key:, document_ids: [])
       body = body.to_s.strip
-      raise PayrollSubmissionPeriod::TransitionError, "Write a message first" if body.blank?
+      documents = PortalMessages::Attachments.resolve!(company_id: @company.id, user: @actor, ids: document_ids)
+      raise PayrollSubmissionPeriod::TransitionError, "Write a message first" if body.blank? && documents.empty?
       raise PayrollSubmissionPeriod::TransitionError, "Keep messages under 5,000 characters" if body.length > 5000
 
       message = nil
@@ -74,12 +75,14 @@ module PayrollSubmissions
         thread = period.client_portal_thread
         key = idempotency_key.presence&.to_s&.first(128)
         if thread && key && (message = thread.messages.find_by(author_id: @actor.id, idempotency_key: key))
-          raise Conflict, "This retry key was used for a different message" unless message.body == body
+          unless message.body.to_s == body && message.attachment_ids == documents.map(&:id)
+            raise Conflict, "This retry key was used for a different message"
+          end
 
           replayed = true
           next
         end
-        message = create_message!(period, body, key)
+        message = create_message!(period, body, key, documents: documents)
         PortalNotifications.message_created!(message)
       end
       ClientPortalThreadChannel.broadcast_thread(message.client_portal_thread, event: "message_created") unless replayed
@@ -95,10 +98,10 @@ module PayrollSubmissions
       end
     end
 
-    def create_message!(period, body, key)
+    def create_message!(period, body, key, documents: [])
       thread = ensure_thread!(period)
       message = ClientPortalMessage.create!(client_portal_thread: thread, company_id: period.company_id,
-        author: @actor, body: body, idempotency_key: key)
+        author: @actor, body: body.presence, idempotency_key: key, attach_documents: documents)
       PortalActivity.record!(user: @actor, record: message, action: "client_portal_messages#create",
         metadata: PortalActivity.message_metadata(message).merge(payroll_submission_period_id: period.id), **@request_context.slice(:ip_address, :user_agent))
       message

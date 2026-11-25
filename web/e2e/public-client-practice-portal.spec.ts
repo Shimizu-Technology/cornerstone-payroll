@@ -44,8 +44,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.goto('/companies/12/pay-runs');
     await expect(page.getByText('Paid (copied history)').filter({ visible: true }).first()).toBeVisible();
     if (viewport.width >= 1024) {
-      await expect(page.getByText('Client Portal', { exact: true })).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Pay Period Files' })).toBeVisible();
+      await expect(page.getByText('Client portal', { exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Pay period files' })).toBeVisible();
     } else {
       await expect(page.getByText('Cornerstone Payroll · Client Portal')).toBeVisible();
     }
