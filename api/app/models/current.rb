@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 class Current < ActiveSupport::CurrentAttributes
+  attribute :real_user, :view_as_grant
   attribute :user, :actor, :organization_id, :company_id, :request_id, :ip_address, :user_agent, :domain_audit_recorded, default: nil
 
   # Inline jobs and invoked tasks can share a thread with their caller. Restore

@@ -10,6 +10,7 @@ module Api
         companies = Company.includes(:organization, :migration_source_company, :created_by).where(id: current_user.accessible_company_ids)
                            .yield_self { |scope| params[:active].present? ? scope.where(active: ActiveModel::Type::Boolean.new.cast(params[:active])) : scope }
                            .order(:name)
+        companies = companies.where(id: Current.view_as_grant.company_id) if Current.view_as_grant
         @creators = RecordCreator.for_companies(companies.to_a) if StaffRolePolicy.allowed?(current_user, :staff_workspace)
         company_ids = companies.pluck(:id)
         total_employee_counts = employee_counts_by_company(company_ids)
@@ -27,7 +28,7 @@ module Api
           # Matches Admin::CompaniesController#staff_client_access? so assigned
           # managers and accountants can find the client edit page.
           can_view_client_management: current_user.organization_admin? || current_user.manager? || current_user.accountant?,
-          can_switch_company: current_user.accessible_company_ids.size > 1,
+          can_switch_company: !Current.view_as_grant && current_user.accessible_company_ids.size > 1,
           # Firm finance (books, invoices, customer links) may target live
           # clients only; navigation keeps every accessible company.
           billing_company_ids: companies.select(&:live_payroll?).map(&:id),
@@ -65,6 +66,8 @@ module Api
       end
 
       def company_write_allowed?(company)
+        return false if Current.view_as_grant
+
         return false unless current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id)
         return true unless company.test_workspace?
 

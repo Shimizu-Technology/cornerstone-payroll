@@ -11,6 +11,7 @@ module Api
           return render json: { error: "Not authenticated" }, status: :unauthorized
         end
 
+        company_ids = Current.view_as_grant ? [ current_company_id ] : current_user.accessible_company_ids
         payload = {
           user: {
             id: current_user.id,
@@ -21,17 +22,17 @@ module Api
             organization_name: current_user.organization&.name,
             company_id: current_company_id,
             company_name: current_company&.name,
-            home_company_id: current_user.company_id,
-            assigned_company_ids: current_user.accessible_company_ids,
+            home_company_id: Current.view_as_grant ? current_company_id : current_user.company_id,
+            assigned_company_ids: company_ids,
             capabilities: StaffRolePolicy.capabilities_for(current_user),
-            company_capabilities: Company.where(id: current_user.accessible_company_ids).order(:id).to_h do |company|
+            company_capabilities: Company.where(id: company_ids).order(:id).to_h do |company|
               [ company.id.to_s, StaffRolePolicy.capabilities_for(current_user, company: company) ]
             end
           },
           roles: {
             staff: StaffRolePolicy.allowed?(current_user, :staff_workspace),
             client: current_user.client?,
-            employee_links_count: current_user.employee_account_links.portal_eligible.includes(company: :organization).count(&:portal_enabled?)
+            employee_links_count: Current.view_as_grant ? 0 : employee_links_count
           },
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
@@ -43,6 +44,10 @@ module Api
       end
 
       private
+
+      def employee_links_count
+        current_user.employee_account_links.portal_eligible.includes(company: :organization).count(&:portal_enabled?)
+      end
 
       def rls_system_reason
         "Resolve linked employee accounts for authenticated user"

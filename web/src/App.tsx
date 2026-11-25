@@ -38,6 +38,11 @@ const PayrollItemDetail = lazy(() => import('@/pages/payroll-items/PayrollItemDe
 const Reports = lazy(() => import('@/pages/Reports').then((module) => ({ default: module.Reports })));
 const ClientProfitability = lazy(() => import('@/pages/ClientProfitability').then((module) => ({ default: module.ClientProfitability })));
 const ChecksPayments = lazy(() => import('@/pages/ChecksPayments').then((module) => ({ default: module.ChecksPayments })));
+import { ClientGrant, ClientSupportView } from '@/support/ClientSupportView';
+import { StartSupportView } from '@/support/StartSupportView';
+import { SupportAccessLogs } from '@/support/SupportAccessLogs';
+import { supportToken } from '@/support/grant';
+
 const ClientDashboard = lazy(() => import('@/pages/client/ClientDashboard').then((module) => ({ default: module.ClientDashboard })));
 const ClientPayPeriods = lazy(() => import('@/pages/client/ClientPayPeriods').then((module) => ({ default: module.ClientPayPeriods })));
 const ClientPayPeriodDetail = lazy(() => import('@/pages/client/ClientPayPeriodDetail').then((module) => ({ default: module.ClientPayPeriodDetail })));
@@ -361,6 +366,8 @@ function AppRoutes() {
       >
         <Route path="/app" element={isClient ? <ClientDashboard /> : <Dashboard />} />
         <Route path="/app/client-inbox" element={<StaffOnlyRoute><ClientInbox /></StaffOnlyRoute>} />
+        <Route path="/app/sign-in-as" element={<CapabilityRoute capability="start_view_as"><StartSupportView /></CapabilityRoute>} />
+        <Route path="/support-access" element={<ClientOnlyRoute><SupportAccessLogs /></ClientOnlyRoute>} />
         <Route path="/messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
         <Route path="/payroll-files" element={<PayrollFilesRoute><PayrollPeriodsList audience="client" /></PayrollFilesRoute>} />
         <Route path="/payroll-files/:ref" element={<PayrollFilesRoute><PayrollPeriodPage audience="client" /></PayrollFilesRoute>} />
@@ -468,17 +475,26 @@ function AppFeedback({ children }: { children: ReactNode }) {
   return <FeedbackProvider key={scope} scopeKey={scope}>{children}</FeedbackProvider>;
 }
 
+const developmentToken = async () => null;
+
 function AppContents() {
+  const workspace = (
+    <AuthProvider>
+      {!supportToken && <PostHogIdentify />}
+      <CompanyProvider>
+        <AppFeedback><AppRoutes /></AppFeedback>
+      </CompanyProvider>
+    </AuthProvider>
+  );
   return (
     <>
-      <PostHogPageView />
+      {!supportToken && <PostHogPageView />}
       <AppWithClerk>
-        <AuthProvider>
-          <PostHogIdentify />
-          <CompanyProvider>
-            <AppFeedback><AppRoutes /></AppFeedback>
-          </CompanyProvider>
-        </AuthProvider>
+        {supportToken
+          ? clerkPubKey
+            ? <ClientSupportView>{workspace}</ClientSupportView>
+            : import.meta.env.DEV ? <ClientGrant getToken={developmentToken}>{workspace}</ClientGrant> : <p>Staff sign-in is unavailable.</p>
+          : workspace}
       </AppWithClerk>
     </>
   );

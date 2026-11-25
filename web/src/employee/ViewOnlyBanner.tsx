@@ -6,13 +6,15 @@ export interface ViewOnlyGrant {
   name: string;
   minutesLeft?: number | null;
   onEnd: () => void;
+  ending?: boolean;
+  error?: string | null;
 }
 
 /**
  * Shown the whole time a Cornerstone admin uses the view-only "Sign in as"
  * (M4-9). It sits above the header and takes the top safe area.
  */
-export function ViewOnlyBanner({ name, minutesLeft, onEnd }: ViewOnlyGrant): ReactElement {
+export function ViewOnlyBanner({ name, minutesLeft, onEnd, ending, error }: ViewOnlyGrant): ReactElement {
   const remaining = typeof minutesLeft === 'number' && minutesLeft >= 0
     ? ` · ${minutesLeft} min left` : '';
   return (
@@ -21,10 +23,11 @@ export function ViewOnlyBanner({ name, minutesLeft, onEnd }: ViewOnlyGrant): Rea
         <Eye className="size-5" />
       </span>
       <p className="min-w-0 flex-1">
-        <strong className="block break-words text-[0.98rem] leading-snug">Viewing as {name}</strong>
-        <span className="text-[0.85rem] font-semibold text-warning-300">View only{remaining}</span>
+        <strong className="block break-words text-[0.98rem] leading-snug">Viewing as {name}, view only</strong>
+        {remaining && <span className="text-[0.85rem] font-semibold text-warning-300">{remaining}</span>}
+        {error && <span className="block text-sm" role="alert">{error}</span>}
       </p>
-      <button type="button" className="emp-btn emp-viewas-end" onClick={onEnd}>End</button>
+      <button type="button" className="emp-btn emp-viewas-end" onClick={onEnd} disabled={ending}>{ending ? 'Ending…' : 'End'}</button>
     </section>
   );
 }

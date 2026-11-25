@@ -35,6 +35,11 @@ class AuditLog < ApplicationRecord
     request_id: Current.request_id,
     event_category: "activity"
   )
+    if (grant = Current.view_as_grant)
+      user = Current.real_user
+      company_id = grant.company_id
+      organization_id = Current.organization_id || user.organization_id
+    end
     actor = user ? AuditActor.for_user(user) : actor || Current.actor
     current_user = Current.user
     if user.nil? && current_user && actor && %w[staff_user client_user].include?(actor.type)
@@ -53,8 +58,10 @@ class AuditLog < ApplicationRecord
       actor = AuditActor.system_job("Unknown actor")
     end
 
-    log = create!(
+    attributes = {
       user: user,
+      real_user_id: Current.real_user&.id,
+      view_as_grant_id: grant&.id,
       organization_id: organization_id,
       company_id: company_id,
       action: action,
@@ -71,7 +78,12 @@ class AuditLog < ApplicationRecord
       actor_name: actor&.name,
       actor_email: actor&.email,
       actor_role: actor&.role
-    )
+    }
+    log = if grant
+      ActiveRecord::Base.while_preventing_writes(false) { create!(attributes) }
+    else
+      create!(attributes)
+    end
     # Authentication can happen before a separate domain action in the same request.
     Current.domain_audit_recorded = true unless action.start_with?("authentication#")
     log

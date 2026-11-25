@@ -7,6 +7,7 @@ class ApplicationController < ActionController::API
   E2E_USER_EMAIL_HEADER = "X-E2E-User-Email"
 
   include ClerkAuthenticatable
+  include ViewAsEnforcement
   include PdfGenerationFailureHandling
 
   around_action :reset_current_context, prepend: true
@@ -30,7 +31,7 @@ class ApplicationController < ActionController::API
 
   def set_current_context
     authenticated_user = current_user
-    if authenticated_user.is_a?(User)
+    if authenticated_user.is_a?(User) && !Current.view_as_grant
       Current.user = authenticated_user
       Current.actor = AuditActor.for_user(authenticated_user)
       Current.organization_id = current_organization_id
@@ -42,6 +43,7 @@ class ApplicationController < ActionController::API
   end
 
   def track_authenticated_user_activity
+    return if view_as_requested?
     return unless current_user.is_a?(User)
 
     session_id = @clerk_token_payload&.fetch("sid", nil)
@@ -82,6 +84,7 @@ class ApplicationController < ActionController::API
 
   # Fallback user for development when auth is disabled
   def current_user
+    return @current_user if Current.view_as_grant
     return super unless auth_disabled?
 
     @current_user ||= begin
@@ -127,6 +130,8 @@ class ApplicationController < ActionController::API
   end
 
   def current_company_id
+    return Current.view_as_grant.company_id if Current.view_as_grant
+
     @current_company_id ||= resolve_company_id
   end
 
