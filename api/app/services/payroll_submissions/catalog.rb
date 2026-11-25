@@ -111,6 +111,10 @@ module PayrollSubmissions
       matching_pay_period(entry.start_date, entry.end_date)
     end
 
+    def voided_pay_period?(entry)
+      (entry.record&.pay_period || entry.pay_period)&.correction_status == "voided"
+    end
+
     def retired_link_warning(entry)
       linked = entry.record&.pay_period
       return unless linked&.correction_status == "voided"

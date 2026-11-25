@@ -66,7 +66,7 @@ module PayrollSubmissions
       end
       unless @staff
         payload[:client_payroll_status] = case payload[:status]
-        when "paid" then "committed"
+        when "paid" then pay_period&.client_finished? ? "committed" : "preparing"
         when "draft_ready" then payload[:review_pay_period_id] ? "pending" : "preparing"
         when "approved", "changes_requested" then payload[:review_pay_period_id] ? payload[:status] : "preparing"
         else "preparing"

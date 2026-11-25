@@ -39,4 +39,16 @@ RSpec.describe PayrollSubmissions::Serializer do
     serializer = described_class.new(current_user: staff, catalog: catalog)
     expect(serializer.summary(catalog.resolve(record.id.to_s))).to include(status: "in_review", status_label: "Payroll in progress")
   end
+
+  it "does not show a paid submission as finalized when its linked run was voided" do
+    record = add_period(0)
+    record.pay_period.update_column(:correction_status, "voided")
+    client = create(:user, company: company, role: "client")
+    catalog = PayrollSubmissions::Catalog.new(company: company, today: Date.new(2026, 11, 17))
+    serializer = described_class.new(current_user: client, catalog: catalog)
+
+    summary = serializer.summary(catalog.resolve(record.id.to_s))
+    expect(summary).to include(client_payroll_status: "preparing")
+    expect(summary).not_to have_key(:review_pay_period_id)
+  end
 end

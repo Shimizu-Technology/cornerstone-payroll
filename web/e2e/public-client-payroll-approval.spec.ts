@@ -45,6 +45,7 @@ function payPeriod(status: 'pending' | 'approved'): Record<string, unknown> {
     total_net: '4890.00',
     client_payroll_approval_required: true,
     payroll_review: payrollReview(status),
+    can_decide_payroll_review: status === 'pending',
     payroll_items: [
       {
         id: 801, employee_id: 21, employee_name: 'Mo Example', employment_type: 'salary',
