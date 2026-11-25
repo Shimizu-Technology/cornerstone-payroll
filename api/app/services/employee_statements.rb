@@ -49,6 +49,11 @@ class EmployeeStatements
     Page.new(statements: statements, years: years, next_page: (page + 1 if rows.size > PAGE_SIZE))
   end
 
+  # The newest listed statement's pay date, or nil when none are posted yet.
+  def latest_pay_date
+    ordered_union.limit(1).pick(Arel.sql("statements.pay_date"))&.to_date
+  end
+
   # A replaced revision's id finds the statement that replaced it, so an old
   # link opens the current version. Anything else not listed is nil.
   def find(id)
