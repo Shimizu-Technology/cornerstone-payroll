@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, ty
 import { useLocation } from 'react-router';
 import { confirmPayrollScopeChange } from '@/lib/payroll-scope-change';
 import { isBillingClient } from '@/lib/company-write-access';
+import { analytics } from '@/lib/analytics';
 import { companiesApi, type CompanyListItem } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -171,6 +172,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     setScopeChangeLocationKey(location.key);
     setActiveCompanyId(companyId);
     companiesApi.switchCompany(companyId, company.organization_id);
+    analytics.companySwitch();
     return true;
   }, [activeCompanyId, companies, location.key]);
 
