@@ -1846,14 +1846,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const listUrl = `/companies/${fixture.company_id}/pay-runs?source=client-dashboard`;
 
     await page.goto(listUrl);
-    await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Pay periods' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Employees', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/employees`);
-    await expect(page.getByRole('link', { name: 'Pay Periods', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
+    await expect(page.getByRole('link', { name: 'Pay periods', exact: true })).toHaveAttribute('href', `/companies/${fixture.company_id}/pay-runs`);
     await page.getByRole('button', { name: 'View', exact: true }).first().click();
     await expect(page).toHaveURL(new RegExp(
       `/companies/${fixture.company_id}/pay-runs/\\d+/overview\\?return_to=${encodeURIComponent(listUrl)}`,
     ));
-    await page.getByRole('button', { name: 'Back to List', exact: true }).click();
+    await page.getByRole('button', { name: 'Back to list', exact: true }).click();
     await expect(page).toHaveURL(listUrl);
 
     await context.close();
