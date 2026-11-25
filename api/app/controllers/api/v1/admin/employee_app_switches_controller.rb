@@ -23,15 +23,15 @@ module Api
         def update
           skip_default_audit_log!
           update = EmployeeAppSwitch::Update.new(company: current_company, actor: current_user,
-            changes: params[:changes].try(:to_unsafe_h), reason: params[:reason])
-          if update.turning_on?
-            update.preflight!
-            require_recent_verification!
-            return if performed?
-          end
-
+            changes: params[:changes].try(:to_unsafe_h), reason: params[:reason], session_claims: @clerk_token_payload)
+          # Failing checks are listed before a fresh second factor is asked for.
+          update.preflight! if update.turning_on?
           result = update.call
           render json: { data: payload(EmployeeAppSwitch::Readiness.new(company: current_company)), saved: result.except(:values) }
+        rescue EmployeeAppSwitch::StepUpRequired => error
+          # The service refused; the concern renders Clerk's step-up prompt.
+          require_recent_verification!
+          render json: { error: error.message }, status: :forbidden unless performed?
         rescue EmployeeAppSwitch::NotReady => error
           render json: { error: "Not ready to turn on yet. Fix the failing checks first.", code: "not_ready",
                          failing_checks: error.failures.map(&:as_json) }, status: :unprocessable_entity

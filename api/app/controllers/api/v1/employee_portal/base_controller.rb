@@ -52,12 +52,16 @@ module Api
         # A demo company running under the early-access waiver (database RLS
         # not yet enforced) is served only while THIS process runs the RLS
         # guard in raise mode as the restricted role; otherwise it looks like
-        # no link at all.
+        # no link at all. A demo link's session is already pinned to the
+        # demo's own subdomain (EmployeeLinks.openable?); a browser request
+        # must also come from it.
         def require_guarded_demo_process!
           company = employee_access_context&.company
-          return if EmployeeAppSwitch::Enforcement.demo_request_allowed?(company)
+          return head :not_found unless EmployeeAppSwitch::Enforcement.demo_request_allowed?(company)
+          return unless @employee_link && company&.demo?
 
-          head :not_found
+          origin = request.headers["Origin"]
+          head :not_found if origin.present? && !EmployeeLinks.demo_request_allowed?(company, origin)
         end
 
         def require_employee_link!

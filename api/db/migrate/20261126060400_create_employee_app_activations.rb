@@ -8,12 +8,18 @@
 #
 # Also the durable queue of Clerk revocations the demo kill switch requests
 # (pending sign-up invitations and employee sessions). Each row is retried
-# until Clerk confirms, and a repeat stop never queues a duplicate.
+# until Clerk confirms, gives up, or ends needing follow-up; a repeat stop
+# never queues a duplicate, and a sweep re-enqueues rows whose job was lost.
+#
+# Both tables are company-protected: their policies are staged here and
+# they follow the database's current enforcement phase, like the other
+# employee tables, so RLS readiness stays installed after this migration.
 class CreateEmployeeAppActivations < ActiveRecord::Migration[8.1]
   PARTS = %w[
     employee_portal_enabled subdomain_enabled employee_portal.features.stubs employee_portal.features.tax_forms
     employee_portal.features.profile_requests employee_portal.features.delivery_consent
   ].freeze
+  PROTECTED = %w[employee_app_activations employee_app_clerk_revocations].freeze
 
   def up
     create_table :employee_app_activations do |t|
@@ -51,15 +57,26 @@ class CreateEmployeeAppActivations < ActiveRecord::Migration[8.1]
       t.string :last_error, limit: 200
       t.datetime :confirmed_at
       t.datetime :gave_up_at
+      # Clerk answered, but not with a confirmed revocation (an invitation
+      # already accepted whose sign-in couldn't be found): a person checks it.
+      t.datetime :follow_up_at
+      t.string :outcome, limit: 40
+      # When a job was last queued for the row; nil means none was (the
+      # sweep and a repeat stop queue it).
+      t.datetime :enqueued_at
       t.timestamps null: false
 
-      t.index %i[kind target], unique: true, where: "confirmed_at IS NULL AND gave_up_at IS NULL",
+      t.index %i[kind target], unique: true, where: "confirmed_at IS NULL AND gave_up_at IS NULL AND follow_up_at IS NULL",
         name: "idx_employee_app_clerk_revocations_pending"
+      t.index %i[enqueued_at id], where: "confirmed_at IS NULL AND gave_up_at IS NULL AND follow_up_at IS NULL",
+        name: "idx_employee_app_clerk_revocations_sweep"
       t.check_constraint "kind IN ('invitation', 'sessions')", name: "employee_app_clerk_revocations_kind_check"
       t.check_constraint "attempts >= 0", name: "employee_app_clerk_revocations_attempts_check"
-      t.check_constraint "NOT (confirmed_at IS NOT NULL AND gave_up_at IS NOT NULL)",
+      t.check_constraint "num_nonnulls(confirmed_at, gave_up_at, follow_up_at) <= 1",
         name: "employee_app_clerk_revocations_outcome_check"
     end
+
+    stage_company_policies!
 
     execute <<~SQL
       CREATE OR REPLACE FUNCTION protect_employee_app_activation() RETURNS trigger AS $$
@@ -96,5 +113,21 @@ class CreateEmployeeAppActivations < ActiveRecord::Migration[8.1]
     drop_table :employee_app_clerk_revocations
     drop_table :employee_app_activations
     execute "DROP FUNCTION IF EXISTS protect_employee_app_activation()"
+  end
+
+  private
+
+  # Stage the company policy on each new protected table and match the
+  # enforcement phase of the employee surface already in place.
+  def stage_company_policies!
+    execute File.read(Rails.root.join("db/rls_policies.sql"))
+    enforced = connection.select_value("SELECT relrowsecurity FROM pg_class WHERE oid = 'employee_account_links'::regclass")
+    PROTECTED.each do |table|
+      execute "SELECT pg_temp.install_company_policy(current_schema(), #{connection.quote(table)}, NULL, NULL, false)"
+      next unless enforced
+
+      execute "ALTER TABLE #{table} ENABLE ROW LEVEL SECURITY"
+      execute "ALTER TABLE #{table} FORCE ROW LEVEL SECURITY"
+    end
   end
 end

@@ -151,14 +151,18 @@ module EmployeeLinks
   end
 
   # The links a login can open from this origin: the employee app's list,
-  # the link it opens and the /auth/me count all use this.
+  # the link it opens (every link-scoped data request) and the /auth/me
+  # count all use this. A demo link also needs a session from that demo's
+  # own subdomain and the request-time demo gate, so outside it a demo link
+  # is neither listed, counted nor opened.
   def self.openable_links(user, azp:)
     user.employee_account_links.portal_eligible.includes(company: :organization).order(:id)
       .select { |link| openable?(user, link, azp: azp) }
   end
 
   def self.openable?(user, link, azp:)
-    link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company)
+    link.portal_enabled? && origin_allows_company?(azp, link.company_id) && demo_boundary_allows?(user, link.company) &&
+      demo_request_allowed?(link.company, azp)
   end
 
   # Invitation issuance for a demo company holds the company row lock,
@@ -171,9 +175,9 @@ module EmployeeLinks
     Company.where(id: company.id).lock("FOR SHARE").pick(:id)
   end
 
-  # A demo link's activation, claim and bind must come from that demo
-  # company's own subdomain, and (under the early-access waiver) this
-  # process must run the RLS guard in raise mode as the restricted role.
+  # A demo link's activation, claim, bind and data requests must come from
+  # that demo company's own subdomain, and (under the early-access waiver)
+  # this process must run the RLS guard in raise mode as the restricted role.
   def self.demo_request_allowed?(company, origin)
     return true unless company&.demo?
 

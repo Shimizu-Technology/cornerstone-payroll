@@ -72,26 +72,49 @@ module EmployeeAppSwitch
       state[:phase] == "shadow" && state[:kill_switch_bypass] == false
     end
 
-    # Cached for a few seconds per process; CompanyFeatures reads it on
-    # every demo company lookup.
-    def verified?
+    # The database state, cached for a few seconds per process;
+    # CompanyFeatures reads it on every demo company lookup.
+    def cached_state
       cached = STATE_CACHE.get
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       return cached.first if cached && now < cached.last
 
-      value = database_state[:enforced] == true
-      STATE_CACHE.compare_and_set(cached, [ value, now + CACHE_SECONDS ].freeze)
-      value
+      state = database_state.slice(:phase, :enforced, :kill_switch_bypass).freeze
+      STATE_CACHE.compare_and_set(cached, [ state, now + CACHE_SECONDS ].freeze)
+      state
     end
 
-    # Read-time gate for a demo company's employee app (CompanyFeatures).
+    def verified?
+      cached_state[:enforced] == true
+    end
+
+    # The early-access waiver applies only in the intended shadow state; a
+    # partial, bypassed, not-installed or unreadable database never counts.
+    def waiver_state?
+      shadow?(cached_state)
+    end
+
+    # Read-time gate for a demo company's employee app: verified
+    # enforcement, or the shadow state with an in-effect window naming the
+    # company.
     def demo_open?(company, today: PayrollBusinessClock.today)
       if verified?
         retire_windows!
         return true
       end
 
-      EmployeeAppEarlyAccessWindow.current_for(company.organization_id)&.covers?(company, today: today) == true
+      waiver_state? && EmployeeAppEarlyAccessWindow.current_for(company.organization_id)&.covers?(company, today: today) == true
+    end
+
+    # The full gate every reader uses (CompanyFeatures, so requests, jobs and
+    # mail alike): the window rule above AND, under the waiver, this process
+    # running the guard in raise mode as the restricted role with no bypass.
+    # A job on an unguarded worker therefore sees the demo's app as off and
+    # does nothing.
+    def demo_app_open?(company, today: PayrollBusinessClock.today)
+      return true unless company&.demo?
+
+      demo_open?(company, today: today) && demo_request_allowed?(company)
     end
 
     # Once enforcement is verified, every open window retires for good.
@@ -131,14 +154,15 @@ module EmployeeAppSwitch
       return true unless company&.demo?
       return true if verified?
 
-      current_process_guarded?
+      waiver_state? && current_process_guarded?
     end
 
     def current_process_guarded?(env: ENV)
       return false unless RlsConfiguration.mode(env) == "raise" && RlsConfiguration.runtime_url(env)
 
       ActiveRecord::Base.connection_pool.with_connection do |connection|
-        runtime_role_verified?(connection) && !RlsDatabase.bypass_enabled?(connection)
+        # An unreadable or missing kill switch row is unknown: closed.
+        runtime_role_verified?(connection) && RlsDatabase.bypass_state(connection) == false
       end
     rescue StandardError => error
       Rails.logger.warn("[EmployeeAppSwitch::Enforcement] current process check failed: #{error.class}")

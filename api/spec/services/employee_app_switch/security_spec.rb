@@ -129,7 +129,12 @@ RSpec.describe "Employee app switch security" do
     let(:demo) { create_demo_company(organization: organization, subdomain_slug: "harborfinch") }
     let(:live) { create(:company, organization: organization) }
 
-    before { allow(described_class).to receive(:verified?).and_return(false) }
+    let(:shadow) { { phase: "shadow", enforced: false, kill_switch_bypass: false } }
+
+    before do
+      allow(described_class).to receive(:verified?).and_return(false)
+      allow(described_class).to receive(:database_state).and_return(shadow)
+    end
 
     it "lets a demo under the waiver through only on a guarded process" do
       expect(described_class.demo_request_allowed?(live)).to be(true)
@@ -137,20 +142,49 @@ RSpec.describe "Employee app switch security" do
 
       guard = { "RLS_CONTEXT_GUARD_MODE" => "raise", "RLS_DATABASE_URL" => "postgres://payroll_app@db.example.test/payroll" }
       allow(RlsDatabase).to receive(:verify_runtime!).and_return(true)
-      allow(RlsDatabase).to receive(:bypass_enabled?).and_return(false)
+      allow(RlsDatabase).to receive(:bypass_state).and_return(false)
       expect(described_class.current_process_guarded?(env: guard)).to be(true)
       expect(described_class.current_process_guarded?(env: guard.merge("RLS_CONTEXT_GUARD_MODE" => "log"))).to be(false)
 
-      allow(RlsDatabase).to receive(:bypass_enabled?).and_return(true)
+      allow(RlsDatabase).to receive(:bypass_state).and_return(true)
+      expect(described_class.current_process_guarded?(env: guard)).to be(false)
+      # A missing kill switch row is unknown, never "off".
+      allow(RlsDatabase).to receive(:bypass_state).and_return(nil)
       expect(described_class.current_process_guarded?(env: guard)).to be(false)
 
       described_class.reset_cache!
-      allow(RlsDatabase).to receive(:bypass_enabled?).and_return(false)
+      allow(RlsDatabase).to receive(:bypass_state).and_return(false)
       allow(RlsDatabase).to receive(:verify_runtime!).and_raise("not the restricted role")
       expect(described_class.current_process_guarded?(env: guard)).to be(false)
 
       allow(described_class).to receive(:verified?).and_return(true)
       expect(described_class.demo_request_allowed?(demo)).to be(true)
+    end
+
+    it "accepts the waiver only in the intended shadow state" do
+      allow(described_class).to receive(:current_process_guarded?).and_return(true)
+      expect(described_class.demo_request_allowed?(demo)).to be(true)
+
+      [ shadow.merge(phase: "partial"), shadow.merge(phase: "unknown", kill_switch_bypass: nil),
+        shadow.merge(phase: "bypassed", kill_switch_bypass: true), shadow.merge(kill_switch_bypass: nil),
+        shadow.merge(phase: "not_installed") ].each do |state|
+        described_class.reset_cache!
+        allow(described_class).to receive(:database_state).and_return(state)
+        expect(described_class.waiver_state?).to be(false), state.inspect
+        expect(described_class.demo_request_allowed?(demo)).to be(false), state.inspect
+      end
+    end
+
+    it "uses the full gate for every reader: window, shadow state and a guarded process" do
+      EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ demo.id ],
+        expires_on: PayrollBusinessClock.today + 3, reason: "Owner approved", set_by: create(:user, company: live, organization: organization, role: :super_admin))
+      allow(described_class).to receive(:current_process_guarded?).and_return(false)
+      expect(described_class.demo_open?(demo)).to be(true)
+      expect(described_class.demo_app_open?(demo)).to be(false)
+
+      allow(described_class).to receive(:current_process_guarded?).and_return(true)
+      expect(described_class.demo_app_open?(demo)).to be(true)
+      expect(described_class.demo_app_open?(live)).to be(true)
     end
 
     it "requires a demo link's activation, claim and bind to come from its own subdomain" do
@@ -227,6 +261,97 @@ RSpec.describe "Employee app switch security" do
       TenantScope.as_system(reason: "spec") { job.give_up!(RevokeEmployeeAppClerkJob::RevocationFailed.new("nope")) }
       expect(stuck.reload.gave_up_at).to be_present
       expect(AuditLog.where(action: described_class::GAVE_UP_ACTION, record_id: stuck.id).count).to eq(1)
+    end
+
+    it "never counts an accepted invitation as revoked: it ends the resulting account's sessions" do
+      bound = request!("invitation", "inv_bound", user: login)
+      allow(clerk).to receive(:invitation_status).with("inv_bound").and_return("accepted")
+      allow(clerk).to receive(:revoke_user_sessions).and_return({ success: false, error: "Clerk down" }, { success: true })
+
+      described_class.perform_now(bound.id)
+      expect(bound.reload).to have_attributes(confirmed_at: nil, last_error: "Clerk down")
+      described_class.perform_now(bound.id)
+      expect(bound.reload).to have_attributes(outcome: "accepted_sessions_revoked")
+      expect(bound.confirmed_at).to be_present
+      expect(clerk).to have_received(:revoke_user_sessions).with("user_employee_1", created_before: anything, email: nil).twice
+
+      # Accepted but not bound yet: the one Clerk account with the invited address.
+      pending = create(:user, company: company, organization: organization, clerk_id: "pending_abc", email: "pending.one@example.test")
+      unbound = request!("invitation", "inv_unbound", user: pending)
+      allow(clerk).to receive(:invitation_status).with("inv_unbound").and_return("accepted")
+      allow(clerk).to receive(:users_with_email).with("pending.one@example.test").and_return([ { "id" => "user_new_account" } ])
+      allow(clerk).to receive(:revoke_user_sessions).with("user_new_account", created_before: anything, email: "pending.one@example.test")
+        .and_return({ success: true })
+      described_class.perform_now(unbound.id)
+      expect(unbound.reload).to have_attributes(outcome: "accepted_sessions_revoked")
+      expect(unbound.confirmed_at).to be_present
+    end
+
+    it "ends an accepted invitation with no single account to sign out as needing follow-up, not confirmed" do
+      pending = create(:user, company: company, organization: organization, clerk_id: "pending_xyz", email: "pending.two@example.test")
+      revocation = request!("invitation", "inv_lost", user: pending)
+      allow(clerk).to receive(:invitation_status).with("inv_lost").and_return("accepted")
+      allow(clerk).to receive(:users_with_email).and_return([])
+
+      described_class.perform_now(revocation.id)
+      expect(revocation.reload).to have_attributes(confirmed_at: nil, gave_up_at: nil, outcome: "accepted_account_not_found")
+      expect(revocation.follow_up_at).to be_present
+      expect(revocation).not_to be_pending
+      expect(AuditLog.find_by!(action: described_class::FOLLOW_UP_ACTION, record_id: revocation.id).metadata)
+        .to include("outcome" => "accepted_account_not_found")
+      expect(AuditLog.where(action: described_class::CONFIRMED_ACTION, record_id: revocation.id)).to be_empty
+      expect(described_class).not_to have_been_enqueued
+      # A later stop may request the same target again.
+      expect(request!("invitation", "inv_lost", user: pending)).to be_persisted
+    end
+  end
+
+  describe RetryEmployeeAppClerkRevocationsJob do
+    include ActiveJob::TestHelper
+
+    let(:organization) { create(:organization) }
+    let(:company) { create(:company, organization: organization) }
+    let(:admin) { create(:user, company: company, organization: organization, role: :org_admin) }
+
+    def request!(target, at:)
+      TenantScope.as_system(reason: "spec") do
+        EmployeeAppClerkRevocation.request!(kind: "sessions", target: target, organization: organization, company: company,
+          source: EmployeeAppClerkRevocation::SOURCE_DEMO_STOP, requested_by: admin, now: at)
+      end
+    end
+
+    it "re-enqueues pending revocations whose job never ran or was lost, and leaves live and finished ones" do
+      now = Time.current
+      never_queued = request!("101", at: now - 10.minutes)
+      just_requested = request!("102", at: now - 1.minute)
+      lost = request!("103", at: now - 1.day)
+      lost.update_columns(enqueued_at: now - 1.day, updated_at: now - 7.hours)
+      live = request!("104", at: now - 1.hour)
+      live.update_columns(enqueued_at: now - 1.hour, updated_at: now - 20.minutes)
+      done = request!("105", at: now - 1.day)
+      done.update_columns(confirmed_at: now - 1.hour, updated_at: now - 1.day)
+
+      expect(TenantScope.as_system(reason: "spec") { described_class.perform_now(now: now) }).to eq(2)
+      expect(RevokeEmployeeAppClerkJob).to have_been_enqueued.with(never_queued.id)
+      expect(RevokeEmployeeAppClerkJob).to have_been_enqueued.with(lost.id)
+      [ just_requested, live, done ].each { |row| expect(RevokeEmployeeAppClerkJob).not_to have_been_enqueued.with(row.id) }
+      expect(never_queued.reload.enqueued_at).to be_within(1.second).of(now)
+
+      # Once queued, the next sweep leaves them alone.
+      clear_enqueued_jobs
+      expect(TenantScope.as_system(reason: "spec") { described_class.perform_now(now: now + 1.minute) }).to eq(0)
+    end
+
+    it "leaves a row unqueued when its enqueue fails, so the next sweep tries again" do
+      row = request!("201", at: 10.minutes.ago)
+      allow(RevokeEmployeeAppClerkJob).to receive(:perform_later).and_raise(ActiveJob::EnqueueError)
+      expect(TenantScope.as_system(reason: "spec") { EmployeeAppClerkRevocation.enqueue!([ row.id ]) }).to eq([])
+      expect(row.reload.enqueued_at).to be_nil
+    end
+
+    it "runs on a schedule" do
+      schedule = YAML.load_file(Rails.root.join("config/recurring.yml"), aliases: true).dig("production", "retry_employee_app_clerk_revocations")
+      expect(schedule).to include("class" => described_class.name)
     end
   end
 end

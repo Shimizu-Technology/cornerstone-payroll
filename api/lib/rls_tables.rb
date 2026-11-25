@@ -12,8 +12,8 @@ module RlsTables
     check_supersession_rollout_approvals client_documents client_operating_profiles
     client_portal_messages client_portal_threads company_help_contacts company_pay_schedules company_workweeks
     company_ytd_totals daily_time_records deduction_types delivery_consents department_ytd_totals departments
-    direct_deposit_payment_confirmations employee_account_links employee_app_activations employee_change_requests
-    employee_compensation_changes employee_configuration_review_resolutions employee_contact_changes_to_confirm employee_deductions
+    direct_deposit_payment_confirmations employee_account_links employee_app_activations employee_app_clerk_revocations
+    employee_change_requests employee_compensation_changes employee_configuration_review_resolutions employee_contact_changes_to_confirm employee_deductions
     employee_document_notices employee_document_requirement_events employee_document_requirements employee_documents employee_emergency_contacts employee_loans employee_notes
     employee_payroll_fields employee_retirement_elections employee_retirement_year_inputs
     employee_status_events employee_tipped_occupations employee_w4_elections employee_wage_rate_versions
@@ -63,7 +63,7 @@ module RlsTables
 
   RLS_EXEMPT_TABLES = %w[
     cable_connection_tickets client_profitability_settings companies company_assignments
-    employee_app_clerk_revocations employee_app_early_access_windows employee_placeholder_emails
+    employee_app_early_access_windows employee_placeholder_emails
     expense_artifacts expense_payments expense_vendors expenses filing_submitters finance_api_requests
     finance_api_tokens finance_books invoice_artifacts invoice_billing_profiles invoice_chat_messages
     invoice_chat_sessions invoice_credit_notes invoice_deliveries invoice_events invoice_line_items

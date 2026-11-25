@@ -8,15 +8,20 @@ module EmployeeAppSwitch
   # works, revokes the activation and clears today's and every later
   # scheduled version. Turning the employee app off also turns off every
   # feature under it.
+  #
+  # The service itself requires what turning on needs, so no caller can skip
+  # it: the actor's verified session claims (session_claims:, the Clerk
+  # token payload) must show a second factor verified within the step-up
+  # window, and the readiness checks are always built here, never passed in.
   class Update
     attr_reader :company, :actor
 
-    def initialize(company:, actor:, changes:, reason:, readiness: nil, today: PayrollBusinessClock.today)
+    def initialize(company:, actor:, changes:, reason:, session_claims:, today: PayrollBusinessClock.today)
       @company = company
       @actor = actor
       @raw_changes = changes
       @raw_reason = reason
-      @readiness = readiness
+      @session_claims = session_claims
       @today = today
     end
 
@@ -29,7 +34,7 @@ module EmployeeAppSwitch
     end
 
     def readiness
-      @readiness ||= Readiness.new(company: company)
+      @readiness ||= Readiness.new(company: company, today: @today)
     end
 
     # Raises NotReady before anything is locked or written, so the screen can
@@ -43,6 +48,7 @@ module EmployeeAppSwitch
 
     def call
       reason = EmployeeAppSwitch.reason!(@raw_reason)
+      require_step_up! if turning_on?
       company.with_lock(requires_new: true) do
         fresh_actor = User.lock.find_by(id: actor&.id)
         company.company_assignments.where(user_id: fresh_actor&.id).lock.load
@@ -75,6 +81,10 @@ module EmployeeAppSwitch
 
         [ key, value ]
       end
+    end
+
+    def require_step_up!
+      raise StepUpRequired unless MfaPolicy.recently_verified_second_factor?(@session_claims)
     end
 
     def authorize!(user)
