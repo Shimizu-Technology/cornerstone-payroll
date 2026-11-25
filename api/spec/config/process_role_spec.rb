@@ -31,8 +31,8 @@ RSpec.describe "APP_PROCESS_ROLE" do
     result = boot_role("employee_web", "/api/v1/admin/companies")
     expect(result).to include(up: 200, up_queries: [], forbidden: 404)
     expect(result[:cable_mount_path]).to be_nil
-    expect(result[:paths]).to all(match(%r{\A(?:(?:/up|/health/dependencies)\(|/api/v1/(?:employee/|kiosk/|auth/|public/tenant_branding(?:\z|/logo/)))}))
-    expect(result[:paths]).to include("/api/v1/employee/context(.:format)", "/api/v1/public/tenant_branding",
+    expect(result[:paths]).to all(match(%r{\A(?:(?:/up|/health/dependencies)\(|/api/v1/(?:employee/|kiosk/|auth/|public/employee_terms\z|public/tenant_branding(?:\z|/logo/)))}))
+    expect(result[:paths]).to include("/api/v1/employee/context(.:format)", "/api/v1/public/employee_terms", "/api/v1/public/tenant_branding",
       "/api/v1/public/tenant_branding/logo/:slug/:file", "/health/dependencies(.:format)")
     expect(result[:paths]).to all(match(ProcessRole::EMPLOYEE_WEB_ROUTE_PATTERN))
   end

@@ -246,6 +246,50 @@ RSpec.describe "Client subdomains", type: :request do
     Rack::Attack.enabled = previously_enabled
   end
 
+  describe "public employee terms CORS" do
+    let(:path) { "/api/v1/public/employee_terms" }
+    let(:origin) { "https://#{enabled_host}" }
+
+    it "allows a GET and its preflight without credentials for an enabled tenant" do
+      EmployeeTermsVersion.create!(version: "cors-test", status: "approved", published_at: Time.current,
+        terms_url: "https://example.test/terms", privacy_url: "https://example.test/privacy")
+
+      expect(preflight(origin)).to eq(origin)
+      expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
+
+      get path, headers: { "Origin" => origin }
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Access-Control-Allow-Origin"]).to eq(origin)
+      expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
+      expect(preflight(origin, method: "POST")).to be_nil
+    end
+
+    it "omits CORS headers for disabled and unregistered tenants" do
+      [ "https://#{disabled_host}", "https://unregistered.shimizu-technology.com" ].each do |refused|
+        expect(preflight(refused)).to be_nil
+        get path, headers: { "Origin" => refused }
+        expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+      end
+    end
+
+    it "keeps throttled responses readable without credentials for an enabled tenant" do
+      previously_enabled = Rack::Attack.enabled
+      Rack::Attack.enabled = true
+      limit = Rack::Attack.throttles.fetch("employee_terms/ip").limit
+      address = { "REMOTE_ADDR" => "203.0.113.63" }
+      freeze_time do
+        limit.times { get path, env: address }
+
+        get path, headers: { "Origin" => origin }, env: address
+        expect(response).to have_http_status(:too_many_requests)
+        expect(response.headers["Access-Control-Allow-Origin"]).to eq(origin)
+        expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
+      end
+    ensure
+      Rack::Attack.enabled = previously_enabled
+    end
+  end
+
   describe "signed Clerk tokens" do
     let(:rsa_key) { OpenSSL::PKey::RSA.generate(2048) }
     let(:jwk) { JWT::JWK.new(rsa_key) }

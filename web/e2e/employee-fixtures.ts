@@ -126,6 +126,7 @@ export async function mockEmployeeApi(page: Page, mock: EmployeeMock = {}): Prom
   let nextContactId = 50;
 
   await page.route('**/api/v1/public/tenant_branding**', (route) => (mock.branding === null ? route.fulfill({ status: 404 }) : json(route, mock.branding ?? branding)));
+  await page.route("**/api/v1/public/employee_terms", (route) => json(route, { version: "test-v1", title: "Employee App Terms", terms_url: "/terms", privacy_url: "/privacy" }));
   await page.route('**/api/v1/auth/me', (route) => json(route, { roles: { employee_links_count: 1 } }));
   await page.route('**/api/v1/employee/**', async (route) => {
     const request = route.request();

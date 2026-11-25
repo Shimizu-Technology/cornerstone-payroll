@@ -4,6 +4,7 @@
 # signed with a local key and checked by ClerkTokenVerifier against its JWKS.
 # Only Clerk's Backend API (ClerkInvitationService) is a double.
 module EmployeeLinkHelpers
+  TEST_TERMS_VERSION = "request-test-v1"
   ISSUER = "https://clerk.employee-links.example.test"
   PAYROLL_ORIGIN = "https://payroll.example.test"
   APP_URL = "https://employees.example.test"
@@ -15,6 +16,8 @@ module EmployeeLinkHelpers
     base.let(:clerk_invitations) { [] }
 
     base.before do
+      EmployeeTermsVersion.create!(version: TEST_TERMS_VERSION, status: "draft", terms_url: "/terms",
+        privacy_url: "/privacy", published_at: Time.current)
       verifier = ClerkTokenVerifier.new(
         env: { "CLERK_ISSUER" => ISSUER, "CLERK_AUTHORIZED_PARTIES" => PAYROLL_ORIGIN },
         cache: ActiveSupport::Cache::MemoryStore.new,
@@ -87,14 +90,14 @@ module EmployeeLinkHelpers
 
   def activation_params(employee, **overrides)
     { date_of_birth: employee.date_of_birth.iso8601, ssn_last4: employee.ssn_digits.last(4),
-      email: "own.address@example.net" }.merge(overrides)
+      email: "own.address@example.net", terms_version: TEST_TERMS_VERSION }.merge(overrides)
   end
 
   # origin: the browser Origin the sign-up page sends (a client subdomain).
   def post_activation(params, headers: {}, origin: nil)
     request_headers = { "CONTENT_TYPE" => "application/json" }
     request_headers["Origin"] = origin if origin
-    post "/api/v1/employee/activation", params: params.to_json, headers: request_headers.merge(headers)
+    post "/api/v1/employee/activation", params: { terms_version: TEST_TERMS_VERSION }.merge(params).to_json, headers: request_headers.merge(headers)
   end
 
   # What Clerk reports once the person finishes sign-up with the invitation:

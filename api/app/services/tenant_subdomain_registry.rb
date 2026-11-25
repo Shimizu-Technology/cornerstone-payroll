@@ -8,6 +8,8 @@ class TenantSubdomainRegistry
   CLIENT_ORIGIN_PATTERN = %r{\Ahttps?://(?:[^/?#@]*@)?([^./?#:]+)\.#{Regexp.escape(ROOT_DOMAIN)}\.?(?=[:/?#]|\z)}i
   RESERVED_SLUGS = %w[payroll api clerk clkmail accounts www staging mail admin app my status docs support tax aire aire-api plane shimizu].freeze
   BRANDING_PATH = %r{\A/api/v1/public/tenant_branding/?\z}
+  TERMS_PATH = %r{\A/api/v1/public/employee_terms/?\z}
+  TERMS_METHODS = %w[GET OPTIONS].freeze
   PORTAL_PATH = %r{\A/api/v1/(?:auth|employee)/}
   BRANDING_METHODS = %w[GET HEAD OPTIONS].freeze
   BRANDING_KEYS = %w[logo_url primary_color accent_color display_name app_name show_main_phone].freeze
