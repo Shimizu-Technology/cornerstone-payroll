@@ -1,4 +1,4 @@
-import { formatGuamDate } from '@/lib/utils';
+import { formatGuamDateTime } from '@/lib/utils';
 import { isTestWorkspaceCompany } from '@/lib/company-write-access';
 import { financeWriteBlockedMessage } from '@/components/finance/FinanceWriteNotice';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -121,7 +121,7 @@ export function FinanceAgentAccess() {
         {loading || loadedBookId !== activeBook.id ? <p role="status" className="mt-4 text-sm text-neutral-600">{loading ? 'Loading keys…' : 'Keys could not be loaded.'}</p>
             : tokens.length === 0 ? <p className="mt-4 text-sm text-neutral-600">No agent keys yet.</p>
             : <ul className="mt-4 divide-y divide-neutral-100">{tokens.map((token) => <li key={token.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0"><p className="font-medium text-neutral-950">{token.name}</p><p className="text-xs text-neutral-600">{token.scopes.includes('draft_write') ? 'Draft editing' : 'Read only'} · {token.revoked_at ? 'Revoked' : new Date(token.expires_at) <= new Date() ? 'Expired' : 'Active'} · Expires {formatGuamDate(token.expires_at)} · Last used {token.last_used_at ? new Date(token.last_used_at).toLocaleString() : 'never'}</p></div>
+              <div className="min-w-0"><p className="font-medium text-neutral-950">{token.name}</p><p className="text-xs text-neutral-600">{token.scopes.includes('draft_write') ? 'Draft editing' : 'Read only'} · {token.revoked_at ? 'Revoked' : new Date(token.expires_at) <= new Date() ? 'Expired' : 'Active'} · Expires {formatGuamDateTime(token.expires_at)} · Last used {token.last_used_at ? formatGuamDateTime(token.last_used_at) : 'never'}</p></div>
               {!token.revoked_at && (confirmRevokeId === token.id
                 ? <div className="flex flex-wrap items-center gap-2"><span className="text-xs text-rose-800">This agent will lose access immediately.</span><Button type="button" variant="outline" disabled={busy} onClick={() => setConfirmRevokeId(null)}>Cancel</Button><Button type="button" disabled={busy || financeReadOnly} onClick={() => void revokeToken(token)}>Confirm revoke</Button></div>
                 : <Button type="button" variant="outline" disabled={busy || financeReadOnly} onClick={() => setConfirmRevokeId(token.id)}>Revoke</Button>)}

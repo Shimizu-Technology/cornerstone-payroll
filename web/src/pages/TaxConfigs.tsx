@@ -1,4 +1,4 @@
-import { formatGuamDate } from '@/lib/utils';
+import { formatGuamDate, formatGuamDateTime } from '@/lib/utils';
 import { useFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
 import { Plus, CheckCircle, History, Edit, Trash2, Copy, Save, X } from 'lucide-react';
@@ -868,7 +868,7 @@ export default function TaxConfigs() {
                         {log.field_name && `: ${log.field_name}`}
                       </span>
                       <span className="text-neutral-600">
-                        {new Date(log.created_at).toLocaleString()}
+                        {formatGuamDateTime(log.created_at)}
                       </span>
                     </div>
                     {log.old_value && (

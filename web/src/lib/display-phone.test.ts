@@ -4,6 +4,7 @@ import { formatPhone } from './display-phone';
 
 describe('formatPhone', () => {
   it.each([
+    ['+1 670 555-0162', '(670) 555-0162'],
     ['+16715550162', '(671) 555-0162'],
     ['+1 671 555-0162', '(671) 555-0162'],
     ['(671) 555-0162', '(671) 555-0162'],
@@ -20,7 +21,7 @@ describe('formatPhone', () => {
     (value) => expect(formatPhone(value)).toBe(value),
   );
 
-  it.each([null, undefined, ''])('returns an empty value for %j', (value) => {
+  it.each([null, undefined, '', '   '])('returns an empty value for %j', (value) => {
     expect(formatPhone(value)).toBe('');
   });
 });

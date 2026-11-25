@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useCallback } from 'react';
@@ -390,7 +391,7 @@ export default function PayrollReminders() {
                     <div key={log.id} className="rounded-xl border border-neutral-200 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <Badge variant={log.reminder_type === 'overdue' ? 'danger' : log.reminder_type === 'create_payroll' ? 'info' : 'warning'}>{log.reminder_type === 'overdue' ? 'Overdue' : log.reminder_type === 'create_payroll' ? 'Create Payroll' : 'Upcoming'}</Badge>
-                        <span className="text-right text-xs text-neutral-500">{new Date(log.sent_at).toLocaleString()}</span>
+                        <span className="text-right text-xs text-neutral-500">{formatGuamDateTime(log.sent_at)}</span>
                       </div>
                       <p className="mt-3 text-sm text-neutral-700">Pay date: {log.pay_period ? formatDate(log.pay_period.pay_date) : log.expected_pay_date ? formatDate(log.expected_pay_date) : '—'}</p>
                       <p className="mt-1 text-sm text-neutral-700">Period: {log.pay_period ? formatDateRange(log.pay_period.start_date, log.pay_period.end_date) : 'Not yet created'}</p>
@@ -442,7 +443,7 @@ export default function PayrollReminders() {
                                   : '—'}
                             </TableCell>
                             <TableCell className="text-sm text-neutral-500">
-                              {new Date(log.sent_at).toLocaleString()}
+                              {formatGuamDateTime(log.sent_at)}
                             </TableCell>
                             <TableCell className="text-sm text-neutral-500">
                               {log.recipients_snapshot.join(', ')}

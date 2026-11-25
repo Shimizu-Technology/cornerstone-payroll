@@ -60,7 +60,8 @@ export function formatGuamDate(timestamp?: string | null, options?: Intl.DateTim
 }
 
 export function formatGuamDateTime(dateString?: string | null, options?: Intl.DateTimeFormatOptions): string {
-  if (!dateString) return 'Not recorded';
+  const date = dateString ? new Date(dateString) : null;
+  if (!date || !Number.isFinite(date.getTime())) return 'Not recorded';
 
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
@@ -72,7 +73,7 @@ export function formatGuamDateTime(dateString?: string | null, options?: Intl.Da
     ...options,
     timeZone: 'Pacific/Guam',
     timeZoneName: undefined,
-  }).format(new Date(dateString)) + ' ChST';
+  }).format(date) + ' ChST';
 }
 
 export function formatGuamDateTimeShort(dateString?: string | null): string {

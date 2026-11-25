@@ -1,7 +1,7 @@
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { exclusionCategoryLabels } from '@/lib/time-tracking-exclusions';
 import { supportsSourceOperation } from '@/lib/time-tracking';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { controlClassName } from '@/components/ui/field-styles';
@@ -63,7 +63,7 @@ function formatRate(cents: number | null | undefined): string {
 function formatTimestamp(value: string | null | undefined): string {
   if (!value) return 'Unavailable';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : formatGuamDateTime(value);
 }
 
 function formatExclusionReason(reason: string): string {
