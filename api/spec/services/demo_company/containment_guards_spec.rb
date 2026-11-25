@@ -80,14 +80,7 @@ RSpec.describe "Demo company containment guards" do
       end.to raise_error(ActiveRecord::StatementInvalid, /cannot belong to a demo company/)
     end
 
-    # D4 opens a contained demo commit; until then the model refuses to save a
-    # committed demo period, so these examples stand in for that one rule.
-    def allow_committed_demo_periods
-      allow_any_instance_of(PayPeriod).to receive(:test_workspace_cannot_be_committed)
-    end
-
     it "voids a committed demo period without creating any liability posting" do
-      allow_committed_demo_periods
       expect(PayrollLiabilityPostingService.reverse!(pay_period: period, actor: admin, reason: "Demo void")).to eq([])
       PayPeriodCorrectionService.void!(pay_period: period, actor: admin, reason: "Demo void")
 
@@ -96,7 +89,6 @@ RSpec.describe "Demo company containment guards" do
     end
 
     it "corrects a committed demo period's pay date without creating any liability posting" do
-      allow_committed_demo_periods
       new_date = period.pay_date + 1.day
       expect(PayrollLiabilityPostingService.restate_for_pay_date!(pay_period: period, actor: admin, reason: "Demo",
         old_pay_date: period.pay_date, new_pay_date: new_date)).to be_nil
@@ -129,15 +121,26 @@ RSpec.describe "Demo company containment guards" do
   end
 
   describe "check output" do
-    it "refuses demo print runs and preprinted bank stock" do
+    it "never prints a demo check on preprinted bank stock" do
       expect { FirstHawaiianFourUpCheckGenerator.new(company: demo, payroll_items: []) }
         .to raise_error(ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE)
       demo.check_stock_type = "first_hawaiian_4up"
       expect(demo).not_to be_valid
+      %w[bottom_check top_check].each do |stock|
+        demo.check_stock_type = stock
+        expect(demo).to be_valid
+      end
+    end
 
-      service = CheckPrintRunGenerationService.allocate
-      service.instance_variable_set(:@pay_period, period)
-      expect { service.send(:validate_request!) }.to raise_error(CheckPrintRunGenerationService::InvalidSelectionError, Company::DEMO_UNAVAILABLE_MESSAGE)
+    it "stores only fictional routing numbers that fail the ABA checksum for a demo" do
+      expect(AbaRoutingNumber.valid_checksum?("021000021")).to be(true)
+      expect(AbaRoutingNumber.valid_checksum?("123456789")).to be(false)
+      demo_employee.bank_routing_number_encrypted = "021000021"
+      expect(demo_employee).not_to be_valid
+      demo_employee.bank_routing_number_encrypted = "123456789"
+      expect(demo_employee).to be_valid
+      live_employee = create(:employee, company: live, department: create(:department, company: live), bank_routing_number_encrypted: "021000021")
+      expect(live_employee).to be_valid
     end
   end
 
