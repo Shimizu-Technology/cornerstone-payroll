@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_060300) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1041,6 +1041,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.check_constraint "status::text = ANY (ARRAY['invited'::character varying::text, 'active'::character varying::text, 'former'::character varying::text, 'revoked'::character varying::text])", name: "employee_account_links_status_check"
   end
 
+  create_table "employee_app_early_access_windows", force: :cascade do |t|
+    t.bigint "company_ids", null: false, array: true
+    t.datetime "created_at", null: false
+    t.string "end_reason", limit: 500
+    t.datetime "ended_at"
+    t.bigint "ended_by_id"
+    t.date "expires_on", null: false
+    t.bigint "organization_id", null: false
+    t.string "reason", limit: 500, null: false
+    t.bigint "set_by_id", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "ended_by_id" ], name: "index_employee_app_early_access_windows_on_ended_by_id"
+    t.index [ "organization_id", "created_at", "id" ], name: "idx_employee_app_early_access_windows_history"
+    t.index [ "organization_id" ], name: "idx_employee_app_early_access_windows_one_open", unique: true, where: "(ended_at IS NULL)"
+    t.index [ "set_by_id" ], name: "index_employee_app_early_access_windows_on_set_by_id"
+    t.check_constraint "cardinality(company_ids) >= 1 AND cardinality(company_ids) <= 2 AND array_position(company_ids, NULL::bigint) IS NULL", name: "employee_app_early_access_windows_company_ids_check"
+    t.check_constraint "ended_at IS NULL AND ended_by_id IS NULL AND end_reason IS NULL OR ended_at IS NOT NULL AND ended_by_id IS NOT NULL AND length(btrim(end_reason::text)) > 0", name: "employee_app_early_access_windows_end_shape_check"
+    t.check_constraint "expires_on >= ((created_at AT TIME ZONE 'UTC'::text) AT TIME ZONE 'Pacific/Guam'::text)::date AND expires_on <= (((created_at AT TIME ZONE 'UTC'::text) AT TIME ZONE 'Pacific/Guam'::text)::date + 31)", name: "employee_app_early_access_windows_expiry_check"
+    t.check_constraint "length(btrim(reason::text)) > 0", name: "employee_app_early_access_windows_reason_check"
+  end
+
   create_table "employee_change_requests", force: :cascade do |t|
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
@@ -1448,6 +1469,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "retirement_year_input_year"
   end
 
+  create_table "employee_service_observations", force: :cascade do |t|
+    t.boolean "authorized_parties_valid", default: false, null: false
+    t.datetime "created_at", null: false
+    t.boolean "dependencies_healthy", default: false, null: false
+    t.jsonb "failed_checks", default: [], null: false
+    t.boolean "mfa_evidence_recorded", default: false, null: false
+    t.datetime "observed_at", null: false
+    t.string "process_role", limit: 40, null: false
+    t.boolean "require_mfa", default: false, null: false
+    t.string "revision", limit: 80
+    t.string "rls_guard_mode", limit: 10, null: false
+    t.boolean "rls_runtime_role_verified", default: false, null: false
+    t.string "service", limit: 40, null: false
+    t.boolean "service_checks_passed", default: false, null: false
+    t.datetime "updated_at", null: false
+    t.index [ "service" ], name: "idx_employee_service_observations_service", unique: true
+    t.check_constraint "jsonb_typeof(failed_checks) = 'array'::text", name: "employee_service_observations_failed_checks_check"
+    t.check_constraint "rls_guard_mode::text = ANY (ARRAY['off'::character varying, 'log'::character varying, 'raise'::character varying]::text[])", name: "employee_service_observations_guard_mode_check"
+    t.check_constraint "service::text = 'employee_web'::text", name: "employee_service_observations_service_check"
+  end
+
   create_table "employee_status_events", force: :cascade do |t|
     t.bigint "actor_id"
     t.bigint "company_id", null: false
@@ -1471,6 +1513,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
     t.check_constraint "previous_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'terminated'::character varying::text])", name: "employee_status_events_previous_status_check"
     t.check_constraint "resulting_status::text = ANY (ARRAY['active'::character varying::text, 'inactive'::character varying::text, 'terminated'::character varying::text])", name: "employee_status_events_resulting_status_check"
     t.check_constraint "source::text = ANY (ARRAY['operator'::character varying::text, 'production_migration'::character varying::text])", name: "employee_status_events_source_check"
+  end
+
+  create_table "employee_terms_versions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "privacy_url", limit: 500, null: false
+    t.datetime "published_at", null: false
+    t.string "status", limit: 20, default: "draft", null: false
+    t.string "terms_url", limit: 500, null: false
+    t.datetime "updated_at", null: false
+    t.string "version", limit: 80, null: false
+    t.index [ "status", "published_at", "id" ], name: "idx_employee_terms_versions_current"
+    t.index [ "version" ], name: "idx_employee_terms_versions_version", unique: true
+    t.check_constraint "status::text = ANY (ARRAY['draft'::character varying, 'approved'::character varying]::text[])", name: "employee_terms_versions_status_check"
   end
 
   create_table "employee_tipped_occupations", force: :cascade do |t|
@@ -5332,6 +5387,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_002000) do
   add_foreign_key "employee_account_links", "users", column: "invited_by_id"
   add_foreign_key "employee_account_links", "users", column: "revoked_by_id"
   add_foreign_key "employee_account_links", "users", column: "sign_up_reset_requested_by_id"
+  add_foreign_key "employee_app_early_access_windows", "organizations", on_delete: :restrict
+  add_foreign_key "employee_app_early_access_windows", "users", column: "ended_by_id", on_delete: :restrict
+  add_foreign_key "employee_app_early_access_windows", "users", column: "set_by_id", on_delete: :restrict
   add_foreign_key "employee_change_requests", "companies"
   add_foreign_key "employee_change_requests", "employee_account_links", column: [ "requested_by_link_id", "employee_id", "company_id" ], primary_key: [ "id", "employee_id", "company_id" ], name: "fk_employee_change_requests_requester_link"
   add_foreign_key "employee_change_requests", "employees"

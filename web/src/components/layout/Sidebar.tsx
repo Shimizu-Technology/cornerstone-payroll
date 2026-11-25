@@ -39,6 +39,7 @@ import {
   MessagesSquare,
   PieChart,
   Smartphone,
+  ToggleRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
@@ -47,7 +48,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { CompanySwitcher } from './CompanySwitcher';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeeAppRolloutPath, employeeAppSettingsPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppSwitchPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -111,6 +112,7 @@ const clientSettingsNavigation: NavItem[] = [
   { name: 'How this client runs', href: '/operating-profile', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app settings', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app switch', href: '/employee-app/switch', icon: <ToggleRight className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'My Printer & Checks', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Reminders', href: '/payroll-reminders', icon: <Bell className="h-[18px] w-[18px] shrink-0" /> },
@@ -292,11 +294,13 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/time-tracking-sources') return isAdmin;
     if (item.href === '/app/aire-history-approval') return (isAdmin || isAccountant) && hasCapability('payroll_operations');
     if (item.href === '/employee-app') return !!activeCompanyId && canManageClientAdministration;
+    if (item.href === '/employee-app/switch') return !!activeCompanyId && hasCapability('manage_employee_app_switch');
     if (!canManageClientConfiguration) return false;
     return true;
   }).map((item) => {
     if (item.href === '/operating-profile') return { ...item, href: `/companies/${activeCompanyId}/operating-profile` };
     if (item.href === '/employee-app' && activeCompanyId) return { ...item, href: employeeAppSettingsPath(activeCompanyId) };
+    if (item.href === '/employee-app/switch' && activeCompanyId) return { ...item, href: employeeAppSwitchPath(activeCompanyId) };
     return item;
   });
   const primaryNavigation = (isClient ? portalNavigation : clientNavigation).map((item): NavItem => {

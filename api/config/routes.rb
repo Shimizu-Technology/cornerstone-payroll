@@ -393,6 +393,12 @@ Rails.application.routes.draw do
         get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
         post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",
           constraints: { operation: /invite|resend|unlock|revoke|reset_sign_up/ }
+        # M4-9d: lift the Milestone 4 lock for the selected company (org admins).
+        resource :employee_app_switch, only: [ :show, :update ], format: false do
+          put :early_access, action: :set_early_access
+          delete :early_access, action: :end_early_access
+          post :demo_stop
+        end
         resource :employee_app_settings, only: [ :show ] do
           patch :branding, action: :update_branding
           put :help_contacts, action: :update_help_contacts

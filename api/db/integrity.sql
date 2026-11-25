@@ -1138,3 +1138,54 @@ CREATE TRIGGER delivery_disclosures_immutable
 BEFORE UPDATE OF kind, version, title, text, digest, status, published_at ON delivery_disclosures
 FOR EACH ROW
 EXECUTE FUNCTION prevent_delivery_disclosure_mutation();
+
+-- 20261126060100_create_employee_app_early_access_windows.rb
+CREATE OR REPLACE FUNCTION protect_employee_app_early_access_window() RETURNS trigger AS $$
+BEGIN
+  IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+    OR NEW.company_ids IS DISTINCT FROM OLD.company_ids
+    OR NEW.expires_on IS DISTINCT FROM OLD.expires_on
+    OR NEW.reason IS DISTINCT FROM OLD.reason
+    OR NEW.set_by_id IS DISTINCT FROM OLD.set_by_id
+    OR NEW.created_at IS DISTINCT FROM OLD.created_at
+    OR OLD.ended_at IS NOT NULL
+  THEN
+    RAISE EXCEPTION 'employee_app_early_access_windows rows can only be ended once; set a new window instead'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS employee_app_early_access_windows_immutable ON employee_app_early_access_windows;
+CREATE TRIGGER employee_app_early_access_windows_immutable
+BEFORE UPDATE ON employee_app_early_access_windows
+FOR EACH ROW
+EXECUTE FUNCTION protect_employee_app_early_access_window();
+
+CREATE OR REPLACE FUNCTION prevent_employee_app_early_access_window_delete() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'employee_app_early_access_windows rows are kept for the audit history'
+    USING ERRCODE = 'check_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS employee_app_early_access_windows_no_delete ON employee_app_early_access_windows;
+CREATE TRIGGER employee_app_early_access_windows_no_delete
+BEFORE DELETE ON employee_app_early_access_windows
+FOR EACH ROW
+EXECUTE FUNCTION prevent_employee_app_early_access_window_delete();
+
+-- 20261126060300_create_employee_terms_versions.rb
+CREATE OR REPLACE FUNCTION prevent_employee_terms_version_mutation() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'employee_terms_versions rows are immutable; insert a new version instead'
+    USING ERRCODE = 'check_violation';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS employee_terms_versions_immutable ON employee_terms_versions;
+CREATE TRIGGER employee_terms_versions_immutable
+BEFORE UPDATE OR DELETE ON employee_terms_versions
+FOR EACH ROW
+EXECUTE FUNCTION prevent_employee_terms_version_mutation();
