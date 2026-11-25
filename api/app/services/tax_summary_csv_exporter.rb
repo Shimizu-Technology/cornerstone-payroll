@@ -56,6 +56,10 @@ class TaxSummaryCsvExporter
           format_currency(entry[:amount])
         ]
       end
+      source = report.dig(:source, :statement) || report.dig(:source, :label)
+      csv << [ "Payroll Source", source ] if source.present?
+      csv << [ "Base Withholding Tax", format_currency(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
+      csv << [ "Additional Withholding", format_currency(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
     end
   end
 
@@ -75,7 +79,7 @@ class TaxSummaryCsvExporter
   private
 
   def format_currency(value)
-    format("%.2f", value.to_f)
+    format("%.2f", value.to_d)
   end
 
   def period_label(period)
