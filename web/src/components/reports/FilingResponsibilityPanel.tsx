@@ -1,3 +1,4 @@
+import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, PencilLine } from 'lucide-react';
@@ -44,7 +45,7 @@ function filingStatus(gate: PayrollFilingGate) {
 
 function formatReviewDate(value: string | null | undefined) {
   if (!value) return null;
-  return new Date(value).toLocaleString();
+  return formatGuamDateTime(value);
 }
 
 interface FilingResponsibilityPanelProps {

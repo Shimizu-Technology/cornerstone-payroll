@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Info, LockKeyhole } from 'lucide-react';
 import { useParams } from 'react-router';
@@ -228,7 +229,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
       });
       setProfile(response);
       setDraft(draftFor(response));
-      setSaved(`Version ${response.saved.version} ${effectiveOn === correctionDate ? 'corrected' : 'saved'}, effective ${response.saved.effective_on}.`);
+      setSaved(`Version ${response.saved.version} ${effectiveOn === correctionDate ? 'corrected' : 'saved'}, effective ${formatDate(response.saved.effective_on)}.`);
       setEffectiveOn('');
       setReason('');
       setPresetNote('');
@@ -285,7 +286,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
                     ))}
                   </Select>
                   <p id={dateHelpId} className="text-sm text-neutral-600">
-                    {earliestDate ? `Earliest available draft period starts ${earliestDate}.` : 'No draft pay periods are available for a profile change.'}
+                    {earliestDate ? `Earliest available draft period starts ${formatDate(earliestDate)}.` : 'No draft pay periods are available for a profile change.'}
                   </p>
                   <div className="space-y-1.5">
                     <Label htmlFor={reasonId}>Reason for change</Label>
@@ -312,7 +313,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
                   <li key={version.version} className="py-3 first:pt-0 last:pb-0">
                     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       <strong className="text-sm text-neutral-950">Version {version.version}</strong>
-                      <span className="text-sm text-neutral-600">{version.effective_on}{version.ends_on ? ` to ${version.ends_on}` : ' onwards'}</span>
+                      <span className="text-sm text-neutral-600">{version.ends_on ? formatDateRange(version.effective_on, version.ends_on) : `${formatDate(version.effective_on)} onwards`}</span>
                     </div>
                     {version.reason && <p className="mt-1 break-words text-sm text-neutral-700">{version.reason}</p>}
                   </li>

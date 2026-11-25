@@ -1,3 +1,4 @@
+import { formatDate as shortDate, formatDateRange } from "@/lib/display-date";
 import Decimal from "decimal.js";
 import { guamBusinessDate } from "@/lib/payrollBusinessDate";
 import {
@@ -35,14 +36,10 @@ export function signedMoney(value: Decimal): string {
   return `${value.isNegative() ? "−" : "+"}${money(value.abs())}`;
 }
 
-export function shortDate(iso?: string): string {
-  if (!iso) return "";
-  const [year, month, day] = iso.split("-").map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
+export { shortDate };
 
 export function periodLabel(period: Pick<HistoryPeriod, "start_date" | "end_date">): string {
-  return `${shortDate(period.start_date)} – ${shortDate(period.end_date)}`;
+  return formatDateRange(period.start_date, period.end_date);
 }
 
 /** Sums paychecks into the register's columns. */

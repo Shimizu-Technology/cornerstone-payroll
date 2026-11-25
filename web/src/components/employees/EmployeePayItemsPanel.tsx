@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-date';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Plus } from 'lucide-react';
@@ -259,7 +260,7 @@ export function EmployeePayItemsPanel({ employeeId, companyId, employeeName, com
                 <p className="font-semibold tabular-nums text-neutral-950">{row.employee_loan_id ? 'Managed in Loans' : value === null ? 'Enter each payroll' : field.amount_type === 'percentage' ? `${value}%` : formatCurrency(value)}</p>
               </div>
               {inherited && !row.employee_loan_id && field.amount_type !== 'manual' && <p className="mt-2 text-xs text-neutral-600">{field.owner_employee_id ? 'Uses item default' : 'Uses client default'}</p>}
-              <p className="mt-2 text-xs text-neutral-600">{row.start_date ? `From ${row.start_date}` : 'No start-date restriction'} · {row.end_date ? `through ${row.end_date}, inclusive` : 'until stopped'}</p>
+              <p className="mt-2 text-xs text-neutral-600">{row.start_date ? `From ${formatDate(row.start_date)}` : 'No start-date restriction'} · {row.end_date ? `through ${formatDate(row.end_date)}, inclusive` : 'until stopped'}</p>
               {row.notes && <p className="mt-2 break-words text-xs text-neutral-600">{row.notes}</p>}
               <div className="mt-3 flex flex-wrap gap-2"><Button type="button" variant="outline" size="sm" onClick={() => openEdit(row)} disabled={disabled || saving || busyRow !== null}>Edit</Button>
                 <Button type="button" variant="ghost" size="sm" onClick={() => void toggleActive(row)} disabled={disabled || saving || busyRow !== null || (!row.active && !field.active && !field.owner_employee_id)}>{busyRow === row.id ? 'Saving…' : row.active ? 'Stop' : 'Reactivate'}</Button>

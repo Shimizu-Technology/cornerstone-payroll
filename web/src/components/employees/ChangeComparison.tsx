@@ -1,4 +1,4 @@
-import { formatPhone } from '@/lib/employee-contact';
+import { formatPhone } from '@/lib/display-phone';
 
 const labels: Record<string, string> = {
   address_line1: 'Street address',

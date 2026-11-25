@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeContactDetails } from './EmployeeContactDetails';
@@ -171,6 +172,33 @@ describe('EmployeeContactDetails', () => {
 
   afterEach(cleanup);
 
+  it('keeps the phone text as typed and prevents saving the same number', async () => {
+    const user = userEvent.setup();
+    apiMocks.clientList.mockResolvedValue({
+      data: [buildEmployee({ first_name: 'Maria', last_name: 'Cruz', phone: '+16715550142' })],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+    });
+    renderClientPage();
+    await screen.findByRole('button', { name: 'Edit Maria Cruz' });
+
+    const phone = field('Mobile for Maria Cruz');
+    const save = screen.getByRole<HTMLButtonElement>('button', { name: 'Save Maria Cruz' });
+    expect(phone.value).toBe('(671) 555-0142');
+    await user.type(phone, '9');
+    expect(save.disabled).toBe(false);
+    await user.keyboard('{Backspace}');
+    expect(phone.value).toBe('(671) 555-0142');
+    expect(save.disabled).toBe(true);
+    expect(screen.queryByText(/unsaved row/i)).toBeNull();
+
+    await user.clear(phone);
+    await user.type(phone, '+16715550142');
+    expect(phone.value).toBe('+16715550142');
+    expect(save.disabled).toBe(true);
+    await user.keyboard('{Enter}');
+    expect(apiMocks.clientUpdate).not.toHaveBeenCalled();
+  });
+
   it('sends only changed fields with row_revision and baseline_values on a phone-only save, leaving address untouched', async () => {
     const maria = buildEmployee({
       id: 101,
@@ -220,9 +248,9 @@ describe('EmployeeContactDetails', () => {
     });
 
     // Saved: the row closes and shows the full, formatted number.
-    expect(await screen.findByText('+1 671 555-0199')).toBeTruthy();
+    expect(await screen.findByText('(671) 555-0199')).toBeTruthy();
     expect(screen.queryByLabelText('Mobile for Maria Cruz')).toBeNull();
-    expect((field('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('+16715550199');
+    expect((field('Mobile for Maria Cruz') as HTMLInputElement).value).toBe('(671) 555-0199');
     expect((field('Street address for Maria Cruz') as HTMLInputElement).value).toBe('100 Marine Corps Dr');
   });
 
@@ -556,7 +584,7 @@ describe('EmployeeContactDetails', () => {
         7,
       );
     });
-    expect((field('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('+16715550199');
+    expect((field('Mobile for Ana Reyes') as HTMLInputElement).value).toBe('(671) 555-0199');
     expect(document.body.textContent).not.toContain('123-45-6789');
   });
 
