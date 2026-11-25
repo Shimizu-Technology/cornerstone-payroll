@@ -17,6 +17,25 @@ RSpec.describe DemoOutbound, :portal_notifications do
     ENV[described_class::ENV_KEY] = saved
   end
 
+  describe "employee app mail while a demo's employee app is off (M4-9d kill switch)" do
+    it "refuses every employee channel, even to an allow-listed address, and audits why" do
+      DemoOutbound::EMPLOYEE_CHANNELS.each do |channel|
+        expect(described_class.permit?(company: demo, email: allowed, channel: channel)).to be(false)
+      end
+      log = AuditLog.where(action: "outbound#recipient_refused", company_id: demo.id).order(:id).last
+      expect(log.metadata).to include("channel" => "employee_tax_form_notice", "reason" => "employee_app_off")
+
+      # Client and staff mail keep following the allow-list alone.
+      expect(described_class.permit?(company: demo, email: allowed, channel: "portal_notification")).to be(true)
+      # A live company is never affected.
+      expect(described_class.permit?(company: live, email: "anyone@client.example", channel: "employee_link_invite")).to be(true)
+
+      allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true)
+      expect(described_class.permit?(company: demo, email: allowed, channel: "employee_link_invite")).to be(true)
+      expect(described_class.permit?(company: demo, email: other_alias, channel: "employee_link_invite")).to be(false)
+    end
+  end
+
   describe "the allow-list" do
     it "reads normalized, exact addresses from private configuration and keeps plus aliases distinct" do
       expect(described_class.allowlist).to contain_exactly(allowed, "reviewer+employee@demo-mail.example")
@@ -242,6 +261,10 @@ RSpec.describe DemoOutbound, :portal_notifications do
 
   describe "employee links" do
     let(:employee) { create(:employee, company: demo, department: create(:department, company: demo), email: other_alias) }
+
+    # The allow-list sits behind the demo's employee app switch (M4-9d);
+    # open that gate to exercise the allow-list itself.
+    before { allow_any_instance_of(CompanyFeatures).to receive(:employee_portal_enabled?).and_return(true) }
 
     it "issues no emailed invite token to a non-allowed demo address" do
       link = EmployeeAccountLink.new(company: demo, employee: employee)

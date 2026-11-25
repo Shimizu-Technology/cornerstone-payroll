@@ -37,6 +37,9 @@ class StaffRolePolicy
     # platform and organization admins.
     reveal_hidden_employee_notes: %w[super_admin org_admin],
     start_view_as: %w[super_admin],
+    # Lift the Milestone 4 lock for one company's employee app (M4-9d), set
+    # demo early access, and use the demo kill switch.
+    manage_employee_app_switch: %w[super_admin org_admin],
     manage_platform: %w[super_admin]
   }.freeze
 
@@ -65,6 +68,7 @@ class StaffRolePolicy
     view_client_profitability: "Admin access required to see client profitability",
     reveal_hidden_employee_notes: "Only super admins and organization admins can view hidden staff notes",
     start_view_as: "Support view permission required",
+    manage_employee_app_switch: "Only organization admins can change the employee app switch",
     manage_platform: "Super admin access required"
   }.freeze
 
@@ -77,6 +81,7 @@ class StaffRolePolicy
     "api/v1/admin/employee_hours_evidence" => :payroll_operations,
     "api/v1/admin/employee_notes" => :payroll_operations,
     "api/v1/admin/organizations" => :manage_platform,
+    "api/v1/admin/employee_app_switches" => :manage_employee_app_switch,
     "api/v1/admin/users" => :manage_organization,
     "api/v1/admin/user_invitations" => :manage_organization,
     "api/v1/admin/company_assignments" => :manage_organization,

@@ -80,6 +80,9 @@ module ClientOperatingProfiles
 
         if OperatingProfileCatalog.locked_milestone_for(entry) &&
             (!OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS.include?(entry.id) || @changes.fetch(entry.id) != false)
+          if EmployeeAppSwitch::KEYS.include?(entry.id)
+            raise Invalid, "#{entry.label} is locked here. Turn it on from the Employee app switch screen."
+          end
           raise Invalid, "#{entry.label} is locked until its milestone launches."
         end
       end
@@ -96,7 +99,9 @@ module ClientOperatingProfiles
     def save_profile!(previous, amend:)
       before = OperatingProfileCatalog.values_for(previous)
       after = before.merge(@changes)
-      if OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS.any? { |key| after[key] != false }
+      # A switch the Employee app switch turned on (M4-9d) may stay on through
+      # an ordinary profile edit; every other forthcoming switch stays off.
+      if OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS.any? { |key| after[key] != false && !switch_kept_on?(key, before, after) }
         raise Invalid, "All forthcoming feature switches must be off."
       end
       errors = OperatingProfileCatalog.change_errors(after)
@@ -121,6 +126,10 @@ module ClientOperatingProfiles
         }
       )
       profile
+    end
+
+    def switch_kept_on?(key, before, after)
+      EmployeeAppSwitch::KEYS.include?(key) && before[key] == true && after[key] == true
     end
 
     def append_profile!(previous, attributes)

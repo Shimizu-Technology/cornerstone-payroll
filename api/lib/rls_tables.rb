@@ -63,7 +63,7 @@ module RlsTables
 
   RLS_EXEMPT_TABLES = %w[
     cable_connection_tickets client_profitability_settings companies company_assignments
-    employee_placeholder_emails
+    employee_app_early_access_windows employee_placeholder_emails
     expense_artifacts expense_payments expense_vendors expenses filing_submitters finance_api_requests
     finance_api_tokens finance_books invoice_artifacts invoice_billing_profiles invoice_chat_messages
     invoice_chat_sessions invoice_credit_notes invoice_deliveries invoice_events invoice_line_items
@@ -74,7 +74,8 @@ module RlsTables
   ].freeze
 
   RLS_GLOBAL_TABLES = %w[
-    annual_retirement_limits annual_tax_configs delivery_disclosures email_provider_events filing_status_configs information_return_thresholds
+    annual_retirement_limits annual_tax_configs delivery_disclosures email_provider_events employee_service_observations
+    employee_terms_versions filing_status_configs information_return_thresholds
     operational_queue_probes solid_queue_blocked_executions solid_queue_claimed_executions
     solid_queue_failed_executions solid_queue_jobs solid_queue_pauses solid_queue_processes
     solid_queue_ready_executions solid_queue_recurring_executions solid_queue_recurring_tasks

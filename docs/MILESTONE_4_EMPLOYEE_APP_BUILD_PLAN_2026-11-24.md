@@ -451,7 +451,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
     - the `employee_web` service healthy;
     - counsel text loaded for any terms or consent screen that's shown.
     
-    The setting screen lists any failing check by name.
+    The setting screen lists any failing check by name. (Built in M4-9d: `docs/rollout/M4_EMPLOYEE_APP_SWITCH.md`.)
 - **Depends on:** M4-1, M4-2 and M4-3. The view-only employee screens also need M4-8, so that part can ship as its own PR.
 
 ### M4-10 Platform: employee site and service

@@ -18,6 +18,12 @@ module DemoOutbound
   # Reserved names (RFC 2606) never deliver, so a demo record may hold them.
   NON_DELIVERING_DOMAIN = /\.(example|test|invalid)\z/
   SCOPE_KEY = :demo_outbound_company_id
+  # Employee app mail and sign-up steps. For a demo these go out only while
+  # that demo's employee app is on, so the demo kill switch (M4-9d), which
+  # turns it off, also stops every queued or retried employee notification.
+  EMPLOYEE_CHANNELS = %w[
+    employee_link_invite employee_link_claim employee_link_activation employee_link_bind employee_tax_form_notice
+  ].freeze
 
   module_function
 
@@ -47,6 +53,11 @@ module DemoOutbound
   # logged and audited, and the caller must not send.
   def permit?(company:, email:, channel:, user: nil)
     return true unless demo_target?(company, user)
+
+    if EMPLOYEE_CHANNELS.include?(channel.to_s) && !employee_app_open?(company&.demo? ? company : demo_company_for(user))
+      refuse!(company: company || demo_company_for(user), email: email, channel: channel, user: user, reason: "employee_app_off")
+      return false
+    end
     return true if allowed?(email)
 
     refuse!(company: company || demo_company_for(user), email: email, channel: channel, user: user)
@@ -126,7 +137,17 @@ module DemoOutbound
     Array(filtered[:to]).any? ? filtered : nil
   end
 
-  def refuse!(company:, email:, channel:, user: nil)
+  # Fails closed: an unreadable profile counts as off.
+  def employee_app_open?(company)
+    return false unless company
+
+    CompanyFeatures.for(company).employee_portal_enabled?
+  rescue StandardError => error
+    Rails.logger.warn("[DemoOutbound] employee app state unavailable: #{error.class}")
+    false
+  end
+
+  def refuse!(company:, email:, channel:, user: nil, reason: nil)
     address = normalize(email)
     domain = address&.split("@", 2)&.last
     digest = address && Digest::SHA256.hexdigest(address)
@@ -140,7 +161,8 @@ module DemoOutbound
       Current.set(domain_audit_recorded: nil) do
         AuditLog.record!(actor: actor, organization_id: company.organization_id, company_id: company.id,
           action: "outbound#recipient_refused", record_type: "Company", record_id: company.id,
-          metadata: { channel: channel, recipient_domain: domain, recipient_digest: digest, user_id: user&.id },
+          metadata: { channel: channel, recipient_domain: domain, recipient_digest: digest, user_id: user&.id }
+            .merge(reason ? { reason: reason } : {}),
           event_category: "security")
       end
     end
