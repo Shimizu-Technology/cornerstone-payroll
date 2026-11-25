@@ -183,9 +183,10 @@ export function PrivacyPolicy() {
       <LegalSection id="choices" title="Your choices">
         <LegalList>
           <li>
-            <strong>Employees:</strong> your employer controls your payroll record. To see or correct your information, ask
-            your employer first. You can also contact us or Cornerstone, and we will work with your employer on the
-            request.
+            <strong>Employees:</strong> your employer controls your payroll record. To see or correct your information,
+            contact your employer using the contacts listed in the Employee App’s Help section, or ask your manager.
+            Your employer can put you in touch with Cornerstone if needed. To correct your legal name or Social Security
+            number, ask your manager to put you in touch with Cornerstone.
           </li>
           <li>
             <strong>People who sign in:</strong> you can ask us to correct your account details or close your account.
