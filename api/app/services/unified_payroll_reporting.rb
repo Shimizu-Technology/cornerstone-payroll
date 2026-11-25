@@ -3,6 +3,8 @@
 class UnifiedPayrollReporting
   SOURCE_STATEMENT = "QuickBooks source values remain authoritative locked snapshots and were not recalculated. Recorded ledger adjustments are shown separately and never rewrite the source."
   EMPLOYER_SOCIAL_SECURITY = /\A(?:SS|Social Security(?: Employer)?|Employer Social Security)\z/i
+  REGULAR_HOURS = /\A(?:regular|hourly)\b/i
+  OVERTIME_HOURS = /overtime|\bot\b/i
   EMPLOYER_MEDICARE = /\A(?:Med|Medicare(?: Employer)?|Employer Medicare)\z/i
 
   def initialize(company_id:, period:)
@@ -26,6 +28,22 @@ class UnifiedPayrollReporting
     scope = locked_adjustment_scope.where(effective_pay_date: @period.range)
     scope = scope.where(historical_paychecks: { employee_id: employee_id }) if employee_id
     scope.chronological.to_a
+  end
+
+  def historical_tax_exclusion_note
+    paychecks = historical_scope.pluck(:federal_income_tax, :gross_pay)
+    adjustments = locked_adjustment_scope.where(effective_pay_date: @period.range)
+      .pluck(:federal_income_tax, :gross_pay)
+    amounts = paychecks + adjustments
+    return if amounts.empty?
+
+    fit = amounts.sum(0.to_d) { |withholding, _| withholding.to_d }
+    wages = amounts.sum(0.to_d) { |_, gross_pay| gross_pay.to_d }
+    note = "Imported QuickBooks/prior-provider payroll is not included."
+    excluded = []
+    excluded << "#{ActiveSupport::NumberHelper.number_to_currency(fit)} in FIT" unless fit.zero?
+    excluded << "#{ActiveSupport::NumberHelper.number_to_currency(wages)} in gross wages" unless wages.zero?
+    excluded.empty? ? note : "#{note} Excluded #{excluded.to_sentence}."
   end
 
   # The same eligible imported paychecks as historical_paychecks /
@@ -52,8 +70,9 @@ class UnifiedPayrollReporting
       payroll_count: row.fetch(:payroll_count, 0).to_i + regular_period_count(paychecks),
       imported_payroll_count: regular_period_count(paychecks),
       imported_opening_summary_count: opening_summary_count(paychecks),
-      total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
-      total_overtime_hours: (row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours].to_d).round(2).to_f,
+      total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
+      combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
+      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
@@ -71,7 +90,7 @@ class UnifiedPayrollReporting
       employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
       employer_taxes_and_contributions_total: row.fetch(:employer_taxes_and_contributions_total, 0).to_f + totals[:employer_taxes_and_contributions_total],
       employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
-      withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
+      withholding_tax: row.fetch(:withholding_tax, 0).to_d + totals[:withholding_tax],
       social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
       medicare_tax: row.fetch(:medicare_tax, 0).to_f + totals[:medicare_tax],
       retirement: row.fetch(:retirement, 0).to_f + totals[:retirement],
@@ -86,8 +105,9 @@ class UnifiedPayrollReporting
   def add_historical_to_company_totals(row, paychecks, adjustments = [], native_employee_ids:)
     totals = historical_totals(paychecks, adjustments)
     row.merge(
-      total_hours: row.fetch(:total_hours, 0).to_f + totals[:total_hours],
-      total_overtime_hours: (row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours].to_d).round(2).to_f,
+      total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
+      combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
+      total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
       gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
       bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
@@ -105,7 +125,7 @@ class UnifiedPayrollReporting
       employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
       employer_taxes_and_contributions_total: row.fetch(:employer_taxes_and_contributions_total, 0).to_f + totals[:employer_taxes_and_contributions_total],
       employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
-      withholding_tax: row.fetch(:withholding_tax, 0).to_f + totals[:withholding_tax],
+      withholding_tax: row.fetch(:withholding_tax, 0).to_d + totals[:withholding_tax],
       social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
       medicare_tax: row.fetch(:medicare_tax, 0).to_f + totals[:medicare_tax],
       retirement: row.fetch(:retirement, 0).to_f + totals[:retirement],
@@ -173,8 +193,9 @@ class UnifiedPayrollReporting
       pay_date: paycheck.pay_date,
       period_description: paycheck.historical_pay_period.source_label,
       scheduled_hours: nil,
-      hours_worked: paycheck.hours_total.to_f,
-      overtime_hours: nil,
+      hours_worked: recorded_hours_component(paycheck, REGULAR_HOURS)&.to_f,
+      total_hours: paycheck.hours_total.to_f,
+      overtime_hours: recorded_hours_component(paycheck, OVERTIME_HOURS)&.to_f,
       holiday_hours: nil,
       pto_hours: nil,
       reported_tips: totals[:tips],
@@ -215,7 +236,8 @@ class UnifiedPayrollReporting
       pay_date: adjustment.effective_pay_date,
       period_description: "Historical #{adjustment.kind} · #{paycheck.historical_pay_period.source_label}",
       scheduled_hours: nil,
-      hours_worked: adjustment.hours_total.to_f,
+      hours_worked: nil,
+      total_hours: adjustment.hours_total.to_f,
       overtime_hours: nil,
       holiday_hours: nil,
       pto_hours: nil,
@@ -315,8 +337,9 @@ class UnifiedPayrollReporting
     employer_contribution_totals = historical_employer_contribution_totals(rows)
     employer_contributions = sum(rows, :employer_contributions)
     {
-      total_hours: sum(rows, :hours_total),
-      total_overtime_hours: component_sum(paychecks, :hours_breakdown, /\A(?:OT|Overtime(?: Pay)?)\z/i),
+      total_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, REGULAR_HOURS).to_d },
+      combined_hours: rows.sum(0.to_d) { |row| row.hours_total.to_d },
+      total_overtime_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, OVERTIME_HOURS).to_d },
       gross_pay: sum(rows, :gross_pay),
       bonus: component_sum(rows, :earnings_breakdown, /bonus/i),
       employer_social_security_tax: employer_social_security_tax,
@@ -329,7 +352,7 @@ class UnifiedPayrollReporting
       employer_contributions: employer_contributions,
       employer_taxes_and_contributions_total: (employer_taxes_total + employer_contributions).round(2),
       employer_payroll_cost: sum(rows, :total_payroll_cost),
-      withholding_tax: sum(rows, :federal_income_tax),
+      withholding_tax: rows.sum(0.to_d) { |row| row.federal_income_tax.to_d },
       social_security_tax: sum(rows, :social_security_tax),
       medicare_tax: sum(rows, :medicare_tax),
       retirement: classified_deduction_sum(rows, "retirement", [ [ :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX ] ]),
@@ -365,13 +388,19 @@ class UnifiedPayrollReporting
   end
 
   def component_sum(paychecks, field, pattern)
-    paychecks.sum(0.to_d) do |paycheck|
-      Array(paycheck.public_send(field)).sum(0.to_d) do |entry|
-        component = entry.to_h.with_indifferent_access
-        amount = BigDecimal(component[:amount].to_s, exception: false) || 0.to_d
-        component[:label].to_s.match?(pattern) ? amount : 0.to_d
-      end
-    end.to_f
+    paychecks.sum(0.to_d) { |paycheck| matching_component_amounts(paycheck.public_send(field), pattern).sum(0.to_d) }.to_f
+  end
+
+  def recorded_hours_component(paycheck, pattern)
+    amounts = matching_component_amounts(paycheck.hours_breakdown, pattern)
+    amounts.sum(0.to_d) if amounts.any?
+  end
+
+  def matching_component_amounts(components, pattern)
+    Array(components).filter_map do |entry|
+      component = entry.to_h.with_indifferent_access
+      BigDecimal(component[:amount].to_s, exception: false) if component[:label].to_s.match?(pattern)
+    end
   end
 
   def historical_employer_contribution_totals(rows)
