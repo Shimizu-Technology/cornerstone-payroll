@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_060500) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_060600) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1074,12 +1074,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_060500) do
     t.string "job_id", limit: 64
     t.string "kind", limit: 20, null: false
     t.string "last_error", limit: 200
+    t.string "lease_token", limit: 64
     t.datetime "leased_until"
     t.bigint "organization_id", null: false
     t.string "outcome", limit: 40
     t.datetime "requested_at", null: false
     t.bigint "requested_by_id"
     t.string "source", limit: 40, null: false
+    t.datetime "submitted_at"
     t.string "target", limit: 255, null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id"
