@@ -7,6 +7,11 @@ module Api
         SENSITIVE_PAYLOAD_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
 
         before_action :set_change_request, only: [ :show, :approve, :reject ]
+
+        rescue_from EmployeeChangeRequest::Cancelled do |error|
+          render json: { error: error.message }, status: :conflict
+        end
+
         rescue_from EmployeeProfileIdentity::LinkCheckUnavailable do |error|
           render json: { error: error.message }, status: :service_unavailable
         end
@@ -95,6 +100,7 @@ module Api
             status: change_request.status,
             request_kind: change_request.request_kind,
             profile_address: change_request.profile_address?,
+            note_visible_to_employee: change_request.requested_by_link_id.present?,
             employee_id: change_request.employee_id,
             employee_name: change_request.employee.full_name,
             requested_by_id: change_request.requested_by_id,

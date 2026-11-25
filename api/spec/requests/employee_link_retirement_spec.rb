@@ -46,7 +46,7 @@ RSpec.describe "Employee link retirement", type: :request do
 
   describe "termination" do
     it "makes the link former with termination date + 2 years by default, keeps read-only access and the staff audit" do
-      expect(context_status).to eq(204)
+      expect(context_status).to eq(200)
       termination = PayrollBusinessClock.today - 10
 
       terminate!(on: termination)
@@ -56,7 +56,7 @@ RSpec.describe "Employee link retirement", type: :request do
       expect(link_audits(link, "made_former").sole).to have_attributes(user_id: staff.id, company_id: company.id)
       expect(AuditLog.where(action: "employees#terminate", record_id: employee.id).count).to eq(1)
       expect(worker.reload).to be_active
-      expect(context_status).to eq(204)
+      expect(context_status).to eq(200)
     end
 
     it "uses the company's own former_access_years" do
@@ -143,7 +143,7 @@ RSpec.describe "Employee link retirement", type: :request do
 
       expect(link.reload).to be_revoked
       expect(worker.reload).to be_active
-      expect(context_status(for_link: other_link)).to eq(204)
+      expect(context_status(for_link: other_link)).to eq(200)
     end
 
     it "never deactivates a staff or client login, only its link" do
@@ -160,7 +160,7 @@ RSpec.describe "Employee link retirement", type: :request do
 
   describe "staff revoke" do
     it "records who, why and when, ends access on the next request and signs the person out" do
-      expect(context_status).to eq(204)
+      expect(context_status).to eq(200)
       clear_enqueued_jobs
 
       as_staff_in(company) { EmployeeLinks::Revoke.call(link: link, actor: staff, reason: "Lost phone, reported by manager") }
@@ -275,7 +275,7 @@ RSpec.describe "Employee link retirement", type: :request do
       expect(link.reload).to be_revoked
       expect(link_audits(invite.link, "reactivated").sole.user_id).to eq(worker.id)
       expect(AuditLog.where(action: "authentication#employee_login_reactivated", record_id: worker.id).count).to eq(1)
-      expect(context_status(for_link: invite.link)).to eq(204)
+      expect(context_status(for_link: invite.link)).to eq(200)
       expect(context_status).to eq(404)
     end
 

@@ -580,6 +580,39 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "isolates emergency contacts and enforces employee ownership" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company, other_company = create(:company), create(:company)
+          attrs = { name: "Example Contact", phone: "+16715550100" }
+          own, foreign = TenantScope.as_system(reason: "Create emergency contact RLS fixtures") do
+            contacts = [ company, other_company ].map do |owner|
+              EmployeeEmergencyContact.create!(company: owner, employee: create(:employee, company: owner), **attrs)
+            end
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeEmergencyContact.create!(company: company, employee_id: contacts.last.employee_id, **attrs)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            setup_step_three(connection, tables: %w[employee_emergency_contacts])
+            contacts
+          end
+
+          TenantScope.with_company(company.id) do
+            expect(EmployeeEmergencyContact.order(:id).pluck(:id)).to eq([ own.id ])
+            expect(EmployeeEmergencyContact.where(id: foreign.id).update_all(name: "Changed")).to eq(0)
+            expect(EmployeeEmergencyContact.where(id: foreign.id).delete_all).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeEmergencyContact.insert_all!([ attrs.merge(company_id: other_company.id, employee_id: foreign.employee_id) ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     it "isolates payroll contact confirmations and rejects a mismatched employee company" do
       pool.with_connection do |connection|
         connection.transaction do
