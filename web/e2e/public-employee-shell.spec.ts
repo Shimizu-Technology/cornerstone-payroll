@@ -297,15 +297,24 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       await expect(page.getByRole('heading', { level: 1, name: 'Welcome' })).toBeVisible();
     });
 
-    test('without branding the app uses a neutral Cornerstone Payroll brand', async ({ page }) => {
-      await mockApi(page, { branding: (route) => route.fulfill({ status: 500 }) });
-      await page.goto(`/?${tenant}`);
+    test('the shared host uses a neutral Cornerstone Payroll brand', async ({ page }) => {
+      await page.goto('/');
 
       await expect(page.getByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeVisible();
       await expect(page.getByText('See your pay stubs and tax forms any time.')).toBeVisible();
       await expect(page.getByText("First time here? Your manager will send you a link to set up your account.")).toBeVisible();
       expect(await page.getByRole('link', { name: 'Sign in' }).evaluate((node) => getComputedStyle(node).backgroundColor)).toBe('rgb(25, 75, 170)');
       await snap(page, `${tag}-12-fallback-brand`);
+    });
+
+    test('an unavailable tenant shows employer guidance before sign-in', async ({ page }) => {
+      await mockApi(page, { branding: (route) => route.fulfill({ status: 404 }) });
+      await page.goto('/sign-in?tenantHost=example-employer.shimizu-technology.com');
+
+      await expect(page.getByRole('heading', { name: "This employee app isn't available yet" })).toBeVisible();
+      await expect(page.getByText('If you were expecting access, contact your employer.')).toBeVisible();
+      await expect(page.getByTestId('dev-preview-sign-in')).toHaveCount(0);
+      await expectNoHorizontalScroll(page);
     });
 
     test('a too-light brand color is darkened so white text stays readable', async ({ page }) => {

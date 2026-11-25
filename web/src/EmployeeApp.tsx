@@ -14,7 +14,7 @@ import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
 import { SignOutProvider } from './employee/SignOut';
 import {
-  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, TwoStepScreen, UnavailableScreen,
+  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, TenantUnavailableScreen, TwoStepScreen, UnavailableScreen,
 } from './employee/StateScreens';
 import { HelpTab } from './employee/help';
 import { MyInfoTab } from './employee/myinfo';
@@ -33,22 +33,21 @@ import './employee/employee.css';
 
 const BRANDING_TIMEOUT_MS = 6000;
 
-function useTenantBrand(): EmployeeBrand | null {
-  const [brand, setBrand] = useState<EmployeeBrand | null>(() => (TENANT_HOST ? null : brandFrom(null)));
+function useTenantBrand(): EmployeeBrand | null | undefined {
+  const [brand, setBrand] = useState<EmployeeBrand | null | undefined>(() => TENANT_HOST ? undefined : brandFrom(null));
   useEffect(() => {
     if (!TENANT_HOST) return;
-    // A cleanup abort (unmount, or StrictMode's second mount) must never set
-    // the fallback brand. The timeout's abort still does, so the app opens.
-    let cancelled = false;
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), BRANDING_TIMEOUT_MS);
+    const timer = window.setTimeout(() => {
+      controller.abort();
+      setBrand(null);
+    }, BRANDING_TIMEOUT_MS);
     void fetchTenantBranding(TENANT_HOST, { baseUrl: API_BASE_URL, signal: controller.signal })
       .then((branding) => {
-        if (!cancelled) setBrand(brandFrom(branding));
+        if (!controller.signal.aborted) setBrand(branding ? brandFrom(branding) : null);
       })
       .finally(() => window.clearTimeout(timer));
     return () => {
-      cancelled = true;
       window.clearTimeout(timer);
       controller.abort();
     };
@@ -117,9 +116,8 @@ function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactEl
 const SIGN_UP_PATHS = new Set(['/activate', '/sign-up', '/sign-up/done', '/claim', '/add-access', '/reactivate']);
 
 function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
-  const { isLoaded, isSignedIn } = useEmployeeAuth();
+  const { isSignedIn } = useEmployeeAuth();
   const location = useLocation();
-  if (!isLoaded) return <BootScreen />;
 
   const path = location.pathname.replace(/\/+$/, '') || '/';
   if (supportToken) return isSignedIn ? <EmployeeSupportView token={supportToken} /> : <SupportSignIn />;
@@ -208,7 +206,10 @@ const PREVIEW_VIEW_AS = import.meta.env.DEV && typeof window !== 'undefined'
 export default function EmployeeApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
   const brand = useTenantBrand();
   const grant = viewAs ?? (PREVIEW_VIEW_AS ? { name: PREVIEW_VIEW_AS, minutesLeft: 27, onEnd: () => window.location.assign('/') } : null);
-  if (!brand) return <BootScreen />;
+  if (brand === undefined) return <BootScreen />;
+  if (brand === null) {
+    return <div className="employee-app"><TenantUnavailableScreen /></div>;
+  }
   const style = brandStyle(brand) as CSSProperties;
   return (
     <BrandContext.Provider value={brand}>
