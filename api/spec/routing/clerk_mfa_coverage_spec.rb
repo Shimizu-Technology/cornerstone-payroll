@@ -8,6 +8,7 @@ RSpec.describe "Clerk MFA route coverage" do
       rails/health
       health/dependencies
       api/v1/public/tenant_branding
+      api/v1/public/employee_terms
       api/v1/employee_portal/activations
       api/v1/finance/access
       api/v1/integrations/aire/events

@@ -104,7 +104,13 @@ function IdentityFields({ draft, setDraft, problems, token }: { draft: IdentityD
   );
 }
 
-function TermsCheckbox({ terms, checked, onChange, error }: { terms: EmployeeTerms | null | undefined; checked: boolean; onChange: (checked: boolean) => void; error?: string | null }): ReactElement | null {
+function TermsCheckbox({ terms, loadFailed, reload, checked, onChange, error }: { loadFailed: boolean; reload: () => void; terms: EmployeeTerms | null | undefined; checked: boolean; onChange: (checked: boolean) => void; error?: string | null }): ReactElement | null {
+  if (loadFailed) return (
+    <>
+      <FormMessage tone="bad">Couldn’t load the Employee App Terms. Please try again.</FormMessage>
+      <EmpButton type="button" onClick={reload}>Retry loading terms</EmpButton>
+    </>
+  );
   if (!terms) return <FormMessage tone={terms === null ? 'bad' : 'info'}>{terms === null ? 'Sign-up is unavailable right now. Reload to try again, or contact your manager.' : 'Loading the Employee App Terms…'}</FormMessage>;
   return (
     <div className="emp-field">
@@ -252,7 +258,7 @@ export function ActivateScreen(): ReactElement {
   const [email, setEmail] = useState('');
   const [useForNotices, setUseForNotices] = useState(false);
   const [agreed, setAgreed] = useState(false);
-  const { terms, reload } = useEmployeeTerms();
+  const { terms, loadFailed, reload } = useEmployeeTerms();
   const [emailProblems, setEmailProblems] = useState<{ email?: string; terms?: string }>({});
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -346,7 +352,7 @@ export function ActivateScreen(): ReactElement {
               If you leave this off, notices go to the email {company} has on file for you. If there isn't one, they come here.
             </p>
           </div>
-          <TermsCheckbox terms={terms} checked={agreed} onChange={setAgreed} error={emailProblems.terms} />
+          <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={emailProblems.terms} />
           <FailureMessage failure={failure} />
           <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? 'Opening…' : 'Create account'}</EmpButton>
           <p className="emp-hint text-center">Next you'll choose a password, or use Google or an emailed code.</p>
@@ -465,7 +471,7 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
   const [draft, setDraft] = useState<IdentityDraft>(EMPTY_DRAFT);
   const [problems, setProblems] = useState<IdentityProblems & { terms?: string }>({});
   const [agreed, setAgreed] = useState(false);
-  const { terms, reload } = useEmployeeTerms();
+  const { terms, loadFailed, reload } = useEmployeeTerms();
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   useDocumentTitle(copy.title);
@@ -505,7 +511,7 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
           <p className="emp-lead">{copy.lead(company)}</p>
         </div>
         <IdentityFields draft={draft} setDraft={setDraft} problems={problems} token={token} />
-        <TermsCheckbox terms={terms} checked={agreed} onChange={setAgreed} error={problems.terms} />
+        <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={problems.terms} />
         <FailureMessage failure={failure} cancelledText={copy.cancelled} />
         <p className="emp-hint">To keep your pay private, we'll ask you to confirm it's you with your password or a code.</p>
         <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? copy.working : copy.button}</EmpButton>
