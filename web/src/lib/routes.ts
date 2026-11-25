@@ -156,7 +156,11 @@ export function safeInternalReturnPath(value: string | null, fallback: string): 
     const internalOrigin = 'https://cornerstone-payroll.local';
     const parsed = new URL(value, internalOrigin);
     if (parsed.origin !== internalOrigin) return fallback;
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    // Dot segments can normalize to `//host`, which a router treats as external.
+    const path = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    if (/^\/[/\\]/.test(parsed.pathname) || /^\/[/\\]/.test(decodeURIComponent(parsed.pathname))) return fallback;
+    if (new URL(path, internalOrigin).origin !== internalOrigin) return fallback;
+    return path;
   } catch {
     return fallback;
   }

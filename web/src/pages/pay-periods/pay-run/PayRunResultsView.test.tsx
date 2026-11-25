@@ -93,6 +93,8 @@ it.each([
 
 it('flags a new hire whose documents still block approval', (): void => {
   render(<MemoryRouter><PayRunResultsView {...props} payPeriod={{ ...props.payPeriod, status: 'calculated', new_hire_document_gaps: [{ employee_id: 7, employee_name: 'Maya Manual', missing: ['Identity and work authorization', 'Signed withholding election'] }] }} /></MemoryRouter>);
-  expect(within(screen.getByRole('row', { name: /Maya Manual/ })).getByText(/2 documents needed/)).toBeTruthy();
-  expect(within(screen.getByRole('region', { name: 'Payroll result for Maya Manual' })).getByText(/2 documents needed/)).toBeTruthy();
+  const documentsHref = '/companies/1/employees/7/edit?return_to=%2Fcompanies%2F1%2Fpay-runs%2F2%2Fwork#employee-documents';
+  const name = '2 documents needed for Maya Manual: open documents';
+  expect(within(screen.getByRole('row', { name: /Maya Manual/ })).getByRole('link', { name }).getAttribute('href')).toBe(documentsHref);
+  expect(within(screen.getByRole('region', { name: 'Payroll result for Maya Manual' })).getByRole('link', { name }).getAttribute('href')).toBe(documentsHref);
 });
