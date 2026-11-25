@@ -11,8 +11,9 @@ module EmployeeAppSwitch
   #
   # The service itself requires what turning on needs, so no caller can skip
   # it: the actor's verified session claims (session_claims:, the Clerk
-  # token payload) must show a second factor verified within the step-up
-  # window, and the readiness checks are always built here, never passed in.
+  # token payload) must pass MfaPolicy's step-up check (a second factor with
+  # REQUIRE_MFA on, a first factor while it's off) within the step-up window,
+  # and the readiness checks are always built here, never passed in.
   class Update
     attr_reader :company, :actor
 
@@ -38,7 +39,7 @@ module EmployeeAppSwitch
     end
 
     # Raises NotReady before anything is locked or written, so the screen can
-    # list the failing checks without asking for a fresh second factor first.
+    # list the failing checks without asking for a fresh step-up first.
     def preflight!
       reason = EmployeeAppSwitch.reason!(@raw_reason)
       authorize!(actor)
@@ -84,7 +85,7 @@ module EmployeeAppSwitch
     end
 
     def require_step_up!
-      raise StepUpRequired unless MfaPolicy.recently_verified_second_factor?(@session_claims)
+      raise StepUpRequired unless MfaPolicy.recently_step_up_verified?(@session_claims)
     end
 
     def authorize!(user)

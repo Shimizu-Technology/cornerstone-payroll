@@ -134,6 +134,11 @@ class ProductionReadiness
 
   # The employee service's own configuration checks, without the live
   # dependency probes. Empty on any other process role (M4-9d observation).
+  # This is what the signed attestation's service_checks_passed covers, so
+  # only what running the employee service needs belongs here: not the MFA
+  # checks (the switch's own mfa check reads require_mfa and the evidence
+  # separately, and intentionally-off MFA isn't a sick service), and not the
+  # payroll tax-table checks, which are about running payroll on Payroll web.
   def employee_service_checks
     employee_web_checks
   end
@@ -221,7 +226,7 @@ class ProductionReadiness
       check("Solid Cache is the effective cache store") { Array(config.cache_store).first.to_sym == :solid_cache_store },
       check("Solid Queue is the effective job adapter") { job_adapter.class.name.include?("SolidQueue") },
       check("Solid Cable is the effective cable adapter") { cable_adapter == "solid_cable" },
-      check("MFA enforcement has instance-bound evidence") { mfa_attestation_recorded? },
+      mfa_check("MFA enforcement has instance-bound evidence") { mfa_attestation_recorded? },
       check("effective trusted proxies reject arbitrary public clients") { trusted_proxies_are_bounded? },
       check("shared rate-limit store is configured for split or multi-worker web") do
         shared_required = env.fetch("WEB_CONCURRENCY", "1").to_i > 1 ||
@@ -293,9 +298,11 @@ class ProductionReadiness
       check("Solid Cable database accepts a query") { select_one(cable_record) },
       check("R2 upload/read/delete round trip succeeds") { r2_round_trip },
       check("Resend API key and every application sender domain are ready") { resend_ready? },
-      check("Clerk Backend API accepts the configured key and matches MFA evidence") { clerk_ready? },
+      clerk_backend_check,
       check("Clerk session token includes the MFA enrollment claim") { clerk_mfa_sample_ready?(jwks_cache: jwks_cache) },
-      check("Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim") { clerk_mfa_sample_token_valid?(jwks_cache: jwks_cache) },
+      mfa_check("Pre-flip MFA check: Clerk session token includes boolean two_factor_enabled claim") do
+        clerk_mfa_sample_token_valid?(jwks_cache: jwks_cache)
+      end,
       check("time tracking destinations resolve only to public addresses") { time_tracking_destinations_resolve? }
     ] + shared_rate_limit_live_checks
   end
@@ -313,6 +320,37 @@ class ProductionReadiness
     Check.new(name: name, passed: passed, detail: passed ? "verified" : "not verified")
   rescue StandardError => e
     Check.new(name: name, passed: false, detail: "#{e.class.name} while verifying")
+  end
+
+  MFA_OFF_DETAIL = "MFA is intentionally off (REQUIRE_MFA is not true) pending the Clerk Pro rollout; " \
+    "this is a hard check once REQUIRE_MFA=true (docs/rollout/MFA_ROLLOUT_RUNBOOK.md)"
+
+  # A check that only matters once two-step sign-in is required: an advisory
+  # WARN while REQUIRE_MFA is off, a FAIL again when it's on.
+  def mfa_check(name, &block)
+    result = check(name, &block)
+    return result if result.passed || MfaPolicy.enabled?(env: env)
+
+    Check.new(name: name, passed: false, advisory: true, detail: "#{MFA_OFF_DETAIL} (#{result.detail})")
+  end
+
+  # The Clerk key itself must work either way; only the match with the MFA
+  # evidence waits for REQUIRE_MFA.
+  def clerk_backend_check
+    name = "Clerk Backend API accepts the configured key and matches MFA evidence"
+    return check(name) { clerk_ready? } if MfaPolicy.enabled?(env: env)
+
+    instance_id = nil
+    accepted = check(name) do
+      status, body = clerk_instance
+      instance_id = body["id"] if status == 200 && body.is_a?(Hash)
+      instance_id.present?
+    end
+    return accepted unless accepted.passed
+    return accepted if instance_id == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
+
+    Check.new(name: name, passed: false, advisory: true,
+      detail: "#{MFA_OFF_DETAIL} (key accepted; instance doesn't match CLERK_MFA_ATTESTED_INSTANCE_ID yet)")
   end
 
   def trusted_proxies_are_bounded?
@@ -430,8 +468,12 @@ class ProductionReadiness
     sender_emails.all? { |email| ready_domains.include?(sender_domain(email)) }
   end
 
+  def clerk_instance
+    http_get.call(URI("https://api.clerk.com/v1/instance"), env.fetch("CLERK_SECRET_KEY"))
+  end
+
   def clerk_ready?
-    status, body = http_get.call(URI("https://api.clerk.com/v1/instance"), env.fetch("CLERK_SECRET_KEY"))
+    status, body = clerk_instance
     status == 200 &&
       body["id"].present? &&
       body["id"] == env["CLERK_MFA_ATTESTED_INSTANCE_ID"].to_s.strip
