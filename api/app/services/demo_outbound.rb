@@ -70,8 +70,19 @@ module DemoOutbound
     return user.company if user.company&.demo?
     return if user.staff_member?
 
+    # Read-only: which demo company, if any, a login is attached to. Callers
+    # run in requests, jobs and binding paths with or without a tenant scope.
+    outside_scope(-> { TenantScope.as_system(reason: "Find the demo company a login belongs to") { demo_company_lookup(user) } }) { demo_company_lookup(user) }
+  end
+
+  def demo_company_lookup(user)
     Company.demo.where(id: EmployeeAccountLink.where(user_id: user.id).select(:company_id))
       .or(Company.demo.where(id: CompanyAssignment.where(user_id: user.id).select(:company_id))).order(:id).first
+  end
+
+  # Enters a scope only when none is active; scopes never nest.
+  def outside_scope(enter)
+    TenantScope.current ? yield : enter.call
   end
 
   def demo_target?(company, user)
@@ -79,10 +90,11 @@ module DemoOutbound
   end
 
   # Marks the code inside the block as sending for this company, so the
-  # transports filter the final recipients too.
+  # transports filter the final recipients too. A nested scope for a non-demo
+  # company keeps an outer demo scope.
   def scoped(company)
     previous = Thread.current[SCOPE_KEY]
-    Thread.current[SCOPE_KEY] = company&.demo? ? company.id : nil
+    Thread.current[SCOPE_KEY] = company.id if company&.demo?
     yield
   ensure
     Thread.current[SCOPE_KEY] = previous
@@ -101,10 +113,11 @@ module DemoOutbound
 
     filtered = payload.dup
     %i[to cc bcc].each do |key|
-      next unless filtered.key?(key) || filtered.key?(key.to_s)
+      # Symbol and string keys are combined, so neither can slip past.
+      values = [ filtered.delete(key), filtered.delete(key.to_s) ].flatten.compact
+      next if values.empty?
 
-      value = filtered.delete(key) || filtered.delete(key.to_s)
-      kept = filter(company: company, emails: value, channel: "mail_transport")
+      kept = filter(company: company, emails: values, channel: "mail_transport").uniq
       filtered[key] = kept if kept.any?
     end
     Array(filtered[:to]).any? ? filtered : nil
@@ -120,7 +133,7 @@ module DemoOutbound
     actor = Current.actor || AuditActor.system_job(name)
     # Senders run in requests, jobs and system sweeps; the refusal is always
     # recorded under the demo company's own tenant scope.
-    TenantScope.with_company(company.id) do
+    record = lambda do
       Current.set(domain_audit_recorded: nil) do
         AuditLog.record!(actor: actor, organization_id: company.organization_id, company_id: company.id,
           action: "outbound#recipient_refused", record_type: "Company", record_id: company.id,
@@ -128,6 +141,7 @@ module DemoOutbound
           event_category: "security")
       end
     end
+    outside_scope(-> { TenantScope.with_company(company.id) { record.call } }) { record.call }
   rescue StandardError => error
     # The refusal stands even if its audit row cannot be written.
     Rails.logger.error("[DemoOutbound] refusal audit failed: #{error.class}")
