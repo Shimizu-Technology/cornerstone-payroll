@@ -9,6 +9,39 @@ module PayrollIntake
       HOURS_PER_WEEK_BEFORE_OT = 40.0
       RECONCILIATION_TOLERANCE = 0.01
 
+      DESCRIPTOR = PayrollIntake::Descriptor.new(
+        key: SOURCE_TYPE,
+        label: SOURCE_LABEL,
+        source_label: SOURCE_LABEL,
+        parser_version: PARSER_VERSION,
+        adapter_class: self,
+        extraction: "text_and_ai",
+        accepts_pasted_text: true,
+        employee_match: "name_fuzzy",
+        idempotency: "files_and_workweek",
+        reports_overtime: false,
+        tips_default: "already_paid_out",
+        overtime_mode: "weekly_split",
+        files: [],
+        portal: { submittable: false, role_map: {} }
+      )
+
+      def self.descriptor
+        DESCRIPTOR
+      end
+
+      def self.source_roles
+        descriptor.source_roles
+      end
+
+      def self.default_required_source_roles
+        descriptor.default_required_source_roles
+      end
+
+      def self.reports_overtime?
+        descriptor.reports_overtime?
+      end
+
       def self.split_for_weekly_hours(week1_hours, week2_hours)
         weeks = [ week1_hours, week2_hours ].map { |value| BigDecimal(value.to_s.presence || "0") }
         regular = weeks.sum { |hours| [ hours, BigDecimal(HOURS_PER_WEEK_BEFORE_OT.to_s) ].min }
