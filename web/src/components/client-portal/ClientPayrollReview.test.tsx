@@ -123,7 +123,7 @@ it('shows honest approval confirmation across queued, sent, and not_sent states'
       onDone={onDone}
     />,
   );
-  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team is being notified by email.');
+  expect(screen.getByRole('status').textContent).toContain('Notification requested for your Cornerstone account team.');
   expect(screen.getByRole('status').textContent).not.toContain('was notified by email');
 
   rerender(
@@ -138,7 +138,7 @@ it('shows honest approval confirmation across queued, sent, and not_sent states'
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was notified by email.');
-  expect(screen.getByRole('status').textContent).not.toContain('being notified by email');
+  expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
 
   rerender(
     <ClientPayrollReview
@@ -152,7 +152,7 @@ it('shows honest approval confirmation across queued, sent, and not_sent states'
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
-  expect(screen.getByRole('status').textContent).not.toContain('being notified by email');
+  expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
 });
 
 it('shows honest change-request confirmation across queued, sent, and not_sent states', () => {
@@ -174,7 +174,7 @@ it('shows honest change-request confirmation across queued, sent, and not_sent s
       onDone={onDone}
     />,
   );
-  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team is being notified by email.');
+  expect(screen.getByRole('status').textContent).toContain('Notification requested for your Cornerstone account team.');
 
   rerender(
     <ClientPayrollReview
@@ -215,5 +215,5 @@ it('shows honest change-request confirmation across queued, sent, and not_sent s
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
-  expect(screen.getByRole('status').textContent).not.toContain('being notified by email');
+  expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
 });
