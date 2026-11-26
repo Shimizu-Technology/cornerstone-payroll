@@ -50,9 +50,9 @@ RSpec.describe "Payroll intake golden files", type: :request do
       overtime_hours: overtime, regular_pay: 711.11, overtime_pay: overtime * 30, **extra }
   end
 
-  def pdf_upload(*rows, reported_total_hours: nil)
-    path = build_revel_pdf(rows, period_start: run.start_date, period_end: run.end_date, reported_total_hours: reported_total_hours)
-    portal_upload("revel.pdf", File.binread(path), PDF_MIME)
+  def pdf_upload(*rows, reported_total_hours: nil, filename: "revel.pdf", report_period: [ run.start_date, run.end_date ])
+    path = build_revel_pdf(rows, period_start: report_period.first, period_end: report_period.last, reported_total_hours: reported_total_hours)
+    portal_upload(filename, File.binread(path), PDF_MIME)
   end
 
   def workbook_upload(name)
@@ -68,6 +68,28 @@ RSpec.describe "Payroll intake golden files", type: :request do
 
   def apply_import(data, **options)
     post "/api/v1/admin/pay_periods/#{run.id}/apply_import", params: { import_id: data.fetch("import_id"), **options }, as: :json
+  end
+
+  def set_up_payroll_tax
+    config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: run.pay_date.year)
+    create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+  end
+
+  def decimal_fields(record, *keys)
+    record.merge(record.slice(*keys).transform_values { |value| value&.to_d&.to_s("F") })
+  end
+
+  def saved_payroll(item = run.payroll_items.find_by!(employee: worker))
+    money = %w[reported_tips tips_paid_out loan_deduction bonus]
+    item.attributes.slice("hours_worked", "overtime_hours").transform_values(&:to_f).merge(
+      decimal_fields(item.attributes.slice(*money), *money)
+    )
+  end
+
+  def expect_apply_blocked(data, **options)
+    apply_import(data, **options)
+    expect(response).to have_http_status(:unprocessable_entity), response.body
+    response.parsed_body.fetch("error")
   end
 
   def expect_golden(name, actual)
@@ -87,29 +109,41 @@ RSpec.describe "Payroll intake golden files", type: :request do
     review.slice("can_apply", "pdf_count", "excel_count", "source_warnings", "unmatched_pdf_names", "unmatched_excel_names").merge(
       "source_roles" => data.dig("source_package", "documents").pluck("source_role"),
       "complete" => data.dig("source_package", "complete"),
-      "totals" => retained.totals,
+      "totals" => decimal_fields(retained.totals, "total_reported_tips"),
       "rows" => review.fetch("source_rows").map do |source_row|
         id = source_row.fetch("id")
         row = normalized.fetch(id)
+        inputs = matched[id]&.slice(
+          "total_hours", "workbook_only", "pay_rate", "tips_boh", "tips_foh", "tip_pool",
+          "loan_deduction", "loan_reconciliation_errors", "loan_reconciliation_warnings",
+          "bonus", "period_pay", "payroll_components", "hand_edited_hours"
+        )
         source_row.slice("source_employee_name", "employee_id", "employee_name", "row_kind", "errors", "warnings").merge(
           "status" => row.status,
           "regular_hours" => row.regular_hours.to_f,
           "overtime_hours" => row.overtime_hours.to_f,
-          "reported_tips" => row.reported_tips.to_f,
-          "tips_paid_out" => row.tips_paid_out.to_f,
-          "payroll_inputs" => matched[id]&.slice(
-            "total_hours", "workbook_only", "pay_rate", "tips_boh", "tips_foh", "tip_pool",
-            "loan_deduction", "loan_reconciliation_errors", "loan_reconciliation_warnings",
-            "bonus", "period_pay", "payroll_components", "hand_edited_hours"
-          )
+          "reported_tips" => row.reported_tips.to_s("F"),
+          "tips_paid_out" => row.tips_paid_out.to_s("F"),
+          "payroll_inputs" => inputs && decimal_fields(inputs, "pay_rate", "tips_boh", "tips_foh", "loan_deduction", "bonus", "period_pay")
         )
       end
     )
   end
 
   it "imports a normal v2 period with both tip pools and a typed reimbursement" do
+    set_up_payroll_tax
     data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 75.25, overtime: 1.5)), workbook: workbook_upload("normal"))
-    expect_golden("normal", mosa_preview(data))
+    snapshot = mosa_preview(data)
+    apply_import(data)
+    expect(response).to have_http_status(:ok), response.body
+    item = run.payroll_items.find_by!(employee: worker)
+    earning = item.payroll_item_earnings.find_by!(label: "Fixture supplies")
+    expect(item.payroll_item_field_entries.sole).to have_attributes(tax_treatment: "non_taxable_addition", source: "import")
+    expect(item.net_pay + item.total_deductions - item.gross_pay).to eq(BigDecimal("12.34"))
+    snapshot["saved_payroll"] = saved_payroll(item).merge(
+      "reimbursement" => decimal_fields(earning.attributes.slice("label", "category", "amount"), "amount")
+    )
+    expect_golden("normal", snapshot)
   end
 
   it "keeps the reported overtime split even with a deliberately inconsistent Revel total" do
@@ -134,6 +168,16 @@ RSpec.describe "Payroll intake golden files", type: :request do
     expect_golden("new_hire", mosa_preview(data))
   end
 
+  it "stitches a wrapped Revel name, matches its typo, and takes the filename dates first" do
+    row = revel_row_for(worker, regular: 61.25, name: "Mockbery,\nTestnia")
+    pdf = pdf_upload(row, filename: "payroll_#{run.start_date}_00-00_to_#{run.end_date}_23-59.pdf",
+      report_period: [ run.start_date - 14, run.end_date - 14 ])
+    data = preview(pdf: pdf, workbook: workbook_upload("normal"))
+    snapshot = mosa_preview(data)
+    snapshot["name_review"] = data.fetch("preview").fetch("low_confidence_matches")
+    expect_golden("wrapped_revel_name", snapshot)
+  end
+
   it "explains a terminated employee in both sources without making either row payable" do
     former = create_worker(IntakeGoldenWorkbooks::TERMINATED, status: "terminated", termination_date: run.start_date + 4)
     data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 65), revel_row_for(former, regular: 18)),
@@ -144,30 +188,103 @@ RSpec.describe "Payroll intake golden files", type: :request do
   context "with an offset legal workweek" do
     let(:workweek_start) { (run.start_date.wday + 1) % 7 }
 
-    it "reads the legacy row-4 layout and keeps both the legacy and date warnings" do
-      data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 72)), workbook: workbook_upload("legacy"),
-        tips_paid_out_from_tips: false)
-      expect_golden("legacy", mosa_preview(data))
+    it "requires saved legacy tip treatment before applying a direct loan deduction and clearing an imported bonus" do
+      set_up_payroll_tax
+      prior_amount = BigDecimal("23.75")
+      item = create(:payroll_item, pay_period: run, employee: worker, import_source: "mosa_revel",
+        bonus_source: "mosa_revel", bonus: prior_amount, imported_bonus: prior_amount)
+      data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 72)), workbook: workbook_upload("legacy"))
+      snapshot = mosa_preview(data)
+      snapshot["apply_error"] = expect_apply_blocked(data, tips_paid_out_from_tips: true)
+      expect(item.reload).to have_attributes(bonus: prior_amount, imported_bonus: prior_amount)
+
+      post "/api/v1/admin/pay_periods/#{run.id}/import_tip_treatment", params: {
+        import_id: data.fetch("import_id"), tips_paid_out_from_tips: true
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      apply_import(data)
+      expect(response).to have_http_status(:ok), response.body
+      item.reload
+      snapshot["saved_payroll"] = saved_payroll(item).merge("imported_bonus" => item.imported_bonus.to_s("F"))
+      expect_golden("legacy", snapshot)
     end
   end
 
-  it "previews a PDF alone as an incomplete package" do
+  it "applies a PDF-only package after staff records the missing-workbook waiver" do
+    set_up_payroll_tax
     data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 75.25)))
-    expect_golden("pdf_only", mosa_preview(data))
+    snapshot = mosa_preview(data)
+    snapshot["apply_error"] = expect_apply_blocked(data)
+    expect(run.payroll_items).to be_empty
+    apply_import(data, no_tips_or_loans: true)
+    expect(response).to have_http_status(:ok), response.body
+    record = PayrollImportRecord.find(data.fetch("import_id"))
+    snapshot["source_waiver"] = record.raw_data.fetch("source_waivers").sole.except("user_id", "at")
+    snapshot["saved_payroll"] = saved_payroll
+    expect_golden("pdf_only", snapshot)
   end
 
-  it "previews an unaccompanied workbook with tips but no imported hours" do
+  it "previews a workbook alone and refuses to apply it without Revel hours" do
     data = preview(workbook: workbook_upload("normal"))
-    expect_golden("workbook_only", mosa_preview(data))
+    snapshot = mosa_preview(data)
+    snapshot["apply_error"] = expect_apply_blocked(data, no_tips_or_loans: true)
+    expect(run.payroll_items).to be_empty
+    expect_golden("workbook_only", snapshot)
   end
 
-  it "keeps the amount and scope of one employee's variable period pay" do
-    create_worker(IntakeGoldenWorkbooks::OWNER, employment_type: "salary", salary_type: "variable", pay_rate: 40_000)
-    data = preview(workbook: workbook_upload("owner_period_pay"))
-    expect_golden("owner_period_pay", mosa_preview(data))
+  it "saves an owner's variable period pay and its scope evidence" do
+    set_up_payroll_tax
+    owner = create_worker(IntakeGoldenWorkbooks::OWNER, employment_type: "salary", salary_type: "variable", pay_rate: 40_000)
+    data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 55)), workbook: workbook_upload("owner_period_pay"))
+    snapshot = mosa_preview(data)
+    apply_import(data)
+    expect(response).to have_http_status(:ok), response.body
+    item = run.payroll_items.find_by!(employee: owner)
+    snapshot["saved_payroll"] = saved_payroll(item).merge(
+      "salary_override" => item.salary_override.to_s("F"),
+      "period_pay_evidence" => item.custom_columns_data.fetch("period_pay_evidence")
+    )
+    expect_golden("owner_period_pay", snapshot)
   end
 
-  %w[missing_id_column extra_hour_corrections_sheet loan_totals_mismatch].each do |fixture|
+  it "uses the legacy fallback dates and reconciles an installment to the named loan" do
+    type = DeductionType.create!(company: company, name: "Fixture installment", category: "post_tax", sub_category: "loan", active: true)
+    loan = EmployeeLoan.create!(company: company, employee: worker, deduction_type: type, name: "Fixture installment",
+      original_amount: 120, current_balance: 120, opening_balance: 120, balance_as_of: run.start_date,
+      balance_source: "statement", payment_amount: 25, first_deduction_date: run.pay_date)
+    worker.employee_deductions.create!(deduction_type: type, amount: 25, is_percentage: false, active: true)
+
+    data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 72)), workbook: workbook_upload("legacy_installment"))
+    snapshot = mosa_preview(data)
+    row = data.fetch("preview").fetch("matched").sole
+    match = row.fetch("loan_reconciliation_matches").sole
+    expect(match.fetch("employee_loan_id")).to eq(loan.id)
+    amounts = %w[installment_beginning_balance installment_new_amount installment_payment installment_estimated_ending_balance]
+    snapshot["installment"] = decimal_fields(row.slice(*amounts), *amounts)
+    snapshot["loan_match"] = decimal_fields(match.except("employee_loan_id"), "amount")
+    expect_golden("legacy_installment", snapshot)
+  end
+
+  it "previews the v1 workbook's separate bonus and one-payroll deduction columns" do
+    data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 70)), workbook: workbook_upload("v1"))
+    expect_golden("v1", mosa_preview(data))
+  end
+
+  it "applies a typed bonus and post-tax deduction with the workbook payee" do
+    set_up_payroll_tax
+    data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 70)), workbook: workbook_upload("one_time_components"))
+    snapshot = mosa_preview(data)
+    apply_import(data)
+    expect(response).to have_http_status(:ok), response.body
+    item = run.payroll_items.find_by!(employee: worker)
+    snapshot["saved_components"] = item.payroll_item_field_entries.order(:label).map do |entry|
+      decimal_fields(entry.attributes.slice("label", "kind", "tax_treatment", "amount", "source"), "amount")
+        .merge("payee_name" => entry.metadata["payee_name"])
+    end
+    expect_golden("one_time_components", snapshot)
+  end
+
+  %w[blank_employee_id extra_hour_corrections_sheet loan_totals_mismatch loan_setup_change].each do |fixture|
     it "rejects #{fixture.tr('_', ' ')} before retaining a package" do
       data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 72)), workbook: workbook_upload(fixture))
       expect(response).to have_http_status(:unprocessable_entity)
@@ -177,7 +294,8 @@ RSpec.describe "Payroll intake golden files", type: :request do
     end
   end
 
-  it "opens the current revised portal submission with the prior workbook retained" do
+  it "applies the current portal revision with the retained workbook and audits the import" do
+    set_up_payroll_tax
     client = create(:user, company: company, role: "client")
     period_key = "#{run.start_date}_#{run.end_date}"
     send_revision = lambda do |**params|
@@ -192,18 +310,37 @@ RSpec.describe "Payroll intake golden files", type: :request do
       keep_document_ids: [ workbook.client_document_id ], based_on_revision: first.revision)
 
     data = preview(submission_id: second.id)
-    expect_golden("portal_revision", mosa_preview(data).merge("portal_source" => data.fetch("portal_source").slice("revision", "current", "workbook_choice")))
+    snapshot = mosa_preview(data).merge("portal_source" => data.fetch("portal_source").slice("revision", "current", "workbook_choice"))
     expect(second.submission_documents.find_by!(role: "changes_workbook").sha256).to eq(workbook.sha256)
+    expect(second.period).to be_pending_source_review
+
+    apply_import(data, portal_source_id: data.dig("portal_source", "selection_id"))
+    expect(response).to have_http_status(:ok), response.body
+    applied_at = second.submission_imports.sole.applied_at
+    expect(applied_at).to be_present
+    expect(first.submission_imports).to be_empty
+    expect(second.period.reload).not_to be_pending_source_review
+    catalog = PayrollSubmissions::Catalog.new(company: company, today: run.end_date + 1)
+    detail = PayrollSubmissions::Serializer.new(current_user: staff, catalog: catalog).detail(catalog.resolve(period_key))
+    expect(detail.fetch(:submissions)).to include(include(id: second.id, imported_at: applied_at))
+    event = second.period.status_events.last
+    expect(event).to have_attributes(payroll_submission_id: second.id, actor: staff)
+    audit = PayrollSubmissions::Audit.feed(second.period).find_by!(action: "payroll_submission_periods#import")
+    expect(audit.metadata).to include("submission_id" => second.id, "current_submission_id" => second.id,
+      "import_id" => data.fetch("import_id"), "source_package_id" => data.dig("source_package", "id"))
+    expect(audit.user_id).to eq(staff.id)
+    snapshot["import_event"] = event.attributes.slice("event", "from_status", "to_status")
+    snapshot["saved_payroll"] = saved_payroll
+    expect_golden("portal_revision", snapshot)
   end
 
   it "guards worksheet hours on re-import, then saves the source split after confirmation" do
-    config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: run.pay_date.year)
-    create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+    set_up_payroll_tax
     first = preview(pdf: pdf_upload(revel_row_for(worker, regular: 75.25, overtime: 1.5)), workbook: workbook_upload("overtime_heavy"))
     apply_import(first)
     expect(response).to have_http_status(:ok), response.body
     item = run.payroll_items.find_by!(employee: worker)
-    expect(item).to have_attributes(hours_worked: 75.25, overtime_hours: 1.5, reported_tips: 11.50, tips_paid_out: 0)
+    expect(item).to have_attributes(hours_worked: 75.25, overtime_hours: 1.5, reported_tips: BigDecimal("11.50"), tips_paid_out: 0.to_d)
     item.update!(hours_worked: 73)
     corrected = preview(pdf: pdf_upload(revel_row_for(worker, regular: 76, overtime: 3.5)),
       supersedes_package_id: first.dig("source_package", "package_id"), supersession_reason: "Synthetic corrected hours")
@@ -215,27 +352,52 @@ RSpec.describe "Payroll intake golden files", type: :request do
 
     apply_import(corrected, confirm_hours_overwrite: true)
     expect(response).to have_http_status(:ok), response.body
-    snapshot["saved_payroll"] = item.reload.attributes.slice("hours_worked", "overtime_hours", "reported_tips", "tips_paid_out")
-      .transform_values(&:to_f)
+    snapshot["saved_payroll"] = saved_payroll
     expect_golden("hand_edit_reimport", snapshot)
   end
 
-  it "previews the alternate adapter's pasted email and its weekly overtime and totals checks" do
+  def preview_spike(total_hours)
     text = <<~EMAIL
       Synthetic payroll email
       Pay period: 06/14/2026 - 06/27/2026
       Employee,Week 1 Hours,Week 2 Hours,Week 1 Tips,Week 2 Tips,Total Hours
-      Testina Mockberry,38,42,5.25,7.50,85
+      Testina Mockberry,38,42,5.25,7.50,#{total_hours}
     EMAIL
     post "/api/v1/admin/pay_periods/#{run.id}/payroll_intake_imports/preview", params: { source_type: "spike_email", pasted_text: text }
 
     expect(response).to have_http_status(:ok), response.body
-    result = response.parsed_body.fetch("import")
-    expect_golden("spike_email", result.slice("totals", "warnings").merge(
+    response.parsed_body.fetch("import")
+  end
+
+  def spike_snapshot(result)
+    result.slice("warnings").merge(
+      "totals" => decimal_fields(result.fetch("totals"), "total_reported_tips", "total_tips_paid_out"),
       "rows" => result.fetch("rows").map do |row|
-        row.slice("employee_id", "source_employee_name", "status", "week1_hours", "week2_hours",
+        fields = row.slice("employee_id", "source_employee_name", "status", "week1_hours", "week2_hours",
           "regular_hours", "overtime_hours", "reported_tips", "tips_paid_out", "warnings", "errors")
+        decimal_fields(fields, "reported_tips", "tips_paid_out")
       end
-    ))
+    )
+  end
+
+  it "previews the alternate adapter's pasted email and its weekly totals check" do
+    expect_golden("spike_email", spike_snapshot(preview_spike(85)))
+  end
+
+  it "applies a ready alternate-adapter row with weekly overtime and paid-out tips" do
+    set_up_payroll_tax
+    result = preview_spike(80)
+    row = result.fetch("rows").sole
+    expect(row.fetch("status")).to eq("ready")
+    snapshot = spike_snapshot(result)
+    post "/api/v1/admin/pay_periods/#{run.id}/payroll_intake_imports/#{result.fetch("id")}/apply", params: {
+      rows: [ { id: row.fetch("id"), disposition: "included", employee_id: worker.id } ]
+    }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("results", "errors")).to eq([])
+    expect(run.reload).to be_calculated
+    expect(run.payroll_items.find_by!(employee: worker).import_source).to eq("spike_email")
+    snapshot["saved_payroll"] = saved_payroll
+    expect_golden("spike_email_apply", snapshot)
   end
 end

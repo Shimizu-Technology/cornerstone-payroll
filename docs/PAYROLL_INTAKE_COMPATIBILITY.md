@@ -1,6 +1,6 @@
 # Payroll intake compatibility
 
-Track C starts with the [`mosa_revel` layout descriptor](../api/config/payroll_intake/mosa_revel.yml) and [golden request specs](../api/spec/requests/api/v1/admin/payroll_intake_golden_spec.rb). The descriptor records the layout and rules used today. The descriptor spec checks the workbook headers and merged cells against the current template generator and the frozen v2 fixture. It also checks the adapter and parser constants. The request specs upload files through staff preview and exercise the portal revision bridge and staff apply. They compare payroll inputs, totals, source completeness, warnings, and errors to checked-in JSON. The legacy warning snapshot takes its existing display label from the adapter so the fixture uses only the code name.
+Track C starts with the [`mosa_revel` layout descriptor](../api/config/payroll_intake/mosa_revel.yml) and [golden request specs](../api/spec/requests/api/v1/admin/payroll_intake_golden_spec.rb). The descriptor spec checks the workbook headers and merged cells against the current template generator and the frozen v2 fixture. It also checks the adapter and parser constants. The descriptor lists the existing parser, matching, and reconciliation specs that form part of the compatibility gate. The golden specs compare preview rows, apply gates, and persisted payroll results against checked-in JSON. Hours are numeric and money is stored as decimal strings. Legacy messages take the existing display label from the adapter at comparison time.
 
 ## Synthetic inputs
 
@@ -12,15 +12,21 @@ bundle exec ruby spec/fixtures/files/payroll_intake_golden/build_workbooks.rb
 
 | Workbook | Behavior captured in JSON |
 | --- | --- |
-| `normal.xlsx` | v2 regular and overtime hours, both tip pools, tips already paid, and a typed reimbursement. Also used for workbook-only review and a corrected portal revision. |
+| `normal.xlsx` | v2 hours, both tip pools, and a first apply with tips paid out and a non-taxable reimbursement. Also used for workbook-only rejection, a wrapped Revel name with conflicting report dates, and an applied portal revision with an audit entry. |
 | `overtime_heavy.xlsx` | Source-reported overtime with inconsistent Revel totals. Also used for double-time characterization and re-import after a worksheet edit. |
 | `new_hire.xlsx` | A mid-period hire matches by name in Revel and by ID in the workbook. |
 | `terminated.xlsx` | Both sources flag the terminated worker for review and leave the rows unmatched for pay. |
-| `legacy.xlsx` | Row-4 legacy headers, both tip pools, direct loan deduction, explicit zero bonus, totals and summary rows, and an off-by-one workbook date and workweek offset. |
-| `owner_period_pay.xlsx` | Variable salary amount for a single employee and the required attestation for that pay date. |
-| `missing_id_column.xlsx` | A changed row without its Employee ID is rejected. |
+| `legacy.xlsx` | Row-4 legacy headers and date and workweek warnings. Apply requires saved tip treatment, deducts a direct loan, and clears an imported bonus with explicit zero. |
+| `legacy_installment.xlsx` | F2/F3 date fallback and an installment reconciled to its named loan without adding a second direct deduction. |
+| `v1.xlsx` | Generated v1 sheet order and separate bonus and one-payroll deduction columns. |
+| `one_time_components.xlsx` | First apply persists a taxable bonus and a post-tax deduction with its payee. |
+| `owner_period_pay.xlsx` | Apply persists the variable salary override and evidence for one employee and pay date. |
+| `blank_employee_id.xlsx` | A changed row with an Employee ID header and a blank ID cell is rejected. |
 | `extra_hour_corrections_sheet.xlsx` | A populated `HOUR CORRECTIONS` sheet is rejected. |
 | `loan_totals_mismatch.xlsx` | A loan ending balance that fails reconciliation is rejected. |
+| `loan_setup_change.xlsx` | A recurring setup change on `DEDUCTIONS & LOANS` is rejected. |
+
+The PDF-only fixture applies after staff records the missing-workbook waiver. The email fixture covers both a total mismatch and a successful apply with weekly overtime and already-paid tips.
 
 A Revel totals line ends the table and its declared totals are skipped. The PDF parser reads double-time hours, but `ImportService` drops them before the adapter's review check. The golden tests capture both current results.
 

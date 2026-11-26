@@ -15,7 +15,7 @@
     "ready_count": 1,
     "review_count": 0,
     "total_regular_hours": 73.0,
-    "total_reported_tips": 12.75,
+    "total_reported_tips": "12.75",
     "total_overtime_hours": 2.0
   },
   "rows": [
@@ -29,16 +29,16 @@
       "status": "ready",
       "regular_hours": 73.0,
       "overtime_hours": 2.0,
-      "reported_tips": 12.75,
-      "tips_paid_out": 12.75,
+      "reported_tips": "12.75",
+      "tips_paid_out": "12.75",
       "payroll_inputs": {
         "total_hours": 75.0,
         "workbook_only": false,
-        "pay_rate": 15.5,
-        "tips_boh": 8.25,
-        "tips_foh": 4.5,
+        "pay_rate": "15.5",
+        "tips_boh": "8.25",
+        "tips_foh": "4.5",
         "tip_pool": "mixed",
-        "loan_deduction": 0.0,
+        "loan_deduction": "0.0",
         "loan_reconciliation_errors": [],
         "loan_reconciliation_warnings": [],
         "bonus": null,
@@ -66,5 +66,18 @@
     "revision": 2,
     "current": true,
     "workbook_choice": "attach"
+  },
+  "import_event": {
+    "event": "import",
+    "from_status": "submitted",
+    "to_status": "submitted"
+  },
+  "saved_payroll": {
+    "hours_worked": 73.0,
+    "overtime_hours": 2.0,
+    "reported_tips": "12.75",
+    "tips_paid_out": "12.75",
+    "loan_deduction": "0.0",
+    "bonus": "0.0"
   }
 }

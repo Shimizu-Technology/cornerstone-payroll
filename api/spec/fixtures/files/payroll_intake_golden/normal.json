@@ -15,7 +15,7 @@
     "ready_count": 1,
     "review_count": 0,
     "total_regular_hours": 75.25,
-    "total_reported_tips": 12.75,
+    "total_reported_tips": "12.75",
     "total_overtime_hours": 1.5
   },
   "rows": [
@@ -29,16 +29,16 @@
       "status": "ready",
       "regular_hours": 75.25,
       "overtime_hours": 1.5,
-      "reported_tips": 12.75,
-      "tips_paid_out": 12.75,
+      "reported_tips": "12.75",
+      "tips_paid_out": "12.75",
       "payroll_inputs": {
         "total_hours": 76.75,
         "workbook_only": false,
-        "pay_rate": 15.5,
-        "tips_boh": 8.25,
-        "tips_foh": 4.5,
+        "pay_rate": "15.5",
+        "tips_boh": "8.25",
+        "tips_foh": "4.5",
         "tip_pool": "mixed",
-        "loan_deduction": 0.0,
+        "loan_deduction": "0.0",
         "loan_reconciliation_errors": [],
         "loan_reconciliation_warnings": [],
         "bonus": null,
@@ -61,5 +61,18 @@
         "hand_edited_hours": null
       }
     }
-  ]
+  ],
+  "saved_payroll": {
+    "hours_worked": 75.25,
+    "overtime_hours": 1.5,
+    "reported_tips": "12.75",
+    "tips_paid_out": "12.75",
+    "loan_deduction": "0.0",
+    "bonus": "0.0",
+    "reimbursement": {
+      "label": "Fixture supplies",
+      "category": "non_taxable",
+      "amount": "12.34"
+    }
+  }
 }
