@@ -122,3 +122,110 @@ it('identifies an override and displays its reason in the client portal', () => 
   expect(screen.getByText('Client requested staff approval.')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
 });
+
+it('shows honest approval confirmation across queued, sent, and not_sent states', () => {
+  const { rerender } = render(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_status: 'queued', notification_queued: true },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Notification requested for your Cornerstone account team.');
+  expect(screen.getByRole('status').textContent).not.toContain('was notified by email');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_status: 'sent', notification_queued: false },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was notified by email.');
+  expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_status: 'not_sent', notification_queued: false },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
+  expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
+});
+
+it('shows honest change-request confirmation across queued, sent, and not_sent states', () => {
+  const { rerender } = render(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: {
+          ...period.payroll_review!,
+          status: 'changes_requested',
+          changes_requested_by_name: 'Casey Manager',
+          change_request_note: 'Fix regular hours',
+          notification_status: 'queued',
+          notification_queued: true,
+        },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Notification requested for your Cornerstone account team.');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: {
+          ...period.payroll_review!,
+          status: 'changes_requested',
+          changes_requested_by_name: 'Casey Manager',
+          change_request_note: 'Fix regular hours',
+          notification_status: 'sent',
+          notification_queued: false,
+        },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was notified by email.');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: {
+          ...period.payroll_review!,
+          status: 'changes_requested',
+          changes_requested_by_name: 'Casey Manager',
+          change_request_note: 'Fix regular hours',
+          notification_status: 'not_sent',
+          notification_queued: false,
+        },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
+  expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
+});

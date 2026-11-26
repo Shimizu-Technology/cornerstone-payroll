@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactEle
 import { BellRing, Mail, X } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
 import { ActionFeedback } from '@/components/ui/action-feedback';
 import { roleLabel } from '@/lib/role-labels';
 import { portalAlertRecipientsApi, type PortalAlertRecipients } from '@/services/portal-notifications-api';
@@ -15,10 +17,12 @@ interface Props {
   onRecipientCountChange?: (count: number | null) => void;
 }
 
-/** The selected client's staff-side portal alert recipients. */
+/** The selected client's Cornerstone account team (staff-side portal alert recipients). */
 export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onRecipientCountChange }: Props): ReactElement {
   const [settings, setSettings] = useState<PortalAlertRecipients | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [leadUserId, setLeadUserId] = useState<number | null>(null);
+  const [backupUserId, setBackupUserId] = useState<number | null>(null);
   const [emails, setEmails] = useState<string[]>([]);
   const [draftEmail, setDraftEmail] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
@@ -45,6 +49,8 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
     setSettings(data);
     countCallbackRef.current?.(data.recipient_count);
     setSelectedIds(data.eligible_users.filter((user) => user.selected).map((user) => user.id));
+    setLeadUserId(data.lead_user_id ?? data.eligible_users.find((user) => user.team_role === 'lead')?.id ?? null);
+    setBackupUserId(data.backup_user_id ?? data.eligible_users.find((user) => user.team_role === 'backup')?.id ?? null);
     setEmails(data.extra_emails);
   }, []);
 
@@ -58,7 +64,7 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
       if (isCurrent()) apply(response.data);
     } catch (caught) {
       if (!isCurrent()) return;
-      setLoadError(caught instanceof Error ? caught.message : 'Could not load alert recipients.');
+      setLoadError(caught instanceof Error ? caught.message : 'Could not load Cornerstone account team.');
       countCallbackRef.current?.(null);
     }
   }, [apply, companyId]);
@@ -76,23 +82,64 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
     return (
       <Card id="portal-alert-recipients">
         <CardContent className="space-y-3 pt-6">
-          <ActionFeedback tone="error" message={`Alert recipients unavailable. ${loadError}`} />
-          <Button variant="outline" onClick={() => void load()}>Retry alert recipients</Button>
+          <ActionFeedback tone="error" message={`Cornerstone account team unavailable. ${loadError}`} />
+          <Button variant="outline" onClick={() => void load()}>Retry account team</Button>
         </CardContent>
       </Card>
     );
   }
-  if (!settings) return <p className="text-sm text-neutral-500">Loading alert recipients…</p>;
+  if (!settings) return <p className="text-sm text-neutral-500">Loading Cornerstone account team…</p>;
 
   const savedIds = settings.eligible_users.filter((user) => user.selected).map((user) => user.id);
-  const dirty = savedIds.length !== selectedIds.length || savedIds.some((id) => !selectedIds.includes(id))
-    || settings.extra_emails.join('\n') !== emails.join('\n') || settings.ineligible_listed_users.length > 0;
+  const savedLeadId = settings.lead_user_id ?? settings.eligible_users.find((user) => user.team_role === 'lead')?.id ?? null;
+  const savedBackupId = settings.backup_user_id ?? settings.eligible_users.find((user) => user.team_role === 'backup')?.id ?? null;
+  const dirty = savedIds.length !== selectedIds.length
+    || savedIds.some((id) => !selectedIds.includes(id))
+    || savedLeadId !== leadUserId
+    || savedBackupId !== backupUserId
+    || settings.extra_emails.join('\n') !== emails.join('\n')
+    || settings.ineligible_listed_users.length > 0;
   const nobody = selectedIds.length === 0 && emails.length === 0;
+  const missingLead = selectedIds.length > 0 && leadUserId === null;
+  const needsLeadSaved = settings.needs_lead ?? (savedIds.length > 0 && savedLeadId === null);
   const atEmailLimit = emails.length >= settings.max_extra_emails;
 
   const toggle = (id: number): void => {
     setSaved(false);
-    setSelectedIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+    if (selectedIds.includes(id)) {
+      if (leadUserId === id) {
+        setLeadUserId(null);
+        setBackupUserId(null);
+      } else if (backupUserId === id) {
+        setBackupUserId(null);
+      }
+      setSelectedIds((current) => current.filter((value) => value !== id));
+    } else {
+      setSelectedIds((current) => (current.includes(id) ? current : [...current, id]));
+    }
+  };
+
+  const selectLead = (value: string): void => {
+    setSaved(false);
+    const nextId = value ? Number(value) : null;
+    setLeadUserId(nextId);
+    if (nextId === null) {
+      setBackupUserId(null);
+    } else {
+      if (backupUserId === nextId) setBackupUserId(null);
+      setSelectedIds((current) => (current.includes(nextId) ? current : [...current, nextId]));
+    }
+  };
+
+  const selectBackup = (value: string): void => {
+    setSaved(false);
+    const nextId = value ? Number(value) : null;
+    if (nextId !== null && leadUserId === null) return;
+    setBackupUserId(nextId);
+    if (nextId !== null) {
+      if (leadUserId === nextId) setLeadUserId(null);
+      setSelectedIds((current) => (current.includes(nextId) ? current : [...current, nextId]));
+    }
   };
 
   const addEmail = (event: FormEvent): void => {
@@ -116,12 +163,17 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
     setEmailError(null);
     setSaved(false);
     try {
-      const response = await portalAlertRecipientsApi.update(requested, { user_ids: selectedIds, emails });
+      const response = await portalAlertRecipientsApi.update(requested, {
+        user_ids: selectedIds,
+        emails,
+        lead_user_id: leadUserId,
+        backup_user_id: backupUserId,
+      });
       if (!isCurrent()) return;
       apply(response.data);
       setSaved(true);
     } catch (caught) {
-      if (isCurrent()) setSaveError(caught instanceof Error ? caught.message : 'Could not save alert recipients.');
+      if (isCurrent()) setSaveError(caught instanceof Error ? caught.message : 'Could not save Cornerstone account team.');
     } finally {
       if (isCurrent()) setSaving(false);
     }
@@ -130,10 +182,11 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
   return (
     <Card id="portal-alert-recipients">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2"><BellRing className="h-5 w-5 shrink-0 text-primary-700" />Portal Alert Recipients</CardTitle>
+        <CardTitle className="flex items-center gap-2"><BellRing className="h-5 w-5 shrink-0 text-primary-700" />Cornerstone account team</CardTitle>
         <CardDescription>
-          Who gets an email when this client sends a message, uploads files or submits an employee change.
-          Each person&apos;s own Immediate, Daily digest or Off setting still applies.
+          Choose the Cornerstone staff assigned to this client. They receive emails when the client approves payroll,
+          requests changes, sends messages, uploads files, or submits employee changes. Each person&apos;s own Immediate,
+          Daily digest or Off setting still applies.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -144,14 +197,57 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
         )}
         {settings.recipient_count === 0 && (
           <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950">
-            <p className="font-semibold">No one receives this client&apos;s portal alerts.</p>
-            <p>New messages, uploads and employee changes are recorded as skipped (no recipients) until you add someone.
+            <p className="font-semibold">No Cornerstone account team is assigned to this client.</p>
+            <p>Payroll approvals, change requests, messages, uploads, and employee changes are recorded as skipped (no recipients) until you assign someone.
               {settings.unnotified_event_count > 0 && ` ${settings.unnotified_event_count} in the last 30 days had nobody to notify.`}</p>
+          </div>
+        )}
+        {settings.recipient_count > 0 && needsLeadSaved && (
+          <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950">
+            <p className="font-semibold">This Cornerstone account team needs an Account lead.</p>
+            <p>Choose an Account lead from the assigned staff and save so someone owns this client&apos;s payroll alerts.</p>
+          </div>
+        )}
+
+        {settings.eligible_users.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor={`account-team-lead-${companyId}`} className="mb-1 block text-xs font-semibold text-neutral-700">
+                Account lead
+              </label>
+              <Select
+                id={`account-team-lead-${companyId}`}
+                value={leadUserId ? String(leadUserId) : ''}
+                disabled={readOnly || saving}
+                onChange={(event) => selectLead(event.target.value)}
+              >
+                <option value="">None selected</option>
+                {settings.eligible_users.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name} ({roleLabel(user.role)})</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label htmlFor={`account-team-backup-${companyId}`} className="mb-1 block text-xs font-semibold text-neutral-700">
+                Backup (optional)
+              </label>
+              <Select
+                id={`account-team-backup-${companyId}`}
+                value={backupUserId ? String(backupUserId) : ''}
+                disabled={readOnly || saving || !leadUserId}
+                onChange={(event) => selectBackup(event.target.value)}
+              >
+                <option value="">None selected</option>
+                {settings.eligible_users.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name} ({roleLabel(user.role)})</option>
+                ))}
+              </Select>
+            </div>
           </div>
         )}
 
         <fieldset className="space-y-2" disabled={readOnly || saving}>
-          <legend className="text-sm font-semibold text-neutral-900">Staff</legend>
+          <legend className="text-sm font-semibold text-neutral-900">Assigned staff</legend>
           <p className="text-xs text-neutral-600">Active staff in your organization who can open this client.</p>
           {settings.eligible_users.length === 0 && <p className="text-sm text-neutral-600">No eligible staff members.</p>}
           <ul className="divide-y divide-neutral-100 rounded-lg border border-neutral-200">
@@ -164,8 +260,12 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
                     checked={selectedIds.includes(user.id)}
                     onChange={() => toggle(user.id)}
                   />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-neutral-900">{user.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-center gap-2 text-sm font-medium text-neutral-900">
+                      <span>{user.name}</span>
+                      {leadUserId === user.id && <Badge variant="info">Lead</Badge>}
+                      {backupUserId === user.id && <Badge variant="default">Backup</Badge>}
+                    </span>
                     <span className="block break-all text-xs text-neutral-600">{roleLabel(user.role)} · {user.email}</span>
                   </span>
                 </label>
@@ -182,7 +282,7 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
         <div className="space-y-2">
           <p className="text-sm font-semibold text-neutral-900">Extra email addresses</p>
           <p className="text-xs leading-5 text-neutral-600">
-            For people without an app account. They get the same generic alert; the link still asks them to sign in.
+            For people without an app account. They get the same alert email; the link still asks them to sign in.
           </p>
           {emails.length > 0 && (
             <ul className="space-y-1.5">
@@ -228,14 +328,17 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
         </div>
 
         {saveError && <ActionFeedback tone="error" message={saveError} />}
-        {saved && <ActionFeedback tone="success" message="Alert recipients saved." />}
+        {saved && <ActionFeedback tone="success" message="Account team saved." />}
         {!readOnly && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button onClick={() => void save()} disabled={!dirty || saving} loading={saving} loadingLabel="Saving…">Save recipients</Button>
-            {dirty && nobody && <p className="text-xs text-amber-900">Saving with nobody selected leaves this client without alerts.</p>}
+            <Button onClick={() => void save()} disabled={!dirty || saving || missingLead} loading={saving} loadingLabel="Saving…">Save account team</Button>
+            {missingLead && <p className="text-xs text-amber-900">Choose an Account lead before saving.</p>}
+            {dirty && nobody && <p className="text-xs text-amber-900">Saving with nobody selected leaves this client without an account team.</p>}
           </div>
         )}
       </CardContent>
     </Card>
   );
 }
+
+export const ClientAccountTeamPanel = PortalAlertRecipientsPanel;

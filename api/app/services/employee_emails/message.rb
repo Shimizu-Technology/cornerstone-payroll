@@ -30,7 +30,7 @@ module EmployeeEmails
 
     # action: { label:, url: } draws the button. lead: an HTML-only sentence
     # just above it. text_line: the plain-text line, "<label>: <url>" if unset.
-    def initialize(brand:, subject:, heading:, paragraphs:, action: nil, note: nil, closing: [], preheader: nil, ignorable: false)
+    def initialize(brand:, subject:, heading:, paragraphs:, action: nil, note: nil, closing: [], preheader: nil, ignorable: false, footer_lines: nil)
       @brand = brand
       @subject = self.class.header_text(subject, max: SUBJECT_MAX)
       @heading = heading
@@ -40,6 +40,7 @@ module EmployeeEmails
       @closing = closing
       @preheader = preheader
       @ignorable = ignorable
+      @custom_footer_lines = footer_lines
     end
 
     # "Harbor Finch Kitchen via Cornerstone Payroll" <payroll@example.com>.
@@ -51,6 +52,13 @@ module EmployeeEmails
 
       name = header_name(employer)
       name ? %("#{name} via #{PRODUCT}" <#{address}>) : %("#{PRODUCT}" <#{address}>)
+    end
+
+    def self.product_from_header(configured = PortalNotifications::Transport.from_email)
+      address = sender_address(configured)
+      return configured unless address
+
+      %("#{PRODUCT}" <#{address}>)
     end
 
     def self.sender_address(configured)
@@ -84,6 +92,8 @@ module EmployeeEmails
     end
 
     def footer_lines
+      return @custom_footer_lines if @custom_footer_lines
+
       reason = "You're getting this because #{brand.name} uses #{PRODUCT} for payroll."
       reason += " If you weren't expecting it, you can ignore this email." if @ignorable
       [ reason, "Sent by #{PRODUCT} on behalf of #{brand.name}" ]
@@ -247,9 +257,10 @@ module EmployeeEmails
     end
 
     def footer_html
-      lines = footer_lines.map { |line| h(line) }
-      %(<p style="margin:16px 0 0 0;font-family:#{FONT};font-size:12px;line-height:1.6;color:#{MUTED_TEXT};">#{lines.first}</p>) +
-        %(<p style="margin:8px 0 0 0;font-family:#{FONT};font-size:12px;line-height:1.6;color:#{MUTED_TEXT};">#{lines.last}</p>)
+      footer_lines.each_with_index.map do |line, index|
+        top = index.zero? ? 16 : 8
+        %(<p style="margin:#{top}px 0 0 0;font-family:#{FONT};font-size:12px;line-height:1.6;color:#{MUTED_TEXT};">#{h(line)}</p>)
+      end.join
     end
   end
 end

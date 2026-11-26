@@ -45,7 +45,7 @@ module PayrollReview
       contexts = EmployeeYearFicaContext.batch(company: pay_period.company, employees: items.map(&:employee),
         year: pay_period.pay_date.year, excluding_pay_period_id: pay_period.id)
       items.map do |item|
-        stable_attributes(item).merge(
+        stable_attributes(item, except: %w[import_origin]).merge(
           "annual_fica_context" => contexts.fetch(item.employee_id).snapshot_for(item),
           "employee" => item.employee.attributes.slice("id", "first_name", "last_name"),
           "payroll_item_deductions" => item.payroll_item_deductions.sort_by(&:id).map { |row| stable_attributes(row, except: %w[company_id]) },
