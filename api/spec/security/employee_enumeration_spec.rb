@@ -137,7 +137,9 @@ RSpec.describe "Employee enumeration resistance", type: :request do
     end
 
     it "returns identical status, body, and headers for every sign-in-redirect kind" do
-      invite = invite!(employee, actor: staff)
+      # A staff-printed code, the only invite that may sign up with an address
+      # other than the one on file.
+      invite = invite!(employee, actor: staff, delivery: "code")
       create(:user, company: alpha, organization: organization, role: :client, email: "taken.enum@example.net")
 
       routed_client = create(:user, company: alpha, organization: organization, role: :client, name: "Morgan Lee",
@@ -148,17 +150,17 @@ RSpec.describe "Employee enumeration resistance", type: :request do
       expect(routed_invite.link.claim_user_id).to eq(routed_client.id)
 
       results = []
-      post_activation(activation_params(employee, token: invite.token, email: "taken.enum@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "taken.enum@example.net"))
       results << [ :existing_payroll_login, response_signature ]
 
-      post_activation(activation_params(employee, token: invite.token, email: "noreply@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "noreply@example.net"))
       results << [ :structural_placeholder, response_signature ]
 
       post_activation(activation_params(routed_emp, token: routed_invite.token, email: "fresh.unused@example.net"))
       results << [ :routed_to_claim_user, response_signature ]
 
       allow(clerk).to receive(:create_invitation).and_return(success: false, error: "Email address is taken.", status_code: 422)
-      post_activation(activation_params(employee, token: invite.token, email: "clerk.taken@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "clerk.taken@example.net"))
       results << [ :clerk_existing_email, response_signature ]
 
       expect_identical_signatures!(results, expected_status: 200)

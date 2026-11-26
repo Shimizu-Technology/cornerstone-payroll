@@ -289,17 +289,18 @@ RSpec.describe "Employee link hardening", type: :request do
   end
 
   describe "a retry that changes the sign-up address" do
-    let!(:invite) { invite!(employee, actor: staff) }
+    # Only a staff-printed code may sign up with an address other than the one on file.
+    let!(:invite) { invite!(employee, actor: staff, delivery: "code") }
 
     before do
-      post_activation(activation_params(employee, token: invite.token, email: "first.try@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "first.try@example.net"))
       expect_sign_up_started
     end
 
     it "keeps the old address while Clerk says the earlier invitation was already accepted" do
       allow(clerk).to receive(:invitation_status).with("inv_1").and_return("accepted")
 
-      post_activation(activation_params(employee, token: invite.token, email: "second.try@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "second.try@example.net"))
 
       expect(response.parsed_body["next"]).to eq("sign_in")
       expect(invite.link.reload.user).to have_attributes(email: "first.try@example.net", clerk_invitation_id: "inv_1")
@@ -309,7 +310,7 @@ RSpec.describe "Employee link hardening", type: :request do
     it "keeps the old address when Clerk can't confirm the earlier invitation closed" do
       allow(clerk).to receive(:revoke_invitation).with("inv_1").and_return(success: false, status: 500)
 
-      post_activation(activation_params(employee, token: invite.token, email: "second.try@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "second.try@example.net"))
 
       expect(response).to have_http_status(:service_unavailable)
       expect(invite.link.reload.user).to have_attributes(email: "first.try@example.net", clerk_invitation_id: "inv_1")
@@ -324,7 +325,7 @@ RSpec.describe "Employee link hardening", type: :request do
         { success: true, invitation_id: "inv_#{clerk_invitations.length}", status: "pending", url: "https://accounts.example.test/x" }
       end
 
-      post_activation(activation_params(employee, token: invite.token, email: "second.try@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "second.try@example.net"))
 
       expect(response.parsed_body["next"]).to eq("sign_in")
       expect(invite.link.reload.user).to have_attributes(email: "first.try@example.net")
@@ -368,10 +369,10 @@ RSpec.describe "Employee link hardening", type: :request do
 
   describe "lock order (EmployeeLinks: employee, logins, links)" do
     it "locks the login before the link when binding, retrying a sign-up, claiming and resending" do
-      invite = invite!(employee, actor: staff)
-      post_activation(activation_params(employee, token: invite.token, email: "first.try@example.net"))
+      invite = invite!(employee, actor: staff, delivery: "code")
+      post_activation(activation_params(employee, code: invite.code, email: "first.try@example.net"))
 
-      retry_locks = row_locks { post_activation(activation_params(employee, token: invite.token, email: "second.try@example.net")) }
+      retry_locks = row_locks { post_activation(activation_params(employee, code: invite.code, email: "second.try@example.net")) }
       # The check locks the link alone; the address is then saved under the
       # login's lock, then the link's.
       expect(retry_locks).to eq(%i[link user link])
@@ -453,16 +454,16 @@ RSpec.describe "Employee link hardening", type: :request do
   end
 
   describe "answers that don't vary by why they failed" do
-    let!(:invite) { invite!(employee, actor: staff) }
+    let!(:invite) { invite!(employee, actor: staff, delivery: "code") }
 
     it "counts no failures against an expired or switched-off invite" do
       invite.link.update_columns(invite_expires_at: 1.minute.ago)
-      post_activation(activation_params(employee, token: invite.token, ssn_last4: "0000"))
+      post_activation(activation_params(employee, code: invite.code, ssn_last4: "0000"))
       expect(response).to have_http_status(:unprocessable_content)
 
       invite.link.update_columns(invite_expires_at: 1.day.from_now)
       company.client_operating_profiles.sole.update_columns(employee_portal_enabled: false)
-      post_activation(activation_params(employee, token: invite.token, ssn_last4: "0000"))
+      post_activation(activation_params(employee, code: invite.code, ssn_last4: "0000"))
       expect(response).to have_http_status(:unprocessable_content)
 
       expect(invite.link.reload.failed_activation_attempts).to eq(0)
@@ -474,11 +475,11 @@ RSpec.describe "Employee link hardening", type: :request do
       pauses = []
       allow(EmployeeLinks::ResponseFloor).to receive(:pause) { |seconds| pauses << seconds }
 
-      post_activation(activation_params(employee, token: invite.token, ssn_last4: "0000"))
+      post_activation(activation_params(employee, code: invite.code, ssn_last4: "0000"))
       create(:user, company: company, email: "taken@example.net", role: :client)
-      post_activation(activation_params(employee, token: invite.token, email: "taken@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "taken@example.net"))
       expect(response.parsed_body["next"]).to eq("sign_in")
-      post_activation(activation_params(employee, token: invite.token, email: "riley.own@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "riley.own@example.net"))
       expect_sign_up_started
 
       expect(pauses.size).to eq(2)

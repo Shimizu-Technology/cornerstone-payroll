@@ -14,8 +14,9 @@ module EmployeeLinks
     # Locks the link (after the user, per the EmployeeLinks lock order) and
     # re-checks it: still invited to this user, for the same invite generation
     # the Clerk invitation was made for (a resend retires older ones), not
-    # expired, not locked, the employee app on for its company, and a client
-    # subdomain token's azp naming that same company.
+    # expired, not locked, the employee app on for its company, a client
+    # subdomain token's azp naming that same company, and the signed-up email
+    # still the employee's email on file (unless staff printed the code).
     def lock_link(user, metadata, azp:)
       link_id = metadata["payroll_employee_link_id"]
       generation = metadata["payroll_invite_generation"]
@@ -32,6 +33,9 @@ module EmployeeLinks
       # A demo login binds only with an allow-listed sign-in address, which
       # also covers printed-code sign-ups.
       return unless DemoOutbound.permit?(company: link.company, email: user.email, channel: "employee_link_bind", user: user)
+      # The bound address is the Clerk account's verified primary
+      # (PayrollInvitation#invited_identity?); it must be the one on file.
+      return if EmployeeLinks.sign_up_email_refusal(link, user.email)
 
       link
     end

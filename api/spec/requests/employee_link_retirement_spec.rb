@@ -246,6 +246,7 @@ RSpec.describe "Employee link retirement", type: :request do
       # Its earlier link was revoked, so staff confirm it's the same person (M4-3).
       invite = invite!(employee.reload, actor: staff, confirm_same_person_email: true)
       expect(invite).to have_attributes(path: "reactivate")
+      clerk_account!("user_riley", email: "riley.own@example.net")
       expect(invite.link.claim_user_id).to eq(worker.id)
 
       # A deactivated login can't use any other employee route.

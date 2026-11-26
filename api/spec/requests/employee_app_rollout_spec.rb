@@ -75,36 +75,90 @@ RSpec.describe "Employee app rollout administration", type: :request do
   context "with a fictional enabled company" do
     before { enable_employee_app!(company) }
 
+    it "lets staff invite and resend with one-time printed codes and audited delivery" do
+      mutate(staff, "invite", delivery: "code")
+
+      expect(response).to have_http_status(:ok)
+      expect(response.headers["Cache-Control"]).to include("no-store")
+      first_code = response.parsed_body.dig("print", "code")
+      expect(first_code.length).to eq(10)
+      expect(response.parsed_body.dig("print", "url")).to eq("#{EmployeeLinkHelpers::APP_URL}/activate")
+      expect(data).to include("status" => "invited", "staff_actions" => staff.staff_member?)
+
+      access = employee.employee_account_links.sole
+      expect(access.invite_code_digest).to eq(EmployeeAccountLink.code_digest(first_code))
+      expect(link_audits(access, "invited").sole).to have_attributes(user_id: staff.id, company_id: company.id)
+      expect(link_audits(access, "invited").sole.metadata).to include("delivery" => "code")
+
+      get_panel(staff)
+      expect(response.body).not_to include(first_code, "invite_code_digest")
+      expect(response.parsed_body).not_to have_key("print")
+
+      mutate(staff, "resend", access_id: access.id, delivery: "code")
+      expect(response).to have_http_status(:ok)
+      next_code = response.parsed_body.dig("print", "code")
+      expect(next_code).not_to eq(first_code)
+      expect(access.reload.invite_code_digest).to eq(EmployeeAccountLink.code_digest(next_code))
+      audit = link_audits(access, "invite_resent").sole
+      expect(audit.user_id).to eq(staff.id)
+      expect(audit.metadata.to_json).not_to include(first_code, next_code)
+    end
+
+    it "refuses every printed-code request from a client manager with a plain 403, even past the UI" do
+      no_email = create(:employee, company: company, email: nil)
+      get rollout_path(client), headers: headers(client)
+      expect(data).to include("can_manage_invites" => true, "can_print_codes" => false)
+      get_panel(client)
+      expect(data).to include("can_print_codes" => false, "staff_actions" => false)
+
+      mutate(client, "invite", delivery: "code")
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::STAFF_CODES_ONLY)
+
+      invite_wave(client, [ employee.id, no_email.id ], delivery: "code")
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::STAFF_CODES_ONLY)
+      expect(EmployeeAccountLink.where(company: company)).to be_empty
+
+      # Reprinting or resetting a code staff already printed.
+      access = invite!(employee, actor: staff, delivery: "code").link
+      mutate(client, "resend", access_id: access.id, delivery: "code")
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::STAFF_CODES_ONLY)
+      mutate(client, "reset_sign_up", access_id: access.id, delivery: "code", reason: "Lost the paper")
+      expect(response).to have_http_status(:forbidden)
+      expect(access.reload).to have_attributes(invite_generation: 1, invited_by_id: staff.id)
+      expect(AuditLog.where(record_type: EmployeeLinks::AUDIT_RECORD_TYPE, user_id: client.id)).to be_empty
+
+      # The services refuse too, whatever calls them.
+      expect { invite!(no_email, actor: client, delivery: "code") }
+        .to raise_error(EmployeeLinks::Forbidden, EmployeeLinks::STAFF_CODES_ONLY)
+      expect { as_staff_in(company) { EmployeeLinks::Resend.call(link: access, actor: client, delivery: "code") } }
+        .to raise_error(EmployeeLinks::Forbidden, EmployeeLinks::STAFF_CODES_ONLY)
+
+      get rollout_path(staff), headers: headers(staff)
+      expect(data).to include("can_print_codes" => true)
+    end
+
+    it "sends a client's email invite only to the address on file" do
+      allow(EmployeeLinks::InviteEmail).to receive(:deliver).and_return(:sent)
+
+      mutate(client, "invite", delivery: "email", email: "someone.else@example.test")
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body["error"]).to eq(EmployeeAppRolloutActions::EMAIL_ON_FILE_ONLY)
+      post "#{rollout_path(client)}/invite", headers: headers(client),
+        params: { employee_ids: [ employee.id ], delivery: "email", email: "someone.else@example.test" }, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(employee.employee_account_links).to be_empty
+      expect(EmployeeLinks::InviteEmail).not_to have_received(:deliver)
+
+      mutate(client, "invite", delivery: "email", email: "Worker@Example.test")
+      expect(response).to have_http_status(:ok)
+      expect(employee.employee_account_links.sole.invite_email).to eq("worker@example.test")
+      expect(EmployeeLinks::InviteEmail).to have_received(:deliver).once
+    end
+
     %i[staff client].each do |who|
-      it "lets #{who} invite and resend with one-time printed codes and audited delivery" do
-        actor = public_send(who)
-        mutate(actor, "invite", delivery: "code")
-
-        expect(response).to have_http_status(:ok)
-        expect(response.headers["Cache-Control"]).to include("no-store")
-        first_code = response.parsed_body.dig("print", "code")
-        expect(first_code.length).to eq(10)
-        expect(response.parsed_body.dig("print", "url")).to eq("#{EmployeeLinkHelpers::APP_URL}/activate")
-        expect(data).to include("status" => "invited", "staff_actions" => actor.staff_member?)
-
-        access = employee.employee_account_links.sole
-        expect(access.invite_code_digest).to eq(EmployeeAccountLink.code_digest(first_code))
-        expect(link_audits(access, "invited").sole).to have_attributes(user_id: actor.id, company_id: company.id)
-        expect(link_audits(access, "invited").sole.metadata).to include("delivery" => "code")
-
-        get_panel(actor)
-        expect(response.body).not_to include(first_code, "invite_code_digest")
-        expect(response.parsed_body).not_to have_key("print")
-
-        mutate(actor, "resend", access_id: access.id, delivery: "code")
-        expect(response).to have_http_status(:ok)
-        next_code = response.parsed_body.dig("print", "code")
-        expect(next_code).not_to eq(first_code)
-        expect(access.reload.invite_code_digest).to eq(EmployeeAccountLink.code_digest(next_code))
-        audit = link_audits(access, "invite_resent").sole
-        expect(audit.user_id).to eq(actor.id)
-        expect(audit.metadata.to_json).not_to include(first_code, next_code)
-      end
 
       it "lets #{who} send email and reports the delivery result without returning the secret" do
         actor = public_send(who)
@@ -144,9 +198,14 @@ RSpec.describe "Employee app rollout administration", type: :request do
 
         post "#{rollout_path(actor)}/invite", headers: headers(actor),
           params: { employee_ids: [ no_email.id ], delivery: "code" }, as: :json
-        expect(response).to have_http_status(:ok)
-        expect(data.sole.dig("print", "code").length).to eq(10)
-        expect(link_audits(no_email.employee_account_links.sole, "invited").sole.user_id).to eq(actor.id)
+        if actor.staff_member?
+          expect(response).to have_http_status(:ok)
+          expect(data.sole.dig("print", "code").length).to eq(10)
+          expect(link_audits(no_email.employee_account_links.sole, "invited").sole.user_id).to eq(actor.id)
+        else
+          expect(response).to have_http_status(:forbidden)
+          expect(no_email.employee_account_links).to be_empty
+        end
       end
     end
 
@@ -185,7 +244,7 @@ RSpec.describe "Employee app rollout administration", type: :request do
       access = employee.employee_account_links.sole
       next_employee = create(:employee, company: company)
 
-      invite_wave(client, [ employee.id, next_employee.id ])
+      invite_wave(staff, [ employee.id, next_employee.id ])
       expect(response).to have_http_status(:ok)
       expect(data.first).to eq("id" => employee.id, "error" => "This employee already has an invite. Resend it instead.")
       expect(data.last).to include("id" => next_employee.id, "print" => include("code" => be_present))
@@ -288,7 +347,7 @@ RSpec.describe "Employee app rollout administration", type: :request do
       expect_sign_up_started
       accept_clerk_invitation!("user_accepted_test")
 
-      mutate(client, "resend", access_id: issued.link.id, delivery: "code")
+      mutate(client, "resend", access_id: issued.link.id, delivery: "email")
       expect(response).to have_http_status(:conflict)
       expect(response.parsed_body).to include("code" => "sign_up_accepted", "error" => EmployeeLinks::Resend::ACCEPTED)
       expect(issued.link.reload.invite_generation).to eq(1)
@@ -302,7 +361,7 @@ RSpec.describe "Employee app rollout administration", type: :request do
       accept_clerk_invitation!("user_stale_rollout")
       issued.link.update!(invite_expires_at: 1.minute.ago)
 
-      mutate(client, "resend", access_id: issued.link.id, delivery: "code")
+      mutate(client, "resend", access_id: issued.link.id, delivery: "email")
       expect(response).to have_http_status(:conflict)
       expect(response.parsed_body).to include("code" => "sign_up_accepted",
         "error" => "This person already created their account, but that sign-up can no longer finish. Ask Cornerstone to reset it.")

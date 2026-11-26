@@ -7,7 +7,8 @@ module EmployeeLinks
   #
   # delivery: "email" sends a link with a random token to the employee's own
   # email (M4-3 invite guard); "code" returns a one-time 10-character sign-up
-  # code to print. Only digests are stored, and the plaintext is returned once.
+  # code to print, for Cornerstone staff only. Only digests are stored, and
+  # the plaintext is returned once.
   class Invite
     Result = Data.define(:link, :token, :code, :path, :email_status)
 
@@ -28,6 +29,7 @@ module EmployeeLinks
 
       company = @employee.company
       EmployeeLinks.require_invitation_management!(@actor, company)
+      EmployeeLinks.require_code_issuer!(@actor, company) if @delivery == "code"
 
       result = ApplicationRecord.transaction do
         EmployeeLinks.lock_for_issuance!(company)

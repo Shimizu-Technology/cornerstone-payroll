@@ -337,7 +337,8 @@ RSpec.describe DemoOutbound, :portal_notifications do
       expect(claim.send(:claimable?, link)).to be(false)
 
       bind_link = instance_double(EmployeeAccountLink, company: demo, company_id: demo.id, invite_open?: true, invite_generation: 1,
-        activation_locked?: false, claim_user_id: nil, employee: instance_double(Employee, active?: true), portal_enabled?: true)
+        activation_locked?: false, claim_user_id: nil, employee: instance_double(Employee, active?: true, email: allowed),
+        portal_enabled?: true, invite_delivery: "email", invite_email: allowed)
       relation = double(find_by: bind_link)
       allow(EmployeeAccountLink).to receive(:lock).and_return(relation)
       metadata = { "payroll_employee_link_id" => 1, "payroll_invite_generation" => 1 }
