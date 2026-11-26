@@ -64,10 +64,11 @@ jobs:
           path: tmp/quality-rspec
 
   # One timing snapshot and three isolated processes share one runner slot.
+  # Workers usually finish in 11-13 minutes; 30 leaves room for a slow runner.
   backend-specs:
     name: Backend RSpec workers
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
