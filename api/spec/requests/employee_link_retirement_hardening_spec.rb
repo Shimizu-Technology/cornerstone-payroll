@@ -268,8 +268,8 @@ RSpec.describe "Employee link retirement hardening", type: :request do
 
       travel_to(15.days.from_now) do
         expect(sweep_close(invite.link.id, :invite, Time.current)).to be(true)
-        other_invite = invite!(other, actor: staff)
-        post_activation(activation_params(other, token: other_invite.token, email: "riley.own@example.net"))
+        other_invite = invite!(other, actor: staff, delivery: "code")
+        post_activation(activation_params(other, code: other_invite.code, email: "riley.own@example.net"))
       end
 
       expect(response.parsed_body["next"]).to eq("sign_in")

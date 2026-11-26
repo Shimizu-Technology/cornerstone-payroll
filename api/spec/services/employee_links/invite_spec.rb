@@ -66,7 +66,7 @@ RSpec.describe EmployeeLinks::Invite, type: :request do
 
     expect(result.email_status).to eq(:captured)
     mail = PortalNotifications::Transport.captured.sole
-    expect(mail).to include(to: "kai@example.net", subject: "You're invited to your employee app")
+    expect(mail).to include(to: "kai@example.net", subject: "You're invited to the #{company.name} employee app")
     expect(mail[:text]).to include("#{EmployeeLinkHelpers::APP_URL}/activate#token=#{CGI.escape(result.token)}")
     expect(mail[:text]).not_to match(/\$\d/)
   end

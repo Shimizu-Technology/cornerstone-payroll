@@ -134,6 +134,14 @@ module Api
           end
 
           @user.with_lock do
+            # A client access change names the level the editor saw, so a stale
+            # form can't silently undo someone else's change.
+            expected_access = params.dig(:user, :expected_client_access_level)
+            if permitted.key?(:client_access_level) && expected_access.present? && expected_access != @user.client_access_level
+              return render json: { error: "This user's client access changed since you opened it. Refresh and try again.",
+                code: "client_access_changed" }, status: :conflict
+            end
+
             if @user.awaiting_clerk_binding? && @user.clerk_invitation_id.present? &&
               permitted.key?(:email) && permitted[:email] != @user.email
               @user.errors.add(:email, "cannot be changed while a Clerk invitation is on file")
@@ -428,11 +436,11 @@ module Api
         end
 
         def create_params
-          params.require(:user).permit(:email, :name, company_ids: [])
+          params.require(:user).permit(:email, :name, :client_access_level, company_ids: [])
         end
 
         def user_params
-          params.require(:user).permit(:email, :name, :active, company_ids: [])
+          params.require(:user).permit(:email, :name, :active, :client_access_level, company_ids: [])
         end
 
         def requested_user_role
@@ -577,6 +585,7 @@ module Api
             email: user.email,
             name: user.name,
             role: user.role,
+            client_access_level: (user.client_access_level if user.client?),
             organization_id: user.organization_id,
             organization_name: user.organization&.name,
             company_id: user.company_id,
@@ -630,6 +639,7 @@ module Api
             "name" => user.name,
             "email" => user.email,
             "role" => user.role,
+            "client_access_level" => (user.client_access_level if user.client?),
             "active" => user.active,
             "platform_owner" => user.platform_owner?,
             "invitation_status" => user.invitation_status,

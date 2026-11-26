@@ -19,6 +19,8 @@ import {
 import { departmentsApi, clientDepartmentsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department } from '@/types';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 // Fallback company ID for development when auth is disabled
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
@@ -29,6 +31,7 @@ interface DepartmentWithCount extends Department {
 
 export function Departments() {
   const { user, isClient } = useAuth();
+  const viewOnly = useClientViewOnly();
   // Use company_id from auth context, fall back to env var for dev mode
   const companyId = user?.company_id ?? DEV_COMPANY_ID;
 
@@ -168,7 +171,7 @@ export function Departments() {
         title="Departments"
         description="Manage your company's departments"
         actions={
-          !isAddingNew && (
+          !isAddingNew && !viewOnly && (
             <Button onClick={() => setIsAddingNew(true)}>
               <Plus className="w-4 h-4 mr-2" />
               Add Department
@@ -178,6 +181,7 @@ export function Departments() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
+        {viewOnly && <ViewOnlyNotice className="mb-4" />}
         {/* Error State */}
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
@@ -234,7 +238,7 @@ export function Departments() {
             <p className="mt-1 text-sm text-gray-500">
               Get started by creating your first department.
             </p>
-            {!isAddingNew && (
+            {!isAddingNew && !viewOnly && (
               <div className="mt-6">
                 <Button onClick={() => setIsAddingNew(true)}>
                   <Plus className="w-4 h-4 mr-2" />
@@ -285,7 +289,7 @@ export function Departments() {
                             <MobileField label="Employees" value={dept.employee_count} />
                             <MobileField label="Status" value={dept.active ? 'Active' : 'Inactive'} />
                           </div>
-                          <MobileCardActions>
+                          {!viewOnly && <MobileCardActions>
                             <Button variant="outline" size="sm" className="min-h-11" onClick={() => handleStartEdit(dept)}>
                               <Edit2 className="mr-1 h-4 w-4" />
                               Edit
@@ -293,7 +297,7 @@ export function Departments() {
                             <Button variant="ghost" size="sm" className="min-h-11" onClick={() => handleToggleActive(dept)} disabled={togglingId === dept.id}>
                               {dept.active ? 'Deactivate' : 'Activate'}
                             </Button>
-                          </MobileCardActions>
+                          </MobileCardActions>}
                         </div>
                       </div>
                     </>
@@ -367,7 +371,7 @@ export function Departments() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      {editingId !== dept.id && (
+                      {editingId !== dept.id && !viewOnly && (
                         <div className="flex items-center justify-end gap-2">
                           <Button
                             variant="ghost"

@@ -16,9 +16,12 @@ import { MobileRecordCard } from '@/components/ui/mobile-record';
 import { LoadMoreFooter } from '@/components/ui/load-more';
 import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { ApiError, clientEmployeeChangeRequestsApi } from '@/services/api';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 import type { BoundedListMeta, EmployeeChangeRequest } from '@/services/api';
 
 export function ClientChangeRequests() {
+  const viewOnly = useClientViewOnly();
   const location = useLocation();
   const navigate = useNavigate();
   const routeState = location.state as { portalNotice?: string; selectedRequestId?: number | null } | null;
@@ -297,7 +300,8 @@ export function ClientChangeRequests() {
                       <Button variant="outline" onClick={() => { setReviewNotes(''); setDecision('reject'); }}>Reject</Button>
                     </div>
                   )}
-                  {profileRequestsEnabled && selected.profile_address && selected.status === 'pending' && selected.can_review === false && (
+                  {viewOnly && selected.status === 'pending' && <ViewOnlyNotice />}
+                  {!viewOnly && profileRequestsEnabled && selected.profile_address && selected.status === 'pending' && selected.can_review === false && (
                     <p className="text-sm text-neutral-600">Another administrator or Cornerstone must review this request.</p>
                   )}
                 </div>

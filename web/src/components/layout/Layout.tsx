@@ -6,6 +6,7 @@ import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
 import { FinanceWriteNotice } from '@/components/finance/FinanceWriteNotice';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 
@@ -21,7 +22,7 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
 export function Layout() {
   const { activeCompany, activeCompanyId, activeOrganizationName, activeOrganizationId } = useCompany();
-  const { user } = useAuth();
+  const { user, isClientViewer } = useAuth();
   const isClient = user?.role === 'client';
   const location = useLocation();
   const financePage = location.pathname.startsWith('/tools/finance') || location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
@@ -205,6 +206,11 @@ export function Layout() {
             </div>
           )}
           {financePage && <FinanceWriteNotice />}
+          {isClientViewer && (
+            <div className="border-b border-neutral-200 bg-white px-4 py-2.5 sm:px-6">
+              <ViewOnlyNotice className="mx-auto max-w-screen-2xl" />
+            </div>
+          )}
           <div
             className={`min-h-full transition-opacity duration-200 ease-out ${
               isSwitchingCompany ? 'opacity-55' : 'opacity-100'

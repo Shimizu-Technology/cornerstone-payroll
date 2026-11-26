@@ -246,6 +246,7 @@ RSpec.describe "Employee link retirement", type: :request do
       # Its earlier link was revoked, so staff confirm it's the same person (M4-3).
       invite = invite!(employee.reload, actor: staff, confirm_same_person_email: true)
       expect(invite).to have_attributes(path: "reactivate")
+      clerk_account!("user_riley", email: "riley.own@example.net")
       expect(invite.link.claim_user_id).to eq(worker.id)
 
       # A deactivated login can't use any other employee route.
@@ -277,6 +278,19 @@ RSpec.describe "Employee link retirement", type: :request do
       expect(AuditLog.where(action: "authentication#employee_login_reactivated", record_id: worker.id).count).to eq(1)
       expect(context_status(for_link: invite.link)).to eq(200)
       expect(context_status).to eq(404)
+    end
+
+    it "retires a printed code with no recorded staff issuer for reactivation too" do
+      invite = invite!(employee.reload, actor: staff, delivery: "code")
+      expect(invite.link.claim_user_id).to eq(worker.id)
+      invite.link.update_columns(invite_code_issued_by_staff: nil)
+
+      reactivate(activation_params(employee, code: invite.code))
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::CODE_RETIRED, "code" => "code_retired")
+      expect(worker.reload).not_to be_active
+      expect(invite.link.reload).to be_invited
     end
 
     it "leaves both the login and the new link inactive when any check fails" do

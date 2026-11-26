@@ -33,8 +33,10 @@ module Api
           return unless terms_version
 
           link_check_started!
-          link = EmployeeLinks::Claim.call(user: @current_user, **link_check_params, azp: azp, request: request, terms_version: terms_version)
+          claim = EmployeeLinks::Claim.new(user: @current_user, **link_check_params, azp: azp, request: request, terms_version: terms_version)
+          link = claim.call
           response.headers["Cache-Control"] = "no-store"
+          return render_claim_refusal(claim.refusal) if !link && claim.refusal
           unless link
             wait_for_response_floor
             return render json: { error: CLAIM_FAILED, code: "claim_failed" }, status: :not_found
@@ -73,6 +75,16 @@ module Api
           return unless CompanyFeatures.for(link.company).employee_portal_feature?(:stubs)
 
           EmployeeStatements.new(context: link).latest_pay_date
+        end
+
+        # A refusal named only after the invite check passed (Claim#refusal).
+        def self.claim_refusal_json(refusal)
+          message = refusal == :code_retired ? EmployeeLinks::CODE_RETIRED : EmployeeLinks::EMAIL_MISMATCH
+          { error: message, code: refusal.to_s }
+        end
+
+        def render_claim_refusal(refusal)
+          render json: self.class.claim_refusal_json(refusal), status: :forbidden
         end
 
         def render_write_maintenance

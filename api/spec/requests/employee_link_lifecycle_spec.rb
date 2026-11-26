@@ -95,27 +95,102 @@ RSpec.describe "Employee link lifecycle", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
     end
 
-    it "keeps the record's email unless the employee chooses the sign-up address for notices" do
+    it "refuses an emailed invite's sign-up with any address but the one on file, with a clear message" do
       invite = invite!(employee, actor: staff)
-      sign_up_and_bind!(employee, token: invite.token, email: "other.address@example.net")
+
+      post_activation(activation_params(employee, token: invite.token, email: "other.address@example.net"))
+
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::EMAIL_MISMATCH, "code" => "email_mismatch")
+      expect(invite.link.reload).to have_attributes(status: "invited", user_id: nil, failed_activation_attempts: 0)
+      expect(clerk_invitations).to be_empty
+      expect(link_audits(invite.link, "sign_up_email_refused").sole.metadata).to include("reason" => "email_mismatch")
+
+      # The address on file still works.
+      sign_up_and_bind!(employee, token: invite.token)
+      expect(invite.link.reload).to be_active
+    end
+
+    it "refuses an emailed invite whose address no longer matches the email on file" do
+      invite = invite!(employee, actor: staff)
+      # Written directly, past the model's email-change handling (which closes the invite).
+      employee.update_columns(email: "riley.new@example.net")
+
+      post_activation(activation_params(employee, token: invite.token))
+      expect(response.parsed_body).to include("code" => "email_mismatch")
+      post_activation(activation_params(employee, token: invite.token, email: "riley.own@example.net"))
+      expect(response.parsed_body).to include("code" => "email_mismatch")
+      expect(clerk_invitations).to be_empty
+    end
+
+    it "never binds a sign-up whose address stopped matching the email on file after it started" do
+      invite = invite!(employee, actor: staff)
+      post_activation(activation_params(employee, token: invite.token))
+      expect_sign_up_started
+      accept_clerk_invitation!("user_riley")
+      employee.update_columns(email: "riley.new@example.net")
+
+      get "/api/v1/auth/me", headers: bearer("user_riley")
+
+      expect(response).to have_http_status(:unauthorized)
+      expect(invite.link.reload).to be_invited
+    end
+
+    it "records at issuance that staff printed a code, and retires a code with no recorded staff issuer" do
+      invite = invite!(employee, actor: staff, delivery: "code")
+      expect(invite.link.invite_code_issued_by_staff).to be(true)
+
+      [ false, nil ].each do |recorded|
+        invite.link.update_columns(invite_code_issued_by_staff: recorded)
+        post_activation(activation_params(employee, code: invite.code))
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body).to eq("error" => EmployeeLinks::CODE_RETIRED, "code" => "code_retired")
+      end
+      expect(clerk_invitations).to be_empty
+    end
+
+    it "decides by the issuer recorded for the code, not the issuer's role today" do
+      invite = invite!(employee, actor: staff, delivery: "code")
+      staff.update_columns(role: User.roles.fetch("client"))
+
+      post_activation(activation_params(employee, code: invite.code))
+      expect_sign_up_started
+    end
+
+    it "never binds a code sign-up once the code's staff issuance is gone" do
+      invite = invite!(employee, actor: staff, delivery: "code")
+      post_activation(activation_params(employee, code: invite.code))
+      expect_sign_up_started
+      accept_clerk_invitation!("user_riley")
+      invite.link.update_columns(invite_code_issued_by_staff: nil)
+
+      get "/api/v1/auth/me", headers: bearer("user_riley")
+      expect(response).to have_http_status(:unauthorized)
+      expect(invite.link.reload).to be_invited
+    end
+
+    it "keeps the record's email unless the employee chooses a staff-printed code's sign-up address for notices" do
+      invite = invite!(employee, actor: staff, delivery: "code")
+      sign_up_and_bind!(employee, code: invite.code, email: "other.address@example.net")
       expect(employee.reload).to have_attributes(email: "riley.own@example.net", email_verified_at: nil)
 
       second = create(:employee, company: company, first_name: "Avery", last_name: "Cruz", email: "avery@example.net",
         date_of_birth: Date.new(1988, 1, 2))
-      invite = invite!(second, actor: staff)
-      post_activation(activation_params(second, token: invite.token, email: "avery.new@example.net", use_for_notices: true))
+      invite = invite!(second, actor: staff, delivery: "code")
+      post_activation(activation_params(second, code: invite.code, email: "avery.new@example.net", use_for_notices: true))
       accept_clerk_invitation!("user_avery")
       get "/api/v1/auth/me", headers: bearer("user_avery")
       expect(second.reload).to have_attributes(email: "avery.new@example.net", contact_source: "employee", email_verified_at: nil)
     end
 
     it "reuses the pending login on a retry, updates a changed free email and rotates the Clerk invitation" do
-      invite = invite!(employee, actor: staff)
-      post_activation(activation_params(employee, token: invite.token, email: "first.try@example.net"))
+      invite = invite!(employee, actor: staff, delivery: "code")
+      post_activation(activation_params(employee, code: invite.code, email: "first.try@example.net"))
       pending_user = invite.link.reload.user
 
       expect do
-        post_activation(activation_params(employee, token: invite.token, email: "second.try@example.net"))
+        post_activation(activation_params(employee, code: invite.code, email: "second.try@example.net"))
       end.not_to change(User, :count)
 
       expect_sign_up_started
@@ -127,16 +202,16 @@ RSpec.describe "Employee link lifecycle", type: :request do
     end
 
     it "gives the same sign-in answer for an address with a login, a placeholder, or one Clerk already has" do
-      invite = invite!(employee, actor: staff)
+      invite = invite!(employee, actor: staff, delivery: "code")
       create(:user, company: company, email: "taken@example.net", role: :client)
       answers = []
 
       [ "TAKEN@example.net", "noreply@example.net" ].each do |email|
-        post_activation(activation_params(employee, token: invite.token, email: email))
+        post_activation(activation_params(employee, code: invite.code, email: email))
         answers << [ response.status, response.parsed_body ]
       end
       allow(clerk).to receive(:create_invitation).and_return(success: false, error: "That email address is taken.", status_code: 422)
-      post_activation(activation_params(employee, token: invite.token, email: "clerk.has.it@example.net"))
+      post_activation(activation_params(employee, code: invite.code, email: "clerk.has.it@example.net"))
       answers << [ response.status, response.parsed_body ]
 
       expect(answers.uniq).to eq([ [ 200, { "next" => "sign_in", "sign_up_url" => nil,
@@ -278,6 +353,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
 
     it "routes a confirmed same-person email to the claim path and attaches the link after step-up" do
       client_user
+      clerk_account!("user_client", email: "riley.own@example.net")
       expect { invite!(employee, actor: staff) }.to raise_error(EmployeeLinks::Error, /confirm this is the same person/)
 
       invite = invite!(employee, actor: staff, confirm_same_person_email: true)
@@ -336,6 +412,60 @@ RSpec.describe "Employee link lifecycle", type: :request do
       expect(response).to have_http_status(:not_found)
       expect(routed.link.reload).to have_attributes(status: "invited", user_id: nil)
       expect([ stranger, namesake ].map { |user| user.reload.employee_account_links }).to all(be_empty)
+    end
+
+    it "retires a printed code with no recorded staff issuer for claims too" do
+      staffer = create(:user, role: :accountant, company: company, name: "Riley Santos", clerk_id: "user_staffer")
+      invite = invite!(employee, actor: staff, delivery: "code")
+      invite.link.update_columns(invite_code_issued_by_staff: nil)
+
+      claim("user_staffer", activation_params(employee, code: invite.code), **fresh_second_factor)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::CODE_RETIRED, "code" => "code_retired")
+      expect(invite.link.reload.user_id).not_to eq(staffer.id)
+    end
+
+    it "takes a ticket-verified primary as proof only when the current invite was emailed to it" do
+      client_user
+      invite = invite!(employee, actor: staff, confirm_same_person_email: true)
+      ticket = lambda do |email|
+        allow(clerk).to receive(:fetch_user).with("user_client").and_return(
+          "id" => "user_client", "primary_email_address_id" => "idn",
+          "email_addresses" => [ { "id" => "idn", "email_address" => email,
+                                   "verification" => { "status" => "verified", "strategy" => "ticket" } } ]
+        )
+      end
+
+      # The invite went to an older address; the ticket proves nothing about this one.
+      invite.link.update_columns(invite_email: "riley.old@example.net")
+      ticket.call("riley.own@example.net")
+      claim("user_client", activation_params(employee, token: invite.token), **fresh_second_factor)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("email_mismatch")
+
+      # The current invite was emailed to it: the invite link proved the inbox.
+      invite.link.update_columns(invite_email: "riley.own@example.net")
+      claim("user_client", activation_params(employee, token: invite.token), **fresh_second_factor)
+      expect(response).to have_http_status(:created)
+    end
+
+    it "refuses a claim when the signed-in Clerk account's verified primary email isn't the one on file" do
+      client_user
+      invite = invite!(employee, actor: staff, confirm_same_person_email: true)
+      clerk_account!("user_client", email: "riley.work@example.net")
+
+      claim("user_client", activation_params(employee, token: invite.token), **fresh_second_factor)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::EMAIL_MISMATCH, "code" => "email_mismatch")
+
+      clerk_account!("user_client", email: "riley.own@example.net", status: "unverified")
+      claim("user_client", activation_params(employee, token: invite.token), **fresh_second_factor)
+      expect(response).to have_http_status(:forbidden)
+      expect(invite.link.reload).to have_attributes(status: "invited", user_id: nil, failed_activation_attempts: 0)
+
+      clerk_account!("user_client", email: "Riley.Own@example.net ")
+      claim("user_client", activation_params(employee, token: invite.token), **fresh_second_factor)
+      expect(response).to have_http_status(:created)
     end
 
     it "closes an abandoned pending sign-up when the person claims with their existing login instead" do

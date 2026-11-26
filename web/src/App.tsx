@@ -16,6 +16,7 @@ import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { isPublicPath } from '@/lib/public-routes';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
+import { EmployeeAppAccessNotice } from '@/components/auth/EmployeeAppAccessNotice';
 import { isMfaRequiredCode } from '@/services/api';
 
 const ClientOperatingProfile = lazy(() => import('@/pages/ClientOperatingProfile').then(module => ({ default: module.ClientOperatingProfile })));
@@ -486,13 +487,22 @@ function AppFeedback({ children }: { children: ReactNode }) {
 
 const developmentToken = async () => null;
 
+function StaffWorkspace(): ReactElement {
+  const { user, isAuthenticated } = useAuth();
+  const { pathname } = useLocation();
+  const content = <AppFeedback><AppRoutes /></AppFeedback>;
+  if (isAuthenticated && user?.role === 'portal_employee') {
+    return isPublicPath(pathname) ? content : <EmployeeAppAccessNotice />;
+  }
+
+  return <CompanyProvider>{content}</CompanyProvider>;
+}
+
 function AppContents() {
   const workspace = (
     <AuthProvider>
       {!supportToken && <PostHogSessionSync />}
-      <CompanyProvider>
-        <AppFeedback><AppRoutes /></AppFeedback>
-      </CompanyProvider>
+      <StaffWorkspace />
     </AuthProvider>
   );
   return (

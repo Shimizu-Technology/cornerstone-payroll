@@ -6,11 +6,12 @@ require "rails_helper"
 # its connection is back in the pool. Not transactional, so the test's own
 # transaction doesn't pin a connection; the request writes nothing.
 RSpec.describe "Employee link response floor", type: :request do
-  include EmployeeLinkHelpers
-
   self.use_transactional_tests = false
 
   it "holds no database connection or tenant scope while it waits" do
+    allow(EmployeeTermsVersion).to receive(:current).and_return(
+      EmployeeTermsVersion.new(version: EmployeeLinkHelpers::TEST_TERMS_VERSION)
+    )
     allow(EmployeeLinks::ResponseFloor).to receive(:enabled?).and_return(true)
     during_pause = []
     allow(EmployeeLinks::ResponseFloor).to receive(:pause) do
@@ -21,8 +22,15 @@ RSpec.describe "Employee link response floor", type: :request do
     end
 
     expect do
-      post_activation({ token: "not-a-real-invite-token", date_of_birth: "1990-04-12", ssn_last4: "1234",
-        email: "someone@example.net" })
+      post "/api/v1/employee/activation",
+        params: {
+          terms_version: EmployeeLinkHelpers::TEST_TERMS_VERSION,
+          token: "not-a-real-invite-token",
+          date_of_birth: "1990-04-12",
+          ssn_last4: "1234",
+          email: "someone@example.net"
+        }.to_json,
+        headers: { "CONTENT_TYPE" => "application/json" }
     end.not_to change(AuditLog, :count)
 
     expect(response).to have_http_status(:unprocessable_content)

@@ -86,7 +86,7 @@ class FirstHawaiianFourUpCheckGenerator
 
   def initialize(company:, payroll_items: [], non_employee_checks: [], starting_slot: 1, rehearsal_preview: false, preview: false)
     # Preprinted bank stock carries real bank details and MICR; a demo never uses it.
-    raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if company&.demo?
+    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company&.demo?
 
     @preview = preview
     @company = company
@@ -99,7 +99,7 @@ class FirstHawaiianFourUpCheckGenerator
   end
 
   def generate
-    raise ArgumentError, "No check entries to render" if entries.empty?
+    raise ReportValidationError, "No check entries to render" if entries.empty?
     entries.each { |entry| PdfUnicodeFont.ensure_printable!(entry.payee, label: "Payee") }
 
     PdfUnicodeFont.document(page_size: [ PAGE_WIDTH, PAGE_HEIGHT ], page_layout: :portrait, margin: MARGIN) do |pdf|

@@ -77,8 +77,15 @@ function useStatements(year: number | null): Statements {
   return { state, reload, more: moreState, showMore };
 }
 
-function useStatement(id: string | null): { state: DataState<StatementDetail>; reload: () => void } {
-  return useEmployeeData<StatementDetail>(id ? `statement:${id}` : null, (api, linkId, signal) => api.statement(linkId, id!, signal));
+function useStatement(id: string | null): { state: DataState<StatementDetail | null>; reload: () => void } {
+  return useEmployeeData<StatementDetail | null>(id ? `statement:${id}` : null, async (api, linkId, signal) => {
+    try {
+      return await api.statement(linkId, id!, signal);
+    } catch (error) {
+      if (error instanceof EmployeeApiError && error.kind === 'resource_not_found') return null;
+      throw error;
+    }
+  });
 }
 
 /** Payroll checks first, then "From QuickBooks records": the order the list shows and Older/Newer walk. */
@@ -211,6 +218,7 @@ function YearSoFar({ latest }: { latest: StatementSummary }): ReactElement {
   if (state.status === 'loading') return <SkeletonRows rows={2} label="Loading this year's totals" />;
   if (state.status === 'error') return <LoadProblem kind={state.kind} onRetry={reload} what="this year's totals" />;
   const detail = state.data;
+  if (!detail) return <p className="emp-hint">No year-to-date totals are available for this pay stub.</p>;
   return (
     <div className="space-y-2">
       <dl className="emp-totals">
@@ -426,7 +434,7 @@ function PayDesktop(): ReactElement {
   // email) shows its own year's list.
   const selected = useStatement(statementId ?? null);
   // The year the API lists the stub under, which a check date can't move.
-  const stubYear = selected.state.status === 'ready' ? selected.state.data.taxYear : null;
+  const stubYear = selected.state.status === 'ready' ? selected.state.data?.taxYear : null;
   const year = yearParam(location.search) ?? stubYear ?? (statementId && selected.state.status === 'loading' ? null : defaultYear);
   const { state } = useStatements(year);
 
@@ -564,6 +572,11 @@ function EarlierStubs({ versions, payDate }: { versions: EarlierVersion[]; payDa
   );
 }
 
+function isYtdOnlyEarning(line: EarningLine): boolean {
+  return line.amount !== null && Number(line.amount) === 0 && Number(line.ytd) !== 0
+    && !Number(line.hours) && line.rate === null;
+}
+
 function EarningRow({ line }: { line: EarningLine }): ReactElement {
   const hours = formatHours(line.hours);
   const rate = formatMoney(line.rate);
@@ -571,7 +584,7 @@ function EarningRow({ line }: { line: EarningLine }): ReactElement {
   const units = hours && Number(line.hours) !== 0
     ? (rate && !hidden ? `${hours} hrs × ${rate}` : `${hours} hrs`) : null;
   return (
-    <tr>
+    <tr className={isYtdOnlyEarning(line) ? 'emp-ytd-only' : undefined}>
       <th scope="row">
         <span className="block">{line.label}</span>
         {units && <span className="emp-term block">{units}</span>}
@@ -596,9 +609,9 @@ function AmountRow({ line, tax = false }: { line: AmountLine; tax?: boolean }): 
   );
 }
 
-function StubTable({ caption, term, total, children }: { caption: string; term?: string; total?: string | null; children: ReactNode }): ReactElement {
+function StubTable({ caption, term, total, children, ytdOnly = false }: { caption: string; term?: string; total?: string | null; children: ReactNode; ytdOnly?: boolean }): ReactElement {
   return (
-    <table className="emp-stub-table">
+    <table className={ytdOnly ? 'emp-stub-table emp-stub-table-ytd-only' : 'emp-stub-table'}>
       <caption>
         <span className="emp-caption-row">
           <span className="min-w-0">{caption}{term && <span className="emp-term"> ({term})</span>}</span>
@@ -654,9 +667,16 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
   if (state.status === 'loading') return <SkeletonRows rows={6} label="Loading the pay stub" />;
   if (state.status === 'error') return <LoadProblem kind={state.kind} onRetry={reload} what="this pay stub" />;
   const stub = state.data;
+  if (!stub) return (
+    <div className="space-y-2">
+      <p className="font-semibold" role="status">We couldn't find that pay stub.</p>
+      <BackLink to={`/pay${linkSuffix}`}>Back to pay stubs</BackLink>
+    </div>
+  );
   const period = formatDateRange(stub.periodStart, stub.periodEnd);
   const hours = hoursLabel(stub.totalHours);
   const quickbooks = stub.source === 'quickbooks';
+  const hasOnlyYtdEarnings = stub.earnings.length > 0 && stub.earnings.every(isYtdOnlyEarning);
   return (
     <article className="emp-stub" aria-labelledby={`emp-stub-${stub.id}`}>
       <header className="space-y-2">
@@ -680,8 +700,9 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
 
       {stub.note && <p className="emp-hint">{stub.note}</p>}
 
+      {hasOnlyYtdEarnings && <p className="emp-no-current-earnings emp-hint">No earnings this pay period.</p>}
       {stub.earnings.length > 0 && (
-        <StubTable caption="Pay before taxes" term="gross pay" total={stub.grossPay}>
+        <StubTable caption="Pay before taxes" term="gross pay" total={stub.grossPay} ytdOnly={hasOnlyYtdEarnings}>
           {stub.earnings.map((line, index) => <EarningRow key={`${line.label}-${index}`} line={line} />)}
         </StubTable>
       )}

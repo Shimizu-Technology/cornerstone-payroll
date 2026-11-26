@@ -151,13 +151,16 @@ function NoMatchMessage(): ReactElement {
   );
 }
 
-type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated';
+type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated'
+  | 'email_mismatch' | 'code_retired';
 
 function failureOf(error: unknown): Failure {
   if (error instanceof StepUpCancelledError) return 'cancelled';
   if (!(error instanceof EmployeeApiError)) return 'server';
   switch (error.kind) {
     case 'terms_updated': return 'terms_updated';
+    case 'email_mismatch': return 'email_mismatch';
+    case 'code_retired': return 'code_retired';
     case 'invalid':
     case 'not_found':
     case 'conflict': return 'no_match';
@@ -195,6 +198,12 @@ function TwoStepMessage({ kind }: { kind: 'mfa_setup' | 'mfa_required' }): React
 function FailureMessage({ failure, cancelledText }: { failure: Failure | null; cancelledText?: string }): ReactElement | null {
   if (!failure) return null;
   if (failure === 'no_match') return <NoMatchMessage />;
+  if (failure === 'email_mismatch') {
+    return <FormMessage tone="bad">This invite is for a different email address. Sign in with the email your employer has on file, or ask them to update it.</FormMessage>;
+  }
+  if (failure === 'code_retired') {
+    return <FormMessage tone="bad">This sign-up code can no longer be used. Ask your employer to send an invite to your email.</FormMessage>;
+  }
   if (failure === 'mfa_setup' || failure === 'mfa_required') return <TwoStepMessage kind={failure} />;
   if (failure === 'cancelled') return <FormMessage tone="bad">{cancelledText ?? "Not done. Confirm it's you to continue."}</FormMessage>;
   if (failure === 'signed_out') return <FormMessage tone="bad">Your sign-in ended. Sign in again, then try again.</FormMessage>;
@@ -385,10 +394,18 @@ export function ActivateScreen(): ReactElement {
 /** /sign-up: where Clerk's invitation lands (its redirect_url), with the ticket in the address. */
 export function SignUpAccountScreen(): ReactElement {
   const { SignUpForm } = useEmployeeAuth();
+  const { search } = useLocation();
+  const hasTicket = Boolean(new URLSearchParams(search).get('__clerk_ticket')?.trim());
   useDocumentTitle('Create your account');
   return (
     <AuthFrame back="/">
-      <SignUpForm redirectTo="/sign-up/done" />
+      {hasTicket ? <SignUpForm redirectTo="/sign-up/done" /> : (
+        <div className="space-y-4">
+          <h1 className="emp-h1">Set up your account</h1>
+          <p className="emp-lead">To set up your account, open the invite link from your email.</p>
+          <Link to="/sign-in" className="emp-link">Sign in</Link>
+        </div>
+      )}
     </AuthFrame>
   );
 }
@@ -463,7 +480,8 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
   const location = useLocation();
   useState(() => takeInviteToken(location));
   const token = currentInviteToken();
-  const { getToken, stepUp } = useEmployeeAuth();
+  const { email, getToken, stepUp } = useEmployeeAuth();
+  const signOut = useSignOut();
   const api = useMemo(() => createEmployeeApi({ baseUrl: API_BASE_URL, getToken }), [getToken]);
   const navigate = useNavigate();
   const company = useCompany();
@@ -473,11 +491,13 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
   const [agreed, setAgreed] = useState(false);
   const { terms, loadFailed, reload } = useEmployeeTerms();
   const [working, setWorking] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
   useDocumentTitle(copy.title);
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
+    if (switchingAccount) return;
     const result = checkDraft(draft, token);
     const found: IdentityProblems & { terms?: string } = { ...result.problems };
     if (!agreed) found.terms = 'To continue, agree to the Terms and Privacy Notice.';
@@ -510,11 +530,23 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
           <h1 className="emp-h1">{copy.title}</h1>
           <p className="emp-lead">{copy.lead(company)}</p>
         </div>
+        {mode === 'claim' && email && (
+          <div className="emp-notice-inline">
+            <p>Signed in as <strong className="break-all">{email}</strong></p>
+            <p className="flex flex-wrap items-center gap-x-2">
+              Not you?
+              <EmpButton variant="quiet" className="emp-btn-small" disabled={working || switchingAccount} onClick={() => {
+                setSwitchingAccount(true);
+                void signOut('/claim').then((signedOut) => { if (!signedOut) setSwitchingAccount(false); });
+              }}>Sign out and use your invite again</EmpButton>
+            </p>
+          </div>
+        )}
         <IdentityFields draft={draft} setDraft={setDraft} problems={problems} token={token} />
         <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={problems.terms} />
         <FailureMessage failure={failure} cancelledText={copy.cancelled} />
         <p className="emp-hint">To keep your pay private, we'll ask you to confirm it's you with your password or a code.</p>
-        <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? copy.working : copy.button}</EmpButton>
+        <EmpButton type="submit" block disabled={working || switchingAccount || !terms} aria-busy={working}>{working ? copy.working : copy.button}</EmpButton>
         {!token && <p className="emp-hint text-center">Got an invite email? Open its link on this device instead of typing a code.</p>}
       </form>
     </AuthFrame>

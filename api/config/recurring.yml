@@ -46,6 +46,12 @@ production:
     schedule: every 10 minutes
 
   # Retries any employee-link activation security notices left pending or failed.
+  # Sends notices to an employee's previous email that are still pending.
+  retry_employee_email_change_notices:
+    class: SendEmployeeEmailChangeNoticeJob
+    queue: default
+    schedule: every 15 minutes
+
   retry_employee_activation_notices:
     class: SendEmployeeActivationNoticeJob
     queue: default

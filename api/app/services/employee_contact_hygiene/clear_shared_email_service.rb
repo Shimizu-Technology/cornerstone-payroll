@@ -96,6 +96,12 @@ module EmployeeContactHygiene
         )
 
         record_employee_audit_entries!(matching, now: now)
+        # update_all skips Employee callbacks, so apply the employee app
+        # consequences here, per locked row, from its ORIGINAL address: close
+        # an open invite, audit, and save the notice to the old address.
+        matching.each do |employee|
+          EmployeeLinks::EmailChange.call(employee: employee, from: employee.email, to: nil, actor: @actor)
+        end
 
         result = Result.new(
           company_id: @company.id,

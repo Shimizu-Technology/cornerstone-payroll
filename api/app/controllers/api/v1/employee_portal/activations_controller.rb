@@ -44,6 +44,8 @@ module Api
           when :sign_up then render json: { next: "sign_up", sign_up_url: result.url, message: nil }
           when :sign_in then render json: { next: "sign_in", sign_up_url: nil, message: SIGN_IN }
           when :unavailable then render_unavailable
+          when :email_mismatch then render_refusal(EmployeeLinks::EMAIL_MISMATCH, "email_mismatch")
+          when :code_retired then render_refusal(EmployeeLinks::CODE_RETIRED, "code_retired")
           else render json: { error: FAILED, code: "activation_failed" }, status: :unprocessable_content
           end
         end
@@ -56,6 +58,10 @@ module Api
 
         def rls_system_reason
           "Check employee app sign-up before any session exists"
+        end
+
+        def render_refusal(message, code)
+          render json: { error: message, code: code }, status: :unprocessable_content
         end
 
         def render_unavailable

@@ -7,7 +7,8 @@ module EmployeeLinks
   #
   # delivery: "email" sends a link with a random token to the employee's own
   # email (M4-3 invite guard); "code" returns a one-time 10-character sign-up
-  # code to print. Only digests are stored, and the plaintext is returned once.
+  # code to print, for Cornerstone staff only. Only digests are stored, and
+  # the plaintext is returned once.
   class Invite
     Result = Data.define(:link, :token, :code, :path, :email_status)
 
@@ -28,6 +29,7 @@ module EmployeeLinks
 
       company = @employee.company
       EmployeeLinks.require_invitation_management!(@actor, company)
+      EmployeeLinks.require_code_issuer!(@actor, company) if @delivery == "code"
       EmployeeAppSwitch::Enforcement.warm_attestation!(company)
 
       result = ApplicationRecord.transaction do
@@ -43,7 +45,7 @@ module EmployeeLinks
         raise Error, "The employee app isn't turned on for this company" unless link.portal_enabled?
 
         claim_user = route_login
-        credentials = Credentials.issue(link, delivery: @delivery, email: @employee.email)
+        credentials = Credentials.issue(link, delivery: @delivery, email: @employee.email, issued_by_staff: EmployeeLinks.staff_management_allowed?(@actor, company))
         link.claim_user = claim_user
         link.save!
 
