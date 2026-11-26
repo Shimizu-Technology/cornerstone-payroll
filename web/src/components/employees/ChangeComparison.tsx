@@ -13,6 +13,25 @@ const labels: Record<string, string> = {
   w2gu_delivery: 'Form W-2GU delivery',
 };
 
+// Stored changes come back in database key order (short keys first), so ZIP
+// would lead the address. Known fields read in form order; others keep theirs.
+const fieldOrder = [
+  'first_name', 'middle_name', 'last_name', 'suffix',
+  'email', 'phone',
+  'address_line1', 'line1', 'address_line2', 'line2', 'city', 'state', 'zip',
+];
+
+function orderedFields(fields: string[]) {
+  const rank = (field: string) => {
+    const index = fieldOrder.indexOf(field);
+    return index === -1 ? fieldOrder.length : index;
+  };
+  return fields
+    .map((field, index) => ({ field, index }))
+    .sort((a, b) => rank(a.field) - rank(b.field) || a.index - b.index)
+    .map(({ field }) => field);
+}
+
 function fieldLabel(field: string) {
   return labels[field] ?? field.replace(/^w4_/, 'W-4 ').replaceAll('_', ' ').replace(/^./, (value) => value.toUpperCase());
 }
@@ -22,7 +41,8 @@ function displayValue(value: unknown): string {
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (Array.isArray(value)) return value.map(displayValue).join('\n') || '—';
   if (typeof value === 'object') {
-    return Object.entries(value).map(([key, entry]) => `${fieldLabel(key)}: ${displayValue(entry)}`).join('\n') || '—';
+    const entries = value as Record<string, unknown>;
+    return orderedFields(Object.keys(entries)).map((key) => `${fieldLabel(key)}: ${displayValue(entries[key])}`).join('\n') || '—';
   }
   return String(value);
 }
@@ -33,7 +53,7 @@ export function ChangeComparison({ before = {}, after = {}, requested = false, c
   requested?: boolean;
   current?: boolean;
 }) {
-  const fields = Object.keys(after);
+  const fields = orderedFields(Object.keys(after));
   if (!fields.length) return null;
 
   return (

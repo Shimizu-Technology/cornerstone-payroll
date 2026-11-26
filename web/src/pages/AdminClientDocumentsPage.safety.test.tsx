@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { MemoryRouter, useNavigate } from 'react-router';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AdminClientDocumentsPage } from './AdminClientDocumentsPage';
@@ -243,4 +243,18 @@ it('clears previous file results when the new search fails', async () => {
   await screen.findByText('Search unavailable');
   expect(screen.queryByText('Payroll hours')).toBeNull();
   expect(screen.getByText('No client uploads found')).toBeTruthy();
+});
+
+it('names every share field by its label', async () => {
+  render(<MemoryRouter><AdminClientDocumentsPage /></MemoryRouter>);
+  await screen.findAllByText('Payroll hours');
+  const form = within(screen.getByRole('button', { name: 'Share Document' }).closest('form') as HTMLFormElement);
+
+  expect(form.getByRole('textbox', { name: 'Title' })).toBeTruthy();
+  expect(form.getByRole('combobox', { name: 'Category' })).toBeTruthy();
+  expect(form.getByRole('combobox', { name: 'Employee' })).toBeTruthy();
+  expect(form.getByRole('textbox', { name: 'Notes' })).toBeTruthy();
+  const files = form.getByLabelText('Files');
+  expect(files.getAttribute('type')).toBe('file');
+  expect(files.getAttribute('aria-describedby')).toBeTruthy();
 });

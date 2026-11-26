@@ -51,7 +51,7 @@ export function FinanceOverview() {
     <Header title="Finance Overview" description="Invoices owed to you and expenses you owe, together in one financial book."
       contextLabel="Financial book" contextValue={activeBook.name}
       actions={<Button variant="outline" onClick={() => setRefresh((value) => value + 1)} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>} />
-    <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <FinanceBookSelector disabled={loading} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Link to="/tools/invoices" className="flex min-h-12 items-center justify-between rounded-xl border border-neutral-200 bg-white px-4 text-sm font-semibold text-primary-800 hover:border-primary-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600">Manage invoices <ArrowUpRight className="h-4 w-4" /></Link>
@@ -73,6 +73,6 @@ export function FinanceOverview() {
             {(row.overdue_invoice_count > 0 || row.overdue_expense_count > 0) && <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><Clock3 className="h-4 w-4 shrink-0" />{row.overdue_invoice_count} overdue invoices and {row.overdue_expense_count} overdue expenses need review.</div>}
           </section>)}
       <p className="text-xs leading-5 text-neutral-600">Payments shown here are entries in this book. Match them to bank, card, or processor statements before treating them as reconciled cash.</p>
-    </main>
+    </div>
   </div>;
 }
