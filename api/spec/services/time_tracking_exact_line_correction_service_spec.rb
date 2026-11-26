@@ -32,6 +32,13 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect(summary[:paid][:line_count]).to eq(0)
   end
 
+  it "keeps an existing exact correction digest after a rollback review flag is set" do
+    preview = service.preview
+    original_period.update_columns(rollback_review_required: true)
+    expect(service.preview.fetch(:proof_digest)).to eq(preview.fetch(:proof_digest))
+    expect(confirm(preview)).to be_persisted
+  end
+
   it "confirms an existing proof after newer compensation activates" do
     activation = PayrollBusinessClock.today + 2
     change_compensation!(employee, effective_on: activation, pay_rate: 31)

@@ -367,6 +367,20 @@ class E2eReleaseFixture
         timekeeping_source: "manual"
       )
 
+      # This browser scenario starts after a void. The request specs exercise
+      # rollback authorization with locally signed claims.
+      voided_period = create_pay_period!(
+        company: company,
+        pay_schedule: pay_schedule,
+        workweek: workweek,
+        start_date: Date.new(2026, 4, 12),
+        end_date: Date.new(2026, 4, 25),
+        pay_date: Date.new(2026, 5, 1),
+        notes: "Gate 0 correction navigation scenario"
+      )
+      voided_period.update!(status: "committed", correction_status: "voided",
+        committed_at: Time.current, voided_at: Time.current, void_reason: "Synthetic correction navigation fixture")
+
       filter_race_period = create_pay_period!(
         company: company,
         pay_schedule: pay_schedule,
@@ -611,6 +625,7 @@ class E2eReleaseFixture
         register_reconciliation_field_name: register_reconciliation_field.name,
         register_reconciliation_field_total: 35.79,
         workflow_pay_period_id: workflow_period.id,
+        voided_pay_period_id: voided_period.id,
         workflow_payroll_item_id: workflow_period.payroll_items.find_by!(employee: employee).id,
         filter_race_pay_period_id: filter_race_period.id,
         mutation_race_pay_period_id: mutation_race_period.id,

@@ -97,6 +97,16 @@ when "ambiguous_commit"
   abort "Lost acknowledgement was not retained" unless allocation.status == "pending_commit" &&
     allocation.remote_allocation_id.nil? && allocation.last_sync_error == "Synthetic response lost after AIRE committed"
   { id: allocation.id, status: allocation.status, commit_command_id: allocation.commit_command_id }
+when "rollback_manual_period"
+  period = PayPeriod.find(payroll.fetch("manual_pay_period_ids").last)
+  abort "Wrong manual fixture company" unless period.company_id == payroll.fetch("company_id")
+  admin = User.find_by!(email: payroll.fetch("admin_email"))
+  TenantScope.with_company(period.company_id) do
+    AdminOverrideService.rollback_payroll!(pay_period: period, actor: admin, verified: true, impersonated: false,
+      unpaid_acknowledgement: true, reason: "Synthetic undelivered manual payroll cancelled before any payment",
+      confirmation: AdminOverrideService.payroll_confirmation(period))
+    { correction_status: period.reload.correction_status }
+  end
 when "sync"
   id = Integer(ENV.fetch("MANUAL_ALLOCATION_ID"), 10)
   allocation = TimeTrackingManualAllocation.find(id)

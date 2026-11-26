@@ -41,7 +41,7 @@ RSpec.describe "Pre-deploy employer contribution tracking" do
       expect(item.reload.check_number).to be_nil
       expect(employee.ytd_totals_for(2024).gross_pay).to eq(0)
       expect(freeze_history(item)).to eq(frozen)
-      lifecycle.unapprove! if status == "approved"
+      lifecycle.unapprove!(reason: "Fixture payroll approval correction") if status == "approved"
       PayrollCalculator.for(employee, item).calculate
       item.save!
       lifecycle.approve!

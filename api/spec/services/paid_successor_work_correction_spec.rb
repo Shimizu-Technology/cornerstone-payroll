@@ -426,13 +426,26 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     legacy["version"] = 1
     legacy.delete("target_tax_year")
     legacy["target"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(current.attributes)))
-    legacy["target_period"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(period.attributes)))
+    legacy["target_period"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(period.attributes.except("rollback_review_required"))))
     retained = legacy.deep_dup
     period.update_columns(tax_sync_status: "synced", tax_sync_attempts: 1, tax_synced_at: Time.current, tax_sync_idempotency_key: "cpr-legacy-#{period.id}")
     expect(resolver.matches_saved_evidence?(legacy)).to be(true)
     expect(legacy).to eq(retained)
     legacy["target"].delete("withholding_tax")
     expect(resolver.matches_saved_evidence?(legacy)).to be(false)
+  end
+
+  it "preserves saved paid target evidence and checksums when a rollback review flag is set" do
+    period, _current = paid_successor
+    resolver = TimeTracking::PaidCorrectionTarget.new(allocation: allocation, source: source,
+      line: next_import.raw_payload["employees"].first["adjustments"].first)
+    saved = resolver.resolve.fetch(:evidence)
+    expect(saved.fetch("target_period")).not_to have_key("rollback_review_required")
+
+    period.update_columns(rollback_review_required: true)
+    expect(resolver.matches_saved_evidence?(saved)).to be(true)
+    expect(TimeTracking::CanonicalPayload.checksum(resolver.resolve.fetch(:evidence)))
+      .to eq(TimeTracking::CanonicalPayload.checksum(saved))
   end
 
   { "net_pay" => 90, "withholding_tax" => 2, "social_security_tax" => 5, "medicare_tax" => 1,

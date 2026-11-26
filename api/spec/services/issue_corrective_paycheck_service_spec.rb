@@ -98,7 +98,7 @@ RSpec.describe IssueCorrectivePaycheckService do
         _, second = issue_target({ hours_worked: 1 })
         frozen_second = second.attributes.deep_dup
         before_void = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: 2 })
-        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse the first positive adjustment")
+        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse the first positive adjustment", acknowledge_later_runs: true)
         expect_ytd_to_match_ledger([ original_item, second ])
         expect(employee.ytd_totals_for(2024).reload.gross_pay).to eq(-9 * original_item.pay_rate)
         ytd_before = employee.ytd_totals_for(2024).reload.attributes
@@ -158,7 +158,7 @@ RSpec.describe IssueCorrectivePaycheckService do
       it "still rejects a negative absolute target even when recorded hours are signed" do
         first_period, = issue_target({ hours_worked: 20 })
         issue_target({ hours_worked: 1 })
-        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse first adjustment")
+        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse first adjustment", acknowledge_later_runs: true)
         ytd_before = employee.ytd_totals_for(2024).reload.attributes
         expect {
           described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: { hours_worked: -1 })
@@ -219,7 +219,7 @@ RSpec.describe IssueCorrectivePaycheckService do
     it "excludes voided correctives from the recorded financial and input baseline" do
       first_period, = issue_target({ hours_worked: 80 })
       issue_target({ hours_worked: 65 })
-      PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "First adjustment reversed")
+      PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "First adjustment reversed", acknowledge_later_runs: true)
       preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: {})
       expect(preview[:recorded][:hours_worked]).to eq(45)
       expect(preview[:recorded][:gross_pay]).to eq(675)
@@ -315,7 +315,7 @@ RSpec.describe IssueCorrectivePaycheckService do
       it "normalizes recorded row hours after an earlier correction is voided" do
         first_period, = issue_target({ hours_worked: 12 })
         issue_target({ hours_worked: 9 })
-        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse first adjustment")
+        PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Reverse first adjustment", acknowledge_later_runs: true)
         preview = described_class.preview(original_pay_period: original_period, employee: employee, corrected_inputs: {})
         expect(preview[:recorded][:hours_worked]).to eq(7)
         expect(preview[:recorded][:custom_columns_data].fetch("wage_rate_hours").sole.fetch("regular_hours")).to eq(7)

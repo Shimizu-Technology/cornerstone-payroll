@@ -46,9 +46,11 @@ RSpec.describe "Demo company contained commit", type: :request do
   end
 
   it "voids a committed demo payroll without liability postings" do
+    allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!)
+    allow(MfaPolicy).to receive(:recently_step_up_verified?).and_return(true)
     post "/api/v1/admin/pay_periods/#{period.id}/commit", params: { expected_next_check_number: demo.next_check_number }
     expect(response).to have_http_status(:ok), response.body
-    post "/api/v1/admin/pay_periods/#{period.id}/void", params: { reason: "Entered the wrong week", unpaid_acknowledgement: true }
+    post "/api/v1/admin/pay_periods/#{period.id}/void", params: { confirmation: AdminOverrideService.payroll_confirmation(period), reason: "Entered the wrong week", unpaid_acknowledgement: true }
     expect(response).to have_http_status(:ok), response.body
     expect(period.reload.correction_status).to eq("voided")
     expect(PayrollLiabilityPosting.where(company: demo)).to be_empty

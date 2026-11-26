@@ -38,7 +38,7 @@ class PayPeriodCorrectionService
   # @param actor      [User]        – user initiating the void
   # @param reason     [String]      – mandatory explanation
   # @return [PayPeriodCorrectionEvent]
-  def self.void!(pay_period:, actor:, reason:)
+  def self.void!(pay_period:, actor:, reason:, acknowledge_later_runs: false)
     raise ArgumentError, "reason is required" if reason.blank?
 
     PayPeriod.transaction do
@@ -61,6 +61,12 @@ class PayPeriodCorrectionService
         raise InvalidStateError, "This payroll has an exact source accounting correction. Voiding is held until the correction disposition and source receipt can be reversed together; review the linked correction with payroll support."
       end
       payments = PayrollRevisionPaymentPreflight.new(pay_period: locked, lock: true).ensure_eligible!
+      later_ids = payments.result.fetch(:later_committed_run_ids)
+      if later_ids.any? && acknowledge_later_runs != true
+        raise InvalidStateError, "Acknowledge that later committed payrolls must be reviewed before voiding"
+      end
+      PayPeriod.where(company_id: locked.company_id, id: later_ids).update_all(rollback_review_required: true) if later_ids.any?
+
       PayrollLiabilityPaymentGuard.ensure_clear!(
         pay_period: locked,
         error_class: InvalidStateError,

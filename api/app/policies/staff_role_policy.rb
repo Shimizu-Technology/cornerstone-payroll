@@ -5,6 +5,7 @@ class StaffRolePolicy
   ROLE_ONLY_CAPABILITIES = %i[manage_source_delegations manage_payroll_go_live_setup].freeze
 
   CAPABILITY_ROLES = {
+    break_glass: %w[super_admin org_admin admin],
     override_client_approval: %w[super_admin org_admin admin],
     manage_source_delegations: %w[super_admin org_admin admin manager],
     manage_payroll_go_live_setup: %w[super_admin org_admin admin manager],
@@ -45,6 +46,7 @@ class StaffRolePolicy
   }.freeze
 
   CAPABILITY_ERRORS = {
+    break_glass: "Admin access required",
     override_client_approval: "Admin access required",
     manage_source_delegations: "Manager or admin access required",
     manage_payroll_go_live_setup: "Manager or admin access required",
@@ -125,6 +127,9 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/pay_periods#void" => :break_glass,
+    "api/v1/admin/pay_periods#reopen_unpaid" => :break_glass,
+    "api/v1/admin/pay_periods#correction_preflight" => :break_glass,
     "api/v1/admin/pay_periods#override_client_approval" => :override_client_approval,
     "api/v1/admin/pay_periods#record_client_approval" => :override_client_approval,
     "api/v1/admin/users#lookup_clerk_id" => :recover_clerk_invitation,
