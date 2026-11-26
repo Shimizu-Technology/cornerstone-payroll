@@ -16,8 +16,12 @@ module EmployeeLinkHelpers
     base.let(:clerk_invitations) { [] }
 
     base.before do
-      EmployeeTermsVersion.create!(version: TEST_TERMS_VERSION, status: "draft", terms_url: "/terms",
-        privacy_url: "/privacy", published_at: Time.current)
+      EmployeeTermsVersion.find_or_create_by!(version: TEST_TERMS_VERSION) do |record|
+        record.status = "draft"
+        record.terms_url = "/terms"
+        record.privacy_url = "/privacy"
+        record.published_at = Time.current
+      end
       verifier = ClerkTokenVerifier.new(
         env: { "CLERK_ISSUER" => ISSUER, "CLERK_AUTHORIZED_PARTIES" => PAYROLL_ORIGIN },
         cache: ActiveSupport::Cache::MemoryStore.new,

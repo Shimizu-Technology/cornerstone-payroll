@@ -261,11 +261,11 @@ export function Departments() {
                         autoFocus
                       />
                       <MobileCardActions className="mt-0 grid grid-cols-2">
-                        <Button size="sm" onClick={handleSaveEdit} disabled={isSavingEdit}>
+                        <Button size="sm" className="min-h-11" onClick={handleSaveEdit} disabled={isSavingEdit}>
                           <Check className="mr-1 h-4 w-4" />
                           Save
                         </Button>
-                        <Button variant="outline" size="sm" onClick={handleCancelEdit} disabled={isSavingEdit}>
+                        <Button variant="outline" size="sm" className="min-h-11" onClick={handleCancelEdit} disabled={isSavingEdit}>
                           Cancel
                         </Button>
                       </MobileCardActions>
@@ -286,11 +286,11 @@ export function Departments() {
                             <MobileField label="Status" value={dept.active ? 'Active' : 'Inactive'} />
                           </div>
                           <MobileCardActions>
-                            <Button variant="outline" size="sm" onClick={() => handleStartEdit(dept)}>
+                            <Button variant="outline" size="sm" className="min-h-11" onClick={() => handleStartEdit(dept)}>
                               <Edit2 className="mr-1 h-4 w-4" />
                               Edit
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleToggleActive(dept)} disabled={togglingId === dept.id}>
+                            <Button variant="ghost" size="sm" className="min-h-11" onClick={() => handleToggleActive(dept)} disabled={togglingId === dept.id}>
                               {dept.active ? 'Deactivate' : 'Activate'}
                             </Button>
                           </MobileCardActions>

@@ -275,6 +275,7 @@ describe('employee site deploy files', () => {
     expect(headers).toContain('https://clerk-staging.example.test');
     expect(headers).not.toContain('cornerstone-payroll-api.onrender.com');
     const reportOnlyLine = headers.split('\n').map((line) => line.trim()).find((line) => line.startsWith('Content-Security-Policy-Report-Only:')) ?? '';
+    expect(reportOnlyLine).not.toContain('upgrade-insecure-requests');
     const imgSrc = reportOnlyLine.split('; ').find((part) => part.startsWith('img-src ')) ?? '';
     expect(imgSrc.split(' ')).toContain('https:');
     for (const file of ['sw.js', 'offline.html', 'sitemap.xml']) expect(existsSync(path.join(dist, file))).toBe(true);
@@ -334,6 +335,7 @@ describe('shared Netlify configuration', () => {
     expect(reportOnlyLine).toContain('https://fonts.googleapis.com');
     expect(reportOnlyLine).toContain('https://fonts.gstatic.com');
     expect(reportOnlyLine).toContain("frame-ancestors 'none'");
+    expect(reportOnlyLine).not.toContain('upgrade-insecure-requests');
     const imgSrc = reportOnlyLine!.split('; ').find((part) => part.startsWith('img-src ')) ?? '';
     expect(imgSrc.split(' ')).toContain('https:');
   });

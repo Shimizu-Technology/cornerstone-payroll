@@ -15,6 +15,17 @@ import { formatDate, formatDateRange } from '@/lib/display-date';
 import { clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { ClientPayrollReview } from '@/components/client-portal/ClientPayrollReview';
 import { ClientPayStubButton } from '@/components/client-portal/ClientPayStubButton';
+import {
+  getVisibleOptionalColumns,
+  itemInsurance,
+  itemLoans,
+  itemNonTaxableAdditions,
+  itemOtherDeductions,
+  itemRetirement,
+  itemTaxes,
+  numericAmount,
+  type VisibleOptionalColumns,
+} from './clientPayPeriodColumns';
 import type { PayrollItem } from '@/types';
 import { payRunsPath, safeInternalReturnPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
@@ -93,6 +104,11 @@ export function ClientPayPeriodDetail(): ReactElement {
     };
   }, [load]);
 
+  const optionalColumns = useMemo(
+    () => getVisibleOptionalColumns(resolvedPayPeriod?.payroll_items || []),
+    [resolvedPayPeriod?.payroll_items],
+  );
+
   const visibleItems = useMemo(() => {
     const items = resolvedPayPeriod?.payroll_items || [];
     return items.filter((item) => {
@@ -153,7 +169,7 @@ export function ClientPayPeriodDetail(): ReactElement {
               <CardContent className="p-0">
                 <div className="space-y-3 p-3 lg:hidden" aria-label="Employee payroll details">
                   {visibleItems.map((item) => (
-                    <PayrollItemMobileCard key={item.id} item={item} />
+                    <PayrollItemMobileCard key={item.id} item={item} optionalColumns={optionalColumns} />
                   ))}
                   {visibleItems.length === 0 && <p className="py-8 text-center text-sm text-neutral-500">No employees match these filters.</p>}
                 </div>
@@ -165,19 +181,19 @@ export function ClientPayPeriodDetail(): ReactElement {
                       <TableHead>Hours</TableHead>
                       <TableHead>Rate</TableHead>
                       <TableHead>Gross</TableHead>
-                      <TableHead>Non-taxable additions</TableHead>
+                      {optionalColumns.nonTaxableAdditions && <TableHead>Non-taxable additions</TableHead>}
                       <TableHead>Taxes</TableHead>
-                      <TableHead>Retirement</TableHead>
-                      <TableHead>Loans</TableHead>
-                      <TableHead>Insurance</TableHead>
-                      <TableHead>Other deductions</TableHead>
+                      {optionalColumns.retirement && <TableHead>Retirement</TableHead>}
+                      {optionalColumns.loans && <TableHead>Loans</TableHead>}
+                      {optionalColumns.insurance && <TableHead>Insurance</TableHead>}
+                      {optionalColumns.otherDeductions && <TableHead>Other deductions</TableHead>}
                       <TableHead>Total deductions</TableHead>
                       <TableHead>Net pay</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody striped>
                     {visibleItems.map((item) => (
-                      <PayrollItemRow key={item.id} item={item} />
+                      <PayrollItemRow key={item.id} item={item} optionalColumns={optionalColumns} />
                     ))}
                   </TableBody>
                 </Table>
@@ -211,49 +227,7 @@ function SummaryCard({ label, value }: SummaryCardProps): ReactElement {
 
 interface PayrollItemRowProps {
   item: PayrollItem;
-}
-
-function numericAmount(value: number | string | null | undefined): number {
-  const parsed = Number(value);
-  return value == null || !Number.isFinite(parsed) ? 0 : parsed;
-}
-
-function itemNonTaxableAdditions(item: PayrollItem): number {
-  if (item.non_taxable_additions_total != null && Number.isFinite(Number(item.non_taxable_additions_total))) {
-    return numericAmount(item.non_taxable_additions_total);
-  }
-  return numericAmount(item.non_taxable_pay);
-}
-
-function itemTaxes(item: PayrollItem): number {
-  return numericAmount(item.withholding_tax) + numericAmount(item.additional_withholding)
-    + numericAmount(item.social_security_tax) + numericAmount(item.medicare_tax)
-    + numericAmount(item.state_withheld);
-}
-
-function itemRetirement(item: PayrollItem): number {
-  return numericAmount(item.retirement_payment) + numericAmount(item.roth_retirement_payment);
-}
-
-function itemLoans(item: PayrollItem): number {
-  if (item.loan_payment != null && Number.isFinite(Number(item.loan_payment))) {
-    return numericAmount(item.loan_payment);
-  }
-  return numericAmount(item.loan_deduction);
-}
-
-function itemInsurance(item: PayrollItem): number {
-  return numericAmount(item.insurance_payment);
-}
-
-function itemOtherDeductions(item: PayrollItem): number {
-  if (item.other_deductions != null && Number.isFinite(Number(item.other_deductions))) {
-    const value = numericAmount(item.other_deductions);
-    return value === 0 ? 0 : value;
-  }
-  const total = numericAmount(item.total_deductions);
-  const diff = Math.round((total - (itemTaxes(item) + itemRetirement(item) + itemLoans(item) + itemInsurance(item))) * 100) / 100;
-  return diff === 0 ? 0 : diff;
+  optionalColumns: VisibleOptionalColumns;
 }
 
 function formatWholeOrCents(amount: number): string {
@@ -296,7 +270,7 @@ function formatItemRate(item: PayrollItem): string {
   return formatCurrency(rate);
 }
 
-function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
+function PayrollItemMobileCard({ item, optionalColumns }: PayrollItemRowProps): ReactElement {
   return (
     <MobileRecordCard>
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -315,12 +289,12 @@ function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
           <MobileField label="Hours" value={formatItemHours(item)} />
           <MobileField label="Rate" value={formatItemRate(item)} />
           <MobileField label="Gross" value={formatCurrency(numericAmount(item.gross_pay))} />
-          <MobileField label="Non-taxable additions" value={formatCurrency(itemNonTaxableAdditions(item))} />
+          {optionalColumns.nonTaxableAdditions && <MobileField label="Non-taxable additions" value={formatCurrency(itemNonTaxableAdditions(item))} />}
           <MobileField label="Taxes" value={formatCurrency(itemTaxes(item))} />
-          <MobileField label="Retirement" value={formatCurrency(itemRetirement(item))} />
-          <MobileField label="Loans" value={formatCurrency(itemLoans(item))} />
-          <MobileField label="Insurance" value={formatCurrency(itemInsurance(item))} />
-          <MobileField label="Other deductions" value={formatCurrency(itemOtherDeductions(item))} />
+          {optionalColumns.retirement && <MobileField label="Retirement" value={formatCurrency(itemRetirement(item))} />}
+          {optionalColumns.loans && <MobileField label="Loans" value={formatCurrency(itemLoans(item))} />}
+          {optionalColumns.insurance && <MobileField label="Insurance" value={formatCurrency(itemInsurance(item))} />}
+          {optionalColumns.otherDeductions && <MobileField label="Other deductions" value={formatCurrency(itemOtherDeductions(item))} />}
           <MobileField label="Total deductions" value={formatCurrency(numericAmount(item.total_deductions))} />
         </div>
       )}
@@ -328,29 +302,29 @@ function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
   );
 }
 
-function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
+function PayrollItemRow({ item, optionalColumns }: PayrollItemRowProps): ReactElement {
   return (
     <TableRow>
       <TableCell stickyLeft className="bg-inherit">
         <div>
           <p className="font-medium text-gray-900">{item.employee_name}</p>
-          {item.pay_stub_available && <ClientPayStubButton itemId={item.id} />}
+          {item.pay_stub_available && <ClientPayStubButton itemId={item.id} compact />}
           <p className="text-xs uppercase tracking-wide text-gray-500">{item.employment_type}</p>
         </div>
       </TableCell>
       <TableCell>{formatItemHours(item)}</TableCell>
       <TableCell>{formatItemRate(item)}</TableCell>
       <TableCell>{formatCurrency(item.gross_pay ?? 0)}</TableCell>
-      {item.details_error ? <TableCell colSpan={7}>{item.details_error}</TableCell> : <>
-        <TableCell>{formatCurrency(itemNonTaxableAdditions(item))}</TableCell>
+      {item.details_error ? <TableCell colSpan={2 + optionalColumns.count}>{item.details_error}</TableCell> : <>
+        {optionalColumns.nonTaxableAdditions && <TableCell>{formatCurrency(itemNonTaxableAdditions(item))}</TableCell>}
         <TableCell>{formatCurrency(itemTaxes(item))}</TableCell>
-        <TableCell>{formatCurrency(itemRetirement(item))}</TableCell>
-        <TableCell>{formatCurrency(itemLoans(item))}</TableCell>
-        <TableCell>{formatCurrency(itemInsurance(item))}</TableCell>
-        <TableCell>{formatCurrency(itemOtherDeductions(item))}</TableCell>
+        {optionalColumns.retirement && <TableCell>{formatCurrency(itemRetirement(item))}</TableCell>}
+        {optionalColumns.loans && <TableCell>{formatCurrency(itemLoans(item))}</TableCell>}
+        {optionalColumns.insurance && <TableCell>{formatCurrency(itemInsurance(item))}</TableCell>}
+        {optionalColumns.otherDeductions && <TableCell>{formatCurrency(itemOtherDeductions(item))}</TableCell>}
         <TableCell>{formatCurrency(item.total_deductions ?? 0)}</TableCell>
       </>}
-      <TableCell>{formatCurrency(item.net_pay ?? 0)}</TableCell>
+      <TableCell className="font-semibold tabular-nums">{formatCurrency(item.net_pay ?? 0)}</TableCell>
     </TableRow>
   );
 }

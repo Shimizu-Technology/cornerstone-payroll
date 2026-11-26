@@ -201,7 +201,7 @@ class ImportedPayrollRegister
   end
 
   def component_amount(lines, pattern)
-    normalized_lines(lines).sum { |line| line[:label].match?(pattern) ? line[:amount] : 0.0 }
+    normalized_lines(lines).sum { |line| line[:label].to_s.squish.match?(pattern) ? line[:amount] : 0.0 }
   end
 
   def normalized_lines(lines)

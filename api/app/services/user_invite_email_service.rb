@@ -169,9 +169,9 @@ class UserInviteEmailService
                                 Getting started
                               </p>
                               <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #374151;">
-                                Click the button below to create your account using
+                                Click the button below to finish setting up your account for
                                 <strong style="color: #111827;">#{h(user.email)}</strong>.
-                                Choose <strong style="color: #111827;">Sign up</strong> if this is your first time.
+                                This link opens account setup directly.
                               </p>
                             </td>
                           </tr>

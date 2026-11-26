@@ -84,3 +84,11 @@ it('highlights only Contact Details when visiting its route', () => {
   expect(screen.getByRole('link', { name: 'Employees' }).getAttribute('aria-current')).toBeNull();
   expect(screen.getByRole('link', { name: 'Contact Details' }).getAttribute('aria-current')).toBe('page');
 });
+
+it('hides the command shortcut badge on mobile viewports', () => {
+  render(<MemoryRouter><Sidebar onOpenCommandPalette={vi.fn()} /></MemoryRouter>);
+  const commandButton = screen.getByRole('button', { name: 'Open command menu' });
+  const shortcutBadge = commandButton.querySelector('span.ml-auto');
+  expect(shortcutBadge?.className).toContain('hidden');
+  expect(shortcutBadge?.className).toContain('lg:inline-flex');
+});

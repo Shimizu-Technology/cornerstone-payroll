@@ -168,7 +168,7 @@ export function Layout() {
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 py-3 backdrop-blur-sm lg:hidden">
           <button
             type="button"
-            className="inline-flex items-center justify-center rounded-xl border border-neutral-300 bg-white p-2 text-neutral-700 shadow-sm transition hover:bg-neutral-50"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-neutral-300 bg-white p-2 text-neutral-700 shadow-sm transition hover:bg-neutral-50"
             onClick={() => setMobileNavOpen(true)}
             aria-label="Open navigation"
             aria-expanded={mobileNavOpen}
@@ -180,7 +180,7 @@ export function Layout() {
             <p className="text-sm font-semibold tracking-tight text-neutral-900">{isClient ? 'Cornerstone Payroll · Client Portal' : 'Cornerstone Payroll'}</p>
             <p className="truncate text-xs font-medium text-primary-700">{financePage ? activeOrganizationName || 'Finance workspace' : activeCompany?.name || 'Payroll workspace'}</p>
           </div>
-          <div className="h-9 w-9" />
+          <div className="h-11 w-11" />
         </div>
 
         <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-neutral-50" aria-live="polite">
@@ -248,7 +248,7 @@ export function Layout() {
       }}>
         <DialogContent variant="drawer" aria-label="Navigation">
           <Sidebar className="w-full" onNavigate={() => setMobileNavOpen(false)} onOpenCommandPalette={() => openCommandPalette('all')} />
-          <button type="button" className="absolute right-3 top-3 z-40 inline-flex h-9 w-9 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100"
+          <button type="button" className="absolute right-3 top-3 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100"
             onClick={() => setMobileNavOpen(false)} aria-label="Close navigation">
             <X className="h-4 w-4" />
           </button>
