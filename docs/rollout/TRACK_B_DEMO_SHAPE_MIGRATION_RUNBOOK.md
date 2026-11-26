@@ -32,7 +32,7 @@ Confirm every item before opening the release window:
 1. Create a named Neon recovery branch (or point-in-time snapshot) from the production primary right before the window (for example `pre-track-b-demo-migrate-YYYYMMDD-HHMMZ`). Record the branch name, UTC recovery timestamp, and deployed commit SHA in the private rollout record. Keep the branch isolated from live services and outbound integrations.
 2. **Understand rollback scope:**
    - **Primary rollback (no data loss for real clients):** §8a enables **Write Maintenance** briefly and runs `demo:revert_to_legacy_shape` with the recorded `CONVERSION_ID` from `demo_shape_conversions` to restore only that company's exact recorded before-state and `employee_account_links.payroll_environment`, without touching unrelated production writes.
-   - **Last-resort whole-DB Neon restore:** restoring a whole-database Neon backup discards any unrelated production writes committed after the recovery point (such as a real client's payroll or posted documents). If you want the option to perform a lossless whole-DB Neon restore, enable **Write Maintenance** ([Payroll write maintenance](../runbooks/WRITE_MAINTENANCE.md) — `WRITE_MAINTENANCE=true` on web + suspend the worker) **before** creating the Neon recovery branch and keep it enabled until the verification gate passes. Otherwise, rely on the targeted per-company rollback in §8 and keep the Neon branch strictly as a disaster-recovery last resort.
+   - **Last-resort whole-DB Neon restore (not lossless under Write Maintenance alone):** restoring a whole-database Neon backup discards **every** write committed after the recovery point. Per [Payroll write maintenance](../runbooks/WRITE_MAINTENANCE.md), even with `WRITE_MAINTENANCE=true`, read requests can still write sign-in activity and access logs, and direct database sessions or Rake tasks bypass the HTTP switch. Do **not** treat a whole-DB Neon restore as lossless unless all non-migration writers are stopped before the recovery branch is created through verification (see §8b). Rely on the targeted per-company rollback in §8a as the primary rollback and keep the Neon branch strictly as a disaster-recovery last resort with an approved recovery plan for any post-checkpoint writes.
 
 ---
 
@@ -273,12 +273,22 @@ This locks the company row `FOR UPDATE`, verifies the recorded conversion has no
 
 ### 8b. Last-resort rollback: Neon recovery branch restore
 
-Use the §1 Neon recovery branch **only** if targeted revert is impossible (for example database corruption or post-conversion state that cannot be cleanly reverted):
+Use the §1 Neon recovery branch **only** if the primary targeted per-company revert (§8a) is impossible (for example database corruption or post-conversion state that cannot be cleanly reverted):
 
-1. **Warning:** a whole-DB Neon restore discards any unrelated production writes committed after the recovery point unless Write Maintenance ([WRITE_MAINTENANCE.md](../runbooks/WRITE_MAINTENANCE.md)) fenced all production writes from before the Neon branch was taken.
-2. Enable Write Maintenance and suspend the worker if not already active.
-3. Restore or promote the §1 Neon recovery branch to the recorded UTC timestamp.
-4. Restart web, worker, and employee API so caches reload pre-migration state, re-verify against `/tmp/track-b-before-*.json`, and then lift Write Maintenance.
+1. **Residual data-loss risk:** a whole-DB Neon restore discards **all** writes committed after the recovery point — including real-client payroll/documents, operational metadata still written during read requests under `WRITE_MAINTENANCE=true` (sign-in activity, access logs), and any writes from direct database sessions or Rails/Rake tasks that bypass the HTTP switch (per [WRITE_MAINTENANCE.md](../runbooks/WRITE_MAINTENANCE.md)). Never treat a whole-DB restore as lossless under `WRITE_MAINTENANCE=true` alone.
+2. **Full-writer fence (if preparing a clean whole-DB recovery point ahead of time):** before creating the recovery branch and continuously through post-migration verification, stop or scale to zero the Solid Queue worker **and** all three web services (Payroll API web, Employee API web, and any remaining web service attached to the primary database), and confirm no other database sessions remain via `pg_stat_activity`:
+
+```sql
+SELECT pid, usename, application_name, state, client_addr
+FROM pg_stat_activity
+WHERE datname = current_database()
+  AND pid <> pg_backend_pid();
+```
+
+   Confirm zero other active or idle application/operator sessions before creating the recovery branch, and keep those services stopped until verification completes.
+3. **Approved post-checkpoint recovery plan:** if any services or direct DB sessions were active after the §1 recovery point, obtain owner approval on a written recovery/reconciliation plan for every write committed after the recovery timestamp **before** restoring or promoting the Neon branch.
+4. Stop (or scale to zero) the worker and all three web services and verify `pg_stat_activity` shows no other DB sessions before restoring or promoting the §1 Neon recovery branch to the recorded UTC timestamp.
+5. Bring services back up so caches reload pre-migration state, re-verify against `/tmp/track-b-before-${COMPANY_ID}.json`, and execute the approved post-checkpoint recovery plan if any post-checkpoint writes were affected.
 
 ---
 
