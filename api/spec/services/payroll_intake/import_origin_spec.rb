@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
-require Rails.root.join("db/migrate/20261127020000_add_import_origin_to_payroll_items_and_imports")
+require Rails.root.join("db/migrate/20261127050000_add_import_origin_to_payroll_items_and_imports")
 
 RSpec.describe "Track C B3 import_origin" do
   let(:company) { create(:company, payroll_intake_source_types: %w[mosa_revel spike_email]) }
