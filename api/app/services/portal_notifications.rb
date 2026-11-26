@@ -14,6 +14,10 @@ module PortalNotifications
   BATCH_WINDOW = 2.minutes
 
   CATEGORIES = {
+    "payroll_super_admin" => {
+      audience: "staff", default_mode: "immediate", mandatory: true, label: "Payroll oversight",
+      description: "Security and payroll actions that require super admin visibility."
+    },
     "tax_form_paper_copies" => {
       audience: "staff", default_mode: "immediate", label: "Paper tax form follow-ups",
       description: "An employee tax form email could not be delivered and a paper copy is due."
@@ -76,6 +80,7 @@ module PortalNotifications
     "payroll_submission_imported" => { category: "payroll_updates" },
     "payroll_submission_acknowledged" => { category: "payroll_updates" },
     "payroll_rollback_staff" => { category: "payroll_submissions" },
+    "payroll_rollback_super_admin" => { category: "payroll_super_admin" },
     "payroll_rollback_client" => { category: "payroll_updates", client_managers_only: true },
     "payroll_review_published" => { category: "payroll_updates", client_managers_only: true },
     "payroll_review_decided" => { category: "payroll_submissions" },
@@ -173,10 +178,11 @@ module PortalNotifications
     end
 
     def payroll_rollback!(entry)
-      %w[staff client].each do |audience|
+      %w[staff client super_admin].each do |audience|
         record!(event_type: "payroll_rollback_#{audience}", company: entry.company, actor: entry.actor,
           subject: entry.subject, dedupe_key: "payroll_rollback:#{entry.id}:#{audience}",
-          metadata: { pay_period_id: entry.subject_id, self_override: audience == "staff" && entry.self_override? })
+          metadata: { pay_period_id: entry.subject_id, self_override: audience == "super_admin" && entry.self_override?,
+            recipient_scope: ("super_admins" if audience == "super_admin") }.compact)
       end
     end
 
@@ -195,6 +201,7 @@ module PortalNotifications
           { "decision" => "cornerstone_override", "recipient_scope" => "client_managers" }
         category = "payroll_updates"
       end
+      category = "payroll_super_admin" if event_type == "payroll_review_decided" && metadata.stringify_keys["recipient_scope"] == "super_admins"
       event = PortalNotificationEvent.new(
         organization_id: company.organization_id, company: company, actor: actor,
         event_type: event_type, category: category,
@@ -231,7 +238,7 @@ module PortalNotifications
 
     def create_delivery!(event, target)
       # Extra addresses have no account preferences; they follow the default.
-      mode = target.user ? Preferences.mode_for(target.user, event.category) : CATEGORIES.dig(event.category, :default_mode)
+      mode = target.user ? Preferences.mode_for(target.user, event.preference_category) : CATEGORIES.dig(event.category, :default_mode)
       ledger_mode = mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode
       intended_email = PortalNotificationRecipient.normalize_email(target.user&.email || target.email)
       attrs = { portal_notification_event: event, user: target.user, recipient_email: target.email,

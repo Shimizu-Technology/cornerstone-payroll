@@ -1298,7 +1298,7 @@ module Api
             reason: params[:reason], confirmation: params[:confirmation], reopen: reopen,
             scope_attributes: reopen ? refresh_scope_attributes : {},
             unpaid_acknowledgement: [ true, "true" ].include?(params[:unpaid_acknowledgement]),
-            acknowledge_later_runs: params[:acknowledge_later_runs] == true)
+            acknowledge_later_runs: [ true, "true" ].include?(params[:acknowledge_later_runs]))
         end
 
         def purpose_fields_submitted?

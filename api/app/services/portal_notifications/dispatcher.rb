@@ -251,7 +251,7 @@ module PortalNotifications
       user = effective_user_for(row)
       return false unless user
 
-      current_mode = Preferences.mode_for(user, row.event.category)
+      current_mode = Preferences.mode_for(user, row.event.preference_category)
       return false unless PortalNotificationDelivery::DELIVERY_MODES.include?(current_mode)
       return false if current_mode == row.delivery_mode
 
@@ -306,7 +306,7 @@ module PortalNotifications
       if row.user_id.nil? && PortalNotificationDelivery.where(portal_notification_event_id: event.id, user_id: user.id).where.not(id: row.id).exists?
         return "coalesced"
       end
-      return "preference_off" if Preferences.mode_for(user, event.category) == "off"
+      return "preference_off" if Preferences.mode_for(user, event.preference_category) == "off"
       # Reading the conversation first makes a still-pending alert unnecessary.
       return "already_read" if event.message_event? && !event.subject.unread_for?(user)
 

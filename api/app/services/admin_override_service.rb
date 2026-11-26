@@ -3,6 +3,13 @@
 class AdminOverrideService
   class AccessDenied < StandardError; end
 
+  ROLLBACK_AUTHORIZATION = Object.new.freeze
+  private_constant :ROLLBACK_AUTHORIZATION
+
+  def self.authorized_rollback?(authorization)
+    ROLLBACK_AUTHORIZATION.equal?(authorization)
+  end
+
   PERIOD_SNAPSHOT_FIELDS = %w[status correction_status voided_at voided_by_id void_reason
     superseded_by_id start_date end_date pay_date committed_by_id approved_by_id].freeze
 
@@ -52,9 +59,9 @@ class AdminOverrideService
         self_override: [ period.created_by_id, period.approved_by_id, period.committed_by_id ].include?(actor.id)
       ) do
         if reopen
-          PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: reason, scope_attributes: scope_attributes)
+          PayPeriodCorrectionService.reopen_unpaid!(authorization: ROLLBACK_AUTHORIZATION, pay_period: period, actor: actor, reason: reason, scope_attributes: scope_attributes)
         else
-          PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: reason,
+          PayPeriodCorrectionService.void!(authorization: ROLLBACK_AUTHORIZATION, pay_period: period, actor: actor, reason: reason,
             acknowledge_later_runs: acknowledge_later_runs)
         end
       end
@@ -67,6 +74,10 @@ class AdminOverrideService
   end
 
   private_class_method def self.authorize!(actor:, company:)
+    if company.practice_copy? || company.test_workspace_archived_at.present?
+      raise AccessDenied, "Payroll rollback is unavailable in this workspace"
+    end
+
     actor = User.lock.find_by(id: actor&.id)
     company.company_assignments.where(user_id: actor&.id).lock.load
     unless StaffRolePolicy.allowed?(actor, :break_glass, company: company) &&

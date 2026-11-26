@@ -323,8 +323,9 @@ module Api
         def audit_fit_override!(reason, previous)
           previous_domain_audit = Current.domain_audit_recorded
           AuditLog.record!(user: current_user, company_id: @pay_period.company_id, action: "payroll_item#fit_override",
-            record_type: "PayrollItem", record_id: @payroll_item.id,
-            metadata: { pay_period_id: @pay_period.id, reason: reason, changed_fields: [ "withholding_tax_override" ],
+            record_type: "PayrollItem", record_id: @payroll_item.id, subject_name: @payroll_item.employee.full_name,
+            metadata: { pay_period_id: @pay_period.id, employee_id: @payroll_item.employee_id,
+              employee_name: @payroll_item.employee.full_name, reason: reason, changed_fields: [ "withholding_tax_override" ],
               before_values: { withholding_tax_override: previous },
               after_values: { withholding_tax_override: @payroll_item.withholding_tax_override } })
         ensure

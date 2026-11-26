@@ -1,3 +1,4 @@
+import { isReverificationCancelledError } from '@clerk/react/errors';
 import type { CorrectionRunResponse, VoidPayPeriodResponse } from '@/services/api';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
 import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
@@ -231,6 +232,7 @@ export function CorrectionPanel({
       setHistoryOpen(false);
       setHistoryError(null);
     } catch (err) {
+      if (isReverificationCancelledError(err)) return;
       const msg = err instanceof Error ? err.message : 'Failed to void pay period.';
       setVoidError(buildErrorWithRecovery(msg));
     } finally {
@@ -255,7 +257,10 @@ export function CorrectionPanel({
       onPayPeriodChange(reopened.source_pay_period);
       setShowReopenModal(false);
       navigate(processingPath(reopened.correction_run.id));
-    } catch (err) { setReopenError(err instanceof Error ? err.message : 'Unable to reopen unpaid payroll. Refresh to check its latest status before retrying.'); }
+    } catch (err) {
+      if (isReverificationCancelledError(err)) return;
+      setReopenError(err instanceof Error ? err.message : 'Unable to reopen unpaid payroll. Refresh to check its latest status before retrying.');
+    }
     finally { setReopenLoading(false); }
   };
 
@@ -600,7 +605,7 @@ export function CorrectionPanel({
               <input type="checkbox" checked={acknowledgeLaterRuns} onChange={event => setAcknowledgeLaterRuns(event.target.checked)} disabled={voidLoading} />
               <span>I acknowledge later committed payrolls will be flagged for review. Their Social Security and Additional Medicare taxes will need to be checked.</span>
             </label>}
-            <RollbackConfirmation id={voidConfirmId} expected={confirmation} value={typedConfirmation} onChange={setTypedConfirmation} disabled={voidLoading} />
+            {preflight?.eligible && <RollbackConfirmation id={voidConfirmId} expected={confirmation} value={typedConfirmation} onChange={setTypedConfirmation} disabled={voidLoading} />}
             </>
           }
           errorMessage={voidError}
@@ -643,7 +648,7 @@ export function CorrectionPanel({
                 onChange={event => setReopenReason(event.target.value)}
                 disabled={reopenLoading}
               />
-              <RollbackConfirmation id={voidConfirmId} expected={confirmation} value={typedConfirmation} onChange={setTypedConfirmation} disabled={reopenLoading} />
+              {preflight?.eligible && <RollbackConfirmation id={voidConfirmId} expected={confirmation} value={typedConfirmation} onChange={setTypedConfirmation} disabled={reopenLoading} />}
             </>
           }
           errorMessage={reopenError}

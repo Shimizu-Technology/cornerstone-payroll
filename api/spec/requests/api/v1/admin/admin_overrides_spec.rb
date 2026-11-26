@@ -2,7 +2,7 @@
 
 require "rails_helper"
 
-RSpec.describe "Admin payroll overrides", type: :request do
+RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: true do
   let(:company) { create(:company) }
   let(:role) { "admin" }
   let(:actor) { create(:user, company: company, role: role, clerk_id: "user_track_h1_fixture") }
@@ -12,6 +12,7 @@ RSpec.describe "Admin payroll overrides", type: :request do
   let(:reason) { "Fixture correction for duplicate payroll inputs" }
   let(:route) { "/api/v1/admin/pay_periods/#{period.id}" }
 
+  include ActiveSupport::Testing::TimeHelpers
   include EmployeeLinkHelpers
 
   def payroll_headers
@@ -111,20 +112,75 @@ RSpec.describe "Admin payroll overrides", type: :request do
     manager = create(:user, company: company, role: "client", client_access_level: "manager")
     viewer = create(:user, company: company, role: "client", client_access_level: "viewer")
     [ manager, viewer ].each { |user| create(:company_assignment, user: user, company: company) }
-    rollback
-    expect(response).to have_http_status(:ok), response.body
-    staff, client = %w[staff client].map { |audience| PortalNotificationEvent.find_by!(event_type: "payroll_rollback_#{audience}", subject: period) }
-    expect(client.deliveries.pluck(:user_id)).to eq([ manager.id ])
-    expect(staff.deliveries.pluck(:user_id)).to contain_exactly(super_admin.id, accountant.id)
-    [ staff, client ].each do |event|
-      expect(event.metadata.keys).to contain_exactly("pay_period_id", "self_override")
-      email = PortalNotifications::Email.new(audience: event.audience, delivery_mode: "immediate", events: [ event ])
-      expect(email.subject).to include(company.name)
-      expect(email.text).not_to include(reason)
-      expect(email.html).not_to include(reason)
+    PortalNotificationRecipient.create!(company: company, user: super_admin)
+    PortalNotificationPreference.create!(user: super_admin, category: "payroll_submissions", delivery_mode: "off")
+
+    with_portal_email do
+      rollback
+      expect(response).to have_http_status(:ok), response.body
+      staff, client, alert = %w[staff client super_admin].map do |audience|
+        PortalNotificationEvent.find_by!(event_type: "payroll_rollback_#{audience}", subject: period)
+      end
+      expect(client.deliveries.pluck(:user_id)).to eq([ manager.id ])
+      expect(staff.deliveries.pluck(:user_id)).to eq([ accountant.id ])
+      expect(alert.deliveries.sole).to have_attributes(user_id: super_admin.id, delivery_mode: "immediate", status: "pending")
+      expect(PortalNotifications::Preferences.categories_for(super_admin)).not_to have_key("payroll_super_admin")
+      expect { PortalNotifications::Preferences.update!(super_admin, "payroll_super_admin" => "off") }
+        .to raise_error(ArgumentError, /Unknown notification category/)
+
+      [ staff, client, alert ].each do |event|
+        expect(event.metadata.keys - %w[pay_period_id self_override recipient_scope]).to be_empty
+        email = PortalNotifications::Email.new(audience: event.audience, delivery_mode: "immediate", events: [ event ])
+        expect(email.subject).to include(company.name)
+        expect(email.text).not_to include(reason)
+        expect(email.html).not_to include(reason)
+      end
+      expect(alert.metadata["self_override"]).to be(true)
+      expect(staff.metadata["self_override"]).to be(false)
+      expect(client.metadata["self_override"]).to be(false)
+
+      travel(3.minutes) { PortalNotifications::Dispatcher.run! }
+      expect(alert.deliveries.sole.status).to eq("sent")
+      expect(captured_portal_emails.count { |email| email[:to] == super_admin.email }).to eq(1)
     end
-    expect(staff.metadata["self_override"]).to be(true)
-    expect(client.metadata["self_override"]).to be(false)
+  end
+
+  it "rejects untrusted callers of both correction engine entry points" do
+    %i[void! reopen_unpaid!].each do |action|
+      expect {
+        PayPeriodCorrectionService.public_send(action, authorization: Object.new, pay_period: period, actor: actor, reason: reason)
+      }.to raise_error(AdminOverrideService::AccessDenied)
+    end
+    expect(period.reload).not_to be_voided
+  end
+
+  it "rechecks archive and practice-copy safety through the service entry point" do
+    target = period
+    options = { pay_period: target, actor: actor, reason: reason, verified: true, impersonated: false,
+      confirmation: AdminOverrideService.payroll_confirmation(target), unpaid_acknowledgement: true }
+    company.update_columns(test_workspace_archived_at: Time.current)
+    expect { AdminOverrideService.rollback_payroll!(**options) }.to raise_error(AdminOverrideService::AccessDenied)
+
+    company.update_columns(test_workspace_archived_at: nil)
+    allow_any_instance_of(Company).to receive(:practice_copy?).and_return(true)
+    expect { AdminOverrideService.rollback_payroll!(**options) }.to raise_error(AdminOverrideService::AccessDenied)
+    expect(target.reload).not_to be_voided
+  end
+
+  it "flags same-date later runs with tied or absent commit timestamps" do
+    employee = create(:employee, company: company)
+    create(:payroll_item, pay_period: period, employee: employee)
+    later_runs = [ period.committed_at, nil ].map do |committed_at|
+      create(:pay_period, :committed, company: company, pay_date: period.pay_date).tap do |run|
+        run.update_columns(committed_at: committed_at)
+        create(:payroll_item, pay_period: run, employee: employee)
+      end
+    end
+    rollback("reopen_unpaid")
+    expect(response.parsed_body.fetch("error")).to include("later payroll")
+    rollback(acknowledge_later_runs: true)
+    expect(response).to have_http_status(:ok), response.body
+    expect(later_runs).to all(satisfy { |run| run.reload.rollback_review_required? })
   end
 
   it "blocks reopening and requires acknowledgement before flagging later committed runs" do
@@ -144,7 +200,7 @@ RSpec.describe "Admin payroll overrides", type: :request do
     expect(response).to have_http_status(:unprocessable_entity)
     expect(later_runs.map { |run| run.reload.rollback_review_required? }).to eq([ false, false ])
 
-    rollback(acknowledge_later_runs: true)
+    rollback(acknowledge_later_runs: "true")
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("pay_period", "admin_rollback")).to be(true)
     expect(later_runs.map { |run| run.reload.rollback_review_required? }).to eq([ true, true ])

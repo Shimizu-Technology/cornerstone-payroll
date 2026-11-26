@@ -149,7 +149,7 @@ RSpec.describe 'R3 independent saved employer identity conservation' do
         end
         expect([ original, first, second ].sum { |item| employer_postings(item) }).to eq(82.5)
         stale = preview(hours_worked: 60)
-        PayPeriodCorrectionService.void!(pay_period: (voided == :first ? first : second).pay_period, actor: actor, reason: "Identity void order", acknowledge_later_runs: true)
+        PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: (voided == :first ? first : second).pay_period, actor: actor, reason: "Identity void order", acknowledge_later_runs: true)
         expect { issue({ hours_worked: 60 }, digest: stale.dig(:meta, :review_digest)) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
         repair = issue(hours_worked: 60)
         active = [ original, first, second, repair ].select { |item| !item.pay_period.reload.voided? }

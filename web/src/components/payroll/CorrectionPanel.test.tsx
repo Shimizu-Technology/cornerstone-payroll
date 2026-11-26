@@ -42,6 +42,7 @@ it('blocks reopening when an associated payment is already delivered', async () 
   mocks.preflight.mockResolvedValue({ correction_preflight: { ...preflight, eligible: false, blockers: ['Check #3108 was delivered to the employee.'] } });
   fireEvent.click(screen.getByRole('button', { name: 'Reopen unpaid payroll' }));
   expect(await screen.findByText('Check #3108 was delivered to the employee.')).toBeTruthy();
+  expect(screen.queryByLabelText(/Type the client and period/)).toBeNull();
   expect((screen.getByRole('button', { name: 'Reopen and create draft' }) as HTMLButtonElement).disabled).toBe(true);
   expect(mocks.reopen).not.toHaveBeenCalled();
 });

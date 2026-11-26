@@ -207,13 +207,14 @@ RSpec.describe MigrationPromotion::Apply do
   end
 
   it "atomically replaces the empty draft, synchronizes setup, and records both payrolls without payment side effects" do
+    first_source_period.update_columns(rollback_review_required: true)
     expect { apply }.to change { target_company.pay_periods.committed.count }.from(0).to(2)
 
     promoted = target_company.pay_periods.committed.period_chronological.to_a
     expect(replaceable_draft.class.exists?(replaceable_draft.id)).to be(false)
     expect(promoted.map(&:promotion_source_pay_period_id)).to eq([ first_source_period.id, second_source_period.id ])
     expect(promoted.map(&:promotion_payment_disposition)).to eq(%w[record_only record_only])
-    expect(promoted).to all(have_attributes(run_purpose_source: "production_migration", parallel_run: false))
+    expect(promoted).to all(have_attributes(run_purpose_source: "production_migration", parallel_run: false, rollback_review_required: false))
     expect(promoted).to all(have_attributes(tax_sync_status: nil, tax_sync_idempotency_key: nil))
     expect(promoted.first.payroll_items.sole.payment_delivery_method).to eq("direct_deposit")
     expect(promoted.flat_map(&:payroll_items)).to all(have_attributes(check_number: nil, check_printed_at: nil))
