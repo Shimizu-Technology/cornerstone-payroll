@@ -134,6 +134,8 @@ class PayPeriodLifecycleService
         committed_by_id: actor&.id
       )
 
+      PortalNotifications.payroll_committed!(pay_period, actor: actor)
+
       apply_ytd_and_loan_effects!(committed_items)
       # A run paid before already-committed runs adds to their YTD.
       PayrollYtdSnapshotRefresh.after(pay_period: pay_period, employee_ids: committed_items.map(&:employee_id).uniq)
