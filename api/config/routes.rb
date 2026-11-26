@@ -100,6 +100,7 @@ Rails.application.routes.draw do
       namespace :client do
         resources :support_access_logs, only: :index
         resource :employee_intake_settings, only: :show
+        resource :intake_profile, only: :show, controller: :intake_profiles
         get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
         post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
         get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
@@ -265,6 +266,7 @@ Rails.application.routes.draw do
             patch :update, on: :member, path: ""
           end
           member do
+            get :intake_profile
             get :migration_rehearsal_preview
             post :migration_rehearsal, action: :create_migration_rehearsal
             post :retry_migration_rehearsal

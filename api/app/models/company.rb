@@ -381,7 +381,7 @@ class Company < ApplicationRecord
   end
 
   def payroll_intake_source_types_are_supported
-    unsupported = Array(payroll_intake_source_types) - PAYROLL_INTAKE_SOURCE_TYPES
+    unsupported = Array(payroll_intake_source_types) - PayrollIntake::Registry.keys
     return if unsupported.empty?
 
     errors.add(:payroll_intake_source_types, "contains unsupported source type(s): #{unsupported.join(', ')}")
@@ -394,7 +394,7 @@ class Company < ApplicationRecord
     end
 
     payroll_intake_settings.each do |source_type, settings|
-      unless PAYROLL_INTAKE_SOURCE_TYPES.include?(source_type.to_s) && settings.is_a?(Hash)
+      unless PayrollIntake::Registry.registered?(source_type) && settings.is_a?(Hash)
         errors.add(:payroll_intake_settings, "contains an unsupported source type: #{source_type}")
         next
       end

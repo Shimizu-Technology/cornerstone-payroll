@@ -27,7 +27,7 @@ module PayrollSubmissions
           standing_change_id: row["standing_change_id"], revision: @submission.revision,
           previous_value: previous["reviewed_value"], amount: row["amount"], hours: row["hours"], employee_wage_rate_id: row["employee_wage_rate_id"],
           wage_rate_label: rate&.label, wage_rate: rate&.rate&.to_s("F"), error: availability_error(row, employee),
-          overwrite_required: existing.present? && existing.import_source != "mosa_revel",
+          overwrite_required: existing.present? && !existing.intake_imported?,
           saved_regular_hours: previous["kind"] == "extra_hours" ? previous["baseline_regular_hours"] : existing&.hours_worked&.to_s("F"),
           saved_overtime_hours: existing&.overtime_hours&.to_s("F"),
           **(row["kind"] == "owner_pay" ? pay.merge(pay_conflict: pay.values.compact.any? { |amount| amount.to_d != row["amount"].to_d }) : {}) }.compact
@@ -233,7 +233,7 @@ module PayrollSubmissions
 
         { change_index: -item.employee_id, kind: "owner_pay", employee_id: item.employee_id,
           employee_name: item.employee.full_name, requires_pay_decision: true,
-          overwrite_required: item.import_source != "mosa_revel",
+          overwrite_required: !item.intake_imported?,
           error: availability_error({ "kind" => "owner_pay" }, item.employee) }.compact
       end
     end

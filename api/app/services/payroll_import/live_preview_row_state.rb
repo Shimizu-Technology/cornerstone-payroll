@@ -54,9 +54,9 @@ module PayrollImport
     # this import would replace them with different Revel hours.
     def self.hand_edited_hours(row, item, applied_hours: {})
       row = row.to_h.stringify_keys
-      return if item.blank? || item.import_source != "mosa_revel" || row["workbook_only"]
+      return if item.blank? || !item.intake_imported? || row["workbook_only"]
 
-      imported = item.custom_columns_data.to_h["mosa_imported_hours"]
+      imported = item.imported_hours_snapshot
       imported = applied_hours[item.employee_id] unless imported.is_a?(Hash)
       return unless imported.is_a?(Hash)
 

@@ -7,6 +7,7 @@ class PayrollItem < ApplicationRecord
   CUSTOM_EARNINGS_SOURCE_KEY = "custom_earnings_source"
   EMPLOYEE_DEFAULT_ADJUSTMENTS_SOURCE = "employee_default"
   MANUAL_ADJUSTMENTS_SOURCE = "manual"
+  IMPORT_ORIGINS = %w[intake time_tracking timecard_ocr correction].freeze
 
   belongs_to :pay_period
   has_one :fica_basis_proof, class_name: "PayrollItemFicaBasisProof", dependent: :restrict_with_exception
@@ -56,10 +57,12 @@ class PayrollItem < ApplicationRecord
   # Uses ||= so an explicitly-passed company_id (e.g. in copy_payroll_items!)
   # is respected without triggering a pay_period reload query.
   before_validation :sync_company_from_pay_period, on: :create
+  before_validation :infer_import_origin
   before_validation :normalize_pay_precision
   before_validation :synchronize_mosa_reviewed_hours!
 
   validates :employment_type, inclusion: { in: Employee::EMPLOYMENT_TYPES }
+  validates :import_origin, inclusion: { in: IMPORT_ORIGINS }, allow_nil: true
   validates :payment_delivery_method, inclusion: { in: Employee::PAYMENT_DELIVERY_METHODS }, allow_nil: true
   validates :pay_rate, presence: true, numericality: { greater_than_or_equal_to: 0 }
   validate :retained_correction_pay_basis_reconciles, on: :update
@@ -105,6 +108,28 @@ class PayrollItem < ApplicationRecord
   # absolute period entry).
   def correction_entry?
     correction_for_payroll_item_id.present?
+  end
+
+  def intake_imported?
+    import_origin == "intake" || (import_origin.nil? && PayrollIntake::Registry.registered?(import_source))
+  end
+
+  def imported_by?(key)
+    key.present? && import_source == key.to_s
+  end
+
+  def imported_hours_snapshot
+    data = custom_columns_data.to_h
+    return data["imported_hours"] if data["imported_hours"].is_a?(Hash)
+
+    data["mosa_imported_hours"] if data["mosa_imported_hours"].is_a?(Hash)
+  end
+
+  def missing_source_hours?
+    data = custom_columns_data.to_h
+    return data["missing_source_hours"] == true if data.key?("missing_source_hours")
+
+    data["mosa_missing_revel_hours"] == true
   end
 
   # ---------------------------------------------------------------------------
@@ -707,7 +732,7 @@ class PayrollItem < ApplicationRecord
 
   def deduction_review_warnings
     warnings = []
-    if custom_columns_data.to_h["mosa_missing_revel_hours"] && hours_worked.to_d.zero? && overtime_hours.to_d.zero?
+    if missing_source_hours? && hours_worked.to_d.zero? && overtime_hours.to_d.zero?
       warnings << "No Revel hours — enter hours from MoSa's email before calculating."
     end
     shortfall = (requested_loan_deduction - loan_deduction.to_d).round(2)
@@ -720,7 +745,7 @@ class PayrollItem < ApplicationRecord
   # Scalar worksheet/API edits must update the reviewed job bucket as well.
   # Otherwise a saved zero-hour bucket would overwrite emailed hours.
   def synchronize_mosa_reviewed_hours!
-    return unless import_source == "mosa_revel"
+    return unless intake_imported?
 
     changed_hours = { hours_worked: "regular_hours", overtime_hours: "overtime_hours",
       holiday_hours: "holiday_hours", pto_hours: "pto_hours" }.select { |field, _key| will_save_change_to_attribute?(field) }
@@ -902,6 +927,21 @@ class PayrollItem < ApplicationRecord
 
   def sync_company_from_pay_period
     self.company_id ||= pay_period&.company_id
+  end
+
+  def infer_import_origin
+    return if import_origin.present? && !(import_source_changed? && !import_origin_changed?)
+
+    self.import_origin =
+      if correction_entry?
+        "correction"
+      elsif PayrollIntake::Registry.registered?(import_source)
+        "intake"
+      elsif import_source.to_s.start_with?("time_tracking:")
+        "time_tracking"
+      elsif import_source == "timecard_ocr"
+        "timecard_ocr"
+      end
   end
 
   def check_date_in_pay_date_year
