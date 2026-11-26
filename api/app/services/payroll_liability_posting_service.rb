@@ -95,6 +95,7 @@ class PayrollLiabilityPostingService
     return nil if pay_period.company.demo?
 
     PayPeriod.transaction do
+      lock_company!
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       validate_postable!(locked)
 
@@ -121,6 +122,7 @@ class PayrollLiabilityPostingService
     return [] if pay_period.company.demo?
 
     PayPeriod.transaction do
+      lock_company!
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       ensure_committed!(locked)
 
@@ -160,6 +162,7 @@ class PayrollLiabilityPostingService
     return nil if pay_period.company.demo?
 
     PayPeriod.transaction do
+      lock_company!
       locked = PayPeriod.lock("FOR UPDATE").find(pay_period.id)
       ensure_committed!(locked)
 
@@ -202,6 +205,13 @@ class PayrollLiabilityPostingService
 
   attr_reader :pay_period, :actor, :posting_type, :idempotency_key,
               :liability_date, :reason, :metadata
+
+  # Company, then period, as every payroll change takes them. Postings
+  # reference the company, and the commit, void and pay-date callers already
+  # hold this lock.
+  def lock_company!
+    Company.lock.find(pay_period.company_id)
+  end
 
   def validate_postable!(locked)
     ensure_committed!(locked)

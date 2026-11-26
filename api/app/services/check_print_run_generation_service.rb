@@ -223,6 +223,8 @@ class CheckPrintRunGenerationService
     run = nil
 
     PayPeriod.transaction do
+      # Company, then period, then paychecks, as every payroll change takes them.
+      Company.lock.find(pay_period.company_id)
       locked_period = PayPeriod.lock.find(pay_period.id)
       locked_generation = CheckPrintGeneration.lock.find(generation.id) if generation
       locked_generation&.assert_worker_lease!(job_id: generation_worker_job_id)
