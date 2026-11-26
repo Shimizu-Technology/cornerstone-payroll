@@ -265,6 +265,34 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  it "keeps the period and other pay lines visible when a pay line has ambiguous history" do
+    affected = committed_pay_period.payroll_items.first
+    unaffected = create(:payroll_item, pay_period: committed_pay_period, company: company, gross_pay: 200, net_pay: 175)
+    error = PayrollComponentMirrors::AmbiguousHistoryError.new("Staff-only reconciliation instructions")
+    allow(PayrollComponentMirrors).to receive(:resolution).and_wrap_original do |original, item, **kwargs|
+      raise error if item.id == affected.id
+
+      original.call(item, **kwargs)
+    end
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, payroll_item_id: affected.id
+    }).and_call_original
+
+    get "/api/v1/client/pay_periods/#{committed_pay_period.id}"
+
+    expect(response).to have_http_status(:ok)
+    period = response.parsed_body.fetch("pay_period")
+    expect(period).to include("employee_count" => 2, "total_gross" => "1200.0")
+    rows = period.fetch("payroll_items").index_by { |row| row.fetch("id") }
+    expect(rows.fetch(affected.id)).to include(
+      "details_error" => "Details for this pay line aren't available yet. Contact Cornerstone.",
+      "net_pay" => "810.0", "pay_stub_available" => false
+    )
+    expect(rows.fetch(affected.id)).not_to have_key("other_deductions")
+    expect(rows.fetch(unaffected.id)).to include("net_pay" => "175.0", "other_deductions" => "0.0")
+    expect(response.body).not_to include(error.message)
+  end
+
   it "does not allow a client to open a draft pay period detail" do
     get "/api/v1/client/pay_periods/#{draft_pay_period.id}"
 

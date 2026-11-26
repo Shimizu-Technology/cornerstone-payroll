@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { clientPayStubsApi, type ClientPayStub, type ClientQuickbooksPaycheck } from '@/services/api';
 import { ClientPayStubButton } from './ClientPayStubButton';
-import { formatCurrency, formatDateRange } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
+import { formatDate, formatDateRange } from '@/lib/display-date';
 
 export function ClientPayStubHistory({ employeeId }: { employeeId: number }) {
   const [rows, setRows] = useState<ClientPayStub[]>([]);
@@ -48,8 +49,8 @@ export function ClientPayStubHistory({ employeeId }: { employeeId: number }) {
               {rows.map(row => (
                 <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
                   <div className="min-w-0">
-                    <p className="font-medium">{row.period_description}</p>
-                    <p className="text-sm">Pay date {row.pay_date} · Net {formatCurrency(Number(row.net_pay))}</p>
+                    <p className="font-medium">{formatDateRange(row.start_date, row.end_date) || row.period_description}</p>
+                    <p className="text-sm">Pay date {formatDate(row.pay_date)} · Net {formatCurrency(Number(row.net_pay))}</p>
                   </div>
                   <ClientPayStubButton itemId={row.id} />
                 </div>
@@ -67,13 +68,13 @@ export function ClientPayStubHistory({ employeeId }: { employeeId: number }) {
                 {quickbooksPaychecks.map(check => {
                   const periodLabel = check.period_start && check.period_end
                     ? formatDateRange(check.period_start, check.period_end)
-                    : `Pay date ${check.pay_date}`;
+                    : `Pay date ${formatDate(check.pay_date)}`;
                   return (
                     <div key={check.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50/60 p-4">
                       <div className="min-w-0">
                         <p className="font-medium text-neutral-900">{periodLabel}</p>
                         <p className="text-sm text-neutral-700">
-                          Pay date {check.pay_date}
+                          Pay date {formatDate(check.pay_date)}
                           {check.gross_pay != null ? ` · Gross ${formatCurrency(Number(check.gross_pay))}` : ''}
                           {check.net_pay != null ? ` · Net ${formatCurrency(Number(check.net_pay))}` : ''}
                         </p>

@@ -25,7 +25,8 @@ RSpec.describe "Client pay stubs", type: :request do
   it "lists finished history, renders a fresh employee statement and audits each read" do
     get "/api/v1/client/pay_stubs/employee/#{employee.id}", headers: headers
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body["pay_stubs"].map { |row| row["id"] }).to eq([ item.id ])
+    expect(response.parsed_body.fetch("pay_stubs").sole).to include(
+      "id" => item.id, "start_date" => "2026-04-01", "end_date" => "2026-04-14")
     2.times do
       get "/api/v1/client/pay_stubs/#{item.id}/download", headers: headers
       expect(response).to have_http_status(:ok)

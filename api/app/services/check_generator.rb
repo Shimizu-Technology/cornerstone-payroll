@@ -149,7 +149,7 @@ class CheckGenerator
       "company_name" => company.name,
       "check_number" => payroll_item.check_number.to_s,
       "check_date" => format_date(payroll_item.check_date || pay_period.pay_date),
-      "payee" => employee.full_name,
+      "payee" => employee.legal_name,
       "payee_address" => employee.full_address.to_s,
       "amount" => fn(payroll_item.net_pay),
       "amount_words" => NumberToWords.convert(payroll_item.net_pay),
@@ -249,7 +249,7 @@ class CheckGenerator
   end
 
   def draw_document(pdf, voided: false, rehearsal_preview: false)
-    PdfUnicodeFont.ensure_printable!(employee.full_name, label: "Employee")
+    PdfUnicodeFont.ensure_printable!(employee.legal_name, label: "Employee")
     PdfUnicodeFont.ensure_printable!(employee.full_address, label: "Employee address")
     pdf.font(PdfUnicodeFont::FAMILY)
     draw_perforations(pdf)
@@ -287,7 +287,7 @@ class CheckGenerator
 
     # ---- Payee name (left) + amount (right) ----
     pdf.bounding_box([ payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy ], width: payee_cfg["width"].to_f, height: 18) do
-      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.full_name }
+      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.legal_name }
     end
     pdf.bounding_box([ payee_address_cfg["x"].to_f + ox, sect_bot + payee_address_cfg["y"].to_f + oy ], width: payee_address_cfg["width"].to_f, height: 32) do
       address_lines = employee.full_address.to_s.split("\n").map(&:strip).reject(&:blank?).first(3)
@@ -335,7 +335,7 @@ class CheckGenerator
     # ROW 1:  PAY (left)  |  TAXES (right)
     # ================================================================
     pdf.font_size(7) do
-      pdf.draw_text employee.full_name, at: [ lx, row1_top ], style: :bold
+      pdf.draw_text employee.legal_name, at: [ lx, row1_top ], style: :bold
     end
 
     table_y1 = row1_top + stub_cfg["pay_table_y_offset"].to_f

@@ -8,6 +8,9 @@ module YearEnd
     TAX_BASE_FIELDS = %w[fit_taxable_wages social_security_taxable_wages social_security_taxable_tips medicare_taxable_wages].freeze
     MISSING_TAX_BASE = TAX_BASE_FIELDS.map { |field| "payroll_items.#{field} IS NULL" }.join(" OR ").freeze
 
+    # Native committed rows before the QuickBooks cutover still qualify if
+    # reportable. An explicit legacy disposition excludes a row; the import
+    # cutoff date alone does not.
     def self.scope(company_ids, year)
       range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
       PayrollItem

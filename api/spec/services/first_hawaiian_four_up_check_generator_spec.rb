@@ -47,14 +47,14 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
       payroll_item_for("Dina", "Santos", "2469", 400.00)
     ]
 
+    items.first.employee.update!(name_suffix: "JR")
     pdf = described_class.new(company: company, payroll_items: items).generate
     reader = PDF::Reader.new(StringIO.new(pdf))
     text = reader.pages.map(&:text).join("\n")
 
     expect(pdf).to start_with("%PDF")
     expect(reader.page_count).to eq(1)
-    expect(text).to include("Ana Taylor")
-    expect(text).to include("Dina Santos")
+    expect(reader.pages.first.runs.map(&:text)).to include("Ana Taylor Jr.", "Dina Santos")
     expect(text).to include("400.00")
   end
 

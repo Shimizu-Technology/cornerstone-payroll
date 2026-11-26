@@ -128,7 +128,7 @@ module Api
             report: employee_pay_history_report(employee, items, period: period)
           }
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def employee_pay_history_xlsx
@@ -140,7 +140,7 @@ module Api
             sheets: employee_pay_history_sheets(report)
           )
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def employee_pay_history_pdf
@@ -156,7 +156,7 @@ module Api
             sheets: sheets
           )
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def employee_pay_history_csv
@@ -168,7 +168,7 @@ module Api
             sheet: employee_pay_history_sheets(report).first
           )
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         # GET /api/v1/admin/reports/tax_summary
@@ -304,7 +304,7 @@ module Api
 
           render json: { report: report }
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def form_941_gu_xlsx
@@ -329,7 +329,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def form_941_gu_pdf
@@ -372,7 +372,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def quarterly_compliance_packet_xlsx
@@ -445,8 +445,10 @@ module Api
             filename: exporter.filename,
             type: "text/plain; charset=us-ascii",
             disposition: "attachment"
-        rescue ArgumentError, KeyError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ArgumentError, KeyError => error
+          Rails.logger.warn("Wage record export for company #{current_company_id}: #{error.class}")
+          Rails.error.report(error, handled: true, context: { company_id: current_company_id, report: action_name })
+          render json: { error: "Could not prepare the wage record file." }, status: :unprocessable_entity
         end
 
         def update_quarterly_compliance_packet_task
@@ -524,7 +526,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         # GET /api/v1/admin/reports/w2_gu_csv
@@ -559,7 +561,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         # GET /api/v1/admin/reports/w2_gu_pdf
@@ -578,7 +580,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def w2_gu_xlsx
@@ -592,7 +594,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         # GET /api/v1/admin/reports/w2_gu_employee_copies
@@ -636,7 +638,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         # GET /api/v1/admin/reports/form_1099_nec_pdf
@@ -655,7 +657,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def form_1099_nec_csv
@@ -671,7 +673,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def form_1099_nec_xlsx
@@ -687,7 +689,7 @@ module Api
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Company not found" }, status: :not_found
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         # POST /api/v1/admin/reports/w2_gu_preflight
@@ -874,7 +876,7 @@ module Api
             type: "application/pdf",
             disposition: "attachment"
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def payroll_summary_by_employee_xlsx
@@ -1191,7 +1193,7 @@ module Api
         def ytd_summary
           render json: { report: build_period_summary_report(payroll_reporting_period) }
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def ytd_summary_xlsx
@@ -1203,7 +1205,7 @@ module Api
             sheets: ytd_summary_sheets(report)
           )
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def ytd_summary_pdf
@@ -1218,7 +1220,7 @@ module Api
             end
           )
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def ytd_summary_csv
@@ -1229,7 +1231,7 @@ module Api
             sheet: ytd_summary_sheets(report).first
           )
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def annual_payroll_summary
@@ -1268,8 +1270,19 @@ module Api
           render_write_maintenance if WriteMaintenance.enabled?
         end
 
+        def render_report_argument_error(error)
+          case error
+          when PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError
+            render_component_history_error(error)
+          else
+            render json: { error: error.message }, status: :unprocessable_entity
+          end
+        end
+
         def render_component_history_error(error)
-          render json: { error: error.message }, status: :unprocessable_entity
+          Rails.logger.warn("Report #{action_name} for company #{current_company_id}: #{error.class}: #{error.message}")
+          Rails.error.report(error, handled: true, context: { company_id: current_company_id, report: action_name })
+          render json: { error: "This report is unavailable until the payroll details are reviewed." }, status: :unprocessable_entity
         end
 
         # Report routes use several target contracts, including pay_period_id
@@ -1868,7 +1881,7 @@ module Api
         rescue OfficialPdfOverlay::TemplateUnavailableError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def quarterly_compliance_official_form_config(form_type)
@@ -2560,7 +2573,7 @@ module Api
               .reverse
               .first(5)
               .map do |row|
-            row.slice(:key, :record_type, :id, :pay_date, :employee_count, :total_net, :source, :run_purpose).merge(
+            row.slice(:key, :record_type, :id, :start_date, :end_date, :pay_date, :employee_count, :total_net, :source, :run_purpose).merge(
               period_description: payroll_history_period_description(row)
             )
           end

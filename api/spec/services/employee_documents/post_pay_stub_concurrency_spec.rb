@@ -33,61 +33,45 @@ RSpec.describe EmployeeDocuments::PostPayStub, :postgres_concurrency do
     item.reload
   end
 
-  it "posts a later stub while an earlier check's replacement refreshes its YTD, without a deadlock" do
-    allow(R2StorageService).to receive(:new).and_return(instance_double(R2StorageService, upload: true, delete: true))
-    posting_generated = Queue.new
-    release_posting = Queue.new
-    allow_any_instance_of(PayStubGenerator).to receive(:generate).and_wrap_original do |original, *args|
-      if Thread.current[:stub_posting]
-        posting_generated << true
-        release_posting.pop
+  it "uploads outside the transaction and discards a PDF when an earlier replacement changes its YTD" do
+    upload_started = Queue.new
+    release_upload = Queue.new
+    uploaded_keys = []
+    storage = instance_double(R2StorageService, delete: true)
+    allow(R2StorageService).to receive(:new).and_return(storage)
+    allow(storage).to receive(:upload) do |key, _bytes, **|
+      uploaded_keys << key
+      if uploaded_keys.one?
+        upload_started << ActiveRecord::Base.connection.transaction_open?
+        release_upload.pop
       end
-      original.call(*args)
+      true
     end
-    results = Queue.new
-    backend = Queue.new
 
     posting = Thread.new do
-      Thread.current[:stub_posting] = true
       ActiveRecord::Base.connection_pool.with_connection do
         described_class.new(PayrollItem.find(later.id)).call
-        results << [ :ok, :posting ]
-      rescue StandardError => e
-        results << [ :error, e ]
       end
     end
-    Timeout.timeout(10) { posting_generated.pop }
+    expect(Timeout.timeout(10) { upload_started.pop }).to be(false)
+    expect(EmployeeDocument.where(payroll_item_id: later.id)).to be_empty
 
-    replacement = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
-        backend << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()")
-        ReplaceCheckService.replace!(payroll_item: PayrollItem.find(earlier.id), corrected_inputs: { hours_worked: 80 },
-          reason: "Correct the July hours", actor: User.find(actor.id))
-        results << [ :ok, :replacement ]
-      rescue StandardError => e
-        results << [ :error, e ]
-      end
+    Timeout.timeout(10) do
+      ReplaceCheckService.replace!(payroll_item: earlier, corrected_inputs: { hours_worked: 80 },
+        reason: "Correct the July hours", actor: actor)
     end
-    wait_for_database_lock!(backend.pop)
-    release_posting << true
-    [ posting, replacement ].each { |thread| Timeout.timeout(15) { thread.join } }
+    release_upload << true
+    document = Timeout.timeout(15) { posting.value }
 
-    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :posting ], [ :ok, :replacement ])
-    expect(EmployeeDocument.where(payroll_item_id: later.id).pluck(:revision)).to eq([ 1 ])
-    expect(later.reload.ytd_gross).to eq(2_400)
-  end
-
-  def wait_for_database_lock!(backend_pid)
-    Timeout.timeout(5) do
-      loop do
-        state = ActiveRecord::Base.connection.select_value(
-          "SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{Integer(backend_pid)}"
-        )
-        break if state == "Lock"
-
-        sleep 0.01
-      end
-    end
+    expect(uploaded_keys.size).to eq(2)
+    expect(storage).to have_received(:delete).with(uploaded_keys.first).once
+    expect(document).to have_attributes(revision: 1, storage_key: uploaded_keys.last,
+      payroll_facts_sha256: PayStubGenerator.new(later.reload, employee_copy: true).employee_payroll_facts_sha256)
+    expect(EmployeeDocument.where(payroll_item_id: later.id)).to contain_exactly(document)
+    expect(later.ytd_gross).to eq(2_400)
+  ensure
+    release_upload << true
+    posting&.join(15)
   end
 
   # Only what this example committed; a fixture that failed to build is skipped.

@@ -243,7 +243,7 @@ class FirstHawaiianFourUpCheckGenerator
       source_type: "payroll_item",
       source_id: item.id,
       check_number: item.check_number,
-      payee: item.employee.full_name,
+      payee: item.employee.legal_name,
       amount: item.net_pay,
       date: item.check_date || item.pay_period.pay_date,
       memo: payroll_memo(item),
