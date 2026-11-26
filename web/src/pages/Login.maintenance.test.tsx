@@ -6,7 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const clerk = vi.hoisted(() => ({ isSignedIn: true }));
 vi.mock('@clerk/react', () => ({
-  SignIn: () => <div data-testid="clerk-sign-in" />,
+  SignIn: ({ forceRedirectUrl }: { forceRedirectUrl?: string }) => (
+    <div data-testid="clerk-sign-in" data-redirect={forceRedirectUrl} />
+  ),
   SignUp: ({ forceRedirectUrl }: { forceRedirectUrl: string }) => {
     const { search } = useLocation();
     return <div data-testid="clerk-sign-up" data-redirect={forceRedirectUrl} data-search={search} />;
@@ -29,6 +31,7 @@ vi.mock('@/components/auth/AccountAccessNotice', () => ({
 }));
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   clerk.isSignedIn = false;
   auth.isAuthenticated = false;
   auth.authProblem = null;
@@ -49,6 +52,7 @@ async function renderLogin(search = '') {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/app" element={<h1>Payroll workspace</h1>} />
+        <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<h1>Payroll review target</h1>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -127,4 +131,46 @@ it('links to the privacy policy and terms from the sign-in card', async () => {
   await renderLogin();
   expect(screen.getByRole('link', { name: 'Privacy Policy' }).getAttribute('href')).toBe('/privacy');
   expect(screen.getByRole('link', { name: 'Terms of Service' }).getAttribute('href')).toBe('/terms');
+});
+
+it('passes a safe same-site return_to path to Clerk and lands on it after sign-in', async () => {
+  const target = '/companies/42/pay-runs/99/overview';
+  await renderLogin(`?return_to=${encodeURIComponent(target)}`);
+  expect(screen.getByTestId('clerk-sign-in').getAttribute('data-redirect')).toBe(target);
+
+  cleanup();
+  clerk.isSignedIn = true;
+  auth.isAuthenticated = true;
+  await renderLogin(`?return_to=${encodeURIComponent(target)}`);
+  expect(screen.getByRole('heading', { name: 'Payroll review target' })).toBeTruthy();
+});
+
+it('navigates to the remembered destination after sign-in even when /login no longer has return_to in the query', async () => {
+  const target = '/companies/42/pay-runs/99/overview';
+  await renderLogin(`?return_to=${encodeURIComponent(target)}`);
+  cleanup();
+
+  clerk.isSignedIn = true;
+  auth.isAuthenticated = true;
+  await renderLogin();
+  expect(screen.getByRole('heading', { name: 'Payroll review target' })).toBeTruthy();
+});
+
+it.each([
+  'https://evil.com/phish',
+  '//evil.com/phish',
+  '/\\evil.com',
+  '/%2fevil.com',
+  '/login?return_to=/app',
+])('rejects hostile return_to %s and falls back to /app', async (hostile) => {
+  await renderLogin(`?return_to=${encodeURIComponent(hostile)}`);
+  expect(screen.getByTestId('clerk-sign-in').getAttribute('data-redirect')).toBe('/app');
+});
+
+it('ignores return_to and stored return path during invitation ticket sign-up', async () => {
+  window.sessionStorage.setItem('cornerstone_auth_return_to', '/companies/42/pay-runs/99/overview');
+  const search = '?__clerk_status=sign_up&__clerk_ticket=fake-ticket&return_to=%2Fcompanies%2F42%2Fpay-runs%2F99%2Foverview';
+  await renderLogin(search);
+  expect(screen.getByTestId('clerk-sign-up').getAttribute('data-redirect')).toBe('/app');
+  expect(window.sessionStorage.getItem('cornerstone_auth_return_to')).toBeNull();
 });

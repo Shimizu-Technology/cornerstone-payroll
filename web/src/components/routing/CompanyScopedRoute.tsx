@@ -40,23 +40,31 @@ export function CompanyScopedRoute(): ReactElement {
               <p className="mt-2 text-sm leading-6 text-neutral-700">
                 The link may be outdated, or your account may not have access to that client. No payroll record was loaded.
               </p>
-              {fallbackCompanyId && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Link
-                    to={payRunsPath(fallbackCompanyId)}
-                    className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
-                  >
-                    <Building2 className="h-4 w-4" />
-                    Open active client pay runs
-                  </Link>
-                  <Link
-                    to={employeesPath(fallbackCompanyId)}
-                    className="inline-flex min-h-11 items-center rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
-                  >
-                    Open employees
-                  </Link>
-                </div>
-              )}
+              <div className="mt-4 flex flex-wrap gap-2">
+                {fallbackCompanyId && (
+                  <>
+                    <Link
+                      to={payRunsPath(fallbackCompanyId)}
+                      className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
+                    >
+                      <Building2 className="h-4 w-4" />
+                      Open active client pay runs
+                    </Link>
+                    <Link
+                      to={employeesPath(fallbackCompanyId)}
+                      className="inline-flex min-h-11 items-center rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
+                    >
+                      Open employees
+                    </Link>
+                  </>
+                )}
+                <Link
+                  to="/app"
+                  className="inline-flex min-h-11 items-center rounded-full border border-neutral-300 bg-white px-4 py-2 text-sm font-semibold text-neutral-700 transition hover:border-primary-300 hover:text-primary-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2"
+                >
+                  Go to dashboard
+                </Link>
+              </div>
             </div>
           </div>
         </section>
