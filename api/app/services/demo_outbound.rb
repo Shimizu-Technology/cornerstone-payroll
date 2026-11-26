@@ -143,6 +143,9 @@ module DemoOutbound
       kept = filter(company: company, emails: values, channel: Thread.current[CHANNEL_KEY] || "mail_transport").uniq
       filtered[key] = kept if kept.any?
     end
+    # A demo never puts an address outside the allow-list in Reply-To.
+    reply_to = [ filtered.delete(:reply_to), filtered.delete("reply_to") ].flatten.compact.select { |email| allowed?(email) }.uniq
+    filtered[:reply_to] = reply_to if reply_to.any?
     Array(filtered[:to]).any? ? filtered : nil
   end
 

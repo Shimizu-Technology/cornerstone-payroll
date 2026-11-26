@@ -13,6 +13,10 @@ module EmployeeEmails
   class Message
     PRODUCT = "Cornerstone Payroll"
     SENDER_NAME_MAX = 50
+    SUBJECT_MAX = 150
+    # Control and format characters (CR/LF, NUL, BiDi overrides such as
+    # U+202E, zero-width characters) and the Unicode line separators.
+    UNSAFE_HEADER_CHARACTERS = /[\p{Cc}\p{Cf}\u2028\u2029]/
     GUAM_TIME_ZONE = "Pacific/Guam"
 
     INK = "#0f172a"
@@ -28,7 +32,7 @@ module EmployeeEmails
     # just above it. text_line: the plain-text line, "<label>: <url>" if unset.
     def initialize(brand:, subject:, heading:, paragraphs:, action: nil, note: nil, closing: [], preheader: nil, ignorable: false)
       @brand = brand
-      @subject = subject
+      @subject = self.class.header_text(subject, max: SUBJECT_MAX)
       @heading = heading
       @paragraphs = paragraphs
       @action = action
@@ -56,12 +60,19 @@ module EmployeeEmails
       nil
     end
 
-    # Safe inside a quoted display name: no quotes, backslashes, angle
-    # brackets or control characters (CR/LF would start a new header).
+    # Safe inside a quoted display name: no quotes, backslashes or angle
+    # brackets, on top of header_text.
     def self.header_name(value)
-      name = value.to_s.gsub(/[[:cntrl:]"\\<>]/, " ").squish
-      name = name.truncate(SENDER_NAME_MAX, omission: "…", separator: " ") if name.length > SENDER_NAME_MAX
-      name.presence
+      header_text(value.to_s.gsub(/["\\<>]/, " "), max: SENDER_NAME_MAX)
+    end
+
+    # Text for a header (display name or subject): one line, no control or
+    # format characters, no RFC 2047 encoded-word ("=?UTF-8?B?...?=") that a
+    # mail client would decode into other text, and a length cap.
+    def self.header_text(value, max:)
+      text = value.to_s.gsub(UNSAFE_HEADER_CHARACTERS, " ").gsub("=?", "= ?").squish
+      text = text.truncate(max, omission: "...", separator: " ") if text.length > max
+      text.presence
     end
 
     def self.guam_date(time)
@@ -84,27 +95,30 @@ module EmployeeEmails
       "#{blocks.compact.join("\n\n")}\n"
     end
 
-    def html
+    # preview: true also draws a data: logo, which only previews use.
+    def html(preview: false)
       <<~HTML
         <!doctype html>
-        <html lang="en">
+        <html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
           <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <meta name="color-scheme" content="light">
             <meta name="supported-color-schemes" content="light">
             <title>#{h(subject)}</title>
+            <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
           </head>
           <body style="margin:0;padding:0;background-color:#{PAGE_BACKGROUND};-webkit-text-size-adjust:100%;">
             #{preheader_html}
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#{PAGE_BACKGROUND}" style="background-color:#{PAGE_BACKGROUND};">
               <tr>
                 <td align="center" style="padding:32px 12px;">
+                  <!--[if mso]><table role="presentation" width="520" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
                   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="max-width:520px;background-color:#ffffff;border:1px solid #{BORDER};border-radius:12px;">
                     <tr><td height="4" bgcolor="#{h(brand.decoration_color)}" style="height:4px;background-color:#{h(brand.decoration_color)};border-radius:12px 12px 0 0;font-size:0;line-height:0;">&nbsp;</td></tr>
                     <tr>
                       <td style="padding:24px 28px 0 28px;">
-                        #{header_html}
+                        #{header_html(preview)}
                       </td>
                     </tr>
                     <tr>
@@ -122,6 +136,7 @@ module EmployeeEmails
                       </td>
                     </tr>
                   </table>
+                  <!--[if mso]></td></tr></table><![endif]-->
                 </td>
               </tr>
             </table>
@@ -140,12 +155,24 @@ module EmployeeEmails
     def preheader_html
       return "" unless preheader
 
-      %(<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#{PAGE_BACKGROUND};opacity:0;">#{h(preheader)}</div>)
+      %(<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#{PAGE_BACKGROUND};opacity:0;">#{h(preheader)}#{'&zwnj;&nbsp;' * 40}</div>)
     end
 
-    def header_html
-      mark = if brand.logo_url
-        %(<img src="#{h(brand.logo_url)}" alt="#{h(brand.name)}" height="40" style="display:block;height:40px;width:auto;max-width:160px;border:0;outline:none;text-decoration:none;">)
+    # Only an https logo, or a data: one in a preview. The white cell keeps a
+    # dark, transparent logo visible when a mail app darkens the email.
+    def logo_src(preview)
+      url = brand.logo_url.to_s
+      return url if url.start_with?("https://") && TenantSubdomainRegistry.https_url(url)
+
+      url if preview && url.start_with?("data:image/")
+    end
+
+    def header_html(preview)
+      src = logo_src(preview)
+      mark = if src
+        <<~LOGO.strip
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td bgcolor="#ffffff" style="background-color:#ffffff;padding:4px;border-radius:8px;"><img src="#{h(src)}" alt="#{h(brand.name)}" height="40" style="display:block;height:40px;width:auto;max-width:160px;border:0;outline:none;text-decoration:none;"></td></tr></table>
+        LOGO
       else
         <<~BADGE.strip
           <table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td width="40" height="40" align="center" valign="middle" bgcolor="#{h(brand.action_color)}" style="width:40px;height:40px;background-color:#{h(brand.action_color)};border-radius:10px;font-family:#{FONT};font-size:18px;line-height:40px;font-weight:700;color:#ffffff;">#{h(brand.monogram)}</td></tr></table>
@@ -182,6 +209,13 @@ module EmployeeEmails
       rows << <<~BUTTON.strip
         <tr>
           <td style="padding:24px 28px 0 28px;">
+            <!--[if mso]>
+            <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="#{url}" style="height:48px;v-text-anchor:middle;width:#{button_width}px;" arcsize="17%" stroke="f" fillcolor="#{color}">
+              <w:anchorlock/>
+              <center style="color:#ffffff;font-family:Arial,sans-serif;font-size:16px;font-weight:bold;">#{h(action[:label])}</center>
+            </v:roundrect>
+            <![endif]-->
+            <!--[if !mso]><!-->
             <table role="presentation" cellspacing="0" cellpadding="0" border="0">
               <tr>
                 <td align="center" bgcolor="#{color}" style="background-color:#{color};border-radius:8px;">
@@ -189,6 +223,7 @@ module EmployeeEmails
                 </td>
               </tr>
             </table>
+            <!--<![endif]-->
           </td>
         </tr>
       BUTTON
@@ -204,6 +239,11 @@ module EmployeeEmails
         </tr>
       FALLBACK
       rows.join("\n")
+    end
+
+    # Outlook's VML button needs a fixed width; about 10px a character.
+    def button_width
+      (action[:label].to_s.length * 10) + 60
     end
 
     def footer_html

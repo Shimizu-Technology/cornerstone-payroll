@@ -43,9 +43,11 @@ module EmployeeEmails
       messages.flat_map do |name, message|
         html = File.join(dir, "#{name}.html")
         text = File.join(dir, "#{name}.txt")
-        File.write(html, message.html)
-        File.write(text, "From: #{Message.from_header(message.brand.name, 'Payroll <noreply@example.test>')}\n" \
-          "Subject: #{message.subject}\n\n#{message.text}")
+        payload = message.payload(to: "employee@example.test")
+        headers = { "From" => Message.from_header(message.brand.name, "Payroll <noreply@example.test>"),
+                    "Reply-To" => payload[:reply_to], "Subject" => payload[:subject] }.compact
+        File.write(html, message.html(preview: true))
+        File.write(text, "#{headers.map { |key, value| "#{key}: #{value}" }.join("\n")}\n\n#{payload[:text]}")
         [ html, text ]
       end
     end

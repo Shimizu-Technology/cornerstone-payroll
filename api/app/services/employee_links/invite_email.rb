@@ -34,12 +34,12 @@ module EmployeeLinks
     end
 
     # The parts of the app the employer has turned on, for the one sentence
-    # about what the app is for. Unknown settings fall back to the basics.
+    # about what the app is for. Unreadable settings name no features.
     def features(company)
       settings = CompanyFeatures.for(company)
       %i[stubs tax_forms profile_requests].select { |feature| settings.employee_portal_feature?(feature) }
-    rescue StandardError
-      %i[stubs profile_requests]
+    rescue ActiveRecord::ActiveRecordError, ArgumentError
+      []
     end
 
     def message(brand, url:, path:, expires_at:, features:)
@@ -66,7 +66,8 @@ module EmployeeLinks
       uses << "keep your contact details up to date" if features.include?(:profile_requests)
       return "#{employer} invited you to its employee app." if uses.empty?
 
-      "#{employer} invited you to its employee app, where you can #{uses.join(' and ')}."
+      # A comma only when the first part already has an "and".
+      "#{employer} invited you to its employee app, where you can #{uses.join(pay.many? ? ', and ' : ' and ')}."
     end
 
     def expiry_line(expires_at)
