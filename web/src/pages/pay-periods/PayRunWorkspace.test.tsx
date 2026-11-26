@@ -653,3 +653,16 @@ it('keeps printing disabled for only voided non-employee checks and enables an a
   expect(print.disabled).toBe(false);
   cleanup();
 });
+
+it('treats a demo company as non-rehearsal even if payroll_environment is legacy migration_rehearsal', async () => {
+  vi.clearAllMocks();
+  apiMocks.activeCompany = { id: 7, payroll_environment: 'migration_rehearsal', test_workspace: false, demo: true, workspace_can_write: true };
+  apiMocks.getPayPeriod.mockResolvedValue({ pay_period: { ...payRun, status: 'committed', parallel_run: false, payroll_items: [] } });
+  apiMocks.printQueue.mockResolvedValue({ items: [] });
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/checks']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+  </Routes></MemoryRouter>);
+  await waitFor(() => expect(apiMocks.printQueue).toHaveBeenCalled());
+  expect(screen.getByRole('button', { name: 'Print checks' })).toBeTruthy();
+  cleanup();
+});
