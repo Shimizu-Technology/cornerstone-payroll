@@ -762,7 +762,7 @@ RSpec.describe "Security client access & API hardening", type: :request do
       payload = attempts.last[:payload]
       expect(payload[:to]).to eq("onfile.worker@example.test")
       expect(payload[:text]).to include("Your Island Bakery employee app account was set up on November 27, 2026")
-      expect(payload[:text]).to include("If this wasn't you, contact Island Bakery/Cornerstone.")
+      expect(payload[:text]).to include("If this wasn't you, contact Island Bakery or Cornerstone right away.")
 
       # Subsequent run is a no-op (never sends twice)
       SendEmployeeActivationNoticeJob.new.perform(link.id)
