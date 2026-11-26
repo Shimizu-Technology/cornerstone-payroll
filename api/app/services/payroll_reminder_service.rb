@@ -245,7 +245,7 @@ class PayrollReminderService
     # -----------------------------------------------------------------------
 
     def email_configured?
-      if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank?
+      unless StagingMailTransport.available?
         Rails.logger.warn("[PayrollReminder] RESEND_API_KEY not configured; skipping reminders")
         return false
       end

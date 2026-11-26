@@ -271,8 +271,9 @@ class R2StorageService
     staging_local_storage? ? STAGING_STORAGE_ROOT : LOCAL_STORAGE_ROOT
   end
 
+  # Staging and a local production copy keep objects on disk.
   def staging_local_storage?
-    ENV["DEPLOYMENT_ENV"] == "staging" &&
+    %w[staging local].include?(ENV["DEPLOYMENT_ENV"]) &&
       ENV["R2_STORAGE_BACKEND"] == "local" &&
       ENV["ACTIVE_STORAGE_SERVICE"] == "local"
   end

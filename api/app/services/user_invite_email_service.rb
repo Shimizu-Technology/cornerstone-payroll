@@ -76,7 +76,7 @@ class UserInviteEmailService
     end
 
     def configured?
-      if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank?
+      unless StagingMailTransport.available?
         Rails.logger.warn("[InviteEmail] RESEND_API_KEY not configured; skipping invite email")
         return false
       end

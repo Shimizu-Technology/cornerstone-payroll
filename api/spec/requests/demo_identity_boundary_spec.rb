@@ -13,7 +13,7 @@ RSpec.describe "Demo identity boundary", type: :request do
   let(:live) { create(:company, organization: organization, name: "Live Grill") }
   let(:demo) { create_demo_company(organization: organization, subdomain_slug: "harborfinch") }
   # A demo link opens only from the demo's own subdomain (M4-9d).
-  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::ROOT_DOMAIN}" }
+  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::DEFAULT_ROOT_DOMAIN}" }
   let(:admin) { create(:user, role: :admin, company: live, organization: organization) }
   let(:demo_login) do
     create(:user, role: :client, company: demo, organization: organization, email: allowed, name: "Jordan Reyes",

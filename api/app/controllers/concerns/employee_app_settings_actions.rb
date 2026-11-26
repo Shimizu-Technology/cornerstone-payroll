@@ -236,7 +236,7 @@ module EmployeeAppSettingsActions
       w2_delivery: company.w2_delivery,
       subdomain: {
         slug: company.subdomain_slug,
-        host: company.subdomain_slug && "#{company.subdomain_slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+        host: company.subdomain_slug && TenantSubdomainRegistry.tenant_host(company.subdomain_slug)
       },
       help_contacts: contacts.map(&:as_help_json),
       max_help_contacts: CompanyHelpContact::MAX_CONTACTS,
