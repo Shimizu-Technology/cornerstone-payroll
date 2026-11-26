@@ -87,6 +87,11 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/client_profitability" => %w[refresh]
   }.freeze
 
+  # Firm-level organization administration is shared across live clients.
+  # Only read-only inspection is allowed while a contained company is selected;
+  # any mutation or admin invitation fails closed.
+  ORGANIZATION_READ_ACTIONS = %w[index show company_transfer_preview].freeze
+
   # Firm books are shared live records even while a copied payroll client is
   # selected. New finance actions fail closed until reviewed as read-only.
   FINANCE_READ_ACTIONS = {
@@ -108,6 +113,10 @@ class TestWorkspaceSafetyPolicy
     if controller_path.start_with?("api/v1/admin/time_tracking_", "api/v1/admin/aire_")
       return false if request_method.in?(%w[GET HEAD])
       return !(controller_path == "api/v1/admin/time_tracking_sources" && action_name.in?(%w[index show]))
+    end
+
+    if controller_path == "api/v1/admin/organizations"
+      return !ORGANIZATION_READ_ACTIONS.include?(action_name)
     end
 
     if controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_")

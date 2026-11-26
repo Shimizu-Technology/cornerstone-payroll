@@ -30,8 +30,8 @@ class PayrollRegisterCsvExporter
     "Custom Earnings",
     "Non-Taxable Pay",
     "Gross Pay",
-    "Base FIT",
-    "Addtl Withholding",
+    "Base #{PayrollLabels::INCOME_TAX_WITHHELD}",
+    PayrollLabels::ADDITIONAL_WITHHOLDING,
     "Social Security Tax",
     "Medicare Tax",
     "Employer Social Security",
@@ -50,7 +50,7 @@ class PayrollRegisterCsvExporter
     "Net Pay",
     "Check Number",
     "Rate Basis",
-    "Total FIT (Base + Additional)",
+    "Total #{PayrollLabels::INCOME_TAX_WITHHELD}",
     "Combined Hours",
     "Non-Taxable Additions (Total)"
   ].freeze
@@ -63,11 +63,11 @@ class PayrollRegisterCsvExporter
 
   def generate
     CSV.generate(headers: true, force_quotes: false) do |csv|
-      csv << headers
+      csv << (headers + [ "Approval" ])
+      approval = ("Override" if report.dig(:pay_period, :approval_marker) == "Override")
+      payroll_rows.each { |emp| csv << (employee_row(emp) + [ approval ]) }
 
-      payroll_rows.each { |emp| csv << employee_row(emp) }
-
-      csv << summary_row
+      csv << (summary_row + [ approval ])
     end
   end
 

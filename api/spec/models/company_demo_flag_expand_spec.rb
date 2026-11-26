@@ -57,7 +57,10 @@ RSpec.describe "Track B demo flag expand phase", type: :model do
 
       expect do
         ActiveRecord::Base.transaction(requires_new: true) do
-          ActiveRecord::Base.connection.execute("UPDATE companies SET demo = TRUE WHERE id = #{sandbox.id}")
+          ActiveRecord::Base.connection.execute(<<~SQL.squish)
+            INSERT INTO companies (organization_id, name, payroll_environment, demo, created_at, updated_at)
+            VALUES (#{organization.id}, 'Invalid Non-Live Demo', 'migration_rehearsal', TRUE, NOW(), NOW())
+          SQL
         end
       end.to raise_error(ActiveRecord::StatementInvalid, /companies_demo_requires_live_payroll/)
     end
@@ -225,6 +228,53 @@ RSpec.describe "Track B demo flag expand phase", type: :model do
         "identities" => {}, "periods" => [ { "key" => "p1", "paychecks" => [ { "employee_id" => 1 } ] } ]
       }).call
       expect(plan.errors).to include("Prior-provider onboarding requires a live client")
+    end
+  end
+
+  describe "dual-shape database guards (HIGH 2)" do
+    it "refuses validation-skipping SQL that flips demo identity on or off" do
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { Company.where(id: live_demo.id).update_all(demo: false) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /demo companies cannot be converted/)
+      expect(live_demo.reload.demo?).to be(true)
+
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) { Company.where(id: live.id).update_all(demo: true) }
+      }.to raise_error(ActiveRecord::StatementInvalid, /demo companies cannot be converted/)
+      expect(live.reload.demo?).to be(false)
+
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) do
+          Company.where(id: live_demo.id).update_all(test_workspace_manifest: { "demo_fixture_key" => "tampered-key" })
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /demo fixture keys are immutable/)
+    end
+
+    it "refuses validation-skipping time_tracking_sources inserts and updates for both demo shapes" do
+      live_source = create(:time_tracking_source, company: live)
+
+      [ live_demo, legacy_demo ].each do |demo_company|
+        expect {
+          ActiveRecord::Base.transaction(requires_new: true) do
+            TimeTrackingSource.insert_all!([ {
+              company_id: demo_company.id,
+              name: "Bypassed AIRE",
+              source_type: "aire_services",
+              base_url: "https://aire.example.test",
+              shared_secret: "secret",
+              active: true,
+              created_at: Time.current,
+              updated_at: Time.current
+            } ])
+          end
+        }.to raise_error(ActiveRecord::StatementInvalid, /time_tracking_sources cannot belong to a demo company/)
+
+        expect {
+          ActiveRecord::Base.transaction(requires_new: true) do
+            TimeTrackingSource.where(id: live_source.id).update_all(company_id: demo_company.id)
+          end
+        }.to raise_error(ActiveRecord::StatementInvalid, /time_tracking_sources cannot belong to a demo company/)
+      end
     end
   end
 end

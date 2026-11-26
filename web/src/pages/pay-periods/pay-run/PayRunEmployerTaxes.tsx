@@ -23,21 +23,21 @@ export function PayRunEmployerTaxes({
             <div className="p-4 border-b border-neutral-200 bg-neutral-50">
               <h3 className="font-semibold text-neutral-950">Employer Tax Obligations</h3>
               <p className="text-sm text-neutral-700 mt-1">
-                Guam FIT deposit plus related FICA obligations for this pay period
+                Guam income tax deposit plus related FICA obligations for this pay period
               </p>
             </div>
             <div className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* FIT Column */}
                 <div>
-                  <h4 className="text-sm font-semibold text-neutral-600 mb-3">Federal / Guam Income Tax</h4>
+                  <h4 className="text-sm font-semibold text-neutral-600 mb-3">Guam income tax</h4>
                   <div className="space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-neutral-600">Employee FIT Withheld</span>
+                      <span className="text-neutral-600">Guam income tax withheld</span>
                       <span className="font-medium">{formatCurrency(totalWithholding)}</span>
                     </div>
                     <div className="flex justify-between pt-2 border-t font-semibold">
-                      <span>FIT Subtotal</span>
+                      <span>Guam income tax subtotal</span>
                       <span>{formatCurrency(totalDRTDeposit)}</span>
                     </div>
                     {fitDivergence && (
@@ -47,7 +47,7 @@ export function PayRunEmployerTaxes({
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                           </svg>
                           <div>
-                            <p className="font-semibold">FIT deposit overridden</p>
+                            <p className="font-semibold">Guam income tax deposit overridden</p>
                             <p className="mt-0.5 leading-snug">
                               Calculated <span className="font-mono">{formatCurrency(fitDivergence.calculated)}</span>,{' '}
                               depositing <span className="font-mono">{formatCurrency(fitDivergence.deposited)}</span>{' '}
@@ -96,7 +96,7 @@ export function PayRunEmployerTaxes({
               </div>
               {fitDivergence && (
                 <p className="mt-3 text-xs text-orange-800">
-                  ⚠ This total reflects the calculated FIT obligation. The FIT deposit check has been
+                  ⚠ This total reflects the calculated Guam income tax obligation. The Guam income tax deposit check has been
                   overridden to <span className="font-mono font-semibold">{formatCurrency(fitDivergence.deposited)}</span>{' '}
                   — actual amount going to Treasurer of Guam differs from the total above by{' '}
                   <span className="font-mono font-semibold">{fitDivergence.delta > 0 ? '+' : ''}{formatCurrency(fitDivergence.delta)}</span>.

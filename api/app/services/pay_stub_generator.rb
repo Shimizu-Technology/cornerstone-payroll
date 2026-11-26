@@ -85,7 +85,7 @@ class PayStubGenerator
   def statement
     {
       earnings: statement_earnings,
-      taxes: tax_lines.map { |label, amount, ytd| { label: label, amount: amount.to_d, ytd: ytd.to_d } },
+      taxes: tax_lines.map { |label, amount, ytd| { label: label, amount: amount.to_d, ytd: ytd } },
       deductions: statement_ytd_breakdown.deductions.map { |row| { label: pay_stub_deduction_label(row), amount: row.current.to_d, ytd: row.ytd.to_d } },
       other_pay: statement_ytd_breakdown.other_pay.map { |row| { label: row.label, amount: row.current.to_d, ytd: row.ytd.to_d } },
       ytd: { gross: pay_ytd_total, net: statement_ytd_totals[:net] }
@@ -95,15 +95,13 @@ class PayStubGenerator
   # The printed legal name, this check's facts, and every printed YTD amount. A later
   # change to an earlier check revises this statement only when it changes a
   # printed YTD amount. Current rows use their own labels, so a relabelled YTD
-  # attribution alone does not. A stub posted under an earlier fingerprint
-  # format never matches, so its next recheck posts one revision carrying
-  # this one.
+  # attribution alone does not.
   def employee_payroll_facts_sha256
-    @employee_payroll_facts_sha256 ||= begin
-      # This check's components load in the same batch as the earlier checks'.
-      ytd_source_items
-      Digest::SHA256.hexdigest([ employee.legal_name, *employee_payroll_current_facts, printed_ytd_facts ].to_json)
-    end
+    @employee_payroll_facts_sha256 ||= employee_payroll_fingerprint
+  end
+
+  def matches_employee_payroll_facts?(digest)
+    digest.present? && (digest == employee_payroll_facts_sha256 || digest == employee_payroll_fingerprint(legacy: true))
   end
 
   def self.employee_payment_line(item)
@@ -118,7 +116,14 @@ class PayStubGenerator
 
   private
 
-  def employee_payroll_current_facts
+  # Reproduce the old tax payload to compare existing frozen PDFs. The legacy
+  # comparison includes combined Medicare, the only Medicare figure they printed.
+  def employee_payroll_fingerprint(legacy: false)
+    ytd_source_items
+    Digest::SHA256.hexdigest([ employee.legal_name, *employee_payroll_current_facts(legacy: legacy), printed_ytd_facts(legacy: legacy) ].to_json)
+  end
+
+  def employee_payroll_current_facts(legacy:)
     earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
       .map { |line| line.except(:ytd) }
     components = PayrollStatementYtdBreakdown::KINDS.map do |kind|
@@ -128,18 +133,19 @@ class PayStubGenerator
       "gross_pay", "net_pay", "withholding_tax", "withholding_tax_override", "withholding_tax_adjustment",
       "social_security_tax", "medicare_tax", "additional_withholding"
     )
+    amounts["additional_medicare_tax"] = payroll_item.additional_medicare_tax.to_d unless legacy || payroll_item.contractor?
     [
       pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
       self.class.employee_payment_line(payroll_item), amounts, earnings, components
     ]
   end
 
-  def printed_ytd_facts
+  def printed_ytd_facts(legacy:)
     fact = ->(amount) { amount&.to_d&.round(2)&.to_s("F") }
     rows = ->(list) { list.map { |row| [ row.label, fact.call(row.ytd) ] } }
     {
       earnings: printed_earning_ytds.map { |ytd| fact.call(ytd) },
-      taxes: tax_lines.map { |label, _amount, ytd| [ label, fact.call(ytd) ] },
+      taxes: tax_facts(legacy: legacy).map { |key, _amount, ytd| [ key, fact.call(ytd) ] },
       deductions: rows.call(statement_ytd_breakdown.deductions),
       other_pay: rows.call(statement_ytd_breakdown.other_pay),
       employer_contributions: rows.call(statement_ytd_breakdown.employer_contributions),
@@ -530,26 +536,26 @@ class PayStubGenerator
   def printable_deduction_rows
     deductions_data = []
 
-    taxes = tax_lines
-    taxes.first(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), format_currency(ytd) ] }
+    taxes = tax_lines.map { |label, amount, ytd| [ label, format_currency(amount), (format_currency(ytd) if ytd) ] }
+    deductions_data << taxes.first if taxes.any?
 
     if taxes.empty?
       # A contractor statement prints no tax rows or notes.
     elsif payroll_item.withholding_tax_override.present?
       deductions_data << [
-        "  (Final FIT Override Applied)",
+        "  (Final #{PayrollLabels::INCOME_TAX} override applied)",
         "",
         ""
       ]
     elsif payroll_item.withholding_tax_adjustment.to_f.nonzero?
       deductions_data << [
-        format("  (FIT Adjustment %s%s)", payroll_item.withholding_tax_adjustment.to_f.positive? ? "+" : "", format_currency(payroll_item.withholding_tax_adjustment).delete("$")),
+        format("  (#{PayrollLabels::INCOME_TAX} adjustment %s%s)", payroll_item.withholding_tax_adjustment.to_f.positive? ? "+" : "", format_currency(payroll_item.withholding_tax_adjustment).delete("$")),
         "",
         ""
       ]
     end
 
-    taxes.drop(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), format_currency(ytd) ] }
+    deductions_data.concat(taxes.drop(1))
 
     statement_ytd_breakdown.deductions.each do |row|
       deductions_data << [ pay_stub_deduction_label(row), format_currency(row.current), format_currency(row.ytd) ]
@@ -590,18 +596,40 @@ class PayStubGenerator
   # A contractor paycheck has no employee taxes, on paper or in the employee
   # app. The paycheck's saved type decides, not the worker's current one.
   def tax_lines
+    tax_facts.map { |key, amount, ytd| [ PayrollLabels::STUB_TAXES.fetch(key), amount, ytd ] }
+  end
+
+  LEGACY_TAX_LABELS = {
+    income_tax: "Federal/Guam Income Tax",
+    social_security: "Social Security (6.2%)",
+    medicare: "Medicare (1.45%)",
+    additional_withholding: "Additional Withholding (W-4 4c)"
+  }.freeze
+
+  def tax_facts(legacy: false)
     return [] if payroll_item.contractor?
 
     lines = [
-      [ "Federal/Guam Income Tax", payroll_item.withholding_tax, statement_ytd_totals[:withholding_tax] ],
-      [ "Social Security (6.2%)", payroll_item.social_security_tax, statement_ytd_totals[:social_security_tax] ],
-      [ "Medicare (1.45%)", payroll_item.medicare_tax, statement_ytd_totals[:medicare_tax] ]
+      [ :income_tax, payroll_item.withholding_tax, statement_ytd_totals[:withholding_tax] ],
+      [ :social_security, payroll_item.social_security_tax, statement_ytd_totals[:social_security_tax] ]
     ]
-    ytd_addl = statement_ytd_totals[:additional_withholding]
-    if payroll_item.additional_withholding.to_d.nonzero? || ytd_addl.nonzero?
-      lines << [ "Additional Withholding (W-4 4c)", payroll_item.additional_withholding, ytd_addl ]
+    medicare_ytd = statement_ytd_totals[:medicare_tax]
+    if legacy
+      lines << [ :medicare, payroll_item.medicare_tax, medicare_ytd ]
+    else
+      additional = payroll_item.additional_medicare_tax.to_d
+      additional_ytd = ytd_sources.additional_medicare_ytd
+      lines << [ :medicare, payroll_item.medicare_tax.to_d - additional, medicare_ytd - additional_ytd.to_d ]
+      lines << [ :additional_medicare, additional, additional_ytd ] if additional.nonzero? || additional_ytd.to_d.nonzero?
     end
-    lines
+
+    ytd_additional = statement_ytd_totals[:additional_withholding]
+    if payroll_item.additional_withholding.to_d.nonzero? || ytd_additional.nonzero?
+      lines << [ :additional_withholding, payroll_item.additional_withholding, ytd_additional ]
+    end
+    return lines unless legacy
+
+    lines.map { |key, amount, ytd| [ LEGACY_TAX_LABELS.fetch(key), amount, ytd ] }
   end
 
   def printable_addition_rows
@@ -698,21 +726,19 @@ class PayStubGenerator
   end
 
   def ytd_summary_table(pdf)
+    tax_rows = tax_facts.filter_map do |key, _current, ytd|
+      next if ytd.nil? || (key == :additional_withholding && ytd.zero?)
+
+      label = key == :social_security ? "Social Security" : PayrollLabels::STUB_TAXES.fetch(key)
+      [ label, format_currency(ytd) ]
+    end
     ytd_data = [
       [ "Gross Earnings", format_currency(pay_ytd_total) ],
       [ "Non-Taxable Pay", format_currency(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
-      [ "Federal/Guam Tax", format_currency(statement_ytd_totals[:withholding_tax]) ],
-      [ "Social Security", format_currency(statement_ytd_totals[:social_security_tax]) ],
-      [ "Medicare", format_currency(statement_ytd_totals[:medicare_tax]) ],
+      *tax_rows,
       [ "Deductions", format_currency(statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.ytd.to_d }) ],
       [ "Net Pay", format_currency(statement_ytd_totals[:net]) ]
     ]
-
-    if payroll_item.contractor?
-      ytd_data.reject! { |label, _amount| label.in?([ "Federal/Guam Tax", "Social Security", "Medicare" ]) }
-    elsif statement_ytd_totals[:additional_withholding].nonzero?
-      ytd_data.insert(3, [ "Additional Withholding", format_currency(statement_ytd_totals[:additional_withholding]) ])
-    end
 
     pdf.make_table(ytd_data, width: 250) do
       cells.padding = [ 2, 6 ]

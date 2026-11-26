@@ -517,7 +517,7 @@ export function ReplaceCheckModal({
             {preview && !preview.meta.is_zero_change && original && corrected && (
               <div className="space-y-2 text-sm">
                 <DeltaLine label="Gross pay" original={original.gross_pay} corrected={corrected.gross_pay} />
-                <DeltaLine label="Federal income tax" original={original.withholding_tax} corrected={corrected.withholding_tax} />
+                <DeltaLine label="Guam income tax" original={original.withholding_tax} corrected={corrected.withholding_tax} />
                 <DeltaLine label="Social Security" original={original.social_security_tax} corrected={corrected.social_security_tax} />
                 <DeltaLine label="Medicare" original={original.medicare_tax} corrected={corrected.medicare_tax} />
                 <DeltaLine label="Tips paid out" original={original.tips_paid_out} corrected={corrected.tips_paid_out} />
@@ -541,7 +541,7 @@ export function ReplaceCheckModal({
                     )}
                   </p>
                   <p className="mt-1">
-                    YTDs, FIT deposit (if enabled), tax sync, and reports
+                    YTDs, Guam income tax deposit (if enabled), tax sync, and reports
                     update from the new values automatically.
                   </p>
                 </div>

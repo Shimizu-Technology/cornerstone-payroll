@@ -494,4 +494,115 @@ RSpec.describe "Published payroll review loop", type: :request do
     client_approve(-1)
     expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
   end
+  describe "Cornerstone override" do
+    before do
+      staff_approve
+      allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!)
+      staff.update!(role: "org_admin")
+    end
+
+    def override_request(reason: "Client authorized staff to proceed.", revision_id: review.id)
+      post "#{admin}/override_client_approval", params: {
+        revision_id: revision_id, acknowledgement: PayrollReviewPackage::OVERRIDE_ACKNOWLEDGEMENT,
+        override_reason: reason
+      }
+    end
+
+    User.roles.each_key do |role|
+      it "enforces staff permissions for #{role}" do
+        staff.update!(role: role)
+        override_request
+        if %w[super_admin org_admin admin].include?(role)
+          expect(response).to have_http_status(:ok)
+          expect(response.parsed_body.fetch("payroll_review")).to include("self_override" => true)
+        else
+          expect(response).to have_http_status(:forbidden)
+          expect(review).to be_pending
+        end
+      end
+    end
+
+    context "with signed authentication claims" do
+      include EmployeeLinkHelpers
+
+      it "requires fresh direct sign-in to record email approval" do
+        staff.update!(clerk_id: "user_email_approval_fixture")
+        allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!).and_call_original
+        params = {
+          revision_id: review.id, client_approver_id: client.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, evidence_reference: "Stored approval email"
+        }
+        path = "#{admin}/record_client_approval"
+        post path, params: params, headers: bearer(staff.clerk_id, fva: [ 45, 45 ], two_factor_enabled: true)
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
+
+        acting_headers = bearer(staff.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true, act: { sub: "user_actor_fixture" })
+        post path, params: params, headers: acting_headers
+        expect(response).to have_http_status(:forbidden)
+        expect(review).to be_pending
+        get admin, headers: acting_headers
+        expect(response.parsed_body.dig("pay_period", "can_record_client_approval")).to be(false)
+
+        post path, params: params, headers: bearer(staff.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true)
+        expect(response).to have_http_status(:ok)
+        expect(review.approval_method).to eq("email_attestation")
+      end
+
+      it "requires fresh sign-in before accepting the override" do
+        staff.update!(clerk_id: "user_override_fixture")
+        allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!).and_call_original
+        params = {
+          revision_id: review.id, acknowledgement: PayrollReviewPackage::OVERRIDE_ACKNOWLEDGEMENT,
+          override_reason: "Client authorized staff to proceed."
+        }
+        post "#{admin}/override_client_approval", params: params,
+          headers: bearer(staff.clerk_id, fva: [ 45, 45 ], two_factor_enabled: true)
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
+        expect(review).to be_pending
+
+        post "#{admin}/override_client_approval", params: params,
+          headers: bearer(staff.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true, act: { sub: "user_actor_fixture" })
+        expect(response).to have_http_status(:forbidden)
+        expect(review).to be_pending
+
+        post "#{admin}/override_client_approval", params: params,
+          headers: bearer(staff.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true)
+        expect(response).to have_http_status(:ok)
+      end
+    end
+
+    it "marks the register and shows the recorded reason in the signed-in client portal" do
+      override_request
+      expect(response).to have_http_status(:ok)
+      get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: period.id }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("report", "pay_period", "approval_marker")).to eq("Override")
+
+      @actor = client
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include(
+        "approval_method" => "cornerstone_override", "override_reason" => "Client authorized staff to proceed."
+      )
+    end
+
+    it "rejects stale revisions and missing or short reasons" do
+      override_request(revision_id: review.id + 1)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
+      [ nil, "short" ].each do |reason|
+        override_request(reason: reason)
+        expect(response).to have_http_status(:unprocessable_entity)
+      end
+      expect(review).to be_pending
+    end
+
+    it "rolls back on audit failure" do
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+      override_request
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(review).to be_pending
+    end
+  end
 end

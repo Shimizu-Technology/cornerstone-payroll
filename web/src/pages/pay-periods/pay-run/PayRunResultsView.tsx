@@ -56,7 +56,7 @@ export function PayRunResultsView(props: Props) {
     if (!count) return null;
     return <Link className="font-semibold text-warning-800 underline" to={employeeDocumentsPath(companyId, item.employee_id, { returnTo: currentPath })} aria-label={`${count} document${count === 1 ? '' : 's'} needed for ${item.employee_name}: open documents`}>{count} document{count === 1 ? '' : 's'} needed</Link>;
   };
-  const otherFlags = (item: PayrollItem) => [item.voided ? 'Voided' : '', item.correction_pay_basis_hold ? 'Pay setup held' : '', item.withholding_tax_override != null ? 'FIT override' : '', Number(item.withholding_tax_adjustment) ? 'FIT adjustment' : '', item.employment_type === 'contractor' ? '1099' : '', item.time_tracking_provenance ? 'Time tracking linked' : '', priorPeriodHours(item) !== 0 ? `${priorPeriodHours(item).toFixed(2)} prior-period hrs` : '', (item.wage_rate_hours || []).length > 1 ? 'Multiple rates' : '', Number(item.net_pay) < 0 ? 'Negative net' : ''].filter(Boolean).join(' · ');
+  const otherFlags = (item: PayrollItem) => [item.voided ? 'Voided' : '', item.correction_pay_basis_hold ? 'Pay setup held' : '', item.withholding_tax_override != null ? 'Guam income tax override' : '', Number(item.withholding_tax_adjustment) ? 'Guam income tax adjustment' : '', item.employment_type === 'contractor' ? '1099' : '', item.time_tracking_provenance ? 'Time tracking linked' : '', priorPeriodHours(item) !== 0 ? `${priorPeriodHours(item).toFixed(2)} prior-period hrs` : '', (item.wage_rate_hours || []).length > 1 ? 'Multiple rates' : '', Number(item.net_pay) < 0 ? 'Negative net' : ''].filter(Boolean).join(' · ');
   const flags = (item: PayrollItem): ReactNode => {
     const documents = documentFlag(item);
     const others = otherFlags(item);

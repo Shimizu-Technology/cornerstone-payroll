@@ -67,9 +67,9 @@ export function detailFor(summary: Record<string, unknown>) {
       { label: 'Tips', hours: null, rate: null, pay_basis: null, amount: '16.25', ytd: '1200.00', kind: 'tips' },
     ],
     taxes: [
-      { label: 'Federal/Guam Income Tax', amount: '24.50', ytd: '1100.00' },
-      { label: 'Social Security (6.2%)', amount: '37.98', ytd: '1580.00' },
-      { label: 'Medicare (1.45%)', amount: '8.88', ytd: '370.00' },
+      { label: 'Guam income tax', kind: 'guam_income_tax', display_label: 'Guam income tax', amount: '24.50', ytd: '1100.00' },
+      { label: 'Social Security (6.2%)', kind: 'social_security', display_label: 'Social Security', amount: '37.98', ytd: '1580.00' },
+      { label: 'Medicare', kind: 'medicare', display_label: 'Medicare', amount: '8.88', ytd: '370.00' },
     ],
     deductions: quickbooks ? [] : [{ label: 'Uniform', amount: '6.96', ytd: '120.00' }],
     other_pay: [],

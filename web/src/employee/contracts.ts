@@ -265,7 +265,7 @@ export interface AmountLine {
   ytd: Money | null;
 }
 
-export type TaxKind = 'guam_income_tax' | 'additional_guam_income_tax' | 'social_security' | 'medicare';
+export type TaxKind = 'guam_income_tax' | 'additional_guam_income_tax' | 'social_security' | 'medicare' | 'additional_medicare';
 
 export interface TaxLine extends AmountLine {
   /** null for a tax the presenter doesn't name (shown by its printed label). */
@@ -301,7 +301,7 @@ function taxLines(value: unknown): TaxLine[] {
     const label = text(line?.label);
     return line && label ? [{
       label, amount: money(line.amount), ytd: money(line.ytd),
-      kind: oneOf(line.kind, ['guam_income_tax', 'additional_guam_income_tax', 'social_security', 'medicare'] as const),
+      kind: oneOf(line.kind, ['guam_income_tax', 'additional_guam_income_tax', 'social_security', 'medicare', 'additional_medicare'] as const),
       displayLabel: text(line.display_label),
     }] : [];
   });

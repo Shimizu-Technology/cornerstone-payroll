@@ -67,7 +67,7 @@ it('retains every combined flag and the contractor correction guards', (): void 
   const item: PayrollItem = { ...props.sortPayrollItems[0], voided: true, correction_pay_basis_hold: { reason: 'Fixture source hold' }, withholding_tax_override: 0, employment_type: 'contractor', wage_rate_hours: [{ employee_wage_rate_id: 1, label: 'Base', rate: 25, regular_hours: 1, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }, { employee_wage_rate_id: 2, label: 'Other', rate: 30, regular_hours: 2, overtime_hours: 0, holiday_hours: 0, pto_hours: 0 }] };
   render(<MemoryRouter><PayRunResultsView {...props} sortPayrollItems={[item]} /></MemoryRouter>);
   const row = screen.getByRole('row', { name: /Maya Manual/ });
-  for (const label of ['Voided', 'Pay setup held', 'FIT override', '1099', 'Multiple rates']) expect(row.textContent).toContain(label);
+  for (const label of ['Voided', 'Pay setup held', 'Guam income tax override', '1099', 'Multiple rates']) expect(row.textContent).toContain(label);
   expect(within(row).queryByText('Correct', { exact: true })).toBeNull();
   expect(within(row).queryByText('Replace check', { exact: true })).toBeNull();
 });

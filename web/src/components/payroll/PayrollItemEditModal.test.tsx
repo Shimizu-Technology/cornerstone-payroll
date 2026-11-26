@@ -170,10 +170,10 @@ it('associates distinct tax labels while preserving zero, signed FIT and the ret
   const user = userEvent.setup();
   mountSaved({ ...savedItem, additional_withholding: 25, additional_withholding_override: 25,
     withholding_tax_adjustment: 5, withholding_tax_override: 40, custom_deductions: [] } as PayrollItem);
-  const extra = screen.getByRole('textbox', { name: 'W-4 4(c) Extra W/H' });
-  const adjustment = screen.getByRole('textbox', { name: 'FIT Adjustment' });
-  const final = screen.getByRole('textbox', { name: 'Final FIT Override' });
-  for (const label of ['W-4 4(c) Extra W/H', 'FIT Adjustment', 'Final FIT Override']) {
+  const extra = screen.getByRole('textbox', { name: 'Additional Guam income tax (W-4 4c)' });
+  const adjustment = screen.getByRole('textbox', { name: 'Guam income tax adjustment' });
+  const final = screen.getByRole('textbox', { name: 'Final Guam income tax override' });
+  for (const label of ['Additional Guam income tax (W-4 4c)', 'Guam income tax adjustment', 'Final Guam income tax override']) {
     await user.click(screen.getByText(label, { selector: 'label', exact: true }));
     expect(document.activeElement).toBe(screen.getByRole('textbox', { name: label }));
   }
@@ -278,7 +278,7 @@ it.each([
   expect(mocks.update.mock.calls[0][2][field]).toBeNull();
 });
 
-it('continues sending explicit zero overrides and a signed FIT adjustment when those values are entered', async () => {
+it('continues sending explicit zero overrides and a signed Guam income tax adjustment when those values are entered', async () => {
   const user = userEvent.setup();
   mountSaved({ ...savedItem, additional_withholding: 25, custom_deductions: [] } as PayrollItem);
   const extra = screen.getByPlaceholderText('25.00') as HTMLInputElement;

@@ -41,7 +41,7 @@ class UnifiedPayrollReporting
     wages = amounts.sum(0.to_d) { |_, gross_pay| gross_pay.to_d }
     note = "Imported QuickBooks/prior-provider payroll is not included."
     excluded = []
-    excluded << "#{ActiveSupport::NumberHelper.number_to_currency(fit)} in FIT" unless fit.zero?
+    excluded << "#{ActiveSupport::NumberHelper.number_to_currency(fit)} in #{PayrollLabels::INCOME_TAX}" unless fit.zero?
     excluded << "#{ActiveSupport::NumberHelper.number_to_currency(wages)} in gross wages" unless wages.zero?
     excluded.empty? ? note : "#{note} Excluded #{excluded.to_sentence}."
   end
