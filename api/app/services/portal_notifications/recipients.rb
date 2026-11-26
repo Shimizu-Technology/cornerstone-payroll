@@ -3,9 +3,9 @@
 module PortalNotifications
   # Who may be alerted about an event.
   #
-  # Staff-side alerts go only to the client's configured recipient list: app
-  # users an administrator ticked, plus extra addresses. Client-side alerts go
-  # to the client's active portal users. Every check is repeated from fresh
+  # Staff-side alerts use the client's configured app users and extra addresses.
+  # Self-override alerts are restricted to super admins in the client's firm.
+  # Client-side alerts go to active portal users. Every check is repeated from fresh
   # records before each send or retry, so removal from the list, deactivation
   # or lost company access stops further sends.
   module Recipients
@@ -118,7 +118,8 @@ module PortalNotifications
         return false unless period.is_a?(PayPeriod) && period.company_id == event.company_id
         return false unless period.approved? && period.correction_status != "voided"
 
-        return false unless period.client_payroll_approval_required?
+        company = Company.find_by(id: event.company_id)
+        return false unless period.client_approval_retained? || company&.client_payroll_approval_required?
 
         package = resolve_review_package(event, period)
         package.present? && package.published_at.present? && package.superseded_at.nil? &&
