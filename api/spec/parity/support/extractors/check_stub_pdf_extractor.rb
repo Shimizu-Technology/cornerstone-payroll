@@ -251,7 +251,7 @@ module Parity
               tax_amounts[:additional_medicare] = current
               addl_med_ytd = ytd
               tax_labels[:additional_medicare] = label
-            elsif down.include?("addtl w/h") || down.include?("w-4 4c") || down.include?("additional withholding") || down.include?("extra guam income tax")
+            elsif down.start_with?("add'l guam income tax") || down.include?("addtl w/h") || down.include?("w-4 4c") || down.include?("additional withholding") || down.include?("extra guam income tax")
               tax_amounts[:additional_withholding] = current
               tax_ytd[:additional_withholding] = ytd
               tax_labels[:additional_withholding] = label
