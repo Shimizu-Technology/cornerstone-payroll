@@ -6,7 +6,7 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-function payrollReview(status: 'pending' | 'approved'): Record<string, unknown> {
+function payrollReview(status: 'pending' | 'approved', notificationQueued = false): Record<string, unknown> {
   return {
     id: 91,
     revision: 3,
@@ -26,10 +26,11 @@ function payrollReview(status: 'pending' | 'approved'): Record<string, unknown> 
     approval_notes: status === 'approved' ? 'Looks correct.' : null,
     approval_evidence_reference: null,
     acknowledgement,
+    ...(status === 'approved' ? { notification_queued: notificationQueued } : {}),
   };
 }
 
-function payPeriod(status: 'pending' | 'approved'): Record<string, unknown> {
+function payPeriod(status: 'pending' | 'approved', notificationQueued = false): Record<string, unknown> {
   return {
     id: 702,
     company_id: 1,
@@ -44,7 +45,7 @@ function payPeriod(status: 'pending' | 'approved'): Record<string, unknown> {
     total_gross: '6500.00',
     total_net: '4890.00',
     client_payroll_approval_required: true,
-    payroll_review: payrollReview(status),
+    payroll_review: payrollReview(status, notificationQueued),
     can_decide_payroll_review: status === 'pending',
     payroll_items: [
       {
@@ -110,10 +111,10 @@ test('client reviews complex payroll and explicitly approves the exact calculati
     if (route.request().method() === 'POST') {
       approvalPayload = route.request().postDataJSON() as Record<string, unknown>;
       approved = true;
-      await fulfillJson(route, { payroll_review: payrollReview('approved') });
+      await fulfillJson(route, { payroll_review: payrollReview('approved', true) });
       return;
     }
-    await fulfillJson(route, { pay_period: payPeriod(approved ? 'approved' : 'pending') });
+    await fulfillJson(route, { pay_period: payPeriod(approved ? 'approved' : 'pending', true) });
   });
 
   await page.goto('/companies/1/pay-runs/702/overview');
@@ -135,7 +136,7 @@ test('client reviews complex payroll and explicitly approves the exact calculati
   await approvalResponse;
 
   expect(approvalPayload).toEqual({ revision_id: 91, acknowledgement, notes: 'Looks correct.' });
-  await expect(page.getByText('Revision 3 approved by MoSa Approver. Cornerstone has been notified.')).toBeVisible();
+  await expect(page.getByText('Revision 3 approved by MoSa Approver. Your Cornerstone account team is queued to be emailed.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve this revision' })).toHaveCount(0);
 });
 
@@ -185,6 +186,6 @@ test('client can find and review every payroll amount on a narrow phone before a
   await page.getByLabel('Note for Cornerstone (required to request changes)').fill('Reviewed every amount.');
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Approve this revision' }).click();
-  await expect(page.getByText('Revision 3 approved by MoSa Approver. Cornerstone has been notified.')).toBeVisible();
+  await expect(page.getByText('Revision 3 approved by MoSa Approver. Recorded. Cornerstone will see it in Client Inbox.')).toBeVisible();
   expect(approvalPayload).toEqual({ revision_id: 91, acknowledgement, notes: 'Reviewed every amount.' });
 });

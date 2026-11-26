@@ -27,13 +27,17 @@ module PortalNotifications
 
     attr_reader :subject, :lines, :link, :footer
 
-    def initialize(audience:, delivery_mode:, events:, app_user: true)
+    def self.payroll_review_batch?(events)
+      events.any? && events.all? { |event| PAYROLL_REVIEW_EVENTS.include?(event.event_type) }
+    end
+
+    def initialize(audience:, delivery_mode:, events:, app_user: true, legacy_renderer: false)
       @footer = if audience == "employee" then EMPLOYEE_FOOTER_LINE
       elsif app_user then FOOTER_LINE
       else EXTRA_ADDRESS_FOOTER_LINE
       end
 
-      if payroll_review_batch?(events)
+      if !legacy_renderer && self.class.payroll_review_batch?(events)
         @branded_message = build_payroll_review_message(audience: audience, events: events, app_user: app_user)
         @subject = @branded_message.subject
         @lines = [ @branded_message.heading, *@branded_message.paragraphs ]
@@ -54,7 +58,7 @@ module PortalNotifications
       @link = if audience == "employee"
         self.class.employee_portal_url(events.first.company)
       else
-        "#{self.class.frontend_url}#{path_for(audience, events)}"
+        "#{self.class.frontend_url}#{path_for(audience, events, legacy: legacy_renderer)}"
       end
     end
 
@@ -151,10 +155,6 @@ module PortalNotifications
     end
 
     private
-
-    def payroll_review_batch?(events)
-      events.any? && events.all? { |event| PAYROLL_REVIEW_EVENTS.include?(event.event_type) }
-    end
 
     def build_payroll_review_message(audience:, events:, app_user:)
       company = events.first.company
@@ -327,8 +327,8 @@ module PortalNotifications
       value.to_s.gsub(EmployeeEmails::Message::UNSAFE_HEADER_CHARACTERS, " ").squish.presence
     end
 
-    def path_for(audience, events)
-      groups = events.map { |event| self.class.destination_group(event) }.uniq
+    def path_for(audience, events, legacy: false)
+      groups = events.map { |event| legacy ? legacy_destination_group(event) : self.class.destination_group(event) }.uniq
       group = groups.one? ? groups.first : :general
       if group.is_a?(Array) && group.first == :contact_confirmation
         return "/companies/#{group.last}/contact-changes-to-confirm"
@@ -349,6 +349,12 @@ module PortalNotifications
       when [ true, :general ] then "/settings/client-documents"
       else "/documents"
       end
+    end
+
+    def legacy_destination_group(event)
+      return :payroll if PAYROLL_REVIEW_EVENTS.include?(event.event_type)
+
+      self.class.destination_group(event)
     end
 
     def h(value)

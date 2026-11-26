@@ -51,10 +51,34 @@ module PortalNotifications
             next if before == mode
 
             preference.update!(delivery_mode: mode)
+            retime_pending_deliveries!(user, category, mode)
             changes[category] = [ before, mode ]
           end
         end
         changes
+      end
+
+      # Switching Immediate <-> Digest retimes unattempted queued alerts so the
+      # change takes effect for already-queued notifications too.
+      def retime_pending_deliveries!(user, category, mode)
+        return unless PortalNotificationDelivery::DELIVERY_MODES.include?(mode)
+
+        normalized_email = PortalNotificationRecipient.normalize_email(user.email)
+        base = PortalNotificationDelivery.pending
+          .joins(:portal_notification_event)
+          .where(attempts: 0, claimed_at: nil, batch_key: nil, portal_notification_events: { category: category })
+        scope = if normalized_email.present?
+          base.where(user_id: user.id).or(base.where(user_id: nil, recipient_email: normalized_email))
+        else
+          base.where(user_id: user.id)
+        end
+
+        scope.includes(:portal_notification_event).find_each do |delivery|
+          deliver_after = PortalNotifications.deliver_after_for(mode, delivery.event.occurred_at)
+          next if delivery.delivery_mode == mode && delivery.deliver_after == deliver_after
+
+          delivery.update!(delivery_mode: mode, deliver_after: deliver_after)
+        end
       end
     end
   end

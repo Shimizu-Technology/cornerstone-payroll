@@ -376,6 +376,18 @@ RSpec.describe "Published payroll review loop", type: :request do
       expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(true)
     end
 
+    # When email is enabled but transport is unconfigured (no sender / API key), notification_queued stays false.
+    @actor = staff
+    post "#{admin}/unapprove"
+    staff_approve
+    with_portal_email(transport: nil, from: nil) do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(false)
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(false)
+    end
+
     # When no account team is assigned, notification_queued stays false even with email enabled.
     @actor = staff
     post "#{admin}/unapprove"

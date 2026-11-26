@@ -27,7 +27,7 @@ module PortalNotifications
       @company = company
       @actor = actor
       @user_ids = user_ids
-      @emails = emails
+      @emails = Array(emails).map { |email| PortalNotificationRecipient.normalize_email(email) }.compact.uniq
       @lead_user_id = lead_user_id
       @backup_user_id = backup_user_id
     end
@@ -37,6 +37,12 @@ module PortalNotifications
       raise IneligibleRecipient if (user_ids - eligible_ids).any?
       raise IneligibleRecipient if (lead_user_id && !eligible_ids.include?(lead_user_id)) ||
         (backup_user_id && !eligible_ids.include?(backup_user_id))
+      if user_ids.any? && lead_user_id.nil?
+        raise InvalidTeamRole, "Choose an Account lead when staff are assigned to the account team"
+      end
+      if backup_user_id && lead_user_id.nil?
+        raise InvalidTeamRole, "Choose an Account lead before assigning a Backup"
+      end
       if lead_user_id && backup_user_id && lead_user_id == backup_user_id
         raise InvalidTeamRole, "Choose different staff members for Lead and Backup"
       end

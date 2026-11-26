@@ -208,14 +208,19 @@ module PortalNotifications
       boundary
     end
 
+    def deliver_after_for(mode, occurred_at)
+      mode == "digest" ? next_digest_at(occurred_at) : occurred_at + BATCH_WINDOW
+    end
+
     private
 
     def create_delivery!(event, target)
       # Extra addresses have no account preferences; they follow the default.
       mode = target.user ? Preferences.mode_for(target.user, event.category) : CATEGORIES.dig(event.category, :default_mode)
+      ledger_mode = mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode
       attrs = { portal_notification_event: event, user: target.user, recipient_email: target.email,
                 recipient_key: target.key, company_id: event.company_id, channel: "email" }
-      skipped = ->(reason, delivery_mode = mode) do
+      skipped = ->(reason, delivery_mode = ledger_mode) do
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: delivery_mode, status: "skipped", skip_reason: reason,
           deliver_after: event.occurred_at, completed_at: Time.current))
       end
@@ -224,13 +229,15 @@ module PortalNotifications
       if !DemoOutbound.permit?(company: event.company, email: target.user&.email || target.email, channel: "portal_notification", user: target.user)
         skipped.call("recipient_not_allowed")
       elsif !delivery_enabled?
-        skipped.call("email_delivery_disabled", mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode)
+        skipped.call("email_delivery_disabled")
+      elsif !Transport.configured?
+        skipped.call("email_not_configured")
       elsif mode == "off"
-        skipped.call("preference_off", CATEGORIES.dig(event.category, :default_mode))
+        skipped.call("preference_off")
       elsif coalesced?(event, target)
         skipped.call("coalesced")
       else
-        deliver_after = mode == "digest" ? next_digest_at(event.occurred_at) : event.occurred_at + BATCH_WINDOW
+        deliver_after = deliver_after_for(mode, event.occurred_at)
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: mode, status: "pending", deliver_after: deliver_after))
       end
     end

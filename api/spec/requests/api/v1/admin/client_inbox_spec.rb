@@ -175,4 +175,79 @@ RSpec.describe "Staff Client Inbox", type: :request do
     get "/api/v1/admin/client_inbox/counts", params: { kind: "bad" }
     expect(response).to have_http_status(:unprocessable_entity)
   end
+
+  it "shows company-scoped payroll review approvals and change requests in Client Inbox and marks them handled after commit or unapprove" do
+    ensure_verified_test_tax_years(2026)
+    company.update!(client_payroll_approval_required: true)
+    second.update!(client_payroll_approval_required: true)
+    create(:company_assignment, user: client, company: company)
+    second_client = create(:user, company: second, organization: org, role: "client")
+    create(:company_assignment, user: second_client, company: second)
+
+    emp1 = create(:employee, company: company)
+    period1 = create(:pay_period, :calculated, company: company,
+      start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+    create(:payroll_item, company: company, pay_period: period1, employee: emp1, gross_pay: 1_200, net_pay: 1_000)
+    PayPeriodLifecycleService.new(pay_period: period1, actor: staff).approve!
+
+    emp2 = create(:employee, company: second)
+    period2 = create(:pay_period, :calculated, company: second,
+      start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+    create(:payroll_item, company: second, pay_period: period2, employee: emp2, gross_pay: 900, net_pay: 750)
+    PayPeriodLifecycleService.new(pay_period: period2, actor: staff).approve!
+
+    # Published-only reviews without a client decision do not appear yet.
+    expect(rows(kind: "payroll_review")).to be_empty
+
+    PayrollReview::RevisionService.new(pay_period: period1, actor: client).approve!(
+      approver: client, recorded_by: client, method: "client_portal",
+      revision_id: period1.payroll_review_packages.current.first!.id,
+      acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+    )
+    PayrollReview::RevisionService.new(pay_period: period2, actor: second_client).request_changes!(
+      revision_id: period2.payroll_review_packages.current.first!.id,
+      note: "Adjust hours"
+    )
+
+    inbox = rows(kind: "payroll_review", status: "waiting")
+    expect(inbox.size).to eq(2)
+    approved_row = inbox.find { |r| r["company_id"] == company.id }
+    changes_row = inbox.find { |r| r["company_id"] == second.id }
+    expect(approved_row).to include(
+      "kind" => "payroll_review",
+      "pay_period_id" => period1.id,
+      "state" => "approved",
+      "state_label" => "Approved — ready to commit",
+      "sender_name" => client.name,
+      "waiting" => true
+    )
+    expect(changes_row).to include(
+      "kind" => "payroll_review",
+      "pay_period_id" => period2.id,
+      "state" => "changes_requested",
+      "state_label" => "Changes requested",
+      "sender_name" => second_client.name,
+      "waiting" => true
+    )
+
+    get "/api/v1/admin/client_inbox/counts"
+    expect(response.parsed_body["data"]).to include("waiting_count" => 2, "waiting_payroll" => 2)
+
+    # Company scoping respects staff assignments.
+    staff.update!(role: "accountant")
+    create(:company_assignment, user: staff, company: company)
+    expect(rows(kind: "payroll_review").map { |r| r["company_id"] }).to eq([ company.id ])
+    staff.update!(role: "org_admin")
+
+    # Committing period1 and unapproving period2 move both entries from waiting to handled.
+    PayPeriodLifecycleService.new(pay_period: period1.reload, actor: staff).commit!
+    PayPeriodLifecycleService.new(pay_period: period2.reload, actor: staff).unapprove!
+
+    expect(rows(kind: "payroll_review", status: "waiting")).to be_empty
+    handled = rows(kind: "payroll_review", status: "handled")
+    expect(handled.map { |r| [ r["company_id"], r["state"] ] }).to contain_exactly(
+      [ company.id, "approved" ],
+      [ second.id, "changes_requested" ]
+    )
+  end
 end

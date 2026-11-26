@@ -100,14 +100,20 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
     || settings.extra_emails.join('\n') !== emails.join('\n')
     || settings.ineligible_listed_users.length > 0;
   const nobody = selectedIds.length === 0 && emails.length === 0;
+  const missingLead = selectedIds.length > 0 && leadUserId === null;
+  const needsLeadSaved = settings.needs_lead ?? (savedIds.length > 0 && savedLeadId === null);
   const atEmailLimit = emails.length >= settings.max_extra_emails;
 
   const toggle = (id: number): void => {
     setSaved(false);
     setSelectedIds((current) => {
       if (current.includes(id)) {
-        if (leadUserId === id) setLeadUserId(null);
-        if (backupUserId === id) setBackupUserId(null);
+        if (leadUserId === id) {
+          setLeadUserId(null);
+          setBackupUserId(null);
+        } else if (backupUserId === id) {
+          setBackupUserId(null);
+        }
         return current.filter((value) => value !== id);
       }
       return [...current, id];
@@ -118,7 +124,9 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
     setSaved(false);
     const nextId = value ? Number(value) : null;
     setLeadUserId(nextId);
-    if (nextId !== null) {
+    if (nextId === null) {
+      setBackupUserId(null);
+    } else {
       if (backupUserId === nextId) setBackupUserId(null);
       setSelectedIds((current) => (current.includes(nextId) ? current : [...current, nextId]));
     }
@@ -127,6 +135,7 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
   const selectBackup = (value: string): void => {
     setSaved(false);
     const nextId = value ? Number(value) : null;
+    if (nextId !== null && leadUserId === null) return;
     setBackupUserId(nextId);
     if (nextId !== null) {
       if (leadUserId === nextId) setLeadUserId(null);
@@ -194,6 +203,12 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
               {settings.unnotified_event_count > 0 && ` ${settings.unnotified_event_count} in the last 30 days had nobody to notify.`}</p>
           </div>
         )}
+        {settings.recipient_count > 0 && needsLeadSaved && (
+          <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950">
+            <p className="font-semibold">This Cornerstone account team needs an Account lead.</p>
+            <p>Choose an Account lead from the assigned staff and save so someone owns this client&apos;s payroll alerts.</p>
+          </div>
+        )}
 
         {settings.eligible_users.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-2">
@@ -220,7 +235,7 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
               <Select
                 id={`account-team-backup-${companyId}`}
                 value={backupUserId ? String(backupUserId) : ''}
-                disabled={readOnly || saving}
+                disabled={readOnly || saving || !leadUserId}
                 onChange={(event) => selectBackup(event.target.value)}
               >
                 <option value="">None selected</option>
@@ -317,7 +332,8 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
         {saved && <ActionFeedback tone="success" message="Account team saved." />}
         {!readOnly && (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button onClick={() => void save()} disabled={!dirty || saving} loading={saving} loadingLabel="Saving…">Save account team</Button>
+            <Button onClick={() => void save()} disabled={!dirty || saving || missingLead} loading={saving} loadingLabel="Saving…">Save account team</Button>
+            {missingLead && <p className="text-xs text-amber-900">Choose an Account lead before saving.</p>}
             {dirty && nobody && <p className="text-xs text-amber-900">Saving with nobody selected leaves this client without an account team.</p>}
           </div>
         )}
