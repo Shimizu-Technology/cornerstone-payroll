@@ -21,7 +21,7 @@ const summary = {
 describe('employee API contracts', () => {
   it('reads an empty context as everything off', () => {
     expect(parseContext(null)).toEqual({
-      firstName: null, status: 'active', formerAccessUntil: null, nextPayday: null, w2Delivery: null,
+      firstName: null, status: 'active', formerAccessUntil: null, nextPayday: null, w2Delivery: null, demo: false,
       features: { stubs: false, taxForms: false, profileRequests: false, deliveryConsent: false },
     });
   });

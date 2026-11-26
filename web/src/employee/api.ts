@@ -78,6 +78,7 @@ export interface EmployeeLink {
   id: string;
   companyName: string;
   subdomainSlug: string | null;
+  demo?: boolean;
   status: string;
   formerAccessUntil: string | null;
   latestPayDate: string | null;
@@ -179,6 +180,7 @@ export function parseLinks(data: unknown): EmployeeLink[] {
       id,
       companyName: text(entry.company_name) ?? '',
       subdomainSlug: text(entry.subdomain_slug),
+      demo: entry.demo === true,
       status: text(entry.status) ?? 'active',
       // An instant at the end of the last Guam day; kept as that day.
       formerAccessUntil: accessDay(entry.former_access_until),

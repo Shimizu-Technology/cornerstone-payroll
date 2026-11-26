@@ -15,6 +15,7 @@ require "set"
 # audited; nothing is sent to it.
 module DemoOutbound
   ENV_KEY = "DEMO_EMAIL_ALLOWLIST"
+  SUBJECT_PREFIX = "[Demo]"
   # Reserved names (RFC 2606) never deliver, so a demo record may hold them.
   NON_DELIVERING_DOMAIN = /\.(example|test|invalid)\z/
   SCOPE_KEY = :demo_outbound_company_id
@@ -146,7 +147,22 @@ module DemoOutbound
     # A demo never puts an address outside the allow-list in Reply-To.
     reply_to = [ filtered.delete(:reply_to), filtered.delete("reply_to") ].flatten.compact.select { |email| allowed?(email) }.uniq
     filtered[:reply_to] = reply_to if reply_to.any?
-    Array(filtered[:to]).any? ? filtered : nil
+    return nil unless Array(filtered[:to]).any?
+
+    # D-3: every demo email carries a "[Demo]" subject prefix. Idempotent so
+    # nested transports (PortalNotifications::Transport -> StagingMailTransport)
+    # never double-prefix.
+    subject = filtered.key?(:subject) ? filtered.delete(:subject) : filtered.delete("subject")
+    filtered[:subject] = mark_subject(subject) unless subject.nil?
+    filtered
+  end
+
+  def mark_subject(subject)
+    text = subject.to_s
+    return SUBJECT_PREFIX if text.strip.empty?
+    return text if text.lstrip.match?(/\A\[demo\](?:\s|\z)/i)
+
+    "#{SUBJECT_PREFIX} #{text.lstrip}"
   end
 
   # Fails closed: an unreadable profile counts as off.

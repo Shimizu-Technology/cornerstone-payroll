@@ -19,6 +19,8 @@ export interface TenantBranding {
   accent_color: string | null;
   /** The company's main phone, unless the client turned it off. Public, so it can show before sign-in. */
   main_phone?: string | null;
+  /** True only for a demo company (D-3); real companies never show the Demo pill. */
+  demo?: boolean;
 }
 
 export interface EmployeeBrand {
@@ -31,6 +33,8 @@ export interface EmployeeBrand {
   mainPhone: string | null;
   /** True when no client branding was found; copy then avoids naming an employer. */
   isFallback: boolean;
+  /** True only when this employer is a demo company (D-3). */
+  demo: boolean;
   action: string;
   /** True when the action color isn't the client's color as entered. */
   actionAdjusted: boolean;
@@ -167,6 +171,7 @@ export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
     monogram: monogramOf(name),
     mainPhone: branding ? dialable(branding.main_phone) : null,
     isFallback: !branding,
+    demo: branding?.demo === true,
     action,
     actionAdjusted: adjusted,
     actionTint: tintOf(action),
@@ -183,10 +188,11 @@ export function brandFrom(branding: TenantBranding | null): EmployeeBrand {
  * it ("Ask your manager at Coral Kitchen"). Colors, logo and main phone stay
  * neutral, since only a client subdomain's branding sets those.
  */
-export function employerBrand(brand: EmployeeBrand, companyName: string | null | undefined): EmployeeBrand {
+export function employerBrand(brand: EmployeeBrand, companyName: string | null | undefined, demo = false): EmployeeBrand {
+  const isDemo = brand.demo || demo === true;
   const name = companyName?.trim();
-  if (!brand.isFallback || !name) return brand;
-  return { ...brand, name, monogram: monogramOf(name), isFallback: false };
+  if (!brand.isFallback || !name) return isDemo === brand.demo ? brand : { ...brand, demo: isDemo };
+  return { ...brand, name, monogram: monogramOf(name), isFallback: false, demo: isDemo };
 }
 
 /** CSS custom properties for the brand roles. */
@@ -211,7 +217,8 @@ function isTenantBranding(value: unknown): value is TenantBranding {
   return (branding.subdomain_enabled === undefined || branding.subdomain_enabled === true)
     && typeof branding.name === 'string' && branding.name.trim() !== ''
     && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color)
-    && stringOrNull(branding.app_name) && stringOrNull(branding.main_phone);
+    && stringOrNull(branding.app_name) && stringOrNull(branding.main_phone)
+    && (branding.demo === undefined || typeof branding.demo === 'boolean');
 }
 
 export type TenantBrandingResult =

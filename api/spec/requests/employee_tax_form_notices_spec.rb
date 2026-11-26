@@ -272,7 +272,7 @@ RSpec.describe "Employee tax form notices", type: :request do
       TenantScope.with_company(demo.id) { EmployeeDocumentNotice.delete_all && EmployeeDocument.delete_all }
       expect(deliver_demo_notice).to have_attributes(status: "sent")
       expect(PortalNotifications::Transport.captured.sole).to include(to: [ "demo.worker@example.test" ],
-        subject: "IMPORTANT TAX RETURN DOCUMENT AVAILABLE")
+        subject: "[Demo] IMPORTANT TAX RETURN DOCUMENT AVAILABLE")
     end
 
     it "never reaches sending through the job, because the employee app stays off for a demo" do
