@@ -28,7 +28,7 @@ module ClientProfitability
     def initialize(organization:, period:, settings: ClientProfitabilitySetting.for(organization), cost_pending: false, spread_overhead: false,
                    cost_basis: nil)
       if cost_basis && !ClientProfitabilitySetting::COST_BASES.include?(cost_basis)
-        raise ArgumentError, "Count pay by must be pay date or work period"
+        raise ReportValidationError, "Count pay by must be pay date or work period"
       end
 
       @requested_cost_basis = cost_basis

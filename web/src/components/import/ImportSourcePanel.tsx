@@ -223,11 +223,22 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
           <PdfPreviewBoundary key={preview.attempt} fallback={error => (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
               <p role="alert" className="text-sm text-neutral-700">The PDF preview could not load.</p>
+              {preview.attempt >= 1 && (
+                <p className="max-w-sm text-sm text-neutral-600">If the preview still won&apos;t load, save your review and reload the page.</p>
+              )}
               <div className="flex flex-wrap justify-center gap-2">
-                <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => void download()}>Download PDF</Button>
+                <Button
+                  type="button"
+                  variant={preview.attempt >= 1 ? 'primary' : 'outline'}
+                  size="sm"
+                  className="max-sm:min-h-11"
+                  onClick={() => void download()}
+                >
+                  Download PDF
+                </Button>
                 <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => {
-                  const attempt = preview.attempt + 1;
-                  setPreview({ View: createPdfPreview(retryChunk(error, attempt)), attempt });
+                  const nextAttempt = preview.attempt + 1;
+                  setPreview({ View: createPdfPreview(retryChunk(error, nextAttempt)), attempt: nextAttempt });
                 }}>Retry preview</Button>
               </div>
             </div>

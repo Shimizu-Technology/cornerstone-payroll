@@ -210,7 +210,7 @@ function CollapsedNavLink({
         className={({ isActive }) =>
           cn(
             'group relative flex items-center rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
-            collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5',
+            collapsed ? 'justify-center px-2 py-2.5 lg:py-2' : 'gap-3 px-3 py-2.5 lg:py-2',
             isActive
               ? collapsed
                 ? 'bg-primary-100 text-primary-800 shadow-sm ring-1 ring-primary-300'
@@ -334,12 +334,12 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
 
   return (
     <aside className={cn(
-      'relative z-30 flex flex-col border-r border-neutral-200/80 bg-white/90 backdrop-blur-sm transition-[width] duration-150 ease-in-out overflow-visible',
+      'relative z-30 flex h-full min-h-0 flex-col border-r border-neutral-200/80 bg-white/90 backdrop-blur-sm transition-[width] duration-150 ease-in-out overflow-visible',
       collapsed ? 'w-16' : 'w-72',
       className
     )}>
       {/* Logo */}
-      <div className="border-b border-neutral-200/70 px-3 py-5">
+      <div className="shrink-0 border-b border-neutral-200/70 px-3 py-3.5">
         <NavLink
           to="/"
           onClick={onNavigate}
@@ -368,8 +368,8 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       {!collapsed && <CompanySwitcher />}
 
       {/* Nav */}
-      <nav className={cn('flex-1 overflow-y-auto py-4', collapsed ? 'px-2' : 'px-4')}>
-        <div className="space-y-1.5">
+      <nav className={cn('min-h-0 flex-1 overflow-y-auto py-3', collapsed ? 'px-2' : 'px-4')}>
+        <div className="space-y-1">
           <NavSection items={primaryNavigation} collapsed={collapsed} onNavigate={onNavigate} />
         </div>
 
@@ -445,7 +445,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       </nav>
 
       {/* Collapse toggle + user */}
-      <div className="border-t border-neutral-200/70 p-3 space-y-2">
+      <div className="shrink-0 space-y-1.5 border-t border-neutral-200/70 p-2.5">
         {onOpenCommandPalette && (
           <button
             ref={commandButtonRef}
@@ -465,7 +465,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             {!collapsed && (
               <>
                 <span className="text-xs">Command menu</span>
-                <span className="ml-auto rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-900">
+                <span className="ml-auto hidden rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 group-hover:text-neutral-900 lg:inline-flex">
                   {platformShortcut('K')}
                 </span>
               </>
