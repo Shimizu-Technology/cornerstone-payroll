@@ -185,14 +185,16 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     end
   end
 
-  it "preserves the current address and request state when the original changes before approval" do
+  # A direct edit replaces the pending request (superseded) instead of leaving
+  # it pending forever; it can't be approved over the newer address.
+  it "supersedes the request when the address is edited directly before approval, and keeps the current address" do
     change_request = system_read { address_request_for(@employee) }
     patch_employee(@employee, @reviewer, address_line1: "300 Example Lane")
     expect(response).to have_http_status(:ok), response.body
     patch "#{requests_path}/#{change_request.id}/approve", headers: headers(@reviewer)
     expect(response).to have_http_status(:unprocessable_entity)
     system_read do
-      expect(change_request.reload).to be_pending
+      expect(change_request.reload).to be_superseded
       expect(@employee.reload.address_line1).to eq("300 Example Lane")
     end
   end

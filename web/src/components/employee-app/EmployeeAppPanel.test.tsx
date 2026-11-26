@@ -130,6 +130,24 @@ describe('Employee app panel', () => {
     expect(screen.queryByRole('link', { name: 'Edit contact details' })).toBeNull();
   });
 
+  it('opens the page’s contact editor from Edit contact details when the page offers one', async () => {
+    mocks.get.mockResolvedValue({ data: employee });
+    const onEditContact = vi.fn();
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppPanel companyId={1} companyName="Example Bakery" employeeId={5} audience="client" onEditContact={onEditContact} /></MemoryRouter>);
+    await user.click(await screen.findByRole('button', { name: 'Edit contact details' }));
+    expect(onEditContact).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('link', { name: 'Edit contact details' })).toBeNull();
+  });
+
+  it('hides Edit contact details when contact can’t be edited, instead of falling back to the employee form', async () => {
+    mocks.get.mockResolvedValue({ data: employee });
+    render(<MemoryRouter><EmployeeAppPanel companyId={1} companyName="Example Bakery" employeeId={5} audience="admin" canEditContact={false} onEditContact={vi.fn()} /></MemoryRouter>);
+    expect(await screen.findByText('worker@example.test')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit contact details' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Edit contact details' })).toBeNull();
+  });
+
   it('requires a reason before staff can revoke', async () => {
     const user = openPanel({ ...employee, staff_actions: true }, 'admin');
     mocks.post.mockResolvedValue({ data: { ...employee, staff_actions: true, status: 'revoked' } });
