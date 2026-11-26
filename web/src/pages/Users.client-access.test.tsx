@@ -124,4 +124,34 @@ describe('Client access level', () => {
     expect(payload).not.toHaveProperty('client_access_level');
     expect(payload).not.toHaveProperty('expected_client_access_level');
   });
+
+  it('keeps the level it opened with when the list refreshes mid-edit, so it can’t undo someone else’s change', async () => {
+    const pending = { ...manager, id: 23, name: 'Pending Person', email: 'pending@example.test', invitation_pending: true } as User;
+    apiMocks.users.list.mockResolvedValueOnce({ data: [viewer, pending] })
+      // Another admin made the viewer a manager while this form was open.
+      .mockResolvedValue({ data: [{ ...viewer, client_access_level: 'manager' }, pending] });
+    apiMocks.users.resendInvitation.mockResolvedValue({ data: pending, invitation_delivery_status: 'queued', invitation_sent: true });
+    apiMocks.users.update.mockResolvedValue({ data: viewer });
+    const user = userEvent.setup();
+    render(<Users />);
+
+    await screen.findAllByText('Client Portal User · Client viewer');
+    const rowFor = (email: string) => screen.getAllByRole('row').find((candidate) => within(candidate).queryByText(email)) as HTMLElement;
+    await user.click(within(rowFor('viewer@example.test')).getByRole('button', { name: 'Edit' }));
+    expect((within(rowFor('viewer@example.test')).getByRole('combobox', { name: 'Client access' }) as HTMLSelectElement).value).toBe('viewer');
+
+    // A refresh while the form is open.
+    await user.click(within(rowFor('pending@example.test')).getByRole('button', { name: /Resend/ }));
+    await waitFor(() => expect(apiMocks.users.list).toHaveBeenCalledTimes(2));
+
+    const name = within(rowFor('viewer@example.test')).getByRole('textbox', { name: 'Name' });
+    await user.clear(name);
+    await user.type(name, 'Renamed Viewer');
+    await user.click(within(rowFor('viewer@example.test')).getByRole('button', { name: /Save/ }));
+
+    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledOnce());
+    const payload = apiMocks.users.update.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('client_access_level');
+    expect(payload).not.toHaveProperty('expected_client_access_level');
+  });
 });

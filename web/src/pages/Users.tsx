@@ -169,6 +169,9 @@ export function Users() {
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('employee');
   const [editClientAccess, setEditClientAccess] = useState<ClientAccessLevel>('manager');
+  // The level the form opened with, so a list refresh mid-edit can't hide a
+  // change someone else made (expected_client_access_level).
+  const [editOpenedAccess, setEditOpenedAccess] = useState<ClientAccessLevel>('manager');
   const [editClientIds, setEditClientIds] = useState<number[]>([]);
   const [editError, setEditError, editErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -334,6 +337,7 @@ export function Users() {
     setEditName(user.name);
     setEditRole(user.role);
     setEditClientAccess(user.client_access_level ?? 'manager');
+    setEditOpenedAccess(user.client_access_level ?? 'manager');
     setEditClientIds(user.assigned_company_ids || []);
     setEditError(null);
     void loadCompanies();
@@ -345,7 +349,7 @@ export function Users() {
     setEditError(null);
     try {
       const editingUser = users.find(user => user.id === editingId);
-      const loadedAccess = editingUser?.client_access_level ?? 'manager';
+      const loadedAccess = editOpenedAccess;
       const payload: {
         name: string; role: UserRole; client_access_level?: ClientAccessLevel; expected_client_access_level?: ClientAccessLevel; company_ids?: number[];
       } = {

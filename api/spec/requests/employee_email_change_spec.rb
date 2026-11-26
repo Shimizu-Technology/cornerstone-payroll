@@ -85,11 +85,45 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
     expect(invite.link.reload).to be_invited
   end
 
-  it "tells the old address about the change when the person has an invite or an active or former link" do
+  def notices
+    EmployeeEmailChangeNotice.where(employee: employee).order(:id)
+  end
+
+  it "saves a pending notice to the old address with the change, then sends it after commit" do
     invite!(employee, actor: staff)
 
-    expect { change_email(client, "riley.new@example.net") }
-      .to have_enqueued_job(SendEmployeeEmailChangeNoticeJob).with(employee.id, "riley.old@example.net", match(uuid_pattern))
+    expect { change_email(client, "riley.new@example.net") }.to have_enqueued_job(SendEmployeeEmailChangeNoticeJob)
+    notice = notices.sole
+    expect(notice).to have_attributes(recipient_email: "riley.old@example.net", status: "pending", company_id: company.id)
+    expect(notice.change_id).to match(uuid_pattern)
+    expect(SendEmployeeEmailChangeNoticeJob).to have_been_enqueued.with(notice.id)
+  end
+
+  it "keeps the notice when the queue is down, and the sweep sends it" do
+    invite!(employee, actor: staff)
+    allow(SendEmployeeEmailChangeNoticeJob).to receive(:perform_later).and_raise(StandardError, "queue down")
+
+    change_email(client, "riley.new@example.net")
+    expect(employee.reload.email).to eq("riley.new@example.net")
+    expect(notices.sole.status).to eq("pending")
+
+    allow(PortalNotifications).to receive(:delivery_enabled?).and_return(true)
+    allow(PortalNotifications::Transport).to receive(:configured?).and_return(true)
+    allow(PortalNotifications::Transport).to receive(:from_email).and_return("noreply@example.test")
+    allow(PortalNotifications::Transport).to receive(:deliver).and_return("id" => "msg_1")
+    SendEmployeeEmailChangeNoticeJob.new.perform
+    expect(notices.sole).to have_attributes(status: "sent", attempts: 1)
+  end
+
+  it "still writes the employee update's own audit when the email and another field change together" do
+    invite!(employee, actor: staff)
+    patch "/api/v1/admin/employees/#{employee.id}", params: { employee: { email: "riley.new@example.net", job_title: "Lead Baker" } },
+      as: :json, headers: bearer(staff.clerk_id).merge("X-Company-Id" => company.id.to_s)
+    expect(response).to have_http_status(:ok), response.body
+
+    expect(email_audit).to be_present
+    expect(AuditLog.where(record_type: "employees", record_id: employee.id).where.not(action: "employee_links#contact_email_changed")
+      .pluck(:action)).to include("employees#update")
   end
 
   it "doesn't notify or audit for an employee who never had employee app access" do
@@ -105,14 +139,41 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
     login = invite.link.reload.user
     expect(invite.link).to be_active
 
-    expect { change_email(staff, "riley.new@example.net") }
-      .to have_enqueued_job(SendEmployeeEmailChangeNoticeJob).with(employee.id, "riley.old@example.net", match(uuid_pattern))
+    expect { change_email(staff, "riley.new@example.net") }.to have_enqueued_job(SendEmployeeEmailChangeNoticeJob)
+    expect(notices.sole.recipient_email).to eq("riley.old@example.net")
 
     expect(login.reload.email).to eq("riley.old@example.net")
     expect(invite.link.reload).to have_attributes(status: "active", user_id: login.id)
     get "/api/v1/employee/context", headers: bearer("user_riley").merge("X-Employee-Link-Id" => invite.link.id.to_s)
     expect(response).to have_http_status(:ok)
     expect(email_audit.metadata["closed_invite_link_ids"]).to eq([])
+  end
+
+  it "applies the same safeguards when staff bulk-clear a shared placeholder email, from each row's original address" do
+    employee.update_columns(email: "front.desk@example.net")
+    other = create(:employee, company: company, first_name: "Avery", last_name: "Cruz", email: "front.desk@example.net",
+      date_of_birth: Date.new(1988, 1, 2))
+    invite = invite!(employee, actor: staff, delivery: "code")
+    EmployeePlaceholderEmail.create!(organization: company.organization, email: "front.desk@example.net", marked_by: staff)
+    generation = invite.link.invite_generation
+
+    result = as_staff_in(company) do
+      EmployeeContactHygiene::ClearSharedEmailService.new(company: company, email: "front.desk@example.net", actor: staff).call!
+    end
+
+    expect(result.cleared_count).to eq(2)
+    expect([ employee.reload.email, other.reload.email ]).to eq([ nil, nil ])
+    link = invite.link.reload
+    expect(link).to have_attributes(invite_code_digest: nil, invite_generation: generation + 1)
+    expect(link.invite_open?).to be(false)
+    post_activation(activation_params(employee, code: invite.code, email: "anyone@example.net"))
+    expect(response.parsed_body["code"]).to eq("activation_failed")
+
+    expect(email_audit).to have_attributes(actor_type: "staff_user", user_id: staff.id)
+    expect(email_audit.metadata).to include("from_email" => "front.desk@example.net", "closed_invite_link_ids" => [ link.id ])
+    expect(notices.sole).to have_attributes(recipient_email: "front.desk@example.net", status: "pending")
+    # The employee who never had app access gets no notice or app audit.
+    expect(EmployeeEmailChangeNotice.where(employee: other)).to be_empty
   end
 
   describe "the notice" do
@@ -122,35 +183,55 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
       allow(PortalNotifications::Transport).to receive(:from_email).and_return("noreply@example.test")
     end
 
+    let(:notice) do
+      EmployeeEmailChangeNotice.create!(company: company, employee: employee, change_id: "change-a",
+        recipient_email: "riley.old@example.net", status: "pending")
+    end
+
     it "sends a short message naming the employer, and nothing else, to the old address" do
       sent = []
       allow(PortalNotifications::Transport).to receive(:deliver) { |payload, **options| sent << [ payload, options ]; { "id" => "msg_1" } }
 
-      expect(SendEmployeeEmailChangeNoticeJob.new.perform(employee.id, "riley.old@example.net", "change-a")).to eq(:sent)
+      expect(SendEmployeeEmailChangeNoticeJob.new.perform(notice.id)).to eq(:sent)
 
       payload, options = sent.sole
       expect(payload).to include(to: "riley.old@example.net", subject: "The email for your Example Bakery employee app was changed",
         text: "The email for your Example Bakery employee app was changed. If you didn't expect this, contact Example Bakery.")
       expect(options).to eq(idempotency_key: "employee-email-changed-change-a")
+      expect(notice.reload).to have_attributes(status: "sent", attempts: 1)
+      # Sent once: a repeat delivery does nothing.
+      expect(SendEmployeeEmailChangeNoticeJob.new.perform(notice.id)).to eq(:skipped)
+      expect(sent.size).to eq(1)
     end
 
     it "gives each change its own notice, even two in the same second" do
       invite!(employee, actor: staff)
-      ids = []
-      allow(SendEmployeeEmailChangeNoticeJob).to receive(:perform_later) { |*args| ids << args.last }
 
       freeze_time do
         change_email(client, "riley.new@example.net")
         change_email(client, "riley.newer@example.net")
       end
 
-      expect(ids.size).to eq(2)
-      expect(ids.uniq.size).to eq(2)
-      expect(ids).to all(match(uuid_pattern))
+      expect(notices.pluck(:recipient_email)).to eq(%w[riley.old@example.net riley.new@example.net])
+      expect(notices.pluck(:change_id).uniq.size).to eq(2)
+      expect(notices.pluck(:change_id)).to all(match(uuid_pattern))
     end
 
-    it "keeps the address out of the job's log lines" do
-      expect(SendEmployeeEmailChangeNoticeJob.log_arguments?).to be(false)
+    it "retries a failed send without the address in the error or the job's log" do
+      allow(PortalNotifications::Transport).to receive(:deliver).and_raise(StandardError, "550 rejected riley.old@example.net")
+      log = StringIO.new
+      logger = ActiveSupport::TaggedLogging.new(Logger.new(log))
+      allow(ActiveJob::Base).to receive(:logger).and_return(logger)
+      allow(Rails).to receive(:logger).and_return(logger)
+
+      expect { EmployeeLinks::EmailChange.deliver_pending!(notice.id) }
+        .to raise_error(EmployeeLinks::EmailChange::DeliveryError) { |error| expect(error.message).not_to include("riley") }
+
+      # The job's retry_on logs the error's message when it schedules the retry.
+      expect { SendEmployeeEmailChangeNoticeJob.perform_now(notice.id) }.to have_enqueued_job(SendEmployeeEmailChangeNoticeJob)
+      expect(log.string).to include("Retrying SendEmployeeEmailChangeNoticeJob", "EmployeeLinks::EmailChange::DeliveryError")
+      expect(log.string).not_to include("riley.old@example.net")
+      expect(notice.reload).to have_attributes(status: "failed", attempts: 2)
     end
   end
 end

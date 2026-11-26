@@ -97,13 +97,15 @@ module EmployeeLinks
       end
     end
 
-    # EmployeeLinks lock order: the employee first, so a contact edit (which
-    # locks it too) can't commit between the email-on-file check and the
-    # activation; then the caller's logins; then the link.
+    # EmployeeLinks lock order: the company (FOR KEY SHARE), then the
+    # employee, so a contact edit (company, then employee) can't commit
+    # between the email-on-file check and the activation and can't deadlock
+    # with it; then the caller's logins; then the link.
     def lock_link(lookup)
       first_read = EmployeeAccountLink.find_by(lookup)
       return unless first_read && (@admit.nil? || @admit.call(first_read))
 
+      EmployeeLinks.lock_company!(first_read.company_id)
       Employee.where(id: first_read.employee_id).lock("FOR NO KEY UPDATE").pick(:id)
       EmployeeLinks.lock_users!(Array(@lock_users.call(first_read)).map(&:id)) if @lock_users
       link = EmployeeAccountLink.lock.find_by(lookup.merge(id: first_read.id))

@@ -1,18 +1,21 @@
 # frozen_string_literal: true
 
-# Sends the short notice to an employee's previous email address after the
-# address on file changed (EmployeeLinks::EmailChange). The address is a job
-# argument, so arguments are kept out of the logs.
+# Sends a saved notice to an employee's previous email address after the
+# address on file changed (EmployeeLinks::EmailChange), retrying transport
+# failures with the same idempotency key. With no argument it is the
+# recurring sweep for notices whose job was lost or is due a retry. Its only
+# argument is the notice id, and its errors never name the address.
 class SendEmployeeEmailChangeNoticeJob < ApplicationJob
   self.rls_mode = :system
   self.log_arguments = false
 
   queue_as :default
-  retry_on StandardError, wait: :polynomially_longer, attempts: 5
+  retry_on EmployeeLinks::EmailChange::DeliveryError, wait: :polynomially_longer,
+    attempts: EmployeeLinks::EmailChange::MAX_ATTEMPTS
 
-  # change_id: one UUID per committed change (EmployeeLinks::EmailChange),
-  # the notice's idempotency key across retries.
-  def perform(employee_id, to, change_id)
-    EmployeeLinks::EmailChange.deliver!(employee_id: employee_id, to: to, change_id: change_id)
+  def perform(notice_id = nil)
+    return EmployeeLinks::EmailChange.deliver_pending!(notice_id) if notice_id
+
+    EmployeeLinks::EmailChange.retry_unsent!
   end
 end

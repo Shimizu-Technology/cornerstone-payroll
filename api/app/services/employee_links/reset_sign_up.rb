@@ -146,6 +146,7 @@ module EmployeeLinks
     # locked pending login, or nil when the link has none.
     def lock_link_and_login!
       employee = @link.employee
+      EmployeeLinks.lock_company!(@link.company_id)
       employee.lock!
       pending_id = EmployeeAccountLink.where(id: @link.id).pick(:user_id)
       pending = EmployeeLinks.lock_users!([ pending_id ]).first
