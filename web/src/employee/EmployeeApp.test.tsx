@@ -48,6 +48,23 @@ describe('employee app shell', () => {
     expect(screen.getByText('See your pay stubs and tax forms any time.')).toBeTruthy();
   });
 
+  it.each(['/sign-up', '/sign-up?__clerk_ticket='])('shows invitation instructions at %s without mounting the sign-up form', async (path) => {
+    window.history.pushState({}, '', path);
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText('To set up your account, open the invite link from your email.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/sign-in');
+    expect(screen.queryByTestId('dev-preview-sign-up')).toBeNull();
+  });
+
+  it('renders the sign-up form when the invitation supplies a Clerk ticket', async () => {
+    window.history.pushState({}, '', '/sign-up?__clerk_ticket=preview');
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('button', { name: 'Finish preview sign-up' })).toBeTruthy();
+    expect(screen.queryByText('To set up your account, open the invite link from your email.')).toBeNull();
+  });
+
   it('opens the five tabs once the link checks out', async () => {
     signedIn();
     const fetchMock = respond({

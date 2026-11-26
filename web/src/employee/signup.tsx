@@ -394,10 +394,18 @@ export function ActivateScreen(): ReactElement {
 /** /sign-up: where Clerk's invitation lands (its redirect_url), with the ticket in the address. */
 export function SignUpAccountScreen(): ReactElement {
   const { SignUpForm } = useEmployeeAuth();
+  const { search } = useLocation();
+  const hasTicket = Boolean(new URLSearchParams(search).get('__clerk_ticket')?.trim());
   useDocumentTitle('Create your account');
   return (
     <AuthFrame back="/">
-      <SignUpForm redirectTo="/sign-up/done" />
+      {hasTicket ? <SignUpForm redirectTo="/sign-up/done" /> : (
+        <div className="space-y-4">
+          <h1 className="emp-h1">Set up your account</h1>
+          <p className="emp-lead">To set up your account, open the invite link from your email.</p>
+          <Link to="/sign-in" className="emp-link">Sign in</Link>
+        </div>
+      )}
     </AuthFrame>
   );
 }
@@ -522,9 +530,9 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
           <h1 className="emp-h1">{copy.title}</h1>
           <p className="emp-lead">{copy.lead(company)}</p>
         </div>
-        {mode === 'claim' && (
+        {mode === 'claim' && email && (
           <div className="emp-notice-inline">
-            {email && <p>Signed in as <strong className="break-all">{email}</strong></p>}
+            <p>Signed in as <strong className="break-all">{email}</strong></p>
             <p className="flex flex-wrap items-center gap-x-2">
               Not you?
               <EmpButton variant="quiet" className="emp-btn-small" disabled={working || switchingAccount} onClick={() => {

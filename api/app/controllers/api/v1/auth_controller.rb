@@ -46,8 +46,8 @@ module Api
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
         if current_user.portal_employee? && !Current.view_as_grant
-          companies = links.map(&:company).uniq
-          payload[:user][:employee_app_url] = EmployeeLinks::AppUrl.origin_for(companies.first) if companies.one?
+          url = employee_app_url
+          payload[:user][:employee_app_url] = url if url
         end
         if @clerk_token_payload && MfaPolicy.enabled?
           payload[:mfa_required] = MfaPolicy.required_for?(user: current_user)
@@ -61,6 +61,15 @@ module Api
       def openable_employee_links
         EmployeeLinks.openable_links(current_user, azp: @clerk_token_payload&.fetch("azp", nil),
           origin: request.headers["Origin"])
+      end
+
+      def employee_app_url
+        # The destination may be the only origin where the link opens (for a
+        # demo). Keep the count above scoped to the current request's origin.
+        companies = current_user.employee_account_links.portal_eligible.active.includes(company: :organization).filter_map do |link|
+          link.company if link.portal_enabled? && EmployeeLinks.demo_boundary_allows?(current_user, link.company)
+        end.uniq
+        EmployeeLinks::AppUrl.origin_for(companies.first) if companies.one?
       end
 
       def rls_system_reason

@@ -4,28 +4,51 @@ import { branding, detailFor, employeeBaseUrl, json, mockEmployeeApi, signIn, st
 test.skip(Boolean(process.env.E2E_BASE_URL), 'Needs both local dev servers');
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-for (const logoUrl of [null, 'https://assets.example.test/employee-icon.png']) {
-  test(`the browser reads the tenant manifest and ${logoUrl ? 'uploaded' : 'generated'} Home Screen icon`, async ({ page }) => {
+for (const fixture of [
+  { name: 'without a logo', logoSize: null, iconSize: 180 },
+  { name: 'with a square logo', logoSize: { width: 256, height: 256 }, iconSize: 256 },
+  { name: 'with a wordmark', logoSize: { width: 256, height: 96 }, iconSize: 180 },
+]) {
+  test(`the browser reads the tenant manifest and square Home Screen icon ${fixture.name}`, async ({ page }) => {
+    const logoUrl = fixture.logoSize ? 'https://assets.example.test/employee-icon.png' : null;
     await mockEmployeeApi(page, {
       branding: { ...branding, app_name: 'Coral Pay', logo_url: logoUrl },
     });
-    if (logoUrl) await page.route(logoUrl, route => route.fulfill({ status: 200, path: 'public/icon-192.png' }));
+    if (logoUrl && fixture.logoSize) {
+      const png = await page.evaluate(({ width, height }) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas.toDataURL('image/png').split(',')[1];
+      }, fixture.logoSize);
+      await page.route(logoUrl, route => route.fulfill({ contentType: 'image/png', body: Buffer.from(png, 'base64') }));
+    }
     await page.goto(`${employeeBaseUrl}/sign-in?${tenantQuery}`);
 
     const manifestLink = page.locator('link[rel="manifest"]');
     await expect(manifestLink).toHaveAttribute('href', /^blob:/);
     await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', branding.primary_color);
+    await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes');
     await expect(page.locator('meta[name="apple-mobile-web-app-title"]')).toHaveAttribute('content', 'Coral Pay');
-    const expectedIcon = logoUrl ?? /^data:image\/png;base64,/;
-    await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', expectedIcon);
-    await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute('href', expectedIcon);
-    const iconSize = await page.locator('link[rel="apple-touch-icon"]').evaluate(async (link: HTMLLinkElement) => {
+    const generatedIcon = /^data:image\/png;base64,/;
+    const favicon = page.locator('link[rel="icon"]');
+    await expect(favicon).toHaveAttribute('href', logoUrl ?? generatedIcon);
+    if (logoUrl) await favicon.evaluate(async (link: HTMLLinkElement) => {
+      const img = new Image();
+      img.src = link.href;
+      await img.decode();
+      await new Promise(requestAnimationFrame);
+    });
+    const touchIcon = page.locator('link[rel="apple-touch-icon"]');
+    await expect(touchIcon).toHaveAttribute('href', fixture.logoSize?.width === fixture.logoSize?.height && logoUrl ? logoUrl : generatedIcon);
+    await expect(touchIcon).toHaveAttribute('sizes', `${fixture.iconSize}x${fixture.iconSize}`);
+    const iconSize = await touchIcon.evaluate(async (link: HTMLLinkElement) => {
       const img = new Image();
       img.src = link.href;
       await img.decode();
       return [img.naturalWidth, img.naturalHeight];
     });
-    expect(iconSize).toEqual([192, 192]);
+    expect(iconSize).toEqual([fixture.iconSize, fixture.iconSize]);
 
     const cdp = await page.context().newCDPSession(page);
     const { data, errors, parsed } = await cdp.send('Page.getAppManifest');
@@ -33,10 +56,10 @@ for (const logoUrl of [null, 'https://assets.example.test/employee-icon.png']) {
     expect(JSON.parse(data)).toMatchObject({
       name: 'Coral Kitchen', short_name: 'Coral Pay', display: 'standalone',
       start_url: `${employeeBaseUrl}/`, theme_color: branding.primary_color,
-      icons: expect.arrayContaining([
+      icons: [
         { src: expect.stringMatching(/^data:image\/png;base64,/), sizes: '192x192', type: 'image/png' },
         { src: expect.stringMatching(/^data:image\/png;base64,/), sizes: '512x512', type: 'image/png' },
-      ]),
+      ],
     });
     expect(parsed?.scope).toBe(`${employeeBaseUrl}/`);
   });
@@ -68,6 +91,25 @@ test('hides YTD-only earnings on a phone and restores their YTD column on deskto
   await expect(earlierPay).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 800 });
   await expect(page.getByRole('row', { name: /Earlier regular pay/ })).toContainText('$125.00');
+});
+
+test('shows a phone message when every earning is YTD-only', async ({ page }) => {
+  await signIn(page);
+  await mockEmployeeApi(page);
+  const detail = {
+    ...detailFor(statements2026[0]),
+    earnings: [{ label: 'Earlier regular pay', hours: null, rate: null, amount: '0.00', ytd: '125.00' }],
+  };
+  await page.route('**/api/v1/employee/statements/906', route => json(route, detail));
+  await page.goto(`${employeeBaseUrl}/pay/906?${tenantQuery}`);
+
+  const notice = page.getByText('No earnings this pay period.');
+  const earnings = page.getByRole('table', { name: /Pay before taxes/ });
+  await expect(notice).toBeVisible();
+  await expect(earnings).toBeHidden();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(earnings.getByRole('row', { name: /Earlier regular pay/ })).toContainText('$125.00');
+  await expect(notice).toBeHidden();
 });
 
 test('switching the account on a claim keeps the invite through a failed sign-out and retry', async ({ page }) => {
