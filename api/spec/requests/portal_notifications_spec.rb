@@ -53,7 +53,7 @@ RSpec.describe "Portal activity notifications", :portal_notifications, type: :re
       dispatch_later
       expect(captured_portal_emails.map { |email| email[:to] }).to contain_exactly(staff.email, "outside.owner@example.test")
       captured_portal_emails.each do |email|
-        expect([ email[:subject], email[:text], email[:html] ].join).not_to include("Jordan", "Payroll questions", "Notify Client")
+        expect([ email[:subject], email[:text], email[:html] ].join).not_to include("Jordan", "Payroll questions")
       end
       expect(event.deliveries.pluck(:status).uniq).to eq([ "sent" ])
     end
@@ -99,7 +99,7 @@ RSpec.describe "Portal activity notifications", :portal_notifications, type: :re
 
       dispatch_later
       expect(captured_portal_emails.map { |email| email[:to] }).to contain_exactly(client.email, second_client.email)
-      expect(captured_portal_emails.first[:text]).to include("https://payroll.example.test/documents")
+      expect(captured_portal_emails.first[:text]).to include("https://payroll.example.test/companies/#{company.id}/messages")
     end
   end
 

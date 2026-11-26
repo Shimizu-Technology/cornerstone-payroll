@@ -300,6 +300,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
       link = invite.link.reload
       expect(link.activation_locked_until).to be_within(1.minute).of(24.hours.from_now)
       expect(link_audits(link, "activation_locked").count).to eq(1)
+      expect(PortalNotificationEvent.where(event_type: "employee_signup_locked", subject: link).count).to eq(1)
 
       expect(attempt).to eq(generic)
       expect(link.reload.failed_activation_attempts).to eq(5)

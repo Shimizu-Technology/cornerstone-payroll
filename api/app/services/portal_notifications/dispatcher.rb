@@ -24,6 +24,7 @@ module PortalNotifications
       # Truncate to PostgreSQL microsecond precision so claimed_at equality checks match stored timestamps.
       @now = now.change(usec: now.usec)
       @claim_token = SecureRandom.hex(16)
+      @w2_posting_availability = {}
     end
 
     def run!
@@ -123,7 +124,6 @@ module PortalNotifications
       return [] if kept.empty?
 
       other_rows = all_batch_rows.reject { |row| row.status == "pending" }
-      all_events = all_batch_rows.map(&:event)
 
       if other_rows.empty?
         return [ claim_rows!(
@@ -135,9 +135,8 @@ module PortalNotifications
         ) ]
       end
 
-      # Single-company generic v2 batches contain no client/subject/date details
-      # and resend their persisted payload verbatim so provider deduplication holds.
-      if v2_batch_key?(previous_key) && !Email.payroll_review_batch?(all_events) && all_events.map(&:company_id).uniq.one?
+      # Preserve the provider key for older, still-safe generic payloads.
+      if replayable_generic_batch?(previous_key, all_batch_rows)
         return [ claim_rows!(
           ids: kept.map(&:id).sort,
           key: previous_key,
@@ -236,6 +235,13 @@ module PortalNotifications
       PortalNotificationDelivery.where(id: ids, status: "pending", claimed_by: claim_token, claimed_at: now)
     end
 
+    # Legacy generic payloads carry no event-specific copy. A branded
+    # payload can describe a revoked event, so never replay a partial batch.
+    def replayable_generic_batch?(key, rows)
+      v2_batch_key?(key) && rows.map(&:company_id).uniq.one? &&
+        rows.any? { |row| row.attempted_payload&.fetch("subject", nil) == Email::SUBJECT }
+    end
+
     def v2_batch_key?(key)
       key.to_s.start_with?(BATCH_KEY_V2_PREFIX)
     end
@@ -251,7 +257,7 @@ module PortalNotifications
       user = effective_user_for(row)
       return false unless user
 
-      current_mode = Preferences.mode_for(user, row.event.category)
+      current_mode = Preferences.mode_for(user, row.event.preference_category)
       return false unless PortalNotificationDelivery::DELIVERY_MODES.include?(current_mode)
       return false if current_mode == row.delivery_mode
 
@@ -289,7 +295,7 @@ module PortalNotifications
       event = row.event
       return "email_delivery_disabled" unless PortalNotifications.delivery_enabled?
       return "email_not_configured" unless Transport.configured?
-      return "resource_unavailable" unless Recipients.subject_available?(event)
+      return "resource_unavailable" unless Recipients.subject_available?(event, now: now, w2_posting_availability: @w2_posting_availability)
       return "destination_changed" if destination_changed?(row, expected_address: expected_address)
 
       revoked = Recipients.revocation_reason(row)
@@ -306,7 +312,7 @@ module PortalNotifications
       if row.user_id.nil? && PortalNotificationDelivery.where(portal_notification_event_id: event.id, user_id: user.id).where.not(id: row.id).exists?
         return "coalesced"
       end
-      return "preference_off" if Preferences.mode_for(user, event.category) == "off"
+      return "preference_off" if Preferences.mode_for(user, event.preference_category) == "off"
       # Reading the conversation first makes a still-pending alert unnecessary.
       return "already_read" if event.message_event? && !event.subject.unread_for?(user)
 
@@ -370,15 +376,10 @@ module PortalNotifications
 
         kept_ids = kept.map(&:id).sort
         other_rows = all_batch_rows.reject { |row| kept_ids.include?(row.id) }
-        all_events = all_batch_rows.map(&:event)
         final_key = group.fetch(:key)
 
         if other_rows.any?
-          single_company_generic_v2 = v2_batch_key?(final_key) &&
-            !Email.payroll_review_batch?(all_events) &&
-            all_events.map(&:company_id).uniq.one?
-
-          if !single_company_generic_v2
+          unless replayable_generic_batch?(final_key, all_batch_rows)
             # A v2 batch with no persisted attempted_payload on any row never
             # reached the provider (even after a crashed claim with attempts > 1).
             never_sent = v2_batch_key?(final_key) && all_batch_rows.all? { |row| row.attempted_payload.nil? }
@@ -398,7 +399,6 @@ module PortalNotifications
               )
               owned_scope(kept_ids).update_all(batch_key: final_key, updated_at: now)
               all_batch_rows = kept
-              all_events = kept.map(&:event)
             else
               mark_skipped_owned!(kept_ids, "access_revoked")
               return nil

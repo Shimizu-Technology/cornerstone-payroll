@@ -5,7 +5,7 @@
 class PortalNotificationDelivery < ApplicationRecord
   STATUSES = %w[pending sent failed skipped].freeze
   DELIVERY_MODES = %w[immediate digest].freeze
-  SKIP_REASONS = %w[no_recipients preference_off coalesced already_read recipient_removed access_revoked resource_unavailable
+  SKIP_REASONS = %w[no_recipients actor_only preference_off coalesced already_read recipient_removed access_revoked resource_unavailable
     email_delivery_disabled email_not_configured staging_contained recipient_not_allowed destination_changed
     foreign_account_suppressed].freeze
 

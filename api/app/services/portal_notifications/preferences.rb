@@ -11,8 +11,14 @@ module PortalNotifications
 
       def categories_for(user)
         audience = audience_for(user)
-        categories = CATEGORIES.select { |_key, category| category[:audience] == audience }
+        categories = CATEGORIES.select { |_key, category| category[:audience] == audience && !category[:mandatory] }
         return categories unless audience == "client"
+
+        categories = if user.client_viewer?
+          categories.except("address_approvals", "contact_changes", "payroll_corrections")
+        else
+          categories.except("payroll_viewer_updates")
+        end
 
         enabled = Company.where(id: user.accessible_company_ids).any? do |company|
           CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
@@ -21,8 +27,11 @@ module PortalNotifications
       end
 
       def mode_for(user, category)
+        definition = CATEGORIES.fetch(category)
+        return definition.fetch(:default_mode) if definition[:mandatory]
+
         PortalNotificationPreference.where(user_id: user.id, category: category).pick(:delivery_mode) ||
-          CATEGORIES.fetch(category).fetch(:default_mode)
+          definition.fetch(:default_mode)
       end
 
       def modes_for(user)
