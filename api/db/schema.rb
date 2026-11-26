@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_030000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -3452,10 +3452,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_030000) do
     t.datetime "updated_at", null: false
     t.jsonb "validation_errors", default: []
     t.bigint "company_id", null: false
+    t.jsonb "import_origin", default: {}, null: false
     t.index [ "company_id", "pay_period_id" ], name: "index_payroll_imports_on_company_id_and_pay_period_id"
     t.index [ "pay_period_id", "status" ], name: "index_payroll_imports_on_pay_period_id_and_status"
     t.index [ "pay_period_id" ], name: "index_payroll_imports_on_pay_period_id"
     t.index [ "payroll_intake_session_id" ], name: "idx_payroll_imports_intake_session", unique: true
+    t.check_constraint "jsonb_typeof(import_origin) = 'object'::text", name: "payroll_imports_import_origin_object"
   end
 
   create_table "payroll_intake_documents", force: :cascade do |t|
@@ -3762,6 +3764,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_030000) do
     t.decimal "ytd_social_security_tax", precision: 14, scale: 2, default: "0.0"
     t.decimal "ytd_withholding_tax", precision: 14, scale: 2, default: "0.0"
     t.bigint "financial_correction_origin_item_id"
+    t.string "import_origin"
     t.index [ "annual_tax_config_id" ], name: "index_payroll_items_on_annual_tax_config_id"
     t.index [ "check_number" ], name: "index_payroll_items_on_check_number"
     t.index [ "company_id", "check_number" ], name: "index_payroll_items_on_company_check_number_unique", unique: true, where: "(check_number IS NOT NULL)"
@@ -3778,7 +3781,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_030000) do
     t.index [ "retirement_rule_snapshot" ], name: "index_payroll_items_on_retirement_rule_snapshot", using: :gin
     t.index [ "tax_rule_snapshot" ], name: "index_payroll_items_on_tax_rule_snapshot", using: :gin
     t.index [ "voided" ], name: "index_payroll_items_on_voided"
-    t.check_constraint "bonus_source IS NULL OR (bonus_source::text = ANY (ARRAY['manual'::character varying::text, 'mosa_revel'::character varying::text]))", name: "payroll_items_bonus_source_check"
+    t.check_constraint "bonus_source IS NULL OR (bonus_source::text = ANY (ARRAY['manual'::character varying, 'mosa_revel'::character varying, 'import'::character varying]::text[]))", name: "payroll_items_bonus_source_check"
+    t.check_constraint "import_origin IS NULL OR (import_origin::text = ANY (ARRAY['intake'::character varying, 'time_tracking'::character varying, 'timecard_ocr'::character varying, 'correction'::character varying]::text[]))", name: "payroll_items_import_origin_check"
     t.check_constraint "imported_bonus IS NULL OR imported_bonus >= 0::numeric", name: "payroll_items_imported_bonus_check"
     t.check_constraint "jsonb_typeof(named_loan_payments) = 'object'::text", name: "payroll_items_named_loan_payments_object"
     t.check_constraint "payment_delivery_method IS NULL OR (payment_delivery_method::text = ANY (ARRAY['paper_check'::character varying::text, 'direct_deposit'::character varying::text]))", name: "payroll_items_payment_delivery_method_check"
