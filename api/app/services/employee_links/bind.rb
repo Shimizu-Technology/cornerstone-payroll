@@ -51,6 +51,9 @@ module EmployeeLinks
     # final email read and the activation.
     def locked_email_on_file(link)
       Employee.transaction(requires_new: true) do
+        # The company first (step 0), so the bind's own inserts never wait on
+        # it behind a contact edit that is waiting on this employee row.
+        EmployeeLinks.lock_company!(link.company_id, nowait: true)
         Employee.where(id: link.employee_id).lock("FOR NO KEY UPDATE NOWAIT").pick(:email)
       end
     rescue ActiveRecord::LockWaitTimeout

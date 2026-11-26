@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1348,6 +1348,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_100000) do
     t.check_constraint "revision > 0", name: "employee_documents_positive_revision"
     t.check_constraint "sha256::text ~ '^[a-f0-9]{64}$'::text", name: "employee_documents_sha256"
     t.check_constraint "status::text = ANY (ARRAY['posted'::character varying::text, 'replaced'::character varying::text, 'withdrawn'::character varying::text])", name: "employee_documents_valid_status"
+  end
+
+  create_table "employee_email_change_notices", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.string "change_id", limit: 36, null: false
+    t.string "recipient_email", null: false
+    t.string "status", limit: 20, default: "pending", null: false
+    t.integer "attempts", default: 0, null: false
+    t.datetime "sent_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "change_id" ], name: "index_employee_email_change_notices_on_change_id", unique: true
+    t.index [ "company_id" ], name: "index_employee_email_change_notices_on_company_id"
+    t.index [ "employee_id" ], name: "index_employee_email_change_notices_on_employee_id"
+    t.index [ "status", "updated_at" ], name: "idx_employee_email_change_notices_unsent", where: "((status)::text = ANY ((ARRAY['pending'::character varying, 'failed'::character varying])::text[]))"
+    t.check_constraint "attempts >= 0", name: "employee_email_change_notices_attempts_check"
+    t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'sent'::character varying, 'skipped'::character varying, 'failed'::character varying]::text[])", name: "employee_email_change_notices_status_check"
   end
 
   create_table "employee_emergency_contacts", force: :cascade do |t|
@@ -5485,6 +5503,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_100000) do
   add_foreign_key "employee_documents", "historical_paychecks", column: [ "historical_paycheck_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_historical_paycheck_id"
   add_foreign_key "employee_documents", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_documents_payroll_item_id"
   add_foreign_key "employee_documents", "users", column: "withdrawn_by_id"
+  add_foreign_key "employee_email_change_notices", "companies", on_delete: :restrict
+  add_foreign_key "employee_email_change_notices", "employees", on_delete: :restrict
   add_foreign_key "employee_emergency_contacts", "companies"
   add_foreign_key "employee_emergency_contacts", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_emergency_contacts_employee", on_delete: :cascade
   add_foreign_key "employee_loans", "companies"

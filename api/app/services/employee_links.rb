@@ -5,29 +5,35 @@
 # employee sees before they are signed in is one generic answer.
 #
 # Lock order, the same on every path that changes links or their logins
-# (invite, resend, sign-up, bind, claim, and later retire, revoke and the
-# expiry sweep), and on contact edits:
+# (invite, resend, reset, sign-up, bind, claim, and later retire, revoke and
+# the expiry sweep), and on contact edits:
 #
-#   0. the company, when a path takes it at all: lock_for_issuance! (a demo
-#      company, FOR SHARE) on invite, resend and a demo's Clerk sign-up, and
-#      company.lock! on staff and client contact edits;
-#   1. the employee row: staff actions and contact edits that change the
-#      employee, and the shared sign-up and claim check (Verify), so a
-#      contact edit can't commit between its email-on-file read and the
-#      activation;
+#   0. the company row, always first when a path takes it:
+#      - contact edits (staff, client, bulk hygiene): company.lock!, FOR UPDATE;
+#      - invite and resend (lock_for_issuance!): FOR SHARE for a demo, which
+#        the demo kill switch takes exclusively, otherwise FOR KEY SHARE;
+#      - the sign-up and claim check (Verify) and reset: FOR KEY SHARE
+#        (lock_company!), the lock their later inserts' foreign-key checks
+#        on the company take anyway.
+#      Taking it before the employee is what stops a deadlock: a contact
+#      edit holding the company FOR UPDATE and waiting on the employee can't
+#      meet a link path holding the employee and waiting to insert a row that
+#      names the company. KEY SHARE and SHARE don't block each other, so
+#      sign-ups don't serialize with each other or with issuance.
+#   1. the employee row: contact edits and staff actions that change the
+#      employee, and Verify, so a contact edit can't commit between the
+#      email-on-file read and the activation;
 #   2. logins (users), lowest id first, FOR NO KEY UPDATE, so a link's
 #      foreign-key check on its login never waits behind them;
 #   3. links.
 #
-# Every path that takes the company takes it first, and Verify never takes
-# it (a demo sign-up's issuance lock is a later, separate transaction), so
-# skipping step 0 can't invert the order. A path that starts from a link
-# reads it first without a lock, locks its employee, then its login, then
-# the link, and re-checks that its login didn't change. Bind is the one
-# exception, because PayrollInvitation locks the login before it starts: it
-# takes the employee row after the link, without waiting (Bind.locked_email_on_file),
-# and fails closed while a contact edit holds it. Clerk calls always happen
-# outside transactions.
+# A path that starts from a link reads it first without a lock, then takes
+# the company, the employee, its login and the link, and re-checks that its
+# login didn't change. Bind is the one exception, because PayrollInvitation
+# locks the login before it starts: after the link it takes the company and
+# then the employee without waiting (Bind.locked_email_on_file), and fails
+# closed while a contact edit holds either. Clerk calls always happen outside
+# transactions.
 module EmployeeLinks
   class Error < StandardError; end
   class Forbidden < Error; end
@@ -86,9 +92,11 @@ module EmployeeLinks
   # email_on_file: the employee's email as read under its row lock, when the
   # caller holds one; :locked when the lock couldn't be taken (refused).
   def self.sign_up_email_refusal(link, email, email_on_file: link.employee.email)
+    # Contention first: a held row refuses even a staff-printed code, so the
+    # activation can't commit alongside a contact edit.
+    return :locked if email_on_file == :locked
     return if staff_printed_code?(link)
     return :code_retired if link.invite_delivery == "code"
-    return :locked if email_on_file == :locked
 
     :email_mismatch unless same_email?(email_on_file, email) && same_email?(link.invite_email, email)
   end
@@ -262,10 +270,21 @@ module EmployeeLinks
   # issuing transaction, then re-check the employee app is on; that re-check
   # reads only the cached employee service answer while the lock is held.
   def self.lock_for_issuance!(company)
-    return unless company&.demo?
+    return lock_company!(company) unless company&.demo?
 
     EmployeeAppSwitch::Enforcement.cached_attestation_only!
     Company.where(id: company.id).lock("FOR SHARE").pick(:id)
+  end
+
+  # Step 0 of the lock order for a path that will lock the employee and then
+  # insert rows naming the company (a login, an audit row): the company row,
+  # FOR KEY SHARE, which is what those inserts' foreign-key checks take
+  # anyway. Taken before the employee row, a contact edit (company FOR
+  # UPDATE, then employee) waits for this path instead of deadlocking with
+  # it. nowait: for Bind, which already holds its login and link.
+  def self.lock_company!(company_or_id, nowait: false)
+    id = company_or_id.is_a?(Company) ? company_or_id.id : company_or_id
+    Company.where(id: id).lock(nowait ? "FOR KEY SHARE NOWAIT" : "FOR KEY SHARE").pick(:id)
   end
 
   # A demo link's activation, claim, bind and data requests must come from

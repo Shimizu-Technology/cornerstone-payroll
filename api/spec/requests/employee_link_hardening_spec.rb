@@ -417,13 +417,37 @@ RSpec.describe "Employee link hardening", type: :request do
       expect(invite.link.reload).to be_active
     end
 
-    it "takes the employee row without waiting at bind and reports it held" do
+    it "takes the company and then the employee row without waiting at bind, and reports either held" do
+      link = instance_double(EmployeeAccountLink, company_id: 2, employee_id: 1)
+      allow(EmployeeLinks).to receive(:lock_company!).with(2, nowait: true).and_raise(ActiveRecord::LockWaitTimeout)
+      expect(EmployeeLinks::Bind.locked_email_on_file(link)).to eq(:locked)
+
+      allow(EmployeeLinks).to receive(:lock_company!).with(2, nowait: true).and_return(2)
       relation = double
       allow(Employee).to receive(:where).and_return(relation)
       allow(relation).to receive(:lock).with("FOR NO KEY UPDATE NOWAIT").and_return(relation)
       allow(relation).to receive(:pick).and_raise(ActiveRecord::LockWaitTimeout)
+      expect(EmployeeLinks::Bind.locked_email_on_file(link)).to eq(:locked)
+    end
 
-      expect(EmployeeLinks::Bind.locked_email_on_file(instance_double(EmployeeAccountLink, employee_id: 1))).to eq(:locked)
+    it "refuses a staff-printed code's bind while the employee row is held, then binds once it's free" do
+      invite = invite!(employee, actor: staff, delivery: "code")
+      post_activation(activation_params(employee, code: invite.code, email: "riley.code@example.net"))
+      expect_sign_up_started
+      accept_clerk_invitation!("user_riley_code")
+      held = true
+      allow(EmployeeLinks::Bind).to receive(:locked_email_on_file).and_wrap_original do |original, *args|
+        held ? :locked : original.call(*args)
+      end
+
+      get "/api/v1/auth/me", headers: bearer("user_riley_code")
+      expect(response).to have_http_status(:unauthorized)
+      expect(invite.link.reload).to be_invited
+
+      held = false
+      get "/api/v1/auth/me", headers: bearer("user_riley_code")
+      expect(response).to have_http_status(:ok)
+      expect(invite.link.reload).to be_active
     end
 
     it "retries a bind that hit a deadlock, re-checking everything under the lock" do

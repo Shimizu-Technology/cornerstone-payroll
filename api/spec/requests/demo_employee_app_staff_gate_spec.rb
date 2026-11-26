@@ -240,6 +240,35 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
       expect(claimant.reload.employee_account_links).to be_empty
     end
 
+    it "refuses a staff-origin claim alike for a match and a miss once RLS enforcement is verified, counting nothing" do
+      allow(enforcement).to receive(:database_state).and_return(shadow.merge(phase: "enforced", enforced: true, enforced_tables: 1))
+      enforcement.reset_cache!
+      before_state = counters(issued.link)
+
+      claim!
+      matched = [ response.status, response.parsed_body ]
+      claim!(ssn_last4: "0000")
+      expect([ response.status, response.parsed_body ]).to eq(matched)
+      expect(matched.first).to eq(404)
+      expect(counters(issued.link)).to eq(before_state)
+      expect(link_audits(issued.link, "activation_failed")).to be_empty
+    end
+
+    it "refuses a claim whose browser Origin isn't the demo's own, alike for a match and a miss, counting nothing" do
+      allow(enforcement).to receive(:database_state).and_return(shadow.merge(phase: "enforced", enforced: true, enforced_tables: 1))
+      enforcement.reset_cache!
+      before_state = counters(issued.link)
+      elsewhere = { "Origin" => EmployeeLinkHelpers::PAYROLL_ORIGIN }
+
+      post "/api/v1/employee/links/claim", params: activation_params(employee, code: issued.code).except(:email).to_json,
+        headers: bearer(claimant.clerk_id).merge("CONTENT_TYPE" => "application/json", **elsewhere)
+      matched = [ response.status, response.parsed_body ]
+      post "/api/v1/employee/links/claim", params: activation_params(employee, code: issued.code, ssn_last4: "0000").except(:email).to_json,
+        headers: bearer(claimant.clerk_id).merge("CONTENT_TYPE" => "application/json", **elsewhere)
+      expect([ response.status, response.parsed_body ]).to eq(matched)
+      expect(counters(issued.link)).to eq(before_state)
+    end
+
     it "lets the guarded employee service count a miss as before" do
       allow(enforcement).to receive(:current_process_guarded?).and_return(true)
       post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
