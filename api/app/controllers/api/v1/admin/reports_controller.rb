@@ -276,11 +276,11 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.current.year
+            PayrollBusinessClock.today.year
           end
           quarter = params[:quarter]&.to_i
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return render json: {
               error: "year must be a valid 4-digit tax year"
             }, status: :unprocessable_entity
@@ -309,10 +309,10 @@ module Api
 
         def form_941_gu_xlsx
           raw_year = params[:year]
-          year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
+          year = raw_year.present? ? Integer(raw_year, exception: false) : PayrollBusinessClock.today.year
           quarter = params[:quarter]&.to_i
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
@@ -697,10 +697,10 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.current.year
+            PayrollBusinessClock.today.year
           end
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
@@ -730,10 +730,10 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.current.year
+            PayrollBusinessClock.today.year
           end
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
@@ -753,10 +753,10 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.current.year
+            PayrollBusinessClock.today.year
           end
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           end
 
@@ -1694,7 +1694,7 @@ module Api
         # year defaults to current year; quarter is optional (1-4). Exact
         # start_date/end_date parameters override the calendar selectors.
         def build_tax_summary_data
-          year    = params[:year]&.to_i || Date.current.year
+          year    = params[:year]&.to_i || PayrollBusinessClock.today.year
           quarter = params[:quarter].present? ? params[:quarter].to_i : nil
 
           if quarter && !(1..4).cover?(quarter)
@@ -1764,10 +1764,10 @@ module Api
 
         def build_quarterly_compliance_packet_data(official_form_941: false)
           raw_year = params[:year]
-          year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
+          year = raw_year.present? ? Integer(raw_year, exception: false) : PayrollBusinessClock.today.year
           quarter = params[:quarter]&.to_i
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return [ nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
           end
 
@@ -1819,10 +1819,10 @@ module Api
 
         def quarterly_compliance_packet_context
           raw_year = params[:year]
-          year = raw_year.present? ? Integer(raw_year, exception: false) : Date.current.year
+          year = raw_year.present? ? Integer(raw_year, exception: false) : PayrollBusinessClock.today.year
           quarter = params[:quarter]&.to_i
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return [ nil, nil, nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
           end
 
@@ -2102,10 +2102,10 @@ module Api
           year = if raw_year.present?
             Integer(raw_year, exception: false)
           else
-            Date.current.year
+            PayrollBusinessClock.today.year
           end
 
-          unless year && year > 2000 && year <= Date.current.year + 1
+          unless year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
             return [ nil, render(json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity) ]
           end
 
@@ -2521,7 +2521,7 @@ module Api
           row
         end
 
-        def ytd_company_totals(year = Date.current.year)
+        def ytd_company_totals(year = PayrollBusinessClock.today.year)
           period = PayrollReportingPeriod.new(
             start_date: Date.new(year, 1, 1),
             end_date: Date.new(year, 12, 31),
@@ -2694,7 +2694,7 @@ module Api
           }
         end
 
-        def employee_ytd_summary(employee, year = Date.current.year)
+        def employee_ytd_summary(employee, year = PayrollBusinessClock.today.year)
           ytd_items = employee_reportable_ytd_items(employee, year)
           {
             year: year,
@@ -5128,8 +5128,8 @@ module Api
         end
 
         def parse_tax_year_param
-          year = params[:year].present? ? Integer(params[:year], exception: false) : Date.current.year
-          return year if year && year > 2000 && year <= Date.current.year + 1
+          year = params[:year].present? ? Integer(params[:year], exception: false) : PayrollBusinessClock.today.year
+          return year if year && year > 2000 && year <= PayrollBusinessClock.today.year + 1
 
           render json: { error: "year must be a valid 4-digit tax year" }, status: :unprocessable_entity
           nil

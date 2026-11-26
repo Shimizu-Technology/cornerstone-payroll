@@ -26,6 +26,7 @@ import type {
 } from '@/services/api';
 import type { ContractorPayType, ContractorType, Employee, EmployeeFormData, EmploymentType, PayFrequency, PayPeriod, PayrollItem } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 interface PayrollIntakeImportModalProps {
   open: boolean;
@@ -59,7 +60,6 @@ const toNumber = (value: unknown): number => {
 };
 
 const fullName = (employee: Employee) => `${employee.first_name} ${employee.last_name}`.trim();
-const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const defaultWageRates = (): NewEmployeeWageRateForm[] => [
   { label: 'Primary', rate: '', is_primary: true },
@@ -79,7 +79,7 @@ const defaultNewEmployeeForm = (sourceName = ''): NewEmployeeForm => {
     contractor_pay_type: 'hourly',
     pay_frequency: 'biweekly',
     pay_rate: '',
-    hire_date: todayIso(),
+    hire_date: guamBusinessDate(),
     wage_rates: defaultWageRates(),
   };
 };

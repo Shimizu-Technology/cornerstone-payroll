@@ -1,4 +1,5 @@
 import { formatGuamDateTime } from '@/lib/utils';
+import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { FilingEmployeeWarnings } from '@/components/reports/FilingEmployeeWarnings';
 import type { FilingEmployeeCompleteness } from '@/types';
@@ -415,7 +416,8 @@ function ChecksPaymentsRegisterPanel() {
 
 function TaxSummaryPanel() {
   const previewPdf = usePdfPreview();
-  const currentYear = new Date().getFullYear();
+  const today = guamBusinessDate();
+  const currentYear = Number(today.slice(0, 4));
   const earliestSupportedYear = 2020;
   const yearOptions = Array.from(
     { length: currentYear - earliestSupportedYear + 1 },
@@ -425,7 +427,7 @@ function TaxSummaryPanel() {
   const [quarter, setQuarter] = useState<number | undefined>(undefined);
   const [periodMode, setPeriodMode] = useState<'calendar' | 'custom'>('calendar');
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(today);
   const [loading, setLoading] = useState(false);
   const [exportingCsv, setExportingCsv] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -1223,7 +1225,8 @@ export function W2GuPanel() {
 
 export function EmployeePayHistoryPanel(): ReactNode {
   const previewPdf = usePdfPreview();
-  const currentYear = new Date().getFullYear();
+  const today = guamBusinessDate();
+  const currentYear = Number(today.slice(0, 4));
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loadingEmployees, setLoadingEmployees] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null);
@@ -1234,7 +1237,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [report, setReport] = useState<EmployeePayHistoryReport | null>(null);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(today);
   const periodParams: PayrollReportPeriodParams = { start_date: startDate, end_date: endDate };
 
   useEffect(() => {

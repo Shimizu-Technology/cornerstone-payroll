@@ -362,3 +362,25 @@ it('keeps removal confirmation cancellable and announces saving while blocking r
   expect(screen.getByRole('status').lastElementChild?.textContent).toBe('Saving and recalculating payroll…');
   expect(screen.getByRole('button', { name: 'Cancel' })).toHaveProperty('disabled', true);
 });
+
+it("refuses a changed check date outside the pay date's tax year, which W-2GU and year-to-date totals use", async () => {
+  const user = userEvent.setup();
+  mocks.update.mockResolvedValue({ payroll_item: savedItem });
+  mocks.recalculate.mockResolvedValue({ payroll_item: savedItem });
+  const onSaved = vi.fn();
+  render(<PayrollItemEditModal open onOpenChange={vi.fn()} payPeriodId={3} payDate="2026-12-31" item={savedItem} onSaved={onSaved} />);
+  const checkDate = await screen.findByLabelText('Check Date');
+  expect(checkDate.getAttribute('min')).toBe('2026-01-01');
+  expect(checkDate.getAttribute('max')).toBe('2026-12-31');
+
+  await user.type(checkDate, '2027-01-02');
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  expect(await screen.findByText(/Check date must be in 2026, the year of this payroll's pay date/)).toBeTruthy();
+  expect(mocks.update).not.toHaveBeenCalled();
+
+  await user.clear(checkDate);
+  await user.type(checkDate, '2026-12-30');
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  await waitFor(() => expect(onSaved).toHaveBeenCalled());
+  expect(mocks.update.mock.calls[0][2]).toMatchObject({ check_date: '2026-12-30' });
+});

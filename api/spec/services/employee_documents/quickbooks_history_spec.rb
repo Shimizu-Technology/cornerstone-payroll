@@ -49,4 +49,37 @@ RSpec.describe EmployeeDocuments::QuickbooksHistory do
 
     expect(described_class.for(employee).pluck(:historical_paycheck_id)).to eq([ history.id ])
   end
+
+  it "ignores voided runs when finding the first native payday" do
+    voided = create(:pay_period, :committed, company: employee.company, start_date: Date.new(2026, 5, 1),
+      end_date: Date.new(2026, 5, 14), pay_date: Date.new(2026, 5, 15))
+    voided.update_columns(correction_status: "voided")
+    may = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 5, 20))
+    july = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 7, 31))
+
+    expect(described_class.for(employee).pluck(:historical_paycheck_id)).to eq([ july.id, may.id ])
+  end
+
+  it "keeps the cutover at a voided first run's committed correction run, whose stubs employees see" do
+    original = PayPeriod.find_by!(company: employee.company)
+    original.update_columns(correction_status: "voided")
+    correction = create(:pay_period, :committed, company: employee.company, start_date: original.start_date,
+      end_date: original.end_date, pay_date: original.pay_date)
+    correction.update_columns(correction_status: "correction", source_pay_period_id: original.id)
+    original.update_columns(superseded_by_id: correction.id)
+    august = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 8, 28))
+    create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 9, 10))
+
+    expect(described_class.for(employee).pluck(:historical_paycheck_id)).to eq([ august.id ])
+  end
+
+  it "shows locked QuickBooks checks before any native run is committed, and earlier years, like staff reports" do
+    PayPeriod.where(company: employee.company).delete_all
+    create(:pay_period, company: employee.company, status: "calculated", pay_date: Date.new(2026, 8, 15))
+    prior_year = create(:historical_paycheck, employee: employee, pay_date: Date.new(2025, 12, 19),
+      period_start: Date.new(2025, 12, 1), period_end: Date.new(2025, 12, 14))
+    july = create(:historical_paycheck, employee: employee, pay_date: Date.new(2026, 7, 31))
+
+    expect(described_class.for(employee).pluck(:historical_paycheck_id)).to eq([ july.id, prior_year.id ])
+  end
 end

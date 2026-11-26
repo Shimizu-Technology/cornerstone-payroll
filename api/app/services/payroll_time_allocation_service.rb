@@ -191,7 +191,8 @@ class PayrollTimeAllocationService
   end
 
   def eligible_work_date?(date)
-    @employee.eligible_on?(date)
+    # The W-4 is checked on the pay date, like readiness and the calculator.
+    @employee.eligible_on?(date, w4_on: @pay_period.pay_date)
   end
 
   def source_for(records)
