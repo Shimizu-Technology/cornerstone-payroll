@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_120100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -3192,6 +3192,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_010000) do
     t.text "void_reason"
     t.datetime "voided_at"
     t.bigint "voided_by_id"
+    t.boolean "client_approval_retained", default: false, null: false
     t.index [ "calculated_by_id" ], name: "index_pay_periods_on_calculated_by_id"
     t.index [ "committed_by_id" ], name: "index_pay_periods_on_committed_by_id"
     t.index [ "company_id", "end_date" ], name: "index_pay_periods_on_company_id_and_end_date"
@@ -3947,6 +3948,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_010000) do
     t.bigint "changes_requested_by_id"
     t.datetime "changes_requested_at"
     t.text "change_request_note"
+    t.text "override_reason"
+    t.boolean "self_override", default: false, null: false
     t.index [ "approval_recorded_by_id" ], name: "index_payroll_review_packages_on_approval_recorded_by_id"
     t.index [ "approved_by_id" ], name: "index_payroll_review_packages_on_approved_by_id"
     t.index [ "calculation_checksum" ], name: "idx_payroll_review_packages_checksum"
@@ -3956,10 +3959,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_010000) do
     t.index [ "pay_period_id", "revision" ], name: "idx_payroll_review_packages_period_revision", unique: true
     t.index [ "pay_period_id" ], name: "idx_payroll_review_packages_current", unique: true, where: "(superseded_at IS NULL)"
     t.index [ "pay_period_id" ], name: "index_payroll_review_packages_on_pay_period_id"
-    t.check_constraint "approval_method IS NULL OR (approval_method::text = ANY (ARRAY['client_portal'::character varying::text, 'email_attestation'::character varying::text]))", name: "payroll_review_packages_approval_method_check"
+    t.check_constraint "approval_method IS NULL OR (approval_method::text = ANY (ARRAY['client_portal'::character varying, 'email_attestation'::character varying, 'cornerstone_override'::character varying]::text[]))", name: "payroll_review_packages_approval_method_check"
     t.check_constraint "changes_requested_at IS NULL AND changes_requested_by_id IS NULL AND change_request_note IS NULL OR changes_requested_at IS NOT NULL AND changes_requested_by_id IS NOT NULL AND NULLIF(btrim(change_request_note), ''::text) IS NOT NULL AND length(change_request_note) <= 2000 AND status::text <> 'approved'::text", name: "payroll_review_change_request_shape"
     t.check_constraint "revision > 0", name: "payroll_review_packages_revision_positive"
-    t.check_constraint "status::text = 'approved'::text AND approved_at IS NOT NULL AND approved_by_id IS NOT NULL AND approval_recorded_by_id IS NOT NULL AND approval_method IS NOT NULL AND approval_acknowledgement = 'I approve this exact payroll review revision for processing.'::text AND (approval_method::text <> 'email_attestation'::text OR NULLIF(btrim(approval_evidence_reference::text), ''::text) IS NOT NULL) AND (approval_method::text <> 'client_portal'::text OR approved_by_id = approval_recorded_by_id) OR status::text = 'pending'::text AND approved_at IS NULL AND approved_by_id IS NULL AND approval_recorded_by_id IS NULL AND approval_method IS NULL AND approval_acknowledgement IS NULL OR status::text = 'superseded'::text", name: "payroll_review_packages_approval_shape"
+    t.check_constraint "(status::text = 'approved'::text AND approved_at IS NOT NULL AND approved_by_id IS NOT NULL AND approval_recorded_by_id IS NOT NULL AND approval_method IS NOT NULL AND approval_acknowledgement IS NOT NULL OR status::text = 'pending'::text AND approved_at IS NULL AND approved_by_id IS NULL AND approval_recorded_by_id IS NULL AND approval_method IS NULL AND approval_acknowledgement IS NULL OR status::text = 'superseded'::text) AND (status::text <> 'approved'::text OR approval_method::text <> 'email_attestation'::text OR NULLIF(btrim(approval_evidence_reference::text), ''::text) IS NOT NULL) AND (status::text <> 'approved'::text OR approval_method::text <> 'client_portal'::text OR approved_by_id = approval_recorded_by_id) AND\nCASE\n    WHEN approval_method::text = 'cornerstone_override'::text THEN char_length(btrim(override_reason)) >= 10 AND char_length(btrim(override_reason)) <= 500 AND approved_by_id = approval_recorded_by_id AND approval_acknowledgement = 'I am approving this exact payroll revision for the client under Cornerstone authority.'::text\n    ELSE override_reason IS NULL AND NOT self_override AND (status::text <> 'approved'::text OR approval_acknowledgement = 'I approve this exact payroll review revision for processing.'::text)\nEND IS TRUE", name: "payroll_review_packages_approval_shape"
     t.check_constraint "status::text = 'superseded'::text AND superseded_at IS NOT NULL AND NULLIF(btrim(supersession_reason), ''::text) IS NOT NULL OR status::text <> 'superseded'::text AND superseded_at IS NULL AND supersession_reason IS NULL", name: "payroll_review_packages_supersession_shape"
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying::text, 'approved'::character varying::text, 'superseded'::character varying::text])", name: "payroll_review_packages_status_check"
   end

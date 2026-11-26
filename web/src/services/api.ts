@@ -2567,6 +2567,7 @@ export interface PayrollRegisterReport {
       end_date: string;
       pay_date: string;
       status: string;
+      approval_marker?: "Override";
     };
     lifecycle: {
       calculated?: { timestamp?: string | null; actor_name?: string | null };
@@ -3497,6 +3498,7 @@ export interface PayrollFinalRecord {
       approved_at: string;
       approved_by_name: string | null;
       approval_method: string;
+      override_reason?: string | null;
       approval_evidence_reference: string | null;
     };
     source_packages: Array<{
@@ -4381,6 +4383,7 @@ export interface CompanyDetail extends CompanyListItem {
 }
 
 export interface CompanyFormData {
+  client_approval_disable_reason?: string;
   name: string;
   ein?: string;
   pay_frequency: string;

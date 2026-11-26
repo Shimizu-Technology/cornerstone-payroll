@@ -87,7 +87,11 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
         <p className="text-sm text-neutral-600">The preview includes paper checks, plus separate stubs for direct deposit and statement-only employees.</p>
         <Button variant="outline" className="h-auto whitespace-normal text-left" disabled={busy} onClick={() => void preview(false, true)}>All pay stubs (including paper-check employees)</Button>
       </>}
-      {review?.status === 'approved' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. Cornerstone has been notified.</p>}
+      {review?.approval_method === 'cornerstone_override' && <div role="status" className="text-success-800">
+        <p className="font-semibold">Approved by Cornerstone on your behalf</p>
+        <p className="whitespace-pre-wrap break-words">{review.override_reason}</p>
+      </div>}
+      {review?.status === 'approved' && review.approval_method !== 'cornerstone_override' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. Cornerstone has been notified.</p>}
       {review?.change_request_note && <div role="status" className="space-y-1 rounded-lg bg-warning-50 p-4 text-warning-950">
         <p className="font-semibold">Changes requested by {review.changes_requested_by_name}</p>
         <p className="whitespace-pre-wrap break-words">{review.change_request_note}</p>
@@ -113,7 +117,8 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
           {payPeriod.payroll_review_history.map(entry => <li key={entry.id} className="space-y-1 border-t border-neutral-200 pt-3 text-sm">
             <p className="font-semibold">Revision {entry.revision} · {entry.status.replace('_', ' ')}</p>
             {entry.published_at && <p>Published {formatGuam(entry.published_at)}</p>}
-            {entry.approved_at && <p>Approved by {entry.approved_by_name} · {formatGuam(entry.approved_at)}</p>}
+            {entry.approved_at && <p>{entry.approval_method === 'cornerstone_override' ? 'Approved by Cornerstone on your behalf' : `Approved by ${entry.approved_by_name}`} · {formatGuam(entry.approved_at)}</p>}
+            {entry.override_reason && <p className="whitespace-pre-wrap break-words">{entry.override_reason}</p>}
             {entry.approval_notes && <p className="whitespace-pre-wrap break-words">{entry.approval_notes}</p>}
             {entry.changes_requested_at && <p>Changes requested by {entry.changes_requested_by_name} · {formatGuam(entry.changes_requested_at)}</p>}
             {entry.change_request_note && <p className="whitespace-pre-wrap break-words">{entry.change_request_note}</p>}

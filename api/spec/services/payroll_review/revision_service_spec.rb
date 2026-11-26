@@ -160,6 +160,7 @@ RSpec.describe PayrollReview::RevisionService do
   end
 
   it "requires retained evidence when staff records an email attestation" do
+    staff.update!(role: "org_admin")
     service.issue!
 
     expect do
@@ -339,5 +340,61 @@ RSpec.describe PayrollReview::RevisionService do
     current = pay_period.payroll_review_packages.current.first!
     expect(package.reload).to have_attributes(status: "superseded", approved_by: client)
     expect(current).to have_attributes(revision: 2, status: "pending", published_at: be_present)
+  end
+  describe "#override!" do
+    let(:reason) { "Client asked Cornerstone to approve this revision." }
+    let(:arguments) do
+      { revision_id: package.id, acknowledgement: PayrollReviewPackage::OVERRIDE_ACKNOWLEDGEMENT, override_reason: reason }
+    end
+    let!(:package) do
+      service.issue!
+      pay_period.update!(status: "approved", approved_by_id: staff.id)
+      service.publish!
+    end
+
+    User.roles.each_key do |role|
+      it "enforces the override capability for #{role}" do
+        staff.update!(role: role)
+        if %w[super_admin org_admin admin].include?(role)
+          expect(service.override!(**arguments)).to have_attributes(
+            approval_method: "cornerstone_override", override_reason: reason, self_override: true, approved_by: staff
+          )
+          expect(AuditLog.find_by!(action: "payroll_review#overridden", record_id: package.id).metadata).to include(
+            "revision" => package.revision, "checksum" => package.calculation_checksum, "override_reason" => reason,
+            "self_override" => true, "method" => "cornerstone_override"
+          )
+        else
+          expect { service.override!(**arguments) }.to raise_error(described_class::Error, /Admin access/)
+          expect(package.reload).to be_pending
+        end
+      end
+    end
+
+    context "as an administrator" do
+      before { staff.update!(role: "org_admin") }
+
+      it "refuses an impersonated session" do
+        allow(Current).to receive(:view_as_grant).and_return(true)
+        expect { service.override!(**arguments) }.to raise_error(described_class::Error, /Exit Sign in as/)
+      end
+
+      it "rejects a missing or short reason" do
+        [ nil, "short" ].each do |reason|
+          expect { service.override!(**arguments.merge(override_reason: reason)) }.to raise_error(described_class::Error, /10–500/)
+        end
+        expect(package.reload).to be_pending
+      end
+
+      it "refuses changed calculation evidence" do
+        payroll_item.update!(gross_pay: 2_000)
+        expect { service.override!(**arguments) }.to raise_error(described_class::StaleRevisionError)
+      end
+
+      it "preserves a pending revision if the audit write fails" do
+        allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+        expect { service.override!(**arguments) }.to raise_error(described_class::Error)
+        expect(package.reload).to be_pending
+      end
+    end
   end
 end

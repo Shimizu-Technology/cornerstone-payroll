@@ -3,14 +3,16 @@
 class PayrollReviewPackage < ApplicationRecord
   APPROVAL_ACKNOWLEDGEMENT = "I approve this exact payroll review revision for processing."
   STATUSES = %w[pending approved superseded].freeze
-  APPROVAL_METHODS = %w[client_portal email_attestation].freeze
+  OVERRIDE_ACKNOWLEDGEMENT = "I am approving this exact payroll revision for the client under Cornerstone authority."
+  OVERRIDE_REASON_LENGTH = (10..500).freeze
+  APPROVAL_METHODS = %w[client_portal email_attestation cornerstone_override].freeze
   IMMUTABLE_REVISION_FIELDS = %w[
     company_id pay_period_id revision schema_version calculation_checksum calculation_snapshot
     source_manifest generated_by_id generated_at
   ].freeze
   APPROVAL_EVIDENCE_FIELDS = %w[
     approved_at approved_by_id approval_recorded_by_id approval_method approval_acknowledgement
-    approval_notes approval_evidence_reference
+    approval_notes approval_evidence_reference override_reason self_override
   ].freeze
 
   belongs_to :company
@@ -30,6 +32,9 @@ class PayrollReviewPackage < ApplicationRecord
   validates :approval_notes, length: { maximum: 2_000 }, allow_blank: true
   validates :approval_evidence_reference, length: { maximum: 500 }, allow_blank: true
   validate :company_matches_pay_period
+  validates :override_reason, length: { in: OVERRIDE_REASON_LENGTH }, if: :cornerstone_override?
+  validates :override_reason, absence: true, unless: :cornerstone_override?
+  validates :self_override, exclusion: { in: [ true ] }, unless: :cornerstone_override?
   validate :approval_shape
   validate :supersession_shape
   validate :revision_identity_immutable, on: :update
@@ -40,6 +45,10 @@ class PayrollReviewPackage < ApplicationRecord
   scope :current, -> { where(superseded_at: nil) }
   scope :summary, -> { select(column_names - [ "calculation_snapshot" ]) }
   scope :shared_history, -> { where.not(sent_for_client_approval_at: nil).or(where.not(changes_requested_at: nil)) }
+
+  def cornerstone_override?
+    approval_method == "cornerstone_override"
+  end
 
   def approved?
     status == "approved"
@@ -102,13 +111,14 @@ class PayrollReviewPackage < ApplicationRecord
       errors.add(:approved_by, "is required") if approved_by.blank?
       errors.add(:approval_recorded_by, "is required") if approval_recorded_by.blank?
       errors.add(:approval_method, "is required") if approval_method.blank?
-      unless approval_acknowledgement == APPROVAL_ACKNOWLEDGEMENT
+      expected_acknowledgement = cornerstone_override? ? OVERRIDE_ACKNOWLEDGEMENT : APPROVAL_ACKNOWLEDGEMENT
+      unless approval_acknowledgement == expected_acknowledgement
         errors.add(:approval_acknowledgement, "must confirm the exact payroll revision")
       end
       if approval_method == "email_attestation" && approval_evidence_reference.to_s.strip.blank?
         errors.add(:approval_evidence_reference, "is required for an email attestation")
       end
-      if approval_method == "client_portal" && approved_by_id != approval_recorded_by_id
+      if (approval_method == "client_portal" || cornerstone_override?) && approved_by_id != approval_recorded_by_id
         errors.add(:approval_recorded_by, "must be the approving client portal user")
       end
     elsif pending? && (approved_at.present? || approved_by.present? || approval_recorded_by.present? || approval_method.present? || approval_acknowledgement.present?)

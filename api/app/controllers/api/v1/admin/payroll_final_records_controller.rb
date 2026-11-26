@@ -175,7 +175,13 @@ module Api
           payroll_approval = evidence[:payroll_approval]
           rows << [ "Payroll approval", payroll_approval[:approved_at], nil, payroll_approval[:approved_by_name] ] if payroll_approval[:approved_at]
           if review
-            rows << [ "Approved payroll review", "Revision #{review[:revision]}", review[:calculation_checksum], "#{review[:approval_method].to_s.humanize} — #{review[:approved_by_name]}" ]
+            approval = if review[:approval_method] == "cornerstone_override"
+              "Approved by Cornerstone for the client: #{review[:approved_by_name]}, #{review[:approved_at]&.iso8601}"
+            else
+              "#{review[:approval_method].to_s.humanize} — #{review[:approved_by_name]}"
+            end
+            rows << [ "Approved payroll review", "Revision #{review[:revision]}", review[:calculation_checksum], approval ]
+            rows << [ "Override reason", nil, nil, review[:override_reason] ] if review[:override_reason]
           end
           evidence[:source_packages].each do |package|
             rows << [ "Payroll source package", package[:package_id], package[:import_hash], package[:source_type].to_s.humanize ]
