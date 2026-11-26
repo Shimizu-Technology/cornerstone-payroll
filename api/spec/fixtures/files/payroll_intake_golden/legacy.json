@@ -31,7 +31,7 @@
     "ready_count": 1,
     "review_count": 0,
     "total_regular_hours": 72.0,
-    "total_reported_tips": 20.0,
+    "total_reported_tips": "20.0",
     "total_overtime_hours": 0.0
   },
   "rows": [
@@ -45,16 +45,16 @@
       "status": "ready",
       "regular_hours": 72.0,
       "overtime_hours": 0.0,
-      "reported_tips": 20.0,
-      "tips_paid_out": 0.0,
+      "reported_tips": "20.0",
+      "tips_paid_out": "0.0",
       "payroll_inputs": {
         "total_hours": 72.0,
         "workbook_only": false,
-        "pay_rate": 15.5,
-        "tips_boh": 12.75,
-        "tips_foh": 7.25,
+        "pay_rate": "15.5",
+        "tips_boh": "12.75",
+        "tips_foh": "7.25",
         "tip_pool": "mixed",
-        "loan_deduction": 9.5,
+        "loan_deduction": "9.5",
         "loan_reconciliation_errors": [],
         "loan_reconciliation_warnings": [],
         "bonus": "0.0",
@@ -63,5 +63,15 @@
         "hand_edited_hours": null
       }
     }
-  ]
+  ],
+  "apply_error": "Choose whether the tips in this older {{adapter_display_name}} workbook were already paid out daily.",
+  "saved_payroll": {
+    "hours_worked": 72.0,
+    "overtime_hours": 0.0,
+    "reported_tips": "20.0",
+    "tips_paid_out": "20.0",
+    "loan_deduction": "9.5",
+    "bonus": "0.0",
+    "imported_bonus": "0.0"
+  }
 }

@@ -25,7 +25,7 @@
     "ready_count": 1,
     "review_count": 2,
     "total_regular_hours": 65.0,
-    "total_reported_tips": 0.0,
+    "total_reported_tips": "0.0",
     "total_overtime_hours": 0.0
   },
   "rows": [
@@ -39,16 +39,16 @@
       "status": "ready",
       "regular_hours": 65.0,
       "overtime_hours": 0.0,
-      "reported_tips": 0.0,
-      "tips_paid_out": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
       "payroll_inputs": {
         "total_hours": 65.0,
         "workbook_only": false,
-        "pay_rate": 15.5,
-        "tips_boh": 0.0,
-        "tips_foh": 0.0,
+        "pay_rate": "15.5",
+        "tips_boh": "0.0",
+        "tips_foh": "0.0",
         "tip_pool": null,
-        "loan_deduction": 0.0,
+        "loan_deduction": "0.0",
         "loan_reconciliation_errors": [],
         "loan_reconciliation_warnings": [],
         "bonus": null,
@@ -76,8 +76,8 @@
       "status": "needs_review",
       "regular_hours": 0.0,
       "overtime_hours": 0.0,
-      "reported_tips": 0.0,
-      "tips_paid_out": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
       "payroll_inputs": null
     },
     {
@@ -99,8 +99,8 @@
       "status": "needs_review",
       "regular_hours": 0.0,
       "overtime_hours": 0.0,
-      "reported_tips": 0.0,
-      "tips_paid_out": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
       "payroll_inputs": null
     }
   ]

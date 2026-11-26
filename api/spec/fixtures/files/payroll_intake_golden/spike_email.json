@@ -1,14 +1,14 @@
 {
+  "warnings": [],
   "totals": {
     "row_count": 1,
     "ready_count": 0,
     "review_count": 1,
     "total_regular_hours": 78.0,
-    "total_reported_tips": 12.75,
-    "total_tips_paid_out": 12.75,
+    "total_reported_tips": "12.75",
+    "total_tips_paid_out": "12.75",
     "total_overtime_hours": 2.0
   },
-  "warnings": [],
   "rows": [
     {
       "employee_id": 905101,
@@ -18,8 +18,8 @@
       "week2_hours": 42.0,
       "regular_hours": 78.0,
       "overtime_hours": 2.0,
-      "reported_tips": 12.75,
-      "tips_paid_out": 12.75,
+      "reported_tips": "12.75",
+      "tips_paid_out": "12.75",
       "warnings": [],
       "errors": [
         {

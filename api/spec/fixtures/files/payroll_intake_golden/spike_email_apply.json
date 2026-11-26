@@ -1,0 +1,35 @@
+{
+  "warnings": [],
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 78.0,
+    "total_reported_tips": "12.75",
+    "total_tips_paid_out": "12.75",
+    "total_overtime_hours": 2.0
+  },
+  "rows": [
+    {
+      "employee_id": 905101,
+      "source_employee_name": "Testina Mockberry",
+      "status": "ready",
+      "week1_hours": 38.0,
+      "week2_hours": 42.0,
+      "regular_hours": 78.0,
+      "overtime_hours": 2.0,
+      "reported_tips": "12.75",
+      "tips_paid_out": "12.75",
+      "warnings": [],
+      "errors": []
+    }
+  ],
+  "saved_payroll": {
+    "hours_worked": 78.0,
+    "overtime_hours": 2.0,
+    "reported_tips": "12.75",
+    "tips_paid_out": "12.75",
+    "loan_deduction": "0.0",
+    "bonus": "0.0"
+  }
+}
