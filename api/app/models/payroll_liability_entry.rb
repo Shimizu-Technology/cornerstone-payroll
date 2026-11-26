@@ -22,7 +22,7 @@ class PayrollLiabilityEntry < ApplicationRecord
 
   belongs_to :payroll_liability_posting, inverse_of: :entries
   belongs_to :company
-  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.legacy_demo? }
   belongs_to :payroll_item, optional: true
   belongs_to :pay_component_tax_rule, optional: true
   has_many :payroll_liability_check_allocations,

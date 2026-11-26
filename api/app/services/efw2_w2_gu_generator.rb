@@ -29,8 +29,8 @@ class Efw2W2GuGenerator
   end
 
   def generate
-    # The SSA/GuamTax wage file is an electronic filing; a demo never produces one.
-    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
+    # The SSA/GuamTax wage file is an electronic filing; a demo never produces one outside DEPLOYMENT_ENV=local.
+    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo? && !LocalDeployment.local?
 
     validate_inputs!
     records = [ submitter_record, employer_record ]

@@ -61,13 +61,36 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/year_end" => %w[form_1099_mark_ready]
   }.freeze
 
-  # Electronic filing files a demo never produces. A practice copy keeps its
-  # existing access to these; the e-files above are blocked for every workspace.
+  # Lifted for new-shape demo companies (live + demo flag). Legacy
+  # test-workspace demos still have pre-migration DB triggers on these tables
+  # until the Track B Migrate phase drops them, so they remain blocked while
+  # legacy_demo is true.
+  DEMO_LIVE_FLAG_ALLOWED_ACTIONS = {
+    "api/v1/admin/pay_periods" => %w[generate_fit_check],
+    "api/v1/admin/non_employee_checks" => %w[
+      create update destroy mark_printed void_check batch_pdf mark_all_printed check_pdf voucher_pdf mark_paid supersede_with_payroll_item
+    ],
+    "api/v1/admin/payroll_filing_records" => %w[create_event]
+  }.freeze
+
+  # Electronic filing upload files a demo never produces outside DEPLOYMENT_ENV=local.
+  DEMO_LOCAL_ONLY_EFILE_ACTIONS = {
+    "api/v1/admin/reports" => %w[w2_gu_efw2 form_1099_pub1220 quarterly_compliance_packet_swica_ascii]
+  }.freeze
+
+  # Electronic filing files a demo never produces outside local mode, plus
+  # org-wide refreshes. A practice copy keeps its existing access to SWICA;
+  # EFW2 and Pub 1220 are blocked for every workspace.
   DEMO_BLOCKED_ACTIONS = {
     "api/v1/admin/reports" => %w[quarterly_compliance_packet_swica_ascii],
     # A refresh pulls the whole organization's Cornerstone Tax hours.
     "api/v1/admin/client_profitability" => %w[refresh]
   }.freeze
+
+  # Firm-level organization administration is shared across live clients.
+  # Only read-only inspection is allowed while a contained company is selected;
+  # any mutation or admin invitation fails closed.
+  ORGANIZATION_READ_ACTIONS = %w[index show company_transfer_preview].freeze
 
   # Firm books are shared live records even while a copied payroll client is
   # selected. New finance actions fail closed until reviewed as read-only.
@@ -86,18 +109,27 @@ class TestWorkspaceSafetyPolicy
     "api/v1/admin/expense_vendors" => %w[index]
   }.freeze
 
-  def self.blocked?(controller_path:, action_name:, request_method: nil, demo: false)
+  def self.blocked?(controller_path:, action_name:, request_method: nil, demo: false, legacy_demo: false)
     if controller_path.start_with?("api/v1/admin/time_tracking_", "api/v1/admin/aire_")
       return false if request_method.in?(%w[GET HEAD])
       return !(controller_path == "api/v1/admin/time_tracking_sources" && action_name.in?(%w[index show]))
+    end
+
+    if controller_path == "api/v1/admin/organizations"
+      return !ORGANIZATION_READ_ACTIONS.include?(action_name)
     end
 
     if controller_path.start_with?("api/v1/admin/invoice", "api/v1/admin/expense", "api/v1/admin/finance_")
       return !FINANCE_READ_ACTIONS.fetch(controller_path, []).include?(action_name)
     end
 
+    if demo && DEMO_LOCAL_ONLY_EFILE_ACTIONS.fetch(controller_path, []).include?(action_name)
+      return !LocalDeployment.local?
+    end
+
     return true if demo && DEMO_BLOCKED_ACTIONS.fetch(controller_path, []).include?(action_name)
     return false if demo && DEMO_ALLOWED_ACTIONS.fetch(controller_path, []).include?(action_name)
+    return false if demo && !legacy_demo && DEMO_LIVE_FLAG_ALLOWED_ACTIONS.fetch(controller_path, []).include?(action_name)
 
     BLOCKED_ACTIONS.fetch(controller_path, []).include?(action_name)
   end

@@ -155,7 +155,7 @@ module EmployeeContactHygiene
     def all_configurable_companies
       scope = Company.where(active: true, test_workspace_archived_at: nil)
       scope = scope.where(organization_id: @organization_id) if @organization_id.present?
-      scope = scope.where(payroll_environment: "live") unless @company_id.present?
+      scope = scope.live_payroll unless @company_id.present?
 
       scope.order(:name).to_a.select do |company|
         @actor.can_access_company?(company.id) &&

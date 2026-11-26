@@ -211,7 +211,7 @@ class EmployeeCompensationChangeService
     # compensation history and wage-rate rows are removed, then copied from
     # the rehearsal with copy_history!.
     def purge_test_workspace_history!(company)
-      raise Error, "Compensation history teardown is limited to test workspaces" unless company.test_workspace?
+      raise Error, "Compensation history teardown is limited to test workspaces" unless company.contained?
       raise Error, "Compensation history teardown requires a transaction" unless company.class.connection.transaction_open?
 
       company.lock!

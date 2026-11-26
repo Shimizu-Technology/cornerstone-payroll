@@ -7,6 +7,7 @@
 module CompanyWorkspacePresentation
   LIVE_SHAPE = {
     payroll_environment: "live",
+    demo: false,
     test_workspace: false,
     test_workspace_purpose: nil,
     test_workspace_purpose_label: nil,
@@ -25,10 +26,11 @@ module CompanyWorkspacePresentation
 
   def self.fields(company, manifest: false)
     payload = if company.demo?
-      LIVE_SHAPE.dup
+      LIVE_SHAPE.merge(demo: true)
     else
       {
         payroll_environment: company.payroll_environment,
+        demo: false,
         test_workspace: company.test_workspace?,
         test_workspace_purpose: company.test_workspace_purpose,
         test_workspace_purpose_label: company.test_workspace_purpose_label,
