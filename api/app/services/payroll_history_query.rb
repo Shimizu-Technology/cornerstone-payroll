@@ -32,7 +32,7 @@ class PayrollHistoryQuery
     @direction = params[:direction].to_s == "asc" ? "ASC" : "DESC"
     @source = SOURCES.include?(params[:source].to_s) ? params[:source].to_s : "all"
     @register_eligible = ActiveModel::Type::Boolean.new.cast(params[:register_eligible]) == true
-    @migration_rehearsal = @register_eligible && Company.where(id: @company_id).pick(:payroll_environment) == "migration_rehearsal"
+    @migration_rehearsal = @register_eligible && Company.where(id: @company_id, payroll_environment: "migration_rehearsal").not_demo.exists?
   end
 
   def call

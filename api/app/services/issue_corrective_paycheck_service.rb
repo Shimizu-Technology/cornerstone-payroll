@@ -1024,8 +1024,8 @@ class IssueCorrectivePaycheckService
   end
 
   def create_supplemental_fit_check!(supplemental)
-    # A demo company's corrections never create a FIT deposit check.
-    return if supplemental.company.demo?
+    # Legacy test-workspace demos still have a pre-migration DB trigger on non_employee_checks.
+    return if supplemental.company.legacy_demo?
 
     fit_total = supplemental.payroll_items
       .where(employment_type: %w[hourly salary])
