@@ -378,6 +378,16 @@ RSpec.describe PayrollReview::RevisionService do
         expect { service.override!(**arguments) }.to raise_error(described_class::Error, /Exit Sign in as/)
       end
 
+      it "checks the persisted role for both staff-recorded decisions" do
+        User.where(id: staff.id).update_all(role: User.roles.fetch("manager"))
+        expect { service.override!(**arguments) }.to raise_error(described_class::Error, /Admin access/)
+        expect do
+          service.approve!(approver: client, recorded_by: staff, method: "email_attestation", revision_id: package.id,
+            acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, evidence_reference: "Stored approval email")
+        end.to raise_error(described_class::Error, /Admin access/)
+        expect(package.reload).to be_pending
+      end
+
       it "rejects a missing or short reason" do
         [ nil, "short" ].each do |reason|
           expect { service.override!(**arguments.merge(override_reason: reason)) }.to raise_error(described_class::Error, /10–500/)

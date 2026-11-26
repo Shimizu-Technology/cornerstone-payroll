@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class CompaniesController < BaseController
+        include RecentVerification
+
         STAFF_EDITABLE_COMPANY_FIELDS = %i[
           address_line1 address_line2 city state zip phone email filing_contact_name
         ].freeze
@@ -283,9 +285,9 @@ module Api
             company.assign_attributes(update_params)
             disabling_approval = company.client_payroll_approval_required_in_database && !company.client_payroll_approval_required?
             if disabling_approval
-              unless StaffRolePolicy.allowed?(current_user, :override_client_approval)
-                return render json: { error: "Admin access required" }, status: :forbidden
-              end
+              revalidate_current_company_write_access!(company: company, capability: :override_client_approval)
+              require_direct_recent_verification!
+              return if performed?
               reason = params.dig(:company, :client_approval_disable_reason)
               reason = reason.is_a?(String) ? reason.strip : ""
               unless PayrollReviewPackage::OVERRIDE_REASON_LENGTH.cover?(reason.length)

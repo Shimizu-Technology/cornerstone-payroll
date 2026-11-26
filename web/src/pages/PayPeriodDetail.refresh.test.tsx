@@ -63,13 +63,14 @@ const componentMocks = vi.hoisted(() => ({
   finalRecordEnabled: false,
 }));
 
+vi.mock('@/services/payroll-approval-api', () => ({ sendPayrollApprovalRequest: apiMocks.recordClientApproval }));
+
 vi.mock('@/services/api', () => ({
   default: { delete: apiMocks.delete },
   ApiError: class ApiError extends Error {},
   payPeriodsApi: {
     get: apiMocks.get,
     clientReview: apiMocks.clientReview,
-    recordClientApproval: apiMocks.recordClientApproval,
     liabilities: apiMocks.liabilities,
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,

@@ -37,9 +37,10 @@ module PayrollSubmissions
         status_changed_at: record&.status_changed_at
       }
       pay_period = @catalog.live_pay_period(entry)
+      approval_required = pay_period&.client_approval_retained? || @catalog.company.client_payroll_approval_required?
       if pay_period && record&.status.in?(%w[draft_ready approved changes_requested paid]) && !pay_period.client_finished?
         payload[:status] = "in_review"
-        payload[:status_label] = pay_period.client_payroll_approval_required? ? "Awaiting payroll preview" : "Payroll in progress"
+        payload[:status_label] = approval_required ? "Awaiting payroll preview" : "Payroll in progress"
       end
       if pay_period
         @published_reviews ||= {}
@@ -48,7 +49,7 @@ module PayrollSubmissions
         else
           @published_reviews[pay_period.id] = pay_period.payroll_review_packages.summary.current.where.not(published_at: nil).first
         end
-        published = nil unless pay_period.client_payroll_approval_required?
+        published = nil unless approval_required
         visible = @staff || pay_period.client_finished? || (pay_period.approved? && published)
         payload[:review_pay_period_id] = pay_period.id if visible
         if pay_period.client_finished?
@@ -58,7 +59,7 @@ module PayrollSubmissions
           payload[:status], payload[:status_label] = if published.changes_requested_at
             [ "changes_requested", "Changes requested on payroll preview" ]
           elsif published.approved?
-            [ "approved", published.cornerstone_override? ? "Approved by Cornerstone on your behalf" : "Client approved payroll preview" ]
+            [ "approved", published.cornerstone_override? ? override_approval_label : "Client approved payroll preview" ]
           else
             [ "draft_ready", "Payroll preview ready for review" ]
           end
@@ -146,6 +147,10 @@ module PayrollSubmissions
     end
 
     private
+
+    def override_approval_label
+      @staff ? "Approved by Cornerstone for the client" : "Approved by Cornerstone on your behalf"
+    end
 
     # Requests for this period, newest first. Both sides see their state.
     def file_requests(record)

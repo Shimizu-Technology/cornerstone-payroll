@@ -9,6 +9,18 @@ module RecentVerification
 
   private
 
+  def impersonated_session?
+    Current.view_as_grant.present? || @clerk_token_payload&.key?("act") == true
+  end
+
+  def require_direct_recent_verification!
+    if impersonated_session?
+      return render json: { error: "Exit Sign in as before changing client approval." }, status: :forbidden
+    end
+
+    require_recent_verification!
+  end
+
   def require_recent_verification!
     return head :unauthorized unless @current_user
     return if MfaPolicy.recently_step_up_verified?(@clerk_token_payload)

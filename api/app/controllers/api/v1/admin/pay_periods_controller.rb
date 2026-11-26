@@ -633,21 +633,23 @@ module Api
         end
 
         def override_client_approval
-          if Current.view_as_grant || @clerk_token_payload&.key?("act")
-            return render json: { error: "Exit Sign in as before overriding client approval." }, status: :forbidden
-          end
-          require_recent_verification!
+          require_direct_recent_verification!
           return if performed?
 
           package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).override!(
             revision_id: params[:revision_id], acknowledgement: params[:acknowledgement], override_reason: params[:override_reason]
           )
           render json: { payroll_review: PayrollReview::PackagePresenter.call(package) }
+        rescue PayrollReview::RevisionService::StaleRevisionError => e
+          render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def record_client_approval
+          require_direct_recent_verification!
+          return if performed?
+
           approver = authorized_client_approver!(params[:client_approver_id])
           review_package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).approve!(
             approver: approver,
@@ -1509,9 +1511,8 @@ module Api
               { id: request.id, title: request.title, status: request.status, status_label: request.status_label }
             end
             json[:client_payroll_approval_required] = pay_period.client_payroll_approval_required?
-            json[:can_record_client_approval] = StaffRolePolicy.allowed?(current_user, :override_client_approval)
-            json[:can_override_client_approval] = json[:can_record_client_approval] &&
-              Current.view_as_grant.nil? && !@clerk_token_payload&.key?("act")
+            json[:can_record_client_approval] = !impersonated_session? && StaffRolePolicy.allowed?(current_user, :override_client_approval)
+            json[:can_override_client_approval] = json[:can_record_client_approval]
             reviews = pay_period.payroll_review_packages.summary.includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
             # Fetch only current/shared rows in one query, preserving the detail
             # query budget even when there is no current review.

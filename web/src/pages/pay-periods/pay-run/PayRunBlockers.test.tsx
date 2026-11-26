@@ -37,9 +37,10 @@ it('explains disabled review on an open run without offering email approval', ()
   expect(screen.queryByRole('button', { name: 'Record Email Approval' })).toBeNull();
 });
 
-it('offers the override to eligible admins and submits the displayed revision after confirmation', async () => {
+it.each([200, 422])('submits the displayed revision and refreshes the banner after response %i', async (status) => {
   const reloadClientReview = vi.fn();
-  const request = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+  const stale = { code: 'stale_payroll_review_revision', error: 'This review revision changed.' };
+  const request = vi.fn().mockResolvedValue(new Response(status === 422 ? JSON.stringify(stale) : null, { status }));
   vi.stubGlobal('fetch', request);
   try {
     const payPeriod = { id: 12, company_id: 3, status: 'approved', client_payroll_approval_required: true,
@@ -56,9 +57,12 @@ it('offers the override to eligible admins and submits the displayed revision af
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.change(screen.getByLabelText(/Override reason/), { target: { value: 'short' } });
     expect(submit.disabled).toBe(true);
+    expect(screen.getByText('5 / 500 characters')).toBeTruthy();
+    expect(screen.getByLabelText(/Override reason/).getAttribute('maxlength')).toBe('500');
     fireEvent.change(screen.getByLabelText(/Override reason/), { target: { value: 'Client requested staff approval.' } });
     fireEvent.click(submit);
     await waitFor(() => expect(reloadClientReview).toHaveBeenCalledOnce());
+    if (status === 422) expect((await screen.findByRole('alert')).textContent).toContain(stale.error);
     expect(JSON.parse(request.mock.calls[0][1].body)).toMatchObject({
       revision_id: 91,
       acknowledgement: 'I am approving this exact payroll revision for the client under Cornerstone authority.',

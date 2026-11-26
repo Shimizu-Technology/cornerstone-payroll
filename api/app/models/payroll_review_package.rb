@@ -119,7 +119,7 @@ class PayrollReviewPackage < ApplicationRecord
         errors.add(:approval_evidence_reference, "is required for an email attestation")
       end
       if (approval_method == "client_portal" || cornerstone_override?) && approved_by_id != approval_recorded_by_id
-        errors.add(:approval_recorded_by, "must be the approving client portal user")
+        errors.add(:approval_recorded_by, cornerstone_override? ? "must be the overriding admin" : "must be the approving client portal user")
       end
     elsif pending? && (approved_at.present? || approved_by.present? || approval_recorded_by.present? || approval_method.present? || approval_acknowledgement.present?)
       errors.add(:base, "approval evidence is only valid for an approved review package")

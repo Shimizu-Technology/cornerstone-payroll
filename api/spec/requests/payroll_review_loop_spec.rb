@@ -396,6 +396,30 @@ RSpec.describe "Published payroll review loop", type: :request do
     context "with signed authentication claims" do
       include EmployeeLinkHelpers
 
+      it "requires fresh direct sign-in to record email approval" do
+        staff.update!(clerk_id: "user_email_approval_fixture")
+        allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!).and_call_original
+        params = {
+          revision_id: review.id, client_approver_id: client.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, evidence_reference: "Stored approval email"
+        }
+        path = "#{admin}/record_client_approval"
+        post path, params: params, headers: bearer(staff.clerk_id, fva: [ 45, 45 ], two_factor_enabled: true)
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
+
+        acting_headers = bearer(staff.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true, act: { sub: "user_actor_fixture" })
+        post path, params: params, headers: acting_headers
+        expect(response).to have_http_status(:forbidden)
+        expect(review).to be_pending
+        get admin, headers: acting_headers
+        expect(response.parsed_body.dig("pay_period", "can_record_client_approval")).to be(false)
+
+        post path, params: params, headers: bearer(staff.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true)
+        expect(response).to have_http_status(:ok)
+        expect(review.approval_method).to eq("email_attestation")
+      end
+
       it "requires fresh sign-in before accepting the override" do
         staff.update!(clerk_id: "user_override_fixture")
         allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!).and_call_original
@@ -437,6 +461,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     it "rejects stale revisions and missing or short reasons" do
       override_request(revision_id: review.id + 1)
       expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["code"]).to eq("stale_payroll_review_revision")
       [ nil, "short" ].each do |reason|
         override_request(reason: reason)
         expect(response).to have_http_status(:unprocessable_entity)

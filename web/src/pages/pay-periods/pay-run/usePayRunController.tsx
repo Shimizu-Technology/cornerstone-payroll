@@ -1,3 +1,6 @@
+import { isReverificationCancelledError } from '@clerk/react/errors';
+import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { estimateDraftGross } from '@/lib/draft-gross';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { useFeedbackState } from '@/components/ui/action-feedback';
@@ -939,23 +942,29 @@ export function usePayRunController({
     }
   };
 
+  const sendClientApproval = useOptionalStepUpRequest((token: string, periodId: number, data: object) =>
+    sendPayrollApprovalRequest(token, companyId, `/admin/pay_periods/${periodId}/record_client_approval`, 'POST', data));
+
   const recordClientApproval = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!payPeriod?.payroll_review || !clientApproverId) return;
     setClientApprovalLoading(true);
     setError(null);
     try {
-      const response = await payPeriodsApi.recordClientApproval(payPeriod.id, {
+      const response = await sendClientApproval(payPeriod.id, {
         client_approver_id: Number(clientApproverId),
         revision_id: payPeriod.payroll_review.id,
         acknowledgement: clientApprovalConfirmed ? payPeriod.payroll_review.acknowledgement : '',
         evidence_reference: clientApprovalEvidence.trim(),
         notes: clientApprovalNotes.trim() || undefined,
       });
-      setPayPeriod({ ...payPeriod, payroll_review: response.payroll_review });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || 'Failed to record client approval');
+      setPayPeriod(current => current?.id === payPeriod.id && current.payroll_review?.id === payPeriod.payroll_review?.id
+        ? { ...current, payroll_review: result.payroll_review } : current);
       setClientApprovalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record client approval');
+      if (!isReverificationCancelledError(err)) setError(err instanceof Error ? err.message : 'Failed to record client approval');
     } finally {
       setClientApprovalLoading(false);
     }

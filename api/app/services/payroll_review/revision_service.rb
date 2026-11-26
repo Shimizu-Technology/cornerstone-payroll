@@ -154,13 +154,13 @@ module PayrollReview
 
     def override!(revision_id:, acknowledgement:, override_reason:)
       raise Error, "Exit Sign in as before overriding client approval." if Current.view_as_grant
-      validate_admin_recorder!(actor)
       reason = override_reason.is_a?(String) ? override_reason.strip : ""
       unless PayrollReviewPackage::OVERRIDE_REASON_LENGTH.cover?(reason.length)
         raise Error, "Enter an override reason of 10–500 characters."
       end
 
       with_decision_lock do
+        @actor = validate_admin_recorder!(actor)
         package = decision_package!(revision_id)
         self_override = actor.id.in?([ package.generated_by_id, pay_period.calculated_by_id, pay_period.approved_by_id ])
         package.update!(
@@ -285,9 +285,13 @@ module PayrollReview
     end
 
     def validate_admin_recorder!(user)
-      unless user&.active? && user.can_access_company?(pay_period.company_id) && StaffRolePolicy.allowed?(user, :override_client_approval)
+      fresh_user = User.lock.find_by(id: user&.id)
+      unless fresh_user&.payroll_access_allowed? && fresh_user.can_access_company?(pay_period.company_id) &&
+          StaffRolePolicy.allowed?(fresh_user, :override_client_approval)
         raise Error, "Admin access required."
       end
+
+      fresh_user
     end
 
     def validate_recording_method!(method, approver, recorded_by, evidence_reference)
@@ -297,6 +301,8 @@ module PayrollReview
           raise Error, "Client portal approval must be recorded by the approving client user."
         end
       when "email_attestation"
+        raise Error, "Exit Sign in as before recording client approval." if Current.view_as_grant
+
         validate_admin_recorder!(recorded_by)
         if evidence_reference.to_s.strip.blank?
           raise Error, "Record the email message reference or retained evidence location."
