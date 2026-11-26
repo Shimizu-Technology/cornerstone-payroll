@@ -74,7 +74,7 @@ export default defineConfig({
     : [
         ...(releaseLane
           ? [{
-              command: `cd ../api && bundle exec ${refreshLane ? 'ruby lib/payroll_refresh_qa_server.rb' : 'rails'} server --environment test --binding 127.0.0.1 --port ${apiPort} --pid tmp/pids/e2e-${apiPort}.pid`,
+              command: `cd ../api && bundle exec ${refreshLane ? 'ruby ../scripts/e2e/payroll_refresh_qa_server.rb' : 'rails'} server --environment test --binding 127.0.0.1 --port ${apiPort} --pid tmp/pids/e2e-${apiPort}.pid`,
               url: `${localApiUrl}/up`,
               reuseExistingServer: false,
               timeout: 120_000,

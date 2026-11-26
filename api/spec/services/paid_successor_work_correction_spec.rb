@@ -12,7 +12,7 @@ RSpec.describe "Exact work correction after accepted financial succession" do
   end
 
   def build_successor(predecessor = original_period)
-    PayPeriodCorrectionService.void!(pay_period: predecessor, actor: actor, reason: "Correct unpaid financial deductions")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: predecessor, actor: actor, reason: "Correct unpaid financial deductions")
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct unpaid financial deductions")
     item = period.payroll_items.find_by!(employee: employee)
     PayrollCalculator.for(employee, item).calculate
@@ -105,7 +105,7 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     expect(TimeTracking::CorrectionCoverage.new(next_import).presentation.first).to include(
       original_payroll_item_id: current.id, frozen_origin_payroll_item_id: original_item.id, verification_status: "verified")
     expect { current.void!(user: actor, reason: "Attempt unsafe paid target void") }.to raise_error(ArgumentError, /exact source accounting correction/)
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Attempt unsafe paid period void") }
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Attempt unsafe paid period void") }
       .to raise_error(PayPeriodCorrectionService::InvalidStateError, /exact source accounting correction/)
     result = TimeTracking::ApplyImportService.new(import: next_import, mappings: [], applied_by: actor).call
     expect(result[:errors]).to eq([])

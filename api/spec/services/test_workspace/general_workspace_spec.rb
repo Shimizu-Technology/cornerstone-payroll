@@ -55,6 +55,7 @@ RSpec.describe "General test workspaces" do
   end
 
   it "copies employee setup and selected payroll history as locked, check-free evidence" do
+    old_period.update_columns(rollback_review_required: true)
     definition = create(:payroll_field_definition, company: source_company, owner_employee: employee, name: "Phone allowance")
     EmployeePayrollField.create!(employee: employee, payroll_field_definition: definition, amount: 25)
     workspace = create_workspace(copy_mode: "exclude_recent", excluded_payrolls: 2)
@@ -72,6 +73,7 @@ RSpec.describe "General test workspaces" do
     expect(copied_employee.employee_payroll_fields.sole.amount).to eq(25.to_d)
     expect(copied_period).to have_attributes(
       test_workspace_source_pay_period_id: old_period.id,
+      rollback_review_required: false,
       test_workspace_role: "baseline",
       status: "approved",
       parallel_run: true

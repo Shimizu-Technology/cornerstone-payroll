@@ -157,7 +157,7 @@ RSpec.describe "Employee-year FICA context" do
     _, second = IssueCorrectivePaycheckService.issue!(original_pay_period: original, employee: employee,
       corrected_inputs: second_inputs, pay_date: original.pay_date, reason: "Repeated tips", actor: actor)
     expect(second.social_security_tax).to eq(0)
-    PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Void the first correction", acknowledge_later_runs: true)
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: first_period, actor: actor, reason: "Void the first correction", acknowledge_later_runs: true)
     expect(second.pay_period.reload.rollback_review_required?).to be(true)
     repair = IssueCorrectivePaycheckService.preview(original_pay_period: original, employee: employee, corrected_inputs: second_inputs)
     expect(repair[:deltas][:social_security_tax]).to eq("3.10".to_d)
@@ -182,7 +182,7 @@ RSpec.describe "Employee-year FICA context" do
       .to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate/)
     run.payroll_items.destroy_all
     calculate(run, 75)
-    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse event")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Reverse event")
     expect { PayPeriodLifecycleService.new(pay_period: run, actor: actor).approve! }
       .to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate/)
   end

@@ -24,6 +24,11 @@ class CreateAdminOverrides < ActiveRecord::Migration[8.1]
       name: "admin_overrides_reason_length", validate: false
     execute File.read(Rails.root.join("db/rls_policies.sql"))
     execute "SELECT pg_temp.install_company_policy(current_schema(), 'admin_overrides')"
+    if connection.select_value("SELECT relrowsecurity FROM pg_class WHERE oid = 'employee_account_links'::regclass")
+      execute "ALTER TABLE admin_overrides ENABLE ROW LEVEL SECURITY"
+      execute "ALTER TABLE admin_overrides FORCE ROW LEVEL SECURITY"
+    end
+
     execute <<~SQL
       CREATE OR REPLACE FUNCTION reject_admin_override_mutation() RETURNS trigger
       LANGUAGE plpgsql AS $$

@@ -140,6 +140,8 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
       PortalNotificationRecipient.create!(company: company, email: foreign_admin.email)
       super_admin
 
+      PortalNotificationPreference.create!(user: super_admin, category: "payroll_submissions", delivery_mode: "off")
+
       with_portal_email do
         package = record_override(actor, preparer: actor)
         expect(package).to be_self_override

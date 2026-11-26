@@ -115,7 +115,7 @@ RSpec.describe "Corrective paycheck review regressions" do
       following = later!
       statement_assertions(following, [ original, first, second, following ])
       removed, retained = voided == :first ? [ first, second ] : [ second, first ]
-      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse signed statement", acknowledge_later_runs: true)
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: removed.pay_period, actor: actor, reason: "Reverse signed statement", acknowledge_later_runs: true)
       statement_assertions(following.reload, [ original, retained, following ])
       expect(freeze_history(original.reload)).to eq(frozen)
     end
@@ -135,7 +135,7 @@ RSpec.describe "Corrective paycheck review regressions" do
         [ original, first, second ].each { |item| assert_cash(item) }
         stale = preview(hours_worked: 65).dig(:meta, :review_digest)
         removed, retained = voided == :first ? [ first, second ] : [ second, first ]
-        PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse insurance delta", acknowledge_later_runs: true)
+        PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: removed.pay_period, actor: actor, reason: "Reverse insurance delta", acknowledge_later_runs: true)
         expect { issue({ hours_worked: 65 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
         repair = issue(hours_worked: 70, custom_deductions: [])
         expect(company.payroll_liability_entries.where(category: "insurance_employee").sum(:amount)).to eq(52.5)
@@ -164,7 +164,7 @@ RSpec.describe "Corrective paycheck review regressions" do
     later = later!(hours_worked: 0, bonus: 500000)
     expect { preview(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::MissingHistoricalContextError)
     expect { issue(hours_worked: 65) }.to raise_error(IssueCorrectivePaycheckService::MissingHistoricalContextError)
-    PayPeriodCorrectionService.void!(pay_period: later.pay_period, actor: actor, reason: "Release annual room")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: later.pay_period, actor: actor, reason: "Release annual room")
     correction = issue(hours_worked: 65)
     expect(PayrollRetirementTotals.for_item(correction).values.sum).to eq(3.76)
   end
@@ -177,7 +177,7 @@ RSpec.describe "Corrective paycheck review regressions" do
       second = issue(hours_worked: 55)
       later!(hours_worked: 0, bonus: 50000)
       removed = voided == :first ? first : second
-      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Annual context changed", acknowledge_later_runs: true)
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: removed.pay_period, actor: actor, reason: "Annual context changed", acknowledge_later_runs: true)
       expect(employee.ytd_totals_for(2024).reload.retirement).to eq(voided == :first ? 22962.5 : 23075)
       repair = issue(hours_worked: 55)
       expect(PayrollRetirementTotals.for_item(repair)[:retirement]).to eq(voided == :first ? 37.5 : -75)

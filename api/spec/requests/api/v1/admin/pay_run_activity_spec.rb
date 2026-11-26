@@ -282,7 +282,10 @@ RSpec.describe "Pay run activity feed", type: :request do
         params: { fit_override_reason: "Fixture withholding correction", payroll_item: { check_memo: "Final check", withholding_tax_override: 25 } }, as: :json
 
       expect(response).to have_http_status(:ok), response.body
-      expect(AuditLog.find_by!(action: "payroll_item#fit_override").metadata.fetch("reason")).to eq("Fixture withholding correction")
+      override = AuditLog.find_by!(action: "payroll_item#fit_override")
+      expect(override.subject_name).to eq(avery.full_name)
+      expect(override.metadata).to include("reason" => "Fixture withholding correction",
+        "employee_id" => avery.id, "employee_name" => avery.full_name)
       metadata = AuditLog.find_by!(action: "payroll_items#update").metadata
       expect(metadata.fetch("changed_fields")).to include("check_memo", "withholding_tax_override")
       expect(metadata.dig("after_values", "check_memo")).to eq("Final check")

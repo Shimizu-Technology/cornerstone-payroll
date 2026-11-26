@@ -546,8 +546,8 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     disposition = confirm
     disposition.time_tracking_correction_receipt.update!(delivered_at: Time.current)
     item = disposition.corrective_payroll_item
-    expect { PayPeriodCorrectionService.void!(pay_period: item.pay_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
-    expect { PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: item.pay_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
     expect { original_item.void!(user: actor, reason: 'reviewing correction') }.to raise_error(ArgumentError, /source receipt can be reversed together/)
     expect(item.reload).not_to be_voided
     expect(original_item.reload).not_to be_voided

@@ -35,8 +35,16 @@ class PortalNotificationEvent < ApplicationRecord
     event_type == "payroll_review_decided" && metadata["decision"].in?(%w[cornerstone_override self_override])
   end
 
-  def self_override_alert?
-    override_decision? && metadata["recipient_scope"] == "super_admins"
+  def super_admin_alert?
+    metadata["recipient_scope"] == "super_admins"
+  end
+
+  def exclude_actor_address?
+    override_decision? || event_type.start_with?("payroll_rollback_")
+  end
+
+  def preference_category
+    super_admin_alert? ? "payroll_super_admin" : category
   end
 
   def client_managers_only?

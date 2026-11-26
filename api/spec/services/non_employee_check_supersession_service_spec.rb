@@ -118,7 +118,7 @@ RSpec.describe NonEmployeeCheckSupersessionService do
     described_class.new(check: check, actor: actor).supersede!(
       payroll_item_id: item.id, reason: "Same issued physical check verified against payroll item", recipient_verified: true)
 
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "This period should not be voided") }
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "This period should not be voided") }
       .to raise_error(PayPeriodCorrectionService::InvalidStateError, /linked to a duplicate/)
     expect {
       ApplicationRecord.transaction(requires_new: true) do

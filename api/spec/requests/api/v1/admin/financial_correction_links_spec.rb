@@ -15,7 +15,7 @@ RSpec.describe "Connect already committed corrected hours", type: :request do
   def legacy_committed
     allow_any_instance_of(PayrollItem).to receive(:financial_correction_origin_item=)
     allow_any_instance_of(TimeTracking::FinancialCorrectionService).to receive(:record_commit!).and_return([])
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct saved payroll")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct saved payroll")
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct saved payroll")
     item = period.payroll_items.first!
     PayrollCalculator.for(employee, item).calculate
@@ -76,7 +76,7 @@ RSpec.describe "Connect already committed corrected hours", type: :request do
     expect(item.time_tracking_financial_correction_links).to be_empty
   end
   it "returns a controlled unsupported-Source commit error with no partial money effects" do
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct saved payroll")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct saved payroll")
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct saved payroll")
     item = period.payroll_items.first!
     PayrollCalculator.for(employee, item).calculate

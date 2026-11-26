@@ -5,7 +5,7 @@
 abort "Synthetic refresh server requires the authenticated test lane" unless
   ENV.values_at("RAILS_ENV", "E2E_TEST_MODE", "AUTH_ENABLED") == %w[test true true]
 
-require_relative "../config/application"
+require_relative "../../api/config/application"
 
 Rails.application.config.after_initialize do
   key = JSON.parse(ENV.fetch("E2E_REFRESH_PUBLIC_JWK"))

@@ -45,13 +45,12 @@ module PortalNotifications
         if event.audience == "employee"
           return employee_target(event)&.email == delivery.recipient_email ? nil : "access_revoked"
         end
-        if (event.override_decision? || event.event_type == "payroll_rollback_staff") && actor_address?(delivery.address, event)
+        if event.exclude_actor_address? && actor_address?(delivery.address, event)
           return "access_revoked"
         end
-        if event.audience == "staff" && !event.self_override_alert?
+        if event.audience == "staff" && !event.super_admin_alert?
           if delivery.user_id
             listed = listed_user?(event.company_id, delivery.user_id) || listed_email?(event.company_id, delivery.user&.email)
-            listed ||= rollback_super_admin?(delivery.user, event)
             return "recipient_removed" unless listed
           else
             return "recipient_removed" unless listed_email?(event.company_id, delivery.recipient_email)
@@ -156,20 +155,16 @@ module PortalNotifications
 
       def staff_targets(event)
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
-        candidate_ids = if event.self_override_alert?
+        candidate_ids = if event.super_admin_alert?
           User.active.where(organization_id: event.organization_id, role: "super_admin").select(:id)
         else
           listed.users.select(:user_id)
-        end
-        if event.event_type == "payroll_rollback_staff"
-          supers = User.active.where(organization_id: event.organization_id, role: "super_admin")
-          candidate_ids = User.where(id: candidate_ids).or(supers).select(:id)
         end
         users = []
         seen_user_ids = []
         taken_canonicals = []
         eligible_listed_users = User.where(id: candidate_ids).order(:id).to_a.select { |user| eligible_user?(user, event) }
-        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.category) != "off" }
+        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.preference_category) != "off" }
         (opted_in + opted_out).each do |user|
           canonical = PortalNotificationRecipient.canonical_email(user.email)
           next if canonical.present? && taken_canonicals.include?(canonical)
@@ -178,19 +173,19 @@ module PortalNotifications
           seen_user_ids << user.id
           taken_canonicals << canonical if canonical.present?
         end
-        return users.map { |user| Target.new(user, nil) } if event.self_override_alert?
+        return users.map { |user| Target.new(user, nil) } if event.super_admin_alert?
 
         extra_targets = []
         listed.extra_emails.order(:email).pluck(:email).each do |email|
           normalized = PortalNotificationRecipient.normalize_email(email)
           canonical = PortalNotificationRecipient.canonical_email(normalized)
           next if normalized.blank? || canonical.blank? || taken_canonicals.include?(canonical)
-          next if (event.override_decision? || event.event_type == "payroll_rollback_staff") && actor_address?(normalized, event)
+          next if event.exclude_actor_address? && actor_address?(normalized, event)
 
           account_users = account_users_for_email(normalized)
           if account_users.any?
             eligible_accounts = account_users.select { |user| eligible_user?(user, event) }
-            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.category) != "off" } || eligible_accounts.first
+            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.preference_category) != "off" } || eligible_accounts.first
             if eligible && !seen_user_ids.include?(eligible.id)
               users << eligible
               seen_user_ids << eligible.id
@@ -221,7 +216,7 @@ module PortalNotifications
         end
         eligible = candidates.select { |user| eligible_user?(user, event) }
         if event.override_decision?
-          opted_in, opted_out = eligible.partition { |user| Preferences.mode_for(user, event.category) != "off" }
+          opted_in, opted_out = eligible.partition { |user| Preferences.mode_for(user, event.preference_category) != "off" }
           eligible = (opted_in + opted_out).uniq { |user| PortalNotificationRecipient.canonical_email(user.email) || user.id }
         end
         eligible.map { |user| Target.new(user, nil) }
@@ -233,10 +228,11 @@ module PortalNotifications
         company = Company.includes(:organization).find_by(id: event.company_id)
         return false unless user && company
         return false if event.actor_id.present? && event.actor_id == user.id
-        return false if (event.override_decision? || event.event_type == "payroll_rollback_staff") && actor_address?(user.email, event)
+        return false if event.exclude_actor_address? && actor_address?(user.email, event)
 
         if event.audience == "staff"
-          return false if event.self_override_alert? && !user.super_admin?
+          return false if event.super_admin_alert? && !user.super_admin?
+          return false if event.event_type == "payroll_rollback_staff" && user.super_admin?
           return false unless staff_can_view_company?(user, company)
 
           if event.event_type == "employee_contact_confirmation_requested"
@@ -258,10 +254,6 @@ module PortalNotifications
         !request.same_person_reviewer?(user)
       rescue EmployeeProfileIdentity::LinkCheckUnavailable
         false
-      end
-
-      def rollback_super_admin?(user, event)
-        event.event_type == "payroll_rollback_staff" && user&.super_admin? && user.organization_id == event.organization_id
       end
 
       def staff_can_view_company?(user, company)

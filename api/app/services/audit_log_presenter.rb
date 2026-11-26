@@ -112,7 +112,9 @@ class AuditLogPresenter
     "check_print_runs#confirmed" => "confirmed printed checks for",
     "correct_committed_pay_date" => "corrected the committed pay date for",
     "create_correction_run" => "created a correction run for",
-    "void_pay_period" => "voided payroll for"
+    "void_pay_period" => "voided payroll for",
+    "reopen_unpaid" => "reopened unpaid payroll for",
+    "payroll_item#fit_override" => "changed final Guam income tax withholding for"
   }.freeze
 
   def self.preload_pay_period_subjects(logs)

@@ -23,7 +23,7 @@ module PortalNotifications
     CORNERSTONE_BLUE = "#194baa"
 
     FILE_REQUEST_EVENTS = %w[file_requested file_request_responded file_request_reviewed].freeze
-    PAYROLL_REVIEW_EVENTS = %w[payroll_review_published payroll_review_decided payroll_rollback_staff payroll_rollback_client].freeze
+    PAYROLL_REVIEW_EVENTS = %w[payroll_review_published payroll_review_decided payroll_rollback_staff payroll_rollback_client payroll_rollback_super_admin].freeze
 
     attr_reader :subject, :lines, :link, :footer
 

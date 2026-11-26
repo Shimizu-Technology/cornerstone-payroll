@@ -32,7 +32,7 @@ RSpec.describe "PR381 proved additions catch-up probe" do
       expect(second.retirement_rule_snapshot.dig("annual_additions", "current_catch_up").to_d).to eq(2780)
       stale = preview(bonus: 95100).dig(:meta, :review_digest)
       removed, retained = voided == :first ? [ first, second ] : [ second, first ]
-      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse catch-up classification delta", acknowledge_later_runs: true)
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: removed.pay_period, actor: actor, reason: "Reverse catch-up classification delta", acknowledge_later_runs: true)
       expect { issue({ bonus: 95100 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
       repair = issue(bonus: 96100)
       expect([ original, retained, repair ].sum { |item| PayrollRetirementCatchUp.for_item(item) }).to eq(2780)

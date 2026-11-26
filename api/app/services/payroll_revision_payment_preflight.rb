@@ -85,7 +85,12 @@ class PayrollRevisionPaymentPreflight
   def later_committed_runs
     PayPeriod.reportable_committed.where(company_id: pay_period.company_id)
       .where.not(id: pay_period.id)
-      .where("pay_date > ? OR (pay_date = ? AND committed_at > ?)", pay_period.pay_date, pay_period.pay_date, pay_period.committed_at)
+      .where(<<~SQL.squish, date: pay_period.pay_date, committed_at: pay_period.committed_at, id: pay_period.id)
+        pay_periods.pay_date > :date OR (pay_periods.pay_date = :date AND
+          (pay_periods.committed_at > :committed_at OR
+            ((pay_periods.committed_at IS NULL OR CAST(:committed_at AS timestamp) IS NULL OR
+              pay_periods.committed_at = :committed_at) AND pay_periods.id > :id)))
+      SQL
       .joins(:payroll_items).where(payroll_items: { employee_id: employee_items.map(&:employee_id) })
   end
 
