@@ -1,0 +1,56 @@
+{
+  "can_apply": true,
+  "pdf_count": 0,
+  "excel_count": 1,
+  "source_warnings": [
+    {
+      "code": "zero_workbook_tips",
+      "severity": "info",
+      "message": "The workbook is included, but its tips total $0."
+    }
+  ],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "supplemental_workbook"
+  ],
+  "complete": false,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 0.0,
+    "total_reported_tips": 0.0,
+    "total_overtime_hours": 0.0
+  },
+  "rows": [
+    {
+      "source_employee_name": "Propria Examplemere",
+      "employee_id": 905104,
+      "employee_name": "Propria Examplemere",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 0.0,
+      "overtime_hours": 0.0,
+      "reported_tips": 0.0,
+      "tips_paid_out": 0.0,
+      "payroll_inputs": {
+        "total_hours": 0.0,
+        "workbook_only": true,
+        "pay_rate": 40000.0,
+        "tips_boh": 0.0,
+        "tips_foh": 0.0,
+        "tip_pool": null,
+        "loan_deduction": 0.0,
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": "456.78",
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    }
+  ]
+}
