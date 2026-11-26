@@ -47,7 +47,14 @@ module EmployeeLinks
       return Result.new(outcome: :failed, url: nil) unless EmployeeLinks.email_format?(@email)
 
       origin = @request&.headers&.[]("Origin")
-      admit = ->(link) { EmployeeLinks.activation_origin_allowed?(link.company, origin) && EmployeeAppSwitch::Enforcement.demo_request_allowed?(link.company) }
+      # A demo link on a process without its own guard is refused here, before
+      # anything is locked or counted, even with no Origin header. The guard
+      # goes first: the Origin check reads the subdomain switch, which for a
+      # demo can ask the employee service or retire early-access windows.
+      admit = lambda do |link|
+        EmployeeAppSwitch::Enforcement.demo_sign_up_admitted?(link.company) &&
+          EmployeeLinks.activation_origin_allowed?(link.company, origin)
+      end
       prepared = Verify.call(**@check, request: @request, admit: admit) { |link| prepare(link) }
       return Result.new(outcome: :failed, url: nil) unless prepared
       return Result.new(outcome: :sign_in, url: nil) if prepared == :sign_in
