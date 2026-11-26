@@ -34,12 +34,16 @@ import {
   INITIAL_ROW_STATE,
   baselineFromEmployee,
   contactStatusBadge,
+  editRowDraft,
+  effectiveDraft,
   extractConflictPayload,
   extractContactValidation,
-  isFieldChanged,
-  type ContactDraft,
+  hasAnyChangedField,
+  rowSaveRequest,
+  type ContactDraftMap,
   type ContactDraftPatch,
   type ContactField,
+  type RowFieldDrafts,
   type RowSaveState,
 } from '@/lib/employee-contact-editor';
 import { Header } from '@/components/layout/Header';
@@ -68,47 +72,11 @@ import { cn, getInitials } from '@/lib/utils';
 import { clientEmployeesApi, employeesApi } from '@/services/api';
 import type { ContactEmployee, PaginationMeta } from '@/types';
 
-export type { RowSaveState } from '@/lib/employee-contact-editor';
+export type { ContactDraftMap, ContactFieldDraft, RowFieldDrafts, RowSaveState } from '@/lib/employee-contact-editor';
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
 const PER_PAGE = 50;
 
-export interface ContactFieldDraft {
-  value: string;
-  baselineValue: string;
-  baselineRevision: string;
-}
-
-export type RowFieldDrafts = Partial<Record<ContactField, ContactFieldDraft>>;
-export type ContactDraftMap = Record<number, RowFieldDrafts>;
-
-function effectiveDraft(employee: ContactEmployee, rowDraft: RowFieldDrafts | undefined): ContactDraft {
-  const serverValues = baselineFromEmployee(employee);
-  if (!rowDraft) return serverValues;
-  const merged: ContactDraft = { ...serverValues };
-  for (const field of CONTACT_FIELDS) {
-    const entry = rowDraft[field];
-    if (entry) merged[field] = entry.value;
-  }
-  return merged;
-}
-
-
-function changedEntriesForRow(rowDraft: RowFieldDrafts | undefined): Array<[ContactField, ContactFieldDraft]> {
-  if (!rowDraft) return [];
-  const changed: Array<[ContactField, ContactFieldDraft]> = [];
-  for (const field of CONTACT_FIELDS) {
-    const entry = rowDraft[field];
-    if (entry && isFieldChanged(field, entry.value, entry.baselineValue)) {
-      changed.push([field, entry]);
-    }
-  }
-  return changed;
-}
-
-function hasAnyChangedField(rowDraft: RowFieldDrafts | undefined): boolean {
-  return changedEntriesForRow(rowDraft).length > 0;
-}
 
 
 export interface EmployeeContactDetailsProps {
@@ -280,30 +248,13 @@ export function EmployeeContactDetails({
   }, [needsContactCount, onNeedsContactCountChange]);
 
   const updateDraftField = (employee: ContactEmployee, field: ContactField, value: string): void => {
-    const serverBaseline = baselineFromEmployee(employee);
-    const serverRevision = employee.contact_revision || employee.updated_at;
     setDrafts((prev) => {
-      const existingRow: RowFieldDrafts = { ...(prev[employee.id] ?? {}) };
-      const existingField = existingRow[field];
-      // Capture the original server value and row revision once when editing starts.
-      // Refetches never replace this baseline; only explicit conflict resolution does.
-      const baselineValue = existingField ? existingField.baselineValue : serverBaseline[field];
-      const baselineRevision = existingField ? existingField.baselineRevision : serverRevision;
-
-      // Keep the typed phone text even when it matches the saved number.
-      if (field !== 'phone' && !isFieldChanged(field, value, baselineValue)) {
-        delete existingRow[field];
-      } else {
-        existingRow[field] = { value, baselineValue, baselineRevision };
-      }
-
-      if (Object.keys(existingRow).length === 0) {
-        if (!prev[employee.id]) return prev;
-        const next = { ...prev };
-        delete next[employee.id];
-        return next;
-      }
-      return { ...prev, [employee.id]: existingRow };
+      const row = editRowDraft(prev[employee.id], employee, field, value);
+      if (row === prev[employee.id]) return prev;
+      const next = { ...prev };
+      if (row) next[employee.id] = row;
+      else delete next[employee.id];
+      return next;
     });
     setRowStates((prev) => {
       const current = prev[employee.id];
@@ -394,17 +345,10 @@ export function EmployeeContactDetails({
         }
       }
     } else {
-      const changedEntries = changedEntriesForRow(drafts[employee.id]);
-      const currentServerRevision = employee.contact_revision || employee.updated_at;
-      let chosenRevision: string | null = null;
-      for (const [field, entry] of changedEntries) {
-        changes[field] = entry.value.trim();
-        baselineValues[field] = entry.baselineValue;
-        if (entry.baselineRevision && entry.baselineRevision !== currentServerRevision) {
-          chosenRevision ??= entry.baselineRevision;
-        }
-      }
-      rowRevision = chosenRevision ?? changedEntries[0]?.[1].baselineRevision ?? currentServerRevision;
+      const request = rowSaveRequest(drafts[employee.id], employee);
+      Object.assign(changes, request.changes);
+      Object.assign(baselineValues, request.baselineValues);
+      rowRevision = request.rowRevision;
     }
 
     const changedKeys = Object.keys(changes) as ContactField[];

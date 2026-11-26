@@ -16,16 +16,18 @@ import {
   SharedEmailNote,
 } from './ContactEditor';
 import {
-  CONTACT_FIELDS,
   INITIAL_ROW_STATE,
-  baselineFromEmployee,
   contactStatusBadge,
+  editRowDraft,
+  effectiveDraft,
   extractConflictPayload,
   extractContactValidation,
-  isFieldChanged,
-  type ContactDraft,
-  type ContactDraftPatch,
+  hasAnyChangedField,
+  keepMineRow,
+  rowSaveRequest,
+  theirsWinRow,
   type ContactField,
+  type RowFieldDrafts,
   type RowSaveState,
 } from '@/lib/employee-contact-editor';
 
@@ -39,66 +41,98 @@ export interface EmployeeContactCardProps {
   viewOnly?: boolean;
   /** Each increment opens the editor, for links elsewhere on the page. */
   editRequest?: number;
-  onSaved?: (updated: ContactEmployee, change: { emailChanged: boolean }) => void;
+  /**
+   * The server's copy changed: after a save, or when a conflict showed
+   * someone else's newer record. emailChanged compares with the page's copy.
+   */
+  onRecordChange?: (record: ContactEmployee, change: { emailChanged: boolean; savedFields: ContactField[] }) => void;
 }
 
-interface Baseline {
-  values: ContactDraft;
-  revision: string;
-}
-
-function revisionOf(employee: ContactEmployee): string {
-  return employee.contact_revision || employee.updated_at;
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 // Email, mobile and mailing address on the employee page. Saves go through
-// the same employee update endpoint as the Contact details grid, with the
-// row revision and baseline values captured when Edit was opened, so a
-// coworker's change in the meantime comes back as a conflict to resolve
+// the same employee update endpoint as the Contact details grid, with each
+// edited field's saved value and row revision from when it was first edited,
+// so a coworker's change in the meantime comes back as a conflict to resolve
 // instead of being overwritten.
 export function EmployeeContactCard({
-  employee, companyId, audience, canEdit, viewOnly = false, editRequest = 0, onSaved,
+  employee, companyId, audience, canEdit, viewOnly = false, editRequest = 0, onRecordChange,
 }: EmployeeContactCardProps): ReactElement {
   const [record, setRecord] = useState<ContactEmployee>(() => toContactRecord(employee));
   const [editing, setEditing] = useState(false);
-  const [baseline, setBaseline] = useState<Baseline | null>(null);
-  const [drafts, setDrafts] = useState<ContactDraftPatch>({});
+  const [drafts, setDrafts] = useState<RowFieldDrafts | undefined>(undefined);
   const [state, setState] = useState<RowSaveState>(INITIAL_ROW_STATE);
   const containerRef = useRef<HTMLDivElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
   const handledEditRequest = useRef(editRequest);
+  // What to focus once the next render commits.
+  const pendingFocus = useRef<'email' | 'edit-button' | null>(null);
+  const scrollOnOpen = useRef(false);
 
-  // Follow the page's copy of the employee while nothing is being edited.
+  // Follow the page's copy of the employee when it changes, unless an edit is
+  // open: the editor keeps the record its baselines came from.
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
   useEffect(() => {
-    if (!editing) setRecord(toContactRecord(employee));
-  }, [employee, editing]);
+    if (!editingRef.current) setRecord(toContactRecord(employee));
+  }, [employee]);
 
-  const startEditing = (): void => {
+  useEffect(() => {
+    const target = pendingFocus.current;
+    if (!target) return;
+    pendingFocus.current = null;
+    if (target === 'email' && editing) {
+      if (scrollOnOpen.current) {
+        containerRef.current?.scrollIntoView?.({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      }
+      containerRef.current?.querySelector<HTMLInputElement>('input[type="email"]')?.focus({ preventScroll: scrollOnOpen.current });
+    } else if (target === 'edit-button' && !editing) {
+      editButtonRef.current?.focus();
+    }
+    scrollOnOpen.current = false;
+  }, [editing]);
+
+  const startEditing = (fromElsewhere = false): void => {
     if (!canEdit) return;
-    setBaseline({ values: baselineFromEmployee(record), revision: revisionOf(record) });
-    setDrafts({});
+    setDrafts(undefined);
     setState(INITIAL_ROW_STATE);
+    pendingFocus.current = 'email';
+    scrollOnOpen.current = fromElsewhere;
     setEditing(true);
+  };
+
+  const closeEditor = (): void => {
+    pendingFocus.current = 'edit-button';
+    setEditing(false);
+    setDrafts(undefined);
   };
 
   useEffect(() => {
     if (editRequest === handledEditRequest.current) return;
     handledEditRequest.current = editRequest;
     if (!canEdit) return;
-    if (!editing) startEditing();
-    containerRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
-    // Wait for the editor to render before focusing the email field.
-    requestAnimationFrame(() => containerRef.current?.querySelector<HTMLInputElement>('input[type="email"]')?.focus({ preventScroll: true }));
-    // startEditing reads the latest record; this runs only for a new request.
+    if (editing) {
+      containerRef.current?.querySelector<HTMLInputElement>('input[type="email"]')?.focus();
+      return;
+    }
+    startEditing(true);
+    // startEditing reads the latest props; this runs only for a new request.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, canEdit]);
 
-  const baselineValues = baseline?.values ?? baselineFromEmployee(record);
-  const draft: ContactDraft = { ...baselineValues, ...drafts };
-  const changedFields = CONTACT_FIELDS.filter((field) => drafts[field] !== undefined && isFieldChanged(field, drafts[field] ?? '', baselineValues[field]));
-  const dirty = changedFields.length > 0;
+  const draft = effectiveDraft(record, drafts);
+  const dirty = hasAnyChangedField(drafts);
+
+  // The page keeps its own copy of the employee; tell it about every newer
+  // record so Cancel, the Employee app panel and other cards stay current.
+  const shareRecord = (next: ContactEmployee, savedFields: ContactField[] = []): void => {
+    onRecordChange?.(next, { emailChanged: (next.email ?? '') !== (employee.email ?? ''), savedFields });
+  };
 
   const updateField = (field: ContactField, value: string): void => {
-    setDrafts((prev) => ({ ...prev, [field]: value }));
+    setDrafts((prev) => editRowDraft(prev, record, field, value));
     setState((prev) => ({
       ...prev,
       saved: false,
@@ -110,17 +144,15 @@ export function EmployeeContactCard({
   };
 
   const cancel = (): void => {
-    setEditing(false);
-    setBaseline(null);
-    setDrafts({});
     setState(INITIAL_ROW_STATE);
+    closeEditor();
   };
 
-  const save = async (options: { confirmSamePerson?: boolean; changes?: ContactDraftPatch; against?: Baseline } = {}): Promise<void> => {
+  const save = async (options: { confirmSamePerson?: boolean; row?: RowFieldDrafts; against?: ContactEmployee } = {}): Promise<void> => {
     if (!canEdit) return;
-    const against = options.against ?? baseline ?? { values: baselineFromEmployee(record), revision: revisionOf(record) };
-    const changes: ContactDraftPatch = options.changes ?? Object.fromEntries(changedFields.map((field) => [field, (drafts[field] ?? '').trim()]));
-    const changedKeys = Object.keys(changes) as ContactField[];
+    const row = options.row ?? drafts;
+    const request = rowSaveRequest(row, options.against ?? record);
+    const changedKeys = Object.keys(request.changes) as ContactField[];
     const confirmSamePerson = Boolean(options.confirmSamePerson || (state.samePersonRequired && state.samePersonChecked));
     if (changedKeys.length === 0 && !confirmSamePerson) return;
 
@@ -130,9 +162,9 @@ export function EmployeeContactCard({
     }));
 
     const payload = {
-      ...changes,
-      row_revision: against.revision,
-      ...(changedKeys.length > 0 ? { baseline_values: Object.fromEntries(changedKeys.map((field) => [field, against.values[field]])) } : {}),
+      ...request.changes,
+      row_revision: request.rowRevision,
+      ...(changedKeys.length > 0 ? { baseline_values: request.baselineValues } : {}),
       ...(confirmSamePerson ? { confirm_same_person_email: true } : {}),
       response_view: 'contact' as const,
     };
@@ -144,16 +176,14 @@ export function EmployeeContactCard({
       const updated = toContactRecord(response.data);
       const addressRequest = 'change_request' in response && response.change_request?.profile_address ? response.change_request : null;
       setRecord(updated);
-      setEditing(false);
-      setBaseline(null);
-      setDrafts({});
       setState({
         ...INITIAL_ROW_STATE,
         saved: true,
         submittedAddressRequestId: addressRequest?.id,
         warnings: response.contact_warnings ?? [],
       });
-      onSaved?.(updated, { emailChanged: (updated.email ?? '') !== (record.email ?? '') });
+      closeEditor();
+      shareRecord(updated, changedKeys);
     } catch (caught) {
       const conflict = extractConflictPayload(caught);
       if (conflict) {
@@ -164,7 +194,7 @@ export function EmployeeContactCard({
             message: conflict.error,
             conflictingFields: conflict.conflicting_fields,
             serverEmployee: conflict.data,
-            userChanges: changes,
+            userChanges: request.changes,
           },
         });
         return;
@@ -182,29 +212,31 @@ export function EmployeeContactCard({
     }
   };
 
-  // Keep mine: resend the same values against the newer record, so only a
-  // deliberate second choice replaces what the other person saved.
+  // Keep mine: resend only what was sent, against the newer record, so only
+  // a deliberate second choice replaces what the other person saved.
   const keepMine = (): void => {
     const conflict = state.conflict;
     if (!conflict) return;
-    const server = conflict.serverEmployee;
-    const rebased = { values: baselineFromEmployee(server), revision: revisionOf(server) };
-    setRecord((prev) => ({ ...prev, ...server }));
-    setBaseline(rebased);
-    void save({ changes: conflict.userChanges, against: rebased });
+    const server = { ...record, ...conflict.serverEmployee };
+    const row = keepMineRow(drafts, conflict);
+    setRecord(server);
+    setDrafts(row);
+    shareRecord(server);
+    void save({ row, against: server });
   };
 
-  // Use theirs: show the newer record and drop only the edits that collided.
-  const useTheirs = (): void => {
+  // Use theirs: show the newer record and drop the edits that collided. The
+  // editor closes when nothing of mine is left to save.
+  const chooseTheirs = (): void => {
     const conflict = state.conflict;
     if (!conflict) return;
-    const server = conflict.serverEmployee;
-    const named = conflict.conflictingFields.filter((field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField));
-    const dropped = new Set<ContactField>(named.length > 0 ? named : (Object.keys(conflict.userChanges) as ContactField[]));
-    setRecord((prev) => ({ ...prev, ...server }));
-    setBaseline({ values: baselineFromEmployee(server), revision: revisionOf(server) });
-    setDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([field]) => !dropped.has(field as ContactField))));
+    const server = { ...record, ...conflict.serverEmployee };
+    const row = theirsWinRow(drafts, conflict);
+    setRecord(server);
     setState(INITIAL_ROW_STATE);
+    shareRecord(server);
+    if (Object.keys(row).length === 0) closeEditor();
+    else setDrafts(row);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
@@ -228,7 +260,7 @@ export function EmployeeContactCard({
           </div>
         </div>
         {!editing && canEdit && (
-          <Button variant="outline" size="sm" aria-label={`Edit contact for ${name}`} onClick={startEditing} className="min-h-11 sm:min-h-9">
+          <Button ref={editButtonRef} variant="outline" size="sm" aria-label={`Edit contact for ${name}`} onClick={() => startEditing()} className="min-h-11 sm:min-h-9">
             <Pencil className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             Edit
           </Button>
@@ -239,7 +271,7 @@ export function EmployeeContactCard({
           <ContactEditor
             employee={record}
             draft={draft}
-            phoneValue={drafts.phone !== undefined ? draft.phone : formatPhone(draft.phone)}
+            phoneValue={drafts?.phone ? draft.phone : formatPhone(draft.phone)}
             state={state}
             canEdit={canEdit}
             dirty={dirty}
@@ -248,7 +280,7 @@ export function EmployeeContactCard({
             onToggleSamePerson={(checked) => setState((prev) => ({ ...prev, samePersonChecked: checked }))}
             onConfirmSamePerson={() => void save({ confirmSamePerson: true })}
             onKeepMine={keepMine}
-            onUseTheirs={useTheirs}
+            onUseTheirs={chooseTheirs}
             onCancel={cancel}
             onSave={() => void save()}
           />

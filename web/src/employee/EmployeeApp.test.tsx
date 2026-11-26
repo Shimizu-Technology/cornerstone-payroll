@@ -265,6 +265,26 @@ describe('employee app shell', () => {
     expect(screen.queryByText(/0001/)).toBeNull();
   });
 
+  it('says when the employer replaced an address request with their own change', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    const address = { address_line1: '300 Employer Set Rd', city: 'Tamuning', state: 'GU', zip: '96913' };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({
+        legal_name: 'Example Worker',
+        address,
+        address_request: { id: 8, status: 'superseded', requested: { ...address, address_line1: '200 Asked For Ave' }, decided_at: '2026-11-20T02:00:00Z' },
+      }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText('Replaced by a change from your employer. The address above is the one on file now.')).toBeTruthy();
+    expect(screen.getByText('Replaced')).toBeTruthy();
+    expect(screen.getByText('300 Employer Set Rd')).toBeTruthy();
+  });
+
   it('asks the employee to refresh and confirm their address when it changed before an edit', async () => {
     signedIn();
     window.history.pushState({}, '', '/my-info');

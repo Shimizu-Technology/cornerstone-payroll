@@ -179,3 +179,117 @@ export function contactStatusBadge(employee: ContactEmployee): { label: string; 
   }
   return { label: 'Complete', variant: 'success' };
 }
+
+// Per-field drafts. Each edited field keeps the saved value and the row
+// revision from when it was first edited, so a save only conflicts on a field
+// someone else changed since, and a refetch never moves the baseline.
+export interface ContactFieldDraft {
+  value: string;
+  baselineValue: string;
+  baselineRevision: string;
+}
+
+export type RowFieldDrafts = Partial<Record<ContactField, ContactFieldDraft>>;
+export type ContactDraftMap = Record<number, RowFieldDrafts>;
+
+export function revisionOf(employee: ContactEmployee): string {
+  return employee.contact_revision || employee.updated_at;
+}
+
+export function effectiveDraft(employee: ContactEmployee, rowDraft: RowFieldDrafts | undefined): ContactDraft {
+  const merged = baselineFromEmployee(employee);
+  if (!rowDraft) return merged;
+  for (const field of CONTACT_FIELDS) {
+    const entry = rowDraft[field];
+    if (entry) merged[field] = entry.value;
+  }
+  return merged;
+}
+
+export function changedEntriesForRow(rowDraft: RowFieldDrafts | undefined): Array<[ContactField, ContactFieldDraft]> {
+  if (!rowDraft) return [];
+  const changed: Array<[ContactField, ContactFieldDraft]> = [];
+  for (const field of CONTACT_FIELDS) {
+    const entry = rowDraft[field];
+    if (entry && isFieldChanged(field, entry.value, entry.baselineValue)) changed.push([field, entry]);
+  }
+  return changed;
+}
+
+export function hasAnyChangedField(rowDraft: RowFieldDrafts | undefined): boolean {
+  return changedEntriesForRow(rowDraft).length > 0;
+}
+
+/**
+ * The row's drafts after typing `value` into `field`. A field typed back to
+ * its saved value is dropped, so it can't be sent later against a newer
+ * baseline; the typed phone text is kept so formatting doesn't jump. Returns
+ * undefined when nothing is left.
+ */
+export function editRowDraft(
+  rowDraft: RowFieldDrafts | undefined, employee: ContactEmployee, field: ContactField, value: string,
+): RowFieldDrafts | undefined {
+  const row: RowFieldDrafts = { ...(rowDraft ?? {}) };
+  const existing = row[field];
+  const baselineValue = existing ? existing.baselineValue : baselineFromEmployee(employee)[field];
+  const baselineRevision = existing ? existing.baselineRevision : revisionOf(employee);
+  if (field !== 'phone' && !isFieldChanged(field, value, baselineValue)) delete row[field];
+  else row[field] = { value, baselineValue, baselineRevision };
+  return Object.keys(row).length > 0 ? row : undefined;
+}
+
+/**
+ * What a save sends: the changed fields, each one's baseline, and the oldest
+ * baseline revision that's behind the record shown, so the server checks
+ * every changed field against what the editor started from.
+ */
+export function rowSaveRequest(rowDraft: RowFieldDrafts | undefined, employee: ContactEmployee): {
+  changes: ContactDraftPatch;
+  baselineValues: Record<string, string>;
+  rowRevision: string;
+} {
+  const changedEntries = changedEntriesForRow(rowDraft);
+  const currentRevision = revisionOf(employee);
+  const changes: ContactDraftPatch = {};
+  const baselineValues: Record<string, string> = {};
+  let staleRevision: string | null = null;
+  for (const [field, entry] of changedEntries) {
+    changes[field] = entry.value.trim();
+    baselineValues[field] = entry.baselineValue;
+    if (entry.baselineRevision && entry.baselineRevision !== currentRevision) staleRevision ??= entry.baselineRevision;
+  }
+  return { changes, baselineValues, rowRevision: staleRevision ?? changedEntries[0]?.[1].baselineRevision ?? currentRevision };
+}
+
+/**
+ * Keep mine: only the values that were sent are rebased onto the newer
+ * record and resent. Anything else in the row wasn't a change, so it's
+ * dropped rather than becoming one against the newer record.
+ */
+export function keepMineRow(rowDraft: RowFieldDrafts | undefined, conflict: RowConflictState): RowFieldDrafts {
+  const server = baselineFromEmployee(conflict.serverEmployee);
+  const serverRevision = revisionOf(conflict.serverEmployee);
+  const rebased: RowFieldDrafts = {};
+  for (const field of CONTACT_FIELDS) {
+    const sent = conflict.userChanges[field];
+    if (sent === undefined) continue;
+    rebased[field] = { value: rowDraft?.[field]?.value ?? sent, baselineValue: server[field], baselineRevision: serverRevision };
+  }
+  return rebased;
+}
+
+/**
+ * Use theirs: drop the edits that collided, and anything that wasn't sent.
+ * The other sent edits keep their own baselines, which still match the
+ * newer record, so saving them can't overwrite the other person.
+ */
+export function theirsWinRow(rowDraft: RowFieldDrafts | undefined, conflict: RowConflictState): RowFieldDrafts {
+  const named = conflict.conflictingFields.filter((field): field is ContactField => CONTACT_FIELDS.includes(field as ContactField));
+  const dropped = new Set<ContactField>(named.length > 0 ? named : (Object.keys(conflict.userChanges) as ContactField[]));
+  const kept: RowFieldDrafts = {};
+  for (const field of CONTACT_FIELDS) {
+    const entry = rowDraft?.[field];
+    if (entry && conflict.userChanges[field] !== undefined && !dropped.has(field)) kept[field] = entry;
+  }
+  return kept;
+}

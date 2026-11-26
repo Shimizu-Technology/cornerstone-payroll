@@ -48,6 +48,7 @@ export function ClientEmployeeOverview() {
   if (activeCompanyId !== companyId || loading) return <WorkspaceLoader label="Loading employee" />;
   if (error || !employee) return <p role="alert" className="p-6 text-danger-700">{error || 'Employee not found.'}</p>;
 
+  const canEditContact = !viewOnly && canWriteClientEmployeeProfile(activeCompany);
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
   const delivery = employeePaymentDelivery(employee);
   const payRate = employee.employment_type === 'salary' && employee.salary_type === 'variable'
@@ -74,10 +75,10 @@ export function ClientEmployeeOverview() {
           employee={employee}
           companyId={companyId}
           audience="client"
-          canEdit={!viewOnly && canWriteClientEmployeeProfile(activeCompany)}
+          canEdit={canEditContact}
           viewOnly={viewOnly}
           editRequest={contactEditRequest}
-          onSaved={(updated, { emailChanged }) => {
+          onRecordChange={(updated, { emailChanged }) => {
             setEmployee((current) => (current ? { ...current, ...updated } : current));
             if (emailChanged) setAppPanelVersion((version) => version + 1);
           }}
@@ -88,7 +89,8 @@ export function ClientEmployeeOverview() {
           companyName={activeCompany?.name || ""}
           employeeId={employeeId}
           audience="client"
-          onEditContact={!viewOnly && canWriteClientEmployeeProfile(activeCompany) ? () => setContactEditRequest((request) => request + 1) : undefined}
+          canEditContact={canEditContact}
+          onEditContact={() => setContactEditRequest((request) => request + 1)}
         />
         <Card>
           <CardHeader><CardTitle>How this employee is paid</CardTitle></CardHeader>
