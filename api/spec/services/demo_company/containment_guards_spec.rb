@@ -152,11 +152,12 @@ RSpec.describe "Demo company containment guards" do
       expect(totals).to eq(forms: 0, box1_cents: 0, box4_cents: 0)
       pdf = Form1096TotalsPdfGenerator.new(company: demo, totals: { forms: 2, box1_cents: 123_456, box4_cents: 0 }, draft: false).generate
       text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
-      expect(text).to include("Total forms: 2", "1,234.56", "Keep this sheet with your records.")
-      expect(text).not_to match(/DRAFT|practice|demo|e-file|GuamTax/i)
+      expect(text).to include("Total forms: 2", "1,234.56", "Keep this sheet with your records.", DemoPdfFooter::TEXT)
+      expect(text).not_to match(/DRAFT|practice|e-file|GuamTax/i)
       live_text = PDF::Reader.new(StringIO.new(Form1096TotalsPdfGenerator.new(company: live, totals: { forms: 1, box1_cents: 1, box4_cents: 0 },
         draft: false).generate)).pages.map(&:text).join("\n")
       expect(live_text).to include("These totals match the GuamTax e-file.")
+      expect(live_text).not_to include(DemoPdfFooter::TEXT)
     end
   end
 

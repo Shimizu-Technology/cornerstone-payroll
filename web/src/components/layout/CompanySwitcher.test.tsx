@@ -75,6 +75,55 @@ describe('CompanySwitcher', () => {
     expect(screen.getByText('Production clients')).toBeTruthy();
     expect(screen.getByText('Test workspaces')).toBeTruthy();
     expect(screen.getByText('Training replay · ready')).toBeTruthy();
+    expect(screen.queryByText('Demo')).toBeNull();
+  });
+
+  it('shows a grey Demo chip only for demo companies in the switcher and single-company client header', () => {
+    const context = companyContext();
+    companyContext.mockReturnValue({
+      ...context,
+      companies: [
+        ...context.companies,
+        {
+          id: 7,
+          organization_id: 1,
+          name: 'Sunset Grill',
+          active: true,
+          active_employees: 5,
+          total_employees: 5,
+          pay_frequency: 'biweekly',
+          historical_payroll_enabled: false,
+          payroll_environment: 'live',
+          test_workspace: false,
+          demo: true,
+        },
+      ],
+      activeCompany: {
+        id: 7,
+        organization_id: 1,
+        name: 'Sunset Grill',
+        active_employees: 5,
+        payroll_environment: 'live',
+        test_workspace: false,
+        demo: true,
+      },
+    });
+
+    const { rerender } = render(<MemoryRouter><CompanySwitcher /></MemoryRouter>);
+    expect(screen.getByText('Demo')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Sunset Grill/i }));
+    // Trigger + dropdown option both carry the Demo chip; Production Alpha does not.
+    expect(screen.getAllByText('Demo')).toHaveLength(2);
+
+    // Single-company (e.g. client portal user) view also shows the Demo chip.
+    companyContext.mockReturnValue({
+      ...context,
+      canSwitchCompany: false,
+      companies: [{ id: 7, organization_id: 1, name: 'Sunset Grill', payroll_environment: 'live', demo: true }],
+      activeCompany: { id: 7, organization_id: 1, name: 'Sunset Grill', payroll_environment: 'live', demo: true },
+    });
+    rerender(<MemoryRouter><CompanySwitcher /></MemoryRouter>);
+    expect(screen.getByText('Demo')).toBeTruthy();
   });
 
   it('shows only clients in the selected organization', () => {

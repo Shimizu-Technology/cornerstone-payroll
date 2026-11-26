@@ -20,6 +20,7 @@ module Api
             next_payday: next_payday&.iso8601,
             # How paper W-2s reach employees: "mailed", "handed_out", or nil when not set (M4-5).
             w2_delivery: employee_access_context.company.w2_delivery,
+            demo: employee_access_context.company.demo?,
             features: FEATURES.index_with { |feature| feature_open?(features, feature) }
           }
         end

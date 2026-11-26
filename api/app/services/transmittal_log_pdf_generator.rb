@@ -46,6 +46,7 @@ class TransmittalLogPdfGenerator
   def generate
     pdf = PdfUnicodeFont.document(page_size: "LETTER", page_layout: :portrait, margin: [ 36, 50, 36, 50 ])
     render_document(pdf)
+    DemoPdfFooter.draw_prawn_footer(pdf, company: company)
     pdf.render
   end
 

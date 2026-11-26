@@ -9,20 +9,21 @@ require "prawn/table"
 class QuarterlyCompliancePacketPdfGenerator
   attr_reader :filename
 
-  def initialize(report)
-    @report = report.to_h.deep_symbolize_keys
+  def initialize(report = nil, demo: nil, **report_keywords)
+    @report = (report || report_keywords).to_h.deep_symbolize_keys
+    @demo = demo.nil? ? @report.dig(:meta, :demo) == true : demo == true
     @filename = "quarterly_compliance_review_packet_draft_#{meta[:year]}_q#{meta[:quarter]}.pdf"
   end
 
   def generate
     packet = CombinePDF.new
     packet << CombinePDF.parse(summary_pdf)
-    packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::Form941.new(report: @report).generate)
+    packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::Form941.new(report: @report, demo: @demo).generate)
     if @report.dig(:federal_941, :deposit_schedule, :schedule_b_required)
-      packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::ScheduleB.new(report: @report).generate)
+      packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::ScheduleB.new(report: @report, demo: @demo).generate)
     end
-    packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::W1.new(report: @report).generate)
-    packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::Sw2.new(report: @report).generate)
+    packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::W1.new(report: @report, demo: @demo).generate)
+    packet << CombinePDF.parse(QuarterlyComplianceOfficialForms::Sw2.new(report: @report, demo: @demo).generate)
     packet.to_pdf
   end
 
@@ -88,6 +89,7 @@ class QuarterlyCompliancePacketPdfGenerator
     pdf.font_size(8) do
       pdf.text "The following pages are draft Form 941#{' and Schedule B' if @report.dig(:federal_941, :deposit_schedule, :schedule_b_required)}, Guam W-1, and Guam SW-2/SWICA preparation copies generated from the same committed payroll data. Review all fields and file through the appropriate agency channel."
     end
+    DemoPdfFooter.draw_prawn_footer(pdf, demo: @demo)
     pdf.render
   end
 

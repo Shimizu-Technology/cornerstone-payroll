@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useId } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useCompany } from '@/contexts/CompanyContext';
+import { DemoBadge } from '@/components/ui/demo-badge';
 import { canWriteCompany } from '@/lib/company-write-access';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
@@ -66,9 +67,12 @@ export function CompanySwitcher() {
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-semibold text-neutral-600">Payroll client</p>
         </div>
-        <p className={`mt-0.5 text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
-          {activeLabel || 'Loading...'}
-        </p>
+        <div className="mt-0.5 flex items-center gap-1.5">
+          <p className={`min-w-0 text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
+            {activeLabel || 'Loading...'}
+          </p>
+          {activeCompany?.demo && <DemoBadge />}
+        </div>
         {activeCompany && isTestWorkspace(activeCompany) && (
           <p className="mt-0.5 text-xs font-semibold text-amber-700">{activeCompany.practice_portal ? 'Practice copy · Client portal' : activeCompany.test_workspace_purpose_label || 'Test workspace'}{!activeCompany.practice_portal && !canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
         )}
@@ -94,9 +98,12 @@ export function CompanySwitcher() {
         className="mt-1 flex w-full items-center justify-between rounded-xl border border-neutral-200 bg-neutral-50/70 px-3 py-2 text-left transition-colors hover:bg-neutral-100"
       >
         <div className="min-w-0 flex-1">
-          <p className={`text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
-            {activeLabel || 'Select Company'}
-          </p>
+          <div className="flex items-center gap-1.5">
+            <p className={`min-w-0 text-sm font-semibold text-neutral-900 ${activeCompany && hasDuplicateName(activeCompany) ? 'break-words' : 'truncate'}`}>
+              {activeLabel || 'Select Company'}
+            </p>
+            {activeCompany?.demo && <DemoBadge />}
+          </div>
           {activeCompany && isTestWorkspace(activeCompany) && (
             <p className="text-xs font-semibold text-amber-700">{activeCompany.practice_portal ? 'Practice copy · Client portal' : activeCompany.test_workspace_purpose_label || 'Test workspace'}{!activeCompany.practice_portal && !canWriteCompany(activeCompany) ? ' · Read-only' : ''}</p>
           )}
@@ -144,9 +151,12 @@ export function CompanySwitcher() {
                     } ${company.id === activeCompany?.id ? 'border-l-2 border-l-primary-600 bg-primary-50' : ''}`}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className={`text-sm ${hasDuplicateName(company) ? 'break-words' : 'truncate'} ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
-                        {clientLabel(company)}
-                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <p className={`min-w-0 text-sm ${hasDuplicateName(company) ? 'break-words' : 'truncate'} ${company.id === activeCompany?.id ? 'font-bold text-primary-700' : 'font-medium text-neutral-900'}`}>
+                          {clientLabel(company)}
+                        </p>
+                        {company.demo && <DemoBadge />}
+                      </div>
                       {isTestWorkspace(company) && (
                         <p className="text-xs font-semibold text-amber-700">{company.test_workspace_purpose_label || 'Test workspace'} · {company.migration_rehearsal_status}{!canWriteCompany(company) ? ' · Read-only' : ''}</p>
                       )}

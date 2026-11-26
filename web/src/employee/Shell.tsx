@@ -6,7 +6,7 @@ import { focusHeadingOnNextScreen } from './focus';
 import { useSignOut } from './hooks';
 import { SECURITY_PATH } from './security';
 import { useOnline } from './useOnline';
-import { BrandMark } from './ui';
+import { BrandMark, DemoPill } from './ui';
 import { ViewOnlyBanner, type ViewOnlyGrant } from './ViewOnlyBanner';
 
 const TABS: ReadonlyArray<{ to: string; label: string; icon: LucideIcon }> = [
@@ -157,7 +157,10 @@ export function EmployeeShell({ viewAs, showNav = true, children }: EmployeeShel
           <span className="emp-brand">
             <BrandMark />
             <span className="emp-brand-text">
-              <span className="emp-brand-name">{brand.name}</span>
+              <span className="emp-brand-name-row">
+                <span className="emp-brand-name">{brand.name}</span>
+                {brand.demo && <DemoPill />}
+              </span>
               <span className="emp-brand-sub">{brand.appName ?? 'Employee pay'}</span>
             </span>
           </span>

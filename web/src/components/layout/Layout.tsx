@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { Outlet, useLocation, useOutlet } from 'react-router';
 import { FlaskConical, Menu, PanelLeftOpen, X } from 'lucide-react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { DemoBadge } from '@/components/ui/demo-badge';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from './CommandPalette';
 import { FinanceWriteNotice } from '@/components/finance/FinanceWriteNotice';
@@ -179,7 +180,10 @@ export function Layout() {
           </button>
           <div className="min-w-0 text-center">
             <p className="text-sm font-semibold tracking-tight text-neutral-900">{isClient ? 'Cornerstone Payroll · Client Portal' : 'Cornerstone Payroll'}</p>
-            <p className="truncate text-xs font-medium text-primary-700">{financePage ? activeOrganizationName || 'Finance workspace' : activeCompany?.name || 'Payroll workspace'}</p>
+            <div className="flex items-center justify-center gap-1.5">
+              <p className="truncate text-xs font-medium text-primary-700">{financePage ? activeOrganizationName || 'Finance workspace' : activeCompany?.name || 'Payroll workspace'}</p>
+              {!financePage && activeCompany?.demo && <DemoBadge />}
+            </div>
           </div>
           <div className="h-11 w-11" />
         </div>
