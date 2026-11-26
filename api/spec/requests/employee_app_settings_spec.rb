@@ -399,7 +399,7 @@ RSpec.describe "Employee app branding and Help contacts", type: :request do
       expect(body).to eq(
         "name" => "Example Grill", "app_name" => "Grill Pay", "primary_color" => "#1898cf", "accent_color" => nil,
         "logo_url" => "http://www.example.com/api/v1/public/tenant_branding/logo/example-grill/#{digest}.png",
-        "main_phone" => "671-555-0100"
+        "main_phone" => "671-555-0100", "demo" => false
       )
       raw = response.body
       [ "Avery Example", "avery@example.test", "671-555-0111", "General manager", company_a.brand_logo_storage_key,

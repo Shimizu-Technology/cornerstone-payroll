@@ -48,7 +48,9 @@ class InstallmentLoanReportPdfGenerator
     end
 
     render_with_footer(pdf,
-      "#{company.name} \u2014 Employee Installment Loan Report \u2014 CONFIDENTIAL"
+      DemoPdfFooter.append("#{company.name} \u2014 Employee Installment Loan Report \u2014 CONFIDENTIAL", company: company),
+      height: company&.demo? ? 24 : 16,
+      top: company&.demo? ? 28 : 26
     )
   end
 

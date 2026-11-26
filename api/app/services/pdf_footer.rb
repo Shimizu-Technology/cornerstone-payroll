@@ -18,13 +18,13 @@ module PdfFooter
   # @param text [String] the footer text
   # @param font_size [Numeric] footer font size (default 6)
   # @return [String] the final PDF bytes
-  def render_with_footer(pdf, text, font_size: 6, height: 16)
+  def render_with_footer(pdf, text, font_size: 6, height: 16, top: 26)
     pdf.repeat(:all, dynamic: true) do
       pdf.canvas do
         left = pdf.page.margins[:left]
         right = pdf.page.margins[:right]
         width = pdf.bounds.width - left - right
-        pdf.bounding_box([ left, 26 ], width: width, height: height) do
+        pdf.bounding_box([ left, top ], width: width, height: height) do
           pdf.stroke_color "CCCCCC"
           pdf.stroke_horizontal_rule
           pdf.move_down 3

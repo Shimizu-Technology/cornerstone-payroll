@@ -33,7 +33,7 @@ describe('employee API client', () => {
 
     expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/employee/links');
     expect(fetchImpl.mock.calls[0][1]?.headers).not.toHaveProperty('X-Employee-Link-Id');
-    expect(links).toEqual([{ id: '7', companyName: "MoSa's", subdomainSlug: 'mosas', status: 'active', formerAccessUntil: null, latestPayDate: '2026-11-20' }]);
+    expect(links).toEqual([{ id: '7', companyName: "MoSa's", subdomainSlug: 'mosas', demo: false, status: 'active', formerAccessUntil: null, latestPayDate: '2026-11-20' }]);
   });
 
   it('builds URLs from a base with or without a trailing slash', async () => {
@@ -152,8 +152,9 @@ describe('parseLinks', () => {
 
   it('accepts a bare array and drops entries without a usable id', () => {
     expect(parseLinks([{ id: '12', company_name: 'A' }, { id: 'abc' }, { company_name: 'no id' }, null])).toEqual([
-      { id: '12', companyName: 'A', subdomainSlug: null, status: 'active', formerAccessUntil: null, latestPayDate: null },
+      { id: '12', companyName: 'A', subdomainSlug: null, demo: false, status: 'active', formerAccessUntil: null, latestPayDate: null },
     ]);
+    expect(parseLinks([{ id: '13', company_name: 'Demo Co', demo: true }])[0]?.demo).toBe(true);
   });
 
   it('returns no links for an unexpected body', () => {
