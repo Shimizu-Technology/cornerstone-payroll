@@ -338,6 +338,8 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         expect(full_row["imported_basis"]).to eq(UnifiedPayrollReporting::BRIDGED)
         expect(money(full_row["withholding_tax"])).to eq((balance.federal_income_tax + fixture.items.fetch(:prior_provider_ytd_p2).total_income_tax_withheld).round(2))
         expect(full_report.dig("source_summary", "historical_ytd_bridge", "totals_basis")).to eq(UnifiedPayrollReporting::BRIDGED)
+        expect(staff_api.ytd_summary_pdf_text(year: Parity::FixtureBuilder::TAX_YEAR))
+          .to include("Imported figures From the applied opening YTD balance")
 
         # A range that starts after January 1 cannot use a year-to-date balance.
         part_row, part_report = row_for.call(start_date: "2026-01-10", end_date: "2026-12-31")

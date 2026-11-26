@@ -31,6 +31,13 @@ module Parity
         ytd_summary_for(year: year)
       end
 
+      def ytd_summary_pdf_text(params)
+        @ctx.get "/api/v1/admin/reports/ytd_summary_pdf", params: params, headers: @headers
+        raise "GET /api/v1/admin/reports/ytd_summary_pdf failed: #{@ctx.response.status}" unless @ctx.response.successful?
+
+        PDF::Reader.new(StringIO.new(@ctx.response.body)).pages.map(&:text).join(" ").squish
+      end
+
       def ytd_summary_for(params)
         @ctx.get "/api/v1/admin/reports/ytd_summary", params: params, headers: @headers
         raise "GET /api/v1/admin/reports/ytd_summary failed: #{@ctx.response.status} #{@ctx.response.body}" unless @ctx.response.successful?
