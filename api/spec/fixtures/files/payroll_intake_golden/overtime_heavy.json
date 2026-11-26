@@ -1,0 +1,58 @@
+{
+  "can_apply": false,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 0,
+    "review_count": 1,
+    "total_regular_hours": 80.0,
+    "total_reported_tips": "11.5",
+    "total_overtime_hours": 31.75
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [
+        {
+          "code": "hours_do_not_reconcile",
+          "message": "Revel’s total includes 13.25 more hours than this row accounts for. Check the report. Exclude this row, apply the rest, then enter this employee’s hours and pay in the worksheet.",
+          "severity": "error"
+        }
+      ],
+      "warnings": [],
+      "status": "needs_review",
+      "regular_hours": 80.0,
+      "overtime_hours": 31.75,
+      "reported_tips": "11.5",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 125.0,
+        "workbook_only": false,
+        "pay_rate": "15.5",
+        "tips_boh": "0.0",
+        "tips_foh": "11.5",
+        "tip_pool": "foh",
+        "loan_deduction": "0.0",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": null,
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    }
+  ],
+  "apply_error": "Revel’s total includes 13.25 more hours than this row accounts for. Check the report. Exclude this row, apply the rest, then enter this employee’s hours and pay in the worksheet."
+}

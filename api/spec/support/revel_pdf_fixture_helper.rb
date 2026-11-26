@@ -17,7 +17,7 @@ module RevelPdfFixtureHelper
     "Fees".ljust(20)
   ].join.freeze
 
-  def build_revel_pdf(rows, period_start: nil, period_end: nil)
+  def build_revel_pdf(rows, period_start: nil, period_end: nil, reported_total_hours: nil)
     fixture = Tempfile.new([ "deidentified-revel-payroll", ".pdf" ])
     fixture.close
 
@@ -29,8 +29,17 @@ module RevelPdfFixtureHelper
       end
       pdf.move_down(4)
       pdf.text(REVEL_HEADER, size: 4)
-      rows.each { |row| pdf.text(revel_row(**row), size: 4) }
-      total_hours = rows.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours)) }
+      rows.each do |row|
+        name = row.fetch(:name)
+        if name.include?("\n")
+          first_line, name = name.split("\n", 2)
+          pdf.text(first_line, size: 4)
+        end
+        row = row.merge(name: name)
+        text = block_given? ? yield(row) : revel_row(**row)
+        pdf.text(text, size: 4)
+      end
+      total_hours = reported_total_hours || rows.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours)) }
       total_pay = rows.sum { |row| row.fetch(:total_pay, row.fetch(:regular_pay)) }
       pdf.text("Totals".ljust(220) + decimal_field(total_hours) + decimal_field(total_pay), size: 4)
     end
@@ -40,9 +49,9 @@ module RevelPdfFixtureHelper
   end
 
   def revel_row(name:, regular_hours:, regular_pay:, overtime_hours: 0.0, overtime_pay: 0.0,
-                total_hours: nil, total_pay: nil)
-    total_hours ||= regular_hours + overtime_hours
-    total_pay ||= regular_pay + overtime_pay
+                doubletime_hours: nil, doubletime_pay: nil, total_hours: nil, total_pay: nil)
+    total_hours ||= regular_hours + overtime_hours + (doubletime_hours || 0)
+    total_pay ||= regular_pay + overtime_pay + (doubletime_pay || 0)
 
     [
       name.ljust(40),
@@ -51,10 +60,10 @@ module RevelPdfFixtureHelper
       "-".ljust(20),
       decimal_field(regular_hours),
       decimal_field(overtime_hours),
-      "-".ljust(20),
+      doubletime_hours.nil? ? "-".ljust(20) : decimal_field(doubletime_hours),
       decimal_field(regular_pay),
       decimal_field(overtime_pay),
-      "-".ljust(20),
+      doubletime_pay.nil? ? "-".ljust(20) : decimal_field(doubletime_pay),
       decimal_field(total_hours),
       decimal_field(total_pay),
       "-".ljust(20)
