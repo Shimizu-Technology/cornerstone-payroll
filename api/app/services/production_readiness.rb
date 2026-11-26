@@ -153,7 +153,22 @@ class ProductionReadiness
   def configuration_checks
     checks = base_configuration_checks + employee_web_checks
     checks << resend_webhook_check unless employee_web?
+    checks << process_role_check if RlsConfiguration.mode(env) == "raise"
     checks
+  end
+
+  # A process running the guard in raise mode is meant to serve employees.
+  # Left on the default role it also mounts payroll routes, and it could take
+  # the employee service's signed answer for a demo's app state
+  # (EmployeeAppSwitch::Enforcement.remote_attestation_allowed?).
+  def process_role_check
+    explicit = env["APP_PROCESS_ROLE"].present?
+    Check.new(
+      name: "APP_PROCESS_ROLE is set where the RLS guard runs in raise mode",
+      passed: explicit,
+      advisory: true,
+      detail: explicit ? env["APP_PROCESS_ROLE"] : "Set APP_PROCESS_ROLE=employee_web on the employee service"
+    )
   end
 
   def resend_webhook_check

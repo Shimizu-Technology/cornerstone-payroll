@@ -18,16 +18,39 @@ module EmployeeAppSwitch
   module Enforcement
     CACHE_SECONDS = 5
     ROLE_CACHE_SECONDS = 30
+    # How long this process trusts the employee service's signed answer that
+    # its guard runs in raise mode, and how long a missing answer is reused
+    # before asking again.
+    ATTESTATION_CACHE_SECONDS = 120
+    ATTESTATION_MISS_CACHE_SECONDS = 15
+    # The ask is bounded tighter than the readiness screen's, since an
+    # invitation or a job may be waiting on it.
+    ATTESTATION_OPEN_TIMEOUT = 1
+    ATTESTATION_READ_TIMEOUT = 2
+    # The whole ask ends by then, however slowly a body trickles in.
+    ATTESTATION_DEADLINE_SECONDS = 3
+    # How long another caller waits for a refresh already under way before
+    # treating the demo's app as off.
+    ATTESTATION_WAIT_SECONDS = 0.5
+    ATTESTATION_WAIT_STEP = 0.05
+    CACHE_ONLY_KEY = :employee_app_switch_attestation_cache_only
+    # Processes that may take the employee service's answer: never the
+    # employee service itself.
+    ATTESTATION_ROLES = [ ProcessRole::ALL, ProcessRole::PAYROLL_WEB ].freeze
     RETIRED_ACTION = "employee_app_early_access#retired"
 
     STATE_CACHE = Concurrent::AtomicReference.new
     ROLE_CACHE = Concurrent::AtomicReference.new
+    ATTESTATION_CACHE = Concurrent::AtomicReference.new
+    # One refresh at a time per process; the others wait briefly for it.
+    ATTESTATION_LOCK = Mutex.new
 
     module_function
 
     def reset_cache!
       STATE_CACHE.set(nil)
       ROLE_CACHE.set(nil)
+      ATTESTATION_CACHE.set(nil)
     end
 
     # Read fresh on this process (the switch screen and readiness checks).
@@ -110,14 +133,14 @@ module EmployeeAppSwitch
     end
 
     # The full gate every reader uses (CompanyFeatures, so requests, jobs and
-    # mail alike): the window rule above AND, under the waiver, this process
-    # running the guard in raise mode as the restricted role with no bypass.
-    # A job on an unguarded worker therefore sees the demo's app as off and
-    # does nothing.
+    # mail alike): the window rule above AND, under the waiver, the employee
+    # service's guard in raise mode as the restricted role with no bypass
+    # (demo_reader_allowed?). Without that, a job sees the demo's app as off
+    # and does nothing.
     def demo_app_open?(company, today: PayrollBusinessClock.today)
       return true unless company&.demo?
 
-      demo_open?(company, today: today) && demo_request_allowed?(company)
+      demo_open?(company, today: today) && demo_reader_allowed?(company)
     end
 
     # Once enforcement is verified, every open window retires for good.
@@ -158,6 +181,98 @@ module EmployeeAppSwitch
       return true if verified?
 
       waiver_state? && current_process_guarded?
+    end
+
+    # Whether a demo's app reads as on under the waiver. The employee service
+    # needs its own guard, exactly as demo_request_allowed?. Staff web and
+    # the worker serve no employee data on this answer, so they follow the
+    # employee service's signed answer that its guard runs in raise mode as
+    # the restricted role (ServiceAttestation). That path is opt-in: only an
+    # `all` or `payroll_web` process with EMPLOYEE_API_URL set takes it.
+    # Employee requests on any process still pass demo_request_allowed?.
+    def demo_reader_allowed?(company, env: ENV)
+      return true unless company&.demo?
+      return true if verified?
+      return false unless waiver_state?
+      return true if current_process_guarded?(env: env)
+      return false unless remote_attestation_allowed?(env)
+
+      employee_service_attested?(env: env)
+    end
+
+    def remote_attestation_allowed?(env = ENV)
+      ATTESTATION_ROLES.include?(env["APP_PROCESS_ROLE"].presence || ProcessRole::ALL) && env["EMPLOYEE_API_URL"].present?
+    end
+
+    # Asks for the employee service's answer ahead of a locked section (an
+    # invitation), so the re-check inside it reads the cache.
+    def warm_attestation!(company)
+      demo_app_open?(company) if company&.demo?
+      nil
+    end
+
+    # Until the current transaction ends, this thread reads only the cached
+    # answer and never asks the employee service: an invitation holding the
+    # company's issuance lock must not wait on the network while DemoStop
+    # waits on that lock. An expired answer then reads as off.
+    def cached_attestation_only!
+      ActiveSupport::IsolatedExecutionState[CACHE_ONLY_KEY] = ActiveRecord::Base.current_transaction
+    end
+
+    def cached_attestation_only?
+      ActiveSupport::IsolatedExecutionState[CACHE_ONLY_KEY]&.open? == true
+    end
+
+    # The employee service's live signed answer (checked for this nonce,
+    # process and age), cached per process. Anything else (no secret or URL,
+    # unsigned, stale, unreachable, a guard not in raise mode) is false, and
+    # an expired answer is never served. One thread refreshes; another waits
+    # up to ATTESTATION_WAIT_SECONDS for it, then reads the app as off.
+    def employee_service_attested?(env: ENV)
+      cached = fresh_attestation
+      return cached.first if cached
+      return false if cached_attestation_only?
+
+      give_up_at = monotonic_now + ATTESTATION_WAIT_SECONDS
+      until ATTESTATION_LOCK.try_lock
+        return false if monotonic_now >= give_up_at
+
+        sleep(ATTESTATION_WAIT_STEP)
+        cached = fresh_attestation
+        return cached.first if cached
+      end
+      begin
+        cached = fresh_attestation
+        return cached.first if cached
+
+        value = fetch_attestation(env)
+        ttl = value ? ATTESTATION_CACHE_SECONDS : ATTESTATION_MISS_CACHE_SECONDS
+        ATTESTATION_CACHE.set([ value, monotonic_now + ttl ].freeze)
+        value
+      ensure
+        ATTESTATION_LOCK.unlock
+      end
+    end
+
+    def fresh_attestation
+      cached = ATTESTATION_CACHE.get
+      cached if cached && monotonic_now < cached.last
+    end
+
+    def monotonic_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    # Only the network ask runs under the deadline; nothing here touches the
+    # database.
+    def fetch_attestation(env)
+      ping = Timeout.timeout(ATTESTATION_DEADLINE_SECONDS) do
+        Readiness.ping_employee_service(env, open_timeout: ATTESTATION_OPEN_TIMEOUT, read_timeout: ATTESTATION_READ_TIMEOUT)
+      end
+      ping[:observation]&.rls_guard_raise? == true
+    rescue StandardError => error # Timeout::Error included
+      Rails.logger.warn("[EmployeeAppSwitch::Enforcement] employee service attestation failed: #{error.class}")
+      false
     end
 
     def current_process_guarded?(env: ENV)

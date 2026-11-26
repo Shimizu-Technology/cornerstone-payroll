@@ -183,10 +183,12 @@ module EmployeeLinks
   # Invitation issuance for a demo company holds the company row lock,
   # shared, which the demo kill switch takes exclusively (DemoStop), so an
   # invitation is never issued halfway through a stop. Call first inside the
-  # issuing transaction, then re-check the employee app is on.
+  # issuing transaction, then re-check the employee app is on; that re-check
+  # reads only the cached employee service answer while the lock is held.
   def self.lock_for_issuance!(company)
     return unless company&.demo?
 
+    EmployeeAppSwitch::Enforcement.cached_attestation_only!
     Company.where(id: company.id).lock("FOR SHARE").pick(:id)
   end
 
