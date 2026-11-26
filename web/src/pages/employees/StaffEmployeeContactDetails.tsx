@@ -36,8 +36,8 @@ export function StaffEmployeeContactDetails(): ReactElement {
   const canViewSharedInboxReport = !isClient && canManageClientConfiguration;
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
   const canEdit = canWriteCompany(activeCompany);
-  const isTestWorkspace = activeCompany?.payroll_environment === 'migration_rehearsal';
-  const canManagePlaceholders = canManageOrganization && !isTestWorkspace;
+  const isContainedCompany = activeCompany?.payroll_environment === 'migration_rehearsal' || Boolean(activeCompany?.test_workspace) || Boolean(activeCompany?.demo);
+  const canManagePlaceholders = canManageOrganization && !isContainedCompany;
 
   const requestedTab = searchParams.get('tab');
   const activeTab: 'grid' | 'shared-emails' = (canViewSharedInboxReport && requestedTab === 'shared-emails') ? 'shared-emails' : 'grid';
@@ -162,7 +162,7 @@ export function StaffEmployeeContactDetails(): ReactElement {
           >
             <SharedInboxReportPanel
               activeCompanyId={companyId}
-              readOnly={!canEdit || isTestWorkspace}
+              readOnly={!canEdit || isContainedCompany}
               canManagePlaceholders={canManagePlaceholders}
               onReportLoaded={(report) => setSharedReportSummary(report.summary)}
               onCleared={(clearedCompanyId) => {

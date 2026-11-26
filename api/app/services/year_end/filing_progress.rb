@@ -19,7 +19,7 @@ module YearEnd
     def call
       return [] if @year < Checklist::FIRST_TAX_YEAR
       decisions = @decisions || PayrollFilingResponsibility.where(company_id: @company.id, tax_year: @year, quarter: nil, responsible_party: "cornerstone").pluck(:filing_type)
-      return [] if @company.test_workspace?
+      return [] if @company.practice_copy?
 
       records = (@records || PayrollFilingRecord.where(company_id: @company.id, tax_year: @year, quarter: nil)).index_by { |r| [ r.filing_type, r.agency ] }
       identities = []

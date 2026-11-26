@@ -21,7 +21,7 @@ module Api
         before_action :enforce_finance_book_context!
         before_action :enforce_company_access!
         before_action :enforce_test_workspace_access!
-        before_action :enforce_test_workspace_safety!
+        before_action :enforce_contained_company_safety!
         before_action :enforce_high_impact_role_policy!
 
         private
@@ -143,16 +143,16 @@ module Api
           }, status: :forbidden
         end
 
-        def enforce_test_workspace_safety!
-          return unless current_company&.test_workspace?
+        def enforce_contained_company_safety!
+          return unless current_company&.contained?
 
-          unless current_company.migration_rehearsal_status == "ready"
+          if current_company.test_workspace? && current_company.migration_rehearsal_status != "ready"
             return render json: {
               error: "This test workspace is still being prepared. Try again after its verified copy is ready."
             }, status: :conflict
           end
           return unless TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action_name,
-            request_method: request.request_method, demo: current_company.demo?)
+            request_method: request.request_method, demo: current_company.demo?, legacy_demo: current_company.legacy_demo?)
 
           message = if current_company.demo?
             Company::DEMO_UNAVAILABLE_MESSAGE

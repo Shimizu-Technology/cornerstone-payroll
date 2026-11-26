@@ -27,22 +27,21 @@ module YearEnd
 
     private def build_overview
       rows = candidate_companies.map { |company| row(company) }
+      live_rows = rows.reject { |entry| entry[:demo] }
       {
         tax_year: year,
         # Undecided clients first: nothing else can start until step 1 is answered.
         clients: rows.sort_by { |row| [ status_rank(row[:status]), row[:w2] && row[:form_1099] ? 1 : 0, -row[:issue_count].to_i, row[:name].downcase ] },
         counts: {
-          needs_action: rows.count { |row| row[:status] == "needs_action" },
-          check_needed: rows.count { |row| row[:status] == "check_needed" },
-          ready: rows.count { |row| row[:status] == "ready" },
-          not_filing: rows.count { |row| row[:status] == "not_filing" }
+          needs_action: live_rows.count { |row| row[:status] == "needs_action" },
+          check_needed: live_rows.count { |row| row[:status] == "check_needed" },
+          ready: live_rows.count { |row| row[:status] == "ready" },
+          not_filing: live_rows.count { |row| row[:status] == "not_filing" }
         },
-        filing_reminder_count: Date.current >= Date.new(year + 1, 1, 1) ? rows.count { |row| row[:filing_progress].any? { |filing| filing[:status].in?(%w[not_filed rejected needs_correction accepted_with_errors]) } } : nil,
+        filing_reminder_count: Date.current >= Date.new(year + 1, 1, 1) ? live_rows.count { |row| row[:filing_progress].any? { |filing| filing[:status].in?(%w[not_filed rejected needs_correction accepted_with_errors]) } } : nil,
         hidden: {
-          # A demo company is left out silently: it is not a filing client and
-          # must not show up as a hidden test workspace either.
           test_workspaces: accessible_companies.count(&:practice_copy?),
-          inactive_without_payroll: accessible_companies.count { |company| !company.test_workspace? && !company.active? && !relevant_inactive?(company) }
+          inactive_without_payroll: accessible_companies.count { |company| company.live_payroll? && !company.active? && !relevant_inactive?(company) }
         }
       }
     end
@@ -63,12 +62,12 @@ module YearEnd
       @company_ids ||= accessible_companies.map(&:id)
     end
 
-    # Test workspaces, demo companies included, never file. An inactive record is listed only while it
-    # still has this year's payroll, reportable one-off contractor checks or a
-    # year-end decision, so staff can say it files no forms instead of
-    # leaving it unanswered.
+    # Operating companies (live clients and active demos) appear in the Year-End
+    # queue. Practice copies never file. An inactive live client is listed only
+    # while it still has this year's payroll, reportable one-off contractor
+    # checks or a year-end decision.
     def candidate_companies
-      accessible_companies.reject(&:test_workspace?).select { |company| company.active? || relevant_inactive?(company) }
+      accessible_companies.select(&:operating?).select { |company| company.active? || (company.live_payroll? && relevant_inactive?(company)) }
     end
 
     def relevant_inactive?(company)
@@ -114,7 +113,10 @@ module YearEnd
           # revision does not cover.
           sign_off_current = efile_current && stored[:readiness] == EfileCheck.readiness_stamp(readinesses[company.id])
           EfileCheck.enqueue(company.id, year, input_revisions[company.id]) unless sign_off_current
-          issues.concat(stored[:issues].map { |entry| { code: entry[:code], label: entry[:message] } }) if efile_current
+          if efile_current
+            stored_issues = stored[:issues].reject { |entry| Checklist::DEMO_EXPECTED_CODES.include?(entry[:code]) }
+            issues.concat(stored_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
+          end
         end
       end
       readiness = readinesses[company.id]
@@ -143,6 +145,7 @@ module YearEnd
       {
         company_id: company.id,
         name: company.name,
+        demo: company.demo?,
         active: company.active?,
         status: status,
         issue_count: status == "check_needed" ? nil : issues.length,
@@ -399,7 +402,7 @@ module YearEnd
     # Printed or paid contractor checks of every candidate company, linked or
     # not, in one query.
     def issued_contractor_checks
-      @issued_contractor_checks ||= OneOffPayees.issued_checks(accessible_companies.reject(&:test_workspace?).map(&:id), year)
+      @issued_contractor_checks ||= OneOffPayees.issued_checks(accessible_companies.select(&:operating?).map(&:id), year)
     end
 
     # Form1099NecAggregator's unlinked one-off contractor payees (printed or

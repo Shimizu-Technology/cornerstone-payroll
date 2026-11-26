@@ -107,19 +107,19 @@ RSpec.describe "Demo company staff and client access", type: :request do
     let!(:demo_employee) { create(:employee, company: demo, department: create(:department, company: demo), first_name: "Robin", last_name: "Lantern") }
     let!(:live_employee) { create(:employee, company: live, department: create(:department, company: live), first_name: "Real", last_name: "Person") }
 
-    it "shows a demo client only its demo company, like an ordinary client" do
+    it "shows a demo client only its demo company, with live shape and demo flag" do
       maren = demo_client
       sign_in(maren)
       get "/api/v1/companies"
       companies = response.parsed_body.fetch("companies")
       expect(companies.map { |company| company["id"] }).to eq([ demo.id ])
-      expect(companies.first).to include("test_workspace" => false, "payroll_environment" => "live")
-      expect(response.body).not_to match(/demo|practice copy|test workspace/i)
+      expect(companies.first).to include("test_workspace" => false, "payroll_environment" => "live", "demo" => true)
+      expect(response.body).not_to match(/practice copy|test workspace/i)
 
       get "/api/v1/client/employees", headers: { "X-Company-Id" => demo.id.to_s }
       expect(response).to have_http_status(:ok), response.body
       expect(response.body).to include("Lantern")
-      expect(response.body).not_to match(/demo|practice copy|test workspace/i)
+      expect(response.body).not_to match(/practice copy|test workspace/i)
 
       get "/api/v1/client/employees", headers: { "X-Company-Id" => live.id.to_s }
       expect(response).to have_http_status(:forbidden)
@@ -174,11 +174,19 @@ RSpec.describe "Demo company staff and client access", type: :request do
             .to be(false), "#{controller_path}##{action} is blocked for a demo"
         end
       end
-      closed = { "api/v1/admin/reports" => %w[w2_gu_efw2 form_1099_pub1220], "api/v1/admin/pay_periods" => %w[generate_fit_check],
-                 "api/v1/admin/payroll_filing_records" => %w[create_event], "api/v1/admin/invoices" => %w[create] }
+      closed = { "api/v1/admin/reports" => %w[w2_gu_efw2 form_1099_pub1220 quarterly_compliance_packet_swica_ascii],
+                 "api/v1/admin/invoices" => %w[create], "api/v1/admin/tax_configs" => %w[update],
+                 "api/v1/admin/filing_submitters" => %w[update], "api/v1/admin/annual_retirement_limits" => %w[create] }
       closed.each do |controller_path, actions|
         actions.each do |action|
           expect(TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action, request_method: "POST", demo: true)).to be(true)
+        end
+      end
+      # Legacy test-workspace demos also keep trigger-backed tables blocked until Migrate drops those triggers.
+      { "api/v1/admin/pay_periods" => %w[generate_fit_check], "api/v1/admin/payroll_filing_records" => %w[create_event] }.each do |controller_path, actions|
+        actions.each do |action|
+          expect(TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action, request_method: "POST", demo: true, legacy_demo: true)).to be(true)
+          expect(TestWorkspaceSafetyPolicy.blocked?(controller_path: controller_path, action_name: action, request_method: "POST", demo: true, legacy_demo: false)).to be(false)
         end
       end
       expect(TestWorkspaceAccessPolicy.allowed?(user: accountant, company: demo, request_method: "POST", capability: :manage_client_configuration)).to be(true)

@@ -13,7 +13,7 @@ class YearEndEfileCheckJob < ApplicationJob
     return if stored && stored[:revision] == revision && stored[:readiness] == YearEnd::EfileCheck.current_readiness_stamp(company_id, year)
 
     company = Company.find_by(id: company_id)
-    YearEnd::Checklist.new(company: company, year: year).call if company && !company.test_workspace?
+    YearEnd::Checklist.new(company: company, year: year).call if company&.operating?
   rescue StandardError => error
     # Exception messages can contain private filing data. Log identifiers only.
     Rails.logger.error("Year-end e-file check company_id=#{company_id} year=#{year} error_class=#{error.class.name}")
