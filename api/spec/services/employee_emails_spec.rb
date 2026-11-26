@@ -45,8 +45,61 @@ RSpec.describe "Employee emails" do
       expect(Mail::Address.new(from).display_name).to start_with("Evil x@y Bcc: victim@example.net")
     end
 
+    it "neutralizes control, format and BiDi characters and encoded-words in the From name and the subject" do
+      hostile = "Harbor\u2028Finch\u0000 \u202Eeman\u200B =?UTF-8?B?UGF5cm9sbCBTdXBwb3J0?= Kitchen\r\nBcc: x@y.test"
+      from = EmployeeEmails::Message.from_header(hostile)
+      brand = EmployeeEmails::Brand.new(name: hostile, app_name: nil, logo_url: nil, primary_color: nil, help_email: nil)
+      subject = EmployeeEmails::Message.new(brand: brand, subject: "Hi #{hostile}", heading: "h", paragraphs: []).payload(to: "kai@example.net")[:subject]
+
+      [ from, subject ].each do |header|
+        expect(header).not_to match(/[\p{Cc}\p{Cf}\u2028\u2029]/)
+        expect(header).not_to include("=?")
+      end
+      expect(Mail::Address.new(from).address).to eq("noreply@payroll.example.test")
+      expect(subject).to start_with("Hi Harbor Finch eman")
+    end
+
+    it "caps a long employer name and subject with plain dots" do
+      expect(EmployeeEmails::Message.header_name("A" * 30 + " " + "B" * 40)).to eq("#{'A' * 30}...")
+      long = EmployeeEmails::Message.new(brand: EmployeeEmails::Brand.for(company), subject: "word " * 60, heading: "h", paragraphs: [])
+      expect(long.subject.length).to be <= EmployeeEmails::Message::SUBJECT_MAX
+      expect(long.subject).to end_with("...")
+    end
+
     it "caps a long employer name" do
       expect(EmployeeEmails::Message.header_name("A" * 30 + " " + "B" * 40).length).to be <= EmployeeEmails::Message::SENDER_NAME_MAX
+    end
+
+    it "omits a reply-to address that isn't a plain, valid address" do
+      contact = company.help_contacts.create!(position: 1, name: "Front desk", email: "desk@harborfinch.example.test")
+      [ "a..b@harborfinch.example.test", "desk@harborfinch.example.test\u2028Bcc: x@y.test", "Desk <desk@harborfinch.example.test>" ].each do |bad|
+        contact.update_columns(email: bad)
+        company.help_contacts.reset
+        expect(invite).not_to have_key(:reply_to), bad
+      end
+    end
+
+    it "never puts an address outside the demo allow-list in a demo company's reply-to" do
+      demo = create_demo_company(organization: create(:organization), name: "Demo Kitchen", fixture_key: "demo-kitchen")
+      demo.help_contacts.create!(position: 1, name: "Real person", email: "real.person@harborfinch.example.com")
+      previous = ENV.fetch(DemoOutbound::ENV_KEY, nil)
+      ENV[DemoOutbound::ENV_KEY] = "allowed@demo-mail.example"
+      expect(EmployeeEmails::Brand.for(demo).help_email).to be_nil
+
+      demo.help_contacts.create!(position: 2, name: "Demo desk", email: "allowed@demo-mail.example")
+      demo.help_contacts.reset
+      expect(EmployeeEmails::Brand.for(demo).help_email).to eq("allowed@demo-mail.example")
+
+      filtered = DemoOutbound.scoped(demo) do
+        DemoOutbound.filter_payload({ to: "allowed@demo-mail.example", reply_to: "real.person@harborfinch.example.com" })
+      end
+      expect(filtered).not_to have_key(:reply_to)
+      kept = DemoOutbound.scoped(demo) do
+        DemoOutbound.filter_payload({ to: "allowed@demo-mail.example", "reply_to" => "allowed@demo-mail.example" })
+      end
+      expect(kept[:reply_to]).to eq([ "allowed@demo-mail.example" ])
+    ensure
+      ENV[DemoOutbound::ENV_KEY] = previous
     end
 
     it "replies to the first Help contact with an email, and to no one without one" do
@@ -102,11 +155,43 @@ RSpec.describe "Employee emails" do
       brand = EmployeeEmails::Brand.for(company)
       all = described_class.message(brand, url: url, path: "sign_up", expires_at: nil, features: %i[stubs tax_forms profile_requests])
       stubs = described_class.message(brand, url: url, path: "sign_up", expires_at: nil, features: %i[stubs])
+      stubs_and_contact = described_class.message(brand, url: url, path: "sign_up", expires_at: nil, features: %i[stubs profile_requests])
 
       expect(all.paragraphs.first).to eq("Harbor Finch Kitchen invited you to its employee app, where you can see your " \
-        "pay stubs and tax forms and keep your contact details up to date.")
+        "pay stubs and tax forms, and keep your contact details up to date.")
       expect(stubs.paragraphs.first).to eq("Harbor Finch Kitchen invited you to its employee app, where you can see your pay stubs.")
+      expect(stubs_and_contact.paragraphs.first).to eq("Harbor Finch Kitchen invited you to its employee app, where you can see your " \
+        "pay stubs and keep your contact details up to date.")
       expect(stubs.note).to eq("This link works once and expires in 14 days.")
+    end
+
+    it "keeps the token out of the subject, heading and inbox preview" do
+      mail = invite
+      preheader = mail[:html][%r{<div style="display:none;[^>]*>(.*?)</div>}m, 1]
+
+      expect(preheader).to start_with("Set up your account to get started.")
+      [ mail[:subject], heading_of(mail[:html]), preheader ].each { |part| expect(part).not_to include(token) }
+    end
+
+    it "renders the reactivate path as a sign-in" do
+      mail = invite(path: "reactivate")
+
+      expect(mail[:html]).to include(">Sign in</a>", "You already have an employee app login.")
+      expect(mail[:text].lines.map(&:chomp)).to include("Sign in: #{url}")
+    end
+
+    it "has an Outlook button and a fixed-width card for Outlook" do
+      html = invite[:html]
+
+      expect(html).to include(%(<v:roundrect xmlns:v="urn:schemas-microsoft-com:vml"), %(href="#{url}"), "<!--[if !mso]><!-->")
+      expect(html).to include(%(<!--[if mso]><table role="presentation" width="520" align="center"))
+    end
+
+    it "names no features when the employer's settings can't be read" do
+      allow(CompanyFeatures).to receive(:for).and_raise(ActiveRecord::StatementInvalid, "boom")
+
+      expect(described_class.features(company)).to eq([])
+      expect(invite[:text]).to include("Harbor Finch Kitchen invited you to its employee app.\n")
     end
 
     it "carries nothing about pay" do
@@ -124,28 +209,83 @@ RSpec.describe "Employee emails" do
       expect(mail[:html]).to include('bgcolor="#0f766e"')
     end
 
-    it "shows an initial badge without a logo and the logo when there is one" do
+    def uploaded_logo!(slug: "harborfinch")
+      company.update_columns(subdomain_slug: slug)
+      allow(company).to receive_messages(brand_logo_digest: "0123456789abcdef", brand_logo_extension: "png")
+      allow(EmployeeLinks::AppUrl).to receive(:subdomain_live?).with(company).and_return(true)
+    end
+
+    it "shows the uploaded logo in a white cell, and an initial badge without one" do
       expect(invite[:html]).to include(">H</td>")
       expect(invite[:html]).not_to include("<img")
 
-      company.update!(branding: { "logo_url" => "https://cdn.example.com/finch.png" })
+      uploaded_logo!
+      ENV["PUBLIC_API_URL"] = "https://employee-api.example.com"
       html = invite[:html]
-      expect(html).to include(%(<img src="https://cdn.example.com/finch.png" alt="Harbor Finch Kitchen" height="40"))
+      expect(html).to include(%(<td bgcolor="#ffffff" style="background-color:#ffffff;padding:4px;border-radius:8px;"><img ) +
+        %(src="https://employee-api.example.com/api/v1/public/tenant_branding/logo/harborfinch/0123456789abcdef.png" alt="Harbor Finch Kitchen" height="40"))
       expect(html).not_to include(">H</td>")
     end
 
-    it "links an uploaded logo through the public logo route only while the subdomain is live and the API's address is set" do
-      company.update_columns(subdomain_slug: "harborfinch")
-      allow(company).to receive_messages(brand_logo_digest: "0123456789abcdef", brand_logo_extension: "png")
-      allow(EmployeeLinks::AppUrl).to receive(:subdomain_live?).with(company).and_return(true)
+    it "links an uploaded logo only through our own route, while the subdomain is live and the API's address is set" do
+      uploaded_logo!
       expect(EmployeeEmails::Brand.for(company).logo_url).to be_nil
 
-      ENV["PUBLIC_API_URL"] = "https://employee-api.example.com/"
+      ENV["PUBLIC_API_URL"] = "https://Employee-API.example.com/"
       expect(EmployeeEmails::Brand.for(company).logo_url)
         .to eq("https://employee-api.example.com/api/v1/public/tenant_branding/logo/harborfinch/0123456789abcdef.png")
 
       allow(EmployeeLinks::AppUrl).to receive(:subdomain_live?).with(company).and_return(false)
       expect(EmployeeEmails::Brand.for(company).logo_url).to be_nil
+    end
+
+    it "accepts only a bare https origin for the API's address" do
+      uploaded_logo!
+      [ "http://employee-api.example.com", "https://employee-api.example.com/api", "https://employee-api.example.com:8443",
+        "https://user@employee-api.example.com", "https://employee-api.example.com?x=1", "https://localhost",
+        "javascript:alert(1)", "not a url" ].each do |value|
+        ENV["PUBLIC_API_URL"] = value
+        expect(EmployeeEmails::Brand.for(company).logo_url).to be_nil, value
+      end
+    end
+
+    it "never uses a client-entered logo URL, even when an upload can't be linked" do
+      company.update!(branding: { "logo_url" => "https://tracker.example.com/pixel.png" })
+      expect(invite[:html]).not_to include("<img")
+
+      uploaded_logo!
+      expect(invite[:html]).not_to include("tracker.example.com")
+    end
+
+    it "draws only an https logo, and a data: logo only in a preview" do
+      base = EmployeeEmails::Brand.new(name: "Harbor Finch Kitchen", app_name: nil, logo_url: nil, primary_color: nil, help_email: nil)
+      draw = ->(logo, preview: false) { EmployeeEmails::Message.new(brand: base.with(logo_url: logo), subject: "s", heading: "h", paragraphs: []).html(preview: preview) }
+
+      [ "http://cdn.example.com/a.png", "javascript:alert(1)", "data:image/png;base64,AAAA", "//cdn.example.com/a.png",
+        "https://localhost/a.png" ].each { |logo| expect(draw.call(logo)).not_to include("<img"), logo }
+      expect(draw.call("https://cdn.example.com/a.png")).to include(%(<img src="https://cdn.example.com/a.png"))
+      expect(draw.call("data:image/png;base64,AAAA", preview: true)).to include(%(<img src="data:image/png;base64,AAAA"))
+      expect(draw.call("javascript:alert(1)", preview: true)).not_to include("<img")
+    end
+
+    it "can't be used to break out of a style attribute, and never crashes on a short color" do
+      hostile = EmployeeEmails::Brand.new(name: "Harbor Finch Kitchen", app_name: nil, logo_url: nil, help_email: nil,
+        primary_color: "#000000;background-image:url(https://tracker.example.com/x)")
+      html = EmployeeEmails::Message.new(brand: hostile, subject: "s", heading: "h", paragraphs: [], action: { label: "Go", url: url }).html
+
+      expect(html).not_to include("background-image", "tracker.example.com")
+      expect(html).to include('bgcolor="#194baa"')
+      expect(hostile.with(primary_color: "#fff").action_color).to eq("#194baa")
+      expect(described_class.action_color_for("#fff")).to eq("#194baa")
+      expect(described_class.action_color_for(nil)).to eq("#194baa")
+    end
+
+    it "escapes the client's app name" do
+      company.update!(branding: { "app_name" => %(Finch & Co's "Crew") })
+      mail = invite
+
+      expect(mail[:html]).to include("Finch &amp; Co&#39;s &quot;Crew&quot;")
+      expect(mail[:html]).not_to include(%(Finch & Co's "Crew"))
     end
 
     it "keeps white button text readable on any brand color" do
@@ -194,6 +334,15 @@ RSpec.describe "Employee emails" do
       expect(mail[:html].scan(/href="([^"]+)"/).flatten.uniq).to eq([ "https://employees.example.test/taxes" ])
     end
 
+    it "names the legal employer in the required sentences even when the app shows another name" do
+      company.update!(branding: { "display_name" => "Harbor Finch" })
+      mail = described_class.payload(document, "kai@example.net")
+
+      expect(mail[:text]).to include("Your 2026 Form W-2GU from Harbor Finch Kitchen is now available in your employee app.",
+        "If you weren't expecting this email, contact Harbor Finch Kitchen.")
+      expect(mail[:from]).to start_with(%("Harbor Finch via Cornerstone Payroll"))
+    end
+
     it "still says where to look when the app has no address" do
       ENV["EMPLOYEE_APP_URL"] = nil
       mail = described_class.payload(document, "kai@example.net")
@@ -211,6 +360,8 @@ RSpec.describe "Employee emails" do
         expect(paths.map { |path| File.basename(path) }).to include("invite_sign_up.html", "invite_sign_in.txt",
           "activation_notice.html", "tax_form_notice.html")
         expect(File.read(File.join(dir, "invite_sign_up.html"))).to include("Harbor Finch Kitchen", ">Set up your account</a>")
+        expect(File.read(File.join(dir, "invite_sign_up.txt"))).to include("Reply-To: help@harborfinch.example.test")
+        expect(File.read(File.join(dir, "invite_sign_in.html"))).to include('<img src="data:image/svg+xml;base64,')
       end
     end
   end
