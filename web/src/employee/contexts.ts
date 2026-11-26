@@ -41,10 +41,22 @@ export interface EmployeeAuthValue {
 export interface HideAmountsValue {
   hidden: boolean;
   setHidden: (hidden: boolean) => void;
+  /** True while the one-time explainer note should be visible on screen. */
+  explainerVisible: boolean;
+  /** Persists that the one-time explainer has been shown on this device. */
+  markExplainerShown: () => void;
+  /** Hides the one-time explainer after its first screen unmounts or navigates away. */
+  dismissExplainer: () => void;
 }
 
-/** "Hide amounts": every amount on screen shows as "$•••" while this is on. */
-export const HideAmountsContext = createContext<HideAmountsValue>({ hidden: false, setHidden: () => undefined });
+/** "Hide amounts": every amount on screen shows as "$•••" while this is on (masked by default). */
+export const HideAmountsContext = createContext<HideAmountsValue>({
+  hidden: true,
+  setHidden: () => undefined,
+  explainerVisible: false,
+  markExplainerShown: () => undefined,
+  dismissExplainer: () => undefined,
+});
 
 export function useHideAmounts(): HideAmountsValue {
   return useContext(HideAmountsContext);

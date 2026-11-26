@@ -115,22 +115,38 @@ describe('employee app shell', () => {
     expect(contextChecks).toBeGreaterThan(1);
   });
 
-  it('remembers "Hide amounts" on this device', async () => {
+  it('masks amounts by default and remembers the choice on this device', async () => {
     signedIn();
+    const statement = {
+      id: 906,
+      pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20', run_purpose: 'regular' },
+      check_date: '2026-11-20',
+      gross_pay: '612.50',
+      net_pay: '534.18',
+      total_hours: '38.50',
+      payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-20', check_number_last4: null },
+      pdf_available: true,
+    };
     vi.stubGlobal('fetch', respond({
       '/employee/links': () => Response.json([{ id: 3 }]),
-      '/employee/context': () => new Response(null, { status: 204 }),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [statement], years: [2026], next_page: null }),
+      '/employee/statements/906': () => Response.json({ ...statement, earnings: [], taxes: [], deductions: [], other_pay: [], ytd: { gross: '1000.00', net: '800.00' } }),
     }));
     const first = render(<EmployeeApp />);
-    await userEvent.click(await screen.findByRole('button', { name: 'Hide amounts' }));
-    expect(screen.getByRole('button', { name: 'Show amounts' })).toBeTruthy();
-    expect(localStorage.getItem('employee-app:hide-amounts')).toBe('true');
+    const showButton = await screen.findByRole('button', { name: 'Show amounts' });
+    expect(showButton.getAttribute('aria-pressed')).toBeNull();
+    await userEvent.click(showButton);
+    expect(screen.getByRole('button', { name: 'Hide amounts' })).toBeTruthy();
+    expect(localStorage.getItem('employee-app:hide-amounts')).toBe('false');
     first.unmount();
 
     render(<EmployeeApp />);
-    expect(await screen.findByRole('button', { name: 'Show amounts' })).toBeTruthy();
-    await userEvent.click(screen.getByRole('button', { name: 'Show amounts' }));
-    expect(localStorage.getItem('employee-app:hide-amounts')).toBeNull();
+    const hideButton = await screen.findByRole('button', { name: 'Hide amounts' });
+    expect(hideButton.getAttribute('aria-pressed')).toBeNull();
+    await userEvent.click(hideButton);
+    expect(screen.getByRole('button', { name: 'Show amounts' })).toBeTruthy();
+    expect(localStorage.getItem('employee-app:hide-amounts')).toBe('true');
   });
 
   it('points Help to the manager, never to Cornerstone', async () => {
@@ -382,7 +398,8 @@ describe('employee app shell', () => {
 
     expect(await screen.findByRole('heading', { name: '2026 W-2GU' })).toBeTruthy();
     expect(screen.getByText('A corrected form is being prepared')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Download W-2GU (PDF)' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Download W-2GU PDF (shows amounts)' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: /Show amounts|Hide amounts/ })).toBeNull();
     expect(screen.getByRole('heading', { name: '2025 W-2GU' })).toBeTruthy();
     expect(screen.getAllByText('Your paper copy is mailed to your home address.')).toHaveLength(2);
   });
@@ -568,12 +585,12 @@ describe('employee app shell', () => {
     await userEvent.click(within(list).getByRole('link', { name: /Mar 13/ }));
     const adjusted = await screen.findByRole('article');
     expect(within(adjusted).getByText('Includes recorded payroll adjustments.')).toBeTruthy();
-    expect(within(adjusted).getByRole('button', { name: /View original stub \(PDF\)/ })).toBeTruthy();
+    expect(within(adjusted).getByRole('button', { name: 'View original stub PDF (shows amounts)' })).toBeTruthy();
     expect(within(adjusted).getByText('This PDF is the original QuickBooks stub from before the recorded adjustment, so its amounts differ from the ones above.')).toBeTruthy();
 
     await userEvent.click(within(adjusted).getAllByRole('link', { name: /^Older:/ })[0]);
     const unadjusted = await screen.findByRole('article');
-    await within(unadjusted).findByRole('button', { name: /View original stub \(PDF\)/ });
+    await within(unadjusted).findByRole('button', { name: 'View original stub PDF (shows amounts)' });
     expect(within(unadjusted).queryByText(/from before the recorded adjustment/)).toBeNull();
   });
 
