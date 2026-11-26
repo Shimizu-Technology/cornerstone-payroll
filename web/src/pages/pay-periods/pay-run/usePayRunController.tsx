@@ -1634,6 +1634,14 @@ export function usePayRunController({
     return displayEmployees;
   })();
 
+  const reloadClientReview = () => {
+    const current = activePageScopeRef.current;
+    if (current.companyId === companyId && current.payRunId === payPeriod.id &&
+        correctionRouteGeneration === commitRouteGenerationRef.current) {
+      void loadPayPeriod(payPeriod.id, true);
+    }
+  };
+
   return { status: 'ready' as const, sections: {
     coverage: { commitRouteGenerationRef, companyId, handleRefreshSetup, handleRunPayroll, payRunId, pendingCoverageActionRef, processing, setSourceCoverageAcknowledged, setSourceCoverageOpen, setSourceCoverageReason, sourceCoverageAcknowledged, sourceCoverageOpen, sourceCoverageReason },
     reviewDialogs: { companyId, currentPath, loadPayPeriod, payPeriod, payRunId, paymentMethodItem, reviewingItem, setPaymentMethodItem, setReviewingItem },
@@ -1641,7 +1649,7 @@ export function usePayRunController({
     processing: { onPreviewDownloaded: (revision: number) => setPayPeriod(current => current?.id === payRunId && current.company_id === companyId
       ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, processingAction, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
     feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, documentBlockedEmployees, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
-    blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, reloadClientReview: () => { void loadPayPeriod(payPeriod.id, true); }, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
+    blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, reloadClientReview, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
     source: { sourceCoverageProcessing: processing, onReviewSourceCoverage: isDraft || isCalculated ? () => { if (!processing) void handleRunPayroll(); } : undefined, aireSourceRefreshToken, companyId, currentAireRecord, hoursMap, invalidateAireSource, loadPayPeriod, payPeriod, setTimeTrackingAutoPreview, setTimeTrackingImportOpen },
     metadata: { formatCorrectionPayDate, isApproved, isCalculated, isCommitted, isCorrection, isVoided, payDateCorrections, payPeriod, processedBy, statusConfig },
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
