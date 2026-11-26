@@ -7,9 +7,10 @@ module DemoCompany
   # Read-only before/after verification tool for the Track B demo-shape migration.
   #
   # Always refuses to run inside an existing database transaction and executes
-  # inside its own `SET TRANSACTION READ ONLY` transaction using strictly
-  # read-only model/service predicates (no early-access window retirements, no
-  # practice-account deactivations, no Year-End job enqueues).
+  # inside its own `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`
+  # transaction using strictly read-only model/service predicates (no
+  # early-access window retirements, no practice-account deactivations, no
+  # Year-End job enqueues).
   #
   # Captures a deterministic, PII-free snapshot per named company covering:
   # - shape columns (the ONLY section allowed to differ between before and after;
@@ -172,7 +173,7 @@ module DemoCompany
       ensure_no_open_transaction!
       system_scope do
         ApplicationRecord.transaction do
-          ApplicationRecord.connection.execute("SET TRANSACTION READ ONLY")
+          ApplicationRecord.connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
           authorize!
           TenantSubdomainRegistry.invalidate!
           companies = load_companies!
@@ -636,7 +637,17 @@ module DemoCompany
 
         if before_val.is_a?(Hash) && after_val.is_a?(Hash)
           (before_val.keys | after_val.keys).sort.flat_map do |key|
-            collect_diffs(before_val[key], after_val[key], prefix: "#{prefix}.#{key}")
+            b_has = before_val.key?(key)
+            a_has = after_val.key?(key)
+            if b_has && a_has
+              collect_diffs(before_val[key], after_val[key], prefix: "#{prefix}.#{key}")
+            else
+              [ {
+                path: "#{prefix}.#{key}",
+                before: b_has ? before_val[key] : :missing,
+                after: a_has ? after_val[key] : :missing
+              } ]
+            end
           end
         else
           [ { path: prefix, before: before_val, after: after_val } ]

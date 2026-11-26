@@ -114,13 +114,17 @@ module DemoCompany
 
     def validate_targets_before_write!
       found = Company.where(organization_id: organization.id, id: company_ids).order(:id).to_a
-      missing = company_ids - found.map(&:id)
-      raise Refused, "Company ID(s) not found in organization: #{missing.join(', ')}" if missing.any?
+      ensure_all_found!(found.map(&:id))
 
       found.each do |company|
         classify_company!(company)
         ensure_no_time_tracking_history!(company)
       end
+    end
+
+    def ensure_all_found!(found_ids)
+      missing = company_ids - found_ids
+      raise Refused, "Company ID(s) not found in organization: #{missing.join(', ')}" if missing.any?
     end
 
     def classify_company!(company)
@@ -158,8 +162,9 @@ module DemoCompany
     def plan_only
       connection = ApplicationRecord.connection
       ApplicationRecord.transaction do
-        connection.execute("SET TRANSACTION READ ONLY")
+        connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         companies = Company.where(organization_id: organization.id, id: company_ids).order(:id).to_a
+        ensure_all_found!(companies.map(&:id))
         changes = []
         to_convert = []
         already_converted = []
@@ -187,6 +192,7 @@ module DemoCompany
 
     def apply_per_company!
       ordered_ids = Company.where(organization_id: organization.id, id: company_ids).order(:id).pluck(:id)
+      ensure_all_found!(ordered_ids)
       changes = []
       converted = []
       already_converted = []
@@ -216,7 +222,8 @@ module DemoCompany
       ApplicationRecord.transaction do
         connection.execute("SET LOCAL lock_timeout = #{connection.quote(LOCK_TIMEOUT)}")
 
-        company = Company.where(organization_id: organization.id).lock.find(company_id)
+        company = Company.where(organization_id: organization.id).lock.find_by(id: company_id)
+        raise Refused, "Company ID(s) not found in organization: #{company_id}" unless company
         state = classify_company!(company)
         ensure_no_time_tracking_history!(company)
         next [ :already_converted, [] ] if state == :already_converted

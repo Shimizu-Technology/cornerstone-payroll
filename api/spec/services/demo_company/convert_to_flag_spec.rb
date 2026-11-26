@@ -349,6 +349,30 @@ RSpec.describe DemoCompany::ConvertToFlag do
 
       expect(old_demo.reload).to be_legacy_demo
     end
+
+    it "refuses before any write if a requested company leaves the organization between validation and query" do
+      other_org = create(:organization).tap { |org| created_organization_ids << org.id }
+
+      # Dry-run: company moves out right after validate_targets_before_write!.
+      service_dry = described_class.new(organization: organization, actor: admin, company_ids: [ old_demo.id, second_demo.id ], dry_run: true)
+      allow(service_dry).to receive(:validate_targets_before_write!).and_wrap_original do |orig|
+        orig.call
+        second_demo.update_columns(organization_id: other_org.id)
+      end
+      expect { service_dry.call }.to raise_error(described_class::Refused, /not found in organization: #{second_demo.id}/)
+
+      # Restore and test apply mode: neither company may be written.
+      second_demo.update_columns(organization_id: organization.id)
+      service_apply = described_class.new(organization: organization, actor: admin, company_ids: [ old_demo.id, second_demo.id ], dry_run: false)
+      allow(service_apply).to receive(:validate_targets_before_write!).and_wrap_original do |orig|
+        orig.call
+        second_demo.update_columns(organization_id: other_org.id)
+      end
+      expect { service_apply.call }.to raise_error(described_class::Refused, /not found in organization: #{second_demo.id}/)
+      expect(old_demo.reload).to be_legacy_demo
+      expect(second_demo.reload).to be_legacy_demo
+      expect(AuditLog.where(action: described_class::AUDIT_ACTION)).to be_empty
+    end
   end
 
   describe "atomic rollback on half-failure" do
