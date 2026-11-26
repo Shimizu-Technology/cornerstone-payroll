@@ -25,21 +25,32 @@ RSpec.describe "Client viewer access", type: :request do
     bearer(user.clerk_id).merge("X-Company-Id" => company.id.to_s)
   end
 
-  # Every non-GET route in the client namespace, with real ids where a
-  # controller looks the record up before the viewer guard runs
-  # (DepartmentsController inherits the admin one's lookups).
+  # Every write verb on every route in the client namespace, including a
+  # route that also answers GET, with real ids where a controller looks the
+  # record up before the viewer guard runs (DepartmentsController inherits
+  # the admin one's lookups).
+  def self.write_verbs(route)
+    route.verb.to_s.split("|").reject { |verb| %w[GET HEAD].include?(verb) || verb.empty? }
+  end
+
   def client_write_routes
     Rails.application.routes.routes.filter_map do |route|
       path = route.path.spec.to_s.delete_suffix("(.:format)")
-      verb = route.verb.to_s
-      next unless path.start_with?("/api/v1/client/") && verb.present? && !verb.match?(/GET|HEAD/)
+      verbs = self.class.write_verbs(route)
+      next unless path.start_with?("/api/v1/client/") && verbs.any?
 
       action = "#{route.defaults[:controller]}##{route.defaults[:action]}"
       filled = path.gsub(/:company_id/, company.id.to_s).gsub(/:employee_id/, employee.id.to_s)
         .gsub(/:operation/, "invite").gsub(/:id/, path.include?("departments") ? department.id.to_s : "1")
         .gsub(/:[a-z_]+/, "1")
-      verb.split("|").map { |single| [ single.downcase.to_sym, filled, action ] }
+      verbs.map { |verb| [ verb.downcase.to_sym, filled, action ] }
     end.flatten(1).uniq
+  end
+
+  it "counts a route that answers both GET and a write verb as a write" do
+    route = Struct.new(:verb).new("GET|POST")
+    expect(self.class.write_verbs(route)).to eq([ "POST" ])
+    expect(self.class.write_verbs(Struct.new(:verb).new("GET"))).to eq([])
   end
 
   it "refuses every client write endpoint to a viewer with a plain 403" do
@@ -68,11 +79,26 @@ RSpec.describe "Client viewer access", type: :request do
     expect(ClientDocument.count).to eq(0)
   end
 
-  it "still lets a viewer record read receipts" do
-    post "/api/v1/client/documents/999999/opened", headers: headers(viewer), as: :json
-    expect(response).not_to have_http_status(:forbidden)
-    post "/api/v1/client/portal_threads/999999/mark_read", headers: headers(viewer), as: :json
-    expect(response).not_to have_http_status(:forbidden)
+  it "still records a viewer's own read receipts for a document and a conversation" do
+    document = create(:client_document, company: company, uploaded_by: manager)
+    post "/api/v1/client/documents/#{document.id}/opened", headers: headers(viewer), as: :json
+    expect(response).to have_http_status(:no_content)
+    expect(document.read_receipts.pluck(:user_id)).to eq([ viewer.id ])
+
+    thread = create(:client_portal_thread, company: company, created_by: manager)
+    create(:client_portal_message, client_portal_thread: thread, company: company, author: manager)
+    get "/api/v1/client/portal_threads/#{thread.id}", headers: headers(viewer)
+    shown = response.parsed_body.fetch("data")
+    post "/api/v1/client/portal_threads/#{thread.id}/mark_read", headers: headers(viewer), as: :json,
+      params: { foreground: true, display_token: shown.fetch("display_token"), displayed_message_ids: shown.fetch("messages").map { |message| message.fetch("id") } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(PortalThreadReadReceipt.where(client_portal_thread: thread).pluck(:user_id)).to eq([ viewer.id ])
+  end
+
+  it "lets a viewer change their own notification preferences, which aren't a company change" do
+    patch "/api/v1/notification_settings", headers: headers(viewer), as: :json, params: { preferences: { portal_replies: "digest" } }
+    expect(response).to have_http_status(:ok), response.body
+    expect(PortalNotificationPreference.where(user: viewer).pluck(:category)).to include("portal_replies")
   end
 
   it "lets a viewer read payroll, employees, reports, documents and messages" do

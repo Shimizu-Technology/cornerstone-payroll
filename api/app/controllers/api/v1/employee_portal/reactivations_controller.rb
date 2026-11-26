@@ -29,8 +29,8 @@ module Api
             session: @clerk_token_payload, request: request, terms_version: terms_version
           )
           link = reactivation.call
-          if !link && reactivation.refusal == :email_mismatch
-            return render json: { error: EmployeeLinks::EMAIL_MISMATCH, code: "email_mismatch" }, status: :forbidden
+          if !link && reactivation.refusal
+            return render json: AccountController.claim_refusal_json(reactivation.refusal), status: :forbidden
           end
           unless link
             wait_for_response_floor

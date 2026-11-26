@@ -561,6 +561,36 @@ describe('employee app shell', () => {
     expect((screen.getByLabelText('Send my pay stub notices to this email') as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('checkbox', { name: /Employee App Terms/ }) as HTMLInputElement).checked).toBe(true);
   });
+
+  it.each([
+    ['email_mismatch', 'This invite is for a different email address. Sign in with the email your employer has on file, or ask them to update it.'],
+    ['code_retired', 'This sign-up code can no longer be used. Ask your employer to send an invite to your email.'],
+  ])('shows a plain message when sign-up answers %s', async (code, message) => {
+    window.history.pushState({}, '', '/activate');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input), 'http://localhost').pathname.replace(/^\/api\/v1/, '');
+      if (path === '/public/employee_terms') {
+        return Response.json({ version: '2026-11-25-draft-1', title: 'Employee App Terms', terms_url: '/terms', privacy_url: '/privacy' });
+      }
+      if (path === '/employee/activation') return Response.json({ error: 'Refused', code }, { status: 422 });
+      return new Response(null, { status: 404 });
+    }));
+    render(<EmployeeApp />);
+
+    await screen.findByText("First, tell us who you are. We'll check everything when you create your account.");
+    await userEvent.type(screen.getByLabelText('Sign-up code'), 'ABCDEFGHJK');
+    await userEvent.selectOptions(screen.getByLabelText('Month'), '4');
+    await userEvent.type(screen.getByLabelText('Day'), '7');
+    await userEvent.type(screen.getByLabelText('Year'), '1990');
+    await userEvent.type(screen.getByLabelText('Last 4 of your Social Security number'), '1234');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await userEvent.type(await screen.findByLabelText('Your email'), 'maren@harborfinch.test');
+    await userEvent.click(screen.getByRole('checkbox', { name: /Employee App Terms/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.queryByText("We couldn't match those details")).toBeNull();
+  });
 });
 
 describe('ViewOnlyBanner', () => {

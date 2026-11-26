@@ -373,9 +373,9 @@ RSpec.describe "Employee link hardening", type: :request do
       post_activation(activation_params(employee, code: invite.code, email: "first.try@example.net"))
 
       retry_locks = row_locks { post_activation(activation_params(employee, code: invite.code, email: "second.try@example.net")) }
-      # The check locks the link alone; the address is then saved under the
-      # login's lock, then the link's.
-      expect(retry_locks).to eq(%i[link user link])
+      # The check locks the employee, then the link; the address is then saved
+      # under the login's lock, then the link's.
+      expect(retry_locks).to eq(%i[employee link user link])
 
       accept_clerk_invitation!("user_riley")
       bind_locks = row_locks { get "/api/v1/auth/me", headers: bearer("user_riley") }
@@ -393,7 +393,37 @@ RSpec.describe "Employee link hardening", type: :request do
       create(:user, role: :accountant, company: company, name: "Avery Cruz", clerk_id: "user_avery_staff")
       claim_locks = row_locks { claim("user_avery_staff", activation_params(other, code: code_invite.code), **fresh_second_factor) }
       expect(response).to have_http_status(:created)
-      expect(claim_locks).to eq(%i[user link])
+      # The employee row first, so a contact edit (which locks it too) can't
+      # commit between the email-on-file check and the activation.
+      expect(claim_locks).to eq(%i[employee user link])
+    end
+
+    it "refuses a bind while a contact edit holds the employee row, and binds on the next sign-in" do
+      invite = invite!(employee, actor: staff)
+      post_activation(activation_params(employee, token: invite.token))
+      accept_clerk_invitation!("user_riley")
+      held = true
+      allow(EmployeeLinks::Bind).to receive(:locked_email_on_file).and_wrap_original do |original, *args|
+        held ? :locked : original.call(*args)
+      end
+
+      get "/api/v1/auth/me", headers: bearer("user_riley")
+      expect(response).to have_http_status(:unauthorized)
+      expect(invite.link.reload).to be_invited
+
+      held = false
+      get "/api/v1/auth/me", headers: bearer("user_riley")
+      expect(response).to have_http_status(:ok)
+      expect(invite.link.reload).to be_active
+    end
+
+    it "takes the employee row without waiting at bind and reports it held" do
+      relation = double
+      allow(Employee).to receive(:where).and_return(relation)
+      allow(relation).to receive(:lock).with("FOR NO KEY UPDATE NOWAIT").and_return(relation)
+      allow(relation).to receive(:pick).and_raise(ActiveRecord::LockWaitTimeout)
+
+      expect(EmployeeLinks::Bind.locked_email_on_file(instance_double(EmployeeAccountLink, employee_id: 1))).to eq(:locked)
     end
 
     it "retries a bind that hit a deadlock, re-checking everything under the lock" do

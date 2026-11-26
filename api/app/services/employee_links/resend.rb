@@ -65,7 +65,7 @@ module EmployeeLinks
 
         @link.claim_user = route_login(employee)
         @link.invited_by = @actor
-        credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email)
+        credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email, issued_by_staff: EmployeeLinks.staff_management_allowed?(@actor, @link.company))
         @link.save!
         retire_pending_sign_up!(pending) if pending
         path = EmployeeLinks.invite_path(@link.claim_user)
@@ -105,11 +105,12 @@ module EmployeeLinks
     end
 
     # An accepted, unbound sign-up still binds at the person's next sign-in
-    # while its nonce and its link's invite are both open.
+    # while its nonce is open and its link passes the bind rule
+    # (Bind.link_bindable?); otherwise staff reset the sign-up.
     def bindable?(pending)
       now = Time.current
       pending.active? && pending.invite_nonce_digest.present? && pending.invite_nonce_expires_at&.>(now) &&
-        @link.reload.invite_open?(now) && !@link.activation_locked?(now)
+        Bind.link_bindable?(@link.reload, pending, now: now)
     end
 
     # The pending login stays on the link (a later sign-up reuses it), but
