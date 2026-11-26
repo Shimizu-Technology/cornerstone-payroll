@@ -795,10 +795,28 @@ RSpec.describe "Year-end checklist", type: :request do
 
         expect(response).to have_http_status(:ok), response.body
         expect(response.parsed_body.dig("filing", "status")).to eq("filing_ready")
+        expect(PortalNotificationEvent.where(company: company, event_type: "w2_ready_to_post")).to be_empty
         decision = checklist_step("filing_decision")
         expect(decision["issues"].map { |issue| issue["code"] }).to eq(%w[FORM_1099_FILER_NOT_CHOSEN])
         expect(checklist_step("reconciliation")["status"]).to eq("done")
         expect(response.parsed_body.dig("data", "status")).to eq("needs_action")
+      end
+
+      it "queues the account team when 2026 employee tax forms are ready to post", :portal_notifications do
+        company.client_operating_profiles.create!(effective_on: Date.new(2026, 1, 1), version: 1,
+          offering: "payroll_service", hours_source: "manual", employee_portal_enabled: true,
+          options: { employee_portal: { features: { tax_forms: true } } })
+        activate_employee_app!(company)
+        account_team = create(:user, role: "admin", company: company)
+        list_portal_recipient!(company, user: account_team)
+        with_portal_email do
+          mark_ready
+          expect(response).to have_http_status(:ok), response.body
+
+          event = PortalNotificationEvent.find_by!(company: company, event_type: "w2_ready_to_post")
+          expect(event.metadata).to eq("tax_year" => 2026, "revision" => 1)
+          expect(event.deliveries.sole).to have_attributes(user_id: account_team.id, status: "pending", delivery_mode: "immediate")
+        end
       end
 
       it "still runs the W-2 checks and blocks on a real W-2 problem" do
