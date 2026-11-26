@@ -15,12 +15,13 @@ class TabularReportPdfGenerator
   TEXT_MUTED = "607089"
   BORDER = "CBD5E1"
 
-  def initialize(title:, subtitle:, filename:, sheets:, landscape: true)
+  def initialize(title:, subtitle:, filename:, sheets:, landscape: true, demo: false)
     @title = title
     @subtitle = subtitle
     @filename = filename
     @sheets = Array(sheets).map { |sheet| sheet.to_h.deep_symbolize_keys }
     @landscape = landscape
+    @demo = demo == true
   end
 
   attr_reader :filename
@@ -38,7 +39,8 @@ class TabularReportPdfGenerator
       render_sheet(pdf, sheet)
     end
 
-    render_with_footer(pdf, [ @title, @subtitle, "CONFIDENTIAL" ].compact_blank.join(" — "), font_size: 7)
+    base_footer = [ @title, @subtitle, "CONFIDENTIAL" ].compact_blank.join(" — ")
+    render_with_footer(pdf, DemoPdfFooter.append(base_footer, demo: @demo), font_size: 7, height: @demo ? 26 : 16, top: @demo ? 30 : 26)
   end
 
   private

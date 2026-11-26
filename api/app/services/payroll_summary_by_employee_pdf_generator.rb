@@ -31,6 +31,7 @@ class PayrollSummaryByEmployeePdfGenerator
     end
     render_table(pdf)
     render_footer(pdf)
+    DemoPdfFooter.draw_prawn_footer(pdf, company: company, y: 34, height: 8)
     pdf.render
   end
 

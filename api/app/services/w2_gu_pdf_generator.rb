@@ -25,8 +25,9 @@ class W2GuPdfGenerator
 
   attr_reader :report
 
-  def initialize(report_data)
-    @report = report_data
+  def initialize(report_data = nil, demo: nil, **report_keywords)
+    @report = report_data || report_keywords
+    @demo = demo.nil? ? @report.dig(:meta, :demo) == true : demo == true
   end
 
   def generate
@@ -55,9 +56,12 @@ class W2GuPdfGenerator
     render_caveats_block(pdf)
     render_employee_table(pdf)
 
+    base_footer = "W-2GU Filing Preparation Summary \u2014 #{report.dig(:employer, :name)} \u2014 #{report.dig(:meta, :year)} \u2014 Generated #{report.dig(:meta, :generated_at)} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY"
     render_with_footer(pdf,
-      "W-2GU Filing Preparation Summary \u2014 #{report.dig(:employer, :name)} \u2014 #{report.dig(:meta, :year)} \u2014 Generated #{report.dig(:meta, :generated_at)} \u2014 CONFIDENTIAL, FOR INTERNAL USE ONLY",
-      font_size: 7
+      DemoPdfFooter.append(base_footer, demo: @demo),
+      font_size: 7,
+      height: @demo ? 26 : 16,
+      top: @demo ? 30 : 26
     )
   end
 

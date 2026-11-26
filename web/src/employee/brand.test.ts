@@ -148,4 +148,12 @@ describe('employerBrand', () => {
     expect(employerBrand(client, 'Coral Kitchen')).toBe(client);
     expect(employerBrand(brandFrom(null), '  ')).toEqual(brandFrom(null));
   });
+
+  it('carries the demo flag only when demo is true', () => {
+    expect(brandFrom({ name: 'Sunset Grill', logo_url: null, primary_color: null, accent_color: null, demo: true }).demo).toBe(true);
+    expect(brandFrom({ name: 'Live Cafe', logo_url: null, primary_color: null, accent_color: null, demo: false }).demo).toBe(false);
+    expect(brandFrom(null).demo).toBe(false);
+    expect(employerBrand(brandFrom(null), 'Sunset Grill', true).demo).toBe(true);
+    expect(employerBrand(brandFrom(null), 'Live Cafe', false).demo).toBe(false);
+  });
 });

@@ -27,12 +27,31 @@ afterEach(cleanup);
 it('deduplicates refresh/page overlap by kind and id, replacing stale row data', () => {
   expect(mergeInboxRows([row('message'), row('document')], [{ ...row('message'), waiting: false }, row('document', 2)])).toEqual([{ ...row('message'), waiting: false }, row('document'), row('document', 2)]);
 });
+it('shows a Demo chip on demo inbox rows and marks demo companies in the client picker', async () => {
+  mocks.companies = [
+    { id: 2, organization_id: 1, name: 'Second client', active: true, payroll_environment: 'live', demo: false } as CompanyListItem,
+    { id: 7, organization_id: 1, name: 'Sunset Grill', active: true, payroll_environment: 'live', demo: true } as CompanyListItem,
+  ];
+  mocks.list.mockResolvedValue({
+    data: [
+      row('message', 1),
+      { ...row('document', 2), company_id: 7, company_name: 'Sunset Grill', demo: true },
+    ],
+    meta: { next_cursor: null },
+  });
+  render(<MemoryRouter><ClientInbox /></MemoryRouter>);
+  await screen.findByText('document item 2');
+  expect(screen.getAllByText('Demo')).toHaveLength(1);
+  expect(screen.getByRole('option', { name: 'Sunset Grill · Demo' })).toBeTruthy();
+  expect(screen.getByRole('option', { name: 'Second client' })).toBeTruthy();
+});
 it('shows server-wide counts and only switches company when opening a row', async () => {
   render(<MemoryRouter initialEntries={['/app/client-inbox?kind=message']}><ClientInbox /><Destination /></MemoryRouter>);
   await screen.findByText('message item 1');
   expect(screen.getByText('310')).toBeTruthy();
   expect(screen.getByText(/unread \(live clients\)/)).toBeTruthy();
   expect(mocks.switchCompany).not.toHaveBeenCalled();
+  expect(screen.queryByText('Demo')).toBeNull();
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'unread' } });
   await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'unread' })));
   expect(mocks.switchCompany).not.toHaveBeenCalled();
@@ -191,5 +210,5 @@ it('includes a demo company in the client filter dropdown', async () => {
   } as CompanyListItem);
   render(<MemoryRouter><ClientInbox /></MemoryRouter>);
   await screen.findByText('message item 1');
-  expect(screen.getByRole('option', { name: 'Harbor Finch Kitchen' })).toBeTruthy();
+  expect(screen.getByRole('option', { name: 'Harbor Finch Kitchen · Demo' })).toBeTruthy();
 });
