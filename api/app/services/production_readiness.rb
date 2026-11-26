@@ -235,6 +235,7 @@ class ProductionReadiness
   def base_configuration_checks
     [
       check("RAILS_ENV is production") { environment.production? },
+      check("this is a hosted deployment, not a local production copy") { !LocalDeployment.local?(env) },
       check("authentication is enabled") { env.fetch("AUTH_ENABLED", "true") == "true" },
       check("TLS is effectively forced") { config.force_ssl == true && config.assume_ssl == true },
       check("R2 is the effective Active Storage service") { config.active_storage.service.to_sym == :r2 },
@@ -389,6 +390,8 @@ class ProductionReadiness
   end
 
   def production_https_url?(value)
+    return LocalDeployment.local_origin?(value, env) if LocalDeployment.local?(env)
+
     uri = URI.parse(value.to_s)
     uri.is_a?(URI::HTTPS) &&
       uri.host.present? &&

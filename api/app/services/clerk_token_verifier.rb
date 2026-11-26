@@ -36,6 +36,8 @@ class ClerkTokenVerifier
     return false unless normalized
 
     uri = URI.parse(normalized)
+    return LocalDeployment.local_origin?(normalized) if LocalDeployment.local?
+
     uri.is_a?(URI::HTTPS) && uri.port == 443
   end
 
