@@ -4,13 +4,16 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ImportSourceDocument } from '@/services/api';
 import { ImportSourcePanel } from './ImportSourcePanel';
 
-const mocks = vi.hoisted(() => ({ previewSource: vi.fn(), downloadSource: vi.fn() }));
+const mocks = vi.hoisted(() => ({ previewSource: vi.fn(), downloadSource: vi.fn(), loadPdf: vi.fn() }));
 vi.mock('@/services/api', async (original) => ({
   ...await original<typeof import('@/services/api')>(),
   payrollIntakeImportsApi: { previewSource: mocks.previewSource, downloadSource: mocks.downloadSource },
 }));
 vi.mock('@/components/documents/PdfPreview', () => ({
-  PdfDocumentView: ({ blob }: { blob: Blob | null }) => <div data-testid="pdf-view">{blob ? `pdf ${blob.size} bytes` : 'no pdf'}</div>,
+  get PdfDocumentView() {
+    mocks.loadPdf();
+    return ({ blob }: { blob: Blob | null }) => <div data-testid="pdf-view">{blob ? `pdf ${blob.size} bytes` : 'no pdf'}</div>;
+  },
 }));
 
 const pdf: ImportSourceDocument = { id: 11, source_role: 'revel_hours', filename: 'revel-hours.pdf', content_type: 'application/pdf', byte_size: 8 };
@@ -46,6 +49,29 @@ it('shows the Revel PDF and workbook tabs and loads each file when chosen', asyn
   fireEvent.click(screen.getByRole('tab', { name: 'Revel PDF' }));
   expect(await screen.findByTestId('pdf-view')).toBeTruthy();
   expect(mocks.previewSource).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the review open when the PDF chunk fails and retries the loader in place', async () => {
+  mocks.loadPdf.mockImplementationOnce(() => { throw new Error('Could not fetch preview chunk'); });
+  mocks.downloadSource.mockRejectedValueOnce(new Error('Synthetic download failure'));
+  render(<div role="dialog" aria-label="Import review">
+    <input aria-label="Review note" defaultValue="Keep this draft" />
+    <ImportSourcePanel payPeriodId={9} importId={30} documents={[pdf]} />
+  </div>, { onCaughtError: () => {} });
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'The PDF preview could not load.');
+  expect(screen.getByRole('dialog', { name: 'Import review' })).toBeTruthy();
+  expect(screen.getByRole('textbox', { name: 'Review note' })).toHaveProperty('value', 'Keep this draft');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download PDF' }));
+  expect(await screen.findByText('Synthetic download failure')).toBeTruthy();
+  expect(mocks.downloadSource).toHaveBeenCalledWith(9, 30, 11);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
+  expect(await screen.findByTestId('pdf-view')).toBeTruthy();
+  expect(mocks.loadPdf).toHaveBeenCalledTimes(2);
+  expect(mocks.previewSource).toHaveBeenCalledOnce();
+  expect(screen.queryByText('The PDF preview could not load.')).toBeNull();
 });
 
 it('hides the Workbook tab when only the PDF was provided', async () => {

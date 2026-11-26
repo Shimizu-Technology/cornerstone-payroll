@@ -56,8 +56,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     }));
     await page.goto('/reports');
     await expect(page.getByRole('region', { name: 'Report catalog' })).toBeVisible();
-    await expect(page.getByRole('option', { name: '2026-11-01 - 2026-11-14' })).toHaveCount(0);
-    await expect(page.getByRole('option', { name: '2026-10-19 - 2026-11-01' })).toHaveCount(0);
+    await expect(page.getByRole('option', { name: 'Nov 1 – 14, 2026' })).toHaveCount(0);
+    await expect(page.getByRole('option', { name: 'Oct 19 – Nov 1, 2026' })).toHaveCount(0);
     await page.getByRole('combobox', { name: 'Quarter' }).selectOption('2');
     const payrollScope = page.getByText(statement);
     await expect(payrollScope).toHaveCount(2);

@@ -30,6 +30,34 @@ function renderDetail() {
   );
 }
 
+it('shows the pay-line message on desktop and mobile and keeps other rows readable', async () => {
+  const detailsError = "Details for this pay line aren't available yet. Contact Cornerstone.";
+  apiMocks.getPayPeriod.mockResolvedValue({
+    pay_period: {
+      id: 9,
+      company_id: 2,
+      start_date: '2026-08-01',
+      end_date: '2026-08-14',
+      pay_date: '2026-08-19',
+      status: 'committed',
+      payroll_items: [
+        { id: 101, employee_name: 'Casey First', details_error: detailsError, net_pay: 180 },
+        { id: 102, employee_name: 'Morgan Second', other_deductions: 25, net_pay: 260 },
+      ],
+    },
+  });
+
+  renderDetail();
+
+  expect(await screen.findByRole('heading', { name: 'Pay period: Aug 1 – 14, 2026' })).toBeTruthy();
+  const affectedRow = screen.getByRole('row', { name: /Casey First/ });
+  expect(within(affectedRow).getByText(detailsError)).toBeTruthy();
+  expect(within(screen.getByRole('row', { name: /Morgan Second/ })).getByText('$25.00')).toBeTruthy();
+  const mobile = screen.getByLabelText('Employee payroll details');
+  expect(within(mobile).getByText(detailsError)).toBeTruthy();
+  expect(within(mobile).getByText('Morgan Second')).toBeTruthy();
+});
+
 it('renders Salary and /yr for salaried rows and includes Other deductions so row totals reconcile', async () => {
   apiMocks.getPayPeriod.mockResolvedValue({
     pay_period: {

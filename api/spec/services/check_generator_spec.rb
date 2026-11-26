@@ -59,6 +59,25 @@ RSpec.describe CheckGenerator do
 
   subject(:generator) { described_class.new(payroll_item) }
 
+  it "prints the legal name on the check face and both stubs" do
+    [ [ "III", "John Santos III" ], [ nil, "John Santos" ] ].each do |suffix, legal_name|
+      employee.update!(name_suffix: suffix)
+      generator = described_class.new(payroll_item)
+      reader = PDF::Reader.new(StringIO.new(generator.generate))
+
+      expect(generator.render_input_payload.fetch("payee")).to eq(legal_name)
+      expect(reader.pages.first.runs.map(&:text).count(legal_name)).to eq(3)
+    end
+  end
+
+  it "keeps a check with a very long legal name on one stock page" do
+    employee.update!(first_name: ("Example " * 40).strip, name_suffix: "III")
+
+    reader = PDF::Reader.new(StringIO.new(generator.generate))
+
+    expect(reader.page_count).to eq(1)
+  end
+
   it "prints historical reimbursements only under OTHER PAY and adjusts the visible PAY total" do
     apply_historical_ytd_balance(
       company: company, employee: employee,

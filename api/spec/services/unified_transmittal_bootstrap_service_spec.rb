@@ -35,6 +35,7 @@ RSpec.describe UnifiedTransmittalBootstrapService do
   subject(:service) { described_class.new(pay_period: pay_period, actor: actor) }
 
   it "builds one editable packet from checks, reports, and calculated obligations" do
+    employee.update!(name_suffix: "JR")
     transmittal = service.call
 
     expect(transmittal).to be_pay_period_source
@@ -46,6 +47,9 @@ RSpec.describe UnifiedTransmittalBootstrapService do
       "report:payroll_register",
       "tax_obligation:income_tax"
     )
+
+    employee_check = transmittal.items.where("source_key LIKE ?", "payroll_item:%").sole
+    expect(employee_check).to have_attributes(payable_to: "Maria Santos Jr.", title: "Employee check — Maria Santos Jr.")
 
     income_tax = transmittal.items.find_by!(source_key: "tax_obligation:income_tax")
     expect(income_tax.amount).to eq(50.00)

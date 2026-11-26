@@ -165,3 +165,16 @@ it('focuses on files only without rendering a message composer', async () => {
   expect(screen.queryByText('Portal Messages')).toBeNull();
   expect(screen.queryByRole('button', { name: /Start Conversation/i })).toBeNull();
 });
+
+
+it('uses the Guam upload date in the mobile and desktop layouts', async () => {
+  mocks.list.mockResolvedValueOnce({
+    data: [{ ...doc(3), created_at: '2026-11-17T18:30:00Z' }],
+    meta: meta(1),
+  });
+  render(<ClientDocuments />);
+
+  expect((await screen.findByText('Nov 18, 2026')).closest('table')).toBeNull();
+  const row = screen.getByRole('row', { name: /Onboarding 3/ });
+  expect(within(row).getByRole('cell', { name: 'Nov 18, 2026, 4:30:00 AM ChST' })).toBeTruthy();
+});
