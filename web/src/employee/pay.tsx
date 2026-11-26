@@ -153,9 +153,10 @@ function StatementRow({ statement, selected, to, onSelect }: { statement: Statem
             {status?.tone === 'bad' && <Chip tone="bad">{status.label}</Chip>}
             {statement.corrected && <Chip tone="warn">Corrected</Chip>}
           </span>
+          {statement.notice && <span className="emp-row-sub">{statement.notice}</span>}
           {details && <span className="emp-row-sub">{details}</span>}
         </span>
-        <span className="emp-row-amount"><Money value={statement.netPay} /></span>
+        {!statement.withdrawn && <span className="emp-row-amount"><Money value={statement.netPay} /></span>}
         <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-neutral-400" />
       </Link>
     </li>
@@ -208,12 +209,14 @@ function PayComingSoon(): ReactElement {
 
 function LatestPay({ statement, statements }: { statement: StatementSummary; statements: StatementSummary[] }): ReactElement {
   const hours = hoursLabel(statement.totalHours);
+  if (statement.withdrawn) return <p role="status">{statement.notice}</p>;
   return (
     <div className="space-y-4">
       <div>
         <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>
         <p className="emp-hero-amount"><Money value={statement.netPay} /></p>
         <PaidLine statement={statement} />
+        {statement.notice && <p role="status">{statement.notice}</p>}
         {hours && <p className="text-neutral-700">{hours}</p>}
         <Comparison statement={statement} statements={statements} />
       </div>
@@ -328,6 +331,7 @@ function HomeWithPay(): ReactElement {
   const statements = state.status === 'ready' ? inListOrder(state.data.statements) : [];
   const latest = statements[0];
   const recent = statements.slice(1, 4);
+  const latestActive = statements.find((statement) => !statement.withdrawn);
   const body = (content: (latestCheck: StatementSummary) => ReactNode, empty: ReactNode): ReactNode => {
     if (state.status === 'loading') return <SkeletonRows label="Loading your pay" />;
     if (state.status === 'error') return <LoadProblem kind={state.kind} onRetry={reload} what="your pay" />;
@@ -352,7 +356,7 @@ function HomeWithPay(): ReactElement {
       </div>
       <div className="emp-column emp-wide-only">
         <Card title="This year so far">
-          {body((check) => <YearSoFar latest={check} />, <p className="text-neutral-600">Your totals will show here after your first payday.</p>)}
+          {body(() => latestActive ? <YearSoFar latest={latestActive} /> : null, <p className="text-neutral-600">Your totals will show here after your first payday.</p>)}
         </Card>
         <QuestionsCard />
       </div>
@@ -713,6 +717,7 @@ function StubDetailView({
       <BackLink to={`/pay${linkSuffix}`}>Back to pay stubs</BackLink>
     </div>
   );
+  if (stub.withdrawn) return <p role="status">{stub.notice}</p>;
   const period = formatDateRange(stub.periodStart, stub.periodEnd);
   const hours = hoursLabel(stub.totalHours);
   const quickbooks = stub.source === 'quickbooks';
@@ -727,6 +732,7 @@ function StubDetailView({
         </div>
         {quickbooks && <Chip tone="neutral">From QuickBooks records</Chip>}
         <PaidLine statement={stub} />
+        {stub.notice && <p role="status">{stub.notice}</p>}
         {hours && <p className="text-neutral-700">{hours}</p>}
       </header>
 

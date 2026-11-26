@@ -79,8 +79,13 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
       assert_delivery(oversight, supervisor, "immediate")
       assert_delivery(events.detect(&:client_managers_only?), manager, "immediate")
       assert_delivery(events.detect(&:client_viewers_only?), viewer, "digest")
+      account_team = events.find { |event| event.metadata["recipient_scope"] == "account_team" }
+      assert_delivery(account_team, staff, "immediate")
+      expect(events.flat_map { |event| event.deliveries.pluck(:user_id).compact }).to contain_exactly(manager.id, viewer.id, staff.id, supervisor.id)
       assert_copy(oversight, "pay-runs/#{period.id}/work")
       expect { PortalNotifications::Preferences.update!(supervisor, oversight.category => "off") }.to raise_error(ArgumentError)
+      travel(3.minutes) { PortalNotifications::Dispatcher.run! }
+      expect(captured_portal_emails.pluck(:to)).to contain_exactly(manager.email, staff.email, supervisor.email)
     end
   end
 

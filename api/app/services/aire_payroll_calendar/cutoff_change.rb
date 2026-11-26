@@ -91,7 +91,9 @@ module AirePayrollCalendar
         record_audit!(override, publication)
         Result.new(override: override, publication: publication, idempotent: false)
       end
-      Publisher.queue_delivery(result.publication.id, now: @now) unless result.idempotent
+      unless result.idempotent
+        ActiveRecord.after_all_transactions_commit { Publisher.queue_delivery(result.publication.id, now: @now) }
+      end
       result
     rescue Contract::Error, Publisher::Error => e
       raise Error.new(e.message, status: e.is_a?(Publisher::ConflictError) ? :conflict : :unprocessable_entity)

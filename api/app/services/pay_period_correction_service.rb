@@ -139,6 +139,11 @@ class PayPeriodCorrectionService
         void_reason:       reason
       )
 
+      EmployeeDocument.posted.where(company_id: locked.company_id, payroll_item_id: locked.payroll_items.select(:id))
+        .update_all(status: "withdrawn", withdrawal_reason: "rollback", updated_at: void_time)
+      Form500Filing.where(company_id: locked.company_id, pay_period_id: locked.id, status: "prepared")
+        .update_all(status: "cancelled", updated_by_id: actor.id, updated_at: void_time)
+
       PayrollYtdSnapshotRefresh.call(pay_period: locked, employee_ids: employee_ids)
       manual_ids = locked.time_tracking_manual_allocations.where.not(status: "voided").pluck(:id)
       if manual_ids.any?
