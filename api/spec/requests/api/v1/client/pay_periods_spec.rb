@@ -288,7 +288,11 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
       "details_error" => "Details for this pay line aren't available yet. Contact Cornerstone.",
       "net_pay" => "810.0", "pay_stub_available" => false
     )
-    expect(rows.fetch(affected.id)).not_to have_key("other_deductions")
+    expect(rows.fetch(affected.id).keys).not_to include(
+      "non_taxable_additions_total", "withholding_tax", "additional_withholding", "social_security_tax", "medicare_tax",
+      "additional_medicare_tax", "state_withheld", "retirement_payment", "roth_retirement_payment", "loan_payment", "loan_deduction",
+      "insurance_payment", "other_deductions", "custom_deductions", "payroll_adjustments", "total_deductions"
+    )
     expect(rows.fetch(unaffected.id)).to include("net_pay" => "175.0", "other_deductions" => "0.0")
     expect(response.body).not_to include(error.message)
   end
@@ -298,6 +302,37 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
 
     expect(response).to have_http_status(:not_found)
     expect(response.parsed_body).to eq("error" => "Pay period not found")
+  end
+
+  it "blocks client approval when the published revision has a pay line the client cannot review" do
+    company.update!(client_payroll_approval_required: true)
+    draft_pay_period.update!(status: "calculated", calculated_at: Time.current)
+    service = PayrollReview::RevisionService.new(pay_period: draft_pay_period)
+    package = service.issue!
+    draft_pay_period.update!(status: "approved")
+    service.publish!
+
+    path = "/api/v1/client/pay_periods/#{draft_pay_period.id}"
+    get path
+    expect(response.parsed_body.dig("pay_period", "can_decide_payroll_review")).to be(true)
+
+    allow(PayrollComponentMirrors).to receive(:resolution).and_raise(
+      PayrollComponentMirrors::AmbiguousHistoryError, "Staff-only component repair"
+    )
+    get path
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("pay_period", "can_decide_payroll_review")).to be(false)
+    expect(response.parsed_body.dig("pay_period", "payroll_items").sole).to include("details_error" => a_string_including("Contact Cornerstone"))
+
+    post "#{path}/approve_review", params: {
+      revision_id: package.id,
+      acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq(
+      "error" => "Some pay lines can't be shown yet, so this review can't be approved. Contact Cornerstone."
+    )
+    expect(package.reload.status).to eq("pending")
   end
 
   it "shows an approved review revision and lets the assigned client approve only that revision" do

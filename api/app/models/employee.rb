@@ -2,7 +2,7 @@
 
 class Employee < ApplicationRecord
   validates :name_suffix, inclusion: { in: %w[JR SR II III IV V VI] }, allow_blank: true
-  before_validation { self.name_suffix = name_suffix.to_s.upcase.delete(".").presence }
+  before_validation { self.name_suffix = name_suffix.to_s.strip.upcase.delete(".").presence }
   include TracksRecordCreation
 
   belongs_to :created_by, class_name: "User", optional: true
@@ -416,7 +416,7 @@ class Employee < ApplicationRecord
   # The legal name with its suffix ("Jr.", "III") for records and payroll
   # documents. W-2GU prints the coded suffix in its own box.
   def legal_name
-    suffix = name_suffix.to_s.upcase.delete(".")
+    suffix = name_suffix.to_s.strip.upcase.delete(".")
     [ full_name, { "JR" => "Jr.", "SR" => "Sr." }.fetch(suffix, suffix) ].compact_blank.join(" ")
   end
 

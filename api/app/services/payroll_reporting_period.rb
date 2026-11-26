@@ -6,6 +6,8 @@
 # therefore includes committed, non-voided payrolls whose pay_date falls inside
 # the requested dates; it does not use the dates on which hours were earned.
 class PayrollReportingPeriod
+  class InvalidPeriod < ArgumentError; end
+
   attr_reader :start_date, :end_date, :year
 
   def self.all_time
@@ -23,7 +25,7 @@ class PayrollReportingPeriod
     end_value = params[:end_date].presence
 
     if start_value || end_value
-      raise ArgumentError, "start_date and end_date are both required" unless start_value && end_value
+      raise InvalidPeriod, "start_date and end_date are both required" unless start_value && end_value
 
       return new(
         start_date: parse_iso_date!(start_value, "start_date"),
@@ -32,7 +34,7 @@ class PayrollReportingPeriod
     end
 
     year = Integer(params[:year].presence || default_year, exception: false)
-    raise ArgumentError, "year must be a valid 4-digit year" unless year&.between?(2000, PayrollBusinessClock.today.year + 1)
+    raise InvalidPeriod, "year must be a valid 4-digit year" unless year&.between?(2000, PayrollBusinessClock.today.year + 1)
 
     new(start_date: Date.new(year, 1, 1), end_date: Date.new(year, 12, 31), year: year)
   end
@@ -40,12 +42,12 @@ class PayrollReportingPeriod
   def self.parse_iso_date!(value, name)
     Date.iso8601(value.to_s)
   rescue Date::Error
-    raise ArgumentError, "#{name} must use YYYY-MM-DD format"
+    raise InvalidPeriod, "#{name} must use YYYY-MM-DD format"
   end
   private_class_method :parse_iso_date!
 
   def initialize(start_date:, end_date:, year: nil, label: nil, filename_token: nil, all_time: false)
-    raise ArgumentError, "start_date must be on or before end_date" if start_date > end_date
+    raise InvalidPeriod, "start_date must be on or before end_date" if start_date > end_date
 
     @start_date = start_date
     @end_date = end_date

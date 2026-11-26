@@ -9,7 +9,7 @@
 # Callers that must not act on a sign-off that changes while they work (mark
 # ready, downloads) hold the company lock, which mark ready takes too.
 class Form1099NecFilingState
-  Result = Struct.new(:cornerstone_files, :report, :report_error, :fingerprint, :readiness, :final, keyword_init: true) do
+  Result = Struct.new(:cornerstone_files, :report, :report_error, :report_exception, :fingerprint, :readiness, :final, keyword_init: true) do
     def current?
       readiness.present? && readiness.current?(fingerprint)
     end
@@ -73,12 +73,12 @@ class Form1099NecFilingState
       .find_by(tax_year: year, quarter: nil, filing_type: "form_1099")&.responsible_party == "cornerstone"
     return Result.new(cornerstone_files: false, final: false) unless files
 
-    report, error = @preloaded || load_report
+    report, error, exception = @preloaded || load_report
     fingerprint = Form1099InputsFingerprint.new(company: company, year: year, report: report).call if report
     # Read after the fingerprint, so a sign-off made while it was computed is seen.
     readiness = Form1099FilingReadiness.find_by(company_id: company.id, tax_year: year)
     Result.new(
-      cornerstone_files: true, report: report, report_error: error, fingerprint: fingerprint, readiness: readiness,
+      cornerstone_files: true, report: report, report_error: error, report_exception: exception, fingerprint: fingerprint, readiness: readiness,
       final: report.present? && Form1099FilingReadiness.final?(company: company, year: year, readiness: readiness, fingerprint: fingerprint)
     )
   end
@@ -90,6 +90,6 @@ class Form1099NecFilingState
   def load_report
     [ Form1099NecAggregator.new(company, year).generate, nil ]
   rescue ActiveRecord::RecordNotFound, ArgumentError => e
-    [ nil, e.message ]
+    [ nil, e.message, e ]
   end
 end

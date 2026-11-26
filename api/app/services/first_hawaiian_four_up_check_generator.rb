@@ -215,15 +215,11 @@ class FirstHawaiianFourUpCheckGenerator
 
   def draw_text_field(pdf, section, field, slot_bottom, text, align: :left)
     cfg = layout_field(section, field)
-    pdf.bounding_box(
-      [ cfg["x"].to_f + ox, slot_bottom + cfg["y"].to_f + oy ],
-      width: cfg["width"].to_f,
-      height: cfg.fetch("height", 14).to_f
-    ) do
-      pdf.font_size(cfg["font_size"].to_f) do
-        pdf.text text.to_s, align:, overflow: :shrink_to_fit
-      end
-    end
+    size = cfg["font_size"].to_f
+    pdf.text_box text.to_s,
+      at: [ cfg["x"].to_f + ox, slot_bottom + cfg["y"].to_f + oy ],
+      width: cfg["width"].to_f, height: cfg.fetch("height", 14).to_f,
+      size: size, align: align, overflow: :shrink_to_fit, min_font_size: [ size, 5 ].min
   end
 
   def slot_bottom_for(slot_index)

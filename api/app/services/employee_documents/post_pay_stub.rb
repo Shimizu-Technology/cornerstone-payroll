@@ -2,13 +2,13 @@
 
 module EmployeeDocuments
   class PostPayStub
-    Posting = Data.define(:latest, :original, :predecessor, :fingerprint, :payment_line, :legal_name) do
+    Posting = Data.define(:latest, :original, :predecessor, :fingerprint, :payment_line) do
       def revision
         (latest&.revision || 0) + 1
       end
 
       def signature
-        [ latest&.id, original&.id, predecessor&.id, revision, fingerprint, payment_line, legal_name ]
+        [ latest&.id, original&.id, predecessor&.id, revision, fingerprint, payment_line ]
       end
     end
 
@@ -31,9 +31,10 @@ module EmployeeDocuments
     private
 
     def post_once
+      checked_at = Time.current
       prepared = with_locked_item do |period|
         generator = PayStubGenerator.new(@item, employee_copy: true)
-        posting = posting_plan(period, generator)
+        posting = posting_plan(period, generator, checked_at: checked_at)
         [ posting, generator.generate ] if posting
       end
       return unless prepared
@@ -41,8 +42,8 @@ module EmployeeDocuments
       posting, bytes = prepared
       recorded = false
       staged = FreezePdf.stage(bytes: bytes, source: @item, revision: posting.revision)
+      checked_at = Time.current
       with_locked_item do |period|
-        checked_at = Time.current
         current = posting_plan(period, PayStubGenerator.new(@item, employee_copy: true), checked_at: checked_at)
         next unless current
         next :stale unless current.signature == posting.signature
@@ -61,18 +62,22 @@ module EmployeeDocuments
     # foreign key needs; taking it first means a replacement or commit that
     # already holds the company never waits on a paycheck this posting holds.
     def with_locked_item
-      EmployeeDocument.transaction(requires_new: true) do
-        company = Company.lock("FOR KEY SHARE").find(@item.company_id)
-        period = PayPeriod.lock("FOR SHARE").find(@item.pay_period_id)
-        period.company = company
-        @item = PayrollItem.eager_load(:employee).lock("FOR UPDATE OF payroll_items").find(@item.id)
-        @item.pay_period = period
-        @item.company = company
-        yield period
+      # Rails bypasses the cache for locked queries, but the generator also
+      # reads components and earlier paychecks that can change during upload.
+      ActiveRecord::Base.uncached do
+        EmployeeDocument.transaction(requires_new: true) do
+          company = Company.lock("FOR KEY SHARE").find(@item.company_id)
+          period = PayPeriod.lock("FOR SHARE").find(@item.pay_period_id)
+          period.company = company
+          @item = PayrollItem.eager_load(:employee).lock("FOR UPDATE OF payroll_items").find(@item.id)
+          @item.pay_period = period
+          @item.company = company
+          yield period
+        end
       end
     end
 
-    def posting_plan(period, generator, checked_at: Time.current)
+    def posting_plan(period, generator, checked_at:)
       latest = documents_for(@item.id).lock.first
       if (reason = withdrawal_reason(period))
         latest.update!(status: :withdrawn, withdrawal_reason: reason) if latest&.posted?
@@ -98,7 +103,7 @@ module EmployeeDocuments
       end
 
       Posting.new(latest: latest, original: original, predecessor: repairing_link ? original : (latest || original),
-        fingerprint: fingerprint, payment_line: PayStubGenerator.employee_payment_line(@item), legal_name: @item.employee.legal_name)
+        fingerprint: fingerprint, payment_line: PayStubGenerator.employee_payment_line(@item))
     end
 
     def record_posting(staged, posting, period, checked_at)

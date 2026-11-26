@@ -27,15 +27,26 @@ RSpec.describe UnifiedPayrollReporting do
     )
   end
 
-  it "counts Regular OT in overtime hours only" do
-    check = financial_row_class.new(hours_breakdown: [
-      { label: "Regular Pay", amount: "40" }, { label: "Hourly", amount: "8" },
-      { label: "Regular OT", amount: "5" }
-    ])
-    reporting = described_class.new(company_id: 1, period: instance_double(PayrollReportingPeriod))
+  describe "historical hours labels" do
+    let(:reporting) { described_class.new(company_id: 1, period: instance_double(PayrollReportingPeriod)) }
 
-    expect(reporting.send(:recorded_hours_component, check, described_class::REGULAR_HOURS)).to eq(48)
-    expect(reporting.send(:recorded_hours_component, check, described_class::OVERTIME_HOURS)).to eq(5)
+    [ "Regular Pay - Office", "Hourly Rate", "Regular Hrs", "Regular - Kitchen", "  Regular  Hours " ].each do |label|
+      it "counts #{label.inspect} as regular hours" do
+        check = financial_row_class.new(hours_breakdown: [ { label: label, amount: "8" } ])
+
+        expect(reporting.send(:recorded_hours_component, check, described_class::REGULAR_HOURS)).to eq(8)
+        expect(reporting.send(:recorded_hours_component, check, described_class::OVERTIME_HOURS)).to be_nil
+      end
+    end
+
+    [ "Regular OT", "Hourly Overtime", "Regular Double Time" ].each do |label|
+      it "counts #{label.inspect} only as overtime" do
+        check = financial_row_class.new(hours_breakdown: [ { label: label, amount: "5" } ])
+
+        expect(reporting.send(:recorded_hours_component, check, described_class::REGULAR_HOURS)).to be_nil
+        expect(reporting.send(:recorded_hours_component, check, described_class::OVERTIME_HOURS)).to eq(5)
+      end
+    end
   end
 
   describe "historical employer cost classification" do

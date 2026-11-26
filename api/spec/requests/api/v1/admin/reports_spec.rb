@@ -26,6 +26,36 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     allow_any_instance_of(Api::V1::Admin::ReportsController).to receive(:current_user).and_return(admin_user)
   end
 
+  it "logs an unexpected print-package error without returning the exception text" do
+    period = create(:pay_period, :committed, company: company)
+    error = ArgumentError.new("Internal PDF assembly detail")
+    allow(CombinePDF).to receive(:new).and_raise(error)
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, report: "full_print_package_pdf"
+    }).and_call_original
+
+    get "/api/v1/admin/reports/full_print_package_pdf", params: { pay_period_id: period.id }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq("error" => "Could not generate the full print package.")
+  end
+
+  it "keeps date validation actionable and masks ambiguous tax-summary history" do
+    get "/api/v1/admin/reports/tax_summary", params: { start_date: "2026-01-01" }
+    expect(response.parsed_body).to eq("error" => "start_date and end_date are both required")
+
+    error = PayrollComponentMirrors::AmbiguousHistoryError.new("Staff-only reconciliation instructions")
+    allow(PayrollFieldDisclosure).to receive(:new).and_raise(error)
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, report: "tax_summary"
+    }).and_call_original
+
+    get "/api/v1/admin/reports/tax_summary", params: { year: 2026 }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq("error" => "This report is unavailable until the payroll details are reviewed.")
+  end
+
   %w[draft calculated approved].each do |status|
     it "marks every #{status} workbook sheet and the signoff sheet as preview" do
       run = create(:pay_period, company: company, status: status)

@@ -4,12 +4,10 @@ module Api
   module V1
     module Client
       class PayPeriodsController < BaseController
-        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError do |error|
-          Rails.error.report(error, handled: true, context: { company_id: current_company_id, action: action_name })
-          render json: { error: "Payroll details are unavailable right now. Contact Cornerstone." }, status: :unprocessable_entity
-        end
+        include ClientComponentHistoryErrors
 
         PAY_LINE_DETAILS_UNAVAILABLE = "Details for this pay line aren't available yet. Contact Cornerstone."
+        REVIEW_DETAILS_UNAVAILABLE = "Some pay lines can't be shown yet, so this review can't be approved. Contact Cornerstone."
 
         audit_actions :approve_review
         before_action :set_pay_period, only: %i[show approve_review request_changes preview_pdf]
@@ -46,7 +44,13 @@ module Api
             acknowledgement: params[:acknowledgement],
             notes: params[:notes],
             revision_id: params[:revision_id]
-          )
+          ) do |locked_period|
+            ActiveRecord::Base.uncached do
+              if client_pay_items(locked_period).any? { |item| pay_item_summary(item, locked_period).key?(:details_error) }
+                raise PayrollReview::RevisionService::Error, REVIEW_DETAILS_UNAVAILABLE
+              end
+            end
+          end
           render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
         rescue PayrollReview::RevisionService::StaleRevisionError => e
           render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
@@ -132,22 +136,24 @@ module Api
 
         def set_pay_period
           scope = PayPeriod.reportable_periods.where(company_id: current_company_id)
-          @pay_period = scope.includes(
-            payroll_items: [
-              :employee,
-              :payroll_item_earnings,
-              { payroll_item_field_entries: :payroll_field_definition },
-              { payroll_item_deductions: :deduction_type }
-            ]
-          ).find_by(id: params[:id])
+          @pay_period = scope.find_by(id: params[:id])
           @pay_period = nil unless client_visible_period?(@pay_period)
           return if @pay_period
 
           render json: { error: "Pay period not found" }, status: :not_found
         end
 
+        def client_pay_items(pay_period)
+          pay_period.payroll_items.reportable.includes(
+            :employee,
+            :payroll_item_earnings,
+            { payroll_item_field_entries: :payroll_field_definition },
+            { payroll_item_deductions: :deduction_type }
+          ).select(&:payroll_included?)
+        end
+
         def pay_period_summary(pay_period, include_items: false)
-          items = pay_period.payroll_items.reportable.select(&:payroll_included?)
+          items = client_pay_items(pay_period)
           json = {
             id: pay_period.id,
             company_id: pay_period.company_id,
@@ -184,6 +190,7 @@ module Api
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
             json[:payroll_review_history] = [] unless pay_period.company.client_payroll_approval_required?
             json[:payroll_items] = items.map { |item| pay_item_summary(item, pay_period) }
+            json[:can_decide_payroll_review] = false if json[:payroll_items].any? { |item| item.key?(:details_error) }
           end
 
           json
@@ -203,16 +210,6 @@ module Api
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             gross_pay: item.gross_pay,
-            withholding_tax: item.withholding_tax,
-            additional_withholding: item.additional_withholding,
-            social_security_tax: item.social_security_tax,
-            medicare_tax: item.medicare_tax,
-            additional_medicare_tax: item.additional_medicare_tax,
-            state_withheld: 0,
-            loan_deduction: item.loan_deduction,
-            custom_deductions: item.custom_deductions || [],
-            payroll_adjustments: item.payroll_adjustments || [],
-            total_deductions: item.total_deductions,
             net_pay: item.net_pay
           }
           summary.merge(pay_item_breakdown(item))
@@ -256,7 +253,17 @@ module Api
             roth_retirement_payment: roth_retirement_total,
             loan_payment: loans_total,
             insurance_payment: insurance_total,
-            other_deductions: other_deductions_total
+            other_deductions: other_deductions_total,
+            withholding_tax: item.withholding_tax,
+            additional_withholding: item.additional_withholding,
+            social_security_tax: item.social_security_tax,
+            medicare_tax: item.medicare_tax,
+            additional_medicare_tax: item.additional_medicare_tax,
+            state_withheld: 0,
+            loan_deduction: item.loan_deduction,
+            custom_deductions: item.custom_deductions || [],
+            payroll_adjustments: item.payroll_adjustments || [],
+            total_deductions: item.total_deductions
           }
         end
 

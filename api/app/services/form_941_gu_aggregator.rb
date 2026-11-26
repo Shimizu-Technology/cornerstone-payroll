@@ -36,6 +36,8 @@
 # - Only "committed" pay periods are included (pay_date falls in the quarter).
 
 class Form941GuAggregator
+  class MissingWageBase < ArgumentError; end
+
   SS_RATE_COMBINED      = 0.124  # 6.2% employee + 6.2% employer
   MEDICARE_RATE_COMBINED = 0.029 # 1.45% employee + 1.45% employer
   ADD_MEDICARE_RATE      = 0.009  # Additional Medicare Tax (employee only)
@@ -620,7 +622,7 @@ class Form941GuAggregator
 
   def ss_wage_base
     AnnualTaxConfig.historical_ss_wage_base(year)&.to_f || SS_WAGE_BASE_BY_YEAR.fetch(year) do
-      raise ArgumentError, "SS wage base not configured for #{year}. Add #{year} to SS_WAGE_BASE_BY_YEAR."
+      raise MissingWageBase, "SS wage base not configured for #{year}. Add #{year} to SS_WAGE_BASE_BY_YEAR."
     end
   end
 

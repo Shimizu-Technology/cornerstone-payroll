@@ -4,9 +4,7 @@ module Api
   module V1
     module Client
       class PayStubsController < BaseController
-        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError do |error|
-          render json: { error: error.message }, status: :unprocessable_entity
-        end
+        include ClientComponentHistoryErrors
 
         def index
           employee = Employee.where(company_id: current_company_id).find(params[:employee_id])

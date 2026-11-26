@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Download, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SheetPreview } from '@/components/documents/SheetPreview';
@@ -7,7 +7,44 @@ import { isJsonBlob, readSheetPreview, type SheetPreviewData } from '@/lib/sheet
 import { cn } from '@/lib/utils';
 import { payrollIntakeImportsApi, type ImportSourceDocument } from '@/services/api';
 
-const PdfDocumentView = lazy(() => import('@/components/documents/PdfPreview').then((module) => ({ default: module.PdfDocumentView })));
+function createPdfPreview(chunk?: URL) {
+  return lazy(async () => {
+    const module: typeof import('@/components/documents/PdfPreview') = chunk
+      ? await import(/* @vite-ignore */ chunk.href)
+      : await import('@/components/documents/PdfPreview');
+    return { default: module.PdfDocumentView };
+  });
+}
+
+function retryChunk(error: unknown, attempt: number): URL | undefined {
+  if (!(error instanceof TypeError)) return;
+  const match = error.message.match(/(?:Failed to fetch dynamically imported module|error loading dynamically imported module): (https?:\/\/\S+)$/i);
+  if (!match) return;
+
+  try {
+    const chunk = new URL(match[1]);
+    const expectedPath = /^\/(?:assets\/PdfPreview-[\w-]+\.js|src\/components\/documents\/PdfPreview\.tsx)$/;
+    if (chunk.origin !== window.location.origin || !expectedPath.test(chunk.pathname)) return;
+
+    // The browser remembers failed module fetches by URL within this page.
+    chunk.searchParams.set('previewRetry', `${Date.now()}-${attempt}`);
+    return chunk;
+  } catch {
+    return undefined;
+  }
+}
+
+class PdfPreviewBoundary extends Component<{ children: ReactNode; fallback: (error: unknown) => ReactNode }, { failure: { error: unknown } | null }> {
+  state: { failure: { error: unknown } | null } = { failure: null };
+
+  static getDerivedStateFromError(error: unknown) {
+    return { failure: { error } };
+  }
+
+  render() {
+    return this.state.failure ? this.props.fallback(this.state.failure.error) : this.props.children;
+  }
+}
 
 type TabKey = 'pdf' | 'workbook';
 type Loaded =
@@ -50,6 +87,7 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
   const loadedRef = useRef<Record<number, Loaded>>({});
   const [attempt, setAttempt] = useState(0);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [preview, setPreview] = useState(() => ({ View: createPdfPreview(), attempt: 0 }));
   const baseId = useId();
   const active = tabs.find((tab) => tab.key === selected) || tabs[0];
   const activeId = active?.file.id;
@@ -182,9 +220,22 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
             <p className="max-w-sm text-sm text-neutral-700">{state.message}</p>
           </div>
         ) : state.status === 'pdf' ? (
-          <Suspense fallback={<p role="status" className="p-4 text-sm text-neutral-600">Loading PDF preview…</p>}>
-            <PdfDocumentView blob={state.blob} className="flex-1" />
-          </Suspense>
+          <PdfPreviewBoundary key={preview.attempt} fallback={error => (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+              <p role="alert" className="text-sm text-neutral-700">The PDF preview could not load.</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => void download()}>Download PDF</Button>
+                <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => {
+                  const attempt = preview.attempt + 1;
+                  setPreview({ View: createPdfPreview(retryChunk(error, attempt)), attempt });
+                }}>Retry preview</Button>
+              </div>
+            </div>
+          )}>
+            <Suspense fallback={<p role="status" className="p-4 text-sm text-neutral-600">Loading PDF preview…</p>}>
+              <preview.View blob={state.blob} className="flex-1" />
+            </Suspense>
+          </PdfPreviewBoundary>
         ) : (
           <SheetPreview data={state.data} className="flex-1" />
         )}

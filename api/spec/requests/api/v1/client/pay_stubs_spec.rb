@@ -42,6 +42,19 @@ RSpec.describe "Client pay stubs", type: :request do
     expect(text).not_to match(/accountant.only|review warning|storage.key|transmittal/i)
   end
 
+  it "logs ambiguous stub history and returns a client-safe download error" do
+    error = PayrollInsuranceComponents::AmbiguousHistoryError.new("Staff-only insurance repair instructions")
+    allow_any_instance_of(PayStubGenerator).to receive(:generate).and_raise(error)
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, action: "download"
+    }).and_call_original
+
+    get "/api/v1/client/pay_stubs/#{item.id}/download", headers: headers
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq("error" => "Payroll details are unavailable right now. Contact Cornerstone.")
+  end
+
   it "rejects other companies and foreign employee history" do
     other = create(:payroll_item)
     get "/api/v1/client/pay_stubs/#{other.id}/download", headers: headers

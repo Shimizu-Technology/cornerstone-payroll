@@ -58,6 +58,15 @@ RSpec.describe FirstHawaiianFourUpCheckGenerator do
     expect(text).to include("400.00")
   end
 
+  it "keeps a very long payee in the final slot on the same stock page" do
+    item = payroll_item_for(("Example " * 40).strip, "Taylor", "2466", 100.25)
+    item.employee.update!(name_suffix: "III")
+
+    pdf = described_class.new(company: company, payroll_items: [ item ], starting_slot: 4).generate
+
+    expect(PDF::Reader.new(StringIO.new(pdf)).page_count).to eq(1)
+  end
+
   it "marks each rehearsal check only with the VOID watermark" do
     item = payroll_item_for("Ana", "Taylor", nil, 100.25)
     generator = described_class.new(company: company, payroll_items: [ item ], rehearsal_preview: true)

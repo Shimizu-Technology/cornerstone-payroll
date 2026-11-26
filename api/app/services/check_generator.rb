@@ -286,9 +286,11 @@ class CheckGenerator
     end
 
     # ---- Payee name (left) + amount (right) ----
-    pdf.bounding_box([ payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy ], width: payee_cfg["width"].to_f, height: 18) do
-      pdf.font_size(payee_cfg["font_size"].to_f) { pdf.text employee.legal_name }
-    end
+    payee_size = payee_cfg["font_size"].to_f
+    pdf.text_box employee.legal_name,
+      at: [ payee_cfg["x"].to_f + ox, sect_bot + payee_cfg["y"].to_f + oy ],
+      width: payee_cfg["width"].to_f, height: 18, size: payee_size,
+      overflow: :shrink_to_fit, min_font_size: [ payee_size, 6 ].min
     pdf.bounding_box([ payee_address_cfg["x"].to_f + ox, sect_bot + payee_address_cfg["y"].to_f + oy ], width: payee_address_cfg["width"].to_f, height: 32) do
       address_lines = employee.full_address.to_s.split("\n").map(&:strip).reject(&:blank?).first(3)
       if address_lines.any?
