@@ -183,6 +183,17 @@ module EmployeeAppSwitch
       waiver_state? && current_process_guarded?
     end
 
+    # Whether a demo link's sign-up may even be checked on this process: only
+    # a process running its own guard (the employee service) serves one, in
+    # the early-access and the verified state alike. Elsewhere Activate
+    # refuses it before Verify locks or counts anything, so a match and a
+    # miss get the same answer.
+    def demo_activation_admitted?(company)
+      return true unless company&.demo?
+
+      demo_request_allowed?(company) && current_process_guarded?
+    end
+
     # Whether a demo's app reads as on under the waiver. The employee service
     # needs its own guard, exactly as demo_request_allowed?. Staff web and
     # the worker serve no employee data on this answer, so they follow the
