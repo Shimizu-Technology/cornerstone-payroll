@@ -2,6 +2,8 @@
 
 class StagingMailInterceptor
   def self.delivering_email(message)
+    # A local production copy captures every message to files, unredacted.
+    return message.delivery_method(StagingActionMailerDelivery) if LocalDeployment.local?
     return unless StagingOutboundPolicy.staging?
     message.delivery_method(StagingActionMailerDelivery)
     payload = StagingOutboundPolicy.mail_payload({ to: message.to, cc: message.cc, bcc: message.bcc, reply_to: message.reply_to, subject: message.subject })

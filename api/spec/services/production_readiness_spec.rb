@@ -204,7 +204,7 @@ RSpec.describe ProductionReadiness do
     report = with_sample_token { readiness.run(live: true) }
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(34)
+    expect(report.checks.length).to eq(35)
     expect(cache.values).to be_empty
     expect(cache.deleted.length).to eq(1)
     expect(storage.objects).to be_empty
@@ -377,7 +377,7 @@ RSpec.describe ProductionReadiness do
     report = readiness.run(live: false)
 
     expect(report).to be_passed
-    expect(report.checks.length).to eq(21)
+    expect(report.checks.length).to eq(22)
   end
 
   it "warns when a process runs the RLS guard in raise mode on the default process role" do
@@ -745,7 +745,7 @@ RSpec.describe ProductionReadiness do
       report = employee_report
 
       expect(report).to be_passed
-      expect(report.checks.length).to eq(24)
+      expect(report.checks.length).to eq(25)
       expect(report.checks.map(&:name).grep(/\Aemployee_web:/).length).to eq(4)
     end
 
