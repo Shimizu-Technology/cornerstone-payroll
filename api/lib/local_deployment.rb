@@ -64,6 +64,9 @@ module LocalDeployment
       fail!("DEPLOYMENT_ENV=local requires ACTIVE_STORAGE_SERVICE=local and R2_STORAGE_BACKEND=local")
     end
     fail!("DEPLOYMENT_ENV=local requires an absolute LOCAL_MAIL_CAPTURE_DIR") unless env["LOCAL_MAIL_CAPTURE_DIR"].to_s.start_with?("/")
+    if env["LOCAL_STORAGE_ROOT"].to_s != "" && !env["LOCAL_STORAGE_ROOT"].start_with?("/")
+      fail!("LOCAL_STORAGE_ROOT must be an absolute path")
+    end
 
     root = tenant_root_domain(env)
     fail!("DEPLOYMENT_ENV=local requires TENANT_ROOT_DOMAIN under .localhost") unless root
