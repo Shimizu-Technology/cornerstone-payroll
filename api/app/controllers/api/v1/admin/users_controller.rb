@@ -414,6 +414,7 @@ module Api
           invitation_response
         rescue StandardError => e
           Rails.logger.error("[UsersController] Practice login moved but its invitation could not be refreshed for user #{user.id}: #{e.class}")
+          UserInviteEmailService.record_email_status(user, false)
           invitation_status_response("failed", error: "The login was moved, but its invitation could not be sent. Use Resend.")
         end
 
@@ -592,6 +593,8 @@ module Api
             active: user.active,
             invitation_status: user.invitation_status,
             invitation_pending: user.invitation_pending?,
+            invite_email_status: user.invite_email_status,
+            invite_email_status_at: user.invite_email_status_at,
             can_recover_clerk_invitation: !StagingOutboundPolicy.staging? && PayrollInvitation.recoverable_by?(user, current_user),
             invited_at: user.invited_at,
             invited_by_id: user.invited_by_id,

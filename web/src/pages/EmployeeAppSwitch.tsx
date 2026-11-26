@@ -27,6 +27,24 @@ function formatDateTime(value: string | null): string {
 }
 
 type Mutation = { method: 'PATCH' | 'PUT' | 'DELETE' | 'POST'; suffix: string; body: unknown };
+type FailureBody = SwitchFailure & { clerk_error?: { reason?: string } };
+
+// Payroll commits a switch change before it builds the reply, so only a
+// refusal that comes before the write (step-up, sign-in, permission, rate
+// limit) can promise nothing changed. A server error, timeout or lost
+// connection may arrive after the change was saved.
+const UNCONFIRMED = "Payroll couldn't confirm whether the change was saved. Choose Check again (or refresh the page) to see the current state before trying again.";
+
+function switchFailureMessage(status: number, body: FailureBody | null): SwitchFailure {
+  if (body?.error) return body;
+  const error = body?.clerk_error?.reason === 'reverification-error'
+    ? "This change needs a fresh sign-in check, and it wasn't completed. Choose the change again and confirm it's you when asked. Nothing was changed."
+    : status === 401 ? 'Your sign-in has ended. Sign in again, then make the change. Nothing was changed.'
+      : status === 403 ? "Your login isn't allowed to make this change. Nothing was changed."
+        : status === 429 ? 'Too many tries in a short time. Wait a minute, then try again. Nothing was changed.'
+          : UNCONFIRMED;
+  return { ...body, error };
+}
 
 export function EmployeeAppSwitch() {
   const { activeCompany } = useCompany();
@@ -64,13 +82,13 @@ function CompanySwitch({ companyId }: { companyId: number }) {
   const mutate = useCallback(async (mutation: Mutation): Promise<SwitchFailure | null> => {
     try {
       const response = await send(mutation);
-      const body = await response.json().catch(() => null) as (SwitchFailure & { data?: EmployeeAppSwitchState }) | null;
+      const body = await response.json().catch(() => null) as FailureBody | null;
       if (body?.data) setState(body.data);
       if (response.ok) return null;
-      return body ?? { error: 'Could not save the change. Try again.' };
+      return switchFailureMessage(response.status, body);
     } catch (failure) {
       if (isReverificationCancelledError(failure)) return { error: 'Sign-in check cancelled. Nothing was changed.' };
-      return { error: 'Could not save the change. Check your connection and try again.' };
+      return { error: UNCONFIRMED };
     }
   }, [send]);
 

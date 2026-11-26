@@ -23,11 +23,14 @@ class PayrollInvitation
   # Clerk confirmed the previous one closed. The block, if given, runs under
   # the user's lock just before that save; a false answer saves nothing and
   # revokes the new invitation.
+  # A failure says what became of the login's previous invitation when it
+  # matters to the caller: previous_invitation: :kept (still open, nothing
+  # closed it) or :accepted (someone already accepted it).
   def send_invite(user, redirect_url:, ignore_existing: false, metadata: {}, attributes: {}, &commit)
-    return { success: false, error: "Clerk API not configured" } unless @clerk.configured?
+    return { success: false, error: "Clerk API not configured", previous_invitation: :kept } unless @clerk.configured?
 
     user.reload
-    return invitation_changed unless user.awaiting_clerk_binding?
+    return invitation_changed.merge(previous_invitation: :kept) unless user.awaiting_clerk_binding?
 
     snapshot = user.attributes.slice(*INVITATION_FIELDS)
     email = attributes.fetch(:email, snapshot.fetch("email"))
@@ -258,9 +261,10 @@ class PayrollInvitation
   def close_previous_invitation(invitation_id)
     case close_invitation(invitation_id)
     when :closed then nil
-    when :accepted then { success: false, error: ACCEPTED_MESSAGE }
+    when :accepted then { success: false, error: ACCEPTED_MESSAGE, previous_invitation: :accepted }
     else
-      { success: false, error: "Could not confirm the previous invitation is closed. Its sign-in details were preserved. Try again or contact an administrator." }
+      { success: false, error: "Could not confirm the previous invitation is closed. Its sign-in details were preserved. Try again or contact an administrator.",
+        previous_invitation: :kept }
     end
   end
 
