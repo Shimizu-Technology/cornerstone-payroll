@@ -51,7 +51,7 @@ module Api
               end
             end
           end
-          render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
+          render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package, include_notification_status: true) }
         rescue PayrollReview::RevisionService::StaleRevisionError => e
           render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error => e
@@ -63,7 +63,7 @@ module Api
 
           package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user)
             .request_changes!(revision_id: params[:revision_id], note: params[:note])
-          render json: { payroll_review: PayrollReview::PackagePresenter.call(package) }
+          render json: { payroll_review: PayrollReview::PackagePresenter.call(package, include_notification_status: true) }
         rescue PayrollReview::RevisionService::StaleRevisionError => e
           render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
         rescue PayrollReview::RevisionService::Error => e
@@ -179,7 +179,7 @@ module Api
             pay_period.payroll_review_packages.summary.current.where.not(published_at: nil)
               .includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
           end
-          json[:payroll_review] = PayrollReview::PackagePresenter.call(review)
+          json[:payroll_review] = PayrollReview::PackagePresenter.call(review, include_notification_status: true)
           json[:can_decide_payroll_review] = pay_period.approved? &&
             PayrollReview::RevisionService.client_can_decide?(review, current_user) == true
 

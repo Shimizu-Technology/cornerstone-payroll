@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 class PayrollReviewPackage < ApplicationRecord
+  include PortalInboxUpdates
+
   APPROVAL_ACKNOWLEDGEMENT = "I approve this exact payroll review revision for processing."
   STATUSES = %w[pending approved superseded].freeze
   APPROVAL_METHODS = %w[client_portal email_attestation].freeze
