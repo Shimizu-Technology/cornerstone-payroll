@@ -8,11 +8,17 @@ module PayrollIntake
   # (for MoSa: "No tips or loans this period").
   class SourceCompleteness
     def self.roles_for(source_type)
+      descriptor = PayrollIntake::Registry.find(source_type)
+      return descriptor.source_roles if descriptor
+
       adapter = PayrollIntake::PreviewService::SOURCE_ADAPTERS[source_type.to_s]
       adapter.respond_to?(:source_roles) ? adapter.source_roles : {}
     end
 
     def self.default_required_roles(source_type)
+      descriptor = PayrollIntake::Registry.find(source_type)
+      return descriptor.default_required_source_roles if descriptor
+
       adapter = PayrollIntake::PreviewService::SOURCE_ADAPTERS[source_type.to_s]
       adapter.respond_to?(:default_required_source_roles) ? adapter.default_required_source_roles : []
     end
