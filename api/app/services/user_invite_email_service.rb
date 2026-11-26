@@ -13,10 +13,13 @@ class UserInviteEmailService
     "employee" => "Employee",
     "portal_employee" => "Employee"
   }.freeze
+  EMAIL_STATUSES = %w[queued sent captured refused skipped failed].freeze
 
   class << self
     # Returns true, :captured, :refused (a demo login's address is not on the
-    # allow-list, so nothing is sent) or false.
+    # allow-list, so nothing is sent), :skipped (email delivery isn't
+    # configured here) or false. Each outcome is also saved on the user as
+    # invite_email_status, so staff see a send that never went out.
     #
     # invitation_url is the Clerk invitation's own URL. Production Clerk is
     # invite-only and the first Payroll sign-in binds through the accepted
@@ -26,13 +29,16 @@ class UserInviteEmailService
     def send_invite(user:, invited_by:, invitation_url: nil)
       demo_company = DemoOutbound.demo_company_for(user)
       if demo_company && !DemoOutbound.permit?(company: demo_company, email: user.email, channel: "user_invite_email", user: user)
-        return :refused
+        return record_email_status(user, :refused)
       end
       unless acceptance_url?(invitation_url)
         Rails.logger.error("[InviteEmail] Not sent user_id=#{user.id}: no invitation acceptance URL")
-        return false
+        return record_email_status(user, false)
       end
-      return false unless configured?
+      unless configured?
+        Rails.logger.error("[InviteEmail] Skipped user_id=#{user.id}: email delivery is not configured")
+        return record_email_status(user, :skipped)
+      end
 
       button_link = invitation_url
       display_url = invitation_url
@@ -47,25 +53,42 @@ class UserInviteEmailService
           }
         )
       end
-      return :refused if response["suppressed"]
+      return record_email_status(user, :refused) if response["suppressed"]
 
       if StagingOutboundPolicy.staging? && response["staging_captured"]
         Rails.logger.info("[InviteEmail] STAGING captured invite user_id=#{user.id}; no email was sent")
-        return :captured
+        return record_email_status(user, :captured)
       end
 
       # Resend's Ruby client returns an HTTParty::Response whose parsed keys are
       # symbols (:id), while internal stubs/captures may use string keys ("id").
       message_id = response[:id].presence || response["id"].presence
       Rails.logger.info("[InviteEmail] Sent invite user_id=#{user.id} to #{LogRedaction.email(user.email)} id=#{message_id}") unless StagingOutboundPolicy.staging?
-      true
+      record_email_status(user, true)
     rescue StandardError => e
       if StagingOutboundPolicy.staging?
         Rails.logger.error("[InviteEmail] Failed user_id=#{user.id}: #{e.class}; content redacted")
       else
         Rails.logger.error("[InviteEmail] Failed user_id=#{user.id} to #{LogRedaction.email(user.email)}: #{e.class}")
       end
-      false
+      record_email_status(user, false)
+    end
+
+    # Saves the outcome on the user and returns it unchanged. A failure to
+    # save is logged; it never turns a sent email into a failed one.
+    def record_email_status(user, outcome)
+      status = case outcome
+      when true then "sent"
+      when false then "failed"
+      else outcome.to_s
+      end
+      raise ArgumentError, "unknown invite email status #{status}" unless EMAIL_STATUSES.include?(status)
+
+      user.update_columns(invite_email_status: status, invite_email_status_at: Time.current) if user.persisted?
+      outcome
+    rescue ActiveRecord::ActiveRecordError => e
+      Rails.logger.error("[InviteEmail] Could not record status=#{status} user_id=#{user.id}: #{e.class}")
+      outcome
     end
 
     def acceptance_url?(url)

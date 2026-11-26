@@ -3,7 +3,7 @@ import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedbac
 import { roleLabel } from '@/lib/role-labels';
 import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useId, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
-import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
+import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, MailX, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -62,6 +62,11 @@ function errorCode(err: unknown): string | undefined {
 
 const sameIds = (left: number[], right: number[]) =>
   left.length === right.length && left.every((id, index) => id === right[index]);
+
+// Both mean no email left: the person can't sign in until someone resends.
+function inviteNotSent(response: InvitationDeliveryResponse): boolean {
+  return response.invitation_delivery_status === 'failed' || response.invitation_delivery_status === 'skipped';
+}
 
 function inviteFailureReason(response: InvitationDeliveryResponse): string {
   if (response.invitation_delivery_status === 'failed') {
@@ -296,7 +301,7 @@ export function Users() {
       setInviteWarning(null);
       if (invitationNeedsRetry(response)) {
         setSuccessMessage(null);
-        setInviteWarning({ user: response.data, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
+        setInviteWarning({ user: response.data, reason: inviteFailureReason(response), confirmedFailure: inviteNotSent(response) });
       } else {
         setSuccessMessage(`Account created. ${invitationOutcomeMessage(response)}`);
       }
@@ -321,7 +326,7 @@ export function Users() {
       setError(null);
       setSuccessMessage(null);
       setInviteWarning(null);
-      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: response.invitation_delivery_status === 'failed' });
+      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: inviteNotSent(response) });
       else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to resend invitation';
@@ -1035,12 +1040,19 @@ export function Users() {
   );
 }
 
+// The send happens in a background job, so a skip or failure shows up here
+// rather than in the response to the invite.
+const INVITE_EMAIL_NOT_SENT = new Set(['skipped', 'failed', 'refused']);
+
 function StatusBadges({ user }: { user: User }) {
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {user.active === false ? <Badge>Inactive</Badge> : <Badge variant="success">Active</Badge>}
       {user.invitation_pending && (
         <Badge variant="warning"><Mail className="mr-1 h-3 w-3" aria-hidden="true" />Pending invite</Badge>
+      )}
+      {user.invitation_pending && INVITE_EMAIL_NOT_SENT.has(user.invite_email_status ?? '') && (
+        <Badge variant="danger"><MailX className="mr-1 h-3 w-3" aria-hidden="true" />Invite email not sent</Badge>
       )}
     </span>
   );

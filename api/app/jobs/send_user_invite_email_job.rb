@@ -15,6 +15,9 @@ class SendUserInviteEmailJob < ApplicationJob
     return :captured if success == :captured
     # Rechecked at send time: a stale job for a refused address sends nothing.
     return :refused if success == :refused
+    # Retrying can't configure email. The user's row says it was skipped, so
+    # staff see it and can resend once delivery is set up.
+    return :skipped if success == :skipped
 
     # The error names the login, never its address.
     raise "Failed to send invite email for user_id=#{user.id}" unless success
