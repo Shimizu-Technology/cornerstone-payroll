@@ -21,6 +21,14 @@ class UnifiedPayrollReporting
     net_pay: ->(balance) { balance.net_pay.to_d }
   }.freeze
 
+  def self.basis_label(basis)
+    {
+      BRIDGED => "From the applied opening YTD balance",
+      AS_IMPORTED => "As imported",
+      MIXED => "Partly from the applied opening YTD balance, partly as imported"
+    }.fetch(basis.to_s, basis.to_s.humanize)
+  end
+
   def initialize(company_id:, period:)
     @company_id = Integer(company_id)
     @period = period
@@ -87,37 +95,37 @@ class UnifiedPayrollReporting
       total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
       combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
       total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
-      gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
+      gross_pay: (row.fetch(:gross_pay, 0).to_d + totals[:gross_pay]).to_f,
       non_taxable_additions_total: row.fetch(:non_taxable_additions_total, 0).to_d + totals[:non_taxable_pay],
       imported_basis: totals[:imported_basis],
-      bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
+      bonus: (row.fetch(:bonus, 0).to_d + totals[:bonus]).to_f,
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
       installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
-      historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified],
-      health_insurance_deductions: row.fetch(:health_insurance_deductions, 0).to_f + totals[:health_insurance_deductions],
-      source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket],
-      employer_social_security_tax: row.fetch(:employer_social_security_tax, 0).to_f + totals[:employer_social_security_tax],
-      employer_medicare_tax: row.fetch(:employer_medicare_tax, 0).to_f + totals[:employer_medicare_tax],
-      other_employer_taxes: row.fetch(:other_employer_taxes, 0).to_f + totals[:other_employer_taxes],
-      employer_taxes_total: row.fetch(:employer_taxes_total, 0).to_f + totals[:employer_taxes_total],
-      employer_traditional_401k_match: row.fetch(:employer_traditional_401k_match, 0).to_f + totals[:employer_traditional_401k_match],
-      employer_roth_401k_match: row.fetch(:employer_roth_401k_match, 0).to_f + totals[:employer_roth_401k_match],
-      other_employer_contributions: row.fetch(:other_employer_contributions, 0).to_f + totals[:other_employer_contributions],
-      employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
-      employer_taxes_and_contributions_total: row.fetch(:employer_taxes_and_contributions_total, 0).to_f + totals[:employer_taxes_and_contributions_total],
-      employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
+      historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified].to_f,
+      health_insurance_deductions: (row.fetch(:health_insurance_deductions, 0).to_d + totals[:health_insurance_deductions]).to_f,
+      source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket].to_f,
+      employer_social_security_tax: (row.fetch(:employer_social_security_tax, 0).to_d + totals[:employer_social_security_tax]).to_f,
+      employer_medicare_tax: (row.fetch(:employer_medicare_tax, 0).to_d + totals[:employer_medicare_tax]).to_f,
+      other_employer_taxes: (row.fetch(:other_employer_taxes, 0).to_d + totals[:other_employer_taxes]).to_f,
+      employer_taxes_total: (row.fetch(:employer_taxes_total, 0).to_d + totals[:employer_taxes_total]).to_f,
+      employer_traditional_401k_match: (row.fetch(:employer_traditional_401k_match, 0).to_d + totals[:employer_traditional_401k_match]).to_f,
+      employer_roth_401k_match: (row.fetch(:employer_roth_401k_match, 0).to_d + totals[:employer_roth_401k_match]).to_f,
+      other_employer_contributions: (row.fetch(:other_employer_contributions, 0).to_d + totals[:other_employer_contributions]).to_f,
+      employer_contributions: (row.fetch(:employer_contributions, 0).to_d + totals[:employer_contributions]).to_f,
+      employer_taxes_and_contributions_total: (row.fetch(:employer_taxes_and_contributions_total, 0).to_d + totals[:employer_taxes_and_contributions_total]).to_f,
+      employer_payroll_cost: (row.fetch(:employer_payroll_cost, 0).to_d + totals[:employer_payroll_cost]).to_f,
       withholding_tax: row.fetch(:withholding_tax, 0).to_d + totals[:withholding_tax],
       # Imported history does not separate W-4 4c from income tax.
       base_withholding_tax: row.fetch(:base_withholding_tax, 0).to_d + totals[:withholding_tax],
       additional_withholding: row.fetch(:additional_withholding, 0).to_d,
-      social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
-      medicare_tax: row.fetch(:medicare_tax, 0).to_f + totals[:medicare_tax],
-      retirement: row.fetch(:retirement, 0).to_f + totals[:retirement],
-      roth_retirement: row.fetch(:roth_retirement, 0).to_f + totals[:roth_retirement],
-      tips: row.fetch(:tips, 0).to_f + totals[:tips],
-      tips_paid_out: row.fetch(:tips_paid_out, 0).to_f + totals[:tips_paid_out],
-      total_deductions: row.fetch(:total_deductions, 0).to_f + totals[:total_deductions],
-      net_pay: row.fetch(:net_pay, 0).to_f + totals[:net_pay]
+      social_security_tax: (row.fetch(:social_security_tax, 0).to_d + totals[:social_security_tax]).to_f,
+      medicare_tax: (row.fetch(:medicare_tax, 0).to_d + totals[:medicare_tax]).to_f,
+      retirement: (row.fetch(:retirement, 0).to_d + totals[:retirement]).to_f,
+      roth_retirement: (row.fetch(:roth_retirement, 0).to_d + totals[:roth_retirement]).to_f,
+      tips: (row.fetch(:tips, 0).to_d + totals[:tips]).to_f,
+      tips_paid_out: (row.fetch(:tips_paid_out, 0).to_d + totals[:tips_paid_out]).to_f,
+      total_deductions: (row.fetch(:total_deductions, 0).to_d + totals[:total_deductions]).to_f,
+      net_pay: (row.fetch(:net_pay, 0).to_d + totals[:net_pay]).to_f
     )
   end
 
@@ -127,35 +135,35 @@ class UnifiedPayrollReporting
       total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
       combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
       total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
-      gross_pay: row.fetch(:gross_pay, 0).to_f + totals[:gross_pay],
+      gross_pay: (row.fetch(:gross_pay, 0).to_d + totals[:gross_pay]).to_f,
       non_taxable_additions_total: row.fetch(:non_taxable_additions_total, 0).to_d + totals[:non_taxable_pay],
       imported_basis: totals[:imported_basis],
-      bonus: row.fetch(:bonus, 0).to_f + totals[:bonus],
+      bonus: (row.fetch(:bonus, 0).to_d + totals[:bonus]).to_f,
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
       installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
-      historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified],
-      health_insurance_deductions: row.fetch(:health_insurance_deductions, 0).to_f + totals[:health_insurance_deductions],
-      source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket],
-      employer_social_security_tax: row.fetch(:employer_social_security_tax, 0).to_f + totals[:employer_social_security_tax],
-      employer_medicare_tax: row.fetch(:employer_medicare_tax, 0).to_f + totals[:employer_medicare_tax],
-      other_employer_taxes: row.fetch(:other_employer_taxes, 0).to_f + totals[:other_employer_taxes],
-      employer_taxes_total: row.fetch(:employer_taxes_total, 0).to_f + totals[:employer_taxes_total],
-      employer_traditional_401k_match: row.fetch(:employer_traditional_401k_match, 0).to_f + totals[:employer_traditional_401k_match],
-      employer_roth_401k_match: row.fetch(:employer_roth_401k_match, 0).to_f + totals[:employer_roth_401k_match],
-      other_employer_contributions: row.fetch(:other_employer_contributions, 0).to_f + totals[:other_employer_contributions],
-      employer_contributions: row.fetch(:employer_contributions, 0).to_f + totals[:employer_contributions],
-      employer_taxes_and_contributions_total: row.fetch(:employer_taxes_and_contributions_total, 0).to_f + totals[:employer_taxes_and_contributions_total],
-      employer_payroll_cost: row.fetch(:employer_payroll_cost, 0).to_f + totals[:employer_payroll_cost],
+      historical_loan_deductions_unclassified: totals[:historical_loan_deductions_unclassified].to_f,
+      health_insurance_deductions: (row.fetch(:health_insurance_deductions, 0).to_d + totals[:health_insurance_deductions]).to_f,
+      source_labeled_after_tax_401k_in_pretax_bucket: totals[:source_labeled_after_tax_401k_in_pretax_bucket].to_f,
+      employer_social_security_tax: (row.fetch(:employer_social_security_tax, 0).to_d + totals[:employer_social_security_tax]).to_f,
+      employer_medicare_tax: (row.fetch(:employer_medicare_tax, 0).to_d + totals[:employer_medicare_tax]).to_f,
+      other_employer_taxes: (row.fetch(:other_employer_taxes, 0).to_d + totals[:other_employer_taxes]).to_f,
+      employer_taxes_total: (row.fetch(:employer_taxes_total, 0).to_d + totals[:employer_taxes_total]).to_f,
+      employer_traditional_401k_match: (row.fetch(:employer_traditional_401k_match, 0).to_d + totals[:employer_traditional_401k_match]).to_f,
+      employer_roth_401k_match: (row.fetch(:employer_roth_401k_match, 0).to_d + totals[:employer_roth_401k_match]).to_f,
+      other_employer_contributions: (row.fetch(:other_employer_contributions, 0).to_d + totals[:other_employer_contributions]).to_f,
+      employer_contributions: (row.fetch(:employer_contributions, 0).to_d + totals[:employer_contributions]).to_f,
+      employer_taxes_and_contributions_total: (row.fetch(:employer_taxes_and_contributions_total, 0).to_d + totals[:employer_taxes_and_contributions_total]).to_f,
+      employer_payroll_cost: (row.fetch(:employer_payroll_cost, 0).to_d + totals[:employer_payroll_cost]).to_f,
       withholding_tax: row.fetch(:withholding_tax, 0).to_d + totals[:withholding_tax],
       # Imported history does not separate W-4 4c from income tax.
       base_withholding_tax: row.fetch(:base_withholding_tax, 0).to_d + totals[:withholding_tax],
       additional_withholding: row.fetch(:additional_withholding, 0).to_d,
-      social_security_tax: row.fetch(:social_security_tax, 0).to_f + totals[:social_security_tax],
-      medicare_tax: row.fetch(:medicare_tax, 0).to_f + totals[:medicare_tax],
-      retirement: row.fetch(:retirement, 0).to_f + totals[:retirement],
-      roth_retirement: row.fetch(:roth_retirement, 0).to_f + totals[:roth_retirement],
-      total_deductions: row.fetch(:total_deductions, 0).to_f + totals[:total_deductions],
-      net_pay: row.fetch(:net_pay, 0).to_f + totals[:net_pay],
+      social_security_tax: (row.fetch(:social_security_tax, 0).to_d + totals[:social_security_tax]).to_f,
+      medicare_tax: (row.fetch(:medicare_tax, 0).to_d + totals[:medicare_tax]).to_f,
+      retirement: (row.fetch(:retirement, 0).to_d + totals[:retirement]).to_f,
+      roth_retirement: (row.fetch(:roth_retirement, 0).to_d + totals[:roth_retirement]).to_f,
+      total_deductions: (row.fetch(:total_deductions, 0).to_d + totals[:total_deductions]).to_f,
+      net_pay: (row.fetch(:net_pay, 0).to_d + totals[:net_pay]).to_f,
       payroll_count: row.fetch(:payroll_count, 0).to_i + regular_period_count(paychecks),
       employee_count: (native_employee_ids + paychecks.map(&:employee_id)).compact.uniq.length,
       imported_payroll_count: regular_period_count(paychecks),
@@ -222,8 +230,8 @@ class UnifiedPayrollReporting
       overtime_hours: recorded_hours_component(paycheck, OVERTIME_HOURS)&.to_f,
       holiday_hours: nil,
       pto_hours: nil,
-      reported_tips: totals[:tips],
-      tips_paid_out: totals[:tips_paid_out],
+      reported_tips: totals[:tips].to_f,
+      tips_paid_out: totals[:tips_paid_out].to_f,
       bonus: 0,
       custom_earnings_total: 0,
       custom_deductions_total: 0,
@@ -233,7 +241,7 @@ class UnifiedPayrollReporting
       total_income_tax_withheld: paycheck.federal_income_tax.to_f,
       social_security_tax: paycheck.social_security_tax.to_f,
       medicare_tax: paycheck.medicare_tax.to_f,
-      total_deductions: totals[:total_deductions],
+      total_deductions: totals[:total_deductions].to_f,
       net_pay: paycheck.net_pay.to_f,
       check_number: paycheck.check_number,
       payment_method: paycheck.payment_method,
@@ -267,7 +275,7 @@ class UnifiedPayrollReporting
       overtime_hours: nil,
       holiday_hours: nil,
       pto_hours: nil,
-      reported_tips: totals[:tips],
+      reported_tips: totals[:tips].to_f,
       tips_paid_out: 0,
       bonus: 0,
       custom_earnings_total: 0,
@@ -278,7 +286,7 @@ class UnifiedPayrollReporting
       total_income_tax_withheld: adjustment.federal_income_tax.to_f,
       social_security_tax: adjustment.social_security_tax.to_f,
       medicare_tax: adjustment.medicare_tax.to_f,
-      total_deductions: totals[:total_deductions],
+      total_deductions: totals[:total_deductions].to_f,
       net_pay: adjustment.net_pay.to_f,
       check_number: nil,
       payment_method_label: PayrollPaymentLabel::ADJUSTMENT,
@@ -374,30 +382,30 @@ class UnifiedPayrollReporting
       adjustments.select { |adjustment| balances.key?(bridge_key(adjustment)) }
     )
     BRIDGE_FIGURES.each do |field, figure|
-      value = (totals[field].to_d - covered[field].to_d + balances.values.sum(0.to_d, &figure)).round(2)
-      totals[field] = totals[field].is_a?(Float) ? value.to_f : value
+      totals[field] = (totals[field] - covered[field] + balances.values.sum(0.to_d, &figure)).round(2)
     end
     complete = (paychecks + adjustments).all? { |row| balances.key?(bridge_key(row)) }
     totals.merge(imported_basis: complete ? BRIDGED : MIXED)
   end
 
+  # Every money figure stays BigDecimal; callers convert at the response.
   def imported_totals(paychecks, adjustments = [])
     rows = paychecks + adjustments
     non_taxable = rows.sum(0.to_d) { |row| non_taxable_pay(row) }
-    employer_taxes_total = sum(rows, :employer_taxes)
-    employer_social_security_tax = component_sum(rows, :employer_tax_breakdown, EMPLOYER_SOCIAL_SECURITY)
-    employer_medicare_tax = component_sum(rows, :employer_tax_breakdown, EMPLOYER_MEDICARE)
+    employer_taxes_total = decimal_sum(rows, :employer_taxes)
+    employer_social_security_tax = decimal_component_sum(rows, :employer_tax_breakdown, EMPLOYER_SOCIAL_SECURITY)
+    employer_medicare_tax = decimal_component_sum(rows, :employer_tax_breakdown, EMPLOYER_MEDICARE)
     employer_contribution_totals = historical_employer_contribution_totals(rows)
-    employer_contributions = sum(rows, :employer_contributions)
+    employer_contributions = decimal_sum(rows, :employer_contributions)
     {
       total_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, REGULAR_HOURS).to_d },
       combined_hours: rows.sum(0.to_d) { |row| row.hours_total.to_d },
       total_overtime_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, OVERTIME_HOURS).to_d },
       # Imported gross includes non-taxable reimbursements; like the pay stub,
       # reports show them as non-taxable additions instead.
-      gross_pay: (rows.sum(0.to_d) { |row| row.gross_pay.to_d } - non_taxable).round(2).to_f,
+      gross_pay: (rows.sum(0.to_d) { |row| row.gross_pay.to_d } - non_taxable).round(2),
       non_taxable_pay: non_taxable,
-      bonus: component_sum(rows, :earnings_breakdown, /bonus/i),
+      bonus: decimal_component_sum(rows, :earnings_breakdown, /bonus/i),
       employer_social_security_tax: employer_social_security_tax,
       employer_medicare_tax: employer_medicare_tax,
       other_employer_taxes: (employer_taxes_total - employer_social_security_tax - employer_medicare_tax).round(2),
@@ -407,23 +415,23 @@ class UnifiedPayrollReporting
       other_employer_contributions: (employer_contributions - employer_contribution_totals[:traditional_401k] - employer_contribution_totals[:roth_401k]).round(2),
       employer_contributions: employer_contributions,
       employer_taxes_and_contributions_total: (employer_taxes_total + employer_contributions).round(2),
-      employer_payroll_cost: sum(rows, :total_payroll_cost),
+      employer_payroll_cost: decimal_sum(rows, :total_payroll_cost),
       withholding_tax: rows.sum(0.to_d) { |row| row.federal_income_tax.to_d },
-      social_security_tax: sum(rows, :social_security_tax),
-      medicare_tax: sum(rows, :medicare_tax),
+      social_security_tax: decimal_sum(rows, :social_security_tax),
+      medicare_tax: decimal_sum(rows, :medicare_tax),
       retirement: classified_deduction_sum(rows, "retirement", [ [ :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_PRE_TAX ] ]),
       roth_retirement: classified_deduction_sum(rows, "roth_retirement", [ [ :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::RETIREMENT_ROTH ] ]),
       historical_loan_deductions_unclassified: classified_deduction_sum(rows, "loans", [ [ :pretax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN ],
         [ :after_tax_deduction_breakdown, QuickbooksHistory::YtdBridgePlan::LOAN ] ]),
       health_insurance_deductions: classified_deduction_sum(rows, "insurance", [ [ :pretax_deduction_breakdown, /\AHealth Insurance\z/i ],
         [ :after_tax_deduction_breakdown, /\AHealth Insurance\z/i ] ]),
-      source_labeled_after_tax_401k_in_pretax_bucket: component_sum(rows, :pretax_deduction_breakdown, /\A401\(k\) After Tax\z/i),
-      tips: rows.sum(0.to_d) { |row| verified_history_amount(row, "reported_tips") || component_sum([ row ], :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS).to_d }.to_f,
+      source_labeled_after_tax_401k_in_pretax_bucket: decimal_component_sum(rows, :pretax_deduction_breakdown, /\A401\(k\) After Tax\z/i),
+      tips: rows.sum(0.to_d) { |row| verified_history_amount(row, "reported_tips") || decimal_component_sum([ row ], :earnings_breakdown, QuickbooksHistory::YtdBridgePlan::TIPS) }.round(2),
       # QuickBooks does not distinguish paid-out tips; the existing-roster lane
       # requires the provider's explicit verified value.
-      tips_paid_out: rows.sum(0.to_d) { |row| verified_history_amount(row, "tips_paid_out") || 0.to_d }.to_f,
-      total_deductions: rows.sum(0.to_d) { |paycheck| paycheck.pretax_deductions + paycheck.employee_taxes + paycheck.after_tax_deductions }.to_f,
-      net_pay: sum(rows, :net_pay)
+      tips_paid_out: rows.sum(0.to_d) { |row| verified_history_amount(row, "tips_paid_out") || 0.to_d }.round(2),
+      total_deductions: rows.sum(0.to_d) { |paycheck| paycheck.pretax_deductions.to_d + paycheck.employee_taxes.to_d + paycheck.after_tax_deductions.to_d }.round(2),
+      net_pay: decimal_sum(rows, :net_pay)
     }
   end
 
@@ -441,7 +449,7 @@ class UnifiedPayrollReporting
       balance = range_balances[key]
       next unless balance
 
-      sources = bridge_sources.fetch(key)
+      sources = bridge_sources(key)
       present_paychecks = paychecks.select { |paycheck| bridge_key(paycheck) == key }.map(&:id).sort
       present_adjustments = adjustments.select { |adjustment| bridge_key(adjustment) == key }.map(&:id).sort
       [ key, balance ] if present_paychecks == sources.fetch(:paychecks) && present_adjustments == sources.fetch(:adjustments)
@@ -466,9 +474,12 @@ class UnifiedPayrollReporting
     end
   end
 
-  # Every imported row each covering balance was built from.
-  def bridge_sources
-    @bridge_sources ||= range_balances.keys.index_with do |batch_id, employee_id, year|
+  # Every imported row a covering balance was built from, loaded only for the
+  # balances a totals call actually reaches.
+  def bridge_sources(key)
+    @bridge_sources ||= {}
+    @bridge_sources[key] ||= begin
+      batch_id, employee_id, year = key
       year_range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
       {
         paychecks: HistoricalPaycheck.where(historical_import_batch_id: batch_id, employee_id: employee_id, pay_date: year_range).order(:id).pluck(:id),
@@ -495,8 +506,8 @@ class UnifiedPayrollReporting
 
   def classified_deduction_sum(rows, field, components)
     rows.sum(0.to_d) do |row|
-      verified_history_amount(row, field) || components.sum(0.to_d) { |bucket, pattern| component_sum([ row ], bucket, pattern).to_d }
-    end.to_f
+      verified_history_amount(row, field) || components.sum(0.to_d) { |bucket, pattern| decimal_component_sum([ row ], bucket, pattern) }
+    end.round(2)
   end
 
   def sum(paychecks, field)
@@ -505,6 +516,14 @@ class UnifiedPayrollReporting
 
   def component_sum(paychecks, field, pattern)
     paychecks.sum(0.to_d) { |paycheck| matching_component_amounts(paycheck.public_send(field), pattern).sum(0.to_d) }.to_f
+  end
+
+  def decimal_sum(rows, field)
+    rows.sum(0.to_d) { |row| row.public_send(field).to_d }.round(2)
+  end
+
+  def decimal_component_sum(rows, field, pattern)
+    rows.sum(0.to_d) { |row| matching_component_amounts(row.public_send(field), pattern).sum(0.to_d) }.round(2)
   end
 
   def recorded_hours_component(paycheck, pattern)
@@ -533,7 +552,7 @@ class UnifiedPayrollReporting
         totals[:roth_401k] += amount if group == PayrollReportingGroups::GROUP_401K_AFTER_TAX
       end
     end
-    totals.transform_values(&:to_f)
+    totals.transform_values { |amount| amount.round(2) }
   end
 
   def regular_period_count(paychecks)

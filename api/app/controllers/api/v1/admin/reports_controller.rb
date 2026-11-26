@@ -2714,9 +2714,10 @@ module Api
             custom_earnings_total: custom_earnings_total(item),
             custom_deductions_total: custom_deductions_total(item),
             gross_pay: item.gross_pay.to_f,
-            # Split as the pay stub prints it: income tax, then W-4 4c.
-            withholding_tax: item.withholding_tax.to_d.to_f,
-            additional_withholding: item.additional_withholding.to_d.to_f,
+            # Split as the pay stub prints it: income tax, then W-4 4c. Floats
+            # at the response, as every amount in this row.
+            withholding_tax: item.withholding_tax.to_f,
+            additional_withholding: item.additional_withholding.to_f,
             total_income_tax_withheld: item.total_income_tax_withheld.to_f,
             social_security_tax: item.social_security_tax.to_f,
             medicare_tax: item.medicare_tax.to_f,
@@ -4428,6 +4429,9 @@ module Api
               when :source_labeled_after_tax_401k_in_pretax_bucket
                 "401(k) after-tax (imported as pre-tax)"
               when :withholding_tax then PayrollLabels::INCOME_TAX_WITHHELD
+              when :base_withholding_tax then PayrollLabels::INCOME_TAX
+              when :additional_withholding then PayrollLabels::ADDITIONAL_WITHHOLDING
+              when :imported_basis then "Imported figures"
               when :social_security_tax then "Social Security tax"
               when :medicare_tax then "Medicare tax"
               when :retirement then "Traditional 401(k)"
@@ -4436,6 +4440,7 @@ module Api
               end
               display = case key.to_sym
               when :period_basis then value.to_s.humanize
+              when :imported_basis then UnifiedPayrollReporting.basis_label(value)
               when :year, :start_date, :end_date then value
               when :total_hours, :total_overtime_hours, :combined_hours
                 ActiveSupport::NumberHelper.number_to_delimited(format("%.2f", value.to_d))
