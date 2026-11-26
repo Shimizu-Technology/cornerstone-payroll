@@ -1,4 +1,4 @@
-import type { ReactElement, ReactNode } from 'react';
+import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
 import { CircleAlert, LoaderCircle, Lock, Power, RefreshCw, ShieldCheck, Timer, WifiOff, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { askManager } from './brand';
@@ -112,17 +112,56 @@ export function RateLimitedState(actions: StateActions): ReactElement {
 }
 
 /** A full-screen message outside the shell: the app is off, or access has ended. */
-function FullScreenState({ icon, title, children, actions }: { icon: LucideIcon; title: string; children: ReactNode; actions: ReactNode }): ReactElement {
+function FullScreenState({ icon, title, children, actions, focusHeading = false }: {
+  icon: LucideIcon;
+  title: string;
+  children?: ReactNode;
+  actions?: ReactNode;
+  focusHeading?: boolean;
+}): ReactElement {
   useDocumentTitle(title);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusHeading) heading.current?.focus();
+  }, [focusHeading]);
   return (
     <main className="emp-auth">
       <div className="emp-auth-grow" role="alert">
         <StateIcon icon={icon} />
-        <h1 className="emp-h1">{title}</h1>
+        <h1 className="emp-h1" ref={heading} tabIndex={focusHeading ? -1 : undefined}>{title}</h1>
         {children}
       </div>
-      <div className="space-y-2">{actions}</div>
+      {actions && <div className="space-y-2">{actions}</div>}
     </main>
+  );
+}
+
+export function TenantUnavailableScreen({ onRetry }: { onRetry: () => void }): ReactElement {
+  return (
+    <FullScreenState icon={Power} title="This employee app isn't available yet" focusHeading actions={
+      <EmpButton block onClick={onRetry}>Try again</EmpButton>
+    }>
+      <p className="emp-lead">If you were expecting access, contact your employer.</p>
+    </FullScreenState>
+  );
+}
+
+export function TenantConnectionErrorScreen({ onRetry }: { onRetry: () => void }): ReactElement {
+  return (
+    <FullScreenState icon={WifiOff} title="We couldn't open the app" focusHeading actions={
+      <EmpButton block onClick={onRetry}>Try again</EmpButton>
+    }>
+      {/* A switched-off company's address fails like a dropped connection in the browser, so this covers both. */}
+      <p className="emp-lead">Check your connection and try again. If this keeps happening, contact your employer.</p>
+    </FullScreenState>
+  );
+}
+
+export function SignInLoadErrorScreen(): ReactElement {
+  return (
+    <FullScreenState icon={CircleAlert} title="We couldn't load sign-in" focusHeading actions={
+      <EmpButton block onClick={() => window.location.reload()}>Try again</EmpButton>
+    } />
   );
 }
 
