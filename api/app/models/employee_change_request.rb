@@ -63,7 +63,9 @@ class EmployeeChangeRequest < ApplicationRecord
   belongs_to :requested_by_link, class_name: "EmployeeAccountLink", optional: true
   belongs_to :reviewed_by, class_name: "User", optional: true
 
-  enum :status, { pending: 0, approved: 1, rejected: 2, cancelled: 3 }
+  # superseded: a direct staff or Client manager address edit replaced a
+  # pending employee address request (supersede_pending_address!).
+  enum :status, { pending: 0, approved: 1, rejected: 2, cancelled: 3, superseded: 4 }
 
   validates :proposed_changes, presence: true
   validates :requested_by, presence: true, on: :create
@@ -80,6 +82,28 @@ class EmployeeChangeRequest < ApplicationRecord
       .where("proposed_changes - ARRAY[?]::text[] = '{}'::jsonb", ADDRESS_FIELDS)
       .where(%q{NOT jsonb_path_exists(proposed_changes, '$.* ? (@.type() != "string" && @.type() != "null")')})
   }
+
+  # A direct contact edit that changes the mailing address replaces the
+  # employee's own pending address request, which could otherwise never be
+  # approved (its original values no longer match). Callers hold the company
+  # and then the employee lock, as every contact writer does
+  # (employee_links.rb); the request lock comes last. Review paths take the
+  # company lock first too, so the two orders never wait on each other.
+  def self.supersede_pending_address!(employee:, actor:, changed_fields:)
+    return if (changed_fields.map(&:to_s) & ADDRESS_FIELDS).empty?
+
+    request = for_company(employee.company_id).lock.find_by(employee_id: employee.id, status: :pending)
+    return unless request&.profile_address?
+
+    request.update!(status: :superseded, reviewed_by: actor, reviewed_at: Time.current)
+    AuditLog.record!(
+      user: actor, company_id: employee.company_id, action: "employee_change_requests#superseded",
+      record_type: "employee_change_requests", record_id: request.id, subject_name: employee.full_name,
+      metadata: { employee_id: employee.id, replaced_fields: changed_fields.map(&:to_s) & ADDRESS_FIELDS,
+                  requested_by_link_id: request.requested_by_link_id }
+    )
+    request
+  end
 
   def profile_address_origin?
     own_record? || requested_by_link_id.present?

@@ -35,7 +35,7 @@ class PayrollInsuranceComponents
   end
 
   def self.field_amount(item)
-    item.payroll_item_field_entries.sum(0.to_d) do |row|
+    item.payroll_field_entries_for_calculation.sum(0.to_d) do |row|
       row.active? && row.kind == "deduction" && row.category == "insurance" ? row.amount.to_d : 0.to_d
     end.round(2)
   end

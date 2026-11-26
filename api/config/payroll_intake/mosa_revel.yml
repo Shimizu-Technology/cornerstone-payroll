@@ -1,0 +1,129 @@
+# Track C characterization of the existing adapter. Verified by the intake golden specs.
+key: mosa_revel
+parser_version: mosa_revel:v1
+extraction: deterministic
+idempotency: files_period_roster_loans_and_workweek
+files:
+  revel_hours:
+    extensions: [.pdf]
+    content_type: application/pdf
+    max: 1
+    required_by_default: true
+    portal_role: revel_payroll
+  supplemental_workbook:
+    extensions: [.xlsx, .xls]
+    max: 1
+    required_by_default: true
+    waiver_label: No tips or loans this period
+    portal_role: changes_workbook
+revel_hours:
+  header_pattern: 'Employee.*Role.*Ext\. ID.*Wage.*Regular h\.'
+  columns_zero_based_inclusive:
+    employee: [0, 39]
+    role: [40, 59]
+    ext_id: [60, 79]
+    wage: [80, 99]
+    regular_hours: [100, 119]
+    overtime_hours: [120, 139]
+    doubletime_hours: [140, 159]
+    regular_pay: [160, 179]
+    overtime_pay: [180, 199]
+    doubletime_pay: [200, 219]
+    total_hours: [220, 239]
+    total_pay: [240, 259]
+    fees: [260, 279]
+  employee_match: fuzzy_name_against_active_roster
+  wrapped_names: Join adjacent name fragments when one line carries payroll numbers and the other is a name continuation. A last-name fragment on the numeric line must end in a comma. A leading name-only fragment must contain a comma.
+  compressed_columns:
+    trigger: The fixed parse has a blank employee, total hours above 200, positive total pay with zero total hours, or a nonblank double-time value that fails numeric parsing.
+    parsing: Right-align two-decimal values and dash placeholders to the nine payroll columns from regular hours through fees. Skip the leading wage token when the fixed wage field shows one. Keep the name in characters 0–39.
+  totals: 'A line matching ^\s*Totals (case-insensitive) and containing a number matching \d+\.\d{2} ends the table. Footer values are skipped.'
+  payroll_fields:
+    regular_hours: hours_worked
+    overtime_hours: overtime_hours
+    doubletime_hours: The preview retains decimal hours. Positive hours or double-time pay block apply with doubletime_not_supported.
+    total_hours: A reported total more than 0.01 hours above the sum of regular, overtime, and double-time hours blocks apply with hours_do_not_reconcile.
+    wage_and_pay: use Cornerstone compensation
+workbook:
+  generated:
+    schema_versions: [cornerstone-mosa-supplemental/v1, cornerstone-mosa-supplemental/v2]
+    detection_sheet: START HERE
+    metadata_columns: {label: A, value: B}
+    metadata_labels: [Schema version, Company ID, Company, Pay period start, Pay period end, Pay date, Template revision, Prior revision replaced, Submitter, Submitted at, Revel filename, 'No supplemental changes? (YES/NO)', Attestation]
+    merged_ranges: ['A1:D1', 'A2:D2']
+    employee_match: stable_employee_id_against_active_roster
+    header_row: 1
+    first_data_row: 2
+    column_detection: Data sheets are read by position without validating header text. The START HERE metadata uses labels.
+    v1_sheet_order: [START HERE, EMPLOYEE CHANGES, DEDUCTIONS & LOANS]
+    sheets:
+      EMPLOYEE CHANGES:
+        required: true
+        columns: [Employee ID, Employee, Department, BOH tips, FOH tips, 'Tips already paid? (YES/NO)', Source / reason, Notes]
+        v1_headers_g_to_l: [One-time bonus, One-payroll deduction, Effective date, Recipient / payee, Source / reason, Notes]
+        v1_columns_g_to_l: [bonus, one_payroll_deduction, effective_date, recipient, source, notes]
+      OWNER PERIOD PAY:
+        required: false
+        columns: [Employee ID, Employee, Pay this employee, Scope confirmation, Effective pay date, Source / reason, Notes]
+      ONE-TIME COMPONENTS:
+        required: false
+        columns: [Employee ID, Employee, Type, Label, Amount, Category, Recipient / payee, Effective pay date, Source / reason, Notes]
+      DEDUCTIONS & LOANS:
+        required: true
+        columns: [Employee ID, Employee, Component ID, Component, Type, Current amount, Action (KEEP/CHANGE/STOP), Amount this payroll, Effective date, Stop date / rule, Opening balance, New advance, Payment, Ending balance, Recipient / payee, Source, Notes]
+    payroll_fields:
+      BOH and FOH tips: reported_tips (retaining each pool)
+      tips already paid: tips_paid_out when YES
+      owner period pay: period_pay for this employee only
+      recurring amount and installment payment: loan_deduction, subject to loan reconciliation
+    one_time_pay_codes:
+      BONUS: taxable_addition
+      OTHER TAXABLE EARNING: taxable_addition
+      REIMBURSEMENT: non_taxable_addition
+      POST-TAX DEDUCTION: post_tax_deduction
+    validation:
+      - Require the matching company ID, start date, end date, pay date, and an attestation.
+      - Require an employee ID on changed rows. Tips already paid accepts YES, NO, or blank.
+      - A no-changes attestation cannot accompany changed rows.
+      - Owner pay requires a positive amount, THIS EMPLOYEE ONLY, matching pay date, and a source.
+      - One-time items require a supported type and category, positive amount, matching pay date, and source. Deductions also require a payee.
+      - With a positive ending balance, opening plus advance minus payment must match ending within one cent.
+      - Recurring setup changes, advances, and payroll amounts against a named loan or recurring component require review in Cornerstone.
+      - Any populated A–J cell from row 2 on HOUR CORRECTIONS rejects the file. Unrecognized sheets are ignored.
+  legacy:
+    detection: absence of START HERE
+    header_row: 4
+    first_data_row: 5
+    employee_match: fuzzy_name_against_active_roster
+    metadata:
+      sheet: Read the first available recognized sheet in the order below.
+      period_end: Prefer an exact date in C2. If blank or a month-only label, read F2.
+      pay_date: Prefer an exact date in C3. If blank or a month-only label, read F3.
+    sheets:
+      TIPS - BOH: {C: last_name, D: first_name, F: tips_boh}
+      TIPS - FOH: {C: last_name, D: first_name, F: tips_foh}
+      LOANS (NO INSTALLMENTS): {C: last_name, D: first_name, F: recurring_loan_deduction}
+      INSTALLMENT LOANS: {C: last_name, D: first_name, F: beginning_balance, G: new_amount, H: payment, I: estimated_ending_balance}
+      BONUSES: {C: last_name, D: first_name, F: bonus}
+    skipped_sheets: [SUMMARY]
+    quirks:
+      - Sheet headers are positional. The parser does not check header text.
+      - The pay date must match. A one-day period-end difference warns, and a larger difference rejects the file.
+      - Both tip pools are summed, and apply requires a choice of whether legacy tips were already paid.
+      - Blank bonus is absent. Zero clears an imported bonus. Duplicate bonus rows are rejected.
+      - A blank last_name in column C skips the row, including totals. A blank first_name in column D alone does not skip it.
+pay_period:
+  length_days: 14
+  workweek_starts_at_minutes: 0
+  requires_confirmed_workweek: true
+  source_reports_overtime: true
+  misaligned_workweek: warn
+  revel_dates: Both period boundaries must match. Look for a date range in the filename first, then the report text.
+characterization_specs:
+  - spec/requests/api/v1/admin/payroll_intake_golden_spec.rb
+  - spec/services/payroll_import/revel_pdf_parser_spec.rb # Compressed columns and lower-level wrapped name cases.
+  - spec/services/payroll_import/name_matcher_spec.rb # Fuzzy matches, nicknames, and rejection thresholds.
+  - spec/services/payroll_import/loan_tip_excel_parser_spec.rb # C2/C3 typed dates, F2/F3 fallback, and pool and loan aggregation.
+  - spec/services/payroll_import/mosa_supplemental_template_spec.rb # Generated schema, attestation, and sheet-level validation.
+  - spec/services/payroll_import/loan_reconciliation_spec.rb # Named loans, setup, balance mismatch, and final payment caps.
+  - spec/requests/api/v1/admin/payroll_import_installment_loan_spec.rb # Loan setup, rematching, and stale offers.
