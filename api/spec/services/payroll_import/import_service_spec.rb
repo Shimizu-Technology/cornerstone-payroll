@@ -384,26 +384,105 @@ RSpec.describe PayrollImport::ImportService do
       end
     end
 
-    it "replaces imported one-time components authoritatively on re-import" do
-      employee = create(:employee, company: company, employment_type: "hourly", pay_rate: 20)
-      allow_any_instance_of(PayrollItem).to receive(:calculate!) { |item| item.save! }
-      component = {
-        component_type: "BONUS",
-        label: "Launch bonus",
-        amount: 100,
-        kind: "addition",
-        tax_treatment: "taxable_addition",
-        category: "other",
-        effective_pay_date: pay_period.pay_date.iso8601,
-        source: "CEO approval"
-      }
+    context "when replacing imported one-time components" do
+      let(:employee) do
+        create(:employee, company: company, first_name: "Jordan", last_name: "Fixture",
+          employment_type: "hourly", pay_rate: BigDecimal("20.00"))
+      end
+      let(:reimbursement) do
+        {
+          component_type: "REIMBURSEMENT", label: "Travel reimbursement", amount: BigDecimal("25.00"),
+          kind: "addition", tax_treatment: "non_taxable_addition", category: "reimbursement",
+          effective_pay_date: pay_period.pay_date.iso8601, source: "Approved receipt"
+        }
+      end
 
-      first = service.apply!(matched: [ { employee_id: employee.id, total_tips: 0, payroll_components: [ component ] } ])
-      second = service.apply!(matched: [ { employee_id: employee.id, total_tips: 0, payroll_components: [] } ])
+      before { create(:tax_table, tax_year: pay_period.pay_date.year) }
 
-      expect(first[:errors]).to be_empty
-      expect(second[:errors]).to be_empty
-      expect(pay_period.payroll_items.find_by!(employee: employee).payroll_item_field_entries.where(source: "import")).to be_empty
+      def apply_components(*components)
+        result = service.apply!(matched: [
+          { employee_id: employee.id, regular_hours: BigDecimal("10.00"), payroll_components: components }
+        ])
+        expect(result[:errors]).to be_empty
+        expect(result[:success]).to contain_exactly(include(employee_id: employee.id))
+        pay_period.payroll_items.find_by!(employee: employee)
+      end
+
+      it "recalculates with one entry when the same label is imported again" do
+        item = apply_components(reimbursement)
+        previous = item.payroll_item_field_entries.sole
+
+        item = apply_components(reimbursement.merge(amount: BigDecimal("50.00")))
+
+        expect(item.payroll_item_field_entries.sole).to have_attributes(label: "Travel reimbursement",
+          amount: BigDecimal("50.00"), source: "import")
+        expect(PayrollItemFieldEntry.exists?(previous.id)).to be(false)
+        expect(item.payroll_item_earnings.where(category: "non_taxable")).to contain_exactly(
+          have_attributes(label: "Travel reimbursement", amount: BigDecimal("50.00"))
+        )
+        expect(item.net_pay).to eq(BigDecimal("234.70"))
+      end
+
+      it "removes an omitted reimbursement from net pay and earnings while keeping a manual entry" do
+        item = apply_components(reimbursement)
+        expect(item.net_pay).to eq(BigDecimal("209.70"))
+        manual = item.payroll_item_field_entries.create!(
+          label: "Manual supplies reimbursement", amount: BigDecimal("10.00"),
+          kind: "addition", tax_treatment: "non_taxable_addition", category: "reimbursement",
+          source: "manual", employee_paid: true
+        )
+
+        item = apply_components
+
+        expect(item.payroll_item_field_entries).to contain_exactly(manual)
+        expect(manual.reload.amount).to eq(BigDecimal("10.00"))
+        expect(item).to have_attributes(gross_pay: BigDecimal("200.00"), withholding_tax: BigDecimal("0.00"),
+          social_security_tax: BigDecimal("12.40"), medicare_tax: BigDecimal("2.90"), net_pay: BigDecimal("194.70"))
+        expect(item.payroll_item_earnings).to contain_exactly(
+          have_attributes(label: "Regular Pay", amount: BigDecimal("200.00")),
+          have_attributes(label: "Manual supplies reimbursement", amount: BigDecimal("10.00"))
+        )
+      end
+
+      it "removes an omitted taxable bonus from gross pay, taxes, net pay and earnings" do
+        bonus = {
+          component_type: "BONUS", label: "Launch bonus", amount: BigDecimal("40.00"),
+          kind: "addition", tax_treatment: "taxable_addition", category: "other",
+          effective_pay_date: pay_period.pay_date.iso8601, source: "Approved bonus"
+        }
+        item = apply_components(bonus)
+        expect(item).to have_attributes(gross_pay: BigDecimal("240.00"), social_security_tax: BigDecimal("14.88"),
+          medicare_tax: BigDecimal("3.48"), net_pay: BigDecimal("221.64"))
+
+        item = apply_components
+
+        expect(item.payroll_item_field_entries).to be_empty
+        expect(item).to have_attributes(gross_pay: BigDecimal("200.00"), withholding_tax: BigDecimal("0.00"),
+          social_security_tax: BigDecimal("12.40"), medicare_tax: BigDecimal("2.90"), net_pay: BigDecimal("184.70"))
+        expect(item.payroll_item_earnings).to contain_exactly(
+          have_attributes(label: "Regular Pay", amount: BigDecimal("200.00"))
+        )
+      end
+
+      it "rebuilds a post-tax deduction and its itemized deduction with the replacement amount" do
+        deduction = {
+          component_type: "POST-TAX DEDUCTION", label: "Uniform repayment", amount: BigDecimal("20.00"),
+          kind: "deduction", tax_treatment: "post_tax_deduction", category: "other",
+          payee_name: "Fixture Company", effective_pay_date: pay_period.pay_date.iso8601, source: "Signed instruction"
+        }
+        item = apply_components(deduction)
+        expect(item.net_pay).to eq(BigDecimal("164.70"))
+
+        item = apply_components(deduction.merge(amount: BigDecimal("35.00")))
+
+        expect(item.payroll_item_field_entries.sole).to have_attributes(label: "Uniform repayment",
+          amount: BigDecimal("35.00"), tax_treatment: "post_tax_deduction", source: "import")
+        expect(item.payroll_item_deductions.where(category: "post_tax")).to contain_exactly(
+          have_attributes(label: "Uniform repayment", amount: BigDecimal("35.00"))
+        )
+        expect(item).to have_attributes(gross_pay: BigDecimal("200.00"), withholding_tax: BigDecimal("0.00"),
+          social_security_tax: BigDecimal("12.40"), medicare_tax: BigDecimal("2.90"), net_pay: BigDecimal("149.70"))
+      end
     end
 
     it "preserves existing imported components when a replacement component is invalid" do

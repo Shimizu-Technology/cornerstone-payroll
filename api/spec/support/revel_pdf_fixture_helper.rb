@@ -40,9 +40,9 @@ module RevelPdfFixtureHelper
   end
 
   def revel_row(name:, regular_hours:, regular_pay:, overtime_hours: 0.0, overtime_pay: 0.0,
-                total_hours: nil, total_pay: nil)
-    total_hours ||= regular_hours + overtime_hours
-    total_pay ||= regular_pay + overtime_pay
+                doubletime_hours: nil, doubletime_pay: nil, total_hours: nil, total_pay: nil)
+    total_hours ||= regular_hours + overtime_hours + (doubletime_hours || 0)
+    total_pay ||= regular_pay + overtime_pay + (doubletime_pay || 0)
 
     [
       name.ljust(40),
@@ -51,10 +51,10 @@ module RevelPdfFixtureHelper
       "-".ljust(20),
       decimal_field(regular_hours),
       decimal_field(overtime_hours),
-      "-".ljust(20),
+      doubletime_hours.nil? ? "-".ljust(20) : decimal_field(doubletime_hours),
       decimal_field(regular_pay),
       decimal_field(overtime_pay),
-      "-".ljust(20),
+      doubletime_pay.nil? ? "-".ljust(20) : decimal_field(doubletime_pay),
       decimal_field(total_hours),
       decimal_field(total_pay),
       "-".ljust(20)

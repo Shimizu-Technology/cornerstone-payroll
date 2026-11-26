@@ -231,8 +231,9 @@ module PayrollIntake
         when "unmatched_workbook"
           errors << unmatched_employee_error(raw_row, name, "unmatched_workbook_employee", "Use the employee's Cornerstone ID in the change workbook.")
         end
-        if raw_row[:doubletime_hours].to_f.positive?
-          errors << error("doubletime_not_supported", "This Revel row includes double-time hours. Enter a reviewed typed earning before applying.")
+        if raw_row[:doubletime_hours].to_d.positive?
+          errors << error("doubletime_not_supported",
+            "Double-time hours can’t be imported automatically yet. Review these hours and enter the double-time pay manually, or contact Cornerstone for help.")
         end
         if duplicate_ids.include?(raw_row[:employee_id].to_i)
           errors << error("duplicate_employee", "Multiple Revel rows map to this employee. Resolve the duplicate before applying.")
