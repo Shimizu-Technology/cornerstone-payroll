@@ -274,7 +274,7 @@ class W2GuPdfGenerator
       { content: "Employee",   background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold },
       { content: "SSN",        background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold },
       { content: "Box 1\nWages", background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
-      { content: "Box 2\nFed W/H", background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
+      { content: "Box 2\n#{PayrollLabels::INCOME_TAX_WITHHELD}", background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Box 3\nSS Wages", background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Box 4\nSS W/H", background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
       { content: "Box 5\nMed Wages", background_color: HEADER_BG, text_color: "FFFFFF", font_style: :bold, align: :right },
@@ -327,7 +327,7 @@ class W2GuPdfGenerator
         overflow: :shrink_to_fit
       }
     ) do
-      row(0).height = 26
+      row(0).height = 32
     end
 
     pdf.fill_color TEXT_DARK

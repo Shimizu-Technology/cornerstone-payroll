@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   parseContext, parseHelpContacts, parseProfile, parseStatementDetail, parseStatementPage, parseStatementSummary, parseTaxForms, signUpUrlFrom,
 } from './contracts';
-import { addressLines, comparisonLine, formatHours, formatMoney, paymentStatus, taxLabel } from './format';
+import { addressLines, comparisonLine, formatHours, formatMoney, paymentStatus } from './format';
 import { birthDate, normalizeCode } from './signupState';
 
 // EmployeePayStatements::Presenter#summary, as served to AIRE today (fictional values).
@@ -164,13 +164,6 @@ describe('employee formatting', () => {
     expect(formatMoney('1234.5')).toBe('$1,234.50');
     expect(formatMoney(null)).toBeNull();
     expect(formatHours('38.50')).toBe('38.5');
-  });
-
-  it('never calls Guam income tax "Federal"', () => {
-    expect(taxLabel('Federal/Guam Income Tax')).toEqual({ label: 'Guam income tax', term: 'Withholding' });
-    expect(taxLabel('Additional Withholding (W-4 4c)').label).not.toMatch(/federal/i);
-    expect(taxLabel('Federal something else').label).toBe('something else');
-    expect(taxLabel('Social Security (6.2%)')).toEqual({ label: 'Social Security', term: 'FICA' });
   });
 
   it('shows only payment states that are certain', () => {

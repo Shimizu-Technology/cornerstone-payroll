@@ -67,20 +67,6 @@ export function paymentStatus(payment: StatementPayment): { label: string; tone:
   }
 }
 
-/**
- * Plain labels with the technical term in small print (§8a). Guam income tax
- * is never called "Federal", even though the printed stub's label reads
- * "Federal/Guam Income Tax".
- */
-export function taxLabel(label: string): { label: string; term: string | null } {
-  const lower = label.toLowerCase();
-  if (lower.startsWith('additional withholding')) return { label: 'Extra Guam income tax you asked for', term: 'Additional withholding (W-4 4c)' };
-  if (lower.includes('income tax') || lower.includes('withholding')) return { label: 'Guam income tax', term: 'Withholding' };
-  if (lower.startsWith('social security')) return { label: 'Social Security', term: 'FICA' };
-  if (lower.startsWith('medicare')) return { label: 'Medicare', term: 'FICA' };
-  return { label: label.replace(/\bfederal\b\s*\/?\s*/gi, '').trim() || label, term: null };
-}
-
 function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many;
 }

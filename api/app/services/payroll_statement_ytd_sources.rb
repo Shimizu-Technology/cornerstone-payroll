@@ -45,6 +45,13 @@ class PayrollStatementYtdSources
     historical_balance&.through_pay_date
   end
 
+  # Historical opening balances carry only combined Medicare.
+  def additional_medicare_ytd
+    return if historical_balance
+
+    @additional_medicare_ytd ||= items.sum(0.to_d) { |item| item.additional_medicare_tax.to_d }
+  end
+
   def items
     @items ||= begin
       prior_periods = PayPeriod.reportable_for_company(@company)

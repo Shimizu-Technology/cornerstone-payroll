@@ -41,9 +41,9 @@ RSpec.describe "Earnings statement YTD consistency" do
     statement = PayStubGenerator.new(current).statement
 
     expect(statement.fetch(:ytd)).to eq(gross: 2_000.to_d, net: 1_647.to_d)
-    expect(tax_ytd(statement)).to eq("Federal/Guam Income Tax" => 200.to_d, "Social Security (6.2%)" => 124.to_d,
-      "Medicare (1.45%)" => 29.to_d)
-    expect(ytd_summary(current)).to include("Gross Earnings $2,000.00", "Federal/Guam Tax $200.00",
+    expect(tax_ytd(statement)).to eq("Guam income tax" => 200.to_d, "Social Security (6.2%)" => 124.to_d,
+      "Medicare" => 29.to_d)
+    expect(ytd_summary(current)).to include("Gross Earnings $2,000.00", "Guam income tax $200.00",
       "Social Security $124.00", "Medicare $29.00", "Net Pay $1,647.00")
     expect(PayStubGenerator.new(current).send(:ytd_total_deductions)).to eq(353.to_d)
   end
@@ -56,14 +56,26 @@ RSpec.describe "Earnings statement YTD consistency" do
     later = item_for(committed_period(Date.new(2026, 8, 14), start_date: Date.new(2026, 8, 1), end_date: Date.new(2026, 8, 10)))
 
     expect(PayStubGenerator.new(inside).statement.fetch(:ytd)).to eq(gross: 1_000.to_d, net: 823.50.to_d)
-    expect(tax_ytd(PayStubGenerator.new(inside).statement)).to include("Federal/Guam Income Tax" => 100.to_d)
+    expect(tax_ytd(PayStubGenerator.new(inside).statement)).to include("Guam income tax" => 100.to_d)
 
     statement = PayStubGenerator.new(later).statement
     expect(statement.fetch(:ytd)).to eq(gross: 26_000.to_d, net: 20_823.50.to_d)
-    expect(tax_ytd(statement)).to include("Federal/Guam Income Tax" => 2_600.to_d, "Social Security (6.2%)" => 1_612.to_d)
+    expect(tax_ytd(statement)).to include("Guam income tax" => 2_600.to_d, "Social Security (6.2%)" => 1_612.to_d)
     expect(PayrollEarningsYtdBreakdown.new(later).source_items).to eq([ later ])
     expect(CheckGenerator.new(later).render_input_payload.fetch("summary")).to include(
       "ytd_gross" => "26,000.00", "ytd_net_pay" => "20,823.50"
+    )
+  end
+
+  it "shows the saved Additional Medicare on the current check and leaves bridged YTD combined" do
+    apply_historical_ytd_balance(company: company, employee: employee, through_pay_date: Date.new(2026, 7, 31),
+      medicare_tax: 362.50)
+    later = item_for(committed_period(Date.new(2026, 8, 14), start_date: Date.new(2026, 8, 1), end_date: Date.new(2026, 8, 10)))
+    later.update_columns(medicare_tax: 20, additional_medicare_tax: 5.50)
+
+    expect(PayStubGenerator.new(later).statement.fetch(:taxes)).to include(
+      { label: "Medicare", amount: 14.50.to_d, ytd: 382.50.to_d },
+      { label: "Additional Medicare", amount: 5.50.to_d, ytd: nil }
     )
   end
 
@@ -124,11 +136,11 @@ RSpec.describe "Earnings statement YTD consistency" do
       w2 = W2GuAggregator.new(company, 2024).generate.fetch(:employees).find { |row| row[:employee_id] == worker.id }
       statement = PayStubGenerator.new(item.reload).statement
       expect(tax_ytd(statement)).to eq(
-        "Federal/Guam Income Tax" => w2.fetch(:box2_federal_income_tax_withheld).to_d,
+        "Guam income tax" => w2.fetch(:box2_federal_income_tax_withheld).to_d,
         "Social Security (6.2%)" => w2.fetch(:box4_social_security_tax_withheld).to_d,
-        "Medicare (1.45%)" => w2.fetch(:box6_medicare_tax_withheld).to_d
+        "Medicare" => w2.fetch(:box6_medicare_tax_withheld).to_d
       )
-      expect(tax_ytd(statement).fetch("Federal/Guam Income Tax")).to eq(opening[:withholding_tax].to_d + 10 + 150)
+      expect(tax_ytd(statement).fetch("Guam income tax")).to eq(opening[:withholding_tax].to_d + 10 + 150)
       expect(statement.dig(:ytd, :gross)).to eq(opening[:gross_pay].to_d + 100 + 2_000)
       expect(item).to have_attributes(ytd_gross: opening[:gross_pay].to_d + 100 + 2_000,
         ytd_withholding_tax: opening[:withholding_tax].to_d + 10 + 150,
@@ -199,12 +211,12 @@ RSpec.describe "Earnings statement YTD consistency" do
       employee.update_columns(w4_step2_multiple_jobs: true, w4_step4a_other_income: 1_200)
 
       label = CheckGenerator.new(item.reload).render_input_payload.fetch("tax_rows").first.first
-      expect(label).to eq("Federal Income Tax")
+      expect(label).to eq("Guam income tax")
 
       item.update_columns(tax_rule_snapshot: { "w4" => { "step2_multiple_jobs" => true, "step4a_other_income" => 0.0,
                                                          "step4b_deductions" => 500.0 } })
       expect(CheckGenerator.new(item.reload).render_input_payload.fetch("tax_rows").first.first)
-        .to eq("Federal Income Tax (Step2,4b)")
+        .to eq("Guam income tax (Step2,4b)")
     end
 
     it "prints a signed correction's own adjustment line so the check stub foots to its gross" do
@@ -231,7 +243,7 @@ RSpec.describe "Earnings statement YTD consistency" do
     text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item).generate)).pages.map(&:text).join("\n")
 
     expect(PayStubGenerator.new(item).statement.fetch(:taxes)).to eq([])
-    expect(text).not_to include("Social Security", "Medicare", "Federal/Guam")
+    expect(text).not_to include("Social Security", "Medicare", "Guam income tax")
     expect(text).to include("NET PAY", "$500.00")
   end
 
@@ -243,8 +255,8 @@ RSpec.describe "Earnings statement YTD consistency" do
     text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
 
     expect(generator.statement.fetch(:taxes).map { |row| row.fetch(:amount) }).to eq([ 115.64.to_d, 99.20.to_d, 23.20.to_d ])
-    expect(text).to include("Federal/Guam Income Tax $115.64", "Social Security (6.2%) $99.20", "Medicare (1.45%) $23.20",
-      "TOTAL DEDUCTIONS $238.04", "Federal/Guam Tax $115.64")
+    expect(text).to include("Guam income tax $115.64", "Social Security (6.2%) $99.20", "Medicare $23.20",
+      "TOTAL DEDUCTIONS $238.04", "Guam income tax $115.64")
   end
 
   describe "printed money" do

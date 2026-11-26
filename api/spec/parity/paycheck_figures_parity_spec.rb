@@ -363,17 +363,10 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
           )
         end
 
-        it "uses the same W-4 4(c) additional withholding label across employee API, pay stub PDF, and check stub PDF" do
-          pending "L17/F6: W-4 4(c) label differs across employee API display_label, pay stub PDF, and check stub PDF"
-          assert_parity!(
-            fixture: scenario[:employee_key],
-            figure: [ :tax_labels, :additional_withholding ],
-            values_by_view: {
-              employee_api_display: views.dig(:employee_api, :tax_display_labels, :additional_withholding),
-              employee_stub_pdf: views.dig(:employee_stub_pdf, :tax_labels, :additional_withholding),
-              check_stub_pdf: views.dig(:check_stub_pdf, :tax_labels, :additional_withholding)
-            }
-          )
+        it "uses the full W-4 4(c) label on the employee statement and the compact label on check stock" do
+          expect(views.dig(:employee_api, :tax_display_labels, :additional_withholding)).to eq("Additional Guam income tax (W-4 4c)")
+          expect(views.dig(:employee_stub_pdf, :tax_labels, :additional_withholding)).to eq("Additional Guam income tax (W-4 4c)")
+          expect(views.dig(:check_stub_pdf, :tax_labels, :additional_withholding)).to eq("Add'l Guam income tax (4c)")
         end
       end
 
@@ -387,7 +380,6 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
           )
           expect(views.dig(:staff_pay_period, :taxes, :additional_medicare)).to be > 0
 
-          pending "L5: employee API, pay stub PDF, and check stub PDF do not break out Additional Medicare separately and pay stub PDF labels the combined amount 'Medicare (1.45%)'"
           # When base Medicare (1.45%) and Additional Medicare (0.9%) are split into
           # separate lines, keeping 'Medicare (1.45%)' on the base line is valid;
           # reject '1.45%' only if it describes the combined amount without a separate line.
@@ -476,7 +468,6 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
         period: fixture.period2
       )
 
-      pending "L17/F6: income tax label differs across employee API ('Guam income tax'), employee PDF ('Federal/Guam Income Tax' & 'Federal/Guam Tax'), and check stub PDF ('Federal Income Tax')"
       assert_parity!(
         fixture: :hourly_overtime,
         figure: [ :tax_labels, :income_tax ],

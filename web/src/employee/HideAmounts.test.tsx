@@ -59,7 +59,7 @@ const DETAIL_906 = {
     { label: 'Tips', hours: null, rate: null, amount: '16.25', ytd: '1200.00', kind: 'tips' },
   ],
   taxes: [
-    { label: 'Federal/Guam Income Tax', amount: '24.50', ytd: '1100.00' },
+    { label: 'Legacy tax row', display_label: 'Guam income tax', kind: 'guam_income_tax', amount: '24.50', ytd: '1100.00' },
     { label: 'Social Security (6.2%)', amount: '37.98', ytd: '1580.00' },
     { label: 'Medicare (1.45%)', amount: '8.88', ytd: '370.00' },
   ],
@@ -76,7 +76,7 @@ const DETAIL_906 = {
 const DETAIL_QB = {
   ...STATEMENTS_2026[2],
   earnings: [{ label: 'Gross pay', hours: '41.00', rate: null, amount: '615.00', ytd: null, kind: null }],
-  taxes: [{ label: 'Guam Income Tax', amount: '74.98', ytd: null }],
+  taxes: [{ label: 'Guam income tax', amount: '74.98', ytd: null }],
   deductions: [],
   other_pay: [],
   ytd: { gross: null, net: null },
@@ -312,6 +312,9 @@ describe('Employee app masked pay amounts by default (Track K)', () => {
     const { container } = render(<EmployeeApp />);
     const stub = await screen.findByRole('article');
     await within(stub).findByRole('region', { name: 'This year so far' });
+
+    expect(within(stub).getByText('Guam income tax')).toBeTruthy();
+    expect(within(stub).queryByText('Legacy tax row')).toBeNull();
 
     // Dates, payment method, hours and hours-only comparison remain visible; rates are masked with dots.
     expect(stub.textContent).toContain('Nov 1 – 14, 2026');

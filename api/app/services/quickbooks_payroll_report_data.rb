@@ -135,10 +135,10 @@ class QuickbooksPayrollReportData
 
   def employee_tax_lines_for(item)
     [
-      Line.new(label: "Federal Income Tax", amount: item.withholding_tax.to_f),
+      Line.new(label: PayrollLabels::INCOME_TAX, amount: item.withholding_tax.to_f),
       Line.new(label: "Social Security", amount: item.social_security_tax.to_f),
       Line.new(label: "Medicare", amount: item.medicare_tax.to_f),
-      Line.new(label: "Additional Withholding", amount: item.additional_withholding.to_f)
+      Line.new(label: PayrollLabels::ADDITIONAL_WITHHOLDING, amount: item.additional_withholding.to_f)
     ].select { |line| line.amount.to_f.nonzero? }
   end
 

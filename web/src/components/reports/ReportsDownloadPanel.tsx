@@ -473,7 +473,7 @@ export function TransmittalEditorModal({
             obligationNotes.push(`FICA Obligation (Social Security & Medicare): ${fmt(data.tax_totals.total_fica)}`);
           }
           if (data.tax_totals.fit > 0) {
-            obligationNotes.push(`FIT Deposit Total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
+            obligationNotes.push(`Guam income tax deposit total: ${fmt(data.tax_totals.fit)} — check to Treasurer of Guam for DRT`);
           }
           setNotes(obligationNotes);
         }
@@ -799,13 +799,13 @@ export function TransmittalEditorModal({
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
                   <div className="grid grid-cols-2 gap-x-8 gap-y-1">
                     <div>
-                      <p className="text-xs font-semibold text-neutral-600 mb-1">Federal / Guam Income Tax</p>
+                      <p className="text-xs font-semibold text-neutral-600 mb-1">Guam income tax</p>
                       <div className="flex justify-between">
-                        <span className="text-neutral-600">Employee FIT Withheld</span>
+                        <span className="text-neutral-600">Guam income tax withheld</span>
                         <span className="font-medium">{fmt(preview.tax_totals.fit)}</span>
                       </div>
                       <div className="flex justify-between border-t mt-1 pt-1 font-semibold">
-                        <span>FIT Subtotal</span>
+                        <span>Guam income tax subtotal</span>
                         <span>{fmt(preview.tax_totals.fit)}</span>
                       </div>
                     </div>
@@ -834,7 +834,7 @@ export function TransmittalEditorModal({
                     </div>
                   </div>
                   <div className="mt-3 pt-3 border-t border-amber-300 flex justify-between text-base font-bold text-amber-800">
-                    <span>Total DRT Deposit (FIT only)</span>
+                    <span>Total DRT Deposit (Guam income tax only)</span>
                     <span>{fmt(preview.tax_totals.total_drt_deposit)}</span>
                   </div>
                 </div>
@@ -850,7 +850,7 @@ export function TransmittalEditorModal({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   <div className="text-sm">
-                    <p className="font-medium text-blue-800">FIT deposit requires Form 500</p>
+                    <p className="font-medium text-blue-800">Guam income tax deposit requires Form 500</p>
                     <p className="text-blue-700 mt-0.5">
                       <button
                         type="button"
