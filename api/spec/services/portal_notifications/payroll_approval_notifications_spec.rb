@@ -750,6 +750,38 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
       end
     end
 
+    it "delivers to an opted-in account sharing a canonical Gmail mailbox when the lower-ID account has the category Off" do
+      lead_gmail = create(:user, company: company, organization: organization, role: "manager", email: "team.lead@gmail.com")
+      backup_gmail = create(:user, company: company, organization: organization, role: "admin", email: "teamlead+backup@googlemail.com")
+      create(:company_assignment, user: lead_gmail, company: company)
+      create(:company_assignment, user: backup_gmail, company: company)
+
+      PortalNotifications::RecipientListUpdate.call!(
+        company: company, actor: staff_backup,
+        user_ids: [ lead_gmail.id, backup_gmail.id ], emails: [],
+        lead_user_id: lead_gmail.id, backup_user_id: backup_gmail.id
+      )
+      PortalNotificationPreference.create!(user: lead_gmail, category: "payroll_submissions", delivery_mode: "off")
+      PortalNotificationPreference.create!(user: backup_gmail, category: "payroll_submissions", delivery_mode: "immediate")
+
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        event = PortalNotificationEvent.find_by!(event_type: "payroll_review_decided")
+        expect(event.deliveries.pluck(:user_id, :status)).to eq([ [ backup_gmail.id, "pending" ] ])
+        expect(PortalNotificationRecipient.where(company: company).lead.pick(:user_id)).to eq(lead_gmail.id)
+        expect(PortalNotificationRecipient.where(company: company).backup.pick(:user_id)).to eq(backup_gmail.id)
+
+        dispatch_at(3.minutes.from_now)
+        expect(captured_portal_emails.map { |m| m[:to] }).to eq([ backup_gmail.email ])
+      end
+    end
+
     it "never re-keys or duplicates a v2 branded digest batch if one period is revoked after a timed-out attempt" do
       PortalNotificationPreference.create!(user: client_manager, category: "payroll_updates", delivery_mode: "digest")
       second_period = create(:pay_period, :calculated, company: company,

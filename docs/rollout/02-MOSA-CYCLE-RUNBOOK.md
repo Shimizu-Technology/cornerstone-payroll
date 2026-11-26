@@ -105,6 +105,8 @@ The portal retains revision and change-request history. Client preview access is
 
 Email delivery uses the existing portal configuration and recipient preferences. Publication and decision events are retained even when delivery is disabled or no recipient is configured; verify recipient setup before the live cycle.
 
+**Notification rollback note:** before rolling back migration `20261127030000` (`AddDeliveryAttemptSnapshotToPortalNotificationDeliveries`), drain or clear any pending or claimed `portal_notification_deliveries` rows whose `batch_key` starts with `portal-notification-v2-`. The `down` migration refuses to drop `attempted_payload` while those rows remain so a previous release cannot re-render a different payload under an existing v2 idempotency key.
+
 ## 7. Parallel-cycle disposition
 
 For a required QuickBooks comparison cycle:
