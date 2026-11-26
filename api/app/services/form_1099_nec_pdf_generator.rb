@@ -25,8 +25,9 @@ class Form1099NecPdfGenerator
 
   attr_reader :report
 
-  def initialize(report_data)
-    @report = report_data
+  def initialize(report_data = nil, demo: nil, **report_keywords)
+    @report = report_data || report_keywords
+    @demo = demo.nil? ? @report.dig(:meta, :demo) == true : demo == true
   end
 
   def generate
@@ -44,7 +45,12 @@ class Form1099NecPdfGenerator
     render_compliance(pdf)
     render_caveats(pdf)
 
-    render_with_footer(pdf, "1099-NEC Preparation Summary – #{report[:meta][:year]}")
+    render_with_footer(
+      pdf,
+      DemoPdfFooter.append("1099-NEC Preparation Summary – #{report[:meta][:year]}", demo: @demo),
+      height: @demo ? 24 : 16,
+      top: @demo ? 28 : 26
+    )
   end
 
   private

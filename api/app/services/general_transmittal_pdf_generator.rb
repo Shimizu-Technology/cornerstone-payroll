@@ -26,6 +26,7 @@ class GeneralTransmittalPdfGenerator
     render_items(pdf)
     render_notes(pdf)
     render_footer(pdf)
+    DemoPdfFooter.draw_prawn_footer(pdf, company: company)
     pdf.render
   end
 

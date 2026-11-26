@@ -612,7 +612,8 @@ RSpec.describe "View-only support sessions", type: :request do
         expect(response.parsed_body.dig("link", "status")).to eq("active")
         get "/api/v1/employee/context", headers: headers
         expect(response).to have_http_status(:ok)
-        expect(response.body).not_to match(/demo|practice|test workspace/i)
+        expect(response.parsed_body["demo"]).to be(true)
+        expect(response.body).not_to match(/practice|test workspace/i)
         get "/api/v1/employee/profile", headers: headers
         expect(response).to have_http_status(:ok)
         expect(response.parsed_body).to include("legal_name" => demo_employee.full_name)
