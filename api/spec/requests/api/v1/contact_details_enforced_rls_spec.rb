@@ -60,6 +60,14 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
     app_role = connection.quote_table_name("rls_contact_app_#{suffix}")
     owner_role = connection.quote_table_name("rls_contact_owner_#{suffix}")
 
+    # Enforce RLS before GRANT ... ON ALL TABLES so pg_class row updates from
+    # GRANT cannot deadlock with autovacuum/autoanalyze before ALTER TABLE
+    # acquires AccessExclusiveLock.
+    RlsTables::PROTECTED_TABLES.sort.each do |table|
+      quoted = connection.quote_table_name(table)
+      connection.execute("ALTER TABLE #{quoted} ENABLE ROW LEVEL SECURITY")
+      connection.execute("ALTER TABLE #{quoted} FORCE ROW LEVEL SECURITY")
+    end
     connection.execute("CREATE ROLE #{app_role} NOSUPERUSER NOBYPASSRLS")
     connection.execute("GRANT USAGE ON SCHEMA public, rls_admin TO #{app_role}")
     connection.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO #{app_role}")
@@ -69,11 +77,6 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
     connection.execute("CREATE ROLE #{owner_role} NOLOGIN NOSUPERUSER BYPASSRLS")
     connection.execute("GRANT SELECT ON employees, employee_account_links TO #{owner_role}")
     connection.execute("ALTER FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} OWNER TO #{owner_role}")
-    RlsTables::PROTECTED_TABLES.sort.each do |table|
-      quoted = connection.quote_table_name(table)
-      connection.execute("ALTER TABLE #{quoted} ENABLE ROW LEVEL SECURITY")
-      connection.execute("ALTER TABLE #{quoted} FORCE ROW LEVEL SECURITY")
-    end
     connection.execute("SET LOCAL ROLE #{app_role}")
   end
 
