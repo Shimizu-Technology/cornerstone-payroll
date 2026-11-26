@@ -35,6 +35,9 @@ RSpec.describe UserInviteEmailService do
     expect(html).to include(%(href="#{CGI.escapeHTML(invitation_url)}"))
     expect(html).to include("ticket=tk_synthetic_123")
     expect(html).not_to match(%r{href="[^"]*/login"})
+    expect(html).to include("opens account setup directly")
+    expect(html).not_to include("Choose")
+    expect(html).not_to include("Sign up")
 
     [ nil, "", "/login", "javascript:alert(1)" ].each do |url|
       expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: url)).to be(false)
@@ -64,5 +67,28 @@ RSpec.describe UserInviteEmailService do
     expect(logged.join).to include("id=49a3999c-0ce1-4ea6-ab68-afcd6dc2e794")
   ensure
     Resend.api_key = saved_key
+  end
+
+  it "uses Client manager/viewer and humanized staff role labels in the invite copy" do
+    sent = []
+    allow(StagingMailTransport).to receive(:deliver) { |payload| sent << payload && { "id" => "em_role" } }
+
+    cases = [
+      [ create(:user, role: "client", client_access_level: "manager", email: "cm@client.example"), "Client manager" ],
+      [ create(:user, role: "client", client_access_level: "viewer", email: "cv@client.example"), "Client viewer" ],
+      [ create(:user, role: "super_admin", email: "sa@staff.example"), "Super Admin" ],
+      [ create(:user, role: "org_admin", email: "oa@staff.example"), "Organization Admin" ],
+      [ create(:user, role: "accountant", email: "acct@staff.example"), "Accountant" ],
+      [ create(:user, role: "manager", email: "mgr@staff.example"), "Manager" ]
+    ]
+
+    cases.each do |invited_user, expected_label|
+      sent.clear
+      expect(described_class.send_invite(user: invited_user, invited_by: nil, invitation_url: invitation_url)).to be(true)
+      html = sent.sole.fetch(:html)
+      expect(html).to include(%(as <strong style="color: #111827;">#{expected_label}</strong>.))
+      expect(html).not_to include("Super_admin")
+      expect(html).not_to include("Org_admin")
+    end
   end
 end

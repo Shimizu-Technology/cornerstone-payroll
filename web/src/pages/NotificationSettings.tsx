@@ -135,17 +135,19 @@ export function NotificationSettings(): ReactElement {
                         <label htmlFor={`notification-${category.key}`} className="text-sm font-semibold text-neutral-900">{category.label}</label>
                         <p className="text-xs leading-5 text-neutral-600">{category.description}</p>
                       </div>
-                      <Select
-                        id={`notification-${category.key}`}
-                        className="sm:w-48"
-                        value={modes[category.key]}
-                        disabled={saving}
-                        onChange={(event) => { setSaved(false); setModes((current) => ({ ...current, [category.key]: event.target.value as NotificationDeliveryMode })); }}
-                      >
-                        <option value="immediate">Immediately{category.default_mode === 'immediate' ? ' (recommended)' : ''}</option>
-                        <option value="digest">Daily digest{category.default_mode === 'digest' ? ' (recommended)' : ''}</option>
-                        <option value="off">Off</option>
-                      </Select>
+                      <div className="sm:shrink-0">
+                        <Select
+                          id={`notification-${category.key}`}
+                          className="pr-9 sm:w-64"
+                          value={modes[category.key]}
+                          disabled={saving}
+                          onChange={(event) => { setSaved(false); setModes((current) => ({ ...current, [category.key]: event.target.value as NotificationDeliveryMode })); }}
+                        >
+                          <option value="immediate">Immediately{category.default_mode === 'immediate' ? ' (recommended)' : ''}</option>
+                          <option value="digest">Daily digest{category.default_mode === 'digest' ? ' (recommended)' : ''}</option>
+                          <option value="off">Off</option>
+                        </Select>
+                      </div>
                     </li>
                   ))}
                 </ul>

@@ -30,7 +30,8 @@ export function AdminEmployeeChangeRequestsPage() {
   const [reviewNotes, setReviewNotes] = useState('');
   const [effectiveOn, setEffectiveOn] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState<'approve' | 'reject' | null>(null);
+  const saving = savingAction !== null;
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const currentStatusRef = useRef(status);
@@ -100,7 +101,7 @@ export function AdminEmployeeChangeRequestsPage() {
   const updateRequest = async (action: 'approve' | 'reject') => {
     if (!selected || !canReview) return;
     try {
-      setSaving(true);
+      setSavingAction(action);
       setError(null);
       if (action === 'approve') {
         await adminEmployeeChangeRequestsApi.approve(selected.id, reviewNotes, effectiveOn || undefined);
@@ -111,7 +112,7 @@ export function AdminEmployeeChangeRequestsPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : `Failed to ${action} request`);
     } finally {
-      setSaving(false);
+      setSavingAction(null);
     }
   };
 
@@ -242,10 +243,10 @@ export function AdminEmployeeChangeRequestsPage() {
                   {selected.status === 'pending' ? (
                     <div className="flex gap-3">
                       <Button disabled={saving || !canReview || Boolean(selected.proposed_compensation_effective_on && !effectiveOn)} onClick={() => void updateRequest('approve')}>
-                        {saving ? 'Saving...' : 'Approve'}
+                        {savingAction === 'approve' ? 'Approving…' : 'Approve'}
                       </Button>
                       <Button variant="outline" disabled={saving || !canReview} onClick={() => void updateRequest('reject')}>
-                        Reject
+                        {savingAction === 'reject' ? 'Rejecting…' : 'Reject'}
                       </Button>
                     </div>
                   ) : null}

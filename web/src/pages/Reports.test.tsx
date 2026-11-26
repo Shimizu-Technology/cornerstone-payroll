@@ -279,9 +279,9 @@ describe('YtdSummaryPanel', () => {
     expect(await screen.findByText('Payroll Summary by Pay Date — 2026')).toBeTruthy();
     expect(screen.getByText('QuickBooks source labels need classification review.')).toBeTruthy();
     fireEvent.click(screen.getByText('More payroll categories and field reconciliation'));
-    expect(screen.getByText('Historical Loans (type unclassified)').nextElementSibling?.textContent).toBe('$60.06');
+    expect(screen.getByText('Loan repayments (imported)').nextElementSibling?.textContent).toBe('$60.06');
     expect(screen.getByText('Health Insurance (payroll fields + historical)').nextElementSibling?.textContent).toBe('$48.11');
-    expect(screen.getByText('Source-labeled after-tax 401(k) in pre-tax bucket').nextElementSibling?.textContent).toBe('$15.45');
+    expect(screen.getByText('401(k) after-tax (imported as pre-tax)').nextElementSibling?.textContent).toBe('$15.45');
     expect(screen.queryByText(/post tax deduction · QuickBooks source/)).toBeNull();
     fireEvent.click(screen.getByRole('checkbox', { name: /Show source breakdown columns/ }));
     expect(screen.getByText(/post tax deduction · QuickBooks source/)).toBeTruthy();

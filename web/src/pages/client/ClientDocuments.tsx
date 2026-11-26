@@ -261,41 +261,43 @@ export function ClientDocuments() {
             {viewOnly ? <ViewOnlyNotice /> : (
             <form onSubmit={handleUpload} className="grid gap-5 md:grid-cols-2">
               <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Title</label>
-                <Input
-                  value={form.title}
-                  onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
-                  placeholder={supportsSingleTitle ? 'Optional document title' : 'Used for single-file uploads only'}
-                  disabled={!supportsSingleTitle}
-                  helperText={
-                    supportsSingleTitle
-                      ? undefined
-                      : 'When you upload multiple files together, each file keeps its own original filename.'
-                  }
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-gray-700">Category</label>
-                <Select value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}>
-                  {documentCategories.map((category) => (
-                    <option key={category.value} value={category.value}>
-                      {category.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              <div className="md:col-span-2 grid gap-5 md:grid-cols-3 md:items-start">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Title</label>
+                  <Input
+                    value={form.title}
+                    onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+                    placeholder={supportsSingleTitle ? 'Optional document title' : 'Used for single-file uploads only'}
+                    disabled={!supportsSingleTitle}
+                    helperText={
+                      supportsSingleTitle
+                        ? undefined
+                        : 'When you upload multiple files together, each file keeps its own original filename.'
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Category</label>
+                  <Select value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}>
+                    {documentCategories.map((category) => (
+                      <option key={category.value} value={category.value}>
+                        {category.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
 
-              <div className="md:col-span-2 mx-auto w-full max-w-xl">
-                <label className="mb-1 block text-sm font-medium text-gray-700">Employee</label>
-                <Select value={form.employee_id} onChange={(e) => setForm((prev) => ({ ...prev, employee_id: e.target.value }))}>
-                  <option value="">General company document</option>
-                  {employeeOptions.map((employee) => (
-                    <option key={employee.value} value={employee.value}>
-                      {employee.label}
-                    </option>
-                  ))}
-                </Select>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-700">Employee</label>
+                  <Select value={form.employee_id} onChange={(e) => setForm((prev) => ({ ...prev, employee_id: e.target.value }))}>
+                    <option value="">General company document</option>
+                    {employeeOptions.map((employee) => (
+                      <option key={employee.value} value={employee.value}>
+                        {employee.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
               </div>
 
               <div className="md:col-span-2">
@@ -437,16 +439,16 @@ export function ClientDocuments() {
                             <MobileField label="Uploaded" value={formatGuamDate(document.created_at) || '—'} />
                           </div>
                           <MobileCardActions>
-                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
+                            <Button variant="outline" size="sm" className="min-h-11 sm:min-h-0 sm:pointer-coarse:min-h-11" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
                               <Eye className="mr-2 h-4 w-4" />
                               Preview
                             </Button>
-                            <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
+                            <Button variant="outline" size="sm" className="min-h-11 sm:min-h-0 sm:pointer-coarse:min-h-11" disabled={!!document.archived_at} onClick={() => void handleDownload(document)}>
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
                             {!viewOnly && (
-                              <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
+                              <Button variant="ghost" size="sm" className="min-h-11 text-red-600 hover:text-red-700 sm:min-h-0 sm:pointer-coarse:min-h-11" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
                                 <Trash2 className="mr-2 h-4 w-4" />
                                 Delete
                               </Button>
