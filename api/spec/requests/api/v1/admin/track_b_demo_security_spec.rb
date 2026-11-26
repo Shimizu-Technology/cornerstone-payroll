@@ -446,4 +446,21 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
 
     include_examples "refuses contained firm and external actions", "legacy-shape demo"
   end
+
+  context "with a legacy demo company converted via DemoCompany::ConvertToFlag selected" do
+    let!(:demo) do
+      company = create_demo_company(organization: organization, fixture_key: "converted-security-demo", ein: "66-7654323")
+      DemoCompany::ConvertToFlag.new(
+        organization: organization,
+        actor: super_admin,
+        company_ids: [ company.id ],
+        dry_run: false
+      ).call
+      company.reload.tap do |converted|
+        raise "Expected converted demo shape" unless converted[:demo] == true && converted.payroll_environment == "live" && !converted.legacy_demo?
+      end
+    end
+
+    include_examples "refuses contained firm and external actions", "converted-shape demo"
+  end
 end

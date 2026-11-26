@@ -35,7 +35,8 @@ module EmployeeAppSwitch
     def initialize(company:, env: ENV, now: Time.current, today: PayrollBusinessClock.date_for(now),
       database_state: -> { Readiness.database_state },
       ping: -> { Readiness.ping_employee_service(env) },
-      window: nil)
+      window: nil,
+      retire_windows: true)
       @company = company
       @env = env
       @now = now
@@ -43,6 +44,7 @@ module EmployeeAppSwitch
       @database_state_source = database_state
       @ping_source = ping
       @window_source = window || -> { EmployeeAppEarlyAccessWindow.current_for(company.organization_id) }
+      @retire_windows = retire_windows
     end
 
     def checks_for(key)
@@ -218,7 +220,7 @@ module EmployeeAppSwitch
       name = "The database enforces company separation (row-level security on)"
       if database_state[:enforced]
         # Verified enforcement retires early access for good.
-        Enforcement.retire_windows!
+        Enforcement.retire_windows! if @retire_windows
         return check(:rls_database, name, true, nil)
       end
 

@@ -1044,14 +1044,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
+-- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127170000_prepare_demo_company_shape_migration.rb)
 CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
 DECLARE
   old_is_demo boolean := OLD.demo OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
+  old_is_legacy_demo boolean := NOT OLD.demo
+    AND OLD.payroll_environment = 'migration_rehearsal'
+    AND COALESCE(OLD.test_workspace_purpose, '') = 'demo';
+  new_is_flag_demo boolean := NEW.demo = true
+    AND NEW.payroll_environment = 'live'
+    AND NEW.test_workspace_purpose IS NULL
+    AND NEW.migration_rehearsal_status IS NULL
+    AND NEW.migration_source_company_id IS NULL
+    AND NEW.migration_source_batch_id IS NULL
+    AND NEW.migration_rehearsal_created_by_id IS NULL
+    AND NEW.migration_rehearsal_created_at IS NULL
+    AND NEW.migration_rehearsal_completed_at IS NULL
+    AND NEW.migration_rehearsal_error IS NULL
+    AND NEW.test_workspace_expires_at IS NULL
+    AND NEW.test_workspace_archived_at IS NULL
+    AND NEW.test_workspace_sealed_at IS NULL;
+  converting_legacy_demo boolean := current_setting('app.allow_demo_shape_migration', true) = 'on'
+    AND old_is_legacy_demo
+    AND new_is_flag_demo;
 BEGIN
-  IF OLD.demo IS DISTINCT FROM NEW.demo
+  IF NOT converting_legacy_demo AND (
+    OLD.demo IS DISTINCT FROM NEW.demo
     OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
-    OR (old_is_demo AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
+    OR (old_is_demo AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment)
+  ) THEN
     RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
       USING ERRCODE = 'check_violation';
   END IF;
