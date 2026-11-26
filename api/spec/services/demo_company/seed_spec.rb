@@ -53,9 +53,17 @@ RSpec.describe DemoCompany::Seed do
 
     expect(result.companies.map(&:name)).to eq([ "Harbor Finch Kitchen", "Harbor Finch Catering" ])
     expect(result.companies).to all(be_demo)
-    expect(kitchen).to have_attributes(subdomain_slug: "harborfinch", check_stock_type: "top_check", auto_create_fit_check: false)
-    expect(catering.subdomain_slug).to eq("harborfinch-catering")
-    expect(kitchen.help_contacts.map(&:name)).to eq([ "Maren Fable", "Front office" ])
+    expect(kitchen).to have_attributes(
+      subdomain_slug: "harborfinch", check_stock_type: "top_check", auto_create_fit_check: false,
+      address_line1: "101 Harbor Finch Way", city: "Hagåtña", state: "GU", zip: "96910",
+      bank_address: "303 Tasi Cove Plaza, Hagåtña, GU 96910", filing_contact_name: "Client Manager"
+    )
+    expect(catering).to have_attributes(
+      subdomain_slug: "harborfinch-catering",
+      address_line1: "202 Coral Lantern Lane", city: "Maite", state: "GU", zip: "96910",
+      bank_address: "303 Tasi Cove Plaza, Hagåtña, GU 96910", filing_contact_name: "Client Manager"
+    )
+    expect(kitchen.help_contacts.map(&:name)).to eq([ "Client Manager", "Front office" ])
     expect(organization.companies.live_payroll.count).to eq(1)
     expect([ kitchen.name, catering.name, kitchen.branding.to_json, kitchen.help_contacts.to_json ].join).not_to match(/demo/i)
 
@@ -70,11 +78,15 @@ RSpec.describe DemoCompany::Seed do
     expect(history.count).to eq(DemoCompany::QuickbooksSample.paychecks.size)
     expect(history.maximum(:pay_date)).to eq(Date.new(2026, 7, 24))
 
-    # Every person can activate or claim: a birth date and a phone.
+    # Every person can activate or claim: a birth date, phone, simple name and invented address.
     seeded = Employee.where(company: [ kitchen, catering ])
     expect(seeded.count).to eq(DemoCompany::Roster::PEOPLE.size)
+    expect(seeded.map(&:full_name).uniq.sort).to eq((1..11).map { |n| format("Employee %02d", n) })
     expect(seeded.map(&:date_of_birth)).to all(be_present)
     expect(seeded.map(&:phone)).to all(be_present)
+    expect(seeded.map(&:zip)).to all(match(/\A969\d{2}\z/))
+    all_addresses = [ kitchen.address_line1, kitchen.bank_address, catering.address_line1, catering.bank_address ] + seeded.map(&:address_line1)
+    expect(all_addresses.join("\n")).not_to match(/Marine Corps|Chalan Santo Papa|Chalan Pasaheru|Route 8|Pale San Vitores/i)
     expect(seeded.map(&:ssn_digits)).to all(start_with("900"))
     expect(seeded.pluck(:email).compact).to be_empty
     expect(seeded.where(employment_type: "contractor")).to be_empty
@@ -82,9 +94,11 @@ RSpec.describe DemoCompany::Seed do
     routing = seeded.where(payment_delivery_method: "direct_deposit").map(&:bank_routing_number_encrypted)
     expect(routing).to all(be_present)
     expect(routing.map { |number| AbaRoutingNumber.valid_checksum?(number) }).to all(be(false))
-    expect([ person(kitchen, "Kit", "Wren"), person(catering, "Kit", "Wren") ].map(&:ssn_digits).uniq.size).to eq(1)
-    expect(person(kitchen, "Jules", "Reed").status).to eq("terminated")
-    expect(person(kitchen, "Quinn", "Sable").employee_status_events.order(:effective_date).pluck(:event_type)).to eq(%w[terminated reactivated])
+    dual_employer = [ person(kitchen, "Employee", "06"), person(catering, "Employee", "06") ]
+    expect(dual_employer.map(&:ssn_digits).uniq.size).to eq(1)
+    expect(dual_employer.map(&:address_line1).uniq).to eq([ "106 Finch Cove Lane" ])
+    expect(person(kitchen, "Employee", "04").status).to eq("terminated")
+    expect(person(kitchen, "Employee", "05").employee_status_events.order(:effective_date).pluck(:event_type)).to eq(%w[terminated reactivated])
 
     # Native payroll from the August 7 payday, through the real calculator.
     expect(result.periods_committed).to eq(16)
@@ -97,25 +111,25 @@ RSpec.describe DemoCompany::Seed do
     items = PayrollItem.where(company: kitchen)
     expect(items.map(&:gross_pay)).to all(be_positive)
     expect(items.map(&:net_pay)).to all(be_positive)
-    robin = items_for(person(kitchen, "Robin", "Lantern"))
-    expect(robin[1].gross_pay).to be > robin[0].gross_pay
-    rowan = items_for(person(kitchen, "Rowan", "Drift"))
-    expect(rowan.first.tips).to eq(410.25)
-    expect(rowan.first.payroll_item_field_entries.sum(:amount)).to eq(15)
-    avery = items_for(person(kitchen, "Avery", "Sprig"))
-    expect(avery[2].hours_worked).to eq(12)
-    drew = items_for(person(kitchen, "Drew", "Flint"))
-    expect(drew[3].pay_rate).to eq(15)
-    expect(drew[4].pay_rate).to eq(16.25)
-    expect(items_for(person(kitchen, "Jules", "Reed")).size).to eq(4)
+    emp01 = items_for(person(kitchen, "Employee", "01"))
+    expect(emp01[1].gross_pay).to be > emp01[0].gross_pay
+    emp02 = items_for(person(kitchen, "Employee", "02"))
+    expect(emp02.first.tips).to eq(410.25)
+    expect(emp02.first.payroll_item_field_entries.sum(:amount)).to eq(15)
+    emp03 = items_for(person(kitchen, "Employee", "03"))
+    expect(emp03[2].hours_worked).to eq(12)
+    emp08 = items_for(person(kitchen, "Employee", "08"))
+    expect(emp08[3].pay_rate).to eq(15)
+    expect(emp08[4].pay_rate).to eq(16.25)
+    expect(items_for(person(kitchen, "Employee", "04")).size).to eq(4)
     expect(PayrollItem.where(company: kitchen, payment_delivery_method: "direct_deposit").pluck(:check_number)).to all(be_nil)
     expect(PayrollItem.where(company: kitchen, payment_delivery_method: "paper_check").pluck(:check_number)).to all(be_present)
 
     # The bridge and native payroll each count once in the year's wages.
-    quickbooks_gross = DemoCompany::QuickbooksSample.paychecks.select { |p| p[:person][:key] == "robin-lantern" }.sum { |p| p[:gross] }
-    native_wages = robin.sum(&:fit_taxable_wages)
+    quickbooks_gross = DemoCompany::QuickbooksSample.paychecks.select { |p| p[:person][:key] == "employee-01" }.sum { |p| p[:gross] }
+    native_wages = emp01.sum(&:fit_taxable_wages)
     w2 = W2GuAggregator.new(kitchen, 2026).generate
-    row = w2.fetch(:employees).find { |entry| entry[:employee_id] == person(kitchen, "Robin", "Lantern").id }
+    row = w2.fetch(:employees).find { |entry| entry[:employee_id] == person(kitchen, "Employee", "01").id }
     expect(row[:box1_wages_tips_other_comp].to_d).to eq((quickbooks_gross + native_wages).to_d.round(2))
 
     # Nothing left the building, and the employee app stays off.
@@ -195,18 +209,18 @@ RSpec.describe DemoCompany::Seed do
       original.call(*args)
     end
     expect { seed! }.to raise_error("Election write failed")
-    expect(Employee.where(first_name: "Ellis", last_name: "Quill")).to be_empty
+    expect(Employee.where(first_name: "Employee", last_name: "09")).to be_empty
 
     allow_any_instance_of(EmployeeW4ElectionChangeService).to receive(:call!).and_call_original
     seed!
-    ellis = person(kitchen, "Ellis", "Quill")
-    expect(ellis.employee_w4_elections.count).to eq(1)
+    emp09 = person(kitchen, "Employee", "09")
+    expect(emp09.employee_w4_elections.count).to eq(1)
 
     # A record left without its election (an older partial run) is repaired.
-    maren = person(kitchen, "Maren", "Fable")
-    EmployeeW4Election.where(employee_id: maren.id).delete_all
+    emp10 = person(kitchen, "Employee", "10")
+    EmployeeW4Election.where(employee_id: emp10.id).delete_all
     seed!
-    expect(maren.reload.employee_w4_elections.count).to eq(1)
+    expect(emp10.reload.employee_w4_elections.count).to eq(1)
   end
 
   it "refuses a concurrent run for the same organization and releases its lock after an error" do
@@ -230,14 +244,14 @@ RSpec.describe DemoCompany::Seed do
 
   it "keeps a tester's later termination when reseeding" do
     seed!
-    quinn = person(kitchen, "Quinn", "Sable")
+    emp05 = person(kitchen, "Employee", "05")
     open_period = kitchen.pay_periods.find_by!(status: "draft")
-    EmployeeStatusTransitionService.terminate!(employee: quinn, actor: admin, attributes: {
+    EmployeeStatusTransitionService.terminate!(employee: emp05, actor: admin, attributes: {
       effective_date: open_period.start_date - 1, reason_category: "voluntary", source: "operator"
     })
     expect { seed! }.not_to raise_error
-    expect(quinn.reload.status).to eq("terminated")
-    expect(quinn.employee_status_events.where(event_type: "reactivated").count).to eq(1)
+    expect(emp05.reload.status).to eq("terminated")
+    expect(emp05.employee_status_events.where(event_type: "reactivated").count).to eq(1)
   end
 
   it "uses the company a concurrent run created first" do

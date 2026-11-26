@@ -42,7 +42,7 @@ module DemoCompany
         Roster.quickbooks_people.map do |person|
           paycheck = Roster.quickbooks_paycheck(person, period)
           check = person[:delivery] == "paper_check" ? (number += 1).to_s : nil
-          paycheck.merge(person: person, name: "#{person[:last]}, #{person[:first]}", check: check)
+          paycheck.merge(person: person, name: Roster.quickbooks_name(person), check: check)
         end
       end
     end
@@ -81,7 +81,7 @@ module DemoCompany
     def employee_details_rows
       rows = Roster.quickbooks_people.map do |person|
         method = person[:delivery] == "paper_check" ? "Check" : "Direct deposit"
-        [ "#{person[:last]}, #{person[:first]} DOB: #{mdy(person[:dob])}", mdy(person[:hire_date]), "Hagåtña kitchen",
+        [ "#{Roster.quickbooks_name(person)} DOB: #{mdy(person[:dob])}", mdy(person[:hire_date]), "Hagåtña kitchen",
           format("Hourly rate: $%.2f/hr Pay method: %s Deductions: None Contributions: None Time off: None", person[:rate], method),
           "SSN: #{person[:ssn]} Fed: Single or Married Filing Separately", "" ]
       end
@@ -91,7 +91,7 @@ module DemoCompany
 
     def directory_rows
       rows = Roster.quickbooks_people.map do |person|
-        [ "#{person[:last]}, #{person[:first]}", mdy(person[:dob]), "", "", "", person[:phone], "", "Hagåtña kitchen", mdy(person[:hire_date]) ]
+        [ Roster.quickbooks_name(person), mdy(person[:dob]), "", "", "", person[:phone], "", "Hagåtña kitchen", mdy(person[:hire_date]) ]
       end
       title("Employee directory report", "For all employees from all locations") +
         [ [ "Name", "Birth date", "Email", "Work phone", "Home phone", "Mobile", "Home address", "Work location", "Hire date" ], *rows ]
@@ -151,9 +151,9 @@ module DemoCompany
       paychecks.each_with_index do |p, index|
         document.start_new_page if index.positive?
         document.text COMPANY_NAME, size: 16, style: :bold
-        document.text "214 Marine Corps Drive, Hagåtña, GU 96910"
+        document.text Roster.formatted_address(Roster::KITCHEN_ADDRESS)
         document.move_down 12
-        document.text "Employee: #{p[:person][:first]} #{p[:person][:last]}"
+        document.text "Employee: #{Roster.full_name(p[:person])}"
         document.text "Pay period: #{mdy(p[:start_date])} - #{mdy(p[:end_date])}"
         document.text "Check date: #{mdy(p[:pay_date])}"
         document.text(p[:check] ? "Check no. #{p[:check]}" : "Paid by direct deposit")

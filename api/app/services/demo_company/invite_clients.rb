@@ -23,8 +23,8 @@ module DemoCompany
       def complete? = !status.start_with?("failed")
     end
 
-    MANAGER_NAME = "Maren Fable"
-    USER_NAME = "Tessa Vale"
+    MANAGER_NAME = Roster::CLIENT_MANAGER_LABEL
+    USER_NAME = Roster::CLIENT_USER_LABEL
     DELIVERED_ACTION = "users#invite_email_delivered"
 
     def initialize(organization:, actor:, manager_email:, user_email:, clerk: ClerkInvitationService.new,
