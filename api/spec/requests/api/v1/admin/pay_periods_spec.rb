@@ -2300,6 +2300,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/record_client_approval" do
+    before { allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!) }
+
     it "records a retained email approval against an assigned client user and exact revision" do
       company.update!(client_payroll_approval_required: true)
       create(:payroll_item, pay_period: pay_period, company: company, employee: employee)

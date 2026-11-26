@@ -121,6 +121,10 @@ module PortalNotifications
         return [ :payroll_review_published, event.company_id, pay_period_id_for(event) ]
       end
 
+      if event.override_decision?
+        return [ :payroll_review_decided, event.company_id, pay_period_id_for(event), event.metadata["decision"], event.audience ]
+      end
+
       if event.event_type == "payroll_review_decided"
         return [ :payroll_review_decided, event.company_id ] if delivery_mode == "digest"
 
@@ -241,7 +245,18 @@ module PortalNotifications
     def decided_copy(demo_prefix:, company_name:, events:, periods:, single_period:, period_text:, pay_date_text:, url:)
       decisions = events.filter_map { |event| event.metadata["decision"] }.uniq
 
-      if single_period && period_text && decisions == [ "approved" ]
+      if (decisions & %w[cornerstone_override self_override]).any?
+        heading = decisions == [ "self_override" ] ? "Payroll self-override recorded" : "Cornerstone approved payroll for the client"
+        subject_suffix = period_text ? " (#{period_text})" : ""
+        {
+          subject: "#{demo_prefix}#{heading} — #{company_name}#{subject_suffix}",
+          preheader: "#{heading} for #{company_name}#{subject_suffix}.",
+          heading: heading,
+          paragraphs: [ "#{company_name}#{subject_suffix}", "Sign in to view the payroll decision." ],
+          action: { label: "Open pay run", url: url },
+          privacy_line: "Payroll details and approval reasons stay behind sign-in."
+        }
+      elsif single_period && period_text && decisions == [ "approved" ]
         paragraphs = [
           "#{company_name} approved the payroll preview for the pay period #{period_text}.",
           ("Pay date: #{pay_date_text}." if pay_date_text),

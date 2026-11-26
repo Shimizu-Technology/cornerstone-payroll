@@ -25,6 +25,8 @@ module PayrollReview
         approved_by_name: review_package.approved_by&.name,
         approval_recorded_by_name: review_package.approval_recorded_by&.name,
         approval_method: review_package.approval_method,
+        override_reason: review_package.override_reason,
+        self_override: review_package.self_override,
         approval_notes: review_package.approval_notes,
         approval_evidence_reference: review_package.approval_evidence_reference,
         acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT

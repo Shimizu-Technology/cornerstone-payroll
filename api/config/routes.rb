@@ -579,6 +579,7 @@ Rails.application.routes.draw do
           member do
             get :client_review
             post :record_client_approval
+            post :override_client_approval
             post :run_payroll
             post :refresh_setup
             get :correction_preflight

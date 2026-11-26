@@ -1515,6 +1515,8 @@ export interface PayPeriod {
   client_file_link_error?: string | null;
   outstanding_file_requests?: { id: number; title: string; status: string; status_label: string }[];
   client_payroll_approval_required?: boolean;
+  can_record_client_approval?: boolean;
+  can_override_client_approval?: boolean;
   payroll_review?: PayrollReviewPackage | null;
   can_decide_payroll_review?: boolean;
   payroll_review_history?: PayrollReviewPackage[];
@@ -1594,7 +1596,9 @@ export interface PayrollReviewPackage {
   approved_by_id?: number | null;
   approved_by_name?: string | null;
   approval_recorded_by_name?: string | null;
-  approval_method?: 'client_portal' | 'email_attestation' | null;
+  approval_method?: 'client_portal' | 'email_attestation' | 'cornerstone_override' | null;
+  override_reason?: string | null;
+  self_override?: boolean;
   approval_notes?: string | null;
   approval_evidence_reference?: string | null;
   acknowledgement: string;
