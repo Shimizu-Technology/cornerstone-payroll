@@ -43,7 +43,7 @@ describe('NotificationSettings', () => {
     expect(screen.getByText(/Daily digests arrive at 7:00 AM Guam time/)).toBeTruthy();
     expect(screen.getByText('Email delivery is off for now.')).toBeTruthy();
     expect(screen.getByText(/In the next daily digest/)).toBeTruthy();
-    expect(screen.queryByText('Clients with no alert recipients')).toBeNull();
+    expect(screen.queryByText('Clients with no account team')).toBeNull();
   });
 
   it('saves only after a change and confirms', async () => {
@@ -64,9 +64,9 @@ describe('NotificationSettings', () => {
     render(<NotificationSettings />);
     expect(await screen.findByText('Quiet Client')).toBeTruthy();
     expect(screen.getByText(/3 items with nobody notified/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose recipients' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Assign account team' }));
     expect(mocks.switchCompany).toHaveBeenCalledWith(7);
-    expect(mocks.navigate).toHaveBeenCalledWith('/settings/client-documents');
+    expect(mocks.navigate).toHaveBeenCalledWith('/settings/clients?edit=7#portal-alert-recipients');
   });
 
   it('shows a retry when settings cannot load', async () => {
@@ -92,7 +92,7 @@ describe('NotificationSettings', () => {
       administration: { clients_without_recipients: [] } } });
     render(<NotificationSettings />);
     expect(await screen.findByText('No portal alerts yet.')).toBeTruthy();
-    expect(screen.getByText('Every client with recent portal activity has alert recipients.')).toBeTruthy();
+    expect(screen.getByText('Every client with recent portal activity has a Cornerstone account team.')).toBeTruthy();
     expect(screen.queryByText(/Email delivery is off for now/)).toBeNull();
   });
 

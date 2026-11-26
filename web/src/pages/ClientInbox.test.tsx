@@ -135,6 +135,29 @@ it('opens pay-period submissions on the period page for that client', async () =
   expect(new URLSearchParams(destination.split('?')[1]).get('inbox')).toBe('/app/client-inbox');
 });
 
+it('opens payroll review decisions on the company-scoped pay-run work view with return_to pointing back to the filtered inbox', async () => {
+  mocks.list.mockResolvedValue({
+    data: [{
+      ...row('payroll_review', 19),
+      pay_period_id: 44,
+      title: 'Payroll approved · Nov 1–14, 2026',
+      state: 'approved',
+      state_label: 'Approved — ready to commit',
+      unread: false,
+    }],
+    meta: { next_cursor: null },
+  });
+  render(<MemoryRouter initialEntries={['/app/client-inbox?kind=payroll_review&status=waiting']}><ClientInbox /><Destination /></MemoryRouter>);
+  const button = await screen.findByRole('button', { name: /Payroll approved · Nov 1–14, 2026/ });
+  expect(button.textContent).toContain('Second client · Payroll review');
+  expect(button.textContent).toContain('Approved — ready to commit');
+  fireEvent.click(button);
+  expect(mocks.switchCompany).toHaveBeenCalledWith(2);
+  const destination = screen.getByTestId('destination').textContent!;
+  expect(destination.split('?')[0]).toBe('/companies/2/pay-runs/44/work');
+  expect(new URLSearchParams(destination.split('?')[1]).get('return_to')).toBe('/app/client-inbox?kind=payroll_review&status=waiting');
+});
+
 it('clearly labels practice work before opening it', async () => {
   mocks.list.mockResolvedValue({ data: [{ ...row('message'), practice_copy: true }], meta: { next_cursor: null } });
   render(<MemoryRouter><ClientInbox /></MemoryRouter>);
