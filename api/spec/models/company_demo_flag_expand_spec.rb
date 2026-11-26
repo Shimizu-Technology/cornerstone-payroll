@@ -276,5 +276,34 @@ RSpec.describe "Track B demo flag expand phase", type: :model do
         }.to raise_error(ActiveRecord::StatementInvalid, /time_tracking_sources cannot belong to a demo company/)
       end
     end
+
+    it "enforces demo fixture-key syntax and null workspace lifecycle timestamps at the database layer" do
+      %w[test_workspace_expires_at test_workspace_archived_at test_workspace_sealed_at].each do |column|
+        expect {
+          ActiveRecord::Base.transaction(requires_new: true) do
+            Company.where(id: live_demo.id).update_all(column => Time.current)
+          end
+        }.to raise_error(ActiveRecord::StatementInvalid, /companies_demo_no_test_workspace_lifecycle/)
+      end
+
+      [
+        { "demo_fixture_key" => "BAD_KEY!" },
+        { "demo_fixture_key" => "" },
+        { "demo_fixture_key" => nil }
+      ].each do |bad_manifest|
+        expect {
+          ActiveRecord::Base.transaction(requires_new: true) do
+            ActiveRecord::Base.connection.execute(<<~SQL.squish)
+              INSERT INTO companies (organization_id, name, payroll_environment, demo, test_workspace_manifest, created_at, updated_at)
+              VALUES (#{organization.id}, 'Invalid Demo Key', 'live', TRUE, #{ActiveRecord::Base.connection.quote(bad_manifest.to_json)}::jsonb, NOW(), NOW())
+            SQL
+          end
+        }.to raise_error(ActiveRecord::StatementInvalid, /companies_demo_fixture_key_format/)
+      end
+
+      # Flagged demo without a fixture key in manifest stays valid at DB and model layers.
+      adhoc_demo = create(:company, organization: organization, name: "Adhoc Flagged Demo", payroll_environment: "live", demo: true, test_workspace_manifest: {})
+      expect(adhoc_demo).to be_persisted
+    end
   end
 end
