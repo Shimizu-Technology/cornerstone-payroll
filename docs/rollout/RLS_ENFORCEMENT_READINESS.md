@@ -1,8 +1,27 @@
 # Postgres RLS enforcement readiness
 
-**Verdict on 2026-11-26: not ready.** Keep production in its current phase until the release runner and retirement audit checks below are closed, the log evidence covers a completed pay cycle, and the rollout lead verifies production catalog, roles and service settings. The [runbook](RLS_ENFORCEMENT_RUNBOOK.md) is for the subsequent post-pay-run window.
+**Verdict on 2026-11-26: not ready for the production cutover.** The owner-side shadow baseline is verified and both code fixes passed local rehearsal. Merge and deploy the reviewed fixes, collect clean log evidence for a complete pay cycle, and finish the per-service runtime and post-pay-run preflight before changing production. [Code fixes and verification](https://github.com/Shimizu-Technology/cornerstone-payroll/pull/626). The [runbook](RLS_ENFORCEMENT_RUNBOOK.md) is for the subsequent post-pay-run window.
 
-The audit used `origin/main` at `89db891eb7d634bf9ed97870694633e6b34b6af8`. The initial DB task rehearsal used `42f6f59ce`. The intervening reports and UI changes did not change the schema, the policies or the RLS tasks. Staff and clients operate in an authorized company. The employee app resolves a verified login link before reading payroll statements, tax forms and profile data for its company. The Solid Queue worker shares the Rails code and runs pay-stub posting, delivery and maintenance sweeps. This analysis used the stated service settings as the production baseline. Render logs alone could not verify the live env values, DB connections, deployed commits, table flags or demo state.
+The audit used `origin/main` at `89db891eb7d634bf9ed97870694633e6b34b6af8`. The initial DB task rehearsal used `42f6f59ce`. The intervening reports and UI changes did not change the schema, the policies or the RLS tasks. Staff and clients operate in an authorized company. The employee app resolves a verified login link before reading payroll statements, tax forms and profile data for its company. The Solid Queue worker shares the Rails code and runs pay-stub posting, delivery and maintenance sweeps. The reviewer used Render logs for shadow evidence. The rollout lead separately verified the owner-side production baseline below. Per-service runtime connection checks and deployed revisions remain open.
+
+## Production baseline
+
+The rollout lead ran the owner-side read-only SQL. These results matched the expected shadow state.
+
+| Check | Result |
+| --- | --- |
+| PostgreSQL and maintenance owner | PostgreSQL 16 or newer. Owner bypasses RLS. |
+| Release migrations | 2 applied |
+| Protected tables | 154 registered, 154 present, 0 enabled, 0 forced, 0 flag mismatches, 0 without a staged policy |
+| Protected table ownership | 0 table owners that the runtime role is a member of |
+| Kill switch | `bypass_enabled=false` |
+| Login-link decision function | `SECURITY DEFINER`, stable, pinned search path, `row_security=off`, owner bypasses RLS, runtime can execute, 2 grantees, 0 unexpected ACL entries |
+| Pay period states | 9 approved, 28 calculated, 5 draft |
+| Active print generations | 0 |
+| Demo early-access windows | 1 current, 0 retired |
+| Staff web environment | `APP_PROCESS_ROLE` unset (effective `all`), `RLS_CONTEXT_GUARD_MODE=log`, `RLS_EXPECT_ENFORCED` unset |
+
+The pay period counts are a baseline. Confirm the completed pay run and absence of active payroll operations with the payroll operator at cutover.
 
 ## Shadow-mode evidence
 
@@ -28,12 +47,12 @@ Zero observed violations do not establish execution of rare year-end tasks or al
 
 ## Code audit
 
-### Needs fix
+### Findings addressed in the code PR
 
 | Path | Failure and fix |
 | --- | --- |
-| Year-end FICA release runner, `ops/payroll-release-day/release_day.rb:94,107,137,142,161,187,192` | **Blocker.** Both preview and apply first hit the unscoped cross-company inventory at line 94. Other unscoped reads include imported payroll inventory and latest source-review rows. The inventory touches `employees`, `payroll_items`, `pay_periods`, historical paychecks and source reviews. Rails `raise` rejects it even before PostgreSQL is enforced. Direct RLS queries also lack the required DB settings. Put the explicitly authorized whole-fleet before/after inventory in system scope and the selected-company direct reads in company scope. Keep those scopes outside their read-only transactions and separate from Rake calls that open their own system scope. Preserve the review and digest gates. Rehearse the complete runner in preview and apply with the restricted role and real forced policies. [Runner](../../ops/payroll-release-day/release_day.rb#L89-L194), [native inventory query](../../api/app/services/payroll_fica_legacy_recovery.rb#L97-L107), [imported inventory queries](../../api/app/services/imported_paycheck_fica_reconciliation.rb#L4-L8). |
-| Early-access retirement, `api/app/services/employee_app_switch/enforcement.rb:126-129,151-173` | **Blocker for retirement audit evidence.** A company-scoped reader can durably retire the open windows, skip the organization audit insert by design, and leave the next system sweep with no rows to audit. The demo itself remains open under verified enforcement. A local fixture confirmed the skipped audit and no-op follow-up. Move durable retirement to an explicit system-owned path and commit the state change and audit for the actual transitioned rows together. Keep demo availability based on verified enforcement so it does not depend on the timing of that sweep. [Retirement path](../../api/app/services/employee_app_switch/enforcement.rb#L123-L174), [system sweep](../../api/app/services/employee_app_switch/demo_expiry.rb#L19-L32). |
+| Year-end FICA release runner, `ops/payroll-release-day/release_day.rb:94,107,137,142,161,187,192` | **Fixed locally in the code PR.** Before the fix, both preview and apply hit the unscoped cross-company inventory at line 94. Other unscoped reads include imported payroll inventory and latest source-review rows. The inventory touches `employees`, `payroll_items`, `pay_periods`, historical paychecks and source reviews. Rails `raise` rejects it even before PostgreSQL is enforced. Direct RLS queries also lack the required DB settings. The fix puts authorized before/after inventory in system scope and selected-company direct reads in their company scope. It preserves the repeatable-read snapshots, separates the scopes from the existing Rake entry points, and keeps the review and digest gates. The real runner passed preview and apply in the forced-RLS rehearsal. [Runner](../../ops/payroll-release-day/release_day.rb#L89-L194), [native inventory query](../../api/app/services/payroll_fica_legacy_recovery.rb#L97-L107), [imported inventory queries](../../api/app/services/imported_paycheck_fica_reconciliation.rb#L4-L8). |
+| Early-access retirement, `api/app/services/employee_app_switch/enforcement.rb:126-129,151-173` | **Fixed locally in the code PR.** A company-scoped reader could retire a window and leave the next system sweep with nothing to audit. Company and support readers now leave retirement to the system sweep. An eligible system path locks the open windows and commits each retirement with its organization audit in the same transaction. Verified enforcement keeps the demo open while the sweep is pending. [Retirement path](../../api/app/services/employee_app_switch/enforcement.rb#L123-L174), [system sweep](../../api/app/services/employee_app_switch/demo_expiry.rb#L19-L32). |
 
 ### Safe in the reviewed entry points
 
@@ -53,7 +72,9 @@ Zero observed violations do not establish execution of rare year-end tasks or al
 
 - PostgreSQL 16.11 in a dedicated local cluster with synthetic data, separate from the machine's shared PostgreSQL. On the audited revision, 320 examples passed across company isolation, enforced end-to-end and contact requests, task and enforcement specs, production readiness, reports, demo switch, employee notices and View As. The total includes the two disposable diagnostic examples below. The first combined attempt collided with the local task rehearsal's cluster-wide fixture role. The clean rerun passed after the local fixture role was removed from the isolated cluster.
 - Ran `rls:install`, `rls:enforce DRY_RUN=1`, the first ten-table batch and full `rls:enforce` with a direct owner connection. Observed shadow `0/154`, partial `10/154`, then enforced `154/154`, with no mixed flags. Set the kill switch, ran `rls:disable` and observed shadow `0/154`. Cleared the switch and confirmed it was off. The exercise used zero inter-batch delay and had no production lock traffic. All three read-only SQL checks below also executed successfully against the isolated cluster.
-- Two disposable diagnostic examples confirmed the unscoped release inventory failure and the retirement audit gap. The full production UI, deployed service settings, live roles and provider journeys still require the operator checks in the runbook.
+- Two initial diagnostic examples confirmed the release inventory failure and the retirement audit gap. The three regression examples in the code PR then failed on the baseline for the expected reasons. The affected suite passed 245 examples, and 146 retirement-related examples passed again after the lock-order adjustment.
+- The code PR's separate PostgreSQL 16 rehearsal ran real preview and digest-locked apply with the restricted runtime role, the guard in `raise`, and all 154 policies forced. The two selected synthetic employers received proofs and the unselected employer received none. In another forced-RLS exercise, two concurrent retirement attempts produced one organization audit and an organization lock deferred retirement to a retry.
+- The owner-side production baseline above is complete. The production runtime role checks, deployed versions, complete pay-cycle evidence, UI and provider checks remain open.
 
 ## Read-only production queries for the lead
 
