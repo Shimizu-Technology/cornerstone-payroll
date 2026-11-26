@@ -71,4 +71,22 @@ RSpec.describe YearEnd::Checklist, "for a demo company" do
     problems = Efw2W2GuGenerator.new(company: company, year: 2026, submitter: nil, report: report).structured_problems
     expect(problems.map { |problem| problem[:code] }).to include(:ssn_invalid)
   end
+
+  it "labels a fictional reserved demo EIN (07-...) as expected without blocking sign-off or loosening EFW2" do
+    company.update!(ein: "07-2026101")
+    fingerprint = W2FilingInputsFingerprint.new(company: company.reload, year: 2026).call
+    W2FilingReadiness.where(company: company, year: 2026).update_all(preflight_fingerprint: fingerprint, ready_fingerprint: fingerprint)
+
+    result = checklist
+    employer_step = result[:steps].find { |entry| entry[:key] == "employer" }
+    expect(employer_step[:status]).to eq("done")
+    expect(employer_step[:issues].sole).to include(code: "DEMO_RESERVED_EIN_EXPECTED", expected_for_demo: true, field: "ein")
+    expect(result[:status]).to eq("ready")
+    expect(result[:issue_count]).to eq(0)
+    expect(described_class.new(company: company.reload, year: 2026, user: admin).w2_mark_ready_blockers).to be_empty
+
+    report = W2GuAggregator.new(company, 2026).generate
+    problems = Efw2W2GuGenerator.new(company: company, year: 2026, submitter: nil, report: report).structured_problems
+    expect(problems.map { |problem| problem[:code] }).to include(:ein_invalid)
+  end
 end
