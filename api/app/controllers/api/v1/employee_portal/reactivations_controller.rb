@@ -24,10 +24,14 @@ module Api
           return unless terms_version
 
           link_check_started!
-          link = EmployeeLinks::Reactivate.call(
+          reactivation = EmployeeLinks::Reactivate.new(
             user: @current_user, **link_check_params, azp: @clerk_token_payload&.fetch("azp", nil),
             session: @clerk_token_payload, request: request, terms_version: terms_version
           )
+          link = reactivation.call
+          if !link && reactivation.refusal
+            return render json: AccountController.claim_refusal_json(reactivation.refusal), status: :forbidden
+          end
           unless link
             wait_for_response_floor
             return render json: { error: AccountController::CLAIM_FAILED, code: "claim_failed" }, status: :not_found

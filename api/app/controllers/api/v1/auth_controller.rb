@@ -25,6 +25,7 @@ module Api
             email: current_user.email,
             name: current_user.name,
             role: current_user.role,
+            client_access_level: (current_user.client_access_level if current_user.client?),
             organization_id: current_user.organization_id,
             organization_name: current_user.organization&.name,
             company_id: current_company_id,

@@ -34,7 +34,11 @@ export function canWriteCompany(company: CompanyListItem | null | undefined, cap
   return company?.workspace_write_permissions?.[capability] === true;
 }
 
+/** The API's answer to every write from a Client viewer (ClientPortalAccess::VIEW_ONLY). */
+export const CLIENT_VIEW_ONLY_MESSAGE = 'Your access is view-only. Ask your account manager for changes.';
+
 export function companyReadOnlyMessage(company: CompanyListItem | null | undefined): string {
+  if (company?.client_view_only) return CLIENT_VIEW_ONLY_MESSAGE;
   if (company?.test_workspace_expired) return 'This test workspace has expired. You can review its records; changes are unavailable.';
   if (company?.test_workspace_purpose === 'backup_snapshot' || company?.test_workspace_sealed_at) return 'This preserved snapshot is for review and recovery only. Changes are unavailable.';
   if (company?.test_workspace_archived_at) return 'This test workspace is archived. Changes are unavailable.';

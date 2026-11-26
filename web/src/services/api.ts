@@ -551,6 +551,7 @@ import type {
   DashboardStats,
   PaginationMeta,
   User,
+  ClientAccessLevel,
   CheckListResponse,
   CheckPrintQueueResponse,
   CheckPrintGeneration,
@@ -902,9 +903,11 @@ export const usersApi = {
     api.get<{ data: User[] }>('/admin/users', params),
   get: (id: number) =>
     api.get<{ data: User }>(`/admin/users/${id}`),
-  create: (data: { email: string; name: string; role: User['role']; company_ids?: number[] }) =>
+  create: (data: { email: string; name: string; role: User['role']; client_access_level?: ClientAccessLevel; company_ids?: number[] }) =>
     api.post<UserCreateResponse>('/admin/users', { user: data }),
-  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>> & { company_ids?: number[] }) =>
+  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>> & {
+    client_access_level?: ClientAccessLevel; expected_client_access_level?: ClientAccessLevel; company_ids?: number[];
+  }) =>
     api.patch<{ data: User }>(`/admin/users/${id}`, { user: data }),
   activate: (id: number) =>
     api.post<{ data: User }>(`/admin/users/${id}/activate`),
@@ -4207,6 +4210,8 @@ export interface CompanyListItem {
   test_workspace_expired?: boolean;
   test_workspace_read_only?: boolean;
   workspace_can_write?: boolean;
+  /** A read-only Client viewer login: workspace_can_write is false everywhere. */
+  client_view_only?: boolean;
   workspace_write_permissions?: Record<string, boolean> | null;
   migration_rehearsal_status?: 'pending' | 'ready' | 'failed' | null;
   migration_source_company_id?: number | null;
@@ -4412,6 +4417,7 @@ interface AuthApiUser {
   email: string;
   name: string;
   role: string;
+  client_access_level?: ClientAccessLevel | null;
   organization_id?: number;
   organization_name?: string;
   company_id: number | null;

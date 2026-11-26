@@ -101,6 +101,13 @@ describe('employee API client', () => {
     await expect(client(fetchImpl).links()).rejects.toMatchObject({ kind, status });
   });
 
+  it('names an email mismatch or a retired code, and keeps every other 403 a not-found', () => {
+    expect(errorForStatus(422, null, 'email_mismatch').kind).toBe('email_mismatch');
+    expect(errorForStatus(403, null, 'email_mismatch').kind).toBe('email_mismatch');
+    expect(errorForStatus(403, null, 'code_retired').kind).toBe('code_retired');
+    expect(errorForStatus(403, null, 'something_else').kind).toBe('not_found');
+  });
+
   it('keeps Retry-After on a 429', () => {
     expect(errorForStatus(429, '30').retryAfterSeconds).toBe(30);
     expect(errorForStatus(429, 'soon').retryAfterSeconds).toBeNull();

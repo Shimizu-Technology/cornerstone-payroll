@@ -19,6 +19,8 @@ import { appendUniqueById, hasMorePages } from '@/lib/paged-list';
 import { clientDocumentsApi, clientEmployeesApi } from '@/services/api';
 import type { ClientDocument, ClientDocumentListMeta } from '@/services/api';
 import type { Employee } from '@/types';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 const documentCategories = [
   { value: 'payroll_source', label: 'Payroll Source' },
@@ -43,6 +45,7 @@ function formatFileSize(bytes: number) {
 }
 
 export function ClientDocuments() {
+  const viewOnly = useClientViewOnly();
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [documentsMeta, setDocumentsMeta] = useState<ClientDocumentListMeta | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -255,6 +258,7 @@ export function ClientDocuments() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {viewOnly ? <ViewOnlyNotice /> : (
             <form onSubmit={handleUpload} className="grid gap-5 md:grid-cols-2">
               <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div>
@@ -390,6 +394,7 @@ export function ClientDocuments() {
               {uploading && <p role="status" aria-live="polite" className="text-sm text-neutral-600">{uploadProgress}</p>}
               </fieldset>
             </form>
+            )}
           </CardContent>
         </Card>
 
@@ -440,10 +445,12 @@ export function ClientDocuments() {
                               <Download className="mr-2 h-4 w-4" />
                               Download
                             </Button>
-                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              Delete
-                            </Button>
+                            {!viewOnly && (
+                              <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                Delete
+                              </Button>
+                            )}
                           </MobileCardActions>
                         </div>
                       </div>
@@ -486,10 +493,12 @@ export function ClientDocuments() {
                             <Download className="mr-2 h-4 w-4" />
                             Download
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </Button>
+                          {!viewOnly && (
+                            <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" disabled={!!document.archived_at} onClick={() => void handleDelete(document)}>
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>

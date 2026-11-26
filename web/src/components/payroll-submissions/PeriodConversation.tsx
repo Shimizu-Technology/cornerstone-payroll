@@ -8,12 +8,15 @@ import { useDisplayedMessages } from '@/components/client-portal/useDisplayedMes
 import type { ClientPortalThread } from '@/services/api';
 import type { PayrollSubmissionsApi } from '@/services/payrollSubmissions';
 import { formatGuam } from '@/lib/payrollSubmissionFormat';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 // Questions and answers about this period. Reuses the portal conversation,
 // so per-person read state and Activity History work as in Messages.
 export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }: {
   api: PayrollSubmissionsApi; periodRef: string; threadId: number | null; onThreadCreated: () => void;
 }): ReactElement {
+  const viewOnly = useClientViewOnly();
   const [thread, setThread] = useState<ClientPortalThread | null>(null);
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,7 +68,7 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
           <Link className="font-semibold underline" to={messagesPath}>Review in Messages</Link>
         </p>
       )}
-      {!staff && awaitingClient > 0 && (
+      {!staff && !viewOnly && awaitingClient > 0 && (
         <p role="status" className="mt-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
           {`Cornerstone asked for ${awaitingClient === 1 ? 'a file' : `${awaitingClient} files`}. `}
           <Link className="font-semibold underline" to={messagesPath}>Send it in Messages</Link>
@@ -94,11 +97,14 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
           </article>
         ))}
       </div>
-      <form onSubmit={send} className="mt-3 space-y-2">
-        <LabeledTextarea label="Message" value={body} onChange={e => setBody(e.target.value)} rows={3} />
-        {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
-        <Button type="submit" disabled={busy || !body.trim()}>{busy ? 'Sending…' : 'Send message'}</Button>
-      </form>
+      {/* Outside the form, so a viewer still sees a failed load. */}
+      {error && <p role="alert" className="mt-3 text-sm text-danger-700">{error}</p>}
+      {viewOnly ? <ViewOnlyNotice className="mt-3" /> : (
+        <form onSubmit={send} className="mt-3 space-y-2">
+          <LabeledTextarea label="Message" value={body} onChange={e => setBody(e.target.value)} rows={3} />
+          <Button type="submit" disabled={busy || !body.trim()}>{busy ? 'Sending…' : 'Send message'}</Button>
+        </form>
+      )}
     </section>
   );
 }

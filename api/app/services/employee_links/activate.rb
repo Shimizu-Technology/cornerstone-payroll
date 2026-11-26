@@ -17,7 +17,13 @@ module EmployeeLinks
   # Outcomes: :sign_up (with url), :sign_in, :failed, :unavailable. :sign_in is
   # one answer for every reason a new account can't start with that email, so
   # it never says whether an address already has a login.
+  #
+  # After the check passes, the sign-up email must be the employee's email on
+  # file unless staff printed the code (EmployeeLinks.sign_up_email_refusal):
+  # :email_mismatch, or :code_retired for a code a client printed. Only
+  # someone who already passed the check sees these.
   class Activate
+    REFUSALS = %i[email_mismatch code_retired].freeze
     Result = Data.define(:outcome, :url)
     # attach: the link gets this login only when the invitation is saved (a
     # reused closed sign-up row; see EmployeeLinks.closed_pending_sign_up_for?).
@@ -45,6 +51,7 @@ module EmployeeLinks
       prepared = Verify.call(**@check, request: @request, admit: admit) { |link| prepare(link) }
       return Result.new(outcome: :failed, url: nil) unless prepared
       return Result.new(outcome: :sign_in, url: nil) if prepared == :sign_in
+      return Result.new(outcome: prepared, url: nil) if REFUSALS.include?(prepared)
 
       start_clerk_sign_up(prepared)
     end
@@ -58,6 +65,13 @@ module EmployeeLinks
       # Answered like any other address that can't start a new account, and
       # checked before a pending login is created or attached.
       return :sign_in unless DemoOutbound.permit?(company: link.company, email: @email, channel: "employee_link_activation")
+
+      refusal = EmployeeLinks.sign_up_email_refusal(link, @email)
+      if refusal
+        EmployeeLinks.audit!(link, "sign_up_email_refused", actor: AuditActor.employee(link.employee), request: @request,
+          metadata: { reason: refusal.to_s, via: link.invite_delivery })
+        return refusal
+      end
 
       pending = link.user
       # A pending login an admin deactivated never restarts a sign-up.

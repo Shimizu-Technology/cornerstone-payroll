@@ -10,6 +10,7 @@ interface User {
   email: string;
   name: string;
   role: string;
+  client_access_level?: 'manager' | 'viewer' | null;
   organization_id?: number;
   organization_name?: string;
   company_id: number | null;
@@ -37,6 +38,8 @@ interface AuthContextType {
   isManager: boolean;
   isAccountant: boolean;
   isClient: boolean;
+  /** A read-only client login: the API refuses every write (CLIENT_VIEW_ONLY_MESSAGE). */
+  isClientViewer: boolean;
   hasCapability: (capability: string) => boolean;
   signOut: (options?: { redirectUrl: string }) => Promise<void>;
   refreshUser: (options?: { skipTokenCache?: boolean }) => Promise<void>;
@@ -66,6 +69,7 @@ function mapAuthUser(user: AuthResponseUser): User {
     email: user.email,
     name: user.name,
     role: user.role,
+    client_access_level: user.client_access_level ?? null,
     organization_id: user.organization_id,
     organization_name: user.organization_name,
     company_id: user.company_id,
@@ -125,6 +129,7 @@ function DevAuthProvider({ children }: { children: React.ReactNode }) {
         isManager: user?.role === 'manager' || isAdminRole(user?.role),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
+        isClientViewer: user?.role === 'client' && user.client_access_level === 'viewer',
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async () => {
           setUser(null);
@@ -282,6 +287,7 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         isManager: user?.role === 'manager' || isAdminRole(user?.role),
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
+        isClientViewer: user?.role === 'client' && user.client_access_level === 'viewer',
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
         signOut: async (options) => {
           const clearAccount = () => {

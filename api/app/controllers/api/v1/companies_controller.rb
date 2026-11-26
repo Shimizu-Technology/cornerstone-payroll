@@ -61,6 +61,8 @@ module Api
           # The switch's own company rule, so a "turn it on" step only
           # appears where the employee app can be switched on.
           employee_app_switch_eligible: EmployeeAppSwitch.eligible_company?(company),
+          # A client viewer reads everything and writes nothing (ClientPortalAccess).
+          client_view_only: current_user.client_viewer?,
           workspace_can_write: company_write_allowed?(company),
           workspace_write_permissions: workspace_write_permissions(company)
         }
@@ -69,7 +71,7 @@ module Api
       end
 
       def company_write_allowed?(company)
-        return false if Current.view_as_grant
+        return false if Current.view_as_grant || current_user.client_viewer?
 
         return false unless current_user.payroll_access_allowed? && company.active? && company.organization&.active? && current_user.can_access_company?(company.id)
         return true unless company.practice_copy?

@@ -88,9 +88,21 @@ module EmployeeLinkHelpers
     end
   end
 
+  # Signs up with the employee's email on file by default: anything else is
+  # refused unless staff printed the code (EmployeeLinks.sign_up_email_refusal).
   def activation_params(employee, **overrides)
     { date_of_birth: employee.date_of_birth.iso8601, ssn_last4: employee.ssn_digits.last(4),
-      email: "own.address@example.net", terms_version: TEST_TERMS_VERSION }.merge(overrides)
+      email: employee.email.presence || "own.address@example.net", terms_version: TEST_TERMS_VERSION }.merge(overrides)
+  end
+
+  # What Clerk reports for an existing login's account (Claim reads its
+  # verified primary email).
+  def clerk_account!(subject, email:, status: "verified")
+    allow(clerk).to receive(:fetch_user).with(subject).and_return(
+      "id" => subject, "primary_email_address_id" => "idn_#{subject}",
+      "email_addresses" => [ { "id" => "idn_#{subject}", "email_address" => email,
+                               "verification" => { "status" => status, "strategy" => "email_code" } } ]
+    )
   end
 
   # origin: the browser Origin the sign-up page sends (a client subdomain).
