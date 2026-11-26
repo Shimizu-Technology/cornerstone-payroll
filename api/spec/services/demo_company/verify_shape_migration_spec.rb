@@ -164,19 +164,27 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       end
     }.to raise_error(described_class::Error, /existing database transaction/)
 
-    # Even when Enforcement reports verified/enforced, capture must NOT retire early_access_window or write an audit log.
+    # Even when Enforcement reports verified/enforced, capture must NOT retire early_access_window or write an audit log,
+    # and must run inside a single REPEATABLE READ, READ ONLY transaction.
     allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
     allow(EmployeeAppSwitch::Enforcement).to receive(:verified?).and_return(true)
 
+    observed_tx = nil
     expect {
       described_class.capture(
         organization: organization,
         actor: admin,
         company_ids: [ old_demo.id ],
         tax_year: 2026,
-        readiness_database_state: -> { enforced_state }
+        readiness_database_state: lambda {
+          observed_tx = ApplicationRecord.connection.select_one(
+            "SELECT current_setting('transaction_isolation') AS iso, current_setting('transaction_read_only') AS ro"
+          )
+          enforced_state
+        }
       )
     }.not_to change(AuditLog, :count)
+    expect(observed_tx).to eq("iso" => "repeatable read", "ro" => "on")
     expect(early_access_window.reload.retired_at).to be_nil
   end
 
@@ -292,6 +300,23 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     diff = described_class.diff(before_snapshot, tampered, expected_company_ids: [ old_demo.id ])
     expect(diff).not_to be_passed
     expect(diff.unexpected_diffs.map { |d| d[:path] }).to include("companies.#{old_demo.id}.payroll_checksums.payroll_items_sha256")
+
+    # Missing non-shape key vs explicit null must FAIL, while explicit null on both sides stays equal.
+    missing_null_key = after_snapshot.deep_dup
+    expect(missing_null_key.dig("companies", old_demo.id.to_s, "employee_app", "readiness")).to be_a(Hash)
+    before_with_nil = before_snapshot.deep_dup
+    before_with_nil["companies"][old_demo.id.to_s]["employee_app"]["readiness"]["early_access_note"] = nil
+    after_with_nil = after_snapshot.deep_dup
+    after_with_nil["companies"][old_demo.id.to_s]["employee_app"]["readiness"]["early_access_note"] = nil
+    expect(described_class.diff(before_with_nil, after_with_nil, expected_company_ids: [ old_demo.id ])).to be_passed
+
+    diff_missing_key = described_class.diff(before_with_nil, missing_null_key, expected_company_ids: [ old_demo.id ])
+    expect(diff_missing_key).not_to be_passed
+    expect(diff_missing_key.unexpected_diffs).to include(
+      path: "companies.#{old_demo.id}.employee_app.readiness.early_access_note",
+      before: nil,
+      after: :missing
+    )
 
     # Non-zero time_tracking_history must FAIL even if matching in both before and after.
     with_history_before = before_snapshot.deep_dup

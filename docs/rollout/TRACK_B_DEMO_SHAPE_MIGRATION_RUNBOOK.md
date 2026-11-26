@@ -21,7 +21,7 @@ Confirm every item before opening the release window:
 1. **Owner approval:** Leon's explicit go-ahead for the release window and target company IDs.
 2. **Code deployed everywhere:** the revision containing `20261127170000_prepare_demo_company_shape_migration.rb`, `DemoCompany::ConvertToFlag`, `DemoCompany::RevertToLegacyShape`, `DemoCompany::VerifyShapeMigration`, and PR #648 (`DemoCompany::RenameFixture`) is deployed to Payroll web, Solid Queue worker, and the Employee API.
    - Verify the pre-conversion migration applied cleanly via the normal owner-backed deploy path (`bin/rails db:safe_prepare`). This migration is dual-shape safe and makes no data changes on deploy; it makes `fk_employee_account_links_live_company` `DEFERRABLE INITIALLY IMMEDIATE`, installs the owner-only `SECURITY DEFINER` functions `convert_demo_company_to_flag` and `revert_demo_company_to_legacy_shape` (revoked from `PUBLIC` and never granted to `payroll_app`), and hardens `prevent_demo_company_conversion()`.
-3. **Owner shell ready for `APPLY=true`:** read-only snapshots (`demo:verify_shape_snapshot`) and dry runs (`demo:convert_to_flag` without `APPLY=true`) run on the normal runtime connection. Applying (`APPLY=true`) or reverting (`demo:revert_to_legacy_shape APPLY=true`) requires the secured owner shell with `RLS_CONTEXT_GUARD_MODE=off` and the direct non-pooler `MIGRATION_DATABASE_URL` (the runtime `payroll_app` role cannot execute the conversion functions or pass the owner check in the trigger).
+3. **Owner shell ready for `APPLY=true`:** read-only snapshots (`demo:verify_shape_snapshot`) and dry runs (`demo:convert_to_flag` with `APPLY=false`) run on the normal runtime connection. Applying (`APPLY=true`) or reverting (`demo:revert_to_legacy_shape APPLY=true`) requires the secured owner shell with `RLS_CONTEXT_GUARD_MODE=off` and the direct non-pooler `MIGRATION_DATABASE_URL` (the runtime `payroll_app` role cannot execute the conversion functions or pass the owner check in the trigger).
 4. **No concurrent demo jobs or payroll work on the target demos:** confirm no `demo:seed` or `demo:rename_fixture` run is active.
 5. **Operator actor ready:** identify the active organization-administrator `ACTOR_ID` (and `ORGANIZATION_ID`, optional when it matches the actor's organization).
 
@@ -71,7 +71,7 @@ export COMPANY_ID=7
 
 ### 3a. Capture the read-only "before" snapshot
 
-Runs inside its own `SET TRANSACTION READ ONLY` transaction with strictly read-only predicates (zero window retirements, zero account deactivations, zero job enqueues):
+Runs inside its own `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY` transaction with strictly read-only predicates (zero window retirements, zero account deactivations, zero job enqueues):
 
 ```sh
 ACTOR_ID="$ACTOR_ID" COMPANY_IDS="$COMPANY_ID" TAX_YEAR="$TAX_YEAR" \
@@ -101,7 +101,7 @@ This snapshot captures per company (without PII or raw error text):
 ### 3b. Dry run the conversion (read-only)
 
 ```sh
-ACTOR_ID="$ACTOR_ID" COMPANY_IDS="$COMPANY_ID" \
+ACTOR_ID="$ACTOR_ID" COMPANY_IDS="$COMPANY_ID" APPLY=false \
   bundle exec rails demo:convert_to_flag
 ```
 
@@ -205,8 +205,8 @@ Run **Track B first, Track D second** in the same release window:
 4. **Run Track D after §5 passes (optionally take a quick post-Track-B Neon checkpoint first):**
 
 ```sh
-# 1. Dry run (default): inspect PLAN lines (record IDs and field names only)
-ORGANIZATION_ID=<org-id> ACTOR_ID="$ACTOR_ID" COMPANY_IDS=7,8 \
+# 1. Dry run: inspect PLAN lines (record IDs and field names only)
+ORGANIZATION_ID=<org-id> ACTOR_ID="$ACTOR_ID" COMPANY_IDS=7,8 APPLY=false \
   bundle exec rails demo:rename_fixture
 
 # 2. Apply (pass EMPLOYEE_MAP / CLIENT_USER_MAP only if dry run reports unmatched/ambiguous rows)
@@ -243,7 +243,7 @@ Use this whenever `demo:verify_shape_diff` reports any unexpected difference or 
 
 ```sh
 ACTOR_ID="$ACTOR_ID" COMPANY_IDS="$COMPANY_ID" \
-  BEFORE="/tmp/track-b-before-${COMPANY_ID}.json" \
+  BEFORE="/tmp/track-b-before-${COMPANY_ID}.json" APPLY=false \
   bundle exec rails demo:revert_to_legacy_shape
 ```
 
