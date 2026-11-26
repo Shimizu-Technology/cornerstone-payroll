@@ -1625,8 +1625,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       filing = response.parsed_body["filing"]
       expect(filing["status"]).to eq("filing_ready")
-      event = PortalNotificationEvent.find_by!(company: company, event_type: "w2_ready_to_post")
-      expect(event).to have_attributes(actor_id: admin_user.id, metadata: { "tax_year" => 2025, "revision" => 1 })
+      expect(PortalNotificationEvent.where(company: company, event_type: "w2_ready_to_post")).to be_empty
       expect(filing["notes"]).to eq("Reviewed by ops")
       expect(filing["marked_ready_at"]).to be_present
       expect(filing["marked_ready_by_id"]).to eq(admin_user.id)

@@ -19,15 +19,22 @@ module PortalNotifications
 
     class << self
       # Returns [targets, recipient_status].
-      def resolve(event)
-        return [ [], "no_recipients" ] unless subject_available?(event) && company_open?(event.company_id)
+      def resolve(event, now: Time.current, w2_posting_availability: {})
+        return [ [], "no_recipients" ] unless subject_available?(event, now: now, w2_posting_availability: w2_posting_availability) && company_open?(event.company_id)
 
         targets = case event.audience
         when "staff" then staff_targets(event)
         when "employee" then [ employee_target(event) ].compact
         else client_targets(event)
         end
-        [ targets, targets.any? ? "recipients" : "no_recipients" ]
+        return [ targets, "recipients" ] if targets.any?
+
+        if event.audience == "staff" && event.actor_id && !event.super_admin_alert?
+          without_actor = event.dup
+          without_actor.actor = nil
+          return [ [], "actor_only" ] if staff_targets(without_actor).any? { |target| target.user&.id == event.actor_id }
+        end
+        [ [], "no_recipients" ]
       end
 
       # Staff users who could be ticked for this client: active, same
@@ -77,7 +84,7 @@ module PortalNotifications
         account_users_for_email(email).find { |user| eligible_user?(user, event) }
       end
 
-      def subject_available?(event)
+      def subject_available?(event, now: Time.current, w2_posting_availability: {})
         subject = event.subject
         return payroll_review_publication_actionable?(event) if event.event_type == "payroll_review_published"
 
@@ -109,16 +116,21 @@ module PortalNotifications
             (!subject.committed? || subject.correction_status == "voided")
         when "employee_signup_locked", "employee_invite_expiring"
           return false unless subject.is_a?(EmployeeAccountLink) && subject.company_id == event.company_id &&
-            subject.invite_open? && subject.portal_enabled? && subject.employee.active?
+            subject.invited? && subject.portal_enabled? && subject.employee.active?
 
           if event.event_type == "employee_signup_locked"
-            return subject.activation_locked? && subject.activation_locked_at&.utc&.iso8601(6) == event.metadata["generation"]
+            return subject.activation_locked_at&.utc&.iso8601(6) == event.metadata["generation"]
           end
-          return !subject.activation_locked? && subject.invite_expires_at.utc.iso8601(6) == event.metadata["generation"]
+          return subject.invite_open?(now) && !subject.activation_locked?(now) &&
+            subject.invite_expires_at.utc.iso8601(6) == event.metadata["generation"]
         when "w2_ready_to_post"
-          return subject.is_a?(W2FilingReadiness) && subject.company_id == event.company_id &&
-            subject.status == "filing_ready" && subject.attestation_history.length == event.metadata["revision"] &&
-            EmployeeDocuments::PostW2GuCopies.new(company: event.company, year: subject.year).posting_pending?
+          return false unless subject.is_a?(W2FilingReadiness) && subject.company_id == event.company_id &&
+            subject.status == "filing_ready" && subject.attestation_history.length == event.metadata["revision"]
+
+          key = [ event.company_id, subject.year, subject.attestation_history.length ]
+          return w2_posting_availability.fetch(key) do
+            w2_posting_availability[key] = EmployeeDocuments::PostW2GuCopies.new(company: event.company, year: subject.year).posting_pending?
+          end
         end
 
         case subject

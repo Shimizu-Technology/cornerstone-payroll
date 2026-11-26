@@ -14,6 +14,13 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
   let(:foreign_staff) { create(:user, role: "super_admin") }
   let(:period) { create(:pay_period, company: company, status: "committed", committed_at: 1.minute.ago) }
 
+  around do |example|
+    travel_to(Time.find_zone!("Pacific/Guam").local(2026, 11, 27, 6))
+    example.run
+  ensure
+    travel_back
+  end
+
   before do
     create(:company_assignment, user: manager, company: company)
     create(:company_assignment, user: viewer, company: company)
@@ -28,9 +35,8 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
   def assert_opt_out(event, user, mode)
     assert_delivery(event, user, mode)
     PortalNotifications::Preferences.update!(user, event.category => "off")
-    travel_to(event.deliveries.find_by!(user: user).deliver_after + 1.second) do
-      PortalNotifications::Dispatcher.run!
-    end
+    travel_to(event.deliveries.find_by!(user: user).deliver_after + 1.second)
+    PortalNotifications::Dispatcher.run!
     expect(event.deliveries.find_by!(user: user).reload.skip_reason).to eq("preference_off")
     expect(captured_portal_emails.pluck(:to)).not_to include(user.email, foreign_staff.email)
   end
@@ -63,6 +69,7 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
     supervisor = create(:user, role: "super_admin", company: company)
     actor = create(:user, role: "super_admin", company: company)
     period.update_columns(correction_status: "voided")
+    expect { PortalNotifications.payroll_reopened!(period, actor: actor, action_id: nil) }.to raise_error(ArgumentError)
     with_portal_email do
       2.times { PortalNotifications.payroll_reopened!(period, actor: actor, action_id: 15) }
       events = PortalNotificationEvent.where(event_type: "payroll_reopened")
@@ -93,6 +100,72 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
       assert_delivery(staff_event, staff, "digest")
       assert_opt_out(client_event, manager, "digest")
     end
+  end
+
+  it "keeps the demo marker and footer on branded portal mail" do
+    demo = create_demo_company(organization: company.organization)
+    event = PortalNotificationEvent.new(company: demo, event_type: "payroll_committed",
+      category: "payroll_finalized", subject: create(:pay_period, company: demo))
+    email = PortalNotifications::Email.new(audience: "client", delivery_mode: "digest", events: [ event ])
+    expect(email.subject).to start_with("[Demo] Payroll committed")
+    expect(email.text).to include("Demo company. Not a real payroll record.")
+    expect(email.html).to include("Demo company. Not a real payroll record.")
+  end
+
+  it "keeps separate client preference categories for managers and viewers" do
+    enable_employee_app!(company)
+    company.client_operating_profiles.last.update!(options: { employee_portal: { features: { profile_requests: true } } })
+    expect(PortalNotifications::Preferences.categories_for(manager)).to include("address_approvals", "contact_changes", "payroll_corrections")
+    expect(PortalNotifications::Preferences.categories_for(manager)).not_to include("payroll_viewer_updates")
+    expect(PortalNotifications::Preferences.categories_for(viewer)).to include("payroll_viewer_updates", "payroll_finalized")
+    expect(PortalNotifications::Preferences.categories_for(viewer)).not_to include("address_approvals", "contact_changes", "payroll_corrections")
+  end
+
+  it "does not flag a client with a configured account team whose only member acted" do
+    PortalNotificationRecipient.where(company: company).extra_emails.delete_all
+    thread = create(:client_portal_thread, company: company, created_by: manager)
+    event = PortalNotifications.record!(event_type: "client_message", company: company, actor: staff,
+      subject: thread, dedupe_key: "actor-only")
+    expect(event.recipient_status).to eq("actor_only")
+    expect(event.deliveries.sole.skip_reason).to eq("actor_only")
+    expect(PortalNotificationEvent.without_staff_recipients).not_to include(event)
+  end
+
+  it "includes both the address request and a generic update in a mixed digest" do
+    address = PortalNotificationEvent.new(company: company, event_type: "address_approval_requested", category: "address_approvals")
+    decision = PortalNotificationEvent.new(company: company, event_type: "employee_change_decided", category: "employee_change_decisions")
+    email = PortalNotifications::Email.new(audience: "client", delivery_mode: "digest", events: [ address, decision ])
+    expect(email.subject).to start_with("Daily portal digest")
+    expect(email.text).to include("An employee address request is pending.", PortalNotifications::Email::UPDATE_LINE)
+  end
+
+  it "delivers the lock generation after the automatic lock window ends" do
+    travel_to(Time.find_zone!("Pacific/Guam").local(2026, 11, 27, 7))
+    enable_employee_app!(company)
+    link = invite!(employee, actor: staff, delivery: "code").link
+    link.update!(activation_locked_at: Time.current, activation_locked_until: 24.hours.from_now)
+    with_portal_email do
+      event = PortalNotifications.employee_link_event!("employee_signup_locked", link, generation: link.activation_locked_at)
+      row = event.deliveries.find_by!(user: staff)
+      travel_to(row.deliver_after + 1.second)
+      expect(link.reload).not_to be_activation_locked
+      PortalNotifications::Dispatcher.run!
+      expect(row.reload.status).to eq("sent")
+    end
+  end
+
+  it "waits to record the expiring-invite reminder until a locked link becomes eligible" do
+    travel_to(Time.find_zone!("Pacific/Guam").local(2026, 11, 27, 7))
+    enable_employee_app!(company)
+    link = invite!(employee, actor: staff, delivery: "code").link
+    link.update!(invite_expires_at: 2.days.from_now, activation_locked_at: Time.current, activation_locked_until: 24.hours.from_now)
+    events = PortalNotificationEvent.where(event_type: "employee_invite_expiring", subject: link)
+    ExpireEmployeeLinksJob.perform_now
+    expect(events).to be_empty
+
+    travel_to(25.hours.from_now)
+    ExpireEmployeeLinksJob.perform_now
+    expect(events.sole.recipient_status).to eq("recipients")
   end
 
   %w[employee_signup_locked employee_invite_expiring].each do |event_type|

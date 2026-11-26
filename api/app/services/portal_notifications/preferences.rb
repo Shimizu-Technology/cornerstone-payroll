@@ -14,6 +14,12 @@ module PortalNotifications
         categories = CATEGORIES.select { |_key, category| category[:audience] == audience && !category[:mandatory] }
         return categories unless audience == "client"
 
+        categories = if user.client_viewer?
+          categories.except("address_approvals", "contact_changes", "payroll_corrections")
+        else
+          categories.except("payroll_viewer_updates")
+        end
+
         enabled = Company.where(id: user.accessible_company_ids).any? do |company|
           CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
         end

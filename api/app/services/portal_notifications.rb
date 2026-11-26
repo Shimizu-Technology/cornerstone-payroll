@@ -218,26 +218,38 @@ module PortalNotifications
       Rails.logger.error("Payroll commit notification failed: period=#{period.id} error=#{error.class}")
     end
 
-    # Track H2 calls this within the rollback transaction with its immutable action ID.
+    # Track H2 calls this within the rollback transaction with its immutable
+    # action ID. Let ledger errors propagate so H2 can roll back both writes.
     def payroll_reopened!(period, actor:, action_id:)
+      raise ArgumentError, "Payroll rollback action ID is required" if action_id.blank?
+
       payroll_lifecycle_event!("payroll_reopened", period, actor: actor, revision: action_id)
     end
 
-    def employee_link_event!(event_type, link, generation:)
+    def employee_link_event!(event_type, link, generation:, now: Time.current)
       record!(event_type: event_type, company: link.company, actor: nil, subject: link,
         dedupe_key: "#{event_type}:#{link.id}:#{generation.utc.iso8601(6)}",
-        metadata: { generation: generation.utc.iso8601(6) })
+        metadata: { generation: generation.utc.iso8601(6) }, occurred_at: now)
     end
 
     def w2_ready_to_post!(filing, actor:)
-      record!(event_type: "w2_ready_to_post", company: filing.company, actor: actor, subject: filing,
-        dedupe_key: "w2_ready_to_post:#{filing.id}:#{filing.attestation_history.length}",
-        metadata: { tax_year: filing.year, revision: filing.attestation_history.length })
+      ApplicationRecord.transaction(requires_new: true) do
+        revision = filing.attestation_history.length
+        dedupe_key = "w2_ready_to_post:#{filing.id}:#{revision}"
+        next if PortalNotificationEvent.exists?(dedupe_key: dedupe_key)
+        next unless EmployeeDocuments::PostW2GuCopies.new(company: filing.company, year: filing.year).posting_pending?
+
+        record!(event_type: "w2_ready_to_post", company: filing.company, actor: actor, subject: filing,
+          dedupe_key: dedupe_key, metadata: { tax_year: filing.year, revision: revision },
+          w2_posting_availability: { [ filing.company_id, filing.year, revision ] => true })
+      end
+    rescue StandardError => error
+      Rails.logger.error("W-2 posting notification failed: filing=#{filing.id} error=#{error.class}")
     end
 
     # Repeating an event (a retried request, a replayed job) returns the saved
     # event instead of creating more alerts.
-    def record!(event_type:, company:, actor:, subject:, dedupe_key:, metadata: {}, occurred_at: Time.current)
+    def record!(event_type:, company:, actor:, subject:, dedupe_key:, metadata: {}, occurred_at: Time.current, w2_posting_availability: {})
       # Practice copies never notify. A demo company notifies like a client,
       # but only allow-listed recipients (DemoOutbound) are ever sent to.
       return if company.nil? || company.practice_copy?
@@ -261,7 +273,7 @@ module PortalNotifications
         event_type: event_type, category: category,
         subject: subject, dedupe_key: dedupe_key, metadata: metadata, occurred_at: occurred_at || Time.current
       )
-      targets, event.recipient_status = Recipients.resolve(event)
+      targets, event.recipient_status = Recipients.resolve(event, now: event.occurred_at, w2_posting_availability: w2_posting_availability)
       begin
         PortalNotificationEvent.transaction(requires_new: true) { event.save! }
       rescue ActiveRecord::RecordNotUnique
@@ -271,7 +283,7 @@ module PortalNotifications
         # Never silently dropped: the ledger shows there was nobody to notify.
         PortalNotificationDelivery.create!(portal_notification_event: event, company_id: event.company_id, channel: "email",
           recipient_key: "none", delivery_mode: CATEGORIES.dig(event.category, :default_mode), status: "skipped",
-          skip_reason: "no_recipients", deliver_after: event.occurred_at, completed_at: Time.current)
+          skip_reason: event.recipient_status, deliver_after: event.occurred_at, completed_at: Time.current)
       end
       targets.each { |target| create_delivery!(event, target) }
       event

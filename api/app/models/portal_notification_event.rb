@@ -3,7 +3,7 @@
 # A typed portal event, saved in the same transaction as the domain change.
 # Metadata holds record IDs and counts only; never names, bodies or file titles.
 class PortalNotificationEvent < ApplicationRecord
-  RECIPIENT_STATUSES = %w[recipients no_recipients].freeze
+  RECIPIENT_STATUSES = %w[recipients no_recipients actor_only].freeze
   STAFF_CATEGORIES = PortalNotifications::CATEGORIES.select { |_key, category| category[:audience] == "staff" }.keys.freeze
 
   belongs_to :organization
