@@ -38,27 +38,42 @@ module PayrollReview
       end
     end
 
+    ENQUEUE_SKIP_REASONS = %w[email_delivery_disabled email_not_configured recipient_not_allowed].freeze
+
     def self.decision_notification_status(review_package)
       return nil unless review_package.approved? || review_package.changes_requested_at.present?
 
       # Derive status from a single read so a concurrent pending -> sent
-      # transition cannot momentarily look like not_sent. Foreign-account
-      # suppressed rows stay pending until Dispatcher processes them in its
-      # normal pass, so queued -> sent transitions at the exact same point as an
-      # unregistered address without ever sending outbound email.
+      # transition cannot momentarily look like not_sent. Tenant-visible status
+      # never depends on how extra-address rows (user_id nil) turn out, so a
+      # foreign-account-suppressed extra address stays indistinguishable from an
+      # unregistered extra address before dispatch, after send, and through
+      # transport failures and retries.
       rows = PortalNotificationDelivery.joins(:portal_notification_event)
         .where(
           company_id: review_package.company_id,
           portal_notification_events: { dedupe_key: "payroll_review_decided:#{review_package.id}" }
         )
-        .pluck(:status, :skip_reason)
+        .pluck(:user_id, :recipient_email, :status, :skip_reason)
 
-      if rows.any? { |status, reason| status == "sent" || (status == "skipped" && reason == "foreign_account_suppressed") }
-        return "sent"
+      account_rows = rows.select { |user_id, _email, _status, _reason| user_id.present? }
+      extra_rows = rows.select { |user_id, email, _status, _reason| user_id.nil? && email.present? }
+
+      if account_rows.any?
+        return "sent" if account_rows.any? { |_user_id, _email, status, _reason| status == "sent" }
+        return "not_sent" unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
+
+        account_rows.any? { |_user_id, _email, status, _reason| status == "pending" } ? "queued" : "not_sent"
+      elsif extra_rows.any?
+        return "not_sent" unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
+
+        entered_dispatch = extra_rows.any? do |_user_id, _email, status, reason|
+          !(status == "skipped" && ENQUEUE_SKIP_REASONS.include?(reason))
+        end
+        entered_dispatch ? "queued" : "not_sent"
+      else
+        "not_sent"
       end
-      return "not_sent" unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
-
-      rows.any? { |status, _reason| status == "pending" } ? "queued" : "not_sent"
     end
 
     def self.decision_notification_queued?(review_package)

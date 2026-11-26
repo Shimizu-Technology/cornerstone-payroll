@@ -75,7 +75,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
   const decisionNotificationCopy = review?.notification_status === 'sent'
     ? 'Your Cornerstone account team was notified by email.'
     : review?.notification_status === 'queued' || (review?.notification_status == null && review?.notification_queued)
-      ? 'Your Cornerstone account team is queued to be emailed.'
+      ? 'Your Cornerstone account team is being notified by email.'
       : 'Recorded. Cornerstone will see it in Client Inbox.';
   return <Card className="border-primary-200">
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
