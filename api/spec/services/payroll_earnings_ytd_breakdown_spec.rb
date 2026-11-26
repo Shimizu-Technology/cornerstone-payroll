@@ -127,7 +127,7 @@ RSpec.describe PayrollEarningsYtdBreakdown do
     expect(rows.fetch("Shift A")).to have_attributes(current: 40.to_d, ytd: 40.to_d)
   end
 
-  it "counts local payroll dated on the historical through-pay date alongside the balance" do
+  it "uses the historical through-pay date as the cutoff for local payroll" do
     cutoff = Date.new(2026, 9, 10)
     overlapping_period = create(:pay_period, :committed, company: company,
       start_date: Date.new(2026, 8, 24), end_date: Date.new(2026, 9, 6), pay_date: cutoff)
@@ -137,8 +137,7 @@ RSpec.describe PayrollEarningsYtdBreakdown do
     apply_historical_balance(employee: employee, gross_pay: 100, earnings: { "Joint" => 100 }, through_pay_date: cutoff)
     payroll_item.payroll_item_earnings.create!(category: "regular", label: "Joint", amount: 117.70)
 
-    # The balance holds only imported pay: 100 imported + 100 native + 117.70.
-    expect(described_class.new(payroll_item).call.sole.ytd).to eq(317.70.to_d)
+    expect(described_class.new(payroll_item).call.sole.ytd).to eq(217.70.to_d)
   end
 
   it "includes earlier reportable payroll, excludes reversed and future payroll, and includes the current item once" do

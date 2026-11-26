@@ -34,6 +34,7 @@ class EmployeePayStatements
         deductions: statement.fetch(:deductions).map { |row| amount_row(row) },
         other_pay: statement.fetch(:other_pay).map { |row| amount_row(row) },
         ytd: { gross: money(statement.dig(:ytd, :gross)), net: money(statement.dig(:ytd, :net)) },
+        ytd_note: (PayrollBridgeOverlap::EMPLOYEE_NOTE if ytd_under_review?),
         source_entries: source_entries_json
       )
     end
@@ -41,6 +42,11 @@ class EmployeePayStatements
     private
 
     attr_reader :item
+
+    def ytd_under_review?
+      date = item.pay_period.pay_date
+      PayrollBridgeOverlap.pending_for(employee: item.employee, year: date.year, through: date).any?
+    end
 
     # Status follows the recorded payment evidence, the same rules as the
     # employee pay history and AIRE payment receipts: delivered checks and

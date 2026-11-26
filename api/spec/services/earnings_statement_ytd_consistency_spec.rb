@@ -48,9 +48,8 @@ RSpec.describe "Earnings statement YTD consistency" do
     expect(PayStubGenerator.new(current).send(:ytd_total_deductions)).to eq(353.to_d)
   end
 
-  it "leaves out an opening balance dated after the paycheck and counts native pay dated inside the balance once" do
-    # A balance holds only imported pay, so a native run dated inside it is
-    # still its own pay, as W-2GU and payroll calculation count it.
+  it "leaves out an opening balance dated after the paycheck and live pay already inside the balance" do
+    # A run paid before the bridge was activated: the balance already contains it.
     inside = item_for(committed_period(Date.new(2026, 7, 15)))
     apply_historical_ytd_balance(company: company, employee: employee, through_pay_date: Date.new(2026, 7, 31),
       gross_pay: 25_000, net_pay: 20_000, federal_income_tax: 2_500, social_security_tax: 1_550, medicare_tax: 362.50)
@@ -60,11 +59,11 @@ RSpec.describe "Earnings statement YTD consistency" do
     expect(tax_ytd(PayStubGenerator.new(inside).statement)).to include("Guam income tax" => 100.to_d)
 
     statement = PayStubGenerator.new(later).statement
-    expect(statement.fetch(:ytd)).to eq(gross: 27_000.to_d, net: 21_647.to_d)
-    expect(tax_ytd(statement)).to include("Guam income tax" => 2_700.to_d, "Social Security (6.2%)" => 1_674.to_d)
-    expect(PayrollEarningsYtdBreakdown.new(later).source_items).to eq([ inside, later ])
+    expect(statement.fetch(:ytd)).to eq(gross: 26_000.to_d, net: 20_823.50.to_d)
+    expect(tax_ytd(statement)).to include("Guam income tax" => 2_600.to_d, "Social Security (6.2%)" => 1_612.to_d)
+    expect(PayrollEarningsYtdBreakdown.new(later).source_items).to eq([ later ])
     expect(CheckGenerator.new(later).render_input_payload.fetch("summary")).to include(
-      "ytd_gross" => "27,000.00", "ytd_net_pay" => "21,647.00"
+      "ytd_gross" => "26,000.00", "ytd_net_pay" => "20,823.50"
     )
   end
 

@@ -525,7 +525,7 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
           payment_delivery_method: 'paper_check', check_number: '1007',
           source: { label: 'Cornerstone' } },
         { key: 'imported:4', record_type: 'imported', pay_date: '2026-08-27', period_description: 'August',
-          gross_pay: 500, net_pay: 400, total_deductions: 100,
+          gross_pay: 500, non_taxable_pay: 150, net_pay: 400, total_deductions: 100,
           check_number: null, source: { label: 'QuickBooks' } },
       ],
     } });
@@ -543,6 +543,7 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
     expect(screen.getAllByText('Paper check')).toHaveLength(2);
     expect(screen.getAllByText('Check #1007')).toHaveLength(2);
     expect(screen.getAllByText('Not recorded')).toHaveLength(2);
+    expect(screen.getAllByText('incl. $150.00 non-taxable')).toHaveLength(2);
     expect(screen.queryByRole('columnheader', { name: 'Additional Guam income tax (W-4 4c)' })).toBeNull();
   });
 

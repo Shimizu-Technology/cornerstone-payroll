@@ -169,6 +169,7 @@ export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetai
   return (
     <div>
       {readOnly && <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6 lg:px-8">{companyReadOnlyMessage(activeCompany)}</p>}
+      {payrollItem.ytd_review?.required && <p role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:px-6 lg:px-8">{payrollItem.ytd_review.message}</p>}
       {!embedded && <Header
         title={`${employeeName} · ${formatDate(payRun.pay_date)}`}
         description={`${formatDateRange(payRun.start_date, payRun.end_date)} · Payroll item #${payrollItem.id}`}

@@ -2781,6 +2781,8 @@ export interface EmployeePayHistoryRecord {
   bonus: number;
   custom_earnings_total?: number;
   gross_pay: number;
+  /** Imported rows: the non-taxable reimbursements included in gross_pay as imported. */
+  non_taxable_pay?: number;
   /** Income tax as the pay stub prints it, without W-4 4c. */
   withholding_tax: number;
   additional_withholding?: number;

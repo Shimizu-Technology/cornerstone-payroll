@@ -33,6 +33,7 @@ class PayrollItem < ApplicationRecord
   has_many :time_tracking_entry_allocations, dependent: :restrict_with_error
   has_many :aire_payroll_entry_acknowledgements, dependent: :restrict_with_error
   has_one :legacy_disposition, class_name: "PayrollItemLegacyDisposition", dependent: :restrict_with_error
+  has_many :bridge_overlap_dispositions, class_name: "PayrollItemBridgeOverlapDisposition", dependent: :restrict_with_error
 
   accepts_nested_attributes_for :payroll_item_field_entries, allow_destroy: true
 

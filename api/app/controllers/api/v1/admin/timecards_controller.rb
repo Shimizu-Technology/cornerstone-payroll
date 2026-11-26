@@ -454,8 +454,9 @@ module Api
             voided_at: item.voided_at,
             void_reason: item.void_reason,
             reprint_of_check_number: item.reprint_of_check_number,
-            ytd_gross: statement_ytd_gross(item),
-            ytd_net: item.ytd_net,
+            # The YTD the paycheck's statement prints, not the calculation snapshot.
+            ytd_gross: statement_ytd.call(item).gross,
+            ytd_net: statement_ytd.call(item).net,
             ytd_withholding_tax: item.ytd_withholding_tax,
             ytd_social_security_tax: item.ytd_social_security_tax,
             ytd_medicare_tax: item.ytd_medicare_tax,
@@ -473,8 +474,8 @@ module Api
           item.custom_columns_data.is_a?(Hash) ? item.custom_columns_data["state_withheld"] : nil
         end
 
-        def statement_ytd_gross(item)
-          (@statement_ytd_gross ||= StatementYtdGross.new).call(item)
+        def statement_ytd
+          @statement_ytd ||= StatementYtdFigures.new
         end
       end
     end

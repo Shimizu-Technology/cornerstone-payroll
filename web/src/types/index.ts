@@ -1853,8 +1853,10 @@ export interface PayrollItem {
   } | null;
   // Custom/flexible deductions
   custom_columns_data?: Record<string, number>;
-  // YTD totals (snapshot at time of calculation)
+  // YTD as the paycheck's statement prints it
   ytd_gross?: number;
+  /** Detail only: an earlier paycheck's place in YTD still needs a recorded decision. */
+  ytd_review?: { required: boolean; message: string };
   ytd_net?: number;
   ytd_withholding_tax?: number;
   ytd_social_security_tax?: number;
