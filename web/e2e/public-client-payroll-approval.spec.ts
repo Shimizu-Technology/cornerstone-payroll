@@ -136,7 +136,7 @@ test('client reviews complex payroll and explicitly approves the exact calculati
   await approvalResponse;
 
   expect(approvalPayload).toEqual({ revision_id: 91, acknowledgement, notes: 'Looks correct.' });
-  await expect(page.getByText('Revision 3 approved by MoSa Approver. Your Cornerstone account team is being notified by email.')).toBeVisible();
+  await expect(page.getByText('Revision 3 approved by MoSa Approver. Notification requested for your Cornerstone account team.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve this revision' })).toHaveCount(0);
 });
 
