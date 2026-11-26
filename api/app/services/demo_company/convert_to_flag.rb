@@ -8,17 +8,19 @@ module DemoCompany
   #
   # Safety guarantees:
   # - Requires an active organization administrator of the target organization.
+  # - Refuses to run inside an existing database transaction so SET LOCAL and
+  #   post-commit cache invalidation never extend past the intended commit.
   # - Refuses empty company_ids, missing companies, companies outside the actor's
-  #   organization, real live clients, practice copies, or malformed rows before
-  #   writing anything.
+  #   organization, real live clients, practice copies, companies with external
+  #   time-tracking/history approval rows, or malformed rows before writing.
   # - Idempotent: already-converted new-shape demo companies succeed as a no-op
   #   with zero writes and zero duplicate audit logs.
-  # - Runs in one atomic transaction per company with an AuditLog row inside the
-  #   same transaction. Uses SET LOCAL app.allow_demo_shape_migration = 'on' and
-  #   defers fk_employee_account_links_live_company until both tables are updated,
-  #   then re-checks the FK immediately before commit.
-  # - Dry-run by default: reports each record and field name that would change
-  #   without values and without writing to the database.
+  # - Executes the shape transition exclusively through the owner-only
+  #   SECURITY DEFINER database function `convert_demo_company_to_flag(...)`
+  #   (never granted to `payroll_app`), in one atomic transaction per company
+  #   with an AuditLog row in the same transaction.
+  # - Dry-run by default: runs inside SET TRANSACTION READ ONLY and reports only
+  #   record identifiers and field names without values.
   class ConvertToFlag
     class Refused < StandardError; end
 
@@ -33,8 +35,9 @@ module DemoCompany
     AUDIT_ACTION = "demo_company#converted_to_flag"
 
     # Exact target values for a converted new-shape demo company.
-    # test_workspace_manifest is intentionally preserved so demo_fixture_key
-    # remains intact and immutable for seed, rename, and fixture-key uniqueness.
+    # test_workspace_manifest is intentionally preserved unchanged so
+    # demo_fixture_key remains intact and immutable for seed, rename, and
+    # fixture-key uniqueness.
     COMPANY_TARGET_ATTRIBUTES = {
       demo: true,
       payroll_environment: "live",
@@ -59,6 +62,7 @@ module DemoCompany
     end
 
     def call
+      ensure_no_open_transaction!
       with_organization_lock do
         system_scope do
           authorize!
@@ -76,6 +80,12 @@ module DemoCompany
 
     attr_reader :organization, :actor, :company_ids, :dry_run
 
+    def ensure_no_open_transaction!
+      return unless ApplicationRecord.connection.open_transactions.positive?
+
+      raise Refused, "Cannot run demo shape conversion inside an existing database transaction"
+    end
+
     def normalize_ids(raw)
       values = Array(raw).flat_map { |entry| entry.to_s.split(",") }.map(&:strip).reject(&:blank?)
       raise Refused, "Specify COMPANY_IDS (comma-separated company IDs)" if values.empty?
@@ -86,7 +96,8 @@ module DemoCompany
     end
 
     def authorize!
-      allowed = organization.present? && actor&.organization_admin? && actor.payroll_access_allowed? &&
+      allowed = organization.present? && actor&.organization_admin? &&
+        actor.payroll_access_allowed?(deactivate_closed_practice: false) &&
         actor.organization_id == organization.id && StaffRolePolicy.allowed?(actor, :manage_organization)
       raise Refused, "An organization administrator is required" unless allowed
     end
@@ -106,7 +117,10 @@ module DemoCompany
       missing = company_ids - found.map(&:id)
       raise Refused, "Company ID(s) not found in organization: #{missing.join(', ')}" if missing.any?
 
-      found.each { |company| classify_company!(company) }
+      found.each do |company|
+        classify_company!(company)
+        ensure_no_time_tracking_history!(company)
+      end
     end
 
     def classify_company!(company)
@@ -114,6 +128,15 @@ module DemoCompany
       return :already_converted if converted_flag_demo?(company)
 
       raise Refused, "Refusing to convert company ##{company.id}: it is not an old-shape demo company"
+    end
+
+    def ensure_no_time_tracking_history!(company)
+      has_history = TimeTrackingSource.where(company_id: company.id).exists? ||
+        AireHistoryReview.where(company_id: company.id).exists? ||
+        AireVerifiedHistoryRolloutReceipt.where(company_id: company.id).exists?
+      return unless has_history
+
+      raise Refused, "Refusing to convert company ##{company.id}: external time-tracking sources or history approvals exist"
     end
 
     def old_shape_demo?(company)
@@ -133,7 +156,9 @@ module DemoCompany
     end
 
     def plan_only
-      with_read_only_if_top_level do
+      connection = ApplicationRecord.connection
+      ApplicationRecord.transaction do
+        connection.execute("SET TRANSACTION READ ONLY")
         companies = Company.where(organization_id: organization.id, id: company_ids).order(:id).to_a
         changes = []
         to_convert = []
@@ -193,6 +218,7 @@ module DemoCompany
 
         company = Company.where(organization_id: organization.id).lock.find(company_id)
         state = classify_company!(company)
+        ensure_no_time_tracking_history!(company)
         next [ :already_converted, [] ] if state == :already_converted
 
         links = EmployeeAccountLink.where(company_id: company.id).where.not(payroll_environment: "live").order(:id).lock.to_a
@@ -200,22 +226,20 @@ module DemoCompany
         company_changes = build_changes(company, company_fields, links)
 
         now = Time.current
-        connection.execute("SET LOCAL app.allow_demo_shape_migration = 'on'")
-        connection.execute("SET CONSTRAINTS fk_employee_account_links_live_company DEFERRED")
-
-        Company.where(id: company.id).update_all(COMPANY_TARGET_ATTRIBUTES.merge(updated_at: now))
-        if links.any?
-          EmployeeAccountLink.where(id: links.map(&:id)).update_all(payroll_environment: "live", updated_at: now)
-        end
-
-        connection.execute("SET CONSTRAINTS fk_employee_account_links_live_company IMMEDIATE")
+        links_updated = connection.select_value(
+          ApplicationRecord.sanitize_sql_array([
+            "SELECT convert_demo_company_to_flag(?, ?)",
+            company.id,
+            now
+          ])
+        ).to_i
 
         company.reload
-        unless converted_flag_demo?(company)
+        unless converted_flag_demo?(company) && links_updated == links.size
           raise Refused, "Post-conversion shape verification failed for company ##{company.id}"
         end
 
-        record_audit!(company, company_fields, links.size)
+        record_audit!(company, company_fields, links_updated)
         [ :converted, company_changes ]
       end
     end
@@ -267,16 +291,6 @@ module DemoCompany
           employee_account_links_updated: links_updated_count
         }
       )
-    end
-
-    def with_read_only_if_top_level(&)
-      connection = ApplicationRecord.connection
-      return yield if connection.open_transactions.positive?
-
-      ApplicationRecord.transaction do
-        connection.execute("SET TRANSACTION READ ONLY")
-        yield
-      end
     end
   end
 end

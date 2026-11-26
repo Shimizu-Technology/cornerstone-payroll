@@ -5,7 +5,14 @@ require "rake"
 require "tmpdir"
 
 RSpec.describe DemoCompany::VerifyShapeMigration do
-  let!(:organization) { create(:organization, client_limit: 5) }
+  # Exercises real PostgreSQL SET TRANSACTION READ ONLY enforcement and
+  # nested-transaction refusal on every capture.
+  self.use_transactional_tests = false
+
+  let!(:created_organization_ids) { [] }
+  let!(:organization) do
+    create(:organization, client_limit: 5).tap { |org| created_organization_ids << org.id }
+  end
   let!(:live) { create(:company, organization: organization, name: "Live Client", ein: "66-7654321") }
   let!(:admin) { create(:user, company: live, organization: organization, role: "admin", created_at: 1.year.ago) }
   let!(:owner) { create(:user, company: live, organization: organization, role: "super_admin", created_at: 1.year.ago) }
@@ -17,8 +24,9 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       subdomain_slug: "harborfinch",
       ein: "66-7654321",
       migration_rehearsal_created_by: admin,
-      migration_rehearsal_created_at: 2.days.ago,
-      migration_rehearsal_completed_at: 2.days.ago
+      migration_rehearsal_created_at: Time.utc(2026, 11, 20, 10, 0, 0),
+      migration_rehearsal_completed_at: Time.utc(2026, 11, 20, 10, 5, 0),
+      migration_rehearsal_error: "Sensitive internal detail that must never appear raw"
     )
   end
   let(:client_email) { "reviewer+manager@demo-mail.example" }
@@ -64,6 +72,7 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     )
   end
   let(:shadow_state) { { phase: "shadow", enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 1 } }
+  let(:enforced_state) { { phase: "enforced", enforced: true, kill_switch_bypass: false, enforced_tables: 1, protected_tables: 1 } }
   let(:stored_pdfs) { {} }
   let(:storage) { instance_double(R2StorageService) }
 
@@ -85,7 +94,6 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     allow(storage).to receive(:download) { |key| stored_pdfs[key] }
     allow(storage).to receive(:delete) { |key| stored_pdfs.delete(key) }
 
-    # Turn on demo employee app & subdomain.
     old_demo.client_operating_profiles.create!(
       effective_on: PayrollBusinessClock.today - 30,
       version: 1,
@@ -100,17 +108,14 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     )
     activate_employee_app!(old_demo, actor: admin)
 
-    # Inbox activity for the demo (must appear as row but never inflate live summary counters).
     thread = create(:client_portal_thread, company: old_demo, created_by: demo_client_user)
     create(:client_portal_message, company: old_demo, client_portal_thread: thread, author: demo_client_user)
 
-    # Finance book + live invoice so revenue exclusion is exercised.
     book = organization.finance_books.first
     live_invoice = create(:invoice, organization: organization, finance_book: book, company: live, status: "draft", invoice_date: Date.new(2026, 3, 15))
     live_invoice.line_items.create!(item_name: "Payroll Fee", description: "Monthly", quantity: 1, rate: 500, line_kind: "service_fee", position: 1)
     live_invoice.update_columns(status: "open", total_amount: 500)
 
-    # Committed payroll + YTD + posted pay stub document.
     period = create_committed_demo_pay_period(company: old_demo, pay_date: Date.new(2026, 3, 6), employee: demo_employee)
     period.update_columns(committed_at: 2.days.ago)
     item = period.payroll_items.sole
@@ -120,7 +125,62 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     EmployeeDocuments::PostPayStub.new(item, now: Time.current).call
   end
 
-  it "captures all verification areas read-only and reports zero unexpected diffs after ConvertToFlag" do
+  after do
+    conn = ApplicationRecord.connection
+    ids = created_organization_ids.uniq
+    next if ids.empty?
+
+    conn.transaction do
+      conn.execute("SET LOCAL session_replication_role = replica")
+      company_ids = conn.select_values("SELECT id FROM companies WHERE organization_id IN (#{ids.join(',')})")
+      if company_ids.any?
+        c_list = company_ids.join(",")
+        %w[
+          employee_documents employee_ytd_totals company_ytd_totals payroll_items pay_periods
+          client_portal_messages client_portal_threads employee_app_activations client_operating_profiles
+          employee_account_links company_assignments employees departments audit_logs
+        ].each do |table|
+          conn.execute("DELETE FROM #{table} WHERE company_id IN (#{c_list})")
+        end
+      end
+      o_list = ids.join(",")
+      invoice_ids = conn.select_values("SELECT id FROM invoices WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM invoice_line_items WHERE invoice_id IN (#{invoice_ids.join(',')})") if invoice_ids.any?
+      conn.execute("DELETE FROM invoices WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM invoice_billing_profiles WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM finance_books WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM employee_app_early_access_windows WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM audit_logs WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM users WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM companies WHERE organization_id IN (#{o_list})")
+      conn.execute("DELETE FROM organizations WHERE id IN (#{o_list})")
+    end
+  end
+
+  it "refuses to run inside an existing transaction and never writes even when RLS enforcement is verified" do
+    expect {
+      ApplicationRecord.transaction do
+        described_class.capture(organization: organization, actor: admin, company_ids: [ old_demo.id ], tax_year: 2026)
+      end
+    }.to raise_error(described_class::Error, /existing database transaction/)
+
+    # Even when Enforcement reports verified/enforced, capture must NOT retire early_access_window or write an audit log.
+    allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+    allow(EmployeeAppSwitch::Enforcement).to receive(:verified?).and_return(true)
+
+    expect {
+      described_class.capture(
+        organization: organization,
+        actor: admin,
+        company_ids: [ old_demo.id ],
+        tax_year: 2026,
+        readiness_database_state: -> { enforced_state }
+      )
+    }.not_to change(AuditLog, :count)
+    expect(early_access_window.reload.retired_at).to be_nil
+  end
+
+  it "captures all verification areas read-only (hashing migration_rehearsal_error, including paid-correction & history evidence) and reports zero unexpected diffs after ConvertToFlag" do
     before_snapshot = nil
     expect {
       before_snapshot = described_class.capture(
@@ -132,9 +192,14 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       )
     }.not_to have_enqueued_job(YearEndEfileCheckJob)
 
+    # Never emit raw migration_rehearsal_error text (LOW 1).
+    expect(JSON.generate(before_snapshot)).not_to include("Sensitive internal detail")
+
     entry = before_snapshot.fetch("companies").fetch(old_demo.id.to_s)
     expect(entry.dig("shape", "company", "demo")).to be(false)
     expect(entry.dig("shape", "company", "payroll_environment")).to eq("migration_rehearsal")
+    expect(entry.dig("shape", "company", "migration_rehearsal_error_present")).to be(true)
+    expect(entry.dig("shape", "company", "migration_rehearsal_error_sha256")).to match(/\A[0-9a-f]{64}\z/)
     expect(entry.dig("shape", "employee_account_links_payroll_environments", active_link.id.to_s)).to eq("migration_rehearsal")
     expect(entry.dig("subdomain", "enabled_origin_company_id")).to eq(old_demo.id)
     expect(entry.dig("counters", "client_caps", "in_live_payroll_scope")).to be(false)
@@ -146,8 +211,13 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     expect(entry.dig("ein_uniqueness", "live_company_ids_sharing_ein")).to eq([ live.id ])
     expect(entry.dig("payroll_checksums", "posted_documents_count")).to eq(1)
     expect(entry.dig("payroll_checksums", "all_posted_stubs_match_stored_fingerprint")).to be(true)
+    expect(entry.dig("payroll_checksums", "paid_correction_evidence_sha256")).to match(/\A[0-9a-f]{64}\z/)
+    expect(entry.dig("payroll_checksums", "time_tracking_history")).to include(
+      "sources_count" => 0,
+      "history_reviews_count" => 0,
+      "verified_history_receipts_count" => 0
+    )
 
-    # Convert the company.
     DemoCompany::ConvertToFlag.new(organization: organization, actor: admin, company_ids: [ old_demo.id ], dry_run: false).call
 
     after_snapshot = described_class.capture(
@@ -158,7 +228,7 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       readiness_database_state: -> { shadow_state }
     )
 
-    diff = described_class.diff(before_snapshot, after_snapshot)
+    diff = described_class.diff(before_snapshot, after_snapshot, expected_company_ids: [ old_demo.id ])
     expect(diff.unexpected_diffs).to eq([])
     expect(diff).to be_passed
 
@@ -168,11 +238,12 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       "companies.#{old_demo.id}.shape.company.payroll_environment",
       "companies.#{old_demo.id}.shape.company.test_workspace_purpose",
       "companies.#{old_demo.id}.shape.company.migration_rehearsal_status",
+      "companies.#{old_demo.id}.shape.company.migration_rehearsal_error_present",
       "companies.#{old_demo.id}.shape.employee_account_links_payroll_environments.#{active_link.id}"
     )
   end
 
-  it "fails the diff if any non-shape field or payroll figure changes or if the after shape is incomplete" do
+  it "fails closed on empty/malformed/duplicate snapshots, missing fields/links, non-zero history reviews, and tampered data (MEDIUM 1 & 4)" do
     before_snapshot = described_class.capture(
       organization: organization, actor: admin, company_ids: [ old_demo.id ], tax_year: 2026,
       readiness_database_state: -> { shadow_state }
@@ -183,17 +254,52 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       readiness_database_state: -> { shadow_state }
     )
 
-    # Tamper a payroll checksum in after_snapshot -> must fail closed.
+    # Empty hashes must FAIL.
+    expect(described_class.diff({}, {})).not_to be_passed
+
+    # Empty companies map must FAIL.
+    empty_companies = before_snapshot.merge("companies" => {})
+    expect(described_class.diff(empty_companies, empty_companies)).not_to be_passed
+
+    # Same snapshot twice must FAIL by default (both legacy+legacy and converted+converted).
+    expect(described_class.diff(before_snapshot, before_snapshot)).not_to be_passed
+    expect(described_class.diff(after_snapshot, after_snapshot)).not_to be_passed
+    # Explicit retry flag allows converted+converted only.
+    expect(described_class.diff(after_snapshot, after_snapshot, expected_company_ids: [ old_demo.id ], allow_already_converted: true)).to be_passed
+    expect(described_class.diff(before_snapshot, before_snapshot, expected_company_ids: [ old_demo.id ], allow_already_converted: true)).not_to be_passed
+
+    # Nil company entry must FAIL.
+    nil_entry = after_snapshot.deep_dup
+    nil_entry["companies"][old_demo.id.to_s] = nil
+    expect(described_class.diff(before_snapshot, nil_entry, expected_company_ids: [ old_demo.id ])).not_to be_passed
+
+    # Missing link map entry must FAIL.
+    missing_link = after_snapshot.deep_dup
+    missing_link["companies"][old_demo.id.to_s]["shape"]["employee_account_links_payroll_environments"] = {}
+    expect(described_class.diff(before_snapshot, missing_link, expected_company_ids: [ old_demo.id ])).not_to be_passed
+
+    # Missing required section must FAIL.
+    missing_section = after_snapshot.deep_dup
+    missing_section["companies"][old_demo.id.to_s].delete("payroll_checksums")
+    expect(described_class.diff(before_snapshot, missing_section, expected_company_ids: [ old_demo.id ])).not_to be_passed
+
+    # Mismatched expected_company_ids must FAIL.
+    expect(described_class.diff(before_snapshot, after_snapshot, expected_company_ids: [ old_demo.id, 999_999 ])).not_to be_passed
+
+    # Tampered payroll checksum must FAIL.
     tampered = after_snapshot.deep_dup
     tampered["companies"][old_demo.id.to_s]["payroll_checksums"]["payroll_items_sha256"] = "0" * 64
-    diff = described_class.diff(before_snapshot, tampered)
+    diff = described_class.diff(before_snapshot, tampered, expected_company_ids: [ old_demo.id ])
     expect(diff).not_to be_passed
     expect(diff.unexpected_diffs.map { |d| d[:path] }).to include("companies.#{old_demo.id}.payroll_checksums.payroll_items_sha256")
 
-    # Unconverted after snapshot -> must fail closed on shape validation.
-    unconverted_diff = described_class.diff(before_snapshot, before_snapshot)
-    expect(unconverted_diff).not_to be_passed
-    expect(unconverted_diff.unexpected_diffs.map { |d| d[:path] }).to include("companies.#{old_demo.id}.shape.company.demo")
+    # Non-zero time_tracking_history must FAIL even if matching in both before and after.
+    with_history_before = before_snapshot.deep_dup
+    with_history_after = after_snapshot.deep_dup
+    [ with_history_before, with_history_after ].each do |snap|
+      snap["companies"][old_demo.id.to_s]["payroll_checksums"]["time_tracking_history"]["history_reviews_count"] = 1
+    end
+    expect(described_class.diff(with_history_before, with_history_after, expected_company_ids: [ old_demo.id ])).not_to be_passed
   end
 
   describe "rake verification tasks" do
@@ -202,7 +308,7 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
     end
 
     def with_env(vars)
-      keys = %w[ORGANIZATION_ID ACTOR_ID COMPANY_IDS TAX_YEAR OUTPUT BEFORE AFTER CHECK_EMPLOYEE_SERVICE]
+      keys = %w[ORGANIZATION_ID ACTOR_ID COMPANY_IDS TAX_YEAR OUTPUT BEFORE AFTER CHECK_EMPLOYEE_SERVICE ALLOW_ALREADY_CONVERTED]
       previous = ENV.to_h.slice(*keys)
       keys.each { |k| ENV.delete(k) }
       vars.each { |k, v| ENV[k] = v }
@@ -211,7 +317,7 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       keys.each { |k| ENV[k] = previous[k] }
     end
 
-    it "captures before/after JSON files and diffs cleanly under RLS raise mode" do
+    it "captures before/after JSON files and diffs cleanly under strict RLS raise mode" do
       allow(RlsContextGuard).to receive(:mode).and_return("raise")
       expect(RlsContextGuard.mode).to eq("raise")
       Dir.mktmpdir("demo-shape-verify") do |dir|
@@ -235,7 +341,7 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
         end
 
         Rake::Task["demo:verify_shape_diff"].reenable
-        with_env("BEFORE" => before_path, "AFTER" => after_path) do
+        with_env("COMPANY_IDS" => old_demo.id.to_s, "BEFORE" => before_path, "AFTER" => after_path) do
           expect { RlsSpecContext.strict { Rake::Task["demo:verify_shape_diff"].invoke } }
             .to output(/OK    demo:verify_shape_diff companies=#{old_demo.id} unexpected_diffs=0/).to_stdout
         end

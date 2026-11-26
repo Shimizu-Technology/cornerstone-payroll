@@ -1047,11 +1047,16 @@ $$ LANGUAGE plpgsql;
 -- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127170000_prepare_demo_company_shape_migration.rb)
 CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
 DECLARE
-  old_is_demo boolean := OLD.demo OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
-  old_is_legacy_demo boolean := NOT OLD.demo
+  old_is_demo boolean := COALESCE(OLD.demo, false) OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
+  old_is_legacy_demo boolean := NOT COALESCE(OLD.demo, false)
     AND OLD.payroll_environment = 'migration_rehearsal'
-    AND COALESCE(OLD.test_workspace_purpose, '') = 'demo';
-  new_is_flag_demo boolean := NEW.demo = true
+    AND COALESCE(OLD.test_workspace_purpose, '') = 'demo'
+    AND OLD.migration_source_company_id IS NULL
+    AND OLD.migration_source_batch_id IS NULL
+    AND OLD.test_workspace_expires_at IS NULL
+    AND OLD.test_workspace_archived_at IS NULL
+    AND OLD.test_workspace_sealed_at IS NULL;
+  new_is_flag_demo boolean := NEW.demo IS TRUE
     AND NEW.payroll_environment = 'live'
     AND NEW.test_workspace_purpose IS NULL
     AND NEW.migration_rehearsal_status IS NULL
@@ -1064,11 +1069,35 @@ DECLARE
     AND NEW.test_workspace_expires_at IS NULL
     AND NEW.test_workspace_archived_at IS NULL
     AND NEW.test_workspace_sealed_at IS NULL;
-  converting_legacy_demo boolean := current_setting('app.allow_demo_shape_migration', true) = 'on'
-    AND old_is_legacy_demo
-    AND new_is_flag_demo;
+  old_is_flag_demo boolean := OLD.demo IS TRUE
+    AND OLD.payroll_environment = 'live'
+    AND OLD.test_workspace_purpose IS NULL;
+  new_is_legacy_demo boolean := NEW.demo IS FALSE
+    AND NEW.payroll_environment = 'migration_rehearsal'
+    AND COALESCE(NEW.test_workspace_purpose, '') = 'demo'
+    AND NEW.migration_rehearsal_status = 'ready'
+    AND NEW.migration_source_company_id IS NULL
+    AND NEW.migration_source_batch_id IS NULL
+    AND NEW.test_workspace_expires_at IS NULL
+    AND NEW.test_workspace_archived_at IS NULL
+    AND NEW.test_workspace_sealed_at IS NULL;
+  caller_is_owner boolean := COALESCE(
+    pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'USAGE')
+    AND pg_has_role(session_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'USAGE'),
+    false
+  );
+  migration_op text := COALESCE(current_setting('app.demo_shape_migration_op', true), '');
+  manifest_unchanged boolean := OLD.test_workspace_manifest IS NOT DISTINCT FROM NEW.test_workspace_manifest;
+  converting_legacy_demo boolean := COALESCE(
+    caller_is_owner AND migration_op = 'convert' AND old_is_legacy_demo AND new_is_flag_demo AND manifest_unchanged,
+    false
+  );
+  reverting_flag_demo boolean := COALESCE(
+    caller_is_owner AND migration_op = 'revert' AND old_is_flag_demo AND new_is_legacy_demo AND manifest_unchanged,
+    false
+  );
 BEGIN
-  IF NOT converting_legacy_demo AND (
+  IF NOT (converting_legacy_demo OR reverting_flag_demo) AND (
     OLD.demo IS DISTINCT FROM NEW.demo
     OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
     OR (old_is_demo AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment)
@@ -1077,9 +1106,13 @@ BEGIN
       USING ERRCODE = 'check_violation';
   END IF;
   IF old_is_demo
-    AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS NOT NULL
     AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
     RAISE EXCEPTION 'demo fixture keys are immutable'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF (converting_legacy_demo OR reverting_flag_demo)
+    AND OLD.test_workspace_manifest IS DISTINCT FROM NEW.test_workspace_manifest THEN
+    RAISE EXCEPTION 'demo manifest cannot change during shape migration'
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
