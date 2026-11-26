@@ -574,7 +574,7 @@ module Api
             custom_deductions: item.custom_deductions || [],
             payroll_adjustments: item.payroll_adjustments || [],
             payroll_field_entries: item.payroll_item_field_entries.map { |entry| payroll_field_entry_json(entry) },
-            ytd_gross: item.ytd_gross,
+            ytd_gross: statement_ytd_gross(item),
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours
           }
@@ -590,7 +590,7 @@ module Api
             json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
             # Include full YTD breakdown
             json[:ytd] = {
-              gross: item.ytd_gross,
+              gross: statement_ytd_gross(item),
               net: item.ytd_net,
               withholding_tax: item.ytd_withholding_tax,
               social_security_tax: item.ytd_social_security_tax,
@@ -628,6 +628,10 @@ module Api
           end
 
           payroll_item.pay_rate = employee.default_payroll_rate_on(payroll_item.pay_period.end_date)
+        end
+
+        def statement_ytd_gross(item)
+          (@statement_ytd_gross ||= StatementYtdGross.new).call(item)
         end
       end
     end

@@ -22,11 +22,6 @@ class PayStubGenerator
     "pto" => "PTO",
     "tips" => "Reported Tips"
   }.freeze
-  # Each printed YTD total and the payroll item amount it accumulates.
-  STATEMENT_YTD_FIELDS = {
-    gross: :gross_pay, withholding_tax: :withholding_tax, social_security_tax: :social_security_tax,
-    medicare_tax: :medicare_tax, additional_withholding: :additional_withholding, net: :net_pay
-  }.freeze
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
@@ -263,67 +258,8 @@ class PayStubGenerator
     pdf.move_down 6
   end
 
-  # Each row's YTD prints only when the rows account for both printed totals and
-  # every contributing paycheck can be attributed. Anything less keeps "—":
-  # a correction without stored rows, an opening balance that was not itemized,
-  # stored rows that omit saved earnings, a pay basis that cannot be established,
-  # or payroll fields whose identity would merge into one row.
   def itemized_earnings_rows
-    return if SignedCorrectionEarnings.call(payroll_item)
-
-    rows = earnings_ytd_breakdown.call
-    return unless rows.sum(0.to_d, &:current) == payroll_item.gross_pay.to_d.round(2)
-    return unless rows.sum(0.to_d, &:ytd) == pay_ytd_total
-    return if rows.any? { |row| row.current.nonzero? && row.ytd.zero? }
-    return unless [ payroll_item, *ytd_source_items ].uniq.all? { |item| earnings_attributable?(item) }
-    return unless payroll_field_rows_attributable?(rows)
-
-    rows.reject { |row| row.current.zero? && row.ytd.zero? }.presence
-  end
-
-  def earnings_attributable?(item)
-    stored = item.payroll_item_earnings.reject { |earning| earning.category.to_s == "non_taxable" }
-    stored.any? ? stored_earnings_cover_item?(item, stored) : unstored_pay_basis_established?(item)
-  end
-
-  # Offsetting omissions can still foot, so compare each saved earning field too.
-  def stored_earnings_cover_item?(item, stored)
-    expected = {
-      "bonus" => item.bonus,
-      "tips" => item.reported_tips,
-      "service_charge" => item.service_charge_wages,
-      "other" => Array(item.custom_earnings).sum(0.to_d) { |entry| entry["amount"].to_d } +
-        item.taxable_payroll_adjustments_total.to_d + item.taxable_payroll_field_entries_total.to_d
-    }
-    expected.all? do |category, amount|
-      stored.select { |earning| earning.category.to_s == category }.sum(0.to_d) { |earning| earning.amount.to_d } == amount.to_d.round(2)
-    end
-  end
-
-  # Reconstruction reads today's profile, so a contractor item needs a saved
-  # basis that still agrees with it. A positive override is a fee, not hours.
-  def unstored_pay_basis_established?(item)
-    return false unless item.contractor? == employee.contractor?
-    return true unless item.contractor?
-
-    snapshot = item.calculation_context_snapshot.to_h["employee"]
-    saved_pay_type = snapshot["contractor_pay_type"] if snapshot.is_a?(Hash)
-    return false unless saved_pay_type.present? && saved_pay_type == employee.contractor_pay_type
-
-    !employee.contractor_hourly? || !item.salary_override.to_d.positive?
-  end
-
-  # Field mirrors are saved by label alone. Print one only when its row holds
-  # exactly that field's own amounts under a single label/treatment/category.
-  def payroll_field_rows_attributable?(rows)
-    entries = ytd_source_items.flat_map { |item| item.payroll_field_entries_for_calculation.select { |entry| entry.active? && entry.taxable_addition? } }
-    entries.group_by(&:label).all? do |label, same_label|
-      next false if same_label.map { |entry| [ entry.tax_treatment, entry.category ] }.uniq.many?
-
-      total = same_label.sum(0.to_d) { |entry| entry.amount.to_d }.round(2)
-      matching = rows.select { |row| row.source_label == label && row.category.to_s == "other" }
-      matching.empty? ? total.zero? : matching.one? && matching.first.ytd == total
-    end
+    earnings_ytd_breakdown.attributable_rows
   end
 
   def itemized_earnings_row(row)
@@ -757,16 +693,8 @@ class PayStubGenerator
     @pay_ytd_total ||= earnings_ytd_breakdown.pay_ytd_total(statement_ytd_totals[:gross])
   end
 
-  # Every YTD total the statement prints: the dated opening balance plus the
-  # same earlier and current paychecks the YTD rows add up, so the totals and
-  # rows always agree.
   def statement_ytd_totals
-    @statement_ytd_totals ||= begin
-      opening = ytd_sources.historical_balance&.ytd_aggregate_totals || {}
-      STATEMENT_YTD_FIELDS.transform_values do |field|
-        (opening.fetch(field, 0).to_d + ytd_source_items.sum(0.to_d) { |item| item.public_send(field).to_d }).round(2)
-      end
-    end
+    ytd_sources.totals
   end
 
   def ytd_sources

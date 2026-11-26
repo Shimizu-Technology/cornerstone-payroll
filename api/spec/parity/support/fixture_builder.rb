@@ -480,7 +480,8 @@ module Parity
         source_status: "active",
         mapping_status: "exact_match"
       )
-      # QuickBooks gross_pay (1910.00) includes 150.00 non-taxable Mileage Reimb.
+      # QuickBooks gross_pay (1910.00) includes a 150.00 non-taxable Reimbursement,
+      # a label the QuickBooks importer classifies as non-taxable.
       # Taxable wages = 1760.00 (80h * $22).
       hist_paycheck = HistoricalPaycheck.create!(
         historical_import_batch: batch,
@@ -504,7 +505,7 @@ module Parity
         adjusted_gross: BigDecimal("1760.00"),
         earnings_breakdown: [
           { "label" => "Regular Pay", "amount" => "1760.00" },
-          { "label" => "Mileage Reimb", "amount" => "150.00" }
+          { "label" => "Reimbursement", "amount" => "150.00" }
         ],
         employee_taxes: BigDecimal("296.21"),
         federal_income_tax: BigDecimal("161.57"),
@@ -577,32 +578,14 @@ module Parity
           "adjustment_digest" => HistoricalPayroll::Ledger.new(batch: batch).adjustment_digest
         }
       )
-      # Bridge balance incorporates QB check + adjustment:
-      # gross_pay = 1960.00 (includes 150.00 non_taxable_pay -> taxable 1810.00)
-      # FIT = 167.74, SS = 112.22, Medicare = 26.25, Net = 1653.79
+      # The balance production's YtdBridgePlan builds from the QB check and its
+      # adjustment: gross_pay 1960.00 (including 150.00 non_taxable_pay, so
+      # taxable 1810.00), FIT 167.74, SS 112.22, Medicare 26.25, Net 1653.79.
+      plan = QuickbooksHistory::YtdBridgePlan.new(batch: batch)
+      planned = plan.send(:build_balances, rows: HistoricalPayroll::Ledger.new(batch: batch).entries).sole
       ytd_balance = HistoricalEmployeeYtdBalance.create!(
         historical_ytd_bridge: bridge,
-        company: company,
-        employee: employee,
-        tax_year: TAX_YEAR,
-        through_period_end: QB_PERIOD_END,
-        through_pay_date: QB_PERIOD_PAY,
-        gross_pay: BigDecimal("1960.00"),
-        non_taxable_pay: BigDecimal("150.00"),
-        fit_taxable_wages: BigDecimal("1810.00"),
-        social_security_taxable_wages: BigDecimal("1810.00"),
-        social_security_taxable_tips: BigDecimal("0.00"),
-        medicare_taxable_wages: BigDecimal("1810.00"),
-        federal_income_tax: BigDecimal("167.74"),
-        social_security_tax: BigDecimal("112.22"),
-        medicare_tax: BigDecimal("26.25"),
-        net_pay: BigDecimal("1653.79"),
-        source_breakdown: {
-          "earnings_breakdown" => {
-            "Regular Pay" => "1810.00",
-            "Mileage Reimb" => "150.00"
-          }
-        }
+        **planned.slice(*(HistoricalEmployeeYtdBalance.column_names - %w[id historical_ytd_bridge_id created_at updated_at])).symbolize_keys
       )
 
       @qb_records = {

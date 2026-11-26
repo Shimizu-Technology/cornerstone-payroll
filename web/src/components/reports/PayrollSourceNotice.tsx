@@ -27,6 +27,7 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
           <p className="mt-1 leading-6 text-amber-800">
             This view includes {includedLabels.join(' and ') || 'locked QuickBooks balance history'}. {summary.source_statement}
           </p>
+          {totalsBasisNote(summary) && <p className="mt-1 leading-6 text-amber-800">{totalsBasisNote(summary)}</p>}
           {quickbooks.opening_summary_count > 0 && (
             <p className="mt-1 leading-6 text-amber-800">
               It includes {quickbooks.opening_summary_count} QuickBooks opening {quickbooks.opening_summary_count === 1 ? 'summary' : 'summaries'} that preserve earlier totals without representing individual paychecks.
@@ -55,6 +56,16 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
       )}
     </div>
   );
+}
+
+// Full-year totals use the applied opening balance, as pay stubs and W-2GU do.
+// A range that starts after January 1 can't, so its imported rows show as imported.
+function totalsBasisNote(summary: PayrollSourceSummary): string | null {
+  const basis = summary.historical_ytd_bridge?.totals_basis;
+  if (basis === 'historical_ytd_bridge') return 'Imported totals use the applied opening year-to-date balance, the same figures as pay stubs and W-2GU.';
+  if (basis === 'mixed') return 'Some imported totals use the applied opening year-to-date balance; the rest are shown as imported.';
+  if (basis === 'as_imported' && summary.historical_ytd_bridge.applied) return 'Imported figures are shown as imported. The opening year-to-date balance covers the year from January 1, so it applies only to ranges that include its whole period.';
+  return null;
 }
 
 function formatMoney(value: number): string {

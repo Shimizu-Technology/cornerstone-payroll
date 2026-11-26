@@ -10,6 +10,11 @@ class PayrollStatementYtdSources
     { payroll_item_field_entries: :payroll_field_definition },
     { payroll_item_deductions: :deduction_type }
   ].freeze
+  # Each printed YTD total and the payroll item amount it accumulates.
+  TOTAL_FIELDS = {
+    gross: :gross_pay, withholding_tax: :withholding_tax, social_security_tax: :social_security_tax,
+    medicare_tax: :medicare_tax, additional_withholding: :additional_withholding, net: :net_pay
+  }.freeze
 
   attr_reader :payroll_item
 
@@ -41,10 +46,6 @@ class PayrollStatementYtdSources
       .first
   end
 
-  def historical_cutoff
-    historical_balance&.through_pay_date
-  end
-
   # Historical opening balances carry only combined Medicare.
   def additional_medicare_ytd
     return if historical_balance
@@ -52,23 +53,34 @@ class PayrollStatementYtdSources
     @additional_medicare_ytd ||= items.sum(0.to_d) { |item| item.additional_medicare_tax.to_d }
   end
 
+  # Every YTD total a statement prints: the dated opening balance plus the
+  # same earlier and current paychecks the YTD rows add up, so the totals and
+  # rows always agree.
+  def totals
+    @totals ||= begin
+      opening = historical_balance&.ytd_aggregate_totals || {}
+      TOTAL_FIELDS.transform_values do |field|
+        (opening.fetch(field, 0).to_d + items.sum(0.to_d) { |item| item.public_send(field).to_d }).round(2)
+      end
+    end
+  end
+
+  # Reportable native paychecks count even when dated on or before the
+  # opening balance's through date: the balance holds only imported pay, and
+  # W-2GU, payroll calculation and the saved YTD snapshots all count them.
+  # Only an explicit legacy disposition or reversal excludes a paycheck.
   def items
     @items ||= begin
       prior_periods = PayPeriod.reportable_for_company(@company)
         .where(pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)", pay_date: pay_date, period_id: @pay_period.id)
-      prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
       items = @employee.payroll_items.financially_reportable.reportable
         .where(company_id: @company.id, pay_period_id: prior_periods.select(:id))
         .eager_load(:pay_period).order("pay_periods.pay_date", "pay_periods.id", :id).to_a
       # Every period here is this company's.
       items.each { |item| item.pay_period.association(:company).target = @company }
 
-      if payroll_item.payroll_included? &&
-          @pay_period.correction_status.in?([ nil, "correction" ]) &&
-          (historical_cutoff.nil? || pay_date > historical_cutoff)
-        items << payroll_item
-      end
+      items << payroll_item if payroll_item.payroll_included? && @pay_period.correction_status.in?([ nil, "correction" ])
       preload_components(items.reject { |item| item.equal?(payroll_item) })
       items
     end
