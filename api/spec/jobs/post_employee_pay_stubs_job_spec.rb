@@ -8,7 +8,7 @@ RSpec.describe PostEmployeePayStubsJob do
   let(:company) { create(:company) }
   let(:period) { create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 8, 1), start_date: Date.new(2026, 8, 1), end_date: Date.new(2026, 8, 14), pay_date: Date.new(2026, 8, 20)) }
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
-  let(:employee) { create(:employee, company: company) }
+  let(:employee) { create(:employee, company: company, updated_at: Time.utc(2026, 8, 1)) }
   let(:item) { create(:payroll_item, pay_period: period, employee: employee, gross_pay: 1_200, net_pay: 960, payment_delivery_method: "direct_deposit") }
   let(:storage) { instance_double(R2StorageService, upload: true, delete: true) }
   let(:cutoff) { Time.utc(2026, 8, 19, 20) }
@@ -36,6 +36,24 @@ RSpec.describe PostEmployeePayStubsJob do
       Digest::SHA256.hexdigest(bytes) == doc.sha256 && text.include?("Direct deposit") && !text.include?("transfer not confirmed")
     end, content_type: "application/pdf").once
     expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
+  end
+
+  it "posts a new revision when only the employee's suffix changes" do
+    item
+    run_at(cutoff)
+    original = documents.sole
+
+    travel_to(cutoff + 1.minute) { employee.update!(name_suffix: "III") }
+    expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocument, :count).by(1)
+
+    replacement = documents.reload.last
+    expect(original.reload).to be_replaced
+    expect(replacement).to have_attributes(revision: 2, status: "posted", replaces_document: original)
+    expect(replacement.payroll_facts_sha256).not_to eq(original.payroll_facts_sha256)
+    expect(storage).to have_received(:upload).with(replacement.storage_key, satisfy do |bytes|
+      PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join.include?(employee.legal_name)
+    end, content_type: "application/pdf").once
+    expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocument, :count)
   end
 
   it "waits for committed payroll and for assignment of the paper check number" do

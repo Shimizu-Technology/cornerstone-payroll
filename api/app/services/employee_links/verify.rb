@@ -70,7 +70,8 @@ module EmployeeLinks
         now = Time.current
         clear_expired_lock!(link, now)
         matched = ActiveSupport::SecurityUtils.secure_compare(expected_secret(link.employee), supplied)
-        usable = link.invite_open?(now) && !link.activation_locked?(now) && link.employee.active? && link.portal_enabled?
+        usable = link.invite_open?(now) && !link.activation_locked?(now) && link.employee.active? && link.portal_enabled? &&
+          EmployeeAppSwitch::Enforcement.demo_request_allowed?(link.company)
 
         if matched && usable
           link.update!(failed_activation_attempts: 0) if link.failed_activation_attempts.positive?

@@ -203,8 +203,12 @@ class CompanyFeatures
 
   # A demo company's employee app opens only while the database enforces
   # RLS, or in the shadow state while an in-effect early-access window names
-  # it (today, Guam time) and this process runs the guarded runtime role.
+  # it (today, Guam time) and the employee service's guard runs in raise
+  # mode as the restricted role: checked on its own process there, and from
+  # its signed answer (cached briefly) on staff web and the worker.
   # Requests, jobs and mail all read it here, so each fails closed alike.
+  # Employee requests also pass Enforcement.demo_request_allowed?, which
+  # always needs the serving process's own guard.
   def demo_gate_open?
     return true unless company.demo?
     return @demo_gate_open if defined?(@demo_gate_open)

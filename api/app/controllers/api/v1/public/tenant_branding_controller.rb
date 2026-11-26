@@ -13,7 +13,7 @@ module Api
             branding = TenantSubdomainRegistry.branding_for(host: host, slug: slug, logo_base_url: request.base_url)
           end
 
-          return head :not_found unless branding
+          return branding_not_found unless branding
 
           render json: branding
         end
@@ -34,6 +34,17 @@ module Api
           response.headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
           response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
           send_data bytes, type: company.brand_logo_content_type, disposition: "inline"
+        end
+
+        private
+
+        def branding_not_found
+          origin = request.headers["Origin"]
+          response.headers["Vary"] = [ response.headers["Vary"], "Origin" ].compact.join(", ")
+          if request.get? && TenantSubdomainRegistry.tenant_shaped_origin?(origin)
+            response.headers["Access-Control-Allow-Origin"] = origin
+          end
+          head :not_found
         end
       end
     end

@@ -155,7 +155,7 @@ class CheckPrintRunGenerationService
       "source_type" => "payroll_item",
       "source_id" => item.id,
       "check_number" => item.check_number.to_s,
-      "payee" => item.employee.full_name,
+      "payee" => item.employee.legal_name,
       "amount" => format("%.2f", item.net_pay.to_d),
       "source_updated_at" => item.updated_at.iso8601(6),
       "printed_at" => item.check_printed_at&.iso8601(6),

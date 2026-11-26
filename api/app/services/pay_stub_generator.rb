@@ -92,17 +92,17 @@ class PayStubGenerator
     }
   end
 
-  # This check's own facts plus every YTD amount the statement prints. A later
+  # The printed legal name, this check's facts, and every printed YTD amount. A later
   # change to an earlier check revises this statement only when it changes a
   # printed YTD amount. Current rows use their own labels, so a relabelled YTD
   # attribution alone does not. A stub posted under an earlier fingerprint
   # format never matches, so its next recheck posts one revision carrying
-  # this one (production had no posted employee stubs when the format changed).
+  # this one.
   def employee_payroll_facts_sha256
     @employee_payroll_facts_sha256 ||= begin
       # This check's components load in the same batch as the earlier checks'.
       ytd_source_items
-      Digest::SHA256.hexdigest([ *employee_payroll_current_facts, printed_ytd_facts ].to_json)
+      Digest::SHA256.hexdigest([ employee.legal_name, *employee_payroll_current_facts, printed_ytd_facts ].to_json)
     end
   end
 
@@ -182,7 +182,7 @@ class PayStubGenerator
   def render_employee_info(pdf)
     pdf.font_size(9) do
       data = [
-        [ "Employee:", employee.full_name ],
+        [ "Employee:", employee.legal_name ],
         [ "Employee ID:", employee.id.to_s ],
         [ "SSN:", "XXX-XX-#{employee.ssn_last_four || '****'}" ],
         [ "Department:", employee.department&.name || "N/A" ]

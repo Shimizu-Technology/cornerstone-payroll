@@ -3,8 +3,8 @@
 class UnifiedPayrollReporting
   SOURCE_STATEMENT = "QuickBooks source values remain authoritative locked snapshots and were not recalculated. Recorded ledger adjustments are shown separately and never rewrite the source."
   EMPLOYER_SOCIAL_SECURITY = /\A(?:SS|Social Security(?: Employer)?|Employer Social Security)\z/i
-  REGULAR_HOURS = /\A(?:regular|hourly)\b/i
-  OVERTIME_HOURS = /overtime|\bot\b/i
+  OVERTIME_HOURS = /overtime|\bot\b|\bdouble[ -]?time\b/i
+  REGULAR_HOURS = /\A(?!.*#{OVERTIME_HOURS})(?:regular|hourly)\b/i
   EMPLOYER_MEDICARE = /\A(?:Med|Medicare(?: Employer)?|Employer Medicare)\z/i
 
   def initialize(company_id:, period:)
@@ -399,7 +399,7 @@ class UnifiedPayrollReporting
   def matching_component_amounts(components, pattern)
     Array(components).filter_map do |entry|
       component = entry.to_h.with_indifferent_access
-      BigDecimal(component[:amount].to_s, exception: false) if component[:label].to_s.match?(pattern)
+      BigDecimal(component[:amount].to_s, exception: false) if component[:label].to_s.squish.match?(pattern)
     end
   end
 

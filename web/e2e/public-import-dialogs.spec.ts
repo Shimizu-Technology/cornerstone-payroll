@@ -336,9 +336,19 @@ test('PayrollIntakeImportModal guards preview, apply, and nested employee creati
 
 test('MoSa import takes missing period pay in the review and requires review before replacing saved hours', async ({ page }): Promise<void> => {
   let periodPayEntered = false;
+  const previewChunkRequests: string[] = [];
+  await page.route(/\/src\/components\/documents\/PdfPreview\.tsx(?:\?|$)/, route => {
+    previewChunkRequests.push(route.request().url());
+    if (previewChunkRequests.length === 1) return route.abort();
+    return route.fulfill({ contentType: 'text/javascript', body: 'export const PdfDocumentView = () => "Synthetic PDF preview";' });
+  });
+  await page.route('**/payroll_intake_imports/905/documents/907/preview', route =>
+    route.fulfill({ contentType: 'application/pdf', body: '%PDF-1.4 synthetic fixture' }),
+  );
   const previewBody = (): string => JSON.stringify({
       import_id: 904,
-      source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', current: true, verified_source_count: 2, source_count: 2, disposition_targets: [] },
+      source_package: { id: 905, package_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', package_revision: 1, package_schema_version: '1.0', current: true, verified_source_count: 2, source_count: 2, disposition_targets: [],
+        documents: [{ id: 907, source_role: 'revel_hours', filename: 'hours.pdf', content_type: 'application/pdf', byte_size: 26 }] },
       preview: {
         matched: [{ source_row_id: 906, employee_id: 801, employee_name: 'Variable Salary', employment_type: 'salary', pay_rate: 200000,
           confidence: 1, matched_name: 'Variable Salary', regular_hours: 0, overtime_hours: 0, total_hours: 0,
@@ -372,9 +382,18 @@ test('MoSa import takes missing period pay in the review and requires review bef
   const dialog = page.getByRole('dialog', { name: 'Import Payroll Data' });
   await dialog.locator('input[type="file"]').first().setInputFiles({ name: 'hours.pdf', mimeType: 'application/pdf', buffer: Buffer.from('fixture') });
   await dialog.getByRole('button', { name: 'Preview Import' }).click();
-  await expect(dialog.getByRole('alert').first()).toContainText('Period pay is required for Variable Salary');
+  await expect(dialog.getByText('Period pay is required for Variable Salary', { exact: false })).toBeVisible();
   await expect(dialog.getByText('Missing period pay', { exact: true }).filter({ visible: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Apply Import/ })).toBeDisabled();
+
+  const openSources = dialog.getByRole('button', { name: /Show source files/ });
+  if (await openSources.isVisible()) await openSources.click();
+  await expect(dialog.getByText('The PDF preview could not load.')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Download PDF', exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Retry preview' }).click();
+  await expect(dialog.getByText('Synthetic PDF preview')).toBeVisible();
+  expect(previewChunkRequests).toHaveLength(2);
+  expect(new URL(previewChunkRequests[1]).searchParams.has('previewRetry')).toBe(true);
 
   await dialog.getByLabel('Pay for Variable Salary this period').fill('9000');
   await dialog.getByRole('button', { name: 'Save pay for Variable Salary' }).click();

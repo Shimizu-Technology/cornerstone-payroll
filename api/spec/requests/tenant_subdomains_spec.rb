@@ -82,6 +82,31 @@ RSpec.describe "Client subdomains", type: :request do
     end
   end
 
+  it "lets an inactive tenant read the empty branding 404 without credentials" do
+    origin = "https://#{disabled_host}"
+    get path, params: { host: disabled_host }, headers: { "Origin" => origin }
+
+    expect(response).to have_http_status(:not_found)
+    expect(response.body).to be_empty
+    expect(response.headers["Access-Control-Allow-Origin"]).to eq(origin)
+    expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
+    expect(response.headers["Vary"]).to include("Origin")
+
+    get path, params: { host: enabled_host }, headers: { "Origin" => origin }
+    expect(response).to have_http_status(:ok)
+    expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+  end
+
+  it "keeps the disabled branding 404 opaque to unrelated, reserved and malformed origins" do
+    [ "https://example.test", "https://api.shimizu-technology.com", "https://-bad.shimizu-technology.com",
+      "http://#{disabled_host}", "https://#{disabled_host}.example.test" ].each do |origin|
+      get path, params: { host: disabled_host }, headers: { "Origin" => origin }
+
+      expect(response).to have_http_status(:not_found)
+      expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+    end
+  end
+
   it "returns the same empty 404 for disabled, unknown, reserved and malformed lookups" do
     [
       { host: disabled_host }, { slug: "disabled" }, { host: "unknown.shimizu-technology.com" },
@@ -149,7 +174,7 @@ RSpec.describe "Client subdomains", type: :request do
     end
   end
 
-  it "excludes an inactive organization from CORS and branding" do
+  it "denies preflights and returns only the readable empty 404 for an inactive organization" do
     origin = "https://#{enabled_host}"
     expect(preflight(origin)).to eq(origin)
 
@@ -158,7 +183,9 @@ RSpec.describe "Client subdomains", type: :request do
     expect(preflight(origin)).to be_nil
     get path, params: { host: enabled_host }, headers: { "Origin" => origin }
     expect(response).to have_http_status(:not_found)
-    expect(response.headers["Access-Control-Allow-Origin"]).to be_nil
+    expect(response.body).to be_empty
+    expect(response.headers["Access-Control-Allow-Origin"]).to eq(origin)
+    expect(response.headers["Access-Control-Allow-Credentials"]).to be_nil
   end
 
   def sql_during
