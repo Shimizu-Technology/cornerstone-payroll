@@ -44,15 +44,24 @@ module PortalNotifications
     def claim(recipient_key)
       PortalNotificationDelivery.transaction do
         rows = due_scope.where(recipient_key: recipient_key).order(:id).lock("FOR UPDATE SKIP LOCKED")
-          .includes(:user, portal_notification_event: :subject).to_a
+          .includes(:user, portal_notification_event: [ :company, :subject ]).to_a
         kept = rows.reject { |row| skip_if_ineligible!(row) }
-        # New batches never mix destinations; an attempted batch keeps its rows.
+        # New batches never mix clients or destinations, so a staff member
+        # covering several clients never gets one merged email pointing at the
+        # wrong client, and an attempted batch keeps its rows on retry.
         # A demo company's alerts never share a batch with a live client's, so a
         # demo refusal can't suppress a live alert on retry.
-        kept.group_by { |row| [ row.delivery_mode, row.batch_key, (Email.destination_group(row.event) unless row.batch_key), row.event.company&.demo? ] }
-          .map do |(mode, previous_key, destination, demo), group|
+        kept.group_by do |row|
+          [
+            row.delivery_mode,
+            row.batch_key,
+            (Email.destination_group(row.event, delivery_mode: row.delivery_mode) unless row.batch_key),
+            (row.company_id unless row.batch_key),
+            row.event.company&.demo?
+          ]
+        end.map do |(mode, previous_key, destination, company_id, demo), group|
           ids = group.map(&:id).sort
-          key = previous_key || "portal-notification-#{Digest::SHA256.hexdigest("#{recipient_key}:#{mode}:#{destination}:#{demo}:#{ids.join(',')}")[0, 48]}"
+          key = previous_key || "portal-notification-#{Digest::SHA256.hexdigest("#{recipient_key}:#{mode}:#{destination}:#{company_id}:#{demo}:#{ids.join(',')}")[0, 48]}"
           events = previous_key ? attempted_events(previous_key) : group.map(&:event)
           PortalNotificationDelivery.where(id: ids).update_all(
             [ "attempts = attempts + 1, claimed_at = ?, batch_key = ?, updated_at = ?", now, key, now ])
@@ -64,7 +73,8 @@ module PortalNotifications
     end
 
     def attempted_events(batch_key)
-      PortalNotificationDelivery.where(batch_key: batch_key).order(:id).includes(:portal_notification_event).map(&:event)
+      PortalNotificationDelivery.where(batch_key: batch_key).order(:id)
+        .includes(portal_notification_event: [ :company, :subject ]).map(&:event)
     end
 
     def skip_if_ineligible!(row)

@@ -34,4 +34,24 @@ RSpec.describe PortalNotifications::RecipientListUpdate do
     PortalNotificationRecipient.create!(company: company, user: staff)
     expect { described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: []) }.not_to change(AuditLog, :count)
   end
+
+  it "audits Lead and Backup changes and rejects conflicting or unselected roles" do
+    changes = described_class.call!(
+      company: company, actor: admin, user_ids: [ admin.id, staff.id ], emails: [],
+      lead_user_id: staff.id, backup_user_id: admin.id
+    )
+    expect(changes[:lead_user]).to eq(before: nil, after: { id: staff.id, name: "Listed Manager" })
+    expect(PortalNotificationRecipient.where(company: company).lead.pick(:user_id)).to eq(staff.id)
+    expect(PortalNotificationRecipient.where(company: company).backup.pick(:user_id)).to eq(admin.id)
+
+    expect do
+      described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: [],
+        lead_user_id: staff.id, backup_user_id: staff.id)
+    end.to raise_error(described_class::InvalidTeamRole)
+
+    expect do
+      described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: [],
+        lead_user_id: admin.id)
+    end.to raise_error(described_class::InvalidTeamRole)
+  end
 end

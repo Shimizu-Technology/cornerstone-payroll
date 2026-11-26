@@ -2,7 +2,7 @@
 
 module PayrollReview
   class PackagePresenter
-    def self.call(review_package, include_source_manifest: true)
+    def self.call(review_package, include_source_manifest: true, include_notification_status: false)
       return nil unless review_package
 
       {
@@ -30,7 +30,21 @@ module PayrollReview
         acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
       }.tap do |payload|
         payload[:source_manifest] = review_package.source_manifest if include_source_manifest
+        if include_notification_status
+          payload[:notification_queued] = decision_notification_queued?(review_package)
+        end
       end
+    end
+
+    def self.decision_notification_queued?(review_package)
+      return nil unless review_package.approved? || review_package.changes_requested_at.present?
+
+      PortalNotificationDelivery.joins(:portal_notification_event)
+        .where(
+          company_id: review_package.company_id,
+          status: %w[pending sent],
+          portal_notification_events: { dedupe_key: "payroll_review_decided:#{review_package.id}" }
+        ).exists?
     end
   end
 end

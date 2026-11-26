@@ -110,3 +110,73 @@ it('shows the published preview without decision controls when access is read-on
   expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
 });
+
+it('shows honest approval confirmation based on whether account-team email was queued', () => {
+  const { rerender } = render(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_queued: true },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was emailed.');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_queued: false },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
+  expect(screen.getByRole('status').textContent).not.toContain('account team was emailed');
+});
+
+it('shows honest change-request confirmation based on whether account-team email was queued', () => {
+  const { rerender } = render(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: {
+          ...period.payroll_review!,
+          status: 'changes_requested',
+          changes_requested_by_name: 'Casey Manager',
+          change_request_note: 'Fix regular hours',
+          notification_queued: true,
+        },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was emailed.');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: {
+          ...period.payroll_review!,
+          status: 'changes_requested',
+          changes_requested_by_name: 'Casey Manager',
+          change_request_note: 'Fix regular hours',
+          notification_queued: false,
+        },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
+  expect(screen.getByRole('status').textContent).not.toContain('account team was emailed');
+});

@@ -27,4 +27,8 @@ class PortalNotificationEvent < ApplicationRecord
   def message_event?
     PortalNotifications::EVENT_TYPES.fetch(event_type)[:message]
   end
+
+  def client_managers_only?
+    PortalNotifications::EVENT_TYPES.fetch(event_type)[:client_managers_only] == true
+  end
 end

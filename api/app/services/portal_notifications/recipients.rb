@@ -142,6 +142,7 @@ module PortalNotifications
         else
           user.client? && user.payroll_access_allowed? && user.organization_id == company.organization_id &&
             user.can_access_company?(company.id) &&
+            (!event.client_managers_only? || !user.client_viewer?) &&
             (event.category != "employee_change_decisions" || event.subject.requested_by_id == user.id) &&
             (event.category != "address_approvals" || can_review_address?(event.subject, user)) &&
             (event.category != "contact_changes" || event.subject.changed_by_id != user.id)
