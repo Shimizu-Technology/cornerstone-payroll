@@ -27,7 +27,9 @@ module PortalNotifications
       @company = company
       @actor = actor
       @user_ids = user_ids
-      @emails = Array(emails).map { |email| PortalNotificationRecipient.normalize_email(email) }.compact.uniq
+      @emails = Array(emails)
+        .filter_map { |email| PortalNotificationRecipient.normalize_email(email) }
+        .uniq { |email| PortalNotificationRecipient.canonical_email(email) }
       @lead_user_id = lead_user_id
       @backup_user_id = backup_user_id
     end

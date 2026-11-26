@@ -145,6 +145,17 @@ it('passes a safe same-site return_to path to Clerk and lands on it after sign-i
   expect(screen.getByRole('heading', { name: 'Payroll review target' })).toBeTruthy();
 });
 
+it('navigates to the remembered destination after sign-in even when /login no longer has return_to in the query', async () => {
+  const target = '/companies/42/pay-runs/99/overview';
+  await renderLogin(`?return_to=${encodeURIComponent(target)}`);
+  cleanup();
+
+  clerk.isSignedIn = true;
+  auth.isAuthenticated = true;
+  await renderLogin();
+  expect(screen.getByRole('heading', { name: 'Payroll review target' })).toBeTruthy();
+});
+
 it.each([
   'https://evil.com/phish',
   '//evil.com/phish',

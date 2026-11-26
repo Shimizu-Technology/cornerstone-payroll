@@ -70,8 +70,11 @@ module Api
           eligible_canonicals = eligible.filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
           emails = listed.extra_emails.order(:email).pluck(:email)
           active_ids = listed_ids & eligible_ids
+          active_user_canonicals = eligible.select { |user| active_ids.include?(user.id) }
+            .filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
           # Scope account matching to this organization so recipient_count stays
-          # independent of foreign-organization registrations.
+          # independent of foreign-organization registrations, and count distinct
+          # canonical mailbox identities so Gmail aliases never count twice.
           same_org_canonicals = if emails.any?
             PortalNotificationRecipient.matching_users_for_emails(
               emails, scope: User.where(organization_id: current_company.organization_id)
@@ -79,11 +82,14 @@ module Api
           else
             Set.new
           end
-          active_extra_count = emails.count do |email|
+          visible_extra_canonicals = emails.filter_map do |email|
             canonical = PortalNotificationRecipient.canonical_email(email)
-            !same_org_canonicals.include?(canonical) || eligible_canonicals.include?(canonical)
-          end
-          active_count = active_ids.size + active_extra_count
+            next if canonical.blank? || active_user_canonicals.include?(canonical)
+            next if same_org_canonicals.include?(canonical) && !eligible_canonicals.include?(canonical)
+
+            canonical
+          end.uniq
+          active_count = active_user_canonicals.size + visible_extra_canonicals.size
           lead_user_id = active_ids.find { |id| listed_roles[id] == "lead" }
           backup_user_id = active_ids.find { |id| listed_roles[id] == "backup" }
           {

@@ -41,15 +41,28 @@ module PayrollReview
     def self.decision_notification_status(review_package)
       return nil unless review_package.approved? || review_package.changes_requested_at.present?
 
-      deliveries = PortalNotificationDelivery.joins(:portal_notification_event)
+      # Derive status from a single read so a concurrent pending -> sent
+      # transition cannot momentarily look like not_sent. Foreign-account
+      # suppressed extra addresses mirror the same queued -> sent lifecycle as
+      # an unregistered extra address so tenant responses stay indistinguishable.
+      rows = PortalNotificationDelivery.joins(:portal_notification_event)
         .where(
           company_id: review_package.company_id,
           portal_notification_events: { dedupe_key: "payroll_review_decided:#{review_package.id}" }
         )
-      return "sent" if deliveries.where(status: "sent").exists?
+        .pluck(:status, :skip_reason, :deliver_after)
+
+      now = Time.current
+      return "sent" if rows.any? { |status, _reason, _after| status == "sent" }
+      if rows.any? { |status, reason, after| status == "skipped" && reason == "foreign_account_suppressed" && after <= now }
+        return "sent"
+      end
       return "not_sent" unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
 
-      deliveries.where(status: "pending").exists? ? "queued" : "not_sent"
+      queued = rows.any? do |status, reason, after|
+        status == "pending" || (status == "skipped" && reason == "foreign_account_suppressed" && after > now)
+      end
+      queued ? "queued" : "not_sent"
     end
 
     def self.decision_notification_queued?(review_package)

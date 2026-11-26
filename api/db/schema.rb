@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_020000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_030000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -4242,6 +4242,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_020000) do
     t.datetime "completed_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "intended_recipient_email"
+    t.string "claimed_by", limit: 64
+    t.jsonb "attempted_payload"
     t.index [ "batch_key" ], name: "index_portal_notification_deliveries_on_batch_key"
     t.index [ "company_id" ], name: "index_portal_notification_deliveries_on_company_id"
     t.index [ "deliver_after", "recipient_key" ], name: "idx_portal_notification_deliveries_due", where: "((status)::text = 'pending'::text)"

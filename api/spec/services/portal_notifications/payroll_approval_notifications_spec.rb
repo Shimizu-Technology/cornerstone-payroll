@@ -69,9 +69,11 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
           "v:roundrect"
         )
 
-        # Privacy: no amounts, employee names, or notes
+        # Privacy: no amounts, employee names, or notes (strip generated URLs so numeric IDs never false-positive)
         combined = [ mail[:subject], mail[:text], mail[:html] ].join("\n")
-        expect(combined).not_to include("2,345", "2345", "1,987", "1987", "Jordan", "Reyes", "$")
+        combined_without_urls = combined.gsub(%r{https?://\S+}, "")
+        expect(combined).not_to include("Jordan", "Reyes", "$")
+        expect(combined_without_urls).not_to include("2,345", "2345", "1,987", "1987")
       end
     end
 
@@ -98,6 +100,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
     let(:package) { pay_period.payroll_review_packages.current.first! }
 
     it "emails only the designated account team on client approval, excluding unlisted staff and notes" do
+      unlisted_staff
       with_portal_email do
         PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
           approver: client_manager,
@@ -123,7 +126,9 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(mail[:text]).to include("Open pay run: #{expected_link}")
 
         combined = [ mail[:subject], mail[:text], mail[:html] ].join("\n")
-        expect(combined).not_to include("Jordan", "Reyes", "500", "2345", "1987", "bonus", "$")
+        combined_without_urls = combined.gsub(%r{https?://\S+}, "")
+        expect(combined).not_to include("Jordan", "Reyes", "bonus", "$")
+        expect(combined_without_urls).not_to include("500", "2345", "1987")
       end
     end
 
@@ -148,7 +153,9 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(mail[:text]).to include("Open pay run: #{expected_link}")
 
         combined = [ mail[:subject], mail[:text], mail[:html] ].join("\n")
-        expect(combined).not_to include("Jordan", "Reyes", "45 hours", "125", "adjust gross", "$")
+        combined_without_urls = combined.gsub(%r{https?://\S+}, "")
+        expect(combined).not_to include("Jordan", "Reyes", "45 hours", "adjust gross", "$")
+        expect(combined_without_urls).not_to include("125")
       end
     end
   end
@@ -571,7 +578,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
       end
     end
 
-    it "drops revoked clients and reconciles remaining rows under a fresh v2 idempotency key" do
+    it "marks surviving rows skipped (access_revoked) instead of re-keying when authorization changes after an attempted legacy batch" do
       with_portal_email do
         legacy_key, rows = seed_legacy_two_client_batch!
         CompanyAssignment.where(user: staff_lead, company: second_company).delete_all
@@ -581,16 +588,75 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         revoked_row = rows.find { |r| r.company_id == second_company.id }.reload
         kept_row = rows.find { |r| r.company_id == company.id }.reload
         expect(revoked_row).to have_attributes(status: "skipped", skip_reason: "access_revoked")
-        expect(kept_row.status).to eq("sent")
-        expect(kept_row.batch_key).to start_with("portal-notification-v2-")
-        expect(kept_row.batch_key).not_to eq(legacy_key)
+        expect(kept_row).to have_attributes(status: "skipped", skip_reason: "access_revoked", batch_key: legacy_key)
+        expect(captured_portal_emails).to be_empty
+      end
+    end
 
-        expect(captured_portal_emails.size).to eq(1)
-        mail = captured_portal_emails.sole
-        expect(mail[:idempotency_key]).to eq(kept_row.batch_key)
-        expect(mail[:subject]).to include("Pacific Harbor Grill")
-        combined = [ mail[:subject], mail[:text], mail[:html] ].join("\n")
-        expect(combined).not_to include("Island Bakery LLC", "Dec 1", "Dec 15", "/companies/#{second_company.id}/")
+    it "resends the persisted v2 payload verbatim on retry after a timeout even if company name or pay date changes" do
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        attempts = []
+        allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
+          attempts << { payload: payload.dup, idempotency_key: idempotency_key }
+          raise Timeout::Error if attempts.size == 1
+
+          { "id" => "provider-deduped-v2" }
+        end
+
+        dispatch_at(3.minutes.from_now)
+        expect(attempts.size).to eq(1)
+
+        # Mutate company name and pay_date before retry — retry must still send exact persisted payload.
+        company.update!(name: "Renamed Harbor Bistro")
+        pay_period.update_columns(pay_date: Date.new(2026, 11, 25))
+
+        dispatch_at(10.minutes.from_now)
+        expect(attempts.size).to eq(2)
+        expect(attempts.last).to eq(attempts.first)
+        expect(attempts.last[:payload][:subject]).to include("Pacific Harbor Grill")
+        expect(attempts.last[:payload][:subject]).not_to include("Renamed Harbor Bistro")
+      end
+    end
+
+    it "never re-keys or duplicates a v2 branded digest batch if one period is revoked after a timed-out attempt" do
+      PortalNotificationPreference.create!(user: client_manager, category: "payroll_updates", delivery_mode: "digest")
+      second_period = create(:pay_period, :calculated, company: company,
+        start_date: Date.new(2026, 11, 15), end_date: Date.new(2026, 11, 28), pay_date: Date.new(2026, 12, 4))
+      create(:payroll_item, company: company, pay_period: second_period, employee: employee, gross_pay: 1_500, net_pay: 1_200)
+
+      with_portal_email do
+        travel_to(Time.utc(2026, 12, 1, 20, 30)) do
+          PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+          PayPeriodLifecycleService.new(pay_period: second_period, actor: staff_lead).approve!
+        end
+
+        attempts = []
+        allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
+          attempts << { payload: payload.dup, idempotency_key: idempotency_key }
+          raise Timeout::Error
+        end
+
+        dispatch_at(Time.utc(2026, 12, 1, 21, 5))
+        expect(attempts.size).to eq(1)
+        original_key = attempts.sole[:idempotency_key]
+
+        # Withdraw second_period before retry: must NOT mint a fresh key and resend.
+        PayPeriodLifecycleService.new(pay_period: second_period.reload, actor: staff_lead).unapprove!
+        allow(PortalNotifications::Transport).to receive(:deliver).and_call_original
+
+        dispatch_at(Time.utc(2026, 12, 1, 21, 10))
+        expect(captured_portal_emails).to be_empty
+        rows = PortalNotificationDelivery.where(user: client_manager).order(:id).to_a
+        expect(rows.map(&:batch_key).uniq).to eq([ original_key ])
+        expect(rows.map(&:status).uniq).to eq([ "skipped" ])
+        expect(rows.map(&:skip_reason)).to contain_exactly("resource_unavailable", "access_revoked")
       end
     end
   end
@@ -771,6 +837,125 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
           .find_by!(portal_notification_events: { event_type: "payroll_review_decided" })
         expect(revoked_row).to have_attributes(status: "skipped", skip_reason: "access_revoked")
         expect(sent_subject).not_to include(revoked_company.name)
+      end
+    end
+
+    it "skips with destination_changed instead of sending to either address if a user's email changes mid-dispatch" do
+      PortalNotificationRecipient.create!(company: second_company, user: staff_lead, team_role: "lead")
+      PortalNotificationRecipient.where(company: company, user: staff_backup).delete_all
+
+      second_client = create(:user, company: second_company, organization: organization, role: "client", client_access_level: "manager")
+      create(:company_assignment, user: second_client, company: second_company)
+      second_employee = create(:employee, company: second_company)
+      second_period = create(:pay_period, :calculated, company: second_company,
+        start_date: Date.new(2026, 12, 1), end_date: Date.new(2026, 12, 15), pay_date: Date.new(2026, 12, 20))
+      create(:payroll_item, company: second_company, pay_period: second_period, employee: second_employee, gross_pay: 900, net_pay: 800)
+
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      PayPeriodLifecycleService.new(pay_period: second_period, actor: staff_lead).approve!
+
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+        PayrollReview::RevisionService.new(pay_period: second_period, actor: second_client).approve!(
+          approver: second_client, recorded_by: second_client, method: "client_portal",
+          revision_id: second_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        # While the first group's email is sending, change staff_lead's email address.
+        delivered = []
+        allow(PortalNotifications::Transport).to receive(:deliver).and_wrap_original do |original, payload, **kwargs|
+          delivered << payload
+          staff_lead.update!(email: "dana.new.mailbox@example.test") if delivered.size == 1
+          original.call(payload, **kwargs)
+        end
+
+        dispatch_at(3.minutes.from_now)
+
+        expect(captured_portal_emails.size).to eq(1)
+        expect(captured_portal_emails.map { |m| m[:to] }).to eq([ "dana.lead@example.test" ])
+        skipped_row = PortalNotificationDelivery.where(user: staff_lead, status: "skipped").sole
+        expect(skipped_row.skip_reason).to eq("destination_changed")
+      end
+    end
+
+    it "does not overwrite another worker's active claim on a sibling row" do
+      PortalNotificationRecipient.create!(company: second_company, user: staff_lead, team_role: "lead")
+      PortalNotificationRecipient.where(company: company, user: staff_backup).delete_all
+
+      second_client = create(:user, company: second_company, organization: organization, role: "client", client_access_level: "manager")
+      create(:company_assignment, user: second_client, company: second_company)
+      second_employee = create(:employee, company: second_company)
+      second_period = create(:pay_period, :calculated, company: second_company,
+        start_date: Date.new(2026, 12, 1), end_date: Date.new(2026, 12, 15), pay_date: Date.new(2026, 12, 20))
+      create(:payroll_item, company: second_company, pay_period: second_period, employee: second_employee, gross_pay: 900, net_pay: 800)
+
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      PayPeriodLifecycleService.new(pay_period: second_period, actor: staff_lead).approve!
+
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+        PayrollReview::RevisionService.new(pay_period: second_period, actor: second_client).approve!(
+          approver: second_client, recorded_by: second_client, method: "client_portal",
+          revision_id: second_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        rows = PortalNotificationDelivery.where(user: staff_lead).joins(:portal_notification_event)
+          .where(portal_notification_events: { event_type: "payroll_review_decided" }).order(:id).to_a
+        first_row, second_row = rows
+        batch_key = "portal-notification-v2-siblingclaim"
+        active_claim_time = 2.minutes.ago.change(usec: 0)
+        first_row.update_columns(batch_key: batch_key, attempts: 1, deliver_after: 10.minutes.ago, claimed_at: nil, claimed_by: nil)
+        second_row.update_columns(batch_key: batch_key, attempts: 1, deliver_after: 10.minutes.ago, claimed_at: active_claim_time, claimed_by: "other-worker-token")
+
+        dispatch_at(Time.current)
+
+        expect(captured_portal_emails).to be_empty
+        expect(second_row.reload).to have_attributes(status: "pending", claimed_by: "other-worker-token", claimed_at: active_claim_time)
+        expect(first_row.reload).to have_attributes(status: "pending", batch_key: batch_key)
+      end
+    end
+  end
+
+  describe "cross-organization isolation during preference retiming" do
+    it "never retimes another organization's unowned extra-address delivery sharing the same mailbox" do
+      PortalNotificationRecipient.where(company: company).delete_all
+      PortalNotificationRecipient.create!(company: company, email: "shared.mailbox@gmail.com")
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+
+      foreign_org = create(:organization, name: "Other Firm")
+      foreign_company = create(:company, organization: foreign_org, name: "Foreign Client")
+      foreign_staff = create(:user, company: foreign_company, organization: foreign_org, role: "admin",
+        email: "sharedmailbox+work@googlemail.com")
+      create(:company_assignment, user: foreign_staff, company: foreign_company)
+
+      with_portal_email do
+        travel_to(Time.utc(2026, 12, 1, 20, 30)) do
+          thread = create(:client_portal_thread, company: company, created_by: client_manager)
+          msg = create(:client_portal_message, company: company, client_portal_thread: thread, author: client_manager)
+          PortalNotifications.message_created!(msg)
+        end
+
+        # Simulate a pending extra-email row in org A (e.g., enqueued before foreign user existed).
+        org_a_delivery = PortalNotificationDelivery.find_by!(company: company, recipient_email: "shared.mailbox@gmail.com")
+        org_a_delivery.update_columns(status: "pending", skip_reason: nil, completed_at: nil,
+          delivery_mode: "immediate", deliver_after: Time.utc(2026, 12, 1, 20, 32))
+
+        PortalNotifications::Preferences.update!(foreign_staff, { "client_messages" => "digest" })
+
+        expect(org_a_delivery.reload).to have_attributes(
+          delivery_mode: "immediate",
+          deliver_after: Time.utc(2026, 12, 1, 20, 32)
+        )
       end
     end
   end
