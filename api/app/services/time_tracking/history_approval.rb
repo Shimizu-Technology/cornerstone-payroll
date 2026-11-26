@@ -476,7 +476,7 @@ module TimeTracking
         "employees" => checksum(@employees.map { |employee| employee_fingerprint(employee) }),
         "runs" => @company.pay_periods.where(id: run_ids).order(:id).to_h do |run|
           items = run.payroll_items.includes(:payroll_item_earnings).order(:id)
-          [ run.id.to_s, checksum([ run.attributes, items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map { |row| row.attributes.except("company_id") } ] } ]) ]
+          [ run.id.to_s, checksum([ run.attributes.except("rollback_review_required"), items.map { |item| [ item.attributes, item.payroll_item_earnings.sort_by(&:id).map { |row| row.attributes.except("company_id") } ] } ]) ]
         end }
     end
 

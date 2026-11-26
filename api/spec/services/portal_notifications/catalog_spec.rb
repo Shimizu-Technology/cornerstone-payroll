@@ -65,7 +65,7 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
     end
   end
 
-  it "exposes an H2 hook with a mandatory in-org super-admin audience" do
+  it "records an idempotent rollback alert with a mandatory in-org super-admin audience" do
     supervisor = create(:user, role: "super_admin", company: company)
     actor = create(:user, role: "super_admin", company: company)
     period.update_columns(correction_status: "voided")

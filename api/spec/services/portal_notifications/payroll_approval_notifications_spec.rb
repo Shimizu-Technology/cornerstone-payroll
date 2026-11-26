@@ -146,6 +146,8 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
       PortalNotificationRecipient.create!(company: company, email: foreign_admin.email)
       super_admin
 
+      PortalNotificationPreference.create!(user: super_admin, category: "payroll_submissions", delivery_mode: "off")
+
       with_portal_email do
         package = record_override(actor, preparer: actor)
         expect(package).to be_self_override
@@ -437,7 +439,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(delivery.reload).to have_attributes(status: "skipped", skip_reason: "access_revoked")
 
         # Enqueue path also drops the extra address once it belongs to a viewer.
-        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
         PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).approve!
         new_pkg = pay_period.payroll_review_packages.current.first!
         PayrollReview::RevisionService.new(pay_period: pay_period.reload, actor: client_manager).approve!(
@@ -464,7 +466,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(captured_portal_emails).to be_empty
         expect(delivery.reload).to have_attributes(status: "skipped", skip_reason: "access_revoked")
 
-        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
         PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).approve!
         new_pkg = pay_period.payroll_review_packages.current.first!
         PayrollReview::RevisionService.new(pay_period: pay_period.reload, actor: client_manager).approve!(
@@ -489,7 +491,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(captured_portal_emails).to be_empty
         expect(delivery.reload).to have_attributes(status: "skipped", skip_reason: "access_revoked")
 
-        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
         PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).approve!
         new_pkg = pay_period.payroll_review_packages.current.first!
         PayrollReview::RevisionService.new(pay_period: pay_period.reload, actor: client_manager).approve!(
@@ -743,7 +745,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         PortalNotificationDelivery.where(id: rows.map(&:id)).update_all(
           batch_key: crashed_key, attempts: 2, claimed_at: nil, claimed_by: nil, attempted_payload: nil
         )
-        PayPeriodLifecycleService.new(pay_period: second_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: second_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
 
         dispatch_at(Time.utc(2026, 12, 1, 21, 5))
 
@@ -895,7 +897,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         original_key = attempts.sole[:idempotency_key]
 
         # Withdraw second_period before retry: must NOT mint a fresh key and resend.
-        PayPeriodLifecycleService.new(pay_period: second_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: second_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
         allow(PortalNotifications::Transport).to receive(:deliver).and_call_original
 
         dispatch_at(Time.utc(2026, 12, 1, 21, 10))
@@ -939,7 +941,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
           .find_by!(user: client_manager, portal_notification_events: { event_type: "payroll_review_published" })
         expect(pub_delivery).to have_attributes(status: "pending", delivery_mode: "digest")
 
-        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
 
         dispatch_at(Time.utc(2026, 12, 1, 21, 5))
 
@@ -1261,7 +1263,7 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
 
         # Enqueue path also drops all 3 Gmail/Googlemail aliases.
         PortalNotifications::Transport.clear_captured!
-        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!(reason: "Fixture payroll approval correction")
         PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).approve!
         new_pkg = pay_period.payroll_review_packages.current.first!
         PayrollReview::RevisionService.new(pay_period: pay_period.reload, actor: client_manager).approve!(

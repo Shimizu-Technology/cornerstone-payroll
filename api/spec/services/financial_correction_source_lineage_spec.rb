@@ -18,7 +18,7 @@ RSpec.describe "Financial correction Source lineage" do
   let(:original_payment_state) { "unprepared" }
 
   def committed_correction
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct the mistaken deduction")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct the mistaken deduction")
     correction = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct the mistaken deduction")
     item = correction.payroll_items.find_by!(employee: employee)
     PayrollCalculator.for(employee, item).calculate
@@ -68,7 +68,7 @@ RSpec.describe "Financial correction ownership recovery" do
       allow_any_instance_of(PayrollItem).to receive(:financial_correction_origin_item=)
       allow_any_instance_of(TimeTracking::FinancialCorrectionService).to receive(:record_commit!).and_return([])
     end
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct the mistaken deduction")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct the mistaken deduction")
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct the mistaken deduction")
     item = period.payroll_items.find_by!(employee: employee)
     if bonus
@@ -121,7 +121,7 @@ RSpec.describe "Financial correction ownership recovery" do
     expect(item.bonus).to eq(25)
     expect(original_item.bonus).not_to eq(item.bonus)
     first_link = accept_link(item)
-    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Correct the next unpaid payroll detail")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Correct the next unpaid payroll detail")
     next_period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct the next unpaid payroll detail")
     next_item = next_period.payroll_items.find_by!(employee: employee)
     expect(next_item.financial_correction_origin_item_id).to eq(item.id)
@@ -315,7 +315,7 @@ RSpec.describe "Financial correction ownership recovery" do
     item.update!(voided: false, voided_at: nil, void_reason: nil, check_number: company.next_check_number!,
       reprint_of_check_number: old_number, check_prepared_at: nil, check_prepared_source_updated_at: nil)
     item.mark_package_prepared!(user: actor)
-    event = PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Explicit whole corrected payroll reversal")
+    event = PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Explicit whole corrected payroll reversal")
     expect(link.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
     TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: period.reload, void_event: event)
     expect(link.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
@@ -377,7 +377,7 @@ RSpec.describe "Concurrent correction Source catch-up", :postgres_concurrency do
   it "records one durable actual-target intent when two operators confirm the same reviewed legacy correction" do
     allow_any_instance_of(PayrollItem).to receive(:financial_correction_origin_item=)
     allow_any_instance_of(TimeTracking::FinancialCorrectionService).to receive(:record_commit!).and_return([])
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct saved payroll")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct saved payroll")
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct saved payroll")
     item = period.payroll_items.first!
     PayrollCalculator.for(employee, item).calculate

@@ -796,7 +796,7 @@ RSpec.describe TimeTracking::ApplyImportService, "finalized AIRE batches" do
         expect(import.aire_payroll_entry_acknowledgements.pluck(:status)).to eq([ "committed" ])
         expect(import.time_tracking_entry_allocations.pluck(:payroll_item_id, :total_hours)).to eq([ [ item.id, 8.to_d ] ])
         actor = create(:user, company: company)
-        event = PayPeriodCorrectionService.void!(pay_period: pay_period, actor: actor, reason: "Reverse legacy retained payroll obligation")
+        event = PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: pay_period, actor: actor, reason: "Reverse legacy retained payroll obligation")
         acknowledgement = item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").sole
         expect(acknowledgement.occurred_at).to be_within(1.second).of(event.created_at)
         expect(acknowledgement.source_time_entry_id).to eq("historic-payment")

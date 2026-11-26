@@ -29,6 +29,26 @@ class AuditRecordSnapshot
   SENSITIVE_PATTERNS = /(ssn|password|token|secret|cipher|routing|account_number|bank_account|date_of_birth)/i
 
   class << self
+    def pay_period_business_summary(record)
+      items = record.payroll_items.financially_reportable
+      aggregates = items.reportable.pick(
+        Arel.sql("COUNT(*)"),
+        Arel.sql("COALESCE(SUM(gross_pay), 0)"),
+        Arel.sql("COALESCE(SUM(total_deductions), 0)"),
+        Arel.sql("COALESCE(SUM(employer_social_security_tax), 0)"),
+        Arel.sql("COALESCE(SUM(employer_medicare_tax), 0)"),
+        Arel.sql("COALESCE(SUM(net_pay), 0)")
+      )
+      {
+        status: record.status,
+        employee_count: aggregates[0].to_i,
+        total_gross: aggregates[1].to_d.to_s("F"),
+        total_deductions: aggregates[2].to_d.to_s("F"),
+        employer_payroll_taxes: (aggregates[3].to_d + aggregates[4].to_d).to_s("F"),
+        total_net: aggregates[5].to_d.to_s("F")
+      }
+    end
+
     def changes_for(record)
       return empty_result unless record.respond_to?(:saved_changes)
 

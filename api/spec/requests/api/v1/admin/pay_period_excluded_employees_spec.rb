@@ -137,7 +137,7 @@ RSpec.describe "Restore removed pay-run employees", type: :request do
   it "retains the removed roster in approval transition responses" do
     period.update!(status: "approved")
     stub_portal_user(Api::V1::Admin::PayPeriodsController, staff, company)
-    post "/api/v1/admin/pay_periods/#{period.id}/unapprove", as: :json
+    post "/api/v1/admin/pay_periods/#{period.id}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("pay_period", "excluded_employee_ids")).to eq([ employee.id ])
     expect(response.parsed_body.dig("pay_period", "excluded_employees").sole).to include("reason" => "No hours received")

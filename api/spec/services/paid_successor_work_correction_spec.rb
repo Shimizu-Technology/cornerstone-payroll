@@ -12,7 +12,7 @@ RSpec.describe "Exact work correction after accepted financial succession" do
   end
 
   def build_successor(predecessor = original_period)
-    PayPeriodCorrectionService.void!(pay_period: predecessor, actor: actor, reason: "Correct unpaid financial deductions")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: predecessor, actor: actor, reason: "Correct unpaid financial deductions")
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct unpaid financial deductions")
     item = period.payroll_items.find_by!(employee: employee)
     PayrollCalculator.for(employee, item).calculate
@@ -105,7 +105,7 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     expect(TimeTracking::CorrectionCoverage.new(next_import).presentation.first).to include(
       original_payroll_item_id: current.id, frozen_origin_payroll_item_id: original_item.id, verification_status: "verified")
     expect { current.void!(user: actor, reason: "Attempt unsafe paid target void") }.to raise_error(ArgumentError, /exact source accounting correction/)
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Attempt unsafe paid period void") }
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Attempt unsafe paid period void") }
       .to raise_error(PayPeriodCorrectionService::InvalidStateError, /exact source accounting correction/)
     result = TimeTracking::ApplyImportService.new(import: next_import, mappings: [], applied_by: actor).call
     expect(result[:errors]).to eq([])
@@ -426,13 +426,26 @@ RSpec.describe "Exact work correction after accepted financial succession" do
     legacy["version"] = 1
     legacy.delete("target_tax_year")
     legacy["target"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(current.attributes)))
-    legacy["target_period"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(period.attributes)))
+    legacy["target_period"] = JSON.parse(JSON.generate(TimeTracking::CanonicalPayload.canonicalize(period.attributes.except("rollback_review_required"))))
     retained = legacy.deep_dup
     period.update_columns(tax_sync_status: "synced", tax_sync_attempts: 1, tax_synced_at: Time.current, tax_sync_idempotency_key: "cpr-legacy-#{period.id}")
     expect(resolver.matches_saved_evidence?(legacy)).to be(true)
     expect(legacy).to eq(retained)
     legacy["target"].delete("withholding_tax")
     expect(resolver.matches_saved_evidence?(legacy)).to be(false)
+  end
+
+  it "preserves saved paid target evidence and checksums when a rollback review flag is set" do
+    period, _current = paid_successor
+    resolver = TimeTracking::PaidCorrectionTarget.new(allocation: allocation, source: source,
+      line: next_import.raw_payload["employees"].first["adjustments"].first)
+    saved = resolver.resolve.fetch(:evidence)
+    expect(saved.fetch("target_period")).not_to have_key("rollback_review_required")
+
+    period.update_columns(rollback_review_required: true)
+    expect(resolver.matches_saved_evidence?(saved)).to be(true)
+    expect(TimeTracking::CanonicalPayload.checksum(resolver.resolve.fetch(:evidence)))
+      .to eq(TimeTracking::CanonicalPayload.checksum(saved))
   end
 
   { "net_pay" => 90, "withholding_tax" => 2, "social_security_tax" => 5, "medicare_tax" => 1,

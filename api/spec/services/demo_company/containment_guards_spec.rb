@@ -74,7 +74,7 @@ RSpec.describe "Demo company containment guards" do
 
     it "voids a committed demo period without creating any liability posting" do
       expect(PayrollLiabilityPostingService.reverse!(pay_period: period, actor: admin, reason: "Demo void")).to eq([])
-      PayPeriodCorrectionService.void!(pay_period: period, actor: admin, reason: "Demo void")
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: admin, reason: "Demo void")
 
       expect(period.reload.correction_status).to eq("voided")
       expect(PayrollLiabilityPosting.where(company: demo)).to be_empty
