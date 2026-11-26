@@ -21,9 +21,11 @@ expect_header() {
 }
 
 expect_body() {
-  local name="$1" url="$2" want="$3" refuse="$4" body
-  body="$(fetch "$url" || true)"
-  if [[ "$body" == *"$want"* && "$body" != *"$refuse"* ]]; then pass "$name"; else fail "$name" "body is not the expected page"; fi
+  local name="$1" url="$2" want="$3" refuse="$4" response status body
+  response="$(fetch -w '\n%{http_code}' "$url" || true)"
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ "$status" == 200 && "$body" == *"$want"* && "$body" != *"$refuse"* ]]; then pass "$name"; else fail "$name" "HTTP $status, or not the expected page"; fi
 }
 
 tenant="https://${TENANT_HOSTS[0]}.$ROOT_DOMAIN:$HTTPS_PORT"

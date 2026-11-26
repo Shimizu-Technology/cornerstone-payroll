@@ -33,7 +33,9 @@ All state lives in `~/.local/share/cornerstone-local-prod` (override with `LOCAL
 
 Clerk keys are read from `~/.config/shimizu/clerk-payroll-local.env` and are never printed. `clerk_setup.py` changes an instance only if it is a development instance and either:
 - its id matches an optional `CLERK_INSTANCE_ID=ins_…` line in that file, or
-- every origin it already allows is under `.localhost`.
+- it already allows at least one origin, and every one is under `.localhost`.
+
+A brand-new instance with no allowed origins needs the `CLERK_INSTANCE_ID` line.
 
 So a staging or shared test instance is never repointed.
 
@@ -43,7 +45,9 @@ So a staging or shared test instance is never repointed.
 - **Secrets stay off the command line.** psql reads passwords from `pgpass` (mode 600), and SQL that sets passwords goes in on stdin.
 - **Pid files are checked before anything is signalled.** A pid must be a positive integer, and its process's command line must match the service (Puma on its own port, `bin/jobs`, this Caddyfile, Redis on 56379, Postgres on this data directory). Anything else is reported and left alone.
 - **Ports are checked before each start.** If something else already listens on a port the mirror needs, `up.sh` stops.
-- **`down.sh --purge` deletes only a marked directory.** The directory must carry the `.cornerstone-local-prod` marker and must not be `/`, `$HOME`, `/tmp` or an ancestor of this repo. Postgres and Caddy must already be stopped.
+- **The data directory must be the mirror's own.** `LOCAL_PROD_HOME` is normalised (no trailing slash, real parent directory). It must not be a symlink, and its marker must not be one. It must not be a shared or top-level directory (`/`, `/Users`, `/tmp`, `$TMPDIR`, `$HOME`, `~/.local`, `~/.local/share`, `~/.config`, `~/Desktop`, `~/Documents`, `~/Downloads`, `~/Library`), nor a directory containing this repo.
+- **`up.sh` never adopts an existing directory.** It uses a missing or empty directory, or one already carrying the `.cornerstone-local-prod` marker.
+- **`down.sh --purge` deletes only a marked directory.** It checks that directory the same way, and nothing may still be using it: no live mirror service, no process naming the directory, nothing on the mirror's ports.
 
 ### Database and RLS
 
