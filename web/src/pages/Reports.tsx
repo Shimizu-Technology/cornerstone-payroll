@@ -621,14 +621,14 @@ function TaxSummaryPanel() {
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               <TotalBox label="Gross Wages" value={report.totals.gross_wages} />
-              <TotalBox label="Withholding Tax" value={report.totals.withholding_tax} />
+              <TotalBox label="Guam income tax" value={report.totals.withholding_tax} />
               <TotalBox label="SS Tax (Employee)" value={report.totals.social_security_employee} />
               <TotalBox label="SS Tax (Employer)" value={report.totals.social_security_employer} />
               <TotalBox label="Medicare (Employee)" value={report.totals.medicare_employee} />
               <TotalBox label="Medicare (Employer)" value={report.totals.medicare_employer} />
               <TotalBox label="Total Employment Taxes" value={report.totals.total_employment_taxes} />
-              {report.totals.base_withholding_tax != null && <TotalBox label="Base Withholding Tax" value={report.totals.base_withholding_tax} />}
-              {report.totals.additional_withholding != null && <TotalBox label="Additional Withholding" value={report.totals.additional_withholding} />}
+              {report.totals.base_withholding_tax != null && <TotalBox label="Base Guam income tax" value={report.totals.base_withholding_tax} />}
+              {report.totals.additional_withholding != null && <TotalBox label="Additional Guam income tax (W-4 4c)" value={report.totals.additional_withholding} />}
             </div>
             <PayrollFieldTotalsTable disclosure={report.payroll_fields} />
           </CardContent>
@@ -1396,7 +1396,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="Gross Pay" value={report.summary.gross_pay ?? 0} />
                 <TotalBox label="Custom Earnings" value={report.summary.custom_earnings_total ?? 0} />
-                <TotalBox label="Withholding" value={report.summary.withholding_tax ?? 0} />
+                <TotalBox label="Guam income tax" value={report.summary.withholding_tax ?? 0} />
                 <TotalBox label="SS Tax" value={report.summary.social_security_tax ?? 0} />
                 <TotalBox label="Medicare" value={report.summary.medicare_tax ?? 0} />
                 <TotalBox label="Retirement" value={report.summary.retirement ?? 0} />
@@ -1426,7 +1426,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                       <div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div>
                       <div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div>
                       <div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div>
-                      <div><dt>Withholding</dt><dd>{fmt(history.withholding_tax ?? 0)}</dd></div>
+                      <div><dt>Guam income tax</dt><dd>{fmt(history.withholding_tax ?? 0)}</dd></div>
                       <div><dt>Combined hours</dt><dd>{history.total_hours ?? '—'}</dd></div>
                     </dl>
                   </details>
@@ -1449,7 +1449,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     <th className="pb-2 pr-4 font-medium text-right">Deductions</th>
                     <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
                     <th className="pb-2 font-medium">Payment</th>
-                    <th className="pb-2 px-4 font-medium text-right">Withholding</th>
+                    <th className="pb-2 px-4 font-medium text-right">Guam income tax withheld</th>
                     <th className="pb-2 font-medium text-right">Combined Hours</th>
                   </tr>
                 </thead>
@@ -1902,7 +1902,7 @@ export function YtdSummaryPanel() {
                       <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
                       <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
                       <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
-                      <TotalBox label="Total Withholding" value={report.company_totals.withholding_tax} />
+                      <TotalBox label="Total Guam income tax" value={report.company_totals.withholding_tax} />
                       <TotalBox label="Total SS Tax" value={report.company_totals.social_security_tax} />
                       <TotalBox label="Total Medicare" value={report.company_totals.medicare_tax} />
                       <TotalBox label="Other Deductions" value={report.company_totals.custom_deductions_total ?? 0} />
@@ -1964,7 +1964,7 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Bonus</th>
                     <SortableTh label="Other Earn." activeLabel={sortLabel('custom_earnings_total')} align="right" onClick={() => updateSort('custom_earnings_total')} />
                     <th className="py-2 pr-4 text-right font-medium">Field Add.</th>
-                    <SortableTh label="Withholding" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
+                    <SortableTh label="Guam income tax withheld" activeLabel={sortLabel('withholding_tax')} align="right" onClick={() => updateSort('withholding_tax')} />
                     <SortableTh label="SS Tax" activeLabel={sortLabel('social_security_tax')} align="right" onClick={() => updateSort('social_security_tax')} />
                     <SortableTh label="Medicare" activeLabel={sortLabel('medicare_tax')} align="right" onClick={() => updateSort('medicare_tax')} />
                     <SortableTh label="Pre-Tax Retirement" activeLabel={sortLabel('retirement')} align="right" onClick={() => updateSort('retirement')} />
@@ -2430,7 +2430,7 @@ function EmployerLiabilityPanel() {
               <h4 className="text-sm font-medium text-neutral-700 mb-3">Full Tax Breakdown</h4>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-neutral-600">Employee Withholding (FIT)</span>
+                  <span className="text-neutral-600">Guam income tax</span>
                   <span className="tabular-nums">{fmt(report.totals.withholding_tax)}</span>
                 </div>
                 <div className="flex justify-between">

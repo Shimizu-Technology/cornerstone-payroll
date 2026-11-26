@@ -475,7 +475,7 @@ describe('Tax Withholding Summary', () => {
   it('keeps the report description and shows the selected range exclusion and total withholding', async () => {
     apiMocks.taxSummary.mockResolvedValue({ report: {
       period: { label: '2026' },
-      source: { label: 'Cornerstone', statement: 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.' },
+      source: { label: 'Cornerstone', statement: 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in Guam income tax.' },
       totals: {
         gross_wages: 1000,
         base_withholding_tax: 120.11,
@@ -496,10 +496,10 @@ describe('Tax Withholding Summary', () => {
     expect(screen.getByText('Quarterly tax withholding totals for filing preparation — all committed pay periods in range.')).toBeTruthy();
     expect(screen.queryByText(/Imported QuickBooks/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
-    expect((await screen.findByText('Base Withholding Tax')).nextElementSibling?.textContent).toBe('$120.11');
-    expect(screen.getByText('Additional Withholding').nextElementSibling?.textContent).toBe('$50.22');
-    expect(screen.getByText('Withholding Tax').nextElementSibling?.textContent).toBe('$170.33');
-    expect(screen.getByText('Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.')).toBeTruthy();
+    expect((await screen.findByText('Base Guam income tax')).nextElementSibling?.textContent).toBe('$120.11');
+    expect(screen.getByText('Additional Guam income tax (W-4 4c)').nextElementSibling?.textContent).toBe('$50.22');
+    expect(screen.getByText('Guam income tax').nextElementSibling?.textContent).toBe('$170.33');
+    expect(screen.getByText('Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in Guam income tax.')).toBeTruthy();
   });
 });
 

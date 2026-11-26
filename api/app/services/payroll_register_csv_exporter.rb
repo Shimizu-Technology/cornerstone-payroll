@@ -30,7 +30,7 @@ class PayrollRegisterCsvExporter
     "Custom Earnings",
     "Non-Taxable Pay",
     "Gross Pay",
-    "Base FIT",
+    "Base #{PayrollLabels::INCOME_TAX_WITHHELD}",
     "Addtl Withholding",
     "Social Security Tax",
     "Medicare Tax",
@@ -50,7 +50,7 @@ class PayrollRegisterCsvExporter
     "Net Pay",
     "Check Number",
     "Rate Basis",
-    "Total FIT (Base + Additional)",
+    "Total #{PayrollLabels::INCOME_TAX_WITHHELD}",
     "Combined Hours",
     "Non-Taxable Additions (Total)"
   ].freeze

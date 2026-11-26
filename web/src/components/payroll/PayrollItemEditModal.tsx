@@ -439,7 +439,7 @@ export function PayrollItemEditModal({
               <span className="font-medium">{formatCurrency(item.gross_pay || 0)}</span>
             </div>
             <div>
-              <span className="text-gray-500">{isContractor ? 'Tax:' : 'FIT:'}</span>{' '}
+              <span className="text-gray-500">{isContractor ? 'Tax:' : 'Guam income tax:'}</span>{' '}
               <span className="font-medium">{isContractor ? '$0.00' : formatCurrency(item.withholding_tax || 0)}</span>
             </div>
             <div>
@@ -874,7 +874,7 @@ export function PayrollItemEditModal({
               <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <div>
                   <label htmlFor={`${inputId}-additional_withholding_override`} className="block text-xs text-gray-500 mb-1 min-h-4">
-                    W-4 4(c) Extra W/H
+                    Additional Guam income tax (W-4 4c)
                   </label>
                   <NumericInput
                     id={`${inputId}-additional_withholding_override`}
@@ -891,7 +891,7 @@ export function PayrollItemEditModal({
                 </div>
                 <div>
                   <label htmlFor={`${inputId}-withholding_tax_adjustment`} className="block text-xs text-gray-500 mb-1 min-h-4">
-                    FIT Adjustment
+                    Guam income tax adjustment
                   </label>
                   <NumericInput
                     id={`${inputId}-withholding_tax_adjustment`}
@@ -902,12 +902,12 @@ export function PayrollItemEditModal({
                     fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
-                    One-time adjustment to the calculated FIT tax only. This does not change the W-4 4(c) amount shown to the left.
+                    One-time adjustment to the calculated Guam income tax only. This does not change the W-4 4(c) amount shown to the left.
                   </p>
                 </div>
                 <div>
                   <label htmlFor={`${inputId}-withholding_tax_override`} className="block text-xs text-gray-500 mb-1 min-h-4">
-                    Final FIT Override
+                    Final Guam income tax override
                   </label>
                   <NumericInput
                     id={`${inputId}-withholding_tax_override`}
@@ -919,7 +919,7 @@ export function PayrollItemEditModal({
                     fixedDecimalsOnBlur={2}
                   />
                   <p className="text-xs text-gray-400 mt-0.5">
-                    Advanced: leave blank for normal calculation; set to force the final FIT tax amount for this pay period.
+                    Advanced: leave blank for normal calculation; set to force the final Guam income tax amount for this pay period.
                   </p>
                 </div>
               </div>

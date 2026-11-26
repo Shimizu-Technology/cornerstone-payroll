@@ -216,9 +216,9 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
       ])
       expect(as_printed(body.fetch("earnings"))).to eq(printed_earnings(item))
       expect(body.fetch("taxes")).to eq([
-        { "label" => "Federal/Guam Income Tax", "amount" => "90.00", "ytd" => "190.00" },
+        { "label" => "Guam income tax", "amount" => "90.00", "ytd" => "190.00" },
         { "label" => "Social Security (6.2%)", "amount" => "45.00", "ytd" => "85.00" },
-        { "label" => "Medicare (1.45%)", "amount" => "10.00", "ytd" => "30.00" }
+        { "label" => "Medicare", "amount" => "10.00", "ytd" => "30.00" }
       ])
       expect(body.fetch("deductions")).to eq(stub.fetch(:deductions).map { |row| { "label" => row[:label], "amount" => format("%.2f", row[:amount]), "ytd" => format("%.2f", row[:ytd]) } })
       expect(body.fetch("ytd")).to eq("gross" => "2632.50", "net" => "2300.00")

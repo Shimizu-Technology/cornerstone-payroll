@@ -36,7 +36,7 @@ RSpec.describe "Payroll report layout regressions" do
       employees: employees, summary: summary).generate
     document = reader(bytes)
     all_text = document.pages.map(&:text).join(" ").gsub(/\s+/, " ")
-    expect(all_text).to include("Regular Hours", "Overtime Hours", "Combined Hours", "Base FIT", "Additional FIT Withholding", "$13,460.85")
+    expect(all_text).to include("Regular Hours", "Overtime Hours", "Combined Hours", "Base Guam income tax withheld", "Additional Guam income tax (W-4 4c)", "$13,460.85")
     # Every worker appears in every detail section; no values are dropped to fit.
     employees.each do |worker|
       expect(all_text.scan(worker[:employee_name]).size).to eq(5)
@@ -77,7 +77,7 @@ RSpec.describe "Payroll report layout regressions" do
       content = text(bytes)
       expect(content).to include("Pay date: 10/15/2026", "Work period: 09/16/2026 - 09/30/2026")
       expect(content).to include(label, "Ground second rate", "$420.00", "$100.00", "$3996.67", "$3483.83", "$4302.42", "81h", "$35.00/hour", "$25.00/hour")
-      expect(content).to include("Federal Income Tax", "Additional Withholding", "-$197.09", "-$10.00")
+      expect(content).to include("Guam income tax", "Additional Guam income tax (W-4 4c)", "-$197.09", "-$10.00")
       # New layout never shrinks body text to the previous four-point minimum.
       sizes = []
       receiver = Class.new do

@@ -109,7 +109,7 @@ class DeductionsContributionsReportPdfGenerator
   def render_tax_detail(pdf)
     start_new_page_if_needed(pdf, 160)
     section_title(pdf, "Employee tax withholdings detail")
-    rows = [ [ "Employee", "Federal Income", "Social Security", "Medicare", "Additional W/H", "Total taxes" ] ]
+    rows = [ [ "Employee", PayrollLabels::INCOME_TAX_WITHHELD, "Social Security", "Medicare", PayrollLabels::ADDITIONAL_WITHHOLDING, "Total taxes" ] ]
     data.tax_withholding_detail_rows.each do |row|
       rows << [ row[:employee_name], money(row[:fit]), money(row[:social_security]), money(row[:medicare]), money(row[:additional_withholding]), money(row[:total]) ]
     end

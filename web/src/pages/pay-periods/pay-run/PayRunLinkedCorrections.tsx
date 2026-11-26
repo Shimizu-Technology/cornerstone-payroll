@@ -56,7 +56,7 @@ export function PayRunLinkedCorrections({
                         </div>
                         <div className="sm:text-right">
                           Δ gross {formatCurrency(it.gross_pay)} ·
-                          Δ FIT {formatCurrency(it.withholding_tax)} ·
+                          Δ Guam income tax {formatCurrency(it.withholding_tax)} ·
                           Δ net <strong>{formatCurrency(it.net_pay)}</strong>
                         </div>
                         {it.correction_reason && (

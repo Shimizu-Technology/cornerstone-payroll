@@ -18,14 +18,15 @@ class TransmittalLogPdfGenerator
     "Employee Installment Loan Report"
   ].freeze
 
-  def self.default_notes(pay_period, include_additional: true)
+  def self.default_notes(pay_period, include_additional: true, legacy_label: false)
     items = pay_period.payroll_items.financially_reportable.reportable
     fit = include_additional ? items.sum { |item| item.total_income_tax_withheld } : items.sum(:withholding_tax)
     fica = items.sum(:social_security_tax) + items.sum(:employer_social_security_tax) +
       items.sum(:medicare_tax) + items.sum(:employer_medicare_tax)
     notes = []
     notes << "FICA Obligation (Social Security & Medicare): #{ActiveSupport::NumberHelper.number_to_currency(fica)}" if fica.positive?
-    notes << "FIT Deposit Total: #{ActiveSupport::NumberHelper.number_to_currency(fit)} — check to Treasurer of Guam for DRT" if fit.positive?
+    deposit_label = legacy_label ? "FIT Deposit Total" : "#{PayrollLabels::INCOME_TAX} deposit total"
+    notes << "#{deposit_label}: #{ActiveSupport::NumberHelper.number_to_currency(fit)} — check to Treasurer of Guam for DRT" if fit.positive?
     notes
   end
 
@@ -231,7 +232,7 @@ class TransmittalLogPdfGenerator
     pdf.move_down 8
 
     pdf.font_size(11) { pdf.text "Employer Tax Obligations", style: :bold }
-    pdf.font_size(8) { pdf.text "Guam FIT deposit plus related FICA obligations for this pay period", color: TEXT_MUTED }
+    pdf.font_size(8) { pdf.text "#{PayrollLabels::INCOME_TAX} deposit plus related FICA obligations for this pay period", color: TEXT_MUTED }
     pdf.move_down 6
 
     col_width = (pdf.bounds.width - 20) / 2
@@ -241,13 +242,13 @@ class TransmittalLogPdfGenerator
 
       # Left column: FIT
       pdf.bounding_box([ 0, y_top ], width: col_width) do
-        pdf.text "FEDERAL / GUAM INCOME TAX", style: :bold, size: 8
+        pdf.text PayrollLabels::INCOME_TAX, style: :bold, size: 8
         pdf.move_down 4
-        tax_row(pdf, "Employee FIT Withheld", fmt(total_fit))
+        tax_row(pdf, PayrollLabels::INCOME_TAX_WITHHELD, fmt(total_fit))
         pdf.move_down 3
         pdf.stroke_horizontal_rule
         pdf.move_down 3
-        tax_row(pdf, "FIT Subtotal", fmt(total_fit), bold: true)
+        tax_row(pdf, "#{PayrollLabels::INCOME_TAX} subtotal", fmt(total_fit), bold: true)
       end
 
       # Right column: FICA
@@ -267,7 +268,7 @@ class TransmittalLogPdfGenerator
 
     pdf.move_down 10
     pdf.font_size(11) { pdf.text "Total DRT Deposit", style: :bold }
-    pdf.font_size(8) { pdf.text "Guam FIT withholding only", color: TEXT_MUTED }
+    pdf.font_size(8) { pdf.text "#{PayrollLabels::INCOME_TAX} only", color: TEXT_MUTED }
     pdf.move_down 2
     pdf.font_size(14) { pdf.text fmt(total_drt), style: :bold, color: "B45309" }
     pdf.move_down 8

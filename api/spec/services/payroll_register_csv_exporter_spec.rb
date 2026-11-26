@@ -277,12 +277,12 @@ RSpec.describe PayrollRegisterCsvExporter do
     it "distinguishes base FIT, additional FIT, combined hours, and salary rate units" do
       report_data[:employees].last[:salary_type] = "annual"
       rows = CSV.parse(exporter.generate, headers: true)
-      expect(rows.first["Base FIT"]).to eq("140.00")
-      expect(rows.first["Total FIT (Base + Additional)"]).to eq("145.00")
+      expect(rows.first["Base Guam income tax withheld"]).to eq("140.00")
+      expect(rows.first["Total Guam income tax withheld"]).to eq("145.00")
       expect(rows.first["Combined Hours"]).to eq("85.0")
       expect(rows.first["Rate Basis"]).to include("USD/hour", "primary rate")
       expect(rows[1]["Rate Basis"]).to eq("USD/year (annual salary)")
-      expect(rows[-1]["Total FIT (Base + Additional)"]).to eq("365.00")
+      expect(rows[-1]["Total Guam income tax withheld"]).to eq("365.00")
       expect(rows[-1]["Combined Hours"]).to eq("85.0")
     end
 
