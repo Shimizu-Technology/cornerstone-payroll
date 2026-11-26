@@ -403,6 +403,23 @@ RSpec.describe "Published payroll review loop", type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
     end
+
+    # When both an account-holder recipient and an extra address exist, status derives strictly
+    # from the account-holder row (unaffected by the extra address).
+    @actor = staff
+    post "#{admin}/unapprove"
+    staff_approve
+    PortalNotificationRecipient.create!(company: company, user: staff, team_role: "lead")
+    PortalNotificationRecipient.create!(company: company, email: "ops.extra@example.test")
+    PortalNotificationPreference.create!(user: staff, category: "payroll_submissions", delivery_mode: "off")
+    with_portal_email do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+      PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+    end
   end
 
   it "excludes client viewers from payroll_review_published notifications" do

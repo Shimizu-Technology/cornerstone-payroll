@@ -162,44 +162,120 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
         revision_id: pkg_f.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
       )
 
-      # Immediately after approval: every tenant-visible field matches identically.
-      get path, headers: { "X-Company-Id" => company_unreg.id.to_s }
-      get_unreg = response.parsed_body.fetch("data").except("company_id", "extra_emails")
-      get path, headers: { "X-Company-Id" => company_foreign.id.to_s }
-      get_foreign = response.parsed_body.fetch("data").except("company_id", "extra_emails")
-      expect(get_foreign).to eq(get_unreg)
-      expect(get_foreign["unnotified_event_count"]).to eq(0)
+      assert_tenant_views_identical = lambda do |review_u, pp_u, review_f, pp_f|
+        act_as(admin)
+        get path, headers: { "X-Company-Id" => company_unreg.id.to_s }
+        expect(response).to have_http_status(:ok), response.body
+        get_unreg = response.parsed_body.fetch("data").except("company_id", "extra_emails")
 
-      get "/api/v1/notification_settings"
-      missing_ids = response.parsed_body.dig("data", "administration", "clients_without_recipients").map { |row| row["company_id"] }
-      expect(missing_ids).not_to include(company_unreg.id, company_foreign.id)
+        get path, headers: { "X-Company-Id" => company_foreign.id.to_s }
+        expect(response).to have_http_status(:ok), response.body
+        get_foreign = response.parsed_body.fetch("data").except("company_id", "extra_emails")
 
-      expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload))
-        .to eq(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload))
-      expect(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_f))
-        .to eq(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_u))
-      expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f)).to eq("queued")
+        expect(get_foreign).to eq(get_unreg)
+        expect(get_foreign["recipient_count"]).to eq(1)
+        expect(get_foreign["unnotified_event_count"]).to eq(0)
 
-      # After deliver_after passes but BEFORE dispatch runs: BOTH still show "queued".
+        get "/api/v1/notification_settings"
+        missing_ids = response.parsed_body.dig("data", "administration", "clients_without_recipients").map { |row| row["company_id"] }
+        expect(missing_ids).not_to include(company_unreg.id, company_foreign.id)
+
+        act_as(client_unreg)
+        get "/api/v1/client/pay_periods/#{pp_u.id}", headers: { "X-Company-Id" => company_unreg.id.to_s }
+        expect(response).to have_http_status(:ok), response.body
+        client_review_u = response.parsed_body.dig("pay_period", "payroll_review")
+
+        act_as(client_foreign)
+        get "/api/v1/client/pay_periods/#{pp_f.id}", headers: { "X-Company-Id" => company_foreign.id.to_s }
+        expect(response).to have_http_status(:ok), response.body
+        client_review_f = response.parsed_body.dig("pay_period", "payroll_review")
+
+        expect(client_review_f.slice("notification_status", "notification_queued"))
+          .to eq(client_review_u.slice("notification_status", "notification_queued"))
+        expect(client_review_f).to include("notification_status" => "queued", "notification_queued" => true)
+        expect(PayrollReview::PackagePresenter.decision_notification_status(review_f.reload))
+          .to eq(PayrollReview::PackagePresenter.decision_notification_status(review_u.reload))
+        expect(PayrollReview::PackagePresenter.decision_notification_queued?(review_f))
+          .to eq(PayrollReview::PackagePresenter.decision_notification_queued?(review_u))
+        expect(PayrollReview::PackagePresenter.decision_notification_status(review_f)).to eq("queued")
+      ensure
+        act_as(admin)
+      end
+
+      # 1. Immediately after approval (before deliver_after): every tenant-visible field matches identically.
+      assert_tenant_views_identical.call(pkg_u, period_u, pkg_f, period_f)
+
+      # 2. After deliver_after passes (before dispatch) and after a successful send:
+      # only the unregistered extra receives email, ops logs record suppression without PII,
+      # and both stay on the neutral "queued" status/copy key.
       travel_to(3.minutes.from_now) do
-        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload)).to eq("queued")
-        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload)).to eq("queued")
-        expect(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_f)).to be(true)
+        assert_tenant_views_identical.call(pkg_u, period_u, pkg_f, period_f)
 
         log = StringIO.new
         allow(Rails).to receive(:logger).and_return(ActiveSupport::Logger.new(log))
 
-        # After dispatch processes both in the same pass: only the unregistered extra actually receives email,
-        # both transition to "sent", and ops logs record the suppression without PII.
         PortalNotifications::Dispatcher.run!
         expect(captured_portal_emails.map { |mail| mail[:to] }).to include(unreg_email)
         expect(captured_portal_emails.map { |mail| mail[:to] }).not_to include(foreign_email, "outsidepartner+ops@googlemail.com")
-        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload))
-          .to eq(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload))
-        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f)).to eq("sent")
+        expect(PortalNotificationDelivery.find_by!(company: company_unreg, recipient_email: unreg_email, portal_notification_event: PortalNotificationEvent.find_by!(dedupe_key: "payroll_review_decided:#{pkg_u.id}")).status).to eq("sent")
+        expect(PortalNotificationDelivery.find_by!(company: company_foreign, recipient_email: foreign_email, portal_notification_event: PortalNotificationEvent.find_by!(dedupe_key: "payroll_review_decided:#{pkg_f.id}"))).to have_attributes(status: "skipped", skip_reason: "foreign_account_suppressed")
+        assert_tenant_views_identical.call(pkg_u, period_u, pkg_f, period_f)
         expect(log.string).to include("[PortalNotification] foreign account suppressed")
         expect(log.string).not_to include(foreign_email, "outsidepartner+ops@googlemail.com")
       end
+
+      # 3. After a failed provider send and through retries (both mid-retry pending and post-retry failure/send):
+      # unregistered vs foreign-suppressed stay identical across every tenant-visible field.
+      period_u2 = create(:pay_period, :calculated, company: company_unreg,
+        start_date: Date.new(2026, 11, 15), end_date: Date.new(2026, 11, 28), pay_date: Date.new(2026, 12, 4))
+      create(:payroll_item, company: company_unreg, pay_period: period_u2, employee: emp_u, gross_pay: 1_000, net_pay: 850)
+      PayPeriodLifecycleService.new(pay_period: period_u2, actor: admin).approve!
+
+      period_f2 = create(:pay_period, :calculated, company: company_foreign,
+        start_date: Date.new(2026, 11, 15), end_date: Date.new(2026, 11, 28), pay_date: Date.new(2026, 12, 4))
+      create(:payroll_item, company: company_foreign, pay_period: period_f2, employee: emp_f, gross_pay: 1_000, net_pay: 850)
+      PayPeriodLifecycleService.new(pay_period: period_f2, actor: admin).approve!
+
+      pkg_u2 = period_u2.payroll_review_packages.current.first!
+      PayrollReview::RevisionService.new(pay_period: period_u2, actor: client_unreg).approve!(
+        approver: client_unreg, recorded_by: client_unreg, method: "client_portal",
+        revision_id: pkg_u2.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+      )
+      pkg_f2 = period_f2.payroll_review_packages.current.first!
+      PayrollReview::RevisionService.new(pay_period: period_f2, actor: client_foreign).approve!(
+        approver: client_foreign, recorded_by: client_foreign, method: "client_portal",
+        revision_id: pkg_f2.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+      )
+
+      unreg_delivery2 = PortalNotificationDelivery.find_by!(
+        company: company_unreg,
+        portal_notification_event: PortalNotificationEvent.find_by!(dedupe_key: "payroll_review_decided:#{pkg_u2.id}")
+      )
+      foreign_delivery2 = PortalNotificationDelivery.find_by!(
+        company: company_foreign,
+        portal_notification_event: PortalNotificationEvent.find_by!(dedupe_key: "payroll_review_decided:#{pkg_f2.id}")
+      )
+
+      allow(PortalNotifications::Transport).to receive(:deliver).and_raise(StandardError, "provider outage")
+      first_attempt_at = 10.minutes.from_now
+      travel_to(first_attempt_at) do
+        PortalNotifications::Dispatcher.run!
+        expect(unreg_delivery2.reload).to have_attributes(status: "pending", attempts: 1)
+        expect(foreign_delivery2.reload).to have_attributes(status: "skipped", skip_reason: "foreign_account_suppressed")
+        assert_tenant_views_identical.call(pkg_u2, period_u2, pkg_f2, period_f2)
+      end
+
+      # Retry while still failing until MAX_ATTEMPTS marks the unregistered row failed: still identical.
+      retry_at = first_attempt_at
+      PortalNotifications::Dispatcher::RETRY_BACKOFF.each do |wait|
+        retry_at += wait
+        travel_to(retry_at) do
+          PortalNotifications::Dispatcher.run!
+          assert_tenant_views_identical.call(pkg_u2, period_u2, pkg_f2, period_f2)
+        end
+      end
+      expect(unreg_delivery2.reload).to have_attributes(status: "failed", attempts: PortalNotifications::Dispatcher::MAX_ATTEMPTS)
+      assert_tenant_views_identical.call(pkg_u2, period_u2, pkg_f2, period_f2)
     end
   end
 
