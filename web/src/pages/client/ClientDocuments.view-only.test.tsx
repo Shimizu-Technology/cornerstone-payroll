@@ -47,3 +47,16 @@ it('keeps upload and delete for a client manager', async () => {
   expect(screen.getByRole('button', { name: /Upload Document/ })).toBeTruthy();
   expect(screen.getAllByRole('button', { name: /Delete/ }).length).toBeGreaterThan(0);
 });
+
+it('names every upload field by its label', async () => {
+  mocks.employees.mockResolvedValue({ data: [{ id: 7, first_name: 'Robin', last_name: 'Lantern' }] });
+  render(<ClientDocuments />);
+
+  expect((await screen.findAllByText('Tax notice')).length).toBeGreaterThan(0);
+  expect((screen.getByLabelText('Title') as HTMLInputElement).tagName).toBe('INPUT');
+  expect(screen.getByRole('combobox', { name: 'Category' })).toBeTruthy();
+  expect(await screen.findByRole('option', { name: 'Robin Lantern' })).toBeTruthy();
+  expect(screen.getByRole('combobox', { name: 'Employee' })).toBeTruthy();
+  expect(screen.getByRole('textbox', { name: 'Notes' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'File Drag and drop files here, or click to browse' })).toBeTruthy();
+});
