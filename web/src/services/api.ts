@@ -753,6 +753,8 @@ export const employeeBulkImportApi = {
   },
   applyJson: (employees: Record<string, unknown>[], previewId?: string): Promise<BulkImportApplyResult> =>
     api.post<BulkImportApplyResult>('/admin/employee_bulk_imports/apply_json', { employees, preview_id: previewId }),
+  cancelPreview: (previewId: string): Promise<void> =>
+    api.delete<void>(`/admin/employee_bulk_imports/preview/${encodeURIComponent(previewId)}`),
 };
 
 export const payrollFieldsApi = {
@@ -2803,6 +2805,8 @@ export interface EmployeePayrollSummary {
   payroll_count: number;
   imported_payroll_count: number;
   imported_opening_summary_count: number;
+  total_hours?: number;
+  combined_hours?: number;
   gross_pay: number;
   custom_earnings_total: number;
   payroll_field_taxable_additions_total: number;
@@ -2848,9 +2852,12 @@ export interface TaxSummaryReport {
   report: {
     type: string;
     period: PayrollReportPeriod;
+    source?: { label: string; statement?: string | null };
     totals: {
       gross_wages: number;
       withholding_tax: number;
+      base_withholding_tax?: number;
+      additional_withholding?: number;
       social_security_employee: number;
       social_security_employer: number;
       medicare_employee: number;
@@ -2888,6 +2895,7 @@ export interface YtdSummaryReport {
       status: string;
       payroll_count?: number;
       total_hours?: number;
+      combined_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
       non_taxable_additions_total?: number;
@@ -2926,6 +2934,7 @@ export interface YtdSummaryReport {
     company_totals: null | {
       year: number;
       total_hours?: number;
+      combined_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
       non_taxable_additions_total?: number;
@@ -3744,8 +3753,19 @@ export interface ClientPayStub {
   period_description: string;
   net_pay: number | string;
 }
+export interface ClientQuickbooksPaycheck {
+  id: number;
+  pay_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  gross_pay: number | string | null;
+  net_pay: number | string | null;
+  hours_total?: number | string | null;
+  source_label?: string;
+  adjustment_note?: string | null;
+}
 export const clientPayStubsApi = {
-  history: (employeeId: number) => api.get<{ pay_stubs: ClientPayStub[] }>(`/client/pay_stubs/employee/${employeeId}`),
+  history: (employeeId: number) => api.get<{ pay_stubs: ClientPayStub[]; quickbooks_paychecks?: ClientQuickbooksPaycheck[] }>(`/client/pay_stubs/employee/${employeeId}`),
   download: (itemId: number) => api.getBlobWithParams(`/client/pay_stubs/${itemId}/download`),
 };
 
@@ -3763,6 +3783,8 @@ export const clientReportsApi = {
     api.getBlobWithParams('/client/reports/payroll_register_pdf', { pay_period_id: payPeriodId }),
   payrollRegisterXlsx: (payPeriodId: number) =>
     api.getBlobWithParams('/client/reports/payroll_register_xlsx', { pay_period_id: payPeriodId }),
+  taxSummary: (params: { year: number; quarter: string }) =>
+    api.get<TaxSummaryReport>('/client/reports/tax_summary', params),
   ytdSummary: (params: PayrollReportPeriodParams = {}) =>
     api.get<YtdSummaryReport>('/client/reports/ytd_summary', params),
   ytdSummaryCsv: (params: PayrollReportPeriodParams = {}) =>
@@ -4390,7 +4412,7 @@ interface AuthApiUser {
   organization_name?: string;
   company_id: number | null;
   company_name: string | null;
-  home_company_id: number;
+  home_company_id: number | null;
   assigned_company_ids: number[];
   capabilities: string[];
   company_capabilities?: Record<string, string[]>;
@@ -7000,12 +7022,20 @@ export const expensesApi = {
     api.getBlobWithParams('/admin/expenses/export', params),
 };
 
+const STAFF_DRAFT_STORAGE_PREFIXES = [
+  'prior-provider-history:',
+  'pay-item-draft:',
+  'shared-pay-field-draft:',
+] as const;
+
 // Auth
 export function clearPriorProviderDrafts(): void {
   try {
     for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
       const key = sessionStorage.key(index);
-      if (key?.startsWith('prior-provider-history:')) sessionStorage.removeItem(key);
+      if (key && STAFF_DRAFT_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+        sessionStorage.removeItem(key);
+      }
     }
   } catch { /* Storage can be unavailable in restricted browser contexts. */ }
 }

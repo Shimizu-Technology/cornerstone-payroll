@@ -135,12 +135,17 @@ export function ClientDashboard(): ReactElement {
   return (
     <div>
       <Header
-        title="Client Portal"
+        title="Dashboard"
         description="Manage employees, review payroll, and securely share documents."
-        actions={!supportToken && <Button onClick={() => navigate(newEmployeeHref)}>Add Employee</Button>}
+        mobileSticky={false}
+        actions={!supportToken && (
+          <div className="hidden sm:block">
+            <Button onClick={() => navigate(newEmployeeHref)}>Add employee</Button>
+          </div>
+        )}
       />
 
-      <div className="space-y-8 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 p-4 sm:space-y-8 sm:p-6 lg:p-8">
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
         )}
@@ -154,7 +159,7 @@ export function ClientDashboard(): ReactElement {
             {currentPayroll && !payroll && (
               <div>
                 <p role="alert">Couldn't check for payroll approvals.</p>
-                <Button variant="outline" size="sm" className="mt-2" onClick={() => setPayrollAttempt(attempt => attempt + 1)}>
+                <Button variant="outline" size="sm" className="mt-2 min-h-11 sm:min-h-11" onClick={() => setPayrollAttempt(attempt => attempt + 1)}>
                   Try again
                 </Button>
               </div>
@@ -179,7 +184,7 @@ export function ClientDashboard(): ReactElement {
                 <p className="font-medium">Next payroll · {formatDateRange(open.start_date, open.end_date)}</p>
                 <p>{open.pay_date ? `Pay date ${formatDate(open.pay_date)}` : 'Pay date to be set'} · {clientPayrollStatus(open.client_payroll_status)}</p>
                 <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={open.review_pay_period_id ? payRunHref(open.review_pay_period_id) : `/payroll-files/${encodeURIComponent(open.ref)}`}>
-                  {open.review_pay_period_id ? 'Open payroll preview' : 'Open Pay Period Files'}
+                  {open.review_pay_period_id ? 'Open payroll preview' : 'Open pay period files'}
                 </Link>
               </div>
             )}
@@ -188,9 +193,15 @@ export function ClientDashboard(): ReactElement {
 
         <PayrollFilesEntry />
 
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+        {!supportToken && (
+          <div className="sm:hidden">
+            <Button className="w-full" onClick={() => navigate(newEmployeeHref)}>Add employee</Button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 sm:gap-6 xl:grid-cols-4">
           <PortalStat
-            label="Active Employees"
+            label="Active employees"
             value={loading ? '—' : String(stats?.active_employees ?? 0)}
             sublabel={loading ? undefined : `${stats?.total_employees ?? 0} total records`}
             icon={<Users className="h-5 w-5" />}
@@ -202,20 +213,20 @@ export function ClientDashboard(): ReactElement {
             icon={<CalendarDays className="h-5 w-5" />}
           />
           <PortalStat
-            label="Uploaded Documents"
+            label="Uploaded documents"
             value={loading ? '—' : String(documentCount)}
             sublabel="Stored for payroll review"
             icon={<FileBarChart2 className="h-5 w-5" />}
           />
           <PortalStat
-            label="Recent Payrolls"
+            label="Recent payrolls"
             value={loading ? '—' : String(stats?.recent_payrolls?.length ?? 0)}
             sublabel="Finalized and imported payrolls"
             icon={<FolderOpen className="h-5 w-5" />}
           />
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-4">
           <QuickLink
             title="Employees"
             description="Add and update employee records"
@@ -223,14 +234,14 @@ export function ClientDashboard(): ReactElement {
             onClick={() => navigate(employeeListHref)}
           />
           <QuickLink
-            title="Pay Periods"
+            title="Pay periods"
             description="Review payroll runs and employee pay"
             icon={<CalendarDays className="h-5 w-5" />}
             onClick={() => navigate(payRunListHref)}
           />
           <QuickLink
             title="Documents"
-            description="Upload requested files securely"
+            description="Store company and employee files"
             icon={<FolderOpen className="h-5 w-5" />}
             onClick={() => navigate('/documents')}
           />
@@ -239,7 +250,7 @@ export function ClientDashboard(): ReactElement {
         {stats?.recent_payrolls?.length ? (
           <Card>
             <CardHeader>
-              <CardTitle>Recent Payrolls</CardTitle>
+              <CardTitle>Recent payrolls</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {stats.recent_payrolls.map((payroll) => (
@@ -281,13 +292,13 @@ function PortalStat({
 }: PortalStatProps): ReactElement {
   return (
     <Card>
-      <CardContent className="pt-6">
-        <div className="flex items-start justify-between">
-          <p className="text-sm font-medium text-neutral-500">{label}</p>
-          <div className="rounded-xl bg-primary-50 p-2 text-primary-700">{icon}</div>
+      <CardContent className="p-4 sm:p-6">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-xs font-medium text-neutral-500 sm:text-sm">{label}</p>
+          <div className="shrink-0 rounded-xl bg-primary-50 p-2 text-primary-700">{icon}</div>
         </div>
-        <p className="mt-3 text-3xl font-semibold tracking-tight text-neutral-900">{value}</p>
-        {sublabel && <p className="mt-1.5 text-sm text-neutral-500">{sublabel}</p>}
+        <p className="mt-2 break-words text-xl font-semibold tracking-tight text-neutral-900 tabular-nums sm:mt-3 sm:text-3xl">{value}</p>
+        {sublabel && <p className="mt-1 text-xs text-neutral-500 sm:mt-1.5 sm:text-sm">{sublabel}</p>}
       </CardContent>
     </Card>
   );

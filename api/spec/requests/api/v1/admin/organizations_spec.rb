@@ -192,6 +192,10 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
              invoice_billing_profile: profile, invoice_recipient: recipient)
     end
     let!(:client_user) { create(:user, organization: platform_org, company: payroll_company, role: :client) }
+    let!(:client_assignment_expiry) { 30.days.from_now.change(usec: 0) }
+    let!(:client_assignment) do
+      CompanyAssignment.create!(user: client_user, company: payroll_company, expires_at: client_assignment_expiry)
+    end
 
     before do
       platform_org.update!(primary_company: platform_company)
@@ -210,6 +214,7 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       preview = response.parsed_body.fetch("transfer")
       expect(preview.fetch("blockers")).to be_empty
       expect(preview.fetch("selected_invoice_numbers")).to eq([ invoice.invoice_number ])
+      expect(preview.fetch("assignments_to_remove")).to eq(1)
 
       expect do
         post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
@@ -234,9 +239,41 @@ RSpec.describe "Api::V1::Admin::Organizations", type: :request do
       expect(profile.finance_book_id).to eq(destination_book.id)
       expect(profile.legal_name).to eq("Shimizu Technology LLC")
       expect(client_user.reload.organization_id).to eq(destination.id)
-      expect(CompanyAssignment.where(company_id: payroll_company.id)).to be_empty
+      expect(CompanyAssignment.where(company_id: payroll_company.id, user_id: org_admin.id)).to be_empty
+      preserved = CompanyAssignment.find_by(company_id: payroll_company.id, user_id: client_user.id)
+      expect(preserved).to be_present
+      expect(preserved.expires_at).to eq(client_assignment_expiry)
+      expect(preserved).to be_valid
+      expect(client_user.can_access_company?(payroll_company.id)).to be(true)
+
+      allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user).and_return(client_user)
+      allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:current_user_id).and_return(client_user.id)
+      get "/api/v1/client/employees"
+      expect(response).to have_http_status(:ok), response.body
+
       expect(original_audit.reload.organization_id).to eq(destination.id)
       expect(AuditLog.where(organization_id: platform_org.id, action: "organizations#company_transferred_out")).to exist
+    end
+
+    it "removes source-only and expired grants while preserving moved clients' valid grants" do
+      source_only_client = create(:user, organization: platform_org, company: platform_company, role: :client)
+      CompanyAssignment.create!(user: source_only_client, company: platform_company)
+      CompanyAssignment.create!(user: source_only_client, company: payroll_company)
+
+      expired_moving_client = create(:user, organization: platform_org, company: payroll_company, role: :client, active: false)
+      CompanyAssignment.create!(user: expired_moving_client, company: payroll_company, expires_at: 1.day.ago)
+
+      post "/api/v1/admin/organizations/transfer_company", params: { transfer: {
+        company_id: payroll_company.id, billing_profile_id: profile.id,
+        source_organization_id: platform_org.id, name: "Shimizu Technology LLC",
+        slug: "shimizu-technology", issuer_legal_name: "Shimizu Technology LLC"
+      } }
+      expect(response).to have_http_status(:created), response.body
+
+      expect(CompanyAssignment.where(company_id: payroll_company.id, user_id: source_only_client.id)).to be_empty
+      expect(CompanyAssignment.where(company_id: payroll_company.id, user_id: expired_moving_client.id)).to be_empty
+      expect(CompanyAssignment.where(company_id: payroll_company.id, user_id: client_user.id).count).to eq(1)
+      expect(client_user.reload.accessible_company_ids).to eq([ payroll_company.id ])
     end
 
     it "refuses a stale source or a company that is the source primary" do

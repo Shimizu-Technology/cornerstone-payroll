@@ -154,7 +154,8 @@ class User < ApplicationRecord
   # Returns all companies this user can access:
   # - super admins: all companies across all organizations
   # - org admins / legacy admins: every company in their organization
-  # - managers/accountants/clients: explicitly assigned companies (or home company)
+  # - managers/accountants: explicitly assigned companies (or home company)
+  # - clients: explicitly assigned companies only (never falls back to home company)
   # - employee-only identities: no staff/client company access
   def accessible_company_ids
     @accessible_company_ids ||= begin
@@ -167,33 +168,33 @@ class User < ApplicationRecord
       elsif organization_admin?
         organization_company_ids
       elsif demo_client?
-        demo_client_access_open? ? demo_client_company_ids : []
+        demo_client_access_open? ? effective_client_company_ids : []
+      elsif client?
+        effective_client_company_ids
       else
-        assigned_ids = if association(:company_assignments).loaded?
-          active_assignments = company_assignments.reject(&:expired?)
-          active_assignment_company_ids = active_assignments.map(&:company_id)
-
-          if active_assignments.all? { |assignment| assignment.association(:company).loaded? }
-            active_assignments.filter_map do |assignment|
-              assignment.company_id unless assignment.company&.test_workspace_archived_at?
-            end
-          else
-            archived_company_ids = Company.where(id: active_assignment_company_ids)
-              .where.not(test_workspace_archived_at: nil)
-              .pluck(:id)
-            active_assignment_company_ids - archived_company_ids
-          end
-        else
-          company_assignments.active_access
-            .joins(:company)
-            .where(companies: { test_workspace_archived_at: nil })
-            .pluck(:company_id)
-        end
+        assigned_ids = active_assigned_company_ids
         assigned_ids &= organization_company_ids
 
-        client_company_boundary(assigned_ids).presence || client_company_boundary(Array(company_id))
+        assigned_ids.presence || Array(company_id)
       end
     end
+  end
+
+  # Single source of truth for effective client company grants (enforcing
+  # expiry, archive timestamps, organization boundary, practice-copy readiness,
+  # and demo-company readiness). Used by authorization and by activation and
+  # assignment mutation guards under the user lock.
+  def effective_client_company_ids(fresh: false)
+    return [] unless client?
+    return practice_portal_open? ? [ practice_company_id ] : [] if practice_company_id?
+    return fresh ? query_demo_client_company_ids : demo_client_company_ids if demo_client?
+
+    assigned_ids = active_assigned_company_ids(fresh: fresh) & organization_company_ids
+    client_company_boundary(assigned_ids)
+  end
+
+  def has_effective_client_grant?
+    effective_client_company_ids(fresh: true).any?
   end
 
   def reload(...)
@@ -303,10 +304,37 @@ class User < ApplicationRecord
   end
 
   def demo_client_company_ids
-    @demo_client_company_ids ||= company_assignments.active_access.joins(:company)
+    @demo_client_company_ids ||= query_demo_client_company_ids
+  end
+
+  def query_demo_client_company_ids
+    company_assignments.active_access.joins(:company)
       .merge(Company.demo.active)
       .where(companies: { organization_id: organization_id, migration_rehearsal_status: "ready", test_workspace_archived_at: nil })
       .order(:company_id).pluck(:company_id)
+  end
+
+  def active_assigned_company_ids(fresh: false)
+    if !fresh && association(:company_assignments).loaded?
+      active_assignments = company_assignments.reject(&:expired?)
+      active_assignment_company_ids = active_assignments.map(&:company_id)
+
+      if active_assignments.all? { |assignment| assignment.association(:company).loaded? }
+        active_assignments.filter_map do |assignment|
+          assignment.company_id unless assignment.company&.test_workspace_archived_at?
+        end
+      else
+        archived_company_ids = Company.where(id: active_assignment_company_ids)
+          .where.not(test_workspace_archived_at: nil)
+          .pluck(:id)
+        active_assignment_company_ids - archived_company_ids
+      end
+    else
+      company_assignments.active_access
+        .joins(:company)
+        .where(companies: { test_workspace_archived_at: nil })
+        .pluck(:company_id)
+    end
   end
 
   def migration_rehearsal_company_requires_staff_role

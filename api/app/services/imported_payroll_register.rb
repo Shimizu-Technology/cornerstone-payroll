@@ -90,7 +90,7 @@ class ImportedPayrollRegister
       pay_rate: nil,
       scheduled_hours: nil,
       hours_worked: money(paycheck.hours_total),
-      overtime_hours: component_amount(paycheck.hours_breakdown, /overtime|\bot\b/i),
+      overtime_hours: component_amount(paycheck.hours_breakdown, UnifiedPayrollReporting::OVERTIME_HOURS),
       holiday_hours: component_amount(paycheck.hours_breakdown, /holiday/i),
       pto_hours: component_amount(paycheck.hours_breakdown, /pto|paid time/i),
       reported_tips: paycheck.source_metadata.to_h.dig("verified_amounts", "reported_tips")&.to_d || component_amount(paycheck.earnings_breakdown, /tip/i),

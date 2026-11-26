@@ -144,8 +144,8 @@ class QuickbooksPayrollReportData
 
   def employer_contribution_lines_for(item)
     entries = deduction_contribution_entries_for_item(item)
-      .select { |entry| entry.company_amount.to_f.nonzero? }
-      .map { |entry| Line.new(label: entry.description, amount: entry.company_amount.to_f) }
+      .select { |entry| entry.company_amount.to_d.nonzero? }
+      .map { |entry| Line.new(label: entry.description, amount: entry.company_amount.to_d) }
 
     entries
   end
@@ -163,15 +163,15 @@ class QuickbooksPayrollReportData
   end
 
   def employer_tax_total(item)
-    item.employer_social_security_tax.to_f + item.employer_medicare_tax.to_f
+    item.employer_social_security_tax.to_d + item.employer_medicare_tax.to_d
   end
 
   def employer_contribution_total(item)
-    employer_contribution_lines_for(item).sum { |line| line.amount.to_f }
+    employer_contribution_lines_for(item).sum(0.to_d) { |line| line.amount.to_d }
   end
 
   def total_payroll_cost(item)
-    item.gross_pay.to_f + employer_tax_total(item) + employer_contribution_total(item)
+    item.gross_pay.to_d + employer_tax_total(item) + employer_contribution_total(item)
   end
 
   def total_summary

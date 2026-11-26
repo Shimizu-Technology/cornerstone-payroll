@@ -87,7 +87,8 @@ module Api
           rescue ArgumentError => e
             render json: { error: e.message }, status: :unprocessable_entity
           rescue StandardError => e
-            render json: { error: "Failed to parse files: #{e.message}" }, status: :unprocessable_entity
+            Rails.logger.error("[PayrollImportsController#preview] #{e.class}: #{e.message}")
+            render json: { error: "Failed to parse files. Check the uploaded files and try again." }, status: :unprocessable_entity
           end
         end
 
@@ -120,7 +121,8 @@ module Api
         rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue StandardError => e
-          render json: { error: "Could not match the files again: #{e.message}" }, status: :unprocessable_entity
+          Rails.logger.error("[PayrollImportsController#rematch] #{e.class}: #{e.message}")
+          render json: { error: "Could not match the files again. Try again or contact support." }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/remove_import_source
@@ -165,7 +167,8 @@ module Api
         rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue StandardError => e
-          render json: { error: "Could not remove the file: #{e.message}" }, status: :unprocessable_entity
+          Rails.logger.error("[PayrollImportsController#remove_source] #{e.class}: #{e.message}")
+          render json: { error: "Could not remove the file. Try again or contact support." }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:pay_period_id/import_tip_treatment
@@ -473,13 +476,14 @@ module Api
               manual_review_warnings: client_changes&.manual_review_warnings || [],
               pay_period: pay_period_json(@pay_period.reload)
             }
-          rescue ArgumentError => e
+          rescue ArgumentError, PayrollIntake::SourcePackageVerifier::VerificationError => e
             import_record&.update(status: "previewed", validation_errors: [ e.message ])
             render json: { error: e.message }, status: :unprocessable_entity
           rescue StandardError => e
+            Rails.logger.error("[PayrollImportsController#apply] #{e.class}: #{e.message}")
             # Keep record previewed so operator can retry apply without re-uploading.
-            import_record&.update(status: "previewed", validation_errors: [ e.message ])
-            render json: { error: "Import apply failed. Import session is still previewed — retry apply or re-preview files. Details: #{e.message}" }, status: :unprocessable_entity
+            import_record&.update(status: "previewed", validation_errors: [ "Import apply failed unexpectedly." ])
+            render json: { error: "Import apply failed. Import session is still previewed — retry apply or re-preview files." }, status: :unprocessable_entity
           end
         end
 
@@ -531,8 +535,11 @@ module Api
           render json: { error: e.message, details: { replacement_required: true, current_package: replacement_package_json(e.current_session) } }, status: :unprocessable_entity
         rescue ActiveRecord::RecordNotFound
           render json: { error: "Portal submission not found for this company and period" }, status: :not_found
-        rescue StandardError => e
+        rescue ArgumentError, PayrollIntake::SourcePackageVerifier::VerificationError => e
           render json: { error: e.message }, status: :unprocessable_entity
+        rescue StandardError => e
+          Rails.logger.error("[PayrollImportsController#preview_portal_submission] #{e.class}: #{e.message}")
+          render json: { error: "Could not open this portal submission for import review. Try again or contact support." }, status: :unprocessable_entity
         end
 
         def persist_preview(package_result, pdf_file, excel_file,

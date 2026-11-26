@@ -159,6 +159,7 @@ RSpec.describe "Clerk Authentication", type: :request do
 
     it "binds a client created by Google sign-up when Clerk carries the invitation metadata" do
       user.update!(role: "client")
+      CompanyAssignment.create!(user: user, company: company)
       issue_pending_invite!
       provider_user["external_accounts"] = [ { "provider" => "oauth_google", "email_address" => "google@example.test" } ]
       provider_user["email_addresses"].first["email_address"] = "google@example.test"
@@ -168,6 +169,16 @@ RSpec.describe "Clerk Authentication", type: :request do
 
       expect(response).to have_http_status(:ok)
       expect(user.reload).to have_attributes(clerk_id: subject_id, email: "auth-spec@example.com")
+    end
+
+    it "returns 403 for a bound client with no active company assignment" do
+      user.update!(role: "client")
+      issue_pending_invite!
+
+      get "/api/v1/client/employees", headers: headers
+
+      expect(response).to have_http_status(:forbidden)
+      expect(user.reload).to have_attributes(clerk_id: subject_id, invitation_status: "accepted")
     end
 
     it "rejects an email match on an already bound, pending, or unbound local row" do

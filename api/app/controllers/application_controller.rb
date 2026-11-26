@@ -196,10 +196,13 @@ class ApplicationController < ActionController::API
     requested_company = request.headers["X-Company-Id"]
     return authorized_explicit_company_id(requested_company) unless requested_company.nil?
 
-    # Fall back to home company if accessible, otherwise first assigned company
+    # Fall back to home company if accessible, otherwise first assigned company.
+    # Client users never fall back to an unauthorized home company.
     home = current_user.company_id
     if current_user.can_access_company?(home)
       home
+    elsif current_user.client?
+      current_user.accessible_company_ids.first
     else
       current_user.accessible_company_ids.first || home
     end

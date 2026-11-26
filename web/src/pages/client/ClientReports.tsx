@@ -14,6 +14,16 @@ import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { clientPayPeriodsApi, clientReportsApi, clientEmployeesApi, type PayrollHistoryRecord } from '@/services/api';
 import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
 
+const CLIENT_QUICKBOOKS_SOURCE_STATEMENT =
+  'Payroll from before Cornerstone is shown exactly as it was in QuickBooks. Any corrections are listed separately.';
+
+function clientSourceStatement(statement?: string | null): string {
+  if (!statement || statement.includes('QuickBooks source values remain authoritative')) {
+    return CLIENT_QUICKBOOKS_SOURCE_STATEMENT;
+  }
+  return statement;
+}
+
 function finiteAmount(value: number | string | null | undefined): number {
   const parsed = Number(value);
   return value == null || !Number.isFinite(parsed) ? 0 : parsed;
@@ -26,6 +36,8 @@ export function ClientReports() {
   const [employeeId, setEmployeeId] = useState('');
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
   const [quarter, setQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
+  const [taxScope, setTaxScope] = useState<{ year: number; quarter: string; statement: string | null }>();
+  const taxScopeNote = taxScope?.year === reportYear && taxScope.quarter === quarter ? taxScope.statement : null;
   const currentYear = new Date().getFullYear();
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,6 +152,18 @@ export function ClientReports() {
   useEffect(() => {
     void loadAnnualSummary();
   }, [loadAnnualSummary]);
+
+  useEffect(() => {
+    let current = true;
+    void clientReportsApi.taxSummary({ year: reportYear, quarter })
+      .then(({ report }) => {
+        if (current) setTaxScope({ year: reportYear, quarter, statement: report?.source?.statement ?? null });
+      })
+      .catch(() => {
+        if (current) setTaxScope(undefined);
+      });
+    return () => { current = false; };
+  }, [reportYear, quarter]);
 
   const downloadBlob = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
@@ -318,7 +342,12 @@ export function ClientReports() {
                 <div className="grid gap-3 md:grid-cols-2">
                   {clientReportCatalog.filter(report => report.group === group).map(report => <Card key={report.key}>
                     <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-                      <p className="min-w-0 font-medium">{report.title}</p>
+                      <div className="min-w-0">
+                        <p className="font-medium">{report.title}</p>
+                        {taxScopeNote && (report.key === 'tax_summary' || report.key === 'employer_liability') && (
+                          <p className="mt-1 text-sm text-gray-600">{taxScopeNote}</p>
+                        )}
+                      </div>
                       <ReportDownloadMenu ariaLabel={`Export ${report.title}`} disabled={exporting !== null || (report.scope === 'period' && !selectedPayPeriodId) || (report.scope === 'employee' && !employeeId)} formats={('pdfOnly' in report ? ['pdf'] : ['pdf', 'xlsx']).map(format => ({
                         key: `${report.key}-${format}`, label: format === 'pdf' ? 'PDF' : 'Excel workbook',
                         description: report.title, kind: format === 'pdf' ? 'pdf' as const : 'spreadsheet' as const,
@@ -335,7 +364,7 @@ export function ClientReports() {
             </section>
             <Card>
             <CardHeader>
-              <CardTitle>Payroll Register</CardTitle>
+              <CardTitle>Payroll register</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <Select className="w-full" value={selectedPayPeriodId} onChange={(e) => setSelectedPayPeriodId(e.target.value)}>
@@ -346,7 +375,7 @@ export function ClientReports() {
                   </option>
                 ))}
               </Select>
-              <p className="text-sm leading-6 text-gray-500">The payroll register is available for Cornerstone payrolls. Open an imported payroll from Pay Periods to review its locked QuickBooks records.</p>
+              <p className="text-sm leading-6 text-gray-500">The payroll register is available for Cornerstone payrolls. Open an imported payroll from Pay periods to review its locked QuickBooks records.</p>
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" disabled={!selectedPayPeriodId} onClick={() => void loadPayrollRegister()}>
                   <Eye className="mr-2 h-4 w-4" />
@@ -377,8 +406,8 @@ export function ClientReports() {
             <Card>
               <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <CardTitle>Annual Payroll Totals</CardTitle>
-                  <p className="mt-2 text-sm leading-6 text-gray-500">Year-by-year totals across locked QuickBooks imports and committed Cornerstone payroll.</p>
+                  <CardTitle>Annual payroll totals</CardTitle>
+                  <p className="mt-2 text-sm leading-6 text-gray-500">Year-by-year totals across QuickBooks records and committed Cornerstone payroll.</p>
                 </div>
                 <ReportDownloadMenu formats={annualSummaryFormats} disabled={!annualSummary || exporting !== null} ariaLabel="Export annual payroll totals" />
               </CardHeader>
@@ -386,8 +415,8 @@ export function ClientReports() {
                 {annualSummary && (
                   <>
                     <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 text-sm leading-6 text-blue-900">
-                      <p className="font-semibold">Imported payroll values remain locked.</p>
-                      <p className="mt-2">{annualSummary.source_statement}</p>
+                      <p className="font-semibold">Payroll from before Cornerstone</p>
+                      <p className="mt-2">{clientSourceStatement(annualSummary.source_statement)}</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-4">
                       <Metric label="All-Year Gross Pay" value={formatCurrency(annualSummary.totals.gross_pay)} />
@@ -460,7 +489,7 @@ export function ClientReports() {
 
             <Card>
             <CardHeader>
-              <CardTitle>Employee Payroll Summary by Period</CardTitle>
+              <CardTitle>Employee payroll summary by period</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4 p-4">
               <div className="flex flex-wrap items-center gap-2">
@@ -472,14 +501,17 @@ export function ClientReports() {
                   <input type="checkbox" checked={includeZeroPay} onChange={(e) => setIncludeZeroPay(e.target.checked)} className="h-4 w-4 accent-primary" />
                   Include active employees with $0 pay
                 </label>
-                <Button variant="outline" onClick={() => void loadYtdSummary()}>View Report</Button>
+                <Button variant="outline" onClick={() => void loadYtdSummary()}>View report</Button>
                 <ReportDownloadMenu
                   formats={summaryFormats}
                   disabled={exporting !== null}
                   ariaLabel="Export payroll summary"
                 />
               </div>
-              <PayrollSourceNotice summary={ytdSummary?.source_summary} mentionFieldScope />
+              <PayrollSourceNotice
+                summary={ytdSummary?.source_summary ? { ...ytdSummary.source_summary, source_statement: clientSourceStatement(ytdSummary.source_summary.source_statement) } : null}
+                mentionFieldScope
+              />
               {ytdSummary?.historical_deductions?.source_bucket_totals.length ? (
                 <p role="note" className="text-sm text-amber-900">{ytdSummary.historical_deductions.classification_note}</p>
               ) : null}
@@ -489,6 +521,7 @@ export function ClientReports() {
                   <Metric label="Health Insurance (payroll fields + historical)" value={formatCurrency(ytdSummary.company_totals.health_insurance_deductions ?? 0)} />
                   <Metric label="Historical Loans (type unclassified)" value={formatCurrency(ytdSummary.company_totals.historical_loan_deductions_unclassified ?? 0)} />
                   <Metric label="401(k) After Tax label in source pre-tax bucket" value={formatCurrency(ytdSummary.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)} />
+                  <Metric label="Combined hours" value={finiteAmount(ytdSummary.company_totals.combined_hours).toFixed(2)} />
                 </div>
               )}
               {ytdSummary?.employee_visibility && !ytdSummary.employee_visibility.include_zero_pay && (
@@ -515,6 +548,7 @@ export function ClientReports() {
                       <MobileField label="Employer contributions" value={formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)} />
                       <MobileField label="Total deductions" value={formatCurrency(employee.total_deductions ?? 0)} />
                       <MobileField label="FIT" value={formatCurrency(employee.withholding_tax)} />
+                      <MobileField label="Combined hours" value={finiteAmount(employee.combined_hours).toFixed(2)} />
                     </div>
                   </MobileRecordCard>
                 ))}
@@ -525,18 +559,19 @@ export function ClientReports() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Employee</TableHead>
-                    <TableHead>OT Hours</TableHead>
-                    <TableHead>Gross Pay</TableHead>
-                    <TableHead>Other Earn.</TableHead>
-                    <TableHead>Field Add.</TableHead>
-                    <TableHead>Other Ded.</TableHead>
-                    <TableHead>Field Ded.</TableHead>
-                    <TableHead>Health Insurance</TableHead>
-                    <TableHead>Historical Loans</TableHead>
-                    <TableHead>Employer Contrib.</TableHead>
-                    <TableHead>Total Ded.</TableHead>
+                    <TableHead>OT hours</TableHead>
+                    <TableHead>Gross pay</TableHead>
+                    <TableHead>Other earn.</TableHead>
+                    <TableHead>Field add.</TableHead>
+                    <TableHead>Other ded.</TableHead>
+                    <TableHead>Field ded.</TableHead>
+                    <TableHead>Health insurance</TableHead>
+                    <TableHead>Historical loans</TableHead>
+                    <TableHead>Employer contrib.</TableHead>
+                    <TableHead>Total ded.</TableHead>
                     <TableHead>FIT</TableHead>
-                    <TableHead>Net Pay</TableHead>
+                    <TableHead>Net pay</TableHead>
+                    <TableHead>Combined hours</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody striped>
@@ -555,6 +590,7 @@ export function ClientReports() {
                       <TableCell>{formatCurrency(employee.total_deductions ?? 0)}</TableCell>
                       <TableCell>{formatCurrency(employee.withholding_tax)}</TableCell>
                       <TableCell>{formatCurrency(employee.net_pay)}</TableCell>
+                      <TableCell>{finiteAmount(employee.combined_hours).toFixed(2)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

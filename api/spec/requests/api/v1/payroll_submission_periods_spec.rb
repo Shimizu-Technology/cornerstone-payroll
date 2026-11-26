@@ -21,6 +21,7 @@ RSpec.describe "Pay-period submissions", type: :request do
     travel_to Time.zone.parse("2026-11-17 02:00:00 UTC") # Nov 17, noon in Guam
     allow(ClientPortalThreadChannel).to receive(:broadcast_thread)
     create(:company_assignment, user: staff, company: company)
+    create(:company_assignment, user: client, company: company)
     as_client
   end
 
@@ -560,6 +561,27 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(period.reload.client_portal_thread.messages.count).to eq(2)
       get "#{client_base}/#{period.id}"
       expect(data["thread_id"]).to eq(thread_id)
+    end
+
+    it "lets a client start a period-linked conversation with attachments via the period message endpoint" do
+      doc = ClientDocument.create!(
+        company: company, uploaded_by: client, title: "Period note", file_name: "note.pdf",
+        content_type: "application/pdf", file_size: 100, file_key: "test/period-note.pdf",
+        category: "misc", visible_to_client: true, scan_status: "clean"
+      )
+      as_client
+      post "#{client_base}/#{period.id}/messages", params: {
+        body: "Attached our adjustment memo.", document_ids: [ doc.id ], idempotency_key: "attach-1"
+      }
+      expect(response).to have_http_status(:created)
+      thread_id = response.parsed_body["thread_id"]
+      expect(period.reload.client_portal_thread_id).to eq(thread_id)
+      expect(response.parsed_body.dig("data", "documents").map { |d| d["id"] }).to eq([ doc.id ])
+      post "#{client_base}/#{period.id}/messages", params: {
+        body: "Attached our adjustment memo.", document_ids: [ doc.id ], idempotency_key: "attach-1"
+      }
+      expect(response).to have_http_status(:ok)
+      expect(period.client_portal_thread.messages.count).to eq(1)
     end
   end
 

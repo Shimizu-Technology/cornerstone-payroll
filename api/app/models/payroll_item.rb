@@ -342,7 +342,11 @@ class PayrollItem < ApplicationRecord
   end
 
   def total_hours
-    hours_worked.to_f + overtime_hours.to_f + holiday_hours.to_f + pto_hours.to_f
+    combined_hours.to_f
+  end
+
+  def combined_hours
+    hours_worked.to_d + overtime_hours.to_d + holiday_hours.to_d + pto_hours.to_d
   end
 
   # Total Guam income tax actually withheld from this paycheck. The calculator

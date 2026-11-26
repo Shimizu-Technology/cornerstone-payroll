@@ -64,7 +64,7 @@ class R2StorageService
     object_url(key)
   rescue Aws::S3::Errors::ServiceError => e
     Rails.logger.error("R2 upload failed: #{e.message}")
-    raise UploadError, "Failed to upload to R2: #{e.message}"
+    raise UploadError, "File upload failed. Please try again."
   end
 
   # Download a file from R2
@@ -85,7 +85,7 @@ class R2StorageService
     nil
   rescue Aws::S3::Errors::ServiceError => e
     Rails.logger.error("R2 download failed: #{e.message}")
-    raise DownloadError, "Failed to download from R2: #{e.message}"
+    raise DownloadError, "File download failed. Please try again."
   end
 
   # Download a file only when the object is small enough to inline safely.
@@ -116,7 +116,7 @@ class R2StorageService
     nil
   rescue Aws::S3::Errors::ServiceError => e
     Rails.logger.error("R2 metadata lookup failed: #{e.message}")
-    raise DownloadError, "Failed to inspect R2 object: #{e.message}"
+    raise DownloadError, "File lookup failed. Please try again."
   end
 
   # Check if an object exists
@@ -144,7 +144,7 @@ class R2StorageService
     client.delete_object(bucket: bucket_name, key: key)
   rescue Aws::S3::Errors::ServiceError => e
     Rails.logger.error("R2 delete failed: #{e.message}")
-    raise UploadError, "Failed to delete from R2: #{e.message}"
+    raise UploadError, "File removal failed. Please try again."
   end
 
   # Generate a pre-signed URL for temporary access
@@ -299,7 +299,7 @@ class R2StorageService
     raise UploadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 upload failed: #{e.message}")
-    raise UploadError, "Failed to upload locally: #{e.message}"
+    raise UploadError, "File upload failed. Please try again."
   end
 
   def download_locally(key)
@@ -311,7 +311,7 @@ class R2StorageService
     raise DownloadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 download failed: #{e.message}")
-    raise DownloadError, "Failed to download locally: #{e.message}"
+    raise DownloadError, "File download failed. Please try again."
   end
 
   def download_locally_with_limit(key, max_bytes:)
@@ -322,9 +322,11 @@ class R2StorageService
     File.binread(path)
   rescue InvalidKeyError => e
     raise DownloadError, e.message
+  rescue DownloadError
+    raise
   rescue StandardError => e
     Rails.logger.error("Local R2 limited download failed: #{e.message}")
-    raise DownloadError, "Failed to download locally: #{e.message}"
+    raise DownloadError, "File download failed. Please try again."
   end
 
   def delete_locally(key)
@@ -334,7 +336,7 @@ class R2StorageService
     raise UploadError, e.message
   rescue StandardError => e
     Rails.logger.error("Local R2 delete failed: #{e.message}")
-    raise UploadError, "Failed to delete locally: #{e.message}"
+    raise UploadError, "File removal failed. Please try again."
   end
 
   def rewindable_upload_body(data)
