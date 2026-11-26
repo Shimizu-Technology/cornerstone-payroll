@@ -151,13 +151,16 @@ function NoMatchMessage(): ReactElement {
   );
 }
 
-type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated';
+type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated'
+  | 'email_mismatch' | 'code_retired';
 
 function failureOf(error: unknown): Failure {
   if (error instanceof StepUpCancelledError) return 'cancelled';
   if (!(error instanceof EmployeeApiError)) return 'server';
   switch (error.kind) {
     case 'terms_updated': return 'terms_updated';
+    case 'email_mismatch': return 'email_mismatch';
+    case 'code_retired': return 'code_retired';
     case 'invalid':
     case 'not_found':
     case 'conflict': return 'no_match';
@@ -195,6 +198,12 @@ function TwoStepMessage({ kind }: { kind: 'mfa_setup' | 'mfa_required' }): React
 function FailureMessage({ failure, cancelledText }: { failure: Failure | null; cancelledText?: string }): ReactElement | null {
   if (!failure) return null;
   if (failure === 'no_match') return <NoMatchMessage />;
+  if (failure === 'email_mismatch') {
+    return <FormMessage tone="bad">This invite is for a different email address. Sign in with the email your employer has on file, or ask them to update it.</FormMessage>;
+  }
+  if (failure === 'code_retired') {
+    return <FormMessage tone="bad">This sign-up code can no longer be used. Ask your employer to send an invite to your email.</FormMessage>;
+  }
   if (failure === 'mfa_setup' || failure === 'mfa_required') return <TwoStepMessage kind={failure} />;
   if (failure === 'cancelled') return <FormMessage tone="bad">{cancelledText ?? "Not done. Confirm it's you to continue."}</FormMessage>;
   if (failure === 'signed_out') return <FormMessage tone="bad">Your sign-in ended. Sign in again, then try again.</FormMessage>;

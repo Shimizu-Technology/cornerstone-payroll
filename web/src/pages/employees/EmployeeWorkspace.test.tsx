@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ hasCapability: () => true }),
+  useOptionalAuth: () => ({ hasCapability: () => true }),
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({

@@ -125,7 +125,7 @@ module EmployeeLinks
 
         @link.claim_user = route_login(@link.employee)
         @link.invited_by = @actor
-        credentials = Credentials.issue(@link, delivery: @delivery, email: @link.employee.email)
+        credentials = Credentials.issue(@link, delivery: @delivery, email: @link.employee.email, issued_by_staff: EmployeeLinks.staff_management_allowed?(@actor, @link.company))
         requested = { requested_at: @link.sign_up_reset_requested_at.iso8601, requested_by_id: @link.sign_up_reset_requested_by_id,
                       requested_reason: @link.sign_up_reset_reason }
         @link.assign_attributes(sign_up_reset_requested_at: nil, sign_up_reset_requested_by: nil, sign_up_reset_reason: nil)
@@ -146,6 +146,7 @@ module EmployeeLinks
     # locked pending login, or nil when the link has none.
     def lock_link_and_login!
       employee = @link.employee
+      EmployeeLinks.lock_company!(@link.company_id)
       employee.lock!
       pending_id = EmployeeAccountLink.where(id: @link.id).pick(:user_id)
       pending = EmployeeLinks.lock_users!([ pending_id ]).first

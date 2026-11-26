@@ -6,12 +6,31 @@ import { clientPayPeriodsApi } from '@/services/api';
 import type { PayPeriod } from '@/types';
 vi.mock('@/services/api', () => ({ clientPayPeriodsApi: { approveReview: vi.fn(), requestChanges: vi.fn(), previewPdf: vi.fn() } }));
 vi.mock('@/components/documents/PdfPreview', () => ({ PdfPreview: () => null }));
+const auth = vi.hoisted(() => ({ isClientViewer: false }));
+vi.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => auth }));
 const period = { id: 5, status: 'approved', can_decide_payroll_review: true, total_gross: 1200, total_net: 1100,
   payroll_review: { id: 11, revision: 2, status: 'pending', published_at: '2026-11-17T00:00:00Z', checksum_short: 'abc123', acknowledgement: 'I approve this exact payroll review revision for processing.' },
 } as PayPeriod;
 const onDone = vi.fn();
 beforeEach(() => { vi.resetAllMocks(); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); auth.isClientViewer = false; });
+it('hides the decision from a client viewer even when the period says decisions are open', () => {
+  auth.isClientViewer = true;
+  render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
+  expect(period.can_decide_payroll_review).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
+  expect(screen.queryByLabelText('Note for Cornerstone (required to request changes)')).toBeNull();
+  expect(screen.getByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+});
+it('lets a client viewer open the preview but not approve or request changes', () => {
+  auth.isClientViewer = true;
+  render(<ClientPayrollReview payPeriod={{ ...period, can_decide_payroll_review: false }} companyId={3} onDone={onDone} />);
+  expect(screen.getByRole('button', { name: 'View preview' })).toBeTruthy();
+  expect(screen.getByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
+});
 it('requires acknowledgement for approval and binds it to the displayed revision', async () => {
   render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
   const approve = screen.getByRole('button', { name: 'Approve this revision' }) as HTMLButtonElement;

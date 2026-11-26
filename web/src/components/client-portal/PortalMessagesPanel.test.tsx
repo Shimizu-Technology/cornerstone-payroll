@@ -11,7 +11,8 @@ import type { PortalDocumentsApi } from './portalFiles';
 
 type Callbacks = { onConnected: () => void; onUnavailable: () => void; onError: () => void; onThread: (value: { thread: ClientPortalThread }) => void };
 const mocks = vi.hoisted(() => ({ company: 2, refresh: vi.fn(), subscribe: vi.fn(), callbacks: [] as Callbacks[] }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 5 } }) }));
+const auth = vi.hoisted(() => ({ user: { id: 5 }, isClientViewer: false }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth, useOptionalAuth: () => auth }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: mocks.company, refreshCompanies: mocks.refresh }) }));
 vi.mock('@/services/clientPortalCable', () => ({ subscribeToClientPortalThreads: mocks.subscribe }));
 const thread = (companyId: number, subject: string) => ({ id: companyId, company_id: companyId, subject, status: 'open', created_at: '2026-10-12T00:00:00Z', updated_at: '2026-10-12T00:00:00Z', unread: false, messages: [] } as ClientPortalThread);
@@ -26,7 +27,20 @@ beforeEach(() => {
   mocks.subscribe.mockImplementation((_company: number, callbacks: Callbacks) => { mocks.callbacks.push(callbacks); return Promise.resolve(vi.fn()); });
   api = { unreadCount: vi.fn().mockResolvedValue({ data: { unread_count: 0 } }), activity: vi.fn().mockResolvedValue({ data: [], meta: {} }), markRead: vi.fn(), list: vi.fn<ThreadsApi['list']>().mockResolvedValue({ data: [] }), get: vi.fn<ThreadsApi['get']>(), create: vi.fn<ThreadsApi['create']>(), update: vi.fn<ThreadsApi['update']>(), createMessage: vi.fn<ThreadsApi['createMessage']>() };
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); auth.isClientViewer = false; });
+
+it('shows a client viewer conversations with a view-only note instead of starting or replying', async () => {
+  auth.isClientViewer = true;
+  api.list.mockResolvedValue({ data: [thread(2, 'Payroll question')] });
+  api.get.mockResolvedValue({ data: { ...thread(2, 'Payroll question'), messages: [] } });
+  render(view());
+  fireEvent.click((await screen.findAllByText('Payroll question'))[0]);
+  await waitFor(() => expect(api.get).toHaveBeenCalled());
+  expect(screen.getAllByText('Your access is view-only. Ask your account manager for changes.').length).toBeGreaterThan(0);
+  expect(screen.queryByRole('button', { name: 'Start Conversation' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /New conversation/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+});
 
 it('clears revoked conversations, blocks sending, and lets the operator refresh access', async () => {
   api.list.mockResolvedValue({ data: [thread(2, 'Former client conversation')] });

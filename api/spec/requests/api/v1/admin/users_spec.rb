@@ -222,6 +222,47 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       expect(User.find_by!(email: "portal-user@example.com").company_assignments.pluck(:company_id)).to eq([ client_company.id ])
     end
 
+    it "invites a client user as a Client manager by default or a Client viewer, and lets staff change it later" do
+      post "/api/v1/admin/users",
+        params: { user: { email: "portal-manager@example.com", role: "client", company_ids: [ client_company.id ] } }
+      expect(response).to have_http_status(:created), response.body
+      expect(response.parsed_body.dig("data", "client_access_level")).to eq("manager")
+
+      post "/api/v1/admin/users", params: { user: { email: "portal-viewer@example.com", role: "client",
+        client_access_level: "viewer", company_ids: [ client_company.id ] } }
+      expect(response).to have_http_status(:created), response.body
+      viewer = User.find_by!(email: "portal-viewer@example.com")
+      expect(viewer).to be_client_viewer
+      expect(AuditLog.where(action: "users#created", record_id: viewer.id).sole.metadata.dig("after_values", "client_access_level"))
+        .to eq("viewer")
+
+      get "/api/v1/admin/users"
+      rows = response.parsed_body.fetch("data").index_by { |row| row.fetch("email") }
+      expect(rows.fetch("portal-viewer@example.com")).to include("client_access_level" => "viewer")
+      expect(rows.fetch("portal-manager@example.com")).to include("client_access_level" => "manager")
+      expect(rows.fetch("accountant@example.com")["client_access_level"]).to be_nil
+
+      patch "/api/v1/admin/users/#{viewer.id}", params: { user: { client_access_level: "manager" } }
+      expect(response).to have_http_status(:ok), response.body
+      expect(viewer.reload.client_access_level).to eq("manager")
+      audit = AuditLog.where(action: "users#updated", record_id: viewer.id).order(:id).last
+      expect(audit.metadata.fetch("changed_fields")).to eq([ "client_access_level" ])
+
+      # A change from a stale form (it saw viewer; it's manager now) is refused.
+      patch "/api/v1/admin/users/#{viewer.id}", params: { user: { client_access_level: "viewer", expected_client_access_level: "viewer" } }
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("client_access_changed")
+      expect(viewer.reload.client_access_level).to eq("manager")
+      # A name-only save leaves the level alone.
+      patch "/api/v1/admin/users/#{viewer.id}", params: { user: { name: "Renamed Viewer" } }
+      expect(response).to have_http_status(:ok)
+      expect(viewer.reload).to have_attributes(name: "Renamed Viewer", client_access_level: "manager")
+
+      patch "/api/v1/admin/users/#{viewer.id}", params: { user: { client_access_level: "owner" } }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(viewer.reload.client_access_level).to eq("manager")
+    end
+
     it "prevents organization admins from creating platform super admins" do
       expect {
         post "/api/v1/admin/users",

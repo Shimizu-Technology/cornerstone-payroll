@@ -5,19 +5,35 @@
 # employee sees before they are signed in is one generic answer.
 #
 # Lock order, the same on every path that changes links or their logins
-# (invite, resend, sign-up, bind, claim, and later retire, revoke and the
-# expiry sweep):
+# (invite, resend, reset, sign-up, bind, claim, and later retire, revoke and
+# the expiry sweep), and on contact edits:
 #
-#   1. the employee row, by staff actions that change the employee;
+#   0. the company row, always first when a path takes it:
+#      - contact edits (staff, client, bulk hygiene): company.lock!, FOR UPDATE;
+#      - invite and resend (lock_for_issuance!): FOR SHARE for a demo, which
+#        the demo kill switch takes exclusively, otherwise FOR KEY SHARE;
+#      - the sign-up and claim check (Verify) and reset: FOR KEY SHARE
+#        (lock_company!), the lock their later inserts' foreign-key checks
+#        on the company take anyway.
+#      Taking it before the employee is what stops a deadlock: a contact
+#      edit holding the company FOR UPDATE and waiting on the employee can't
+#      meet a link path holding the employee and waiting to insert a row that
+#      names the company. KEY SHARE and SHARE don't block each other, so
+#      sign-ups don't serialize with each other or with issuance.
+#   1. the employee row: contact edits and staff actions that change the
+#      employee, and Verify, so a contact edit can't commit between the
+#      email-on-file read and the activation;
 #   2. logins (users), lowest id first, FOR NO KEY UPDATE, so a link's
 #      foreign-key check on its login never waits behind them;
 #   3. links.
 #
-# A path that starts from a link reads it first without a lock, locks its
-# login, then locks the link and re-checks that its login didn't change.
-# Binding writes the employee's contact email last, without waiting: if a
-# staff action holds the employee row, the contact email isn't changed (the
-# login still binds). Clerk calls always happen outside transactions.
+# A path that starts from a link reads it first without a lock, then takes
+# the company, the employee, its login and the link, and re-checks that its
+# login didn't change. Bind is the one exception, because PayrollInvitation
+# locks the login before it starts: after the link it takes the company and
+# then the employee without waiting (Bind.locked_email_on_file), and fails
+# closed while a contact edit holds either. Clerk calls always happen outside
+# transactions.
 module EmployeeLinks
   class Error < StandardError; end
   class Forbidden < Error; end
@@ -37,15 +53,83 @@ module EmployeeLinks
     raise Forbidden, "Cornerstone staff access required" unless staff_management_allowed?(actor, company)
   end
 
-  # Pilot capability: the client's own company users can manage invitations.
-  # Unlocking, revoking and resetting sign-up still require staff management.
+  # Pilot capability: the client's own company users can manage invitations
+  # (a Client manager, not a read-only Client viewer). Unlocking, revoking
+  # and resetting sign-up still require staff management.
   def self.manage_invitations_allowed?(actor, company)
     staff_management_allowed?(actor, company) ||
-      (actor.is_a?(User) && actor.client? && actor.payroll_access_allowed? && actor.can_access_company?(company.id))
+      (actor.is_a?(User) && actor.client? && !actor.client_viewer? && actor.payroll_access_allowed? &&
+        actor.can_access_company?(company.id))
   end
 
   def self.require_invitation_management!(actor, company)
     raise Forbidden, "Employee invitation access required" unless manage_invitations_allowed?(actor, company)
+  end
+
+  STAFF_CODES_ONLY = "Only Cornerstone staff can create printed sign-up codes. Send an email invite instead."
+  EMAIL_MISMATCH = "This invite is for a different email address. Sign in with the email your employer has on file, " \
+    "or ask them to update it."
+  CODE_RETIRED = "This sign-up code can no longer be used. Ask your employer to send an invite to your email."
+
+  # Printed sign-up codes skip the email check at activation, because staff
+  # verified the person in person. So only staff can create one.
+  def self.require_code_issuer!(actor, company)
+    raise Forbidden, STAFF_CODES_ONLY unless staff_management_allowed?(actor, company)
+  end
+
+  # A printed code whose current generation staff issued, as recorded when it
+  # was issued. A code a client issued, or one with no recorded issuer,
+  # doesn't count: it never proved anything about the person.
+  def self.staff_printed_code?(link)
+    link.invite_delivery == "code" && link.invite_code_issued_by_staff == true
+  end
+
+  # Why a sign-up with this address can't finish, or nil when it can. Except
+  # for a staff-printed code, it must be the employee's email on file, and an
+  # emailed invite must have gone to that same address (opening it is the
+  # proof of the inbox, since Clerk's ticket alone proves nothing).
+  #
+  # email_on_file: the employee's email as read under its row lock, when the
+  # caller holds one; :locked when the lock couldn't be taken (refused).
+  def self.sign_up_email_refusal(link, email, email_on_file: link.employee.email)
+    # Contention first: a held row refuses even a staff-printed code, so the
+    # activation can't commit alongside a contact edit.
+    return :locked if email_on_file == :locked
+    return if staff_printed_code?(link)
+    return :code_retired if link.invite_delivery == "code"
+
+    :email_mismatch unless same_email?(email_on_file, email) && same_email?(link.invite_email, email)
+  end
+
+  # Clerk verification strategies where the person proved they receive mail
+  # at the address (a code, a link, or an email provider's sign-in).
+  PROVEN_STRATEGIES = /\A(?:email_code|email_link|from_oauth_[a-z_]+)\z/
+
+  # Whether a Clerk-verified address proves its inbox for this link: Clerk
+  # verified it by a code, a link or an email provider, or the link's current
+  # invite was emailed to that same address (opening it proved the inbox). A
+  # Clerk invitation ticket alone proves nothing: Payroll made that ticket.
+  def self.inbox_proven?(link, email, strategy)
+    return true if PROVEN_STRATEGIES.match?(strategy.to_s)
+
+    link.invite_delivery == "email" && same_email?(link.invite_email, email)
+  end
+
+  # Why an existing login can't claim this link, or nil when it can. identity
+  # is ClerkInvitationService.email_summary of the signed-in Clerk account:
+  # its verified primary email must be the employee's email on file, with
+  # proof of the inbox (inbox_proven?). A printed code staff didn't issue is
+  # retired here too.
+  def self.claim_email_refusal(link, identity)
+    return if staff_printed_code?(link)
+    return :code_retired if link.invite_delivery == "code"
+    return :email_mismatch unless identity.is_a?(Hash) && identity[:primary_verified]
+
+    primary = identity[:primary_email]
+    return :email_mismatch unless same_email?(link.employee.email, primary)
+
+    strategy = identity.fetch(:verification_strategies, {})[primary.to_s.downcase]
+    :email_mismatch unless inbox_proven?(link, primary, strategy)
   end
 
   def self.audit!(link, action, user: nil, actor: nil, metadata: {}, request: nil)
@@ -186,10 +270,21 @@ module EmployeeLinks
   # issuing transaction, then re-check the employee app is on; that re-check
   # reads only the cached employee service answer while the lock is held.
   def self.lock_for_issuance!(company)
-    return unless company&.demo?
+    return lock_company!(company) unless company&.demo?
 
     EmployeeAppSwitch::Enforcement.cached_attestation_only!
     Company.where(id: company.id).lock("FOR SHARE").pick(:id)
+  end
+
+  # Step 0 of the lock order for a path that will lock the employee and then
+  # insert rows naming the company (a login, an audit row): the company row,
+  # FOR KEY SHARE, which is what those inserts' foreign-key checks take
+  # anyway. Taken before the employee row, a contact edit (company FOR
+  # UPDATE, then employee) waits for this path instead of deadlocking with
+  # it. nowait: for Bind, which already holds its login and link.
+  def self.lock_company!(company_or_id, nowait: false)
+    id = company_or_id.is_a?(Company) ? company_or_id.id : company_or_id
+    Company.where(id: id).lock(nowait ? "FOR KEY SHARE NOWAIT" : "FOR KEY SHARE").pick(:id)
   end
 
   # A demo link's activation, claim, bind and data requests must come from

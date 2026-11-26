@@ -34,6 +34,8 @@ export interface Department {
 // ----------------
 
 export type UserRole = 'super_admin' | 'org_admin' | 'admin' | 'manager' | 'employee' | 'accountant' | 'client';
+/** A client portal login's access: Client manager (full) or Client viewer (read-only). */
+export type ClientAccessLevel = 'manager' | 'viewer';
 
 export interface AssignedCompanySummary {
   id: number;
@@ -48,6 +50,8 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  /** Set only for client logins. */
+  client_access_level?: ClientAccessLevel | null;
   organization_id?: number;
   organization_name?: string;
   company_id?: number;
