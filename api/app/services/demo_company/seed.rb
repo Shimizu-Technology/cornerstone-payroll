@@ -25,20 +25,23 @@ module DemoCompany
       {
         key: Roster::KITCHEN, name: "Harbor Finch Kitchen", slug: "harborfinch",
         # The 07 EIN prefix is never issued, so the number can't collide with a real employer.
-        profile: { ein: "07-2026101", address_line1: "214 Marine Corps Drive", city: "Hagåtña", state: "GU", zip: "96910",
-                   phone: "(671) 555-0140", email: "office@harborfinch.example", filing_contact_name: "Maren Fable",
-                   historical_payroll_enabled: true },
-        bank: { bank_name: "Tasi Cove Savings", bank_address: "88 Chalan Santo Papa, Hagåtña, GU 96910" },
+        profile: Roster::KITCHEN_ADDRESS.merge(
+          ein: "07-2026101", phone: "(671) 555-0140", email: "office@harborfinch.example",
+          filing_contact_name: Roster::CLIENT_MANAGER_LABEL, historical_payroll_enabled: true
+        ),
+        bank: { bank_name: Roster::BANK_NAME, bank_address: Roster::BANK_ADDRESS },
         branding: { "display_name" => "Harbor Finch Kitchen", "primary_color" => "#1F4E5F", "accent_color" => "#E3A857" },
-        help: [ { name: "Maren Fable", role: "General manager", phone: "(671) 555-0141", email: "manager@harborfinch.example" },
+        help: [ { name: Roster::CLIENT_MANAGER_LABEL, role: "General manager", phone: "(671) 555-0141", email: "manager@harborfinch.example" },
                 { name: "Front office", role: "Payroll questions", phone: "(671) 555-0142", email: "office@harborfinch.example" } ],
         departments: [ "Kitchen", "Front of house", "Office" ]
       },
       {
         key: Roster::CATERING, name: "Harbor Finch Catering", slug: "harborfinch-catering",
-        profile: { ein: "07-2026102", address_line1: "17 Route 8", city: "Maite", state: "GU", zip: "96910",
-                   phone: "(671) 555-0150", email: "events@harborfinch-catering.example", filing_contact_name: "Maren Fable" },
-        bank: { bank_name: "Tasi Cove Savings", bank_address: "88 Chalan Santo Papa, Hagåtña, GU 96910" },
+        profile: Roster::CATERING_ADDRESS.merge(
+          ein: "07-2026102", phone: "(671) 555-0150", email: "events@harborfinch-catering.example",
+          filing_contact_name: Roster::CLIENT_MANAGER_LABEL
+        ),
+        bank: { bank_name: Roster::BANK_NAME, bank_address: Roster::BANK_ADDRESS },
         branding: { "display_name" => "Harbor Finch Catering", "primary_color" => "#2E5E4E", "accent_color" => "#F2C14E" },
         help: [ { name: "Events desk", role: "Scheduling and pay", phone: "(671) 555-0151", email: "events@harborfinch-catering.example" } ],
         departments: [ "Events" ]
@@ -192,7 +195,7 @@ module DemoCompany
 
       departments = departments_for(company)
       Roster.people_for(company_key(company)).select { |person| person[:quickbooks] }.each do |person|
-        employee = Employee.find_by!(company: company, first_name: person[:first], last_name: person[:last])
+        employee = find_employee(company, person) || raise(ActiveRecord::RecordNotFound, "Missing QuickBooks employee #{person[:key]}")
         complete_profile!(employee, person, departments.fetch(person[:dept]))
         resolve_setup_reviews!(employee, person)
       end
@@ -236,6 +239,12 @@ module DemoCompany
 
     def company_key(company) = fixture_key(company)
 
+    # Matches strictly by the deterministic fictional SSN so a rerun stays
+    # idempotent and never collides with a custom employee sharing a name.
+    def find_employee(company, person)
+      Employee.find_by(company: company, ssn_encrypted: Roster.ssn_variants(person))
+    end
+
     # Fills the fields the employee app and payroll need, without overwriting
     # anything a tester has since changed.
     def complete_profile!(employee, person, department)
@@ -247,14 +256,16 @@ module DemoCompany
         payment_delivery_method: employee.payment_delivery_method.presence || person[:delivery],
         bank_routing_number_encrypted: employee.bank_routing_number_encrypted.presence || person[:routing],
         bank_account_number_encrypted: employee.bank_account_number_encrypted.presence || person[:account],
-        address_line1: employee.address_line1.presence || "#{100 + Roster::PEOPLE.index(person)} Chalan Pasaheru",
-        city: employee.city.presence || "Hagåtña", state: employee.state.presence || "GU", zip: employee.zip.presence || "96910"
+        address_line1: employee.address_line1.presence || Roster.address_line1_for(person),
+        city: employee.city.presence || Roster::EMPLOYEE_CITY,
+        state: employee.state.presence || Roster::EMPLOYEE_STATE,
+        zip: employee.zip.presence || Roster::EMPLOYEE_ZIP
       }
       employee.update!(fill.select { |field, value| employee.public_send(field) != value })
     end
 
     def ensure_native_employee!(company, department, person)
-      existing = Employee.find_by(company: company, first_name: person[:first], last_name: person[:last])
+      existing = find_employee(company, person)
       if existing
         # Repairs a run that stopped between the employee and its election.
         create_initial_w4_election!(existing) unless existing.employee_w4_elections.exists?
@@ -271,7 +282,8 @@ module DemoCompany
         filing_status: "single", allowances: 0, w4_effective_on: person[:hire_date], hire_date: person[:hire_date],
         date_of_birth: person[:dob], phone: person[:phone], payment_delivery_method: person[:delivery],
         bank_routing_number_encrypted: person[:routing], bank_account_number_encrypted: person[:account],
-        address_line1: "#{100 + Roster::PEOPLE.index(person)} Chalan Pasaheru", city: "Hagåtña", state: "GU", zip: "96910"
+        address_line1: Roster.address_line1_for(person), city: Roster::EMPLOYEE_CITY,
+        state: Roster::EMPLOYEE_STATE, zip: Roster::EMPLOYEE_ZIP
         ).tap { |created| create_initial_w4_election!(created) }
       end
       @employees_created += 1

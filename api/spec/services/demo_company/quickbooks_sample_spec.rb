@@ -35,7 +35,9 @@ RSpec.describe DemoCompany::QuickbooksSample do
     expect(check_page).to match(EmployeeDocuments::QuickbooksStubMatches::CHECK_NUMBER)
     pages.each do |text|
       expect(EmployeeDocuments::QuickbooksStubNumbers.possible_ssn?(text)).to be(false)
-      expect(text).not_to match(/routing|account|⑆|⑈|demo|sample/i)
+      expect(text).to include("101 Harbor Finch Way, Hagåtña, GU 96910")
+      expect(text).to match(/Employee: Employee 0[1-8]/)
+      expect(text).not_to match(/routing|account|⑆|⑈|demo|sample|Marine Corps|Chalan|Route 8/i)
     end
   end
 
