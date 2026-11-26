@@ -183,15 +183,18 @@ module EmployeeAppSwitch
       waiver_state? && current_process_guarded?
     end
 
-    # Whether a demo link's sign-up may even be checked on this process: only
-    # a process running its own guard (the employee service) serves one, in
-    # the early-access and the verified state alike. Elsewhere Activate
-    # refuses it before Verify locks or counts anything, so a match and a
-    # miss get the same answer.
-    def demo_activation_admitted?(company)
+    # Whether a demo link's sign-up or claim may even be checked on this
+    # process: only a process running its own guard (the employee service)
+    # serves one, in the early-access and the verified state alike.
+    # Elsewhere Activate and Claim refuse it before Verify locks or counts
+    # anything, so a match and a miss get the same answer. Callers ask this
+    # first: the process check reads no cached database state, and a later
+    # check (a subdomain or app-open read) could ask the employee service or
+    # retire early-access windows.
+    def demo_sign_up_admitted?(company)
       return true unless company&.demo?
 
-      demo_request_allowed?(company) && current_process_guarded?
+      current_process_guarded? && demo_request_allowed?(company)
     end
 
     # Whether a demo's app reads as on under the waiver. The employee service
