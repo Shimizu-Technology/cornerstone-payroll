@@ -107,8 +107,15 @@ RSpec.describe "Client viewer access", type: :request do
   it "tells the web app which level the login has" do
     get "/api/v1/auth/me", headers: headers(viewer)
     expect(response.parsed_body.dig("user", "client_access_level")).to eq("viewer")
+    get "/api/v1/companies", headers: headers(viewer)
+    expect(response.parsed_body.fetch("companies").sole).to include("client_view_only" => true, "workspace_can_write" => false)
+    get "/api/v1/client/employee_app_rollout/#{company.id}", headers: headers(viewer)
+    expect(response.parsed_body.fetch("data")).to include("can_manage_invites" => false, "can_print_codes" => false)
+
     get "/api/v1/auth/me", headers: headers(manager)
     expect(response.parsed_body.dig("user", "client_access_level")).to eq("manager")
+    get "/api/v1/companies", headers: headers(manager)
+    expect(response.parsed_body.fetch("companies").sole).to include("client_view_only" => false, "workspace_can_write" => true)
   end
 
   it "defaults new client logins to manager and only allows the two levels" do

@@ -9,6 +9,8 @@ import { employeeAppRolloutApi, type EmployeeAppAccess } from '@/services/employ
 import { EmployeeAppPanel } from './EmployeeAppPanel';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
+const auth = vi.hoisted(() => ({ isClientViewer: false }));
+vi.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => auth }));
 vi.mock('@/services/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/services/api')>()),
   apiClient: { get: mocks.get, post: mocks.post },
@@ -28,7 +30,7 @@ function openPanel(access: EmployeeAppAccess, audience: 'client' | 'admin' = 'cl
 }
 
 describe('Employee app panel', () => {
-  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); auth.isClientViewer = false; });
 
   it('explains why an invite cannot be sent while the company is off', async () => {
     openPanel({ ...employee, enabled: false, status: 'not_invited', can_invite: true });
@@ -39,7 +41,7 @@ describe('Employee app panel', () => {
   it('keeps the code until Done, confirms closing before Print, and clears it after printing', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const print = vi.spyOn(window, 'print').mockImplementation(() => {});
-    const user = openPanel(employee);
+    const user = openPanel({ ...employee, staff_actions: true, can_print_codes: true }, 'admin');
     mocks.post.mockResolvedValue({
       data: employee,
       print: { name: employee.name, code: 'ABCDEFGHJK', url: 'https://employees.example.test/activate', expires_at: employee.invite_expires_at },
@@ -50,7 +52,7 @@ describe('Employee app panel', () => {
 
     const printView = await screen.findByRole('dialog', { name: 'Print sign-up code' });
     expect(within(printView).getByText('ABCDE-FGHJK')).toBeTruthy();
-    expect(mocks.post).toHaveBeenCalledWith('/client/employees/5/employee_app/resend',
+    expect(mocks.post).toHaveBeenCalledWith('/admin/employees/5/employee_app/resend',
       { access_id: 10, delivery: 'code', confirm_same_person_email: false, reason: undefined }, { companyId: 1 });
 
     const backdrop = printView.closest('[data-dialog-portal]')?.querySelector('[data-dialog-backdrop]');
@@ -87,10 +89,45 @@ describe('Employee app panel', () => {
     mocks.post.mockRejectedValue(new ApiError(message, 409, undefined, { code: 'sign_up_accepted' }));
     await user.click(await screen.findByRole('button', { name: 'Resend invite' }));
     const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Create code' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Resend invite' }));
     expect(await within(dialog).findByRole('status')).toHaveProperty('textContent', message);
-    expect(within(dialog).queryByRole('button', { name: 'Create code' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Resend invite' })).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: 'Done' }));
+  });
+
+  it('offers a client manager email invites to the address on file only, never a printed code', async () => {
+    const user = openPanel({ ...employee, can_print_codes: false });
+    mocks.post.mockResolvedValue({ data: employee, email_status: 'sent' });
+    await user.click(await screen.findByRole('button', { name: 'Resend invite' }));
+    const dialog = within(screen.getByRole('dialog'));
+    expect(dialog.queryByRole('radio', { name: 'Printed code' })).toBeNull();
+    expect(dialog.getByText('worker@example.test')).toBeTruthy();
+    await user.click(dialog.getByRole('button', { name: 'Resend invite' }));
+    expect(mocks.post).toHaveBeenCalledWith('/client/employees/5/employee_app/resend',
+      { access_id: 10, delivery: 'email', confirm_same_person_email: false, reason: undefined }, { companyId: 1 });
+    cleanup();
+
+    const next = openPanel({ ...employee, email: null, status: 'not_invited', access_id: null, can_invite: true, can_print_codes: false });
+    await next.click(await screen.findByRole('button', { name: 'Invite' }));
+    const invite = within(screen.getByRole('dialog'));
+    expect(invite.queryByRole('radio')).toBeNull();
+    expect(invite.getByText(/The invite goes only to the email on file/)).toBeTruthy();
+    expect(invite.getByRole('button', { name: 'Invite' })).toHaveProperty('disabled', true);
+  });
+
+  it('keeps staff printed-code delivery available', async () => {
+    const user = openPanel({ ...employee, staff_actions: true, can_print_codes: true }, 'admin');
+    await user.click(await screen.findByRole('button', { name: 'Resend invite' }));
+    expect(within(screen.getByRole('dialog')).getByRole('radio', { name: 'Printed code' })).toBeTruthy();
+  });
+
+  it('shows a client viewer the status with a view-only note instead of invite or edit controls', async () => {
+    auth.isClientViewer = true;
+    openPanel({ ...employee, can_manage_invites: false, can_print_codes: false });
+    expect(await screen.findByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+    expect(screen.getByText('Invited')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Resend invite' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Edit contact details' })).toBeNull();
   });
 
   it('requires a reason before staff can revoke', async () => {

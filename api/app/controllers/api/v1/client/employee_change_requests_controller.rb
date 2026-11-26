@@ -118,7 +118,8 @@ module Api
             current_values = change_request.pending? ? change_request.employee.slice(*fields) : change_request.original_values
             payload[:original_values] = current_values.slice(*fields)
             payload[:proposed_changes] = change_request.proposed_changes.slice(*fields)
-            payload[:can_review] = profile_requests_enabled? && change_request.pending? && !change_request.same_person_reviewer?(current_user)
+            payload[:can_review] = profile_requests_enabled? && change_request.pending? && !current_user.client_viewer? &&
+              !change_request.same_person_reviewer?(current_user)
           elsif include_payloads
             payload[:proposed_changes] = sanitize_payload(change_request.proposed_changes)
             payload[:original_values] = sanitize_payload(change_request.original_values)

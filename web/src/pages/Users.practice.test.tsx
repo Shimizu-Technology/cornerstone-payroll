@@ -93,7 +93,7 @@ describe('Invite User with a practice copy', () => {
     await user.click(screen.getByRole('button', { name: /Send Invitation/ }));
 
     await waitFor(() => expect(apiMocks.users.create).toHaveBeenCalledExactlyOnceWith({
-      email: 'practice-b@example.invalid', name: 'practice-b', role: 'client', company_ids: [3],
+      email: 'practice-b@example.invalid', name: 'practice-b', role: 'client', client_access_level: 'manager', company_ids: [3],
     }));
   });
 
@@ -286,6 +286,6 @@ describe('Practice login whose copy was archived', () => {
     expect(within(table).queryByText('Production clients')).toBeNull();
     await user.click(within(table).getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledExactlyOnceWith(5, { name: 'Practice Login', role: 'client' }));
+    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledExactlyOnceWith(5, { name: 'Practice Login', role: 'client', client_access_level: 'manager' }));
   });
 });

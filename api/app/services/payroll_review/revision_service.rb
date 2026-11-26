@@ -100,7 +100,7 @@ module PayrollReview
     end
 
     def self.client_can_decide?(package, actor)
-      package&.pending? && !package.changes_requested_at && actor&.active? && actor.client? &&
+      package&.pending? && !package.changes_requested_at && actor&.active? && actor.client? && !actor.client_viewer? &&
         package.generated_by_id != actor.id && Current.view_as_grant.nil?
     end
 
