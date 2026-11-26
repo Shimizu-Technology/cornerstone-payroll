@@ -3,9 +3,11 @@ require_relative "../lib/canonical_proxy_headers"
 require_relative "../lib/write_maintenance"
 require_relative "../lib/logo_upload_body_limit"
 
-# Load environment variables from .env
+# Load environment variables from .env. A local production copy
+# (DEPLOYMENT_ENV=local, ops/local-prod) takes its settings only from its own
+# generated environment, never a developer's .env.
 require "dotenv"
-Dotenv.load
+Dotenv.load unless ENV["DEPLOYMENT_ENV"] == "local"
 require "ipaddr"
 
 require "rails"
