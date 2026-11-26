@@ -214,8 +214,17 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
         headers: bearer(claimant.clerk_id).merge("CONTENT_TYPE" => "application/json")
     end
 
-    it "refuses activation alike for a match and a miss, before any attempt is counted" do
+    def verify_enforcement!
+      allow(enforcement).to receive(:database_state).and_return(shadow.merge(phase: "enforced", enforced: true, enforced_tables: 1))
+      enforcement.reset_cache!
+    end
+
+    # A demo activation with no Origin header: refused before Verify takes
+    # any lock, with one answer for a match and a miss.
+    def expect_activation_refused_alike
+      issued
       before_state = counters(issued.link)
+      allow(EmployeeLinks).to receive(:lock_company!).and_call_original
 
       post_activation(activation_params(employee, code: issued.code))
       matched = [ response.status, response.parsed_body ]
@@ -226,6 +235,18 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
       expect(matched.first).to eq(422)
       expect(counters(issued.link)).to eq(before_state)
       expect(link_audits(issued.link, "activation_failed")).to be_empty
+      expect(EmployeeLinks).not_to have_received(:lock_company!)
+      expect(clerk_invitations).to be_empty
+    end
+
+    it "refuses activation alike for a match and a miss, before any attempt is counted" do
+      expect_activation_refused_alike
+    end
+
+    it "refuses activation alike for a match and a miss once RLS enforcement is verified, counting nothing" do
+      verify_enforcement!
+      expect(enforcement.demo_request_allowed?(demo)).to be(true)
+      expect_activation_refused_alike
     end
 
     it "refuses a claim alike for a match and a miss, leaving the invite as it was" do
@@ -270,6 +291,15 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
     end
 
     it "lets the guarded employee service count a miss as before" do
+      allow(enforcement).to receive(:current_process_guarded?).and_return(true)
+      post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(issued.link.reload.failed_activation_attempts).to eq(1)
+      expect(link_audits(issued.link, "activation_failed").count).to eq(1)
+    end
+
+    it "lets the guarded employee service count a miss once RLS enforcement is verified" do
+      verify_enforcement!
       allow(enforcement).to receive(:current_process_guarded?).and_return(true)
       post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
       expect(response).to have_http_status(:unprocessable_content)

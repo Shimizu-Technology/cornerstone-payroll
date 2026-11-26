@@ -32,6 +32,7 @@ module EmployeeEmails
           path: "claim", expires_at: expires_at, features: %i[stubs profile_requests]),
         "activation_notice" => EmployeeLinks::ActivationNoticeEmail.message(brands[:light],
           activated_at: expires_at, app_url: "https://pelicanrow.example.test"),
+        "email_change_notice" => EmployeeLinks::EmailChange.message(brands[:badge]),
         "tax_form_notice" => EmployeeDocuments::TaxFormNotice.message(brands[:badge], tax_year: 2026,
           employer: "Harbor Finch Kitchen", app_url: "https://harborfinch.example.test")
       }
