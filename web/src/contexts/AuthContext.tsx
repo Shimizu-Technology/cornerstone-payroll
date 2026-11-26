@@ -15,6 +15,7 @@ interface User {
   organization_name?: string;
   company_id: number | null;
   company_name: string | null;
+  employee_app_url?: string | null;
   assigned_company_ids: number[];
   capabilities: string[];
   company_capabilities?: Record<string, string[]>;
@@ -74,6 +75,7 @@ function mapAuthUser(user: AuthResponseUser): User {
     organization_name: user.organization_name,
     company_id: user.company_id,
     company_name: user.company_name,
+    employee_app_url: user.employee_app_url,
     assigned_company_ids: user.assigned_company_ids || [],
     capabilities: user.capabilities || [],
     company_capabilities: user.company_capabilities || {},

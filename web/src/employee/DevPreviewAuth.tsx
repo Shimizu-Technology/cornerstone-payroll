@@ -129,6 +129,7 @@ export function DevPreviewAuthProvider({ children }: { children: ReactNode }): R
 
   const value = useMemo<EmployeeAuthValue>(() => ({
     isSignedIn: signedIn,
+    email: signedIn ? 'preview.employee@example.test' : null,
     getToken: async () => (signedIn ? (verified.current ? 'dev-preview-token-verified' : 'dev-preview-token') : null),
     signOut: async (): Promise<void> => {
       if ((signOutFailuresLeft.current ?? 0) > 0) {

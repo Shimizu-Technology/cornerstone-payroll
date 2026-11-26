@@ -48,6 +48,23 @@ describe('employee app shell', () => {
     expect(screen.getByText('See your pay stubs and tax forms any time.')).toBeTruthy();
   });
 
+  it.each(['/sign-up', '/sign-up?__clerk_ticket='])('shows invitation instructions at %s without mounting the sign-up form', async (path) => {
+    window.history.pushState({}, '', path);
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText('To set up your account, open the invite link from your email.')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Sign in' }).getAttribute('href')).toBe('/sign-in');
+    expect(screen.queryByTestId('dev-preview-sign-up')).toBeNull();
+  });
+
+  it('renders the sign-up form when the invitation supplies a Clerk ticket', async () => {
+    window.history.pushState({}, '', '/sign-up?__clerk_ticket=preview');
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('button', { name: 'Finish preview sign-up' })).toBeTruthy();
+    expect(screen.queryByText('To set up your account, open the invite link from your email.')).toBeNull();
+  });
+
   it('opens the five tabs once the link checks out', async () => {
     signedIn();
     const fetchMock = respond({
@@ -69,6 +86,33 @@ describe('employee app shell', () => {
     const heading = await screen.findByRole('heading', { level: 1, name: 'Pay stubs' });
     expect(document.activeElement).toBe(heading);
     expect(screen.getByText('Your pay stubs will show here')).toBeTruthy();
+  });
+
+  it.each([false, true])('only ends the session for a missing stub when the link check also fails (%s)', async (linkEnded) => {
+    signedIn();
+    window.history.pushState({}, '', '/pay/12345?year=2025');
+    let contextChecks = 0;
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 42, company_name: 'Example Kitchen', status: 'active' }]),
+      '/employee/context': () => {
+        contextChecks += 1;
+        return linkEnded && contextChecks > 1
+          ? new Response(null, { status: 404 })
+          : Response.json({ features: { stubs: true } });
+      },
+      '/employee/statements': () => Response.json({ statements: [], years: [], next_page: null }),
+    }));
+    render(<EmployeeApp />);
+
+    if (linkEnded) {
+      expect(await screen.findByRole('heading', { name: 'Your access has ended' })).toBeTruthy();
+    } else {
+      expect(await screen.findByText("We couldn't find that pay stub.")).toBeTruthy();
+      await userEvent.click(screen.getByRole('link', { name: 'Back to pay stubs' }));
+      expect(window.location.pathname + window.location.search).toBe('/pay?year=2025');
+      expect(screen.getByRole('navigation', { name: 'Main' })).toBeTruthy();
+    }
+    expect(contextChecks).toBeGreaterThan(1);
   });
 
   it('remembers "Hide amounts" on this device', async () => {

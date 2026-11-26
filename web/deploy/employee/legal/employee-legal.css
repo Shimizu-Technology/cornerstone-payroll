@@ -29,6 +29,11 @@ h1 { margin-block: 0.75rem; font-size: clamp(1.875rem, 6vw, 2.5rem); }
 h2 { margin-block: 1.8rem 0.5rem; font-size: 1.25rem; }
 p { margin-block: 0.5rem 1rem; }
 a { color: #234c39; text-underline-offset: 0.2em; }
+header a, footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
 .version, .draft-notice { color: #52564f; font-size: 0.875rem; }
 .draft-notice { display: none; }
 body[data-status="draft"] .draft-notice { display: block; }
