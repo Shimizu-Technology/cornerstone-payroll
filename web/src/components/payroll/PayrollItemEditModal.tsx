@@ -318,6 +318,11 @@ export function PayrollItemEditModal({
         const invalid = fields.custom_deductions.find(deduction => deduction.amount == null || !Number.isFinite(deduction.amount) || deduction.amount <= 0);
         if (invalid) throw new Error(`Enter a positive amount for ${invalid.label}, or remove that deduction.`);
       }
+      // Mirrors the API rule (PayrollItem.check_date_year_problem): a changed
+      // check date must share the pay date's tax year.
+      if (taxYear && fields.check_date && fields.check_date !== (item.check_date || '') && fields.check_date.slice(0, 4) !== taxYear) {
+        throw new Error(`Check date must be in ${taxYear}, the year of this payroll's pay date. W-2GU and year-to-date totals count this check in that year.`);
+      }
       const tipsPaidOut = parseFloat(String(fields.tips_paid_out)) || 0;
       const reportedTips = Math.max(parseFloat(String(fields.reported_tips)) || 0, tipsPaidOut);
       const qualifiedOvertime = Number(fields.qualified_overtime_compensation);
