@@ -48,6 +48,44 @@ module EmployeeLinks
     raise Forbidden, "Employee invitation access required" unless manage_invitations_allowed?(actor, company)
   end
 
+  STAFF_CODES_ONLY = "Only Cornerstone staff can create printed sign-up codes. Send an email invite instead."
+  EMAIL_MISMATCH = "This invite is for a different email address. Sign in with the email your employer has on file, " \
+    "or ask them to update it."
+  CODE_RETIRED = "This sign-up code can no longer be used. Ask your employer to send an invite to your email."
+
+  # Printed sign-up codes skip the email check at activation, because staff
+  # verified the person in person. So only staff can create one.
+  def self.require_code_issuer!(actor, company)
+    raise Forbidden, STAFF_CODES_ONLY unless staff_management_allowed?(actor, company)
+  end
+
+  # A printed code whose current generation staff issued. Older codes a
+  # client issued don't count: they never proved anything about the person.
+  def self.staff_printed_code?(link)
+    link.invite_delivery == "code" && link.invited_by&.staff_member? == true
+  end
+
+  # Why a sign-up with this address can't finish, or nil when it can. Except
+  # for a staff-printed code, it must be the employee's email on file, and an
+  # emailed invite must have gone to that same address (opening it is the
+  # proof of the inbox, since Clerk's ticket alone proves nothing).
+  def self.sign_up_email_refusal(link, email)
+    return if staff_printed_code?(link)
+    return :code_retired if link.invite_delivery == "code"
+
+    :email_mismatch unless same_email?(link.employee.email, email) && same_email?(link.invite_email, email)
+  end
+
+  # Why an existing login can't claim this link, or nil when it can. identity
+  # is ClerkInvitationService.email_summary of the signed-in Clerk account:
+  # its verified primary email must be the employee's email on file.
+  def self.claim_email_refusal(link, identity)
+    return if staff_printed_code?(link)
+    return :email_mismatch unless identity.is_a?(Hash) && identity[:primary_verified]
+
+    :email_mismatch unless same_email?(link.employee.email, identity[:primary_email])
+  end
+
   def self.audit!(link, action, user: nil, actor: nil, metadata: {}, request: nil)
     AuditLog.record!(
       user: user, actor: actor || (AuditActor.for_user(user) if user),

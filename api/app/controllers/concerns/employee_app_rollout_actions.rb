@@ -8,6 +8,7 @@ module EmployeeAppRolloutActions
   MAX_WAVE_SIZE = 25
   APP_OFF = "The employee app isn't turned on for this company."
   EMPLOYEE_NOT_FOUND = "Employee not found in this company."
+  EMAIL_ON_FILE_ONLY = "Email invites go only to the employee's email on file. Update their contact details first."
 
   included do
     before_action :disable_response_caching
@@ -38,7 +39,8 @@ module EmployeeAppRolloutActions
 
   def show
     summary = rollout.summary(actor: current_user)
-    render json: { data: summary.merge(can_manage_invites: can_manage_invites?, max_wave_size: MAX_WAVE_SIZE) }
+    render json: { data: summary.merge(can_manage_invites: can_manage_invites?, can_print_codes: staff_actions?,
+      max_wave_size: MAX_WAVE_SIZE) }
   end
 
   def employee
@@ -53,6 +55,7 @@ module EmployeeAppRolloutActions
     options = { actor: current_user, request: request }
     EmployeeLinks.require_staff!(current_user, current_company) if %w[unlock revoke reset_sign_up].include?(operation)
     access = access_for_change(record) unless operation == "invite"
+    refuse_other_address!(record.email)
 
     result = case operation
     when "invite"
@@ -78,6 +81,7 @@ module EmployeeAppRolloutActions
         employee_ids.all? { |id| positive_id?(id) }
       raise EmployeeLinks::Error, "Select between 1 and #{MAX_WAVE_SIZE} employees."
     end
+    refuse_other_address!(nil)
     delivery = delivery_options.merge(confirm_same_person_email: false)
 
     skip_default_audit_log!
@@ -109,6 +113,19 @@ module EmployeeAppRolloutActions
     EmployeeLinks.manage_invitations_allowed?(current_user, current_company)
   end
 
+  def staff_actions?
+    EmployeeLinks.staff_management_allowed?(current_user, current_company)
+  end
+
+  # Invites are always sent to the address on the employee's record; a
+  # request naming any other address is refused rather than ignored.
+  def refuse_other_address!(email_on_file)
+    return unless params.key?(:email)
+    return if email_on_file && params[:email].is_a?(String) && EmployeeLinks.same_email?(params[:email], email_on_file)
+
+    raise EmployeeLinks::Error, EMAIL_ON_FILE_ONLY
+  end
+
   def rollout
     @rollout ||= EmployeeAppRollout.new(current_company)
   end
@@ -116,7 +133,7 @@ module EmployeeAppRolloutActions
   def employee_payload(record)
     rollout.employee_status(record, rollout.latest_access(record), include_issuer: current_user.staff_member?).merge(
       enabled: rollout.enabled, can_manage_invites: can_manage_invites?,
-      staff_actions: EmployeeLinks.staff_management_allowed?(current_user, current_company)
+      staff_actions: staff_actions?, can_print_codes: staff_actions?
     )
   end
 
@@ -140,6 +157,9 @@ module EmployeeAppRolloutActions
 
     delivery = params[:delivery]
     raise EmployeeLinks::Error, "Choose email or a printed sign-up code." unless %w[email code].include?(delivery)
+    # Printed codes are staff-only (EmployeeLinks.require_code_issuer!),
+    # refused here as a 403 before any invite in a wave is attempted.
+    EmployeeLinks.require_code_issuer!(current_user, current_company) if delivery == "code"
     if delivery == "code" && !EmployeeLinks::AppUrl.origin_for(current_company)
       raise EmployeeLinks::Error, "The employee app address isn't set up for this company."
     end

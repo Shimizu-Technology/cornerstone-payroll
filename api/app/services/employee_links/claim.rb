@@ -11,8 +11,12 @@ module EmployeeLinks
   # organization, have no other open link at that company, and either be the
   # login the invite was routed to (confirmed as the same person, M4-3) or
   # carry the employee's first and last name. Every refusal is the same
-  # generic failure.
+  # generic failure, except one: once the check passed, a login whose Clerk
+  # verified primary email isn't the employee's email on file is refused with
+  # refusal == :email_mismatch (unless staff printed the code).
   class Claim
+    attr_reader :refusal
+
     def self.call(...)
       new(...).call
     end
@@ -33,6 +37,7 @@ module EmployeeLinks
     def call
       return unless user_allowed?
 
+      @identity = clerk_identity
       replaced_invitation = nil
       # The claimant (and an abandoned pending sign-up on the link) are locked
       # before the link, so two claims by one login serialize and the second
@@ -89,8 +94,20 @@ module EmployeeLinks
       return false if link.user_id.present? && link.user_id != @user.id && !pending_sign_up?(link.user)
       return false if EmployeeAccountLink.where(user_id: @user.id, company_id: link.company_id, status: %w[invited active])
         .where.not(id: link.id).exists?
+      return false unless same_person?(link)
 
-      same_person?(link)
+      @refusal = EmployeeLinks.claim_email_refusal(link, @identity)
+      @refusal.nil?
+    end
+
+    # The signed-in Clerk account's addresses, read before any lock (Clerk
+    # calls stay outside transactions). nil when Clerk can't answer.
+    def clerk_identity
+      clerk_user = @clerk.fetch_user(@user.clerk_id)
+      ClerkInvitationService.email_summary(clerk_user) if clerk_user
+    rescue StandardError => error
+      Rails.logger.warn("[EmployeeLinks::Claim] Could not read the Clerk account: #{error.class}")
+      nil
     end
 
     def same_person?(link)
