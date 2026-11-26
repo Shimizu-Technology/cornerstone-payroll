@@ -100,6 +100,10 @@ RSpec.describe "Employee tax form notices", type: :request do
           disclosure_digest: disclosure.digest, given_at: 1.day.ago, access_proof_verified_at: 1.day.ago,
           method: "employee_portal_pdf_verified")
         PortalNotificationRecipient.create!(company: company, email: "staff@example.test")
+        opted_out = create(:user, company: company, role: "admin")
+        list_portal_recipient!(company, user: opted_out)
+        PortalNotificationPreference.create!(user: opted_out, category: "tax_form_paper_copies", delivery_mode: "off")
+        create(:user, :with_client_assignment, company: company, role: "client", client_access_level: "viewer")
         notice_for(employee, message_id: nil)
       end
       allow(PortalNotifications).to receive(:delivery_enabled?).and_return(true)
@@ -121,11 +125,13 @@ RSpec.describe "Employee tax form notices", type: :request do
       TenantScope.as_system(reason: "Spec checks consent and staff alert") do
         expect(consent.reload).to be_active
         event = PortalNotificationEvent.where(event_type: "tax_form_paper_required").sole
-        expect(event.deliveries.count).to eq(1)
+        expect(event.deliveries.pluck(:status, :delivery_mode, :skip_reason)).to contain_exactly(
+          [ "pending", "immediate", nil ], [ "skipped", "immediate", "preference_off" ])
         PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
       end
       expect(PortalNotifications::Transport).to have_received(:deliver).with(
-        hash_including(subject: "Paper tax form follow-up required"), idempotency_key: anything).once
+        hash_including(subject: "Paper W-2 due — #{company.name} (2026)",
+          to: "staff@example.test", text: include("/companies/#{company.id}/year-end?year=2026")), idempotency_key: anything).once
     end
 
     it "records delivery, and ignores events for other email" do

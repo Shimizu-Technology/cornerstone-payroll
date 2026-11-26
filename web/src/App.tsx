@@ -411,6 +411,10 @@ function AppRoutes() {
           <Route path="employee-app" element={<EmployeeAppSettings />} />
           <Route path="employee-app/rollout" element={<EmployeeAppRollout audience={isClient ? 'client' : 'admin'} />} />
           <Route path="employee-app/switch" element={<StaffOnlyRoute><CapabilityRoute capability="manage_employee_app_switch"><EmployeeAppSwitch /></CapabilityRoute></StaffOnlyRoute>} />
+          <Route path="messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
+          <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />
+          <Route path="change-requests" element={<ClientOnlyRoute><ClientChangeRequests /></ClientOnlyRoute>} />
+          <Route path="payroll-files" element={<PayrollFilesRoute><PayrollPeriodsList audience="client" /></PayrollFilesRoute>} />
           <Route path="client-documents" element={<StaffOnlyRoute><AdminClientDocumentsPage /></StaffOnlyRoute>} />
           <Route path="client-messages" element={<StaffOnlyRoute><AdminClientMessagesPage /></StaffOnlyRoute>} />
           <Route path="payroll-submissions" element={<StaffOnlyRoute><PayrollPeriodsList audience="staff" /></StaffOnlyRoute>} />
