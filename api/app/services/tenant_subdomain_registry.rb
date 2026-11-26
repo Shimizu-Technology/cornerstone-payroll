@@ -1,12 +1,11 @@
 # frozen_string_literal: true
 
 class TenantSubdomainRegistry
-  ROOT_DOMAIN = "shimizu-technology.com"
+  # Hosted services always use this domain. Only a local production copy
+  # (DEPLOYMENT_ENV=local, see LocalDeployment) serves tenants elsewhere.
+  DEFAULT_ROOT_DOMAIN = "shimizu-technology.com"
   SLUG_PATTERN = /\A(?!xn--)[a-z0-9][a-z0-9-]{1,38}[a-z0-9]\z/
-  HOST_PATTERN = /\A([a-z0-9-]+)\.#{Regexp.escape(ROOT_DOMAIN)}\z/
-  ORIGIN_PATTERN = /\Ahttps:\/\/([a-z0-9-]+)\.#{Regexp.escape(ROOT_DOMAIN)}\z/
-  CLIENT_ORIGIN_PATTERN = %r{\Ahttps?://(?:[^/?#@]*@)?([^./?#:]+)\.#{Regexp.escape(ROOT_DOMAIN)}\.?(?=[:/?#]|\z)}i
-  RESERVED_SLUGS = %w[payroll api clerk clkmail accounts www staging mail admin app my status docs support tax aire aire-api plane shimizu].freeze
+  RESERVED_SLUGS = %w[payroll api employee-api clerk clkmail accounts www staging mail admin app my status docs support tax aire aire-api plane shimizu].freeze
   BRANDING_PATH = %r{\A/api/v1/public/tenant_branding/?\z}
   TERMS_PATH = %r{\A/api/v1/public/employee_terms/?\z}
   TERMS_METHODS = %w[GET OPTIONS].freeze
@@ -24,17 +23,60 @@ class TenantSubdomainRegistry
   @cache_version = 0
   CACHE_VERSION_LOCK = Mutex.new
 
+  def self.root_domain
+    LocalDeployment.tenant_root_domain || DEFAULT_ROOT_DOMAIN
+  end
+
+  def self.tenant_host(slug)
+    "#{slug}.#{root_domain}"
+  end
+
+  # Browsers include a non-default port in Origin, so a local copy's carries it.
+  def self.tenant_origin(slug)
+    "https://#{tenant_host(slug)}#{LocalDeployment.port_suffix}"
+  end
+
+  def self.host_pattern
+    patterns.fetch(:host)
+  end
+
+  def self.origin_pattern
+    patterns.fetch(:origin)
+  end
+
+  def self.client_origin_pattern
+    patterns.fetch(:client_origin)
+  end
+
+  # Built once per root domain and port; both are fixed for a process.
+  def self.patterns
+    key = [ root_domain, LocalDeployment.port_suffix ].freeze
+    cached = @patterns
+    return cached.last if cached&.first == key
+
+    root = Regexp.escape(key.first)
+    port = Regexp.escape(key.last)
+    built = {
+      host: /\A([a-z0-9-]+)\.#{root}\z/,
+      origin: /\Ahttps:\/\/([a-z0-9-]+)\.#{root}#{port}\z/,
+      client_origin: %r{\Ahttps?://(?:[^/?#@]*@)?([^./?#:]+)\.#{root}\.?(?=[:/?#]|\z)}i
+    }.freeze
+    @patterns = [ key, built ].freeze
+    built
+  end
+  private_class_method :patterns
+
   # Recognize malformed variants of tenant origins too, so they cannot fall
   # back to the static allowlist or the pre-cutover Clerk behavior.
   def self.client_origin?(origin)
     return false unless origin.is_a?(String)
 
-    slug = origin.strip.match(CLIENT_ORIGIN_PATTERN)&.[](1)
+    slug = origin.strip.match(client_origin_pattern)&.[](1)
     slug.present? && !RESERVED_SLUGS.include?(slug.downcase)
   end
 
   def self.tenant_shaped_origin?(origin)
-    slug = ORIGIN_PATTERN.match(origin.to_s)&.[](1)
+    slug = origin_pattern.match(origin.to_s)&.[](1)
     slug.present? && SLUG_PATTERN.match?(slug) && !RESERVED_SLUGS.include?(slug)
   end
 
@@ -45,11 +87,11 @@ class TenantSubdomainRegistry
   def self.enabled_origin_company_id(origin)
     return unless origin.is_a?(String)
 
-    enabled_company_id(origin.match(ORIGIN_PATTERN)&.[](1))
+    enabled_company_id(origin.match(origin_pattern)&.[](1))
   end
 
   def self.branding_for(host: nil, slug: nil, logo_base_url: nil)
-    slug = host.match(HOST_PATTERN)&.[](1) if host.is_a?(String) && slug.nil?
+    slug = host.match(host_pattern)&.[](1) if host.is_a?(String) && slug.nil?
     company_id = enabled_company_id(slug)
     return unless company_id
 
@@ -110,10 +152,17 @@ class TenantSubdomainRegistry
     return unless uri.is_a?(URI::HTTPS) && uri.userinfo.nil? && uri.query.nil? && uri.fragment.nil?
 
     host = uri.host&.delete_suffix(".")
-    value if PUBLIC_LOGO_HOST.match?(host.to_s) && !PRIVATE_LOGO_HOST.match?(host)
+    value if (PUBLIC_LOGO_HOST.match?(host.to_s) && !PRIVATE_LOGO_HOST.match?(host)) || local_tenant_host?(host)
   rescue URI::InvalidURIError
     nil
   end
+
+  # A local production copy's own hosts, e.g. its shared EMPLOYEE_APP_URL.
+  def self.local_tenant_host?(host)
+    root = LocalDeployment.tenant_root_domain
+    root.present? && host.present? && (host == root || host.end_with?(".#{root}"))
+  end
+  private_class_method :local_tenant_host?
 
   def self.hex_color(value)
     value if value.is_a?(String) && value.match?(/\A#[a-f0-9]{6}\z/i)

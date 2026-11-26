@@ -17,7 +17,7 @@ RSpec.describe "Employee portal demo guard", type: :request do
       email: "reviewer+jordan@demo-mail.example")
   end
   let!(:link) { EmployeeAccountLink.create!(user: worker, company: company, employee: employee, status: "active") }
-  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::ROOT_DOMAIN}" }
+  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::DEFAULT_ROOT_DOMAIN}" }
   let(:shared_origin) { EmployeeLinkHelpers::PAYROLL_ORIGIN }
 
   around do |example|
