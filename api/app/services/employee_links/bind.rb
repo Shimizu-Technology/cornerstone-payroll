@@ -5,10 +5,6 @@ module EmployeeLinks
   # calls it inside TenantScope.as_system and the user's row lock, in the same
   # transaction that binds the Clerk ID, so either both happen or neither does.
   module Bind
-    # Clerk verification strategies where the person proved they receive mail
-    # at the address (a code, a link, or an email provider's sign-in).
-    PROVEN_STRATEGIES = /\A(?:email_code|email_link|from_oauth_[a-z_]+)\z/
-
     module_function
 
     # Locks the link (after the user, per the EmployeeLinks lock order) and
@@ -24,20 +20,41 @@ module EmployeeLinks
       return unless generation.is_a?(Integer) && generation.positive?
 
       link = EmployeeAccountLink.lock.find_by(id: link_id, user_id: user.id)
-      now = Time.current
-      return unless link&.invite_open?(now) && link.invite_generation == generation
-      return unless !link.activation_locked?(now) && link.claim_user_id.nil? && link.employee.active?
-      return unless link.portal_enabled? && EmployeeLinks.origin_allows_company?(azp, link.company_id)
+      return unless link && link.invite_generation == generation
+      # The bound address is the Clerk account's verified primary
+      # (PayrollInvitation#invited_identity?); it must be the one on file.
+      return unless link_bindable?(link, user, email_on_file: locked_email_on_file(link))
+      return unless EmployeeLinks.origin_allows_company?(azp, link.company_id)
       return unless EmployeeLinks.demo_boundary_allows?(user, link.company)
       return unless EmployeeLinks.demo_request_allowed?(link.company, azp)
       # A demo login binds only with an allow-listed sign-in address, which
       # also covers printed-code sign-ups.
       return unless DemoOutbound.permit?(company: link.company, email: user.email, channel: "employee_link_bind", user: user)
-      # The bound address is the Clerk account's verified primary
-      # (PayrollInvitation#invited_identity?); it must be the one on file.
-      return if EmployeeLinks.sign_up_email_refusal(link, user.email)
 
       link
+    end
+
+    # The link-side rule for whether this pending login's sign-up could bind
+    # right now, shared with Resend (which tells staff whether to have the
+    # person sign in or to reset the sign-up): the invite still open and not
+    # locked, routed to no other login, the employee active, the app on, and
+    # the sign-up address still allowed (EmployeeLinks.sign_up_email_refusal).
+    def link_bindable?(link, user, now: Time.current, email_on_file: link.employee.email)
+      link.invite_open?(now) && !link.activation_locked?(now) && link.claim_user_id.nil? && link.employee.active? &&
+        link.portal_enabled? && EmployeeLinks.sign_up_email_refusal(link, user.email, email_on_file: email_on_file).nil?
+    end
+
+    # The employee row comes after the user and link here (the user is locked
+    # first by PayrollInvitation), so it is taken without waiting: while a
+    # contact edit holds it, the bind fails closed and the next sign-in
+    # retries. Holding it to commit means that edit can't land between this
+    # final email read and the activation.
+    def locked_email_on_file(link)
+      Employee.transaction(requires_new: true) do
+        Employee.where(id: link.employee_id).lock("FOR NO KEY UPDATE NOWAIT").pick(:email)
+      end
+    rescue ActiveRecord::LockWaitTimeout
+      :locked
     end
 
     def activate!(link, user, request:, identity:)
@@ -59,7 +76,7 @@ module EmployeeLinks
     def email_proven?(link, user, identity)
       strategy = identity.fetch(:verification_strategies, {})[EmployeeLinks.normalized_email(user.email)]
       return false if strategy.nil?
-      return true if PROVEN_STRATEGIES.match?(strategy)
+      return true if EmployeeLinks::PROVEN_STRATEGIES.match?(strategy)
 
       strategy == "ticket" && link.invite_delivery == "email" && EmployeeLinks.same_email?(link.invite_email, user.email)
     end

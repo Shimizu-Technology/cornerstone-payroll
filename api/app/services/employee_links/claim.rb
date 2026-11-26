@@ -11,9 +11,10 @@ module EmployeeLinks
   # organization, have no other open link at that company, and either be the
   # login the invite was routed to (confirmed as the same person, M4-3) or
   # carry the employee's first and last name. Every refusal is the same
-  # generic failure, except one: once the check passed, a login whose Clerk
-  # verified primary email isn't the employee's email on file is refused with
-  # refusal == :email_mismatch (unless staff printed the code).
+  # generic failure, except these, named once the check passed
+  # (EmployeeLinks.claim_email_refusal): refusal == :email_mismatch when the
+  # Clerk account's verified primary email isn't the employee's email on file
+  # with proof of the inbox, or :code_retired for a code staff didn't issue.
   class Claim
     attr_reader :refusal
 

@@ -26,7 +26,10 @@ module EmployeeLinks
 
     module_function
 
-    def issue(link, delivery:, email: nil, now: Time.current)
+    # issued_by_staff: whether Cornerstone staff issue this code generation
+    # (EmployeeLinks.staff_printed_code?). Recorded per generation, never
+    # inferred later from the issuer's current role.
+    def issue(link, delivery:, email: nil, issued_by_staff: false, now: Time.current)
       # An emailed invite for a demo company is issued only to an
       # allow-listed address; a printed code proves its address at bind.
       if delivery == "email" && !DemoOutbound.permit?(company: link.company, email: email, channel: "employee_link_invite")
@@ -44,6 +47,7 @@ module EmployeeLinks
         invite_token_digest: token && EmployeeAccountLink.token_digest(token),
         invite_code_digest: code && EmployeeAccountLink.code_digest(code),
         invite_email: delivery == "email" ? EmployeeLinks.normalized_email(email) : nil,
+        invite_code_issued_by_staff: delivery == "code" ? issued_by_staff == true : nil,
         invite_expires_at: now + EmployeeAccountLink::INVITE_LIFETIME,
         last_invited_at: now,
         # A new generation retires every Clerk sign-up started for the old one.

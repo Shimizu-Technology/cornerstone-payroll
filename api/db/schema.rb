@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1004,6 +1004,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_090000) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "invite_code_digest"
+    t.boolean "invite_code_issued_by_staff"
     t.string "invite_delivery"
     t.string "invite_email"
     t.bigint "claim_user_id"

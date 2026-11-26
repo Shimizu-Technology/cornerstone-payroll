@@ -61,31 +61,57 @@ module EmployeeLinks
     raise Forbidden, STAFF_CODES_ONLY unless staff_management_allowed?(actor, company)
   end
 
-  # A printed code whose current generation staff issued. Older codes a
-  # client issued don't count: they never proved anything about the person.
+  # A printed code whose current generation staff issued, as recorded when it
+  # was issued. A code a client issued, or one with no recorded issuer,
+  # doesn't count: it never proved anything about the person.
   def self.staff_printed_code?(link)
-    link.invite_delivery == "code" && link.invited_by&.staff_member? == true
+    link.invite_delivery == "code" && link.invite_code_issued_by_staff == true
   end
 
   # Why a sign-up with this address can't finish, or nil when it can. Except
   # for a staff-printed code, it must be the employee's email on file, and an
   # emailed invite must have gone to that same address (opening it is the
   # proof of the inbox, since Clerk's ticket alone proves nothing).
-  def self.sign_up_email_refusal(link, email)
+  #
+  # email_on_file: the employee's email as read under its row lock, when the
+  # caller holds one; :locked when the lock couldn't be taken (refused).
+  def self.sign_up_email_refusal(link, email, email_on_file: link.employee.email)
     return if staff_printed_code?(link)
     return :code_retired if link.invite_delivery == "code"
+    return :locked if email_on_file == :locked
 
-    :email_mismatch unless same_email?(link.employee.email, email) && same_email?(link.invite_email, email)
+    :email_mismatch unless same_email?(email_on_file, email) && same_email?(link.invite_email, email)
+  end
+
+  # Clerk verification strategies where the person proved they receive mail
+  # at the address (a code, a link, or an email provider's sign-in).
+  PROVEN_STRATEGIES = /\A(?:email_code|email_link|from_oauth_[a-z_]+)\z/
+
+  # Whether a Clerk-verified address proves its inbox for this link: Clerk
+  # verified it by a code, a link or an email provider, or the link's current
+  # invite was emailed to that same address (opening it proved the inbox). A
+  # Clerk invitation ticket alone proves nothing: Payroll made that ticket.
+  def self.inbox_proven?(link, email, strategy)
+    return true if PROVEN_STRATEGIES.match?(strategy.to_s)
+
+    link.invite_delivery == "email" && same_email?(link.invite_email, email)
   end
 
   # Why an existing login can't claim this link, or nil when it can. identity
   # is ClerkInvitationService.email_summary of the signed-in Clerk account:
-  # its verified primary email must be the employee's email on file.
+  # its verified primary email must be the employee's email on file, with
+  # proof of the inbox (inbox_proven?). A printed code staff didn't issue is
+  # retired here too.
   def self.claim_email_refusal(link, identity)
     return if staff_printed_code?(link)
+    return :code_retired if link.invite_delivery == "code"
     return :email_mismatch unless identity.is_a?(Hash) && identity[:primary_verified]
 
-    :email_mismatch unless same_email?(link.employee.email, identity[:primary_email])
+    primary = identity[:primary_email]
+    return :email_mismatch unless same_email?(link.employee.email, primary)
+
+    strategy = identity.fetch(:verification_strategies, {})[primary.to_s.downcase]
+    :email_mismatch unless inbox_proven?(link, primary, strategy)
   end
 
   def self.audit!(link, action, user: nil, actor: nil, metadata: {}, request: nil)

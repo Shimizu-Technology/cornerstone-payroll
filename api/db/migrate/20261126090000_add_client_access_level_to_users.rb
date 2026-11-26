@@ -12,7 +12,10 @@ class AddClientAccessLevelToUsers < ActiveRecord::Migration[8.1]
     add_check_constraint :users, "client_access_level IN ('manager', 'viewer')", name: "users_client_access_level_check"
   end
 
+  # Rolling back drops every viewer assignment; migrating again restores all
+  # client logins as managers, so re-mark viewers after a rollback.
   def down
+    execute "SET LOCAL lock_timeout = '5s'"
     remove_check_constraint :users, name: "users_client_access_level_check"
     remove_column :users, :client_access_level
   end

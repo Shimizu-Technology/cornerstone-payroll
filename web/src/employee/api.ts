@@ -25,7 +25,8 @@ export type EmployeeApiErrorKind =
   | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
   | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
-  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'terms_updated';
+  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'terms_updated'
+  | 'email_mismatch' | 'code_retired';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -120,6 +121,11 @@ export function errorForStatus(status: number, retryAfterHeader: string | null =
   if (status === 401) return new EmployeeApiError('unauthorized', status);
   if (status === 403 && code === 'mfa_enrollment_required') return new EmployeeApiError('mfa_enrollment_required', status);
   if (status === 403 && code === 'mfa_required') return new EmployeeApiError('mfa_required', status);
+  // Sign-up and claim name these only after the invite check passed
+  // (EmployeeLinks::EMAIL_MISMATCH, CODE_RETIRED), so they reveal nothing.
+  if ((status === 403 || status === 422) && (code === 'email_mismatch' || code === 'code_retired')) {
+    return new EmployeeApiError(code, status);
+  }
   // Any other 403 is treated like 404 so nothing leaks.
   if (status === 403 || status === 404) return new EmployeeApiError('not_found', status);
   if (status === 429 && code === 'email_code_daily_limit') return new EmployeeApiError(code, status);

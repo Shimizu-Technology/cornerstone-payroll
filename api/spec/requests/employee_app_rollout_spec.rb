@@ -372,6 +372,20 @@ RSpec.describe "Employee app rollout administration", type: :request do
       expect(link_audits(issued.link, "invite_resent")).to be_empty
     end
 
+    it "tells staff to reset an accepted sign-up that bind would refuse, not to have the person sign in" do
+      issued = invite!(employee, actor: staff)
+      post_activation(activation_params(employee, token: issued.token))
+      expect_sign_up_started
+      accept_clerk_invitation!("user_mismatch_rollout")
+      # The bind rule (Bind.link_bindable?) now refuses this sign-up's address.
+      employee.update_columns(email: "worker.new@example.test")
+
+      mutate(staff, "resend", access_id: issued.link.id, delivery: "email")
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body).to include("code" => "sign_up_accepted", "error" => EmployeeLinks::Resend::ACCEPTED_STALE)
+      expect(issued.link.reload.invite_generation).to eq(1)
+    end
+
     it "shows a failed staff reset as pending and audits a successful retry with a fresh code" do
       issued = invite!(employee, actor: staff, delivery: "code")
       post_activation(activation_params(employee, code: issued.code))

@@ -280,6 +280,19 @@ RSpec.describe "Employee link retirement", type: :request do
       expect(context_status).to eq(404)
     end
 
+    it "retires a printed code with no recorded staff issuer for reactivation too" do
+      invite = invite!(employee.reload, actor: staff, delivery: "code")
+      expect(invite.link.claim_user_id).to eq(worker.id)
+      invite.link.update_columns(invite_code_issued_by_staff: nil)
+
+      reactivate(activation_params(employee, code: invite.code))
+
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body).to eq("error" => EmployeeLinks::CODE_RETIRED, "code" => "code_retired")
+      expect(worker.reload).not_to be_active
+      expect(invite.link.reload).to be_invited
+    end
+
     it "leaves both the login and the new link inactive when any check fails" do
       invite = invite!(employee.reload, actor: staff, delivery: "code")
       stranger = create(:employee, company: company, date_of_birth: Date.new(1975, 7, 7))

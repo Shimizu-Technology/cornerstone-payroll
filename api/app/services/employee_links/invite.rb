@@ -44,7 +44,7 @@ module EmployeeLinks
         raise Error, "The employee app isn't turned on for this company" unless link.portal_enabled?
 
         claim_user = route_login
-        credentials = Credentials.issue(link, delivery: @delivery, email: @employee.email)
+        credentials = Credentials.issue(link, delivery: @delivery, email: @employee.email, issued_by_staff: EmployeeLinks.staff_management_allowed?(@actor, company))
         link.claim_user = claim_user
         link.save!
 

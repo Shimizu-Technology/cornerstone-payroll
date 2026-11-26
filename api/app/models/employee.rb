@@ -135,6 +135,9 @@ class Employee < ApplicationRecord
   before_update :invalidate_intake_payroll_confirmation
   before_update :guard_compensation_mutation
   before_save :clear_verification_on_contact_change
+  # Closes an open employee app invite, audits and notifies the old address
+  # (EmployeeLinks::EmailChange). Inside the UPDATE, so the row is locked.
+  after_update :apply_employee_app_email_change, if: :saved_change_to_email?
   after_create :record_initial_compensation_history, unless: :skip_initial_compensation_history
   before_validation :normalize_w4_source_reference
   before_validation :normalize_intake_blank_details
@@ -701,6 +704,10 @@ class Employee < ApplicationRecord
   end
 
   private
+
+  def apply_employee_app_email_change
+    EmployeeLinks::EmailChange.call(employee: self, from: email_before_last_save, to: email)
+  end
 
   # A demo company's direct deposits are simulated: its routing numbers must
   # fail the ABA checksum, so no real bank account can ever be stored.
