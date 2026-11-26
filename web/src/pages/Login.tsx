@@ -1,6 +1,6 @@
-import { Show, SignIn, useClerk } from '@clerk/react';
-import { useState } from 'react';
-import { Link, Navigate } from 'react-router';
+import { Show, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
+import { useState, type ComponentProps } from 'react';
+import { Link, Navigate, useLocation } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { isMfaRequiredCode } from '@/services/api';
@@ -9,6 +9,55 @@ import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/ca
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+const touchTarget = { minHeight: '44px' };
+const squareTouchTarget = { ...touchTarget, minWidth: '44px' };
+const actionLink = {
+  ...touchTarget, display: 'inline-flex', alignItems: 'center',
+  color: 'var(--color-primary-700)', '&:hover': { color: 'var(--color-primary-800)' },
+};
+const clerkAppearance: ComponentProps<typeof SignIn>['appearance'] = {
+  elements: {
+    rootBox: 'mx-auto w-full max-w-full',
+    cardBox: 'w-full max-w-full',
+    card: {
+      boxShadow: 'none', borderColor: 'var(--color-neutral-200)', borderRadius: '1rem',
+      // Leave enough room for all six 44px verification-code slots on narrow phones.
+      paddingInline: 'clamp(1px, calc((100vw - 320px) / 3), 2.5rem)',
+    },
+    headerTitle: 'text-neutral-900',
+    headerSubtitle: 'text-neutral-500',
+    // Clerk's unlayered styles can take precedence over Tailwind utilities.
+    socialButtonsBlockButton: {
+      ...touchTarget, borderRadius: '0.75rem', borderColor: 'var(--color-neutral-200)',
+      transitionProperty: 'background-color, border-color',
+      '&:hover': { backgroundColor: 'var(--color-neutral-50)' },
+    },
+    socialButtonsIconButton: touchTarget,
+    alternativeMethodsBlockButton: touchTarget,
+    formButtonPrimary: {
+      ...touchTarget, borderRadius: '0.75rem', backgroundColor: 'var(--color-primary-600)', color: '#fff',
+      boxShadow: '0 1px 2px rgb(0 0 0 / 0.05)', transitionProperty: 'background-color',
+      '&:hover': { backgroundColor: 'var(--color-primary-700)' },
+    },
+    formButtonReset: touchTarget,
+    formFieldInput: {
+      ...touchTarget, borderRadius: '0.75rem', fontSize: '16px', borderColor: 'var(--color-neutral-300)',
+      '&:focus': { borderColor: 'var(--color-primary-500)', boxShadow: '0 0 0 2px var(--color-primary-200)' },
+    },
+    formFieldInput__password: { paddingInlineEnd: '48px' },
+    otpCodeFieldInputs: { gap: 'clamp(0px, calc((100% - 264px) / 5), 0.5rem)' },
+    otpCodeFieldInput: { ...squareTouchTarget, fontSize: '16px' },
+    formFieldInputShowPasswordButton: squareTouchTarget,
+    identityPreviewEditButton: squareTouchTarget,
+    headerBackLink: { ...actionLink, ...squareTouchTarget },
+    backLink: { ...actionLink, ...squareTouchTarget },
+    formFieldAction: actionLink,
+    formResendCodeLink: actionLink,
+    footerActionLink: actionLink,
+    footerPagesLink: actionLink,
+  },
+};
 
 const highlights = [
   {
@@ -219,8 +268,44 @@ function MfaEnrollmentPrompt() {
   );
 }
 
+function SignedInInvitation({ returnTo }: { returnTo: string }) {
+  const { user } = useUser();
+  const { signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutFailed, setSignOutFailed] = useState(false);
+  const email = user?.primaryEmailAddress?.emailAddress;
+
+  async function acceptWithAnotherAccount() {
+    setSigningOut(true);
+    setSignOutFailed(false);
+    try {
+      await signOut({ redirectUrl: returnTo });
+    } catch {
+      setSignOutFailed(true);
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+      <div role="alert">
+        <h2 className="break-words text-xl font-semibold text-neutral-900">
+          {email ? <>You&rsquo;re signed in as {email}.</> : 'You’re already signed in.'}
+        </h2>
+        <p className="mt-1 text-sm text-neutral-700">Sign out to accept this invitation.</p>
+      </div>
+      <Button type="button" onClick={() => { void acceptWithAnotherAccount(); }} loading={signingOut} className="min-h-11">
+        Sign out
+      </Button>
+      {signOutFailed && <p role="alert" className="text-sm text-danger-900">Could not sign out. Try again.</p>}
+    </div>
+  );
+}
+
 export function Login() {
   const { isAuthenticated, isLoading, authProblem, refreshUser, signOut } = useAuth();
+  const { search } = useLocation();
 
   if (isLoading) {
     return (
@@ -245,11 +330,26 @@ export function Login() {
     );
   }
 
-  if (isAuthenticated) {
+  const params = new URLSearchParams(search);
+  const hasTicket = Boolean(params.get('__clerk_ticket'));
+  if (isAuthenticated && !hasTicket) {
     return <Navigate to="/app" replace />;
   }
 
+  // Clerk reads the ticket from the current URL in either embedded form.
+  const needsInviteSignUp = hasTicket && params.get('__clerk_status') === 'sign_up';
+  const clerkFormProps = { routing: 'hash', forceRedirectUrl: '/app', appearance: clerkAppearance } as const;
   const mfaRequired = authProblem?.status === 403 && isMfaRequiredCode(authProblem.code);
+  const accessNotice = mfaRequired ? (
+    <MfaPrompt />
+  ) : authProblem && (
+    <AccountAccessNotice
+      className="mb-6"
+      problem={authProblem}
+      onRetry={authProblem.status !== 401 || authProblem.signOutFailed ? () => { void refreshUser().catch(() => undefined); } : undefined}
+      onSignOut={authProblem.status === 401 ? undefined : () => { void signOut(); }}
+    />
+  );
 
   return (
     <div className="min-h-screen bg-transparent px-3 py-4 sm:px-4 sm:py-10 lg:px-8">
@@ -268,8 +368,8 @@ export function Login() {
               Payroll operations built for Guam teams.
             </h1>
             <p className="mt-4 max-w-lg text-sm leading-relaxed text-primary-100 lg:text-base">
-              A dedicated payroll workspace for Cornerstone Tax Services: company setup, employee records, pay periods,
-              check printing, and year-end reporting.
+              Cornerstone staff and client managers can use this workspace to review payroll, find reports, and keep
+              employee records up to date.
             </p>
 
             <div className="mt-8 hidden space-y-4 sm:block lg:mt-10">
@@ -289,56 +389,21 @@ export function Login() {
           </div>
         </section>
 
-        <section className="cornerstone-sign-in order-1 min-w-0 overflow-hidden rounded-3xl border border-neutral-200/80 bg-white/90 p-4 shadow-xl shadow-neutral-200/50 backdrop-blur-sm sm:p-6 lg:order-2 lg:p-8">
-          {!mfaRequired && (
-            <div className="mb-6">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-700">Welcome back</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-900">Sign in to Cornerstone Payroll</h2>
-              <p className="mt-2 text-sm text-neutral-500">Use your Cornerstone account to continue.</p>
-            </div>
-          )}
-
-          {mfaRequired ? (
-            <MfaPrompt />
-          ) : authProblem && (
-            <AccountAccessNotice
-              className="mb-6"
-              problem={authProblem}
-              onRetry={authProblem.status !== 401 || authProblem.signOutFailed ? () => { void refreshUser().catch(() => undefined); } : undefined}
-              onSignOut={authProblem.status === 401 ? undefined : () => { void signOut(); }}
-            />
-          )}
-
-          {/* An already-signed-in Clerk session (e.g. an invite accepted during
-              maintenance) keeps the notice up; mounting SignIn would bounce to /app. */}
-          <Show when="signed-out">
-          <SignIn
-            routing="hash"
-            forceRedirectUrl="/app"
-            fallbackRedirectUrl="/app"
-            appearance={{
-              elements: {
-                rootBox: 'mx-auto w-full max-w-full',
-                cardBox: 'w-full max-w-full',
-                card: 'w-full max-w-full shadow-none border border-neutral-200 rounded-2xl',
-                headerTitle: 'text-neutral-900',
-                headerSubtitle: 'text-neutral-500',
-                socialButtonsBlockButton:
-                  'rounded-xl border-neutral-200 hover:bg-neutral-50 transition-colors',
-                formButtonPrimary:
-                  'rounded-xl bg-primary-600 hover:bg-primary-700 text-white shadow-sm transition-colors',
-                formFieldInput:
-                  'rounded-xl border-neutral-300 focus:border-primary-500 focus:ring-primary-200',
-                footerActionLink: 'text-primary-700 hover:text-primary-800',
-              },
-            }}
-          />
+        <section className="cornerstone-sign-in order-1 min-w-0 overflow-hidden rounded-3xl border border-neutral-200/80 bg-white/90 px-3 py-4 shadow-xl shadow-neutral-200/50 backdrop-blur-sm sm:p-6 lg:order-2 lg:p-8">
+          {accessNotice}
+          <Show when="signed-out" fallback={hasTicket && <SignedInInvitation returnTo={`/login${search}`} />}>
+            {needsInviteSignUp ? <SignUp {...clerkFormProps} signInUrl="/login" /> : <SignIn {...clerkFormProps} />}
+            {hasTicket && (
+              <p className="mt-3 text-sm text-neutral-700">
+                Invitation links work once and expire. If this one doesn&rsquo;t work, ask Cornerstone to resend your invitation.
+              </p>
+            )}
           </Show>
-          <p className="mt-6 text-center text-xs text-neutral-500">
-            <Link to="/privacy" className="font-semibold hover:text-primary-700">Privacy Policy</Link>
-            <span aria-hidden="true" className="mx-2">·</span>
-            <Link to="/terms" className="font-semibold hover:text-primary-700">Terms of Service</Link>
-          </p>
+          <div className="mt-3 flex flex-wrap items-center justify-center text-xs text-neutral-500">
+            <Link to="/privacy" className="inline-flex min-h-11 items-center px-2 font-semibold hover:text-primary-700">Privacy Policy</Link>
+            <span aria-hidden="true">·</span>
+            <Link to="/terms" className="inline-flex min-h-11 items-center px-2 font-semibold hover:text-primary-700">Terms of Service</Link>
+          </div>
         </section>
       </div>
     </div>

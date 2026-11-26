@@ -1,6 +1,6 @@
 // Tenant branding for the employee app. GET /api/v1/public/tenant_branding
 // returns { name, app_name, logo_url, primary_color, accent_color, main_phone }
-// for an enabled client subdomain, or 404 (TenantSubdomainRegistry.branding_for). Anything else falls back to a neutral Cornerstone brand.
+// for an enabled client subdomain, or 404 (TenantSubdomainRegistry.branding_for).
 //
 // A client's colors become roles, never raw paint:
 // - action: buttons, links and the active tab. Always passes 4.5:1 under white text.
@@ -208,25 +208,54 @@ function stringOrNull(value: unknown): boolean {
 function isTenantBranding(value: unknown): value is TenantBranding {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   const branding = value as Record<string, unknown>;
-  return typeof branding.name === 'string' && branding.name.trim() !== ''
+  return (branding.subdomain_enabled === undefined || branding.subdomain_enabled === true)
+    && typeof branding.name === 'string' && branding.name.trim() !== ''
     && stringOrNull(branding.logo_url) && stringOrNull(branding.primary_color) && stringOrNull(branding.accent_color)
     && stringOrNull(branding.app_name) && stringOrNull(branding.main_phone);
 }
 
-/** Returns null on 404, a network failure or a malformed response, so the caller falls back. */
+export type TenantBrandingResult =
+  | { status: 'enabled'; branding: TenantBranding }
+  | { status: 'disabled' }
+  | { status: 'error' };
+
+const BRANDING_TIMEOUT_MS = 6_000;
+
 export async function fetchTenantBranding(
   host: string,
   { baseUrl, signal, fetchImpl = fetch }: { baseUrl: string; signal?: AbortSignal; fetchImpl?: typeof fetch },
-): Promise<TenantBranding | null> {
+): Promise<TenantBrandingResult> {
+  const error = { status: 'error' } as const;
+  if (globalThis.navigator?.onLine === false || signal?.aborted) return error;
+
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
+  const aborted = new Promise<typeof error>(resolve => {
+    controller.signal.addEventListener('abort', () => resolve(error), { once: true });
+  });
+  const timer = setTimeout(abort, BRANDING_TIMEOUT_MS);
+
   try {
     const url = new URL(`${baseUrl}/public/tenant_branding`, globalThis.location?.origin ?? 'http://localhost');
     url.searchParams.set('host', host);
-    const response = await fetchImpl(url, { credentials: 'omit', cache: 'no-store', signal, headers: { Accept: 'application/json' } });
-    if (!response.ok) return null;
-    const data: unknown = await response.json();
-    return isTenantBranding(data) ? data : null;
+    const request = fetchImpl(url, {
+      credentials: 'omit', cache: 'no-store', signal: controller.signal, headers: { Accept: 'application/json' },
+    }).then(async (response): Promise<TenantBrandingResult> => {
+      if (response.status === 404) return { status: 'disabled' };
+      if (!response.ok) return error;
+      const data: unknown = await response.json();
+      if (data && typeof data === 'object' && 'subdomain_enabled' in data && data.subdomain_enabled === false) {
+        return { status: 'disabled' };
+      }
+      return isTenantBranding(data) ? { status: 'enabled', branding: data } : error;
+    });
+    return await Promise.race([request, aborted]);
   } catch {
-    return null;
+    return error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
