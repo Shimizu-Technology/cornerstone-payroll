@@ -274,13 +274,32 @@ module Api
             return render json: { error: "No permitted client fields were provided" }, status: :unprocessable_entity
           end
 
-          company.with_lock do
+          company.with_lock(requires_new: true) do
             revalidate_current_company_write_access!(company: company,
               capability: full_management ? :manage_client_administration : nil)
             update_params = full_company_management?(company) ? company_params : staff_company_params
             before_updated_at = company.updated_at
             normalize_company_check_layout_config!(update_params, company)
             company.assign_attributes(update_params)
+            disabling_approval = company.client_payroll_approval_required_in_database && !company.client_payroll_approval_required?
+            if disabling_approval
+              unless StaffRolePolicy.allowed?(current_user, :override_client_approval)
+                return render json: { error: "Admin access required" }, status: :forbidden
+              end
+              reason = params.dig(:company, :client_approval_disable_reason)
+              reason = reason.is_a?(String) ? reason.strip : ""
+              unless PayrollReviewPackage::OVERRIDE_REASON_LENGTH.cover?(reason.length)
+                return render json: { error: "Enter a reason of 10–500 characters to turn off client approval." }, status: :unprocessable_entity
+              end
+
+              reviews = PayrollReviewPackage.where(company_id: company.id)
+              open_runs = company.pay_periods.where(status: %w[calculated approved])
+                .or(company.pay_periods.where(status: "draft", id: reviews.select(:pay_period_id)))
+              finalized_runs_with_review = company.pay_periods.where(status: "committed",
+                id: reviews.where.not(published_at: nil).select(:pay_period_id))
+              open_runs.or(finalized_runs_with_review).where(client_approval_retained: false)
+                .update_all(client_approval_retained: true)
+            end
             clear_active_printer_profile_if_calibration_changed(company)
             company.save!
             actual_fields = company.saved_changes.keys - [ "updated_at" ]
@@ -290,7 +309,7 @@ module Api
               user: current_user, company_id: company.id, organization_id: company.organization_id,
               action: name_only ? "company#name_changed" : "companies#update",
               record_type: "Company", record_id: company.id, subject_name: company.name,
-              metadata: safe_changes.merge(
+              metadata: safe_changes.merge(disabling_approval ? { client_approval_disable_reason: reason } : {}).merge(
                 changed_fields: actual_fields, actual_changes: true, name_only: name_only,
                 company_updated_at_before: before_updated_at&.utc&.iso8601(6),
                 company_updated_at_after: company.updated_at.utc.iso8601(6)

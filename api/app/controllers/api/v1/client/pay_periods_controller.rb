@@ -122,7 +122,7 @@ module Api
         end
 
         def current_preview_package!
-          unless Company.find(@pay_period.company_id).client_payroll_approval_required?
+          unless @pay_period.client_payroll_approval_required?
             raise PayrollReview::RevisionService::Error, "Client payroll review is disabled for this company."
           end
           raise PayrollReview::RevisionService::Error, "Preview is available only while payroll is approved." unless @pay_period.approved? && @pay_period.correction_status != "voided"
@@ -174,8 +174,8 @@ module Api
             updated_at: pay_period.updated_at
           }
 
-          json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
-          review = if pay_period.company.client_payroll_approval_required?
+          json[:client_payroll_approval_required] = pay_period.client_payroll_approval_required?
+          review = if pay_period.client_payroll_approval_required?
             pay_period.payroll_review_packages.summary.current.where.not(published_at: nil)
               .includes(:generated_by, :approved_by, :approval_recorded_by).order(revision: :desc).first
           end
@@ -188,7 +188,7 @@ module Api
               .select(PayrollReviewPackage.column_names - %w[calculation_snapshot source_manifest])
               .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
-            json[:payroll_review_history] = [] unless pay_period.company.client_payroll_approval_required?
+            json[:payroll_review_history] = [] unless pay_period.client_payroll_approval_required?
             json[:payroll_items] = items.map { |item| pay_item_summary(item, pay_period) }
             json[:can_decide_payroll_review] = false if json[:payroll_items].any? { |item| item.key?(:details_error) }
           end
@@ -271,7 +271,7 @@ module Api
           return false unless pay_period
           return true if pay_period.client_finished?
 
-          pay_period.company.client_payroll_approval_required? && pay_period.approved? &&
+          pay_period.client_payroll_approval_required? && pay_period.approved? &&
             pay_period.payroll_review_packages.current.where.not(published_at: nil).exists?
         end
       end

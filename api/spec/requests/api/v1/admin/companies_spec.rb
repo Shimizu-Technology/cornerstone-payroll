@@ -379,6 +379,49 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
     end
   end
 
+  describe "turning off client payroll approval" do
+    let!(:calculated) { create(:pay_period, :calculated, company: client_company) }
+    let(:reason) { "Client requested a change for future payroll." }
+
+    before { client_company.update!(client_payroll_approval_required: true) }
+
+    def disable_approval(reason)
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: { client_payroll_approval_required: false, client_approval_disable_reason: reason }
+      }
+    end
+
+    it "preserves the calculated run's gate and records the reason" do
+      disable_approval(reason)
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload).not_to be_client_payroll_approval_required
+      expect(calculated.reload).to be_client_payroll_approval_required
+      expect(AuditLog.find_by!(action: "companies#update", record_id: client_company.id).metadata)
+        .to include("client_approval_disable_reason" => reason)
+      expect do
+        PayrollReview::RevisionService.new(pay_period: calculated).verify_required_approval!
+      end.to raise_error(PayrollReview::RevisionService::Error, /current client payroll review/)
+    end
+
+    it "refuses missing reasons and managers" do
+      disable_approval(nil)
+      expect(response).to have_http_status(:unprocessable_entity)
+      admin_user.update!(role: "manager")
+      disable_approval(reason)
+      expect(response).to have_http_status(:forbidden)
+      expect(client_company.reload).to be_client_payroll_approval_required
+      expect(calculated.reload).not_to be_client_approval_retained
+    end
+
+    it "rolls back both the setting and retained flag if auditing fails" do
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+      disable_approval(reason)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(client_company.reload).to be_client_payroll_approval_required
+      expect(calculated.reload).not_to be_client_approval_retained
+    end
+  end
+
   describe "assigned manager access" do
     let!(:manager_user) do
       User.create!(

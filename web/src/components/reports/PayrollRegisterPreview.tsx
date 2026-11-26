@@ -731,6 +731,7 @@ export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegis
   return (
     <div className="reports-tables space-y-5">
       <PayrollReportReviewWarnings warnings={report.review_warnings} />
+      {report.pay_period.approval_marker && <p className="text-sm font-semibold">Client approval · {report.pay_period.approval_marker}</p>}
       {report.meta?.provisional && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950" role="status">
           <p className="font-bold">Test-only payroll register</p>

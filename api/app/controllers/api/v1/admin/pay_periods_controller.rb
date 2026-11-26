@@ -5,6 +5,7 @@ module Api
     module Admin
       class PayPeriodsController < BaseController
         include Auditable
+        include RecentVerification
         # `:corrective_paychecks` is the new off-cycle supplemental
         # endpoint — it mutates payroll state (creates a supplemental
         # period + a corrective payroll_item, mutates YTD), so it
@@ -19,7 +20,7 @@ module Api
           :promoted_payment_preview, :prepare_promoted_payment,
           :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
-          :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :corrected_hours, :connect_corrected_hours
+          :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :override_client_approval, :corrected_hours, :connect_corrected_hours
         ]
         around_action :with_financial_pay_period_lock, only: [ :update, :destroy, :run_payroll, :refresh_setup, :generate_fit_check ]
 
@@ -626,9 +627,24 @@ module Api
                                       .order(revision: :desc).first
           render json: {
             payroll_review: PayrollReview::PackagePresenter.call(review_package),
-            client_approval_required: @pay_period.company.client_payroll_approval_required?,
+            client_approval_required: @pay_period.client_payroll_approval_required?,
             authorized_client_approvers: authorized_client_approvers
           }
+        end
+
+        def override_client_approval
+          if Current.view_as_grant || @clerk_token_payload&.key?("act")
+            return render json: { error: "Exit Sign in as before overriding client approval." }, status: :forbidden
+          end
+          require_recent_verification!
+          return if performed?
+
+          package = PayrollReview::RevisionService.new(pay_period: @pay_period, actor: current_user).override!(
+            revision_id: params[:revision_id], acknowledgement: params[:acknowledgement], override_reason: params[:override_reason]
+          )
+          render json: { payroll_review: PayrollReview::PackagePresenter.call(package) }
+        rescue PayrollReview::RevisionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         def record_client_approval
@@ -1492,7 +1508,10 @@ module Api
             json[:outstanding_file_requests] = (pay_period.approved? ? pay_period.outstanding_client_file_requests : []).map do |request|
               { id: request.id, title: request.title, status: request.status, status_label: request.status_label }
             end
-            json[:client_payroll_approval_required] = pay_period.company.client_payroll_approval_required?
+            json[:client_payroll_approval_required] = pay_period.client_payroll_approval_required?
+            json[:can_record_client_approval] = StaffRolePolicy.allowed?(current_user, :override_client_approval)
+            json[:can_override_client_approval] = json[:can_record_client_approval] &&
+              Current.view_as_grant.nil? && !@clerk_token_payload&.key?("act")
             reviews = pay_period.payroll_review_packages.summary.includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
             # Fetch only current/shared rows in one query, preserving the detail
             # query budget even when there is no current review.

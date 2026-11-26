@@ -165,6 +165,7 @@ RSpec.describe "View-only support sessions", type: :request do
       [ :post, "/api/v1/auth/view_as" ],
       [ :post, "/api/v1/cable_ticket" ],
       [ :post, "/api/v1/admin/employees" ],
+      [ :post, "/api/v1/admin/pay_periods/1/override_client_approval" ],
       [ :post, "/api/v1/client/employees" ],
       [ :patch, "/api/v1/client/departments/1" ],
       [ :delete, "/api/v1/client/documents/1" ],

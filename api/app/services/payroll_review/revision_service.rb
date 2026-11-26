@@ -61,7 +61,7 @@ module PayrollReview
     # Called inside the lifecycle transaction, after staff approval. Legacy
     # approved runs can be explicitly republished without changing their pay.
     def publish!
-      return unless Company.find(pay_period.company_id).client_payroll_approval_required?
+      return unless approval_required?
 
       raise Error, "Only approved payroll can be published." unless pay_period.approved?
       package = pay_period.payroll_review_packages.current.first
@@ -85,7 +85,7 @@ module PayrollReview
     end
 
     def retry_publication_notification!
-      return unless pay_period.approved? && Company.find(pay_period.company_id).client_payroll_approval_required?
+      return unless pay_period.approved? && approval_required?
 
       package = pay_period.payroll_review_packages.current.first
       notify!(package, "payroll_review_published") if package&.published_at
@@ -152,12 +152,36 @@ module PayrollReview
       raise Error, e.record.errors.full_messages.join(", ")
     end
 
+    def override!(revision_id:, acknowledgement:, override_reason:)
+      raise Error, "Exit Sign in as before overriding client approval." if Current.view_as_grant
+      validate_admin_recorder!(actor)
+      reason = override_reason.is_a?(String) ? override_reason.strip : ""
+      unless PayrollReviewPackage::OVERRIDE_REASON_LENGTH.cover?(reason.length)
+        raise Error, "Enter an override reason of 10–500 characters."
+      end
+
+      with_decision_lock do
+        package = decision_package!(revision_id)
+        self_override = actor.id.in?([ package.generated_by_id, pay_period.calculated_by_id, pay_period.approved_by_id ])
+        package.update!(
+          status: "approved", approved_at: Time.current, approved_by: actor, approval_recorded_by: actor,
+          approval_method: "cornerstone_override", approval_acknowledgement: acknowledgement,
+          override_reason: reason, self_override: self_override
+        )
+        audit!(package, "overridden")
+        notify_override!(package)
+        package
+      end
+    rescue ActiveRecord::RecordInvalid => e
+      raise Error, e.record.errors.full_messages.join(", ")
+    end
+
     def verify_required_approval!
       review_package = pay_period.payroll_review_packages.current.includes(:changes_requested_by).order(revision: :desc).first
       if review_package&.changes_requested_at
         raise Error, "#{review_package.changes_requested_by&.name || 'Client'} requested changes: #{review_package.change_request_note}. Unapprove to make changes."
       end
-      return true unless Company.find(pay_period.company_id).client_payroll_approval_required?
+      return true unless approval_required?
 
       raise Error, "Generate the current client payroll review revision before commit." unless review_package
       raise Error, "Client approval is still required for payroll review revision #{review_package.revision}." unless review_package.approved? && review_package.published_at
@@ -180,13 +204,17 @@ module PayrollReview
     attr_reader :pay_period, :actor
 
     def with_decision_lock
-      Company.find(pay_period.company_id).with_lock do
+      Company.find(pay_period.company_id).with_lock(requires_new: true) do
         pay_period.with_lock { yield }
       end
     end
 
+    def approval_required?
+      pay_period.client_approval_retained? || Company.find(pay_period.company_id).client_payroll_approval_required?
+    end
+
     def decision_package!(revision_id)
-      unless Company.find(pay_period.company_id).client_payroll_approval_required?
+      unless approval_required?
         raise Error, "Client payroll review is disabled for this company."
       end
       pay_period.reload
@@ -208,9 +236,20 @@ module PayrollReview
 
     def audit!(package, event)
       previous_domain_audit = Current.domain_audit_recorded
+      metadata = { pay_period_id: pay_period.id, revision: package.revision }
+      case event
+      when "approved", "overridden"
+        metadata.merge!(method: package.approval_method, notes: package.approval_notes)
+      when "changes_requested"
+        metadata.merge!(method: "client_portal", notes: package.change_request_note)
+      end
+      if event == "overridden"
+        metadata.merge!(override_reason: package.override_reason, self_override: package.self_override,
+          checksum: package.calculation_checksum, approved_at: package.approved_at.iso8601)
+      end
       AuditLog.record!(user: actor, actor: Current.actor || AuditActor.system_job(self.class.name),
         company_id: pay_period.company_id, action: "payroll_review##{event}", record_type: "PayrollReviewPackage", record_id: package.id,
-        metadata: { pay_period_id: pay_period.id, revision: package.revision })
+        metadata: metadata)
     ensure
       # Publication/withdrawal accompany a separate lifecycle audit containing
       # the run's before/after values. Do not suppress that controller audit.
@@ -241,6 +280,16 @@ module PayrollReview
       raise Error, VIEWER_CANNOT_DECIDE if approver.client_viewer?
     end
 
+    def notify_override!(_package)
+      # Use PR #631's recipient routing for the override decision and self-override alert.
+    end
+
+    def validate_admin_recorder!(user)
+      unless user&.active? && user.can_access_company?(pay_period.company_id) && StaffRolePolicy.allowed?(user, :override_client_approval)
+        raise Error, "Admin access required."
+      end
+    end
+
     def validate_recording_method!(method, approver, recorded_by, evidence_reference)
       case method
       when "client_portal"
@@ -248,7 +297,7 @@ module PayrollReview
           raise Error, "Client portal approval must be recorded by the approving client user."
         end
       when "email_attestation"
-        raise Error, "Only payroll staff can record an email approval." unless recorded_by&.staff_member?
+        validate_admin_recorder!(recorded_by)
         if evidence_reference.to_s.strip.blank?
           raise Error, "Record the email message reference or retained evidence location."
         end

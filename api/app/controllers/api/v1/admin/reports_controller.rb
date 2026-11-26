@@ -1642,6 +1642,9 @@ module Api
             employees: w2_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) },
             contractors: contractor_items.map { |item| payroll_item_detail(item, fallback_tip_components: intake_tip_components[item.id]) }
           }
+          if pay_period.payroll_review_packages.current.exists?(approval_method: "cornerstone_override", status: "approved")
+            report_data[:pay_period][:approval_marker] = "Override"
+          end
           if client_report_view?
             %i[employees contractors].each do |key|
               report_data[key].each { |row| row.delete(:check_number) }
@@ -3279,6 +3282,7 @@ module Api
             [ "Description", description || report_value(meta, :report_description) ],
             [ "Pay Period", [ report_value(pp, :start_date), report_value(pp, :end_date) ].compact.join(" to ") ],
             [ "Pay Date", report_value(pp, :pay_date) ],
+            *([ [ "Client approval", report_value(pp, :approval_marker) ] ] if report_value(pp, :approval_marker)),
             [ "Source", report_value(source, :label) ],
             [ "Source handling", report_value(source, :statement) ],
             [ "Payroll status", report_value(meta, :payroll_status_note) ],
@@ -3616,6 +3620,7 @@ module Api
             *([ [ nil, "Payroll status", meta[:payroll_status_note] ] ] if meta[:payroll_status_note]),
             [ nil, "Processed By", format_lifecycle_event_for_register(lifecycle[:calculated]) ],
             [ nil, "Approved By", format_lifecycle_event_for_register(lifecycle[:approved]) ],
+            *([ [ nil, "Client approval", pp[:approval_marker] ] ] if pp[:approval_marker]),
             [ nil, "Committed By", format_lifecycle_event_for_register(lifecycle[:committed]) ]
           ]
         end
