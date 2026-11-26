@@ -205,7 +205,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 20261003020500_create_check_supersession_rollout_approvals.rb (updated by 20261127130000_harden_demo_flag_db_guards.rb)
+-- 20261003020500_create_check_supersession_rollout_approvals.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
 CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -227,7 +227,7 @@ CREATE TRIGGER protect_check_supersession_rollout_approvals
   BEFORE INSERT OR UPDATE OR DELETE ON check_supersession_rollout_approvals
   FOR EACH ROW EXECUTE FUNCTION protect_check_supersession_rollout_approval();
 
--- 20261003020600_enforce_check_supersession_rollout_approval.rb (updated by 20261127130000_harden_demo_flag_db_guards.rb)
+-- 20261003020600_enforce_check_supersession_rollout_approval.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
 CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
 BEGIN
   IF NOT EXISTS (
@@ -1044,7 +1044,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127130000_harden_demo_flag_db_guards.rb)
+-- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
 CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
 DECLARE
   old_is_demo boolean := OLD.demo OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
@@ -1106,7 +1106,7 @@ BEFORE INSERT OR UPDATE OF company_id ON payroll_liability_entries
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_external_records();
 
--- 20261127130000_harden_demo_flag_db_guards.rb
+-- 20261127150000_harden_demo_flag_db_guards.rb
 CREATE OR REPLACE FUNCTION prevent_demo_company_time_tracking_source() RETURNS trigger AS $$
 BEGIN
   IF EXISTS (
