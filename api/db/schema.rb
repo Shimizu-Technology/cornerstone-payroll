@@ -5194,8 +5194,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_120100) do
     t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
     t.check_constraint "client_access_level::text = ANY (ARRAY['manager'::character varying::text, 'viewer'::character varying::text])", name: "users_client_access_level_check"
     t.check_constraint "deactivation_reason IS NULL OR (deactivation_reason::text = ANY (ARRAY['last_employee_link_closed'::character varying::text, 'pending_sign_up_closed'::character varying::text, 'deactivated'::character varying::text]))", name: "users_deactivation_reason_check"
+    t.check_constraint "invite_email_status IS NULL OR (invite_email_status::text = ANY (ARRAY['queued'::character varying, 'sent'::character varying, 'captured'::character varying, 'refused'::character varying, 'skipped'::character varying, 'failed'::character varying]::text[]))", name: "users_invite_email_status_check"
     t.check_constraint "practice_company_id IS NULL OR company_id = practice_company_id AND role = 4", name: "users_practice_scope"
     t.boolean "view_as_allowed", default: false, null: false
+    t.string "invite_email_status"
+    t.datetime "invite_email_status_at"
   end
 
   create_table "view_as_grants", force: :cascade do |t|

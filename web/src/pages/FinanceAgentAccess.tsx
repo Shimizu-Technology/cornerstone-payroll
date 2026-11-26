@@ -85,7 +85,7 @@ export function FinanceAgentAccess() {
   return <div className="min-h-screen bg-[#f8f7f4]">
     <Header title="Agent access" description="Give an agent access to one financial book. Keys are read only unless you allow draft editing. They expire after 90 days and can be revoked here."
       contextLabel="Financial book" contextValue={activeBook.name} />
-    <main className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-4xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       <Link to="/tools/finance" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-primary-800 hover:underline"><ArrowLeft className="h-4 w-4" />Finance overview</Link>
       <FinanceBookSelector disabled={loading || busy} />
       <section aria-label="Agent connection details" className="rounded-2xl border border-neutral-200 bg-white p-5 text-sm shadow-sm sm:p-6">
@@ -127,6 +127,6 @@ export function FinanceAgentAccess() {
                 : <Button type="button" variant="outline" disabled={busy || financeReadOnly} onClick={() => setConfirmRevokeId(token.id)}>Revoke</Button>)}
             </li>)}</ul>}
       </section>
-    </main>
+    </div>
   </div>;
 }

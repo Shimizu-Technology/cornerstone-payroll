@@ -883,7 +883,7 @@ export const clientDepartmentsApi = {
 
 // Users (Admin API)
 export interface InvitationDeliveryResponse {
-  invitation_delivery_status: 'queued' | 'captured' | 'submitted' | 'failed' | 'not_requested';
+  invitation_delivery_status: 'queued' | 'captured' | 'submitted' | 'failed' | 'skipped' | 'not_requested';
   invitation_sent: boolean;
   invitation_error?: string | null;
 }

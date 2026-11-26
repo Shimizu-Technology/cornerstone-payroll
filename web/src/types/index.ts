@@ -60,6 +60,9 @@ export interface User {
   assigned_companies?: AssignedCompanySummary[];
   invitation_status?: 'pending' | 'accepted';
   invitation_pending?: boolean;
+  // What happened to the latest invite email; the send runs after the response.
+  invite_email_status?: 'queued' | 'sent' | 'captured' | 'refused' | 'skipped' | 'failed' | null;
+  invite_email_status_at?: string | null;
   can_recover_clerk_invitation?: boolean;
   invited_at?: string | null;
   invited_by_id?: number | null;
