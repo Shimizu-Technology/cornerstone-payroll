@@ -268,7 +268,14 @@ class R2StorageService
   end
 
   def local_storage_root
+    return Pathname(ENV["LOCAL_STORAGE_ROOT"]).join("local_r2_storage") if local_deployment_storage_root?
+
     staging_local_storage? ? STAGING_STORAGE_ROOT : LOCAL_STORAGE_ROOT
+  end
+
+  # A local production copy keeps objects in its own data directory.
+  def local_deployment_storage_root?
+    staging_local_storage? && LocalDeployment.local? && ENV["LOCAL_STORAGE_ROOT"].present?
   end
 
   # Staging and a local production copy keep objects on disk.

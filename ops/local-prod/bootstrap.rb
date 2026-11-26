@@ -48,6 +48,7 @@ puts "demo companies=#{result.companies.map(&:id).join(',')} employees_created=#
 TenantScope.as_system(reason: "Record the draft Employee App Terms") do
   terms = Dir[File.join(legal_dir, "employee-terms-*-draft.html")].max
   privacy = Dir[File.join(legal_dir, "employee-privacy-*-draft.html")].max
+  abort "No employee-terms-*-draft.html and employee-privacy-*-draft.html in #{legal_dir}; update bootstrap.rb to the new names" unless terms && privacy
   version = File.basename(terms)[/\d{4}-\d{2}-\d{2}/]
   unless EmployeeTermsVersion.exists?(version: version)
     EmployeeTermsVersion.create!(version: version, status: "draft",

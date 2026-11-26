@@ -12,7 +12,8 @@ failed = false
 companies.each do |company|
   readiness = TenantScope.with_company(company.id) { EmployeeAppSwitch::Readiness.new(company: company) }
   checks = TenantScope.with_company(company.id) { readiness.platform_checks + readiness.counsel_checks.values }
-  failed ||= checks.any? { |check| check.status == "failed" }
+  # Only the MFA check may be waived (REQUIRE_MFA off); anything else must pass.
+  failed ||= checks.any? { |check| check.status != "passed" && !(check.key == "mfa" && check.status == "waived") }
   puts "READINESS " + JSON.generate(company: company.subdomain_slug, checks: checks.map { |check| check.as_json.slice(:key, :status, :detail) })
 end
 exit(failed ? 1 : 0)
