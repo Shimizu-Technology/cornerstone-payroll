@@ -13,6 +13,9 @@ class AddDeliveryAttemptSnapshotToPortalNotificationDeliveries < ActiveRecord::M
 
   def down
     execute "SET LOCAL lock_timeout = '5s'"
+    # Hold the table lock from the check through the column drops so no worker
+    # can claim or send a v2 row in between.
+    execute "LOCK TABLE portal_notification_deliveries IN ACCESS EXCLUSIVE MODE"
     active_v2_count = select_value(<<~SQL).to_i
       SELECT COUNT(*)
       FROM portal_notification_deliveries
