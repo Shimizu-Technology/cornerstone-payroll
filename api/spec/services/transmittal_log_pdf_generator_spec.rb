@@ -40,7 +40,7 @@ RSpec.describe TransmittalLogPdfGenerator do
     pay_period.payroll_items.sole.update!(additional_withholding: 66)
     pdf = described_class.new(pay_period).generate
     text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join(" ").gsub(/\s+/, " ")
-    expect(text).to match(/Employee FIT Withheld\s+\$116\.52/)
+    expect(text).to match(/Guam income tax withheld\s+\$116\.52/)
     expect(text).to match(/FIT Subtotal\s+\$116\.52/)
   end
 

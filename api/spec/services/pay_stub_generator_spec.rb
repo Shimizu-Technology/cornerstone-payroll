@@ -974,7 +974,7 @@ RSpec.describe PayStubGenerator do
       additional_withholding: 15)
 
     text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
-    row = text.lines.find { |line| line.include?("Additional Withholding") }
+    row = text.lines.find { |line| line.include?("Additional Guam income tax (W-4 4c)") }
 
     expect(row).to include("$0.00", "$15.00")
   end
@@ -1058,8 +1058,8 @@ RSpec.describe PayStubGenerator do
 
       reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
       ytd = reader.pages.map(&:text).join("\n").split("YEAR-TO-DATE SUMMARY").last.gsub(/\s+/, " ")
-      expect(ytd).to include("Gross Earnings $100.00", "Non-Taxable Pay $20.00", "Additional Withholding $3.00",
-        "Federal/Guam Tax $5.00", "Social Security $6.20", "Medicare $1.45", "Deductions $9.00", "Net Pay $95.35")
+      expect(ytd).to include("Gross Earnings $100.00", "Non-Taxable Pay $20.00", "Additional Guam income tax (W-4 4c) $3.00",
+        "Guam income tax $5.00", "Social Security $6.20", "Medicare $1.45", "Deductions $9.00", "Net Pay $95.35")
       expect(reader.page_count).to eq(1)
     end
   end

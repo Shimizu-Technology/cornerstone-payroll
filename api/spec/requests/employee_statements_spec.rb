@@ -407,7 +407,7 @@ RSpec.describe "Employee statements", type: :request do
       expect(body.fetch("taxes").map { |row| row.values_at("kind", "display_label") }).to start_with(
         [ "guam_income_tax", "Guam income tax" ], [ "social_security", "Social Security" ], [ "medicare", "Medicare" ]
       )
-      expect(body.fetch("taxes").first.fetch("label")).to eq("Federal/Guam Income Tax")
+      expect(body.fetch("taxes").first.fetch("label")).to eq("Guam income tax")
       expect(body.fetch("ytd")).to include("gross", "net")
       expect(body).not_to have_key("source_entries")
 

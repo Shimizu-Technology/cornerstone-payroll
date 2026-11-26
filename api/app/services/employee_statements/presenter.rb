@@ -10,10 +10,11 @@ class EmployeeStatements
     QUICKBOOKS_LABEL = "From QuickBooks records"
     # The printed stub's tax labels, in PayStubGenerator#tax_lines order.
     TAX_KINDS = [
-      [ /\Aadditional withholding/i, "additional_guam_income_tax", "Extra Guam income tax you asked for" ],
-      [ /income tax/i, "guam_income_tax", "Guam income tax" ],
+      [ /\Aadditional (?:withholding|guam income tax)/i, "additional_guam_income_tax", PayrollLabels::ADDITIONAL_WITHHOLDING ],
+      [ /income tax/i, "guam_income_tax", PayrollLabels::INCOME_TAX ],
       [ /\Asocial security/i, "social_security", "Social Security" ],
-      [ /\Amedicare/i, "medicare", "Medicare" ]
+      [ /\Aadditional medicare/i, "additional_medicare", PayrollLabels::STUB_TAXES.fetch(:additional_medicare) ],
+      [ /\Amedicare/i, "medicare", PayrollLabels::STUB_TAXES.fetch(:medicare) ]
     ].freeze
 
     # previous: the regular check listed before this one (EmployeeStatements
@@ -123,7 +124,7 @@ class EmployeeStatements
       adjusted = check.historical_paycheck_adjustments.any?
       total = ->(field) { check.public_send(field).to_d + check.historical_paycheck_adjustments.sum { |row| row.public_send(field).to_d } }
       taxes = [
-        [ "Guam Income Tax", total.call(:federal_income_tax) ],
+        [ PayrollLabels::INCOME_TAX, total.call(:federal_income_tax) ],
         [ "Social Security", total.call(:social_security_tax) ],
         [ "Medicare", total.call(:medicare_tax) ]
       ].map { |label, amount| { label: label, amount: money(amount), ytd: nil }.merge(tax_kind(label)) }

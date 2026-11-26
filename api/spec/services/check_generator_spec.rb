@@ -482,7 +482,7 @@ RSpec.describe CheckGenerator do
         company: company,
         additional_withholding: 15)
 
-      expect(generator.send(:tax_rows)).to include([ "Addtl W/H (W-4 4c)", "0.00", "15.00" ])
+      expect(generator.send(:tax_rows)).to include([ "Add'l Guam income tax (4c)", "0.00", "15.00" ])
     end
 
     it "renders migrated deduction and employer contribution YTD balances on the check stubs" do

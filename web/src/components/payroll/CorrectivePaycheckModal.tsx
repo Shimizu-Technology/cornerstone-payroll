@@ -471,7 +471,7 @@ export function CorrectivePaycheckModal({
                 <p className="text-xs text-gray-600">Recorded amounts include the frozen original and {preview.meta.active_corrective_count ?? 0} active corrections. Arrows show recorded → corrected target.</p>
                 <p className="text-xs text-gray-600">Frozen original: gross {formatCurrency(preview.original.gross_pay)} · net {formatCurrency(preview.original.net_pay)}.</p>
                 <DeltaLine label="Gross pay" original={recorded.gross_pay} corrected={corrected.gross_pay} delta={deltas.gross_pay} />
-                <DeltaLine label="Federal income tax" original={recorded.withholding_tax} corrected={corrected.withholding_tax} delta={deltas.withholding_tax} />
+                <DeltaLine label="Guam income tax" original={recorded.withholding_tax} corrected={corrected.withholding_tax} delta={deltas.withholding_tax} />
                 <DeltaLine label="Social Security" original={recorded.social_security_tax} corrected={corrected.social_security_tax} delta={deltas.social_security_tax} />
                 <DeltaLine label="Medicare" original={recorded.medicare_tax} corrected={corrected.medicare_tax} delta={deltas.medicare_tax} />
                 <DeltaLine label="Reported tips" original={recorded.reported_tips} corrected={corrected.reported_tips} delta={reportedTipsDelta} />
