@@ -30,6 +30,8 @@ export function PayRunRecordHeader({ payRun, client, returnTo, attention, inform
     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm sm:col-span-2 sm:row-start-2" aria-label="Payroll status and attention">
       <span className="inline-flex items-center gap-2 font-semibold text-neutral-950"><span aria-hidden="true" className={`h-2 w-2 rounded-full ${voided ? 'bg-danger-700' : payRun.status === 'committed' ? 'bg-success-700' : 'bg-primary-700'}`} />{status}{payRun.parallel_run && <HelpTip label="parallel comparison">This run is isolated from live payroll actions. It can be calculated and reviewed, but never committed, paid, printed, or filed.</HelpTip>}</span>
       <div className="min-w-0 text-neutral-700">{attention}</div>
+      {payRun.admin_rollback && <span className="font-medium text-neutral-700">Admin rollback recorded</span>}
+      {payRun.rollback_review_required && <span role="status" className="basis-full font-semibold text-warning-800">Review required: an earlier payroll was rolled back</span>}
     </div>
       {information && <p className="text-sm text-neutral-600 sm:col-span-2">{information}</p>}
       {actions && <div className="flex w-full items-start gap-2 sm:col-start-2 sm:row-start-1 sm:w-auto">{actions}</div>}

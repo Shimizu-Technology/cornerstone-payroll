@@ -65,7 +65,7 @@ RSpec.describe "Legacy insurance liability lifecycle" do
 
       if operation == :void
         allow_any_instance_of(PayrollLiabilityPostingService).to receive(:build_entries).and_raise("Recomputed existing source") if existing
-        PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Void legacy payroll")
+        PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Void legacy payroll")
         expect(period.reload).to be_voided
       else
         PayPeriodPayDateCorrectionService.call(pay_period: period, actor: actor, new_pay_date: ledger_correction_date, reason: "Correct legacy date")
