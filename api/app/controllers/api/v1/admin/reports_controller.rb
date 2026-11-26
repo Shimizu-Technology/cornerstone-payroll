@@ -853,6 +853,7 @@ module Api
               "marked_ready_by_id" => filing.marked_ready_by_id, "notes" => filing.notes
             } ]
             filing.save!
+            PortalNotifications.w2_ready_to_post!(filing, actor: current_user)
             if year_end_revision
               YearEnd::ReadyCheck.record(company.id, year, year_end_revision)
               YearEnd::EfileCheck.signed_off(company.id, year, year_end_revision, filing)

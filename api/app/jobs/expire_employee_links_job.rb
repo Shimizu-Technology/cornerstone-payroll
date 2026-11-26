@@ -20,6 +20,9 @@ class ExpireEmployeeLinksJob < ApplicationJob
     EmployeeAccountLink.where(status: "former").where(former_access_until: ..now).order(:id).pluck(:id).each do |id|
       close(id, :former, now)
     end
+    EmployeeAccountLink.where(status: "invited", invite_expires_at: now..(now + EmployeeAppRollout::EXPIRING_WITHIN)).find_each do |link|
+      remind_expiring_invite(link, now)
+    end
     deactivate_logins_without_access(now)
   end
 
@@ -40,6 +43,17 @@ class ExpireEmployeeLinksJob < ApplicationJob
   end
 
   private
+
+  def remind_expiring_invite(link, now)
+    link.with_lock do
+      next unless link.invite_open?(now) && link.invite_expires_at <= now + EmployeeAppRollout::EXPIRING_WITHIN &&
+        !link.activation_locked?(now) && link.portal_enabled? && link.employee.active?
+
+      PortalNotifications.employee_link_event!("employee_invite_expiring", link, generation: link.invite_expires_at, now: now)
+    end
+  rescue StandardError => error
+    Rails.logger.error("[ExpireEmployeeLinksJob] invite reminder link=#{link.id} error=#{error.class}")
+  end
 
   def still_due?(link, kind, now)
     if kind == :invite

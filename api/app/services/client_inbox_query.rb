@@ -135,7 +135,11 @@ class ClientInboxQuery
       WHERE f.company_id IN (#{ids}) AND f.created_at <= ?
       UNION ALL
       SELECT prp.id, prp.company_id, 'payroll_review',
-        CASE WHEN prp.approved_at IS NOT NULL THEN 'Payroll approved · ' ELSE 'Payroll changes requested · ' END ||
+        CASE
+          WHEN prp.approval_method = 'cornerstone_override' THEN 'Cornerstone approved for client · '
+          WHEN prp.approved_at IS NOT NULL THEN 'Payroll approved · '
+          ELSE 'Payroll changes requested · '
+        END ||
         CASE
           WHEN EXTRACT(YEAR FROM pp.start_date) <> EXTRACT(YEAR FROM pp.end_date) THEN to_char(pp.start_date, 'Mon FMDD, YYYY') || ' – ' || to_char(pp.end_date, 'Mon FMDD, YYYY')
           WHEN EXTRACT(MONTH FROM pp.start_date) <> EXTRACT(MONTH FROM pp.end_date) THEN to_char(pp.start_date, 'Mon FMDD') || ' – ' || to_char(pp.end_date, 'Mon FMDD, YYYY')

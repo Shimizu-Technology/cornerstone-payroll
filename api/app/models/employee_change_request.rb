@@ -237,7 +237,7 @@ class EmployeeChangeRequest < ApplicationRecord
     employee.update!(proposed_changes)
     EmployeeContactChangeToConfirm.record!(
       employee: employee, actor: requested_by, before_values: before_values,
-      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer, notify_staff: requested_by_link_id.present?
+      after_values: employee.slice(*proposed_changes.keys), reviewer: reviewer
     )
   end
 
