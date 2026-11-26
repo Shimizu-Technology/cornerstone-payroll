@@ -18,7 +18,10 @@ class PortalNotificationEvent < ApplicationRecord
   validates :dedupe_key, presence: true
 
   # Client work that nobody on staff was set up to hear about.
-  scope :without_staff_recipients, -> { where(recipient_status: "no_recipients", category: STAFF_CATEGORIES) }
+  scope :without_staff_recipients, -> {
+    where(recipient_status: "no_recipients", category: STAFF_CATEGORIES)
+      .where("metadata->>'recipient_scope' IS DISTINCT FROM ?", "super_admins")
+  }
 
   def audience
     PortalNotifications::CATEGORIES.fetch(category).fetch(:audience)
@@ -28,7 +31,16 @@ class PortalNotificationEvent < ApplicationRecord
     PortalNotifications::EVENT_TYPES.fetch(event_type)[:message]
   end
 
+  def override_decision?
+    event_type == "payroll_review_decided" && metadata["decision"].in?(%w[cornerstone_override self_override])
+  end
+
+  def self_override_alert?
+    override_decision? && metadata["recipient_scope"] == "super_admins"
+  end
+
   def client_managers_only?
-    PortalNotifications::EVENT_TYPES.fetch(event_type)[:client_managers_only] == true
+    PortalNotifications::EVENT_TYPES.fetch(event_type)[:client_managers_only] == true ||
+      (override_decision? && metadata["recipient_scope"] == "client_managers")
   end
 end

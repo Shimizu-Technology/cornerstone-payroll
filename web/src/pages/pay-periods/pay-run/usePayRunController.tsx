@@ -1,3 +1,6 @@
+import { isReverificationCancelledError } from '@clerk/react/errors';
+import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { estimateDraftGross } from '@/lib/draft-gross';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
 import { useFeedbackState } from '@/components/ui/action-feedback';
@@ -939,23 +942,29 @@ export function usePayRunController({
     }
   };
 
+  const sendClientApproval = useOptionalStepUpRequest((token: string, periodId: number, data: object) =>
+    sendPayrollApprovalRequest(token, companyId, `/admin/pay_periods/${periodId}/record_client_approval`, 'POST', data));
+
   const recordClientApproval = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
     if (!payPeriod?.payroll_review || !clientApproverId) return;
     setClientApprovalLoading(true);
     setError(null);
     try {
-      const response = await payPeriodsApi.recordClientApproval(payPeriod.id, {
+      const response = await sendClientApproval(payPeriod.id, {
         client_approver_id: Number(clientApproverId),
         revision_id: payPeriod.payroll_review.id,
         acknowledgement: clientApprovalConfirmed ? payPeriod.payroll_review.acknowledgement : '',
         evidence_reference: clientApprovalEvidence.trim(),
         notes: clientApprovalNotes.trim() || undefined,
       });
-      setPayPeriod({ ...payPeriod, payroll_review: response.payroll_review });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || 'Failed to record client approval');
+      setPayPeriod(current => current?.id === payPeriod.id && current.payroll_review?.id === payPeriod.payroll_review?.id
+        ? { ...current, payroll_review: result.payroll_review } : current);
       setClientApprovalOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to record client approval');
+      if (!isReverificationCancelledError(err)) setError(err instanceof Error ? err.message : 'Failed to record client approval');
     } finally {
       setClientApprovalLoading(false);
     }
@@ -1625,6 +1634,14 @@ export function usePayRunController({
     return displayEmployees;
   })();
 
+  const reloadClientReview = () => {
+    const current = activePageScopeRef.current;
+    if (current.companyId === companyId && current.payRunId === payPeriod.id &&
+        correctionRouteGeneration === commitRouteGenerationRef.current) {
+      void loadPayPeriod(payPeriod.id, true);
+    }
+  };
+
   return { status: 'ready' as const, sections: {
     coverage: { commitRouteGenerationRef, companyId, handleRefreshSetup, handleRunPayroll, payRunId, pendingCoverageActionRef, processing, setSourceCoverageAcknowledged, setSourceCoverageOpen, setSourceCoverageReason, sourceCoverageAcknowledged, sourceCoverageOpen, sourceCoverageReason },
     reviewDialogs: { companyId, currentPath, loadPayPeriod, payPeriod, payRunId, paymentMethodItem, reviewingItem, setPaymentMethodItem, setReviewingItem },
@@ -1632,7 +1649,7 @@ export function usePayRunController({
     processing: { onPreviewDownloaded: (revision: number) => setPayPeriod(current => current?.id === payRunId && current.company_id === companyId
       ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, processingAction, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
     feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, documentBlockedEmployees, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
-    blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
+    blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, reloadClientReview, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
     source: { sourceCoverageProcessing: processing, onReviewSourceCoverage: isDraft || isCalculated ? () => { if (!processing) void handleRunPayroll(); } : undefined, aireSourceRefreshToken, companyId, currentAireRecord, hoursMap, invalidateAireSource, loadPayPeriod, payPeriod, setTimeTrackingAutoPreview, setTimeTrackingImportOpen },
     metadata: { formatCorrectionPayDate, isApproved, isCalculated, isCommitted, isCorrection, isVoided, payDateCorrections, payPeriod, processedBy, statusConfig },
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },

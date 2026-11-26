@@ -568,6 +568,10 @@ class PayPeriod < ApplicationRecord
     { employee_count: items.map(&:employee_id).uniq.size, entries: entries.sort_by { |entry| [ entry[:employee_name], entry[:note] ] } }
   end
 
+  def client_payroll_approval_required?
+    client_approval_retained? || company.client_payroll_approval_required?
+  end
+
   def annual_fica_review_note(review: annual_fica_review)
     return unless review
 

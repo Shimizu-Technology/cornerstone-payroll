@@ -63,13 +63,14 @@ const componentMocks = vi.hoisted(() => ({
   finalRecordEnabled: false,
 }));
 
+vi.mock('@/services/payroll-approval-api', () => ({ sendPayrollApprovalRequest: apiMocks.recordClientApproval }));
+
 vi.mock('@/services/api', () => ({
   default: { delete: apiMocks.delete },
   ApiError: class ApiError extends Error {},
   payPeriodsApi: {
     get: apiMocks.get,
     clientReview: apiMocks.clientReview,
-    recordClientApproval: apiMocks.recordClientApproval,
     liabilities: apiMocks.liabilities,
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
@@ -2514,4 +2515,38 @@ it('supersedes an old input-preserving reload while the new run is still loading
   expect(screen.getByLabelText('Current run hours').textContent).toBe('8');
   expect(controller.processing.payPeriod.id).toBe(13);
   expect(controller.hours.employees).toEqual([employee]);
+});
+
+it('ignores a completed client override after navigating to another run', async () => {
+  vi.clearAllMocks();
+  const previous = { ...initialPayPeriod, status: 'approved', notes: 'Previous override run' } as PayPeriod;
+  const next = { ...initialPayPeriod, id: 13, notes: 'Current override run' } as PayPeriod;
+  apiMocks.get.mockImplementation(async (id: number) => ({ pay_period: id === 13 ? next : previous }));
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+
+  let reloadReview!: () => void;
+  function Page() {
+    const navigate = useNavigate();
+    const result = usePayRunController({ initialPayPeriod: previous });
+    if (result.status !== 'ready') return null;
+    reloadReview = result.sections.blockers.reloadClientReview;
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next override run</button>
+      <output>{result.sections.blockers.payPeriod.notes}</output></>;
+  }
+
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} />
+  </Routes></MemoryRouter>);
+  await screen.findByText('Previous override run');
+  const finishOverride = reloadReview;
+  fireEvent.click(screen.getByRole('button', { name: 'Next override run' }));
+  await screen.findByText('Current override run');
+  apiMocks.get.mockClear();
+
+  await act(async () => { finishOverride(); });
+
+  expect(apiMocks.get).not.toHaveBeenCalled();
+  expect(screen.getByText('Current override run')).toBeTruthy();
 });

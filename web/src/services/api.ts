@@ -1679,8 +1679,6 @@ export const payPeriodsApi = {
       client_approval_required: boolean;
       authorized_client_approvers: Array<{ id: number; name: string; email: string }>;
     }>(`/admin/pay_periods/${id}/client_review`),
-  recordClientApproval: (id: number, data: { revision_id: number; client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
-    api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/admin/pay_periods/${id}/record_client_approval`, data),
   liabilities: (id: number) =>
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
       `/admin/pay_periods/${id}/payroll_liabilities`
@@ -2567,6 +2565,7 @@ export interface PayrollRegisterReport {
       end_date: string;
       pay_date: string;
       status: string;
+      approval_marker?: "Override";
     };
     lifecycle: {
       calculated?: { timestamp?: string | null; actor_name?: string | null };
@@ -3497,6 +3496,7 @@ export interface PayrollFinalRecord {
       approved_at: string;
       approved_by_name: string | null;
       approval_method: string;
+      override_reason?: string | null;
       approval_evidence_reference: string | null;
     };
     source_packages: Array<{
@@ -4381,6 +4381,7 @@ export interface CompanyDetail extends CompanyListItem {
 }
 
 export interface CompanyFormData {
+  client_approval_disable_reason?: string;
   name: string;
   ein?: string;
   pay_frequency: string;
