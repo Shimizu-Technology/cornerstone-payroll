@@ -45,7 +45,10 @@ module PortalNotifications
         if event.audience == "employee"
           return employee_target(event)&.email == delivery.recipient_email ? nil : "access_revoked"
         end
-        if event.audience == "staff"
+        if event.override_decision? && actor_address?(delivery.address, event)
+          return "access_revoked"
+        end
+        if event.audience == "staff" && !event.self_override_alert?
           if delivery.user_id
             listed = listed_user?(event.company_id, delivery.user_id) || listed_email?(event.company_id, delivery.user&.email)
             return "recipient_removed" unless listed
@@ -115,8 +118,7 @@ module PortalNotifications
         return false unless period.is_a?(PayPeriod) && period.company_id == event.company_id
         return false unless period.approved? && period.correction_status != "voided"
 
-        company = Company.find_by(id: event.company_id)
-        return false unless company&.client_payroll_approval_required?
+        return false unless period.client_payroll_approval_required?
 
         package = resolve_review_package(event, period)
         package.present? && package.published_at.present? && package.superseded_at.nil? &&
@@ -152,10 +154,15 @@ module PortalNotifications
 
       def staff_targets(event)
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
+        candidate_ids = if event.self_override_alert?
+          User.active.where(organization_id: event.organization_id, role: "super_admin").select(:id)
+        else
+          listed.users.select(:user_id)
+        end
         users = []
         seen_user_ids = []
         taken_canonicals = []
-        eligible_listed_users = User.where(id: listed.users.select(:user_id)).order(:id).to_a.select { |user| eligible_user?(user, event) }
+        eligible_listed_users = User.where(id: candidate_ids).order(:id).to_a.select { |user| eligible_user?(user, event) }
         opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.category) != "off" }
         (opted_in + opted_out).each do |user|
           canonical = PortalNotificationRecipient.canonical_email(user.email)
@@ -165,12 +172,14 @@ module PortalNotifications
           seen_user_ids << user.id
           taken_canonicals << canonical if canonical.present?
         end
-        extra_targets = []
+        return users.map { |user| Target.new(user, nil) } if event.self_override_alert?
 
+        extra_targets = []
         listed.extra_emails.order(:email).pluck(:email).each do |email|
           normalized = PortalNotificationRecipient.normalize_email(email)
           canonical = PortalNotificationRecipient.canonical_email(normalized)
           next if normalized.blank? || canonical.blank? || taken_canonicals.include?(canonical)
+          next if event.override_decision? && actor_address?(normalized, event)
 
           account_users = account_users_for_email(normalized)
           if account_users.any?
@@ -204,7 +213,12 @@ module PortalNotifications
           assigned = CompanyAssignment.active_access.where(company_id: event.company_id).select(:user_id)
           User.active.client.where(organization_id: event.organization_id, id: assigned).order(:id).to_a
         end
-        candidates.select { |user| eligible_user?(user, event) }.map { |user| Target.new(user, nil) }
+        eligible = candidates.select { |user| eligible_user?(user, event) }
+        if event.override_decision?
+          opted_in, opted_out = eligible.partition { |user| Preferences.mode_for(user, event.category) != "off" }
+          eligible = (opted_in + opted_out).uniq { |user| PortalNotificationRecipient.canonical_email(user.email) || user.id }
+        end
+        eligible.map { |user| Target.new(user, nil) }
       end
 
       # Never trusts a memoized user or access list.
@@ -213,8 +227,10 @@ module PortalNotifications
         company = Company.includes(:organization).find_by(id: event.company_id)
         return false unless user && company
         return false if event.actor_id.present? && event.actor_id == user.id
+        return false if event.override_decision? && actor_address?(user.email, event)
 
         if event.audience == "staff"
+          return false if event.self_override_alert? && !user.super_admin?
           return false unless staff_can_view_company?(user, company)
 
           if event.event_type == "employee_contact_confirmation_requested"
@@ -246,6 +262,11 @@ module PortalNotifications
       def company_open?(company_id)
         company = Company.includes(:organization).find_by(id: company_id)
         company&.active? && (company.live_payroll? || company.demo?) && company.organization&.active?
+      end
+
+      def actor_address?(email, event)
+        canonical = PortalNotificationRecipient.canonical_email(email)
+        canonical.present? && canonical == PortalNotificationRecipient.canonical_email(event.actor&.email)
       end
 
       def listed_user?(company_id, user_id)

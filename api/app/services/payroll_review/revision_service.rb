@@ -256,13 +256,14 @@ module PayrollReview
       Current.domain_audit_recorded = previous_domain_audit if event.in?(%w[published withdrawn])
     end
 
-    def notify!(package, event, decision: nil)
+    def notify!(package, event, decision: nil, recipient_scope: nil)
       # A savepoint prevents notification failures (including SQL errors) from
       # aborting the financial transaction or leaving a partial delivery ledger.
       ApplicationRecord.transaction(requires_new: true) do
         PortalNotifications.record!(event_type: event, company: pay_period.company, actor: actor, subject: pay_period,
-          dedupe_key: "#{event}:#{package.id}",
-          metadata: { pay_period_id: pay_period.id, review_package_id: package.id, revision: package.revision, decision: decision }.compact)
+          dedupe_key: [ event, package.id, recipient_scope ].compact.join(":"),
+          metadata: { pay_period_id: pay_period.id, review_package_id: package.id, revision: package.revision,
+                      decision: decision, recipient_scope: recipient_scope }.compact)
       end
     rescue StandardError => e
       Rails.logger.error("Payroll review notification failed: package=#{package.id} event=#{event} error=#{e.class}")
@@ -281,8 +282,11 @@ module PayrollReview
       raise Error, VIEWER_CANNOT_DECIDE if approver.client_viewer?
     end
 
-    def notify_override!(_package)
-      # Use PR #631's recipient routing for the override decision and self-override alert.
+    def notify_override!(package)
+      event = "payroll_review_decided"
+      notify!(package, event, decision: "cornerstone_override")
+      notify!(package, event, decision: "cornerstone_override", recipient_scope: "client_managers")
+      notify!(package, event, decision: "self_override", recipient_scope: "super_admins") if package.self_override?
     end
 
     def validate_admin_recorder!(user)
