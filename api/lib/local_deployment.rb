@@ -5,6 +5,8 @@ require "json"
 require "securerandom"
 require "time"
 require "uri"
+require_relative "database_connection_timeouts"
+require_relative "staging_database_policy"
 
 # DEPLOYMENT_ENV=local runs the production build (RAILS_ENV=production) on a
 # developer machine: loopback databases and Redis, disk storage, mail written
@@ -25,8 +27,11 @@ module LocalDeployment
   DATABASE_SETTINGS = %w[
     DATABASE_URL RLS_DATABASE_URL MIGRATION_DATABASE_URL CACHE_DATABASE_URL QUEUE_DATABASE_URL CABLE_DATABASE_URL
     CACHE_MIGRATION_DATABASE_URL QUEUE_MIGRATION_DATABASE_URL CABLE_MIGRATION_DATABASE_URL
-    MIGRATION_CACHE_DATABASE_URL MIGRATION_QUEUE_DATABASE_URL MIGRATION_CABLE_DATABASE_URL RACK_ATTACK_REDIS_URL
+    MIGRATION_CACHE_DATABASE_URL MIGRATION_QUEUE_DATABASE_URL MIGRATION_CABLE_DATABASE_URL
   ].freeze
+  REDIS_SETTINGS = %w[RACK_ATTACK_REDIS_URL].freeze
+  DATABASE_SCHEMES = %w[postgres postgresql].freeze
+  REDIS_SCHEMES = %w[redis rediss].freeze
   LOOPBACK_HOSTS = %w[localhost 127.0.0.1 ::1 [::1]].freeze
   ROOT_DOMAIN_PATTERN = /\A(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+localhost\z/
   CLERK_DEVELOPMENT_ISSUER = %r{\Ahttps://[a-z0-9-]+\.clerk\.accounts\.dev/?\z}
@@ -63,9 +68,7 @@ module LocalDeployment
     root = tenant_root_domain(env)
     fail!("DEPLOYMENT_ENV=local requires TENANT_ROOT_DOMAIN under .localhost") unless root
     https_port(env)
-    DATABASE_SETTINGS.each do |name|
-      fail!("#{name} must point at a loopback service for DEPLOYMENT_ENV=local") if env[name].to_s != "" && !loopback_url?(env[name])
-    end
+    validate_database_routing!(env)
     fail!("FRONTEND_URL must be a local HTTPS origin") unless local_origin?(env["FRONTEND_URL"], env)
     %w[CORS_ORIGINS CLERK_AUTHORIZED_PARTIES].each do |name|
       origins = env.fetch(name, "").split(",").map(&:strip).reject(&:empty?)
@@ -112,14 +115,46 @@ module LocalDeployment
     false
   end
 
-  def loopback_url?(value)
-    uri = URI.parse(value.to_s)
-    host = uri.host.to_s.downcase
-    return LOOPBACK_HOSTS.include?(host) unless host.empty?
+  # libpq also routes through PG* settings and URL parameters, so a loopback
+  # URL alone proves nothing. DATABASE_URL is required: without it libpq
+  # would fall back to those settings.
+  def validate_database_routing!(env)
+    StagingDatabasePolicy::ROUTING_ENV.each do |name|
+      next if env[name].to_s.empty? || (name == "PGOPTIONS" && env[name] == DatabaseConnectionTimeouts::PG_OPTIONS)
 
-    # A Unix socket: postgres:///db?host=/path
-    socket = URI.decode_www_form(uri.query.to_s).to_h["host"]
-    socket.nil? || socket.start_with?("/")
+      fail!("Remove #{name}: database routing overrides are refused for DEPLOYMENT_ENV=local")
+    end
+    fail!("DEPLOYMENT_ENV=local requires DATABASE_URL") if env["DATABASE_URL"].to_s.strip.empty?
+    DATABASE_SETTINGS.each do |name|
+      next if env[name].to_s.empty? || loopback_url?(env[name])
+
+      fail!("#{name} must point at a loopback service for DEPLOYMENT_ENV=local")
+    end
+    REDIS_SETTINGS.each do |name|
+      next if env[name].to_s.empty? || loopback_url?(env[name], schemes: REDIS_SCHEMES)
+
+      fail!("#{name} must point at a loopback service for DEPLOYMENT_ENV=local")
+    end
+  end
+
+  # One loopback host, or one Unix socket directory given as ?host=/path,
+  # with no parameter that sends libpq anywhere else.
+  def loopback_url?(value, schemes: DATABASE_SCHEMES)
+    uri = URI.parse(value.to_s)
+    return false unless schemes.include?(uri.scheme.to_s.downcase)
+
+    pairs = URI.decode_www_form(uri.query.to_s).map { |name, setting| [ name.downcase, setting ] }
+    pairs.each do |name, setting|
+      next unless StagingDatabasePolicy::ROUTING_PARAMETERS.include?(name)
+      return false unless name == "options" && setting == DatabaseConnectionTimeouts::PG_OPTIONS
+    end
+    sockets = pairs.select { |name, _| name == "host" }.map(&:last)
+    host = uri.host.to_s.downcase
+    if host.empty?
+      sockets.size == 1 && sockets.first.start_with?("/") && !sockets.first.include?(",")
+    else
+      sockets.empty? && LOOPBACK_HOSTS.include?(host)
+    end
   rescue URI::InvalidURIError, ArgumentError
     false
   end
@@ -145,7 +180,8 @@ module LocalDeployment
     message = payload.to_h.transform_keys(&:to_s)
     message["attachments"] = Array(message["attachments"]).map do |attachment|
       attachment = attachment.to_h.transform_keys(&:to_s)
-      { "filename" => attachment["filename"], "bytes" => attachment["content"].to_s.bytesize }
+      content = attachment["content"]
+      { "filename" => attachment["filename"], "bytes" => content.is_a?(Array) ? content.length : content.to_s.bytesize }
     end
     message["idempotency_key"] = options[:idempotency_key] if options[:idempotency_key]
     message["captured_at"] = Time.now.utc.iso8601(6)

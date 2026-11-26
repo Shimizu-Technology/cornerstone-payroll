@@ -160,6 +160,7 @@ class TenantSubdomainRegistry
   # A local production copy's own hosts, e.g. its shared EMPLOYEE_APP_URL.
   def self.local_tenant_host?(host)
     root = LocalDeployment.tenant_root_domain
+    host = host.to_s.downcase
     root.present? && host.present? && (host == root || host.end_with?(".#{root}"))
   end
   private_class_method :local_tenant_host?

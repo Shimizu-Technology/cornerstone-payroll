@@ -271,6 +271,7 @@ class StagingOutboundPolicy
     end
 
     def http_request!(http, request, env: ENV, body: nil)
+      return http_host!(http.address, http.port, http.use_ssl?, env: env) if LocalDeployment.local?(env)
       return true unless staging?(env)
       http_host!(http.address, http.port, http.use_ssl?, env: env)
       host = http.address.downcase

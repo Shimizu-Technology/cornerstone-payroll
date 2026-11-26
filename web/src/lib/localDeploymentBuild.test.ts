@@ -1,13 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import viteConfig from '../../vite.config'
 import { assertDeploymentFlags, assertLocalBuild } from '../../build/staging'
-import { posthogOrigins } from '../../scripts/finalize-surface-dist.mjs'
+import { finalizeEmployeeDist, finalizeStaffDist, posthogOrigins } from '../../scripts/finalize-surface-dist.mjs'
 import { shouldEnableAnalytics } from './analytics'
 import { clientSubdomainHost, DEFAULT_TENANT_ROOT_DOMAIN, tenantRootDomain } from './tenant-subdomain'
 
+const publishableKey = (host: string, prefix: string): string => `${prefix}${Buffer.from(`${host}$`).toString('base64')}`
+const devKey = publishableKey('example-local-1.clerk.accounts.dev', 'pk_test_')
 const localBuild = {
   DEPLOYMENT_ENV: 'local',
   VITE_DEPLOYMENT_ENV: 'local',
-  VITE_CLERK_PUBLISHABLE_KEY: 'pk_test_local',
+  VITE_CLERK_PUBLISHABLE_KEY: devKey,
   VITE_TENANT_ROOT_DOMAIN: 'cornerstone.localhost',
   VITE_API_URL: 'https://api.cornerstone.localhost:8443/api/v1',
 }
@@ -48,5 +54,57 @@ describe('local production copy build', () => {
     expect(posthogOrigins({ ...enabled, VITE_DEPLOYMENT_ENV: 'local' })).toBeNull()
     expect(shouldEnableAnalytics({ env: { ...enabled, VITE_DEPLOYMENT_ENV: 'local' }, isStagingEnv: false, hasSupportToken: false, navigatorObj: {}, windowObj: {} })).toBe(false)
     expect(shouldEnableAnalytics({ env: { ...enabled, VITE_DEPLOYMENT_ENV: 'production' }, isStagingEnv: false, hasSupportToken: false, navigatorObj: {}, windowObj: {} })).toBe(true)
+  })
+})
+
+describe('local build wiring', () => {
+  const webDir = path.resolve(__dirname, '../..')
+  const dirs: string[] = []
+  const dist = (): string => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'local-dist-'))
+    dirs.push(dir)
+    writeFileSync(path.join(dir, 'index.html'), '<html></html>')
+    return dir
+  }
+  const build = (): unknown => (viteConfig as (config: { mode: string; command: 'build' }) => unknown)({ mode: 'production', command: 'build' })
+  const stubLocal = (overrides: Record<string, string> = {}): void => {
+    // The real build reads process.env, so clear CI markers this run may have.
+    for (const key of ['NETLIFY', 'CI', 'GITHUB_ACTIONS', 'RENDER', 'RENDER_SERVICE_ID', 'RENDER_EXTERNAL_URL', 'RENDER_GIT_COMMIT']) vi.stubEnv(key, '')
+    for (const [key, value] of Object.entries({ ...localBuild, ...overrides })) vi.stubEnv(key, value)
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('runs the local build checks from vite.config', () => {
+    stubLocal()
+    expect(build).not.toThrow()
+    stubLocal({ CI: 'true' })
+    expect(build).toThrow(/hosted platform or CI/)
+    stubLocal({ VITE_CLERK_PUBLISHABLE_KEY: publishableKey('clerk.shimizu-technology.com', 'pk_live_') })
+    expect(build).toThrow(/live keys/)
+  })
+
+  it('leaves PostHog out of local staff headers but keeps it for production', () => {
+    const enabled = { VITE_PUBLIC_POSTHOG_ENABLED: 'true', VITE_PUBLIC_POSTHOG_KEY: 'phc_test' }
+    const localDir = dist()
+    expect(finalizeStaffDist({ distDir: localDir, env: { ...localBuild, ...enabled } }).posthog).toBeNull()
+    expect(readFileSync(path.join(localDir, '_headers'), 'utf8')).not.toMatch(/posthog/)
+
+    const productionDir = dist()
+    finalizeStaffDist({ distDir: productionDir, env: { VITE_DEPLOYMENT_ENV: 'production', VITE_API_URL: 'https://cornerstone-payroll.onrender.com/api/v1' } })
+    expect(readFileSync(path.join(productionDir, '_headers'), 'utf8')).toMatch(/us\.i\.posthog\.com/)
+  })
+
+  it('allows the development Clerk key for a local employee build only', () => {
+    const deployDir = path.join(webDir, 'deploy', 'employee')
+    const localDir = dist()
+    const origins = finalizeEmployeeDist({ distDir: localDir, deployDir, env: { ...localBuild, VITE_PUBLIC_POSTHOG_ENABLED: 'true', VITE_PUBLIC_POSTHOG_KEY: 'phc_test' } })
+    expect(origins.clerkOrigin).toBe('https://example-local-1.clerk.accounts.dev')
+    expect(origins.posthog).toBeNull()
+    expect(readFileSync(path.join(localDir, '_headers'), 'utf8')).not.toMatch(/posthog/)
+    expect(() => finalizeEmployeeDist({ distDir: dist(), deployDir, env: { ...localBuild, VITE_DEPLOYMENT_ENV: 'production' } })).toThrow(/pk_live_/)
   })
 })

@@ -31,12 +31,16 @@ class ClerkTokenVerifier
     nil
   end
 
-  def self.valid_production_https_origin?(value)
+  # A local production copy accepts its own origins and its Clerk
+  # development issuer instead.
+  def self.valid_production_https_origin?(value, env: ENV)
     normalized = normalize_origin(value)
     return false unless normalized
 
     uri = URI.parse(normalized)
-    return LocalDeployment.local_origin?(normalized) if LocalDeployment.local?
+    if LocalDeployment.local?(env)
+      return LocalDeployment.local_origin?(normalized, env) || LocalDeployment::CLERK_DEVELOPMENT_ISSUER.match?(normalized)
+    end
 
     uri.is_a?(URI::HTTPS) && uri.port == 443
   end
