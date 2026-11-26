@@ -30,6 +30,7 @@ module EmployeeLinks
       company = @employee.company
       EmployeeLinks.require_invitation_management!(@actor, company)
       EmployeeLinks.require_code_issuer!(@actor, company) if @delivery == "code"
+      EmployeeAppSwitch::Enforcement.warm_attestation!(company)
 
       result = ApplicationRecord.transaction do
         EmployeeLinks.lock_for_issuance!(company)

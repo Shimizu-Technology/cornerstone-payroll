@@ -94,3 +94,18 @@ it.each([{}, { pay_periods: [null] }, { pay_periods: [{ can_decide_payroll_revie
     expect(screen.getByText('Active employees')).toBeTruthy();
   },
 );
+
+
+it('formats the pay period and payday in Recent payrolls', async () => {
+  vi.mocked(clientPayPeriodsApi.list).mockResolvedValueOnce(emptyPayroll);
+  vi.mocked(clientReportsApi.dashboard).mockResolvedValueOnce({
+    stats: { recent_payrolls: [{
+      id: 19, start_date: '2026-10-26', end_date: '2026-11-08', pay_date: '2026-11-11',
+      period_description: '10/26/2026 - 11/08/2026', employee_count: 3, total_net: 1200,
+    }] },
+  } as Awaited<ReturnType<typeof clientReportsApi.dashboard>>);
+
+  render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
+
+  expect(await screen.findByRole('button', { name: /Oct 26 – Nov 8, 2026.*Nov 11, 2026/ })).toBeTruthy();
+});

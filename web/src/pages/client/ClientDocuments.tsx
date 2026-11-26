@@ -1,3 +1,4 @@
+import { formatGuamDate, formatGuamDateTime } from '@/lib/utils';
 import { SubmissionDocumentGroups } from '@/components/documents/SubmissionDocumentGroups';
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -433,7 +434,7 @@ export function ClientDocuments() {
                             <MobileField label="Category" value={categoryLabel(document.category)} />
                             <MobileField label="Employee" value={document.employee_name || 'General'} />
                             <MobileField label="Uploaded by" value={document.uploaded_by_name || '—'} />
-                            <MobileField label="Uploaded" value={new Date(document.created_at).toLocaleDateString()} />
+                            <MobileField label="Uploaded" value={formatGuamDate(document.created_at) || '—'} />
                           </div>
                           <MobileCardActions>
                             <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>
@@ -481,7 +482,7 @@ export function ClientDocuments() {
                       <TableCell>{categoryLabel(document.category)}</TableCell>
                       <TableCell>{document.employee_name || 'General company document'}</TableCell>
                       <TableCell>{document.uploaded_by_name || '—'}</TableCell>
-                      <TableCell>{new Date(document.created_at).toLocaleString()}</TableCell>
+                      <TableCell>{formatGuamDateTime(document.created_at)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button variant="outline" size="sm" disabled={!!document.archived_at} onClick={() => void handlePreview(document)}>

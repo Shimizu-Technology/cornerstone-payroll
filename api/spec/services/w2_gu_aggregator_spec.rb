@@ -345,6 +345,17 @@ RSpec.describe W2GuAggregator do
       expect(report[:employees]).to all(include(box3_social_security_wages: 1_000.0, box12: [ a_hash_including(code: "D", amount: 50.0) ]))
     end
 
+    it "includes reportable native items before the imported balance's through date" do
+      period = create(:pay_period, :committed, company: company,
+        start_date: Date.new(2025, 5, 1), end_date: Date.new(2025, 5, 14), pay_date: Date.new(2025, 5, 18))
+      item = create(:payroll_item, company: company, employee: employee, pay_period: period)
+      create_historical_filing_source(company: company, employee: employee, pay_date: Date.new(2025, 6, 18),
+        gross_pay: 1_000, federal_income_tax: 100, social_security_tax: 62, medicare_tax: 14.50,
+        employer_social_security_tax: 62, employer_medicare_tax: 14.50)
+
+      expect(YearEnd::W2PayrollItems.scope(company.id, 2025)).to contain_exactly(item)
+    end
+
     it "adds imported bridge balances and committed payroll once in a mixed transition year" do
       create_historical_filing_source(
         company: company,

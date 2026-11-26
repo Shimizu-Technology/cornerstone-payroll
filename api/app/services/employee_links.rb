@@ -6,18 +6,28 @@
 #
 # Lock order, the same on every path that changes links or their logins
 # (invite, resend, sign-up, bind, claim, and later retire, revoke and the
-# expiry sweep):
+# expiry sweep), and on contact edits:
 #
-#   1. the employee row, by staff actions that change the employee;
+#   0. the company, when a path takes it at all: lock_for_issuance! (a demo
+#      company, FOR SHARE) on invite, resend and a demo's Clerk sign-up, and
+#      company.lock! on staff and client contact edits;
+#   1. the employee row: staff actions and contact edits that change the
+#      employee, and the shared sign-up and claim check (Verify), so a
+#      contact edit can't commit between its email-on-file read and the
+#      activation;
 #   2. logins (users), lowest id first, FOR NO KEY UPDATE, so a link's
 #      foreign-key check on its login never waits behind them;
 #   3. links.
 #
-# A path that starts from a link reads it first without a lock, locks its
-# login, then locks the link and re-checks that its login didn't change.
-# Binding writes the employee's contact email last, without waiting: if a
-# staff action holds the employee row, the contact email isn't changed (the
-# login still binds). Clerk calls always happen outside transactions.
+# Every path that takes the company takes it first, and Verify never takes
+# it (a demo sign-up's issuance lock is a later, separate transaction), so
+# skipping step 0 can't invert the order. A path that starts from a link
+# reads it first without a lock, locks its employee, then its login, then
+# the link, and re-checks that its login didn't change. Bind is the one
+# exception, because PayrollInvitation locks the login before it starts: it
+# takes the employee row after the link, without waiting (Bind.locked_email_on_file),
+# and fails closed while a contact edit holds it. Clerk calls always happen
+# outside transactions.
 module EmployeeLinks
   class Error < StandardError; end
   class Forbidden < Error; end
@@ -249,10 +259,12 @@ module EmployeeLinks
   # Invitation issuance for a demo company holds the company row lock,
   # shared, which the demo kill switch takes exclusively (DemoStop), so an
   # invitation is never issued halfway through a stop. Call first inside the
-  # issuing transaction, then re-check the employee app is on.
+  # issuing transaction, then re-check the employee app is on; that re-check
+  # reads only the cached employee service answer while the lock is held.
   def self.lock_for_issuance!(company)
     return unless company&.demo?
 
+    EmployeeAppSwitch::Enforcement.cached_attestation_only!
     Company.where(id: company.id).lock("FOR SHARE").pick(:id)
   end
 

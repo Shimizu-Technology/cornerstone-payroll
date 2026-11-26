@@ -4,9 +4,10 @@ module Api
   module V1
     module Client
       class PayPeriodsController < BaseController
-        rescue_from PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError do |error|
-          render json: { error: error.message }, status: :unprocessable_entity
-        end
+        include ClientComponentHistoryErrors
+
+        PAY_LINE_DETAILS_UNAVAILABLE = "Details for this pay line aren't available yet. Contact Cornerstone."
+        REVIEW_DETAILS_UNAVAILABLE = "Some pay lines can't be shown yet, so this review can't be approved. Contact Cornerstone."
 
         audit_actions :approve_review
         before_action :set_pay_period, only: %i[show approve_review request_changes preview_pdf]
@@ -43,7 +44,13 @@ module Api
             acknowledgement: params[:acknowledgement],
             notes: params[:notes],
             revision_id: params[:revision_id]
-          )
+          ) do |locked_period|
+            ActiveRecord::Base.uncached do
+              if client_pay_items(locked_period).any? { |item| pay_item_summary(item, locked_period).key?(:details_error) }
+                raise PayrollReview::RevisionService::Error, REVIEW_DETAILS_UNAVAILABLE
+              end
+            end
+          end
           render json: { payroll_review: PayrollReview::PackagePresenter.call(review_package) }
         rescue PayrollReview::RevisionService::StaleRevisionError => e
           render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
@@ -87,6 +94,8 @@ module Api
             filename: "Payroll_PREVIEW_#{@pay_period.pay_date.iso8601}_rev#{package.revision}#{part_token}.pdf"
         rescue PayrollReview::RevisionService::StaleRevisionError => e
           render json: { error: e.message, code: "stale_payroll_review_revision" }, status: :unprocessable_entity
+        rescue PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError
+          raise
         rescue PayrollReview::RevisionService::Error, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
         rescue ActiveRecord::ActiveRecordError
@@ -127,22 +136,24 @@ module Api
 
         def set_pay_period
           scope = PayPeriod.reportable_periods.where(company_id: current_company_id)
-          @pay_period = scope.includes(
-            payroll_items: [
-              :employee,
-              :payroll_item_earnings,
-              { payroll_item_field_entries: :payroll_field_definition },
-              { payroll_item_deductions: :deduction_type }
-            ]
-          ).find_by(id: params[:id])
+          @pay_period = scope.find_by(id: params[:id])
           @pay_period = nil unless client_visible_period?(@pay_period)
           return if @pay_period
 
           render json: { error: "Pay period not found" }, status: :not_found
         end
 
+        def client_pay_items(pay_period)
+          pay_period.payroll_items.reportable.includes(
+            :employee,
+            :payroll_item_earnings,
+            { payroll_item_field_entries: :payroll_field_definition },
+            { payroll_item_deductions: :deduction_type }
+          ).select(&:payroll_included?)
+        end
+
         def pay_period_summary(pay_period, include_items: false)
-          items = pay_period.payroll_items.reportable.select(&:payroll_included?)
+          items = client_pay_items(pay_period)
           json = {
             id: pay_period.id,
             company_id: pay_period.company_id,
@@ -178,69 +189,82 @@ module Api
               .includes(:generated_by, :approved_by, :approval_recorded_by, :changes_requested_by).order(revision: :desc)
               .map { |package| PayrollReview::PackagePresenter.call(package, include_source_manifest: false) }
             json[:payroll_review_history] = [] unless pay_period.company.client_payroll_approval_required?
-            json[:payroll_items] = items.map do |item|
-              breakdown = PayrollStatementYtdBreakdown.new(item)
-              deduction_rows = breakdown.current_rows(:deduction)
-              non_taxable_additions_total = breakdown.current_rows(:other_pay).sum(0.to_d, &:current).round(2)
-
-              taxes_total = (
-                item.withholding_tax.to_d +
-                item.additional_withholding.to_d +
-                item.social_security_tax.to_d +
-                item.medicare_tax.to_d
-              ).round(2)
-              roth_retirement_total = deduction_rows
-                .select { |row| row.semantic == PayrollReportingGroups::GROUP_401K_AFTER_TAX.to_sym }
-                .sum(0.to_d, &:current).round(2)
-              retirement_total = deduction_rows
-                .select { |row| PayrollReportingGroups.retirement_group?(row.semantic.to_s) }
-                .sum(0.to_d, &:current).round(2)
-              traditional_retirement_total = (retirement_total - roth_retirement_total).round(2)
-              loans_total = deduction_rows
-                .select { |row| row.semantic == :loan }
-                .sum(0.to_d, &:current).round(2)
-              insurance_total = deduction_rows
-                .select { |row| row.semantic == :insurance }
-                .sum(0.to_d, &:current).round(2)
-              other_deductions_total = (
-                item.total_deductions.to_d - (taxes_total + retirement_total + loans_total + insurance_total)
-              ).round(2)
-
-              {
-                id: item.id,
-                pay_stub_available: pay_period.client_finished? && EarningsStatementEligibility.printable?(item),
-                employee_id: item.employee_id,
-                employee_name: item.employee_full_name,
-                employment_type: item.employment_type,
-                salary_type: item.calculation_context_snapshot.to_h.dig("employee", "salary_type") || item.timekeeping_context_snapshot.to_h["salary_type"],
-                contractor_pay_type: item.calculation_context_snapshot.to_h.dig("employee", "contractor_pay_type"),
-                pay_rate: item.pay_rate,
-                total_hours: item.total_hours,
-                hours_worked: item.hours_worked,
-                overtime_hours: item.overtime_hours,
-                gross_pay: item.gross_pay,
-                non_taxable_additions_total: non_taxable_additions_total,
-                withholding_tax: item.withholding_tax,
-                additional_withholding: item.additional_withholding,
-                social_security_tax: item.social_security_tax,
-                medicare_tax: item.medicare_tax,
-                additional_medicare_tax: item.additional_medicare_tax,
-                state_withheld: 0,
-                retirement_payment: traditional_retirement_total,
-                roth_retirement_payment: roth_retirement_total,
-                loan_payment: loans_total,
-                loan_deduction: item.loan_deduction,
-                insurance_payment: insurance_total,
-                other_deductions: other_deductions_total,
-                custom_deductions: item.custom_deductions || [],
-                payroll_adjustments: item.payroll_adjustments || [],
-                total_deductions: item.total_deductions,
-                net_pay: item.net_pay
-              }
-            end
+            json[:payroll_items] = items.map { |item| pay_item_summary(item, pay_period) }
+            json[:can_decide_payroll_review] = false if json[:payroll_items].any? { |item| item.key?(:details_error) }
           end
 
           json
+        end
+
+        def pay_item_summary(item, pay_period)
+          summary = {
+            id: item.id,
+            pay_stub_available: pay_period.client_finished? && EarningsStatementEligibility.printable?(item),
+            employee_id: item.employee_id,
+            employee_name: item.employee_full_name,
+            employment_type: item.employment_type,
+            salary_type: item.calculation_context_snapshot.to_h.dig("employee", "salary_type") || item.timekeeping_context_snapshot.to_h["salary_type"],
+            contractor_pay_type: item.calculation_context_snapshot.to_h.dig("employee", "contractor_pay_type"),
+            pay_rate: item.pay_rate,
+            total_hours: item.total_hours,
+            hours_worked: item.hours_worked,
+            overtime_hours: item.overtime_hours,
+            gross_pay: item.gross_pay,
+            net_pay: item.net_pay
+          }
+          summary.merge(pay_item_breakdown(item))
+        rescue PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError => error
+          Rails.logger.warn("Client pay line #{item.id} for company #{item.company_id}: #{error.class}: #{error.message}")
+          Rails.error.report(error, handled: true, context: { company_id: item.company_id, payroll_item_id: item.id })
+          summary.merge(details_error: PAY_LINE_DETAILS_UNAVAILABLE, pay_stub_available: false)
+        end
+
+        def pay_item_breakdown(item)
+          breakdown = PayrollStatementYtdBreakdown.new(item)
+          deduction_rows = breakdown.current_rows(:deduction)
+          non_taxable_additions_total = breakdown.current_rows(:other_pay).sum(0.to_d, &:current).round(2)
+
+          taxes_total = (
+            item.withholding_tax.to_d +
+            item.additional_withholding.to_d +
+            item.social_security_tax.to_d +
+            item.medicare_tax.to_d
+          ).round(2)
+          roth_retirement_total = deduction_rows
+            .select { |row| row.semantic == PayrollReportingGroups::GROUP_401K_AFTER_TAX.to_sym }
+            .sum(0.to_d, &:current).round(2)
+          retirement_total = deduction_rows
+            .select { |row| PayrollReportingGroups.retirement_group?(row.semantic.to_s) }
+            .sum(0.to_d, &:current).round(2)
+          traditional_retirement_total = (retirement_total - roth_retirement_total).round(2)
+          loans_total = deduction_rows
+            .select { |row| row.semantic == :loan }
+            .sum(0.to_d, &:current).round(2)
+          insurance_total = deduction_rows
+            .select { |row| row.semantic == :insurance }
+            .sum(0.to_d, &:current).round(2)
+          other_deductions_total = (
+            item.total_deductions.to_d - (taxes_total + retirement_total + loans_total + insurance_total)
+          ).round(2)
+
+          {
+            non_taxable_additions_total: non_taxable_additions_total,
+            retirement_payment: traditional_retirement_total,
+            roth_retirement_payment: roth_retirement_total,
+            loan_payment: loans_total,
+            insurance_payment: insurance_total,
+            other_deductions: other_deductions_total,
+            withholding_tax: item.withholding_tax,
+            additional_withholding: item.additional_withholding,
+            social_security_tax: item.social_security_tax,
+            medicare_tax: item.medicare_tax,
+            additional_medicare_tax: item.additional_medicare_tax,
+            state_withheld: 0,
+            loan_deduction: item.loan_deduction,
+            custom_deductions: item.custom_deductions || [],
+            payroll_adjustments: item.payroll_adjustments || [],
+            total_deductions: item.total_deductions
+          }
         end
 
         def client_visible_period?(pay_period)
