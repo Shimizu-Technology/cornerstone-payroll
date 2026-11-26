@@ -133,7 +133,7 @@ module YearEnd
 
       Efw2Formatting.employer_problems(company, structured: true).reject do |problem|
         case problem[:code]
-        when :ein_invalid then company.ein.blank?
+        when :ein_invalid then true
         when :phone_invalid then company.phone.blank?
         when :email_invalid then company.email.blank?
         when :contact_name_missing then company.filing_contact_name.blank?
@@ -142,27 +142,28 @@ module YearEnd
         else false
         end
       end.map do |problem|
-        if company.demo? && problem[:code] == :ein_invalid && demo_reserved_ein?(company.ein)
-          next issue(
-            "DEMO_RESERVED_EIN_EXPECTED",
-            "Expected demo e-file preflight error: this demo company uses a fictional reserved EIN (#{company.ein}), which the official EFW2 validator rejects.",
-            field: "ein",
-            expected_for_demo: true
-          )
-        end
-
-        field = if problem[:code] == :ein_invalid
-          "ein"
-        elsif problem[:code].in?(%i[address_missing address_invalid state_invalid])
+        field = if problem[:code].in?(%i[address_missing address_invalid state_invalid])
           "address"
         end
         issue("EMPLOYER_EFILE_INVALID", problem[:message], field: field)
       end
     end
 
-    def demo_reserved_ein?(value)
-      digits = value.to_s.delete("-")
-      digits.match?(/\A\d{9}\z/) && Efw2Formatting::BAD_EIN_PREFIXES.include?(digits[0, 2])
+    def employer_ein_issues
+      return [] if company.ein.blank? || company.practice_copy? || Efw2Formatting.valid_ein?(company.ein)
+
+      if company.demo? && Efw2Formatting.reserved_ein_prefix?(company.ein)
+        return [
+          issue(
+            "DEMO_RESERVED_EIN_EXPECTED",
+            "Expected demo e-file preflight error: this demo company uses a fictional reserved EIN (#{company.ein}), which official IRS/SSA e-file validators reject.",
+            field: "ein",
+            expected_for_demo: true
+          )
+        ]
+      end
+
+      [ issue("EMPLOYER_EIN_INVALID", "Employer: valid nine-digit EIN required", field: "ein") ]
     end
 
     def efw2_people_issues
@@ -371,6 +372,7 @@ module YearEnd
       if files?("w2_gu") && company.filing_contact_name.blank?
         issues << issue("EMPLOYER_CONTACT_NAME_MISSING", "Add the employer filing contact name.", field: "filing_contact_name")
       end
+      issues += employer_ein_issues
       issues += efw2_employer_issues
       forms = [ ("W-2" if files?("w2_gu")), ("1099" if files?("form_1099")) ].compact.join(" and ")
 
