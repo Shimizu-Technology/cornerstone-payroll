@@ -23,9 +23,10 @@ class EmployeePayStatements
       }
     end
 
-    def detail
+    # employee_app: the employee app's extra fields. AIRE's response stays as it is.
+    def detail(employee_app: false)
       statement = PayStubGenerator.new(item).statement
-      summary.merge(
+      json = summary.merge(
         earnings: statement.fetch(:earnings).map do |row|
           { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), pay_basis: row[:pay_basis],
             amount: money(row[:amount]), ytd: money(row[:ytd]), kind: row[:kind] }
@@ -34,9 +35,11 @@ class EmployeePayStatements
         deductions: statement.fetch(:deductions).map { |row| amount_row(row) },
         other_pay: statement.fetch(:other_pay).map { |row| amount_row(row) },
         ytd: { gross: money(statement.dig(:ytd, :gross)), net: money(statement.dig(:ytd, :net)) },
-        ytd_note: (PayrollBridgeOverlap::EMPLOYEE_NOTE if ytd_under_review?),
         source_entries: source_entries_json
       )
+      return json unless employee_app
+
+      json.merge(ytd_note: (PayrollBridgeOverlap::EMPLOYEE_NOTE if ytd_under_review?))
     end
 
     private
