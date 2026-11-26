@@ -48,7 +48,11 @@ module YearEnd
         # off: the e-file's own payer and payee checks (for example its
         # 40-character limit on the street and suite joined with a space).
         problems = Form1099NecOfficialCopies.new(company: company, report: state.report, kind: "payer", draft: true).problems
-        problems += Form1099Pub1220Generator.new(company: company, year: tax_year, submitter: nil, draft: true, report: state.report).client_problems
+        pub1220_problems = Form1099Pub1220Generator.new(company: company, year: tax_year, submitter: nil, draft: true, report: state.report).client_problems
+        if company.demo? && Efw2Formatting.reserved_ein_prefix?(company.ein)
+          pub1220_problems = pub1220_problems.reject { |message| message == "Payer: valid EIN required" }
+        end
+        problems += pub1220_problems
         problems.uniq!
         raise Refused.new("These 1099s wouldn't print or e-file. Fix each item, then mark them ready.", details: { problems: problems }) if problems.any?
       end
