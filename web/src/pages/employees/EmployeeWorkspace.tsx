@@ -1,4 +1,5 @@
 import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
+import { EmployeeContactCard } from '@/components/employees/EmployeeContactCard';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
@@ -128,6 +129,8 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
   const [reviewError, setReviewError, reviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const [contactEditRequest, setContactEditRequest] = useState(0);
+  const [appPanelVersion, setAppPanelVersion] = useState(0);
   useEffect(() => {
     if (loading || !employee || activeTab !== 'pay-setup') return;
     const targetId = location.hash.slice(1);
@@ -349,7 +352,26 @@ export function EmployeeWorkspace(): ReactElement {
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <>
-            <EmployeeAppPanel key={`${companyId}:${employee.id}`} companyId={companyId} companyName={activeCompany?.name || ""} employeeId={employee.id} audience="admin" />
+            <EmployeeContactCard
+              key={`contact:${companyId}:${employee.id}`}
+              employee={employee}
+              companyId={companyId}
+              audience="admin"
+              canEdit={!readOnly}
+              editRequest={contactEditRequest}
+              onSaved={(updated, { emailChanged }) => {
+                setEmployee((current) => (current ? { ...current, ...updated } : current));
+                if (emailChanged) setAppPanelVersion((version) => version + 1);
+              }}
+            />
+            <EmployeeAppPanel
+              key={`${companyId}:${employee.id}:${appPanelVersion}`}
+              companyId={companyId}
+              companyName={activeCompany?.name || ""}
+              employeeId={employee.id}
+              audience="admin"
+              onEditContact={readOnly ? undefined : () => setContactEditRequest((request) => request + 1)}
+            />
             <EmployeeOverview
               companyId={companyId}
               employee={employee}
