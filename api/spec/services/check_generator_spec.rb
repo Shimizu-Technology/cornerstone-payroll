@@ -573,12 +573,14 @@ RSpec.describe CheckGenerator do
       payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
       payroll_item.payroll_item_earnings.create!(
         category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
-      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 117.70.to_d, call: [
+      rows = [
         PayrollEarningsYtdBreakdown::Row.new(
           label: "Joint", source_label: "Joint", category: "regular",
           hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
         )
-      ])
+      ]
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 117.70.to_d, call: rows,
+        attributable_rows: rows)
       allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item, sources: instance_of(PayrollStatementYtdSources)).and_return(breakdown)
 
       row = generator.send(:pay_rows).find { |candidate| candidate.first == "Joint" }
@@ -670,10 +672,28 @@ RSpec.describe CheckGenerator do
         source: "manual"
       )
 
+      # Gross includes each paycheck's taxable field addition, so the rows foot
+      # and the year can be attributed row by row on both statements.
+      earlier_item.update_columns(gross_pay: payroll_item.gross_pay + 10)
+      payroll_item.update_columns(gross_pay: payroll_item.gross_pay + 25)
       field_row = generator.send(:pay_rows).find { |row| row.first == "Certification Pay" }
 
       expect(field_row[3]).to eq("25.00")
       expect(field_row[4]).to eq("35.00")
+      statement_row = PayStubGenerator.new(payroll_item.reload).statement.fetch(:earnings).find { |row| row[:label] == "Certification Pay" }
+      expect(statement_row).to include(amount: 25.to_d, ytd: 35.to_d)
+    end
+
+    it "prints - for per-earning YTD where the earnings statement prints a dash" do
+      payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
+      payroll_item.payroll_item_earnings.create!(category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
+      row = PayrollEarningsYtdBreakdown::Row.new(label: "Joint", source_label: "Joint", category: "regular",
+        hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d)
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 1_032.90.to_d, call: [ row ],
+        attributable_rows: nil)
+      allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item, sources: instance_of(PayrollStatementYtdSources)).and_return(breakdown)
+
+      expect(generator.send(:pay_rows).first).to eq([ "Joint", "10.70", "11.00", "117.70", "-" ])
     end
 
     it "exclude committed payroll from later pay dates" do

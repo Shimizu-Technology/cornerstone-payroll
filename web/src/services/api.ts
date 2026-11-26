@@ -2751,6 +2751,8 @@ export interface PayrollSourceSummary {
     tax_years: number[];
     through_pay_date?: string | null;
     through_period_end?: string | null;
+    /** Where the totals' imported figures come from. */
+    totals_basis?: 'historical_ytd_bridge' | 'as_imported' | 'mixed' | null;
   };
 }
 
@@ -2779,7 +2781,10 @@ export interface EmployeePayHistoryRecord {
   bonus: number;
   custom_earnings_total?: number;
   gross_pay: number;
+  /** Income tax as the pay stub prints it, without W-4 4c. */
   withholding_tax: number;
+  additional_withholding?: number;
+  total_income_tax_withheld?: number;
   social_security_tax: number;
   medicare_tax: number;
   custom_deductions_total?: number;
@@ -2818,7 +2823,10 @@ export interface EmployeePayrollSummary {
   payroll_field_pre_tax_deductions_total: number;
   payroll_field_post_tax_deductions_total: number;
   payroll_field_employer_contributions_total: number;
+  /** Total withheld: income tax plus W-4 4c. */
   withholding_tax: number;
+  base_withholding_tax?: number;
+  additional_withholding?: number;
   social_security_tax: number;
   medicare_tax: number;
   retirement: number;

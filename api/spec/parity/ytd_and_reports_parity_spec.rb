@@ -83,34 +83,34 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
     context "CheckGenerator YTD source and earning attribution guards" do
       let(:fixture_scenarios) { [ :hourly_overtime ] }
 
-      it "uses PayrollStatementYtdSources (BigDecimal) rather than Employee#ytd_totals_through float sums on CheckGenerator" do
+      it "prints the same as-of-check YTD on the check stub as the earnings statement, to the cent (L3)" do
         item = fixture.items.fetch(:hourly_overtime_p2)
-        sources = PayrollStatementYtdSources.new(item)
-        expected_sources_gross = (
-          sources.items.sum(0.to_d) { |row| row.gross_pay.to_d } +
-          (sources.historical_balance&.gross_pay.to_d || 0.to_d)
-        ).round(2)
-        check_gen = CheckGenerator.new(item)
-        rendered_pdf = check_stub_pdf_extractor.extract(check_gen.generate)
+        prior = fixture.items.fetch(:hourly_overtime_p1)
+        # Independent of the code under test: the two committed paychecks' saved amounts.
+        expected = ->(field) { (prior.public_send(field).to_d + item.public_send(field).to_d).round(2) }
+        check_pdf = check_stub_pdf_extractor.extract(CheckGenerator.new(item).generate)
+        stub_pdf = pay_stub_pdf_extractor.extract(PayStubGenerator.new(item, employee_copy: true).generate)
 
-        # Verify actual rendered YTD values on the check stub match PayrollStatementYtdSources.
-        assert_parity!(
+        assert_parity_table!(
           fixture: :hourly_overtime,
-          figure: [ :ytd, :gross_actual ],
-          values_by_view: {
-            check_stub_pdf: rendered_pdf.dig(:ytd, :gross),
-            payroll_statement_ytd_sources: expected_sources_gross
-          }
+          views: {
+            saved_paychecks: {
+              ytd: {
+                gross: expected.call(:gross_pay),
+                income_tax: expected.call(:withholding_tax),
+                social_security: expected.call(:social_security_tax),
+                medicare_total: expected.call(:medicare_tax),
+                taxes_printed_total: %i[withholding_tax social_security_tax medicare_tax additional_withholding].sum(0.to_d) { |f| expected.call(f) }
+              }
+            },
+            check_stub_pdf: check_pdf,
+            employee_stub_pdf: stub_pdf.merge(ytd: stub_pdf[:ytd].merge(
+              taxes_printed_total: %i[income_tax social_security medicare_total].sum(0.to_d) { |f| stub_pdf.dig(:ytd, f) }
+            ))
+          },
+          figures: [ [ :ytd, :gross ], [ :ytd, :income_tax ], [ :ytd, :social_security ], [ :ytd, :medicare_total ], [ :ytd, :taxes_printed_total ] ]
         )
-
-        # L3 structural check: CheckGenerator currently computes YTD via Employee#ytd_totals_through
-        # (which casts aggregates via to_f at employee.rb:622,702) instead of PayrollStatementYtdSources.
-        fresh_gen = CheckGenerator.new(item)
-        pending "L3: CheckGenerator#ytd uses Employee#ytd_totals_through (float sums) instead of PayrollStatementYtdSources"
-        expect(PayrollStatementYtdSources).to receive(:new).with(item).at_least(:once).and_call_original
-        expect(item.employee).not_to receive(:ytd_totals_through)
-        refreshed_pdf = check_stub_pdf_extractor.extract(fresh_gen.generate)
-        expect(refreshed_pdf.dig(:ytd, :gross)).to eq(expected_sources_gross)
+        expect(check_pdf.dig(:ytd, :gross)).to be > item.gross_pay.to_d
       end
 
       it "gates unattributable per-earning YTD rows identically on check stub PDF and pay stub PDF" do
@@ -124,19 +124,19 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         stub_pdf = pay_stub_pdf_extractor.extract(PayStubGenerator.new(item, employee_copy: true).generate)
         check_pdf = check_stub_pdf_extractor.extract(CheckGenerator.new(item).generate)
 
-        stub_first_ytd = stub_pdf.fetch(:earnings).first&.fetch(:ytd)
-        check_first_ytd = check_pdf.fetch(:earnings).first&.fetch(:ytd)
-
-        pending "L8: CheckGenerator prints per-earning YTD unchecked while PayStubGenerator falls back to '—' when earnings cannot be attributed"
+        # Both PDFs still list every current earning row (so a parsing failure
+        # cannot pass as "no YTD") and both total the year in GROSS/TOTAL.
+        expect(stub_pdf.fetch(:earnings)).not_to be_empty
+        expect(check_pdf.fetch(:earnings).map { |row| row[:amount] }).to eq(stub_pdf.fetch(:earnings).map { |row| row[:amount] })
+        expect(stub_pdf.fetch(:earnings)).to all(include(amount: be_present))
         assert_parity!(
           fixture: :hourly_overtime,
-          figure: [ :earnings, 0, :ytd ],
-          values_by_view: {
-            employee_stub_pdf: stub_first_ytd,
-            check_stub_pdf: check_first_ytd
-          },
-          allow_nil: true
+          figure: [ :ytd, :gross ],
+          values_by_view: { employee_stub_pdf: stub_pdf.dig(:ytd, :gross), check_stub_pdf: check_pdf.dig(:ytd, :gross) }
         )
+        # Neither prints a per-earning YTD the year cannot attribute.
+        expect(stub_pdf.fetch(:earnings).map { |row| row[:ytd] }).to all(be_nil)
+        expect(check_pdf.fetch(:earnings).map { |row| row[:ytd] }).to all(be_nil)
       end
     end
   end
@@ -283,19 +283,8 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         expect(client_ytd).to be_present
         # Independent fixture precondition: bridge carries $150.00 non-taxable QB reimbursement.
         expect(fixture.qb_records.fetch(:ytd_balance).non_taxable_pay).to eq(BigDecimal("150.00"))
-        # Today client/staff ytd_summary and staff_pay_period all agree with each other ($3,885.00),
-        # while employee_api subtracts the $150.00 QB non-taxable Mileage Reimb ($3,735.00).
-        assert_parity!(
-          fixture: :prior_provider_ytd,
-          figure: [ :ytd, :gross_report_and_run_group ],
-          values_by_view: {
-            client_ytd_summary: client_ytd.dig(:ytd, :gross),
-            staff_ytd_summary: staff_ytd.dig(:ytd, :gross),
-            staff_pay_period: staff_run.dig(:ytd, :gross)
-          }
-        )
-
-        pending "L2: YTD summary reports and staff pay run ytd_gross include QuickBooks non-taxable reimbursements ($150.00) in gross_pay while pay stubs subtract them"
+        # Every view counts the $150.00 QB non-taxable Reimbursement outside gross,
+        # as the stub does: $1,810.00 taxable opening wages + $1,925.00 native.
         assert_parity!(
           fixture: :prior_provider_ytd,
           figure: [ :ytd, :gross ],
@@ -306,6 +295,12 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
             staff_pay_period: staff_run.dig(:ytd, :gross)
           }
         )
+        expect(emp_stmt.dig(:ytd, :gross)).to eq(BigDecimal("3735.00"))
+        report = staff_api.ytd_summary(year: Parity::FixtureBuilder::TAX_YEAR)
+        row = report.fetch("employees").find { |entry| entry["employee_id"] == employee.id }
+        expect(money(row["non_taxable_additions_total"])).to eq(BigDecimal("150.00"))
+        expect(row["imported_basis"]).to eq(UnifiedPayrollReporting::BRIDGED)
+        expect(report.dig("source_summary", "historical_ytd_bridge", "totals_basis")).to eq(UnifiedPayrollReporting::BRIDGED)
       end
 
       it "uses the applied YTD bridge cutoff in YTD summary reports rather than summing raw imported paychecks without cutoff" do
@@ -319,7 +314,6 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         staff_ytd = staff_api.extract_ytd_summary_row(employee_id: employee.id, year: Parity::FixtureBuilder::TAX_YEAR)
         expect(staff_ytd).to be_present
 
-        pending "L1: YTD summary reports sum locked HistoricalPaycheck rows directly without honoring the applied HistoricalYtdBridge balance"
         assert_parity!(
           fixture: :prior_provider_ytd,
           figure: [ :ytd, :total_income_tax ],
@@ -328,6 +322,35 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
             staff_ytd_summary: staff_ytd.dig(:ytd, :total_income_tax)
           }
         )
+      end
+
+      it "labels imported figures as imported when a date range covers only part of the bridge window" do
+        employee = fixture.employees.fetch(:prior_provider_ytd)
+        balance = fixture.qb_records.fetch(:ytd_balance)
+        balance.update_columns(federal_income_tax: balance.federal_income_tax + BigDecimal("12.34"))
+        row_for = lambda do |params|
+          report = staff_api.ytd_summary_for(params)
+          [ report.fetch("employees").find { |entry| entry["employee_id"] == employee.id }, report ]
+        end
+
+        # Full year: the bridge balance, as the stub and W-2GU read it.
+        full_row, full_report = row_for.call(year: Parity::FixtureBuilder::TAX_YEAR)
+        expect(full_row["imported_basis"]).to eq(UnifiedPayrollReporting::BRIDGED)
+        expect(money(full_row["withholding_tax"])).to eq((balance.federal_income_tax + fixture.items.fetch(:prior_provider_ytd_p2).total_income_tax_withheld).round(2))
+        expect(full_report.dig("source_summary", "historical_ytd_bridge", "totals_basis")).to eq(UnifiedPayrollReporting::BRIDGED)
+
+        # A range that starts after January 1 cannot use a year-to-date balance.
+        part_row, part_report = row_for.call(start_date: "2026-01-10", end_date: "2026-12-31")
+        qb_check = fixture.qb_records.fetch(:paycheck)
+        qb_adjustment = fixture.qb_records.fetch(:adjustment)
+        expect(part_row["imported_basis"]).to eq(UnifiedPayrollReporting::AS_IMPORTED)
+        expect(part_report.dig("source_summary", "historical_ytd_bridge", "totals_basis")).to eq(UnifiedPayrollReporting::AS_IMPORTED)
+        expect(money(part_row["withholding_tax"])).to eq(
+          (qb_check.federal_income_tax + qb_adjustment.federal_income_tax + fixture.items.fetch(:prior_provider_ytd_p2).total_income_tax_withheld).round(2)
+        )
+        # Either way the imported reimbursement sits outside gross.
+        expect(money(part_row["gross_pay"])).to eq(money(full_row["gross_pay"]))
+        expect(money(part_row["non_taxable_additions_total"])).to eq(BigDecimal("150.00"))
       end
 
       it "represents adjusted QuickBooks paychecks consistently and clearly marks unadjusted as-imported rows in pay history" do
@@ -501,18 +524,20 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
       let(:include_w2_copies) { false }
       let(:fixture_scenarios) { [ :prior_provider_ytd ] }
 
-      it "does not double-count native payroll items dated on or before an applied historical bridge cutoff in W-2GU" do
-        # L16: Add a native committed pay period dated on the exact bridge cutoff date for prior_provider_ytd.
-        # PayrollStatementYtdSources excludes native items <= historical_cutoff, while YearEnd::W2PayrollItems
-        # includes them alongside the bridge balance.
+      it "counts the bridge and every native paycheck once on W-2GU and the statement when a native run sits inside the cutoff" do
+        # A native run paid on the bridge's own through date. Current guards
+        # refuse to create or commit one (the first bridge needs a client with
+        # no pay periods, and every period must follow the boundary), so this is
+        # older data: the period skips only that check, then commits through
+        # the real lifecycle.
         employee = fixture.employees.fetch(:prior_provider_ytd)
+        balance = fixture.qb_records.fetch(:ytd_balance)
         overlap_period = PayPeriod.new(
           company: fixture.company,
-          status: "committed",
+          status: "approved",
           start_date: Date.new(2026, 1, 1),
           end_date: Date.new(2026, 1, 14),
-          pay_date: Parity::FixtureBuilder::QB_PERIOD_PAY,
-          committed_at: Time.zone.parse("2026-01-16 09:00")
+          pay_date: Parity::FixtureBuilder::QB_PERIOD_PAY
         )
         overlap_period.save!(validate: false)
         overlap_item = overlap_period.payroll_items.build(
@@ -525,21 +550,57 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         )
         PayrollCalculator.for(employee, overlap_item).calculate
         overlap_item.save!
+        # Commit also refuses a period inside the boundary today; only that
+        # check is lifted, so snapshots and events are the real ones.
+        allow_any_instance_of(PayPeriod).to receive(:starts_after_historical_ytd_boundary)
+        TenantScope.with_company(fixture.company.id) do
+          PayPeriodLifecycleService.new(pay_period: overlap_period, actor: fixture.staff_user).commit!
+        end
+        RSpec::Mocks.space.any_instance_recorder_for(PayPeriod).stop_all_observation!
+        expect(overlap_period.reload).to be_committed
+        expect(overlap_item.reload.check_number).to be_nil
+        expect(balance.through_pay_date).to eq(overlap_period.pay_date)
 
-        doc = fixture.ensure_stub_posted!(:prior_provider_ytd_p2)
-        emp_stmt = employee_api(:prior_provider_ytd).extract_paycheck(statement_id: doc.id)
+        # The bridge holds only the imported QuickBooks paycheck and its
+        # adjustment, so the native run is new pay, not a copy of it.
+        qb_check = fixture.qb_records.fetch(:paycheck)
+        qb_adjustment = fixture.qb_records.fetch(:adjustment)
+        expect(balance.federal_income_tax).to eq(qb_check.federal_income_tax + qb_adjustment.federal_income_tax)
+        expect(balance.gross_pay).to eq(qb_check.gross_pay + qb_adjustment.gross_pay)
+
+        native = [ overlap_item, fixture.items.fetch(:prior_provider_ytd_p2).reload ]
+        total = ->(field) { native.sum(0.to_d) { |item| item.public_send(field).to_d } }
+        expected_w2 = {
+          box1_wages: (balance.fit_taxable_wages + total.call(:fit_taxable_wages)).round(2),
+          box2_income_tax: (balance.federal_income_tax + total.call(:withholding_tax) + total.call(:additional_withholding)).round(2),
+          box3_ss_wages: (balance.social_security_taxable_wages + total.call(:social_security_taxable_wages)).round(2),
+          box4_ss_tax: (balance.social_security_tax + total.call(:social_security_tax)).round(2),
+          box5_medicare_wages: (balance.medicare_taxable_wages + total.call(:medicare_taxable_wages)).round(2),
+          box6_medicare_tax: (balance.medicare_tax + total.call(:medicare_tax)).round(2)
+        }
         w2_row = staff_api.extract_w2_employee_row(employee_id: employee.id, year: Parity::FixtureBuilder::TAX_YEAR)
         expect(w2_row).to be_present
+        expect(w2_row.slice(*expected_w2.keys)).to eq(expected_w2)
 
-        pending "L16: YearEnd::W2PayrollItems includes native committed payroll dated <= historical_cutoff alongside the applied bridge balance, diverging from PayrollStatementYtdSources"
-        assert_parity!(
+        # The statement, as of the later paycheck, counts the same pay.
+        doc = fixture.ensure_stub_posted!(:prior_provider_ytd_p2)
+        emp_stmt = employee_api(:prior_provider_ytd).extract_paycheck(statement_id: doc.id)
+        expect(emp_stmt.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + total.call(:gross_pay)).round(2))
+        assert_parity_table!(
           fixture: :prior_provider_ytd,
-          figure: :w2_box2_vs_statement_ytd_income_tax,
-          values_by_view: {
-            employee_api_ytd: emp_stmt.dig(:ytd, :total_income_tax),
-            staff_w2_gu_box2: w2_row[:box2_income_tax]
-          }
+          views: {
+            employee_api: emp_stmt.dig(:ytd).merge(income_tax_total: emp_stmt.dig(:ytd, :total_income_tax)),
+            staff_w2_gu: { social_security: w2_row[:box4_ss_tax], medicare_total: w2_row[:box6_medicare_tax], income_tax_total: w2_row[:box2_income_tax] }
+          },
+          figures: %i[income_tax_total social_security medicare_total]
         )
+
+        # The overlap paycheck's own statement includes itself.
+        overlap_doc = TenantScope.as_system(reason: "Parity spec posts overlap stub") do
+          EmployeeDocuments::PostPayStub.new(overlap_item, now: Time.current).call
+        end
+        overlap_stmt = employee_api(:prior_provider_ytd).extract_paycheck(statement_id: overlap_doc.id)
+        expect(overlap_stmt.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + overlap_item.gross_pay.to_d).round(2))
       end
     end
   end

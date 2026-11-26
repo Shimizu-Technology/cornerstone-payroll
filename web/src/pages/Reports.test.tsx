@@ -543,6 +543,32 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
     expect(screen.getAllByText('Paper check')).toHaveLength(2);
     expect(screen.getAllByText('Check #1007')).toHaveLength(2);
     expect(screen.getAllByText('Not recorded')).toHaveLength(2);
+    expect(screen.queryByRole('columnheader', { name: 'Additional Guam income tax (W-4 4c)' })).toBeNull();
+  });
+
+  it('splits Guam income tax and W-4 4c as the pay stub prints them', async () => {
+    apiMocks.employeesList.mockResolvedValue({ data: [{ id: 1, first_name: 'Avery', last_name: 'Example' }] });
+    apiMocks.employeePayHistory.mockResolvedValue({ report: {
+      employee: { name: 'Avery Example', employment_type: 'hourly', pay_rate: 15 },
+      period: { label: '2026' },
+      summary: { withholding_tax: 245.33, base_withholding_tax: 170.33, additional_withholding: 75 },
+      payroll_fields: { totals: [] },
+      history: [
+        { key: 'native:1', record_type: 'native', pay_date: '2026-10-08', period_description: 'October',
+          gross_pay: 900, net_pay: 625, total_deductions: 275, withholding_tax: 170.33, additional_withholding: 75,
+          total_income_tax_withheld: 245.33, payment_delivery_method: 'direct_deposit', check_number: null,
+          source: { label: 'Cornerstone' } },
+      ],
+    } });
+    renderReportPanel(<EmployeePayHistoryPanel />);
+    await screen.findByRole('combobox', { name: 'Employee' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+    expect(await screen.findByRole('columnheader', { name: 'Guam income tax' })).toBeTruthy();
+    expect(screen.getByRole('columnheader', { name: 'Additional Guam income tax (W-4 4c)' })).toBeTruthy();
+    // Summary box, desktop row and phone row each show the split figures.
+    expect(screen.getAllByText('$170.33')).toHaveLength(3);
+    expect(screen.getAllByText('$75.00')).toHaveLength(3);
+    expect(screen.queryByText('$245.33')).toBeNull();
   });
 });
 

@@ -1689,10 +1689,14 @@ module Api
             voided_at: item.voided_at,
             void_reason: item.void_reason,
             reprint_of_check_number: item.reprint_of_check_number,
-            ytd_gross: item.ytd_gross,
+            ytd_gross: statement_ytd_gross(item),
             ytd_net: item.ytd_net,
             wage_rate_hours: item.wage_rate_hours
           }
+        end
+
+        def statement_ytd_gross(item)
+          (@statement_ytd_gross ||= StatementYtdGross.new).call(item)
         end
 
         def time_tracking_provenance_json(item)
