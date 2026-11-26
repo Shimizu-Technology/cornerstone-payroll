@@ -8,7 +8,7 @@ class AddDeliveryAttemptSnapshotToPortalNotificationDeliveries < ActiveRecord::M
     execute "SET LOCAL lock_timeout = '5s'"
     add_column :portal_notification_deliveries, :intended_recipient_email, :string
     add_column :portal_notification_deliveries, :claimed_by, :string, limit: 64
-    add_column :portal_notification_deliveries, :attempted_payload, :jsonb
+    add_column :portal_notification_deliveries, :attempted_payload, :text
   end
 
   def down

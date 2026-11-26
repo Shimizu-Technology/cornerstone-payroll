@@ -13,6 +13,9 @@ class PortalNotificationDelivery < ApplicationRecord
   belongs_to :user, optional: true
   belongs_to :company
 
+  serialize :attempted_payload, coder: JSON
+  encrypts :attempted_payload
+
   validates :channel, inclusion: { in: %w[email] }
   validates :status, inclusion: { in: STATUSES }
   validates :delivery_mode, inclusion: { in: DELIVERY_MODES }

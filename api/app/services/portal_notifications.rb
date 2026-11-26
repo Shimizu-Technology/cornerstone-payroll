@@ -237,11 +237,6 @@ module PortalNotifications
         skipped.call("preference_off")
       elsif coalesced?(event, target)
         skipped.call("coalesced")
-      elsif target.foreign_suppressed
-        # Suppress outbound delivery to foreign-organization accounts internally
-        # while keeping tenant-visible counts and statuses identical to an
-        # unregistered extra address.
-        skipped.call("foreign_account_suppressed", ledger_mode, deliver_after: deliver_after_for(mode, event.occurred_at))
       else
         deliver_after = deliver_after_for(mode, event.occurred_at)
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: mode, status: "pending", deliver_after: deliver_after))

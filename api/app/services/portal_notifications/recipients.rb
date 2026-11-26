@@ -11,7 +11,7 @@ module PortalNotifications
   module Recipients
     STAFF_ROLES = %w[super_admin org_admin admin manager accountant].freeze
 
-    Target = Struct.new(:user, :email, :foreign_suppressed) do
+    Target = Struct.new(:user, :email) do
       def key
         user ? "user:#{user.id}" : "email:#{email}"
       end
@@ -180,18 +180,19 @@ module PortalNotifications
               seen_user_ids << eligible.id
               taken_canonicals << canonical
             elsif account_users.none? { |user| user.organization_id == event.organization_id }
-              # Foreign-organization account: keep internal suppression while
-              # preserving tenant-visible counts/statuses as if unregistered.
-              extra_targets << Target.new(nil, normalized, true)
+              # Foreign-organization account: queue like an unregistered extra so
+              # Dispatcher suppresses it in its normal pass, keeping tenant-visible
+              # timing and counts indistinguishable without ever sending email.
+              extra_targets << Target.new(nil, normalized)
               taken_canonicals << canonical
             end
           else
-            extra_targets << Target.new(nil, normalized, false)
+            extra_targets << Target.new(nil, normalized)
             taken_canonicals << canonical
           end
         end
 
-        users.map { |user| Target.new(user, nil, false) } + extra_targets
+        users.map { |user| Target.new(user, nil) } + extra_targets
       end
 
       def client_targets(event)
