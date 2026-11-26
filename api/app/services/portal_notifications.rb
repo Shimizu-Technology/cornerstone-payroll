@@ -75,6 +75,8 @@ module PortalNotifications
     "payroll_draft_decided" => { category: "payroll_submissions" },
     "payroll_submission_imported" => { category: "payroll_updates" },
     "payroll_submission_acknowledged" => { category: "payroll_updates" },
+    "payroll_rollback_staff" => { category: "payroll_submissions" },
+    "payroll_rollback_client" => { category: "payroll_updates", client_managers_only: true },
     "payroll_review_published" => { category: "payroll_updates", client_managers_only: true },
     "payroll_review_decided" => { category: "payroll_submissions" },
     "payroll_draft_posted" => { category: "payroll_updates" },
@@ -168,6 +170,14 @@ module PortalNotifications
     def payroll_period!(event_type, period:, actor:, dedupe:, metadata: {})
       record!(event_type: event_type, company: period.company, actor: actor, subject: period,
         dedupe_key: "#{event_type}:#{dedupe}", metadata: metadata.merge(period_id: period.id))
+    end
+
+    def payroll_rollback!(entry)
+      %w[staff client].each do |audience|
+        record!(event_type: "payroll_rollback_#{audience}", company: entry.company, actor: entry.actor,
+          subject: entry.subject, dedupe_key: "payroll_rollback:#{entry.id}:#{audience}",
+          metadata: { pay_period_id: entry.subject_id, self_override: audience == "staff" && entry.self_override? })
+      end
     end
 
     # Repeating an event (a retried request, a replayed job) returns the saved

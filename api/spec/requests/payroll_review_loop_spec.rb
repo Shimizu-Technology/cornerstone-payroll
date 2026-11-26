@@ -85,7 +85,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     filenames = []
     [ 40, 60 ].each_with_index do |hours, index|
       if index.positive?
-        post "#{admin}/unapprove"
+        post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
         expect(response).to have_http_status(:ok), response.body
       end
       post "#{admin}/run_payroll", params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: hours, overtime: 0 } } }, as: :json
@@ -149,7 +149,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     client_approve(first.id)
     expect(response).to have_http_status(:unprocessable_entity)
     @actor = staff
-    post "#{admin}/unapprove"
+    post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     expect(response).to have_http_status(:ok)
     expect(first.reload).to be_superseded
     post "#{admin}/run_payroll", params: { employee_ids: [ employee.id ], hours: { employee.id.to_s => { regular: 82, overtime: 0 } } }, as: :json
@@ -174,7 +174,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     first = review
     client_approve
     @actor = staff
-    post "#{admin}/unapprove"
+    post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     expect(response).to have_http_status(:ok)
     expect(first.reload).to have_attributes(status: "superseded", approved_by: client, approval_notes: "Reviewed preview")
     expect(AuditLog.where(action: "payroll_review#withdrawn", record_id: first.id)).to exist
@@ -278,7 +278,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     @actor = client
     allow(PayrollPreviewPdf).to receive(:generate).and_wrap_original do |original, **args|
       pdf = original.call(**args)
-      PayPeriodLifecycleService.new(pay_period: period.reload, actor: staff).unapprove!
+      PayPeriodLifecycleService.new(pay_period: period.reload, actor: staff).unapprove!(reason: "Fixture payroll approval correction")
       pdf
     end
 
@@ -365,7 +365,7 @@ RSpec.describe "Published payroll review loop", type: :request do
 
     # Unapprove and publish a fresh revision, then enable email with an account team assigned.
     @actor = staff
-    post "#{admin}/unapprove"
+    post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     expect(response).to have_http_status(:ok)
     staff_approve
     with_portal_email do
@@ -383,7 +383,7 @@ RSpec.describe "Published payroll review loop", type: :request do
 
     # When email is enabled but transport is unconfigured (no sender / API key), notification stays not_sent.
     @actor = staff
-    post "#{admin}/unapprove"
+    post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     staff_approve
     with_portal_email(transport: nil, from: nil) do
       client_approve
@@ -395,7 +395,7 @@ RSpec.describe "Published payroll review loop", type: :request do
 
     # When no account team is assigned, notification stays not_sent even with email enabled.
     @actor = staff
-    post "#{admin}/unapprove"
+    post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     staff_approve
     PortalNotificationRecipient.where(company: company).delete_all
     with_portal_email do
@@ -407,7 +407,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     # When both an account-holder recipient and an extra address exist, status derives strictly
     # from the account-holder row (unaffected by the extra address).
     @actor = staff
-    post "#{admin}/unapprove"
+    post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     staff_approve
     PortalNotificationRecipient.create!(company: company, user: staff, team_role: "lead")
     PortalNotificationRecipient.create!(company: company, email: "ops.extra@example.test")
@@ -433,7 +433,7 @@ RSpec.describe "Published payroll review loop", type: :request do
       [ :foreign_match, "outside.team@gmail.com" ]
     ].each do |label, extra_email|
       @actor = staff
-      post "#{admin}/unapprove" if period.reload.approved?
+      post "#{admin}/unapprove", params: { reason: "Correct fixture approval" }, as: :json if period.reload.approved?
       staff_approve
       PortalNotificationRecipient.where(company: company).delete_all
       PortalNotificationRecipient.create!(company: company, email: extra_email)

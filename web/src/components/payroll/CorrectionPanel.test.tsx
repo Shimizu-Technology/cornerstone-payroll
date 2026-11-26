@@ -7,13 +7,20 @@ import { Card } from '@/components/ui/card';
 import type { PayPeriod } from '@/types';
 const mocks = vi.hoisted(() => ({ preflight: vi.fn(), reopen: vi.fn(), void: vi.fn(), get: vi.fn(), corrected: vi.fn(), company: 2 }));
 vi.mock('@/services/api', () => ({ payPeriodsApi: { correctionPreflight: mocks.preflight, reopenUnpaid: mocks.reopen, void: mocks.void, get: mocks.get, correctedHours: mocks.corrected } }));
+vi.mock('@/lib/useOptionalStepUpRequest', () => ({
+  useOptionalStepUpRequest: () => async (action: 'void' | 'reopen_unpaid', body: object) => {
+    const result = await (action === 'void' ? mocks.void : mocks.reopen)(83, body);
+    return { ok: true, json: async () => result };
+  },
+}));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: mocks.company }) }));
 afterEach(() => { cleanup(); mocks.company = 2; });
 const period = { id: 83, company_id: 2, status: 'committed', can_void: true, pay_date: '2026-10-10' } as PayPeriod;
+const confirmation = "Example Client / 2026-09-20 to 2026-10-03";
 const preflight = { eligible: true, blockers: [], employee_checks: [{ id: 10, check_number: '3108', payee: 'Example Employee', amount: 1393.15, status: 'assigned', already_voided: false }], other_payments: [{ id: 11, check_number: '3109', payee: 'Treasurer of Guam', amount: 103.66, status: 'assigned', already_voided: false }], requires_unpaid_acknowledgement: true };
 function mount(inCard = false) {
   vi.clearAllMocks();
-  mocks.preflight.mockResolvedValue({ correction_preflight: preflight, void_preflight: preflight });
+  mocks.preflight.mockResolvedValue({ correction_preflight: preflight, void_preflight: preflight, confirmation });
   render(<MemoryRouter initialEntries={['/companies/2/pay-runs/83/work']}><Routes><Route path="/companies/2/pay-runs/83/work" element={inCard ? <Card data-testid="filtered-card"><CorrectionPanel payPeriod={period} returnTo="/companies/2/pay-runs" onPayPeriodChange={vi.fn()} /></Card> : <CorrectionPanel payPeriod={period} returnTo="/companies/2/pay-runs" onPayPeriodChange={vi.fn()} />} /><Route path="/companies/2/pay-runs/86/work" element={<p>Replacement draft 86</p>} /></Routes></MemoryRouter>);
 }
 it('discloses employee and tax checks and creates a connected draft after unpaid acknowledgement', async () => {
@@ -25,8 +32,9 @@ it('discloses employee and tax checks and creates a connected draft after unpaid
   expect((confirm as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText('Reason for reopening'), { target: { value: 'Include the existing saved loan repayment' } });
   fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.change(screen.getByLabelText(/Type the client and period/), { target: { value: confirmation } });
   fireEvent.click(confirm);
-  await waitFor(() => expect(mocks.reopen).toHaveBeenCalledWith(83, { reason: 'Include the existing saved loan repayment', unpaid_acknowledgement: true }));
+  await waitFor(() => expect(mocks.reopen).toHaveBeenCalledWith(83, { reason: 'Include the existing saved loan repayment', confirmation, unpaid_acknowledgement: true }));
   expect(await screen.findByText('Replacement draft 86')).toBeTruthy();
 });
 it('blocks reopening when an associated payment is already delivered', async () => {
@@ -44,16 +52,16 @@ it('voids the entire payroll with payment acknowledgement and preserves a failed
   expect(await screen.findByText(/Check #3108 · Example Employee/)).toBeTruthy();
   fireEvent.click(screen.getByRole('checkbox'));
   fireEvent.change(screen.getByLabelText(/Reason for voiding/), { target: { value: 'Correct an unpaid payroll with a missing deduction' } });
-  fireEvent.change(screen.getByPlaceholderText('VOID'), { target: { value: 'VOID' } });
+  fireEvent.change(screen.getByLabelText(/Type the client and period/), { target: { value: confirmation } });
   fireEvent.click(screen.getByRole('button', { name: 'Void Pay Period' }));
-  await waitFor(() => expect(mocks.void).toHaveBeenCalledWith(83, { reason: 'Correct an unpaid payroll with a missing deduction', unpaid_acknowledgement: true }));
+  await waitFor(() => expect(mocks.void).toHaveBeenCalledWith(83, { reason: 'Correct an unpaid payroll with a missing deduction', confirmation, unpaid_acknowledgement: true, acknowledge_later_runs: false }));
   expect(await screen.findByText(/Another operator recorded payment delivery/)).toBeTruthy();
 });
 
 
 it('uses ordinary void eligibility independently from stricter automatic reopening requirements', async () => {
   mount();
-  mocks.preflight.mockResolvedValue({ correction_preflight: { ...preflight, eligible: false, blockers: ['The finalized AIRE source cannot be automatically reopened.'] }, void_preflight: preflight });
+  mocks.preflight.mockResolvedValue({ correction_preflight: { ...preflight, eligible: false, blockers: ['The finalized AIRE source cannot be automatically reopened.'] }, void_preflight: preflight, confirmation });
   fireEvent.click(screen.getByRole('button', { name: 'Reopen unpaid payroll' }));
   expect(await screen.findByText('The finalized AIRE source cannot be automatically reopened.')).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Reopen and create draft' }) as HTMLButtonElement).disabled).toBe(true);
@@ -62,7 +70,7 @@ it('uses ordinary void eligibility independently from stricter automatic reopeni
   expect(await screen.findByRole('checkbox')).toBeTruthy();
   expect(screen.queryByText('The finalized AIRE source cannot be automatically reopened.')).toBeNull();
   fireEvent.click(screen.getByRole('checkbox'));
-  fireEvent.change(screen.getByPlaceholderText('VOID'), { target: { value: 'VOID' } });
+  fireEvent.change(screen.getByLabelText(/Type the client and period/), { target: { value: confirmation } });
   expect((screen.getByRole('button', { name: 'Void Pay Period' }) as HTMLButtonElement).disabled).toBe(false);
 });
 
@@ -176,4 +184,22 @@ it('ignores a parent period refresh that completes after the operator changes pa
   resolve({ pay_period: { ...period, source_correction_required: false } });
   await Promise.resolve();
   expect(onChange).not.toHaveBeenCalled();
+});
+
+it('requires an exact typed match and explicit acknowledgement when later runs will be flagged', async () => {
+  mount();
+  mocks.preflight.mockResolvedValue({ confirmation, void_preflight: { ...preflight, later_committed_run_ids: [84] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Void This Pay Period' }));
+  expect(await screen.findByText(/Downloaded PDFs, printed copies, and emails/)).toBeTruthy();
+  expect(screen.getByText(/Paid or filed Form 500/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText(/Reason for voiding/), { target: { value: 'Correct duplicate synthetic hours' } });
+  fireEvent.click(screen.getByLabelText(/all active payments/));
+  const input = screen.getByLabelText(/Type the client and period/);
+  const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Void Pay Period' });
+  fireEvent.change(input, { target: { value: 'VOID' } });
+  expect(submit.disabled).toBe(true);
+  fireEvent.change(input, { target: { value: confirmation } });
+  expect(submit.disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText(/later committed payrolls will be flagged/));
+  expect(submit.disabled).toBe(false);
 });

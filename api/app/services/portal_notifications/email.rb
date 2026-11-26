@@ -23,7 +23,7 @@ module PortalNotifications
     CORNERSTONE_BLUE = "#194baa"
 
     FILE_REQUEST_EVENTS = %w[file_requested file_request_responded file_request_reviewed].freeze
-    PAYROLL_REVIEW_EVENTS = %w[payroll_review_published payroll_review_decided].freeze
+    PAYROLL_REVIEW_EVENTS = %w[payroll_review_published payroll_review_decided payroll_rollback_staff payroll_rollback_client].freeze
 
     attr_reader :subject, :lines, :link, :footer
 
@@ -121,6 +121,10 @@ module PortalNotifications
         return [ :payroll_review_published, event.company_id, pay_period_id_for(event) ]
       end
 
+      if event.event_type.start_with?("payroll_rollback_")
+        return [ event.event_type, event.company_id, pay_period_id_for(event), event.metadata["self_override"] ]
+      end
+
       if event.override_decision?
         return [ :payroll_review_decided, event.company_id, pay_period_id_for(event), event.metadata["decision"], event.audience ]
       end
@@ -182,7 +186,20 @@ module PortalNotifications
         help_email: nil
       )
 
-      copy = if events.all? { |event| event.event_type == "payroll_review_published" }
+      copy = if events.all? { |event| event.event_type.start_with?("payroll_rollback_") }
+        self_override = audience == "staff" && events.any? { |event| event.metadata["self_override"] == true }
+        heading = self_override ? "Payroll rolled back by its own operator" : "Payroll rolled back"
+        label = [ company_name, period_text ].compact.join(" · ")
+        {
+          subject: "#{demo_prefix}#{heading} — #{label}",
+          preheader: "#{heading} for #{label}.",
+          heading: heading,
+          paragraphs: [ label, "Sign in to see the current payroll status." ],
+          action: { label: "Open pay runs", url: audience == "client" ?
+            payroll_review_url(audience: audience, company_id: company_id, pay_period_id: nil) : url },
+          privacy_line: "Payroll details stay behind sign-in."
+        }
+      elsif events.all? { |event| event.event_type == "payroll_review_published" }
         published_copy(
           demo_prefix: demo_prefix, company_name: company_name, periods: periods,
           single_period: single_period, period_text: period_text, pay_date_text: pay_date_text, url: url

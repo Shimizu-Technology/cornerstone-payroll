@@ -62,7 +62,8 @@ class PayPeriodLifecycleService
     raise InvalidTransitionError, e.message
   end
 
-  def unapprove!
+  def unapprove!(reason:)
+    reason = AdminOverrideService.reason!(reason)
     with_financial_pay_period_lock do
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only unapprove an approved pay period"
@@ -76,6 +77,11 @@ class PayPeriodLifecycleService
         unapproved_at: Time.current,
         unapproved_by_id: actor&.id
       )
+      AuditLog.record!(user: actor, actor: Current.actor || AuditActor.system_job(self.class.name),
+        company_id: pay_period.company_id, action: "pay_periods#unapprove",
+        record_type: "PayPeriod", record_id: pay_period.id, subject_name: AuditRecordSnapshot.subject_name(pay_period),
+        metadata: { reason: reason, changed_fields: [ "status" ],
+          before_values: { status: "approved" }, after_values: { status: "calculated" } })
     end
 
     pay_period

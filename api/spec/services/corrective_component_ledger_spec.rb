@@ -29,7 +29,7 @@ RSpec.describe "Corrective component ledger" do
         [ original, first, second ].each { |item| assert_cash(item) }
         stale = preview(hours_worked: 60).dig(:meta, :review_digest)
         removed, retained = voided == :first ? [ first, second ] : [ second, first ]
-        PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse selected supplemental")
+        PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse selected supplemental", acknowledge_later_runs: true)
         expect { issue({ hours_worked: 60 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
         repair = issue(hours_worked: 60)
         active = [ original, retained, repair ]
@@ -73,7 +73,7 @@ RSpec.describe "Corrective component ledger" do
         [ original, first, second ].each { |item| assert_cash(item) }
         removed, retained = voided == :first ? [ first, second ] : [ second, first ]
         stale = preview(hours_worked: 60).dig(:meta, :review_digest)
-        PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse field delta")
+        PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse field delta", acknowledge_later_runs: true)
         expect { issue({ hours_worked: 60 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
         repair = issue(hours_worked: 60)
         expect([ original, retained, repair ].sum { |item| item.payroll_item_field_entries.sum(:amount) }).to eq(original_amount)
@@ -146,7 +146,7 @@ RSpec.describe "Corrective component ledger" do
       expect(totals[key]).to eq(48.75)
       second = issue(hours_worked: 55)
       expect(W2GuAggregator.new(company, 2024).generate.fetch(:totals)[key]).to eq(41.25)
-      PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse first plan delta")
+      PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse first plan delta", acknowledge_later_runs: true)
       expect(W2GuAggregator.new(company, 2024).generate.fetch(:totals)[key]).to eq(37.5)
       repair = issue(hours_worked: 65)
       expect(W2GuAggregator.new(company, 2024).generate.fetch(:totals)[key]).to eq(48.75)
@@ -188,7 +188,7 @@ RSpec.describe "Corrective component ledger" do
         qualified_overtime_compensation: 2, custom_earnings: [], custom_deductions: []))
       removed, retained = voided == :first ? [ first, second ] : [ second, first ]
       stale = preview(target).dig(:meta, :review_digest)
-      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse cash component delta")
+      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse cash component delta", acknowledge_later_runs: true)
       expect { issue(target, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
       target = target.merge(bonus: 125)
       repair = issue(target)
@@ -232,7 +232,7 @@ RSpec.describe "Corrective component ledger" do
     original = original!(overtime_hours: 5, holiday_hours: 3, pto_hours: 2)
     first = issue(hours_worked: 65, overtime_hours: 7, holiday_hours: 4, pto_hours: 1)
     second = issue(hours_worked: 55, overtime_hours: 1, holiday_hours: 1, pto_hours: 0)
-    PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse all hour changes")
+    PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse all hour changes", acknowledge_later_runs: true)
     target = { hours_worked: 70, overtime_hours: 8, holiday_hours: 5, pto_hours: 4 }
     repair = issue(target)
     [ original, second, repair ].each { |item| assert_cash(item) }
@@ -251,7 +251,7 @@ RSpec.describe "Corrective component ledger" do
     second = issue(pay_rate: 46800)
     expect(first.overtime_pay).to eq(9.38)
     expect(second.overtime_pay).to eq(-28.13)
-    PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse salary overtime delta")
+    PayPeriodCorrectionService.void!(pay_period: first.pay_period, actor: actor, reason: "Reverse salary overtime delta", acknowledge_later_runs: true)
     repair = issue(pay_rate: 54600)
     expect { issue(overtime_hours: 8) }.to raise_error(IssueCorrectivePaycheckService::UnsupportedEmployeeError, /daily salary-coverage/)
     [ original, second, repair ].each { |item| assert_cash(item) }
@@ -298,7 +298,7 @@ RSpec.describe "Corrective component ledger" do
       expect(second.net_pay).to eq(-50)
       removed, retained = voided == :first ? [ first, second ] : [ second, first ]
       stale = preview(non_taxable_pay: 75).dig(:meta, :review_digest)
-      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse non-taxable cash adjustment")
+      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse non-taxable cash adjustment", acknowledge_later_runs: true)
       expect { issue({ non_taxable_pay: 75 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
       repair = issue(non_taxable_pay: 75)
       expect([ original, retained, repair ].sum(&:non_taxable_pay)).to eq(75)

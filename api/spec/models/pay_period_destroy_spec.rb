@@ -28,7 +28,7 @@ RSpec.describe PayPeriod, "deletion", type: :model do
   it "retains a run approved then unapproved, including after recalculation is invalidated" do
     period = create(:pay_period, :approved, approved_at: 1.hour.ago)
     session = create(:payroll_intake_session, pay_period: period, company: period.company)
-    PayPeriodLifecycleService.new(pay_period: period, actor: nil).unapprove!
+    PayPeriodLifecycleService.new(pay_period: period, actor: nil).unapprove!(reason: "Fixture payroll approval correction")
     period.invalidate_calculation!(reason: "Correct hours")
 
     expect(period.reload.destroy).to be(false)

@@ -45,12 +45,13 @@ module PortalNotifications
         if event.audience == "employee"
           return employee_target(event)&.email == delivery.recipient_email ? nil : "access_revoked"
         end
-        if event.override_decision? && actor_address?(delivery.address, event)
+        if (event.override_decision? || event.event_type == "payroll_rollback_staff") && actor_address?(delivery.address, event)
           return "access_revoked"
         end
         if event.audience == "staff" && !event.self_override_alert?
           if delivery.user_id
             listed = listed_user?(event.company_id, delivery.user_id) || listed_email?(event.company_id, delivery.user&.email)
+            listed ||= rollback_super_admin?(delivery.user, event)
             return "recipient_removed" unless listed
           else
             return "recipient_removed" unless listed_email?(event.company_id, delivery.recipient_email)
@@ -160,6 +161,10 @@ module PortalNotifications
         else
           listed.users.select(:user_id)
         end
+        if event.event_type == "payroll_rollback_staff"
+          supers = User.active.where(organization_id: event.organization_id, role: "super_admin")
+          candidate_ids = User.where(id: candidate_ids).or(supers).select(:id)
+        end
         users = []
         seen_user_ids = []
         taken_canonicals = []
@@ -180,7 +185,7 @@ module PortalNotifications
           normalized = PortalNotificationRecipient.normalize_email(email)
           canonical = PortalNotificationRecipient.canonical_email(normalized)
           next if normalized.blank? || canonical.blank? || taken_canonicals.include?(canonical)
-          next if event.override_decision? && actor_address?(normalized, event)
+          next if (event.override_decision? || event.event_type == "payroll_rollback_staff") && actor_address?(normalized, event)
 
           account_users = account_users_for_email(normalized)
           if account_users.any?
@@ -228,7 +233,7 @@ module PortalNotifications
         company = Company.includes(:organization).find_by(id: event.company_id)
         return false unless user && company
         return false if event.actor_id.present? && event.actor_id == user.id
-        return false if event.override_decision? && actor_address?(user.email, event)
+        return false if (event.override_decision? || event.event_type == "payroll_rollback_staff") && actor_address?(user.email, event)
 
         if event.audience == "staff"
           return false if event.self_override_alert? && !user.super_admin?
@@ -253,6 +258,10 @@ module PortalNotifications
         !request.same_person_reviewer?(user)
       rescue EmployeeProfileIdentity::LinkCheckUnavailable
         false
+      end
+
+      def rollback_super_admin?(user, event)
+        event.event_type == "payroll_rollback_staff" && user&.super_admin? && user.organization_id == event.organization_id
       end
 
       def staff_can_view_company?(user, company)

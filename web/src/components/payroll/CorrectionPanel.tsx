@@ -1,3 +1,6 @@
+import type { CorrectionRunResponse, VoidPayPeriodResponse } from '@/services/api';
+import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
  * CPR-71 / CPR-73: Payroll Correction Panel
@@ -140,6 +143,11 @@ export function CorrectionPanel({
     if (sourceRefreshGeneration.current === generation) onPayPeriodChange(response.pay_period);
   };
 
+  const [confirmation, setConfirmation] = useState('');
+  const [typedConfirmation, setTypedConfirmation] = useState('');
+  const [acknowledgeLaterRuns, setAcknowledgeLaterRuns] = useState(false);
+  const sendRollback = useOptionalStepUpRequest((token: string, action: 'void' | 'reopen_unpaid', body: object) =>
+    sendPayrollApprovalRequest(token, payPeriod.company_id, `/admin/pay_periods/${payPeriod.id}/${action}`, 'POST', body));
   const [preflightLoading, setPreflightLoading] = useState(false);
   const [unpaidAcknowledgement, setUnpaidAcknowledgement] = useState(false);
   const [showReopenModal, setShowReopenModal] = useState(false);
@@ -148,9 +156,12 @@ export function CorrectionPanel({
   const [reopenError, setReopenError] = useState<string | null>(null);
   const loadPreflight = async (action: 'reopen' | 'void') => {
     setPreflight(null);
+    setConfirmation('');
+    setTypedConfirmation('');
+    setAcknowledgeLaterRuns(false);
     setPreflightLoading(true);
     setUnpaidAcknowledgement(false);
-    try { const response = await payPeriodsApi.correctionPreflight(payPeriod.id); setPreflight(action === 'void' ? response.void_preflight : response.correction_preflight); }
+    try { const response = await payPeriodsApi.correctionPreflight(payPeriod.id); setConfirmation(response.confirmation); setPreflight(action === 'void' ? response.void_preflight : response.correction_preflight); }
     catch (err) { setPreflight({ eligible: false, blockers: [err instanceof Error ? err.message : 'Unable to check payment eligibility. Close and try again.'], employee_checks: [], other_payments: [], requires_unpaid_acknowledgement: true }); }
     finally { setPreflightLoading(false); }
   };
@@ -158,7 +169,6 @@ export function CorrectionPanel({
   // ---------- Void modal ----------
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [voidReason, setVoidReason] = useState('');
-  const [voidConfirmText, setVoidConfirmText] = useState('');
   const [voidLoading, setVoidLoading] = useState(false);
   const [voidError, setVoidError] = useState<string | null>(null);
 
@@ -201,22 +211,22 @@ export function CorrectionPanel({
       return;
     }
     if (!preflight?.eligible || !unpaidAcknowledgement) { setVoidError('Confirm that every listed payment remains unissued and unpaid. Resolve any blocked payments first.'); return; }
-    if (voidConfirmText !== 'VOID') {
-      setVoidError("Type VOID (all caps) in the confirmation field to proceed.");
-      return;
-    }
+    if (!confirmation || typedConfirmation !== confirmation || (hasLaterRuns && !acknowledgeLaterRuns)) return;
 
     try {
       setVoidLoading(true);
       setVoidError(null);
-      const response = await payPeriodsApi.void(payPeriod.id, {
+      const result = await sendRollback('void', {
         reason: voidReason.trim(),
+        confirmation: typedConfirmation,
         unpaid_acknowledgement: unpaidAcknowledgement,
+        acknowledge_later_runs: acknowledgeLaterRuns,
       });
-      onPayPeriodChange(response.pay_period);
+      const response = await result.json().catch(() => null);
+      if (!result.ok) throw new Error(response?.error || 'Unable to void payroll.');
+      onPayPeriodChange((response as VoidPayPeriodResponse).pay_period);
       setShowVoidModal(false);
       setVoidReason('');
-      setVoidConfirmText('');
       setHistoryEvents(null);
       setHistoryOpen(false);
       setHistoryError(null);
@@ -232,13 +242,19 @@ export function CorrectionPanel({
     const reasonError = validateReason(reopenReason);
     if (reasonError) { setReopenError(reasonError); return; }
     if (!preflight?.eligible || !unpaidAcknowledgement) { setReopenError('Confirm every listed payment remains unissued and unpaid.'); return; }
+    if (!confirmation || typedConfirmation !== confirmation) return;
     setReopenLoading(true);
     setReopenError(null);
     try {
-      const response = await payPeriodsApi.reopenUnpaid(payPeriod.id, { reason: reopenReason.trim(), unpaid_acknowledgement: true });
-      onPayPeriodChange(response.source_pay_period);
+      const result = await sendRollback('reopen_unpaid', {
+        reason: reopenReason.trim(), confirmation: typedConfirmation, unpaid_acknowledgement: true,
+      });
+      const response = await result.json().catch(() => null);
+      if (!result.ok) throw new Error(response?.error || 'Unable to reopen payroll.');
+      const reopened = response as CorrectionRunResponse;
+      onPayPeriodChange(reopened.source_pay_period);
       setShowReopenModal(false);
-      navigate(processingPath(response.correction_run.id));
+      navigate(processingPath(reopened.correction_run.id));
     } catch (err) { setReopenError(err instanceof Error ? err.message : 'Unable to reopen unpaid payroll. Refresh to check its latest status before retrying.'); }
     finally { setReopenLoading(false); }
   };
@@ -341,6 +357,8 @@ export function CorrectionPanel({
   const isVoided    = payPeriod.correction_status === 'voided';
   const isCorrection = payPeriod.correction_status === 'correction';
   const isDraft     = payPeriod.status === 'draft';
+  const hasLaterRuns = !!preflight?.later_committed_run_ids?.length;
+  const canConfirmRollback = !!confirmation && typedConfirmation === confirmation && !!preflight?.eligible && unpaidAcknowledgement;
   const canVoid     = payPeriod.can_void === true;
   const canCorrect  = payPeriod.can_create_correction_run === true;
   const canDeleteDraft = payPeriod.can_delete_draft_correction_run === true;
@@ -452,8 +470,7 @@ export function CorrectionPanel({
               setShowVoidModal(true);
               setVoidError(null);
               setVoidReason('');
-              setVoidConfirmText('');
-              void loadPreflight('void');
+                      void loadPreflight('void');
             }}
           >
             {isCorrection
@@ -575,20 +592,22 @@ export function CorrectionPanel({
             <VoidModalBody
               isCorrection={isCorrection}
               voidReasonId={voidReasonId}
-              voidConfirmId={voidConfirmId}
               voidReason={voidReason}
-              voidConfirmText={voidConfirmText}
               onReasonChange={setVoidReason}
-              onConfirmTextChange={setVoidConfirmText}
               loading={voidLoading}
             />
+            {preflight?.eligible && hasLaterRuns && <label className="flex items-start gap-2 py-3 text-sm">
+              <input type="checkbox" checked={acknowledgeLaterRuns} onChange={event => setAcknowledgeLaterRuns(event.target.checked)} disabled={voidLoading} />
+              <span>I acknowledge later committed payrolls will be flagged for review. Their Social Security and Additional Medicare taxes will need to be checked.</span>
+            </label>}
+            <RollbackConfirmation id={voidConfirmId} expected={confirmation} value={typedConfirmation} onChange={setTypedConfirmation} disabled={voidLoading} />
             </>
           }
           errorMessage={voidError}
           confirmLabel={voidLoading ? 'Voiding…' : isCorrection ? 'Void Correction Run' : 'Void Pay Period'}
           confirmClassName="bg-red-600 hover:bg-red-700 focus:ring-red-500 text-white"
           loading={voidLoading}
-          confirmDisabled={voidLoading || preflightLoading || !preflight?.eligible || !unpaidAcknowledgement || voidConfirmText !== 'VOID'}
+          confirmDisabled={voidLoading || preflightLoading || !canConfirmRollback || (hasLaterRuns && !acknowledgeLaterRuns)}
           onConfirm={handleVoidSubmit}
           onCancel={closeVoidModal}
         />
@@ -618,18 +637,20 @@ export function CorrectionPanel({
               <textarea
                 id="reopen-payroll-reason"
                 rows={3}
+                maxLength={1000}
                 className="mt-1 w-full rounded-md border border-gray-300 p-3"
                 value={reopenReason}
                 onChange={event => setReopenReason(event.target.value)}
                 disabled={reopenLoading}
               />
+              <RollbackConfirmation id={voidConfirmId} expected={confirmation} value={typedConfirmation} onChange={setTypedConfirmation} disabled={reopenLoading} />
             </>
           }
           errorMessage={reopenError}
           confirmLabel={reopenLoading ? 'Reopening…' : 'Reopen and create draft'}
           confirmClassName="bg-amber-600 text-white hover:bg-amber-700"
           loading={reopenLoading}
-          confirmDisabled={reopenLoading || preflightLoading || !preflight?.eligible || !unpaidAcknowledgement}
+          confirmDisabled={reopenLoading || preflightLoading || !canConfirmRollback}
           onConfirm={handleReopen}
           onCancel={() => { if (!reopenLoading) setShowReopenModal(false); }}
         />
@@ -727,22 +748,16 @@ function buildErrorWithRecovery(msg: string): string {
 interface VoidModalBodyProps {
   isCorrection: boolean;
   voidReasonId: string;
-  voidConfirmId: string;
   voidReason: string;
-  voidConfirmText: string;
   onReasonChange: (v: string) => void;
-  onConfirmTextChange: (v: string) => void;
   loading: boolean;
 }
 
 function VoidModalBody({
   isCorrection,
   voidReasonId,
-  voidConfirmId,
   voidReason,
-  voidConfirmText,
   onReasonChange,
-  onConfirmTextChange,
   loading,
 }: VoidModalBodyProps) {
   return (
@@ -772,6 +787,7 @@ function VoidModalBody({
       </label>
       <textarea
         id={voidReasonId}
+        maxLength={1000}
         className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-red-400 focus:border-red-400 disabled:bg-gray-100 disabled:text-gray-400"
         rows={3}
         placeholder="e.g. Employee 'Jane Doe' was included in error — she was on unpaid leave this period"
@@ -784,23 +800,6 @@ function VoidModalBody({
         Minimum {MIN_REASON_LENGTH} characters. This is recorded permanently in the audit trail.
       </p>
 
-      <label
-        htmlFor={voidConfirmId}
-        className="block text-sm font-medium text-gray-700 mt-4 mb-1"
-      >
-        Type <strong>VOID</strong> to confirm this irreversible action
-      </label>
-      <input
-        id={voidConfirmId}
-        type="text"
-        className={controlClassName('font-mono')}
-        placeholder="VOID"
-        value={voidConfirmText}
-        disabled={loading}
-        aria-required="true"
-        autoComplete="off"
-        onChange={(e) => onConfirmTextChange(e.target.value)}
-      />
     </>
   );
 }
@@ -1224,12 +1223,33 @@ function CorrectionModal({
   );
 }
 
+function RollbackConfirmation({ id, expected, value, onChange, disabled }: {
+  id: string; expected: string; value: string; onChange: (value: string) => void; disabled: boolean;
+}) {
+  if (!expected) return null;
+  return <div className="mt-4">
+    <label htmlFor={id} className="block text-sm font-medium">Type the client and period exactly as shown</label>
+    <p className="my-1 break-words text-sm" id={`${id}-instruction`}>{expected}</p>
+    <input id={id} aria-describedby={`${id}-instruction`} required className={controlClassName()} value={value} onChange={event => onChange(event.target.value)} disabled={disabled} autoComplete="off" />
+  </div>;
+}
+
 function PaymentPreflight({ preflight, loading, acknowledged, onAcknowledged, disabled }: { preflight: PayrollCorrectionPreflight | null; loading: boolean; acknowledged: boolean; onAcknowledged: (value: boolean) => void; disabled: boolean }) {
   if (loading) return <p role="status" className="mb-3 text-sm">Checking associated payments…</p>;
   if (!preflight) return null;
   const payments = [...preflight.employee_checks, ...preflight.other_payments];
   return <div className="mb-4 space-y-3">
     <p className="text-sm font-semibold">Associated payments</p>
+    <details open className="text-sm">
+      <summary className="cursor-pointer font-medium">When rollback is blocked and what to do</summary>
+      <ul className="mt-2 list-disc space-y-1 pl-5">
+        <li>Positive direct deposit, delivered or cleared check, or paid non-employee payment. Verify settlement outside payroll and coordinate any stop payment, return, or reconciliation with the bank.</li>
+        <li>Paid or filed Form 500 or a filing record for the quarter or year. Coordinate filing amendments and payment reconciliation with the filing team.</li>
+        <li>Reopening also stops for finalized AIRE batches, linked source evidence, supplemental corrections, or later committed payroll for the same employees. Review corrections with the source owner and review dependent tax totals.</li>
+      </ul>
+      <p className="mt-2">For individual checks, consider a corrective paycheck or a single-paycheck reversal after verifying payment and filing requirements.</p>
+    </details>
+    <p className="text-sm">Downloaded PDFs, printed copies, and emails already sent cannot be recalled. Destroy any unpaid printed checks, including Guam income tax deposit checks, before confirming.</p>
     <ul className="max-h-48 space-y-2 overflow-y-auto text-sm">{payments.map((payment, index) => <li key={`${payment.id}-${index}`} className="rounded-md border border-slate-200 p-2">{payment.check_number ? `Check #${payment.check_number}` : 'Payment'} · {payment.payee} · {formatCurrency(payment.amount)}<span className="block text-xs text-slate-600">{payment.already_voided ? 'Already voided — retained in history' : payment.status}</span></li>)}</ul>
     {preflight.blockers.length > 0 && <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-800"><p className="font-semibold">Payroll cannot be reopened or voided</p><ul className="list-inside list-disc">{preflight.blockers.map(blocker => <li key={blocker}>{blocker}</li>)}</ul></div>}
     {preflight.eligible && <label className="flex min-h-11 items-start gap-3 text-sm"><input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={acknowledged} onChange={event => onAcknowledged(event.target.checked)} disabled={disabled} /><span>I confirm all active payments listed above have not been issued, paid, or cleared, and any printed copies will be retired.</span></label>}
