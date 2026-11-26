@@ -54,9 +54,10 @@ module YearEnd
                               PAYEE_IDENTITY_UNRESOLVED PAYEE_DUPLICATE_TIN FORM_1099_NOT_MARKED_READY].freeze
     # Employer items only the W-2 filing needs; they never hold up the 1099s.
     W2_ONLY_EMPLOYER_CODES = %w[EMPLOYER_CONTACT_NAME_MISSING EMPLOYER_EFILE_INVALID].freeze
-    # Expected demo preflight notice for fictional 9xx SSNs: shown in the
-    # checklist without loosening the official EFW2 validator or blocking sign-off.
-    DEMO_EXPECTED_CODES = %w[DEMO_RESERVED_SSN_EXPECTED].freeze
+    # Expected demo preflight notices for fictional 9xx SSNs and reserved demo
+    # EIN prefixes (e.g. 07-): shown in the checklist without loosening the
+    # official EFW2 validator or blocking sign-off.
+    DEMO_EXPECTED_CODES = %w[DEMO_RESERVED_SSN_EXPECTED DEMO_RESERVED_EIN_EXPECTED].freeze
     DEMO_RESERVED_SSN_PATTERN = /\A9\d{2}(?!00)\d{2}(?!0000)\d{4}\z/
 
     def call
@@ -141,6 +142,15 @@ module YearEnd
         else false
         end
       end.map do |problem|
+        if company.demo? && problem[:code] == :ein_invalid && demo_reserved_ein?(company.ein)
+          next issue(
+            "DEMO_RESERVED_EIN_EXPECTED",
+            "Expected demo e-file preflight error: this demo company uses a fictional reserved EIN (#{company.ein}), which the official EFW2 validator rejects.",
+            field: "ein",
+            expected_for_demo: true
+          )
+        end
+
         field = if problem[:code] == :ein_invalid
           "ein"
         elsif problem[:code].in?(%i[address_missing address_invalid state_invalid])
@@ -148,6 +158,11 @@ module YearEnd
         end
         issue("EMPLOYER_EFILE_INVALID", problem[:message], field: field)
       end
+    end
+
+    def demo_reserved_ein?(value)
+      digits = value.to_s.delete("-")
+      digits.match?(/\A\d{9}\z/) && Efw2Formatting::BAD_EIN_PREFIXES.include?(digits[0, 2])
     end
 
     def efw2_people_issues
@@ -273,7 +288,7 @@ module YearEnd
       steps.flat_map do |step|
         case step[:key]
         when "filing_decision" then step[:issues].select { |issue| issue[:code] == "FORM_1099_FILER_NOT_CHOSEN" }
-        when "employer" then step[:issues].reject { |issue| issue[:code].in?(W2_ONLY_EMPLOYER_CODES) }
+        when "employer" then step[:issues].reject { |issue| issue[:code].in?(W2_ONLY_EMPLOYER_CODES) || issue[:code].in?(DEMO_EXPECTED_CODES) }
         when "people" then step[:issues].select { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
         else []
         end
