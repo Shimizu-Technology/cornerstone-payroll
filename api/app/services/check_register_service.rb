@@ -6,12 +6,12 @@ class CheckRegisterService
     @from = Date.iso8601(from.to_s)
     @to = Date.iso8601(to.to_s)
     @status = status.to_s.presence
-    raise ArgumentError, "End date must be on or after start date" if @to < @from
+    raise ReportValidationError, "End date must be on or after start date" if @to < @from
     if @status && !CheckReconciliationStatus::STATUSES.include?(@status)
-      raise ArgumentError, "Check status is invalid"
+      raise ReportValidationError, "Check status is invalid"
     end
   rescue Date::Error
-    raise ArgumentError, "Use valid start and end dates"
+    raise ReportValidationError, "Use valid start and end dates"
   end
 
   def call

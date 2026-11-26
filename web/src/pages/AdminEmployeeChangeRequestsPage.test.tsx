@@ -158,3 +158,29 @@ it.each([
   fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
   await waitFor(() => expect(apiMocks.approve).toHaveBeenCalledWith(address.id, '', undefined));
 });
+
+it('shows Rejecting… on Reject and Approving… on Approve while each request is in flight', async () => {
+  vi.clearAllMocks();
+  const pending = request(9, 'Maya Cruz', '');
+  let resolveReject!: () => void;
+  let resolveApprove!: () => void;
+  apiMocks.list.mockResolvedValue({ data: [pending] });
+  apiMocks.get.mockResolvedValue({ data: pending });
+  apiMocks.reject.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveReject = resolve; }));
+  apiMocks.approve.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveApprove = resolve; }));
+
+  render(<MemoryRouter><AdminEmployeeChangeRequestsPage /></MemoryRouter>);
+  await screen.findByText('Request #9');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Rejecting…' }).disabled).toBe(true));
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Approve' }).disabled).toBe(true);
+  await act(async () => { resolveReject(); });
+  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reject' }).disabled).toBe(false));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Approving…' }).disabled).toBe(true));
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Reject' }).disabled).toBe(true);
+  await act(async () => { resolveApprove(); });
+  await waitFor(() => expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Approve' }).disabled).toBe(false));
+});

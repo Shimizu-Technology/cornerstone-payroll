@@ -9,7 +9,7 @@ export function OrganizationSwitcher({ onNavigate }: { onNavigate?: () => void }
 
   if (user?.role === 'client') {
     return (
-      <div className="border-b border-neutral-200/70 px-4 py-2.5">
+      <div className="shrink-0 border-b border-neutral-200/70 px-4 py-2.5">
         <p className="truncate text-xs font-medium text-neutral-600">
           Payroll by <span className="font-semibold text-neutral-900">{activeOrganizationName || 'Loading...'}</span>
         </p>
@@ -19,7 +19,7 @@ export function OrganizationSwitcher({ onNavigate }: { onNavigate?: () => void }
 
   if (user?.role !== 'super_admin' || organizations.length <= 1) {
     return (
-      <div className="border-b border-neutral-200/70 px-4 py-3">
+      <div className="shrink-0 border-b border-neutral-200/70 px-4 py-3">
         <p className="text-xs font-semibold text-neutral-600">Organization</p>
         <p className="mt-1 truncate text-sm font-semibold text-neutral-900">{activeOrganizationName || 'Loading...'}</p>
       </div>
@@ -27,7 +27,7 @@ export function OrganizationSwitcher({ onNavigate }: { onNavigate?: () => void }
   }
 
   return (
-    <div className="border-b border-neutral-200/70 px-4 py-3">
+    <div className="shrink-0 border-b border-neutral-200/70 px-4 py-3">
       <label htmlFor="active-organization" className="text-xs font-semibold text-neutral-600">
         Organization
       </label>

@@ -74,7 +74,7 @@ module QuickbooksHistory
       @report_type = report_type.to_s
       @year = normalized_year(year)
       @worker_key = worker_key.to_s.presence
-      raise ArgumentError, "Unknown historical report" unless REPORTS.key?(@report_type)
+      raise ReportValidationError, "Unknown historical report" unless REPORTS.key?(@report_type)
     end
 
     def call(page: nil, per_page: nil)
@@ -144,7 +144,7 @@ module QuickbooksHistory
       return nil if value.blank?
 
       parsed = Integer(value, exception: false)
-      raise ArgumentError, "year must be between 1900 and #{Date.current.year + 1}" unless parsed&.between?(1900, Date.current.year + 1)
+      raise ReportValidationError, "year must be between 1900 and #{Date.current.year + 1}" unless parsed&.between?(1900, Date.current.year + 1)
 
       parsed
     end

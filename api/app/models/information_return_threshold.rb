@@ -12,6 +12,6 @@ class InformationReturnThreshold < ApplicationRecord
   def self.for!(form_type:, tax_year:)
     find_by!(form_type: form_type.to_s, tax_year: tax_year.to_i)
   rescue ActiveRecord::RecordNotFound
-    raise ArgumentError, "No #{form_type} reporting threshold is configured for #{tax_year}"
+    raise ReportValidationError, "No #{form_type} reporting threshold is configured for #{tax_year}"
   end
 end

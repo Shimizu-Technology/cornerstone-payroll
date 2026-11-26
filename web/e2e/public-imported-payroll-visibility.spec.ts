@@ -181,7 +181,7 @@ test('payroll summary explains combined sources and any excluded unlinked record
   await expect(page.getByText(/Payroll field reconciliation below covers Cornerstone records only/)).toBeVisible();
   await expect(page.getByText('QuickBooks loan labels are unclassified; 401(k) After Tax remains in its source pre-tax bucket.')).toBeVisible();
   await page.getByText('More payroll categories and field reconciliation').click();
-  await expect(page.getByText('Historical Loans (type unclassified)').locator('..')).toContainText('$60,061.76');
+  await expect(page.getByText('Loan repayments (imported)').locator('..')).toContainText('$60,061.76');
   await expect(page.getByText('Health Insurance (payroll fields + historical)').locator('..')).toContainText('$31,809.00');
   await page.getByRole('checkbox', { name: 'Show source breakdown columns' }).check();
   await expect(page.getByRole('row').filter({ hasText: 'Avery Example' })).toContainText('$29,997.00');
@@ -241,7 +241,8 @@ test('client payroll summary shows the source-aware historical categories', asyn
   await page.goto('/reports');
 
   await expect(page.getByText('QuickBooks source bucket needs classification review.')).toBeVisible();
-  await expect(page.getByText('Historical Loans (type unclassified)').locator('..')).toContainText('$60,061.76');
+  await expect(page.getByText('Loan repayments (imported)').first().locator('..')).toContainText('$60,061.76');
+  await expect(page.getByText('401(k) after-tax (imported as pre-tax)').locator('..')).toContainText('$15,454.13');
   await expect(page.getByRole('row').filter({ hasText: 'Avery Example' })).toContainText('122.40');
 });
 

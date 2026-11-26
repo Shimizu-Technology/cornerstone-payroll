@@ -57,7 +57,7 @@ class Form941GuAggregator
     @company = company
     @year    = year.to_i
     @quarter = quarter.to_i
-    raise ArgumentError, "quarter must be 1–4" unless (1..4).cover?(@quarter)
+    raise ReportValidationError, "quarter must be 1–4" unless (1..4).cover?(@quarter)
 
     @include_historical = include_historical.nil? ? locked_historical_imports? : include_historical
   end

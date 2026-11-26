@@ -4,7 +4,7 @@
 class W3ssPdfGenerator < OfficialPdfOverlay
   def initialize(company:, report:, draft:)
     @company, @report, @draft = company, report, draft
-    raise ArgumentError, "W-3SS template supports 2026 only" unless report.dig(:meta, :year).to_i == 2026
+    raise ReportValidationError, "W-3SS template supports 2026 only" unless report.dig(:meta, :year).to_i == 2026
 
     super(template_path: Rails.root.join("lib/assets/fw3ss.pdf"), page_sizes: [ [ 612, 792 ] ])
   end

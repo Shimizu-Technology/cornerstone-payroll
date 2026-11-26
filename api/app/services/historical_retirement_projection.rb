@@ -33,16 +33,16 @@ class HistoricalRetirementProjection
   end
 
   def validate_review!
-    raise ArgumentError, REVIEW_MESSAGE unless balance && balance.employee_id == employee.id &&
+    raise ReportValidationError, REVIEW_MESSAGE unless balance && balance.employee_id == employee.id &&
       balance.company_id == employee.company_id && balance.tax_year == tax_year &&
       balance.historical_ytd_bridge.applied? && balance.historical_ytd_bridge.company_id == employee.company_id
     unless review.is_a?(Hash) && review["balance_digest"].present?
-      raise ArgumentError, "#{REVIEW_MESSAGE} No complete contribution-type review is recorded for #{tax_year}."
+      raise ReportValidationError, "#{REVIEW_MESSAGE} No complete contribution-type review is recorded for #{tax_year}."
     end
-    raise ArgumentError, "#{REVIEW_MESSAGE} The retained source digest has changed since the recorded review." unless review["balance_digest"] == balance_digest
+    raise ReportValidationError, "#{REVIEW_MESSAGE} The retained source digest has changed since the recorded review." unless review["balance_digest"] == balance_digest
 
     rows = review["classifications"]
-    raise ArgumentError, "#{REVIEW_MESSAGE} Classify every retained candidate exactly once." unless rows.is_a?(Array) &&
+    raise ReportValidationError, "#{REVIEW_MESSAGE} Classify every retained candidate exactly once." unless rows.is_a?(Array) &&
       rows.all? { |row| row.is_a?(Hash) && GROUP_KEYS.key?(row["reporting_group"]) } &&
       rows.map { |row| row.slice("source_bucket", "source_label", "amount") }.sort_by { |row| row.values.join("\0") } ==
         candidates.map(&:stringify_keys).sort_by { |row| row.values.join("\0") }
@@ -52,7 +52,7 @@ class HistoricalRetirementProjection
 
   def totals(strict: false)
     if !balance
-      raise ArgumentError, REVIEW_MESSAGE if strict && review.present?
+      raise ReportValidationError, REVIEW_MESSAGE if strict && review.present?
       return zero_totals
     end
     if candidates.any? || review.present?
@@ -132,7 +132,7 @@ class HistoricalRetirementProjection
     %i[retirement roth_retirement].each do |key|
       residual = canonical_totals[key] - known[key]
       unless residual.zero? || (residual.positive? && residual == classified[key])
-        raise ArgumentError, "#{REVIEW_MESSAGE} Canonical #{key} does not reconcile with the retained source amounts."
+        raise ReportValidationError, "#{REVIEW_MESSAGE} Canonical #{key} does not reconcile with the retained source amounts."
       end
       totals[key] = known[key] + classified[key]
     end
@@ -149,7 +149,7 @@ class HistoricalRetirementProjection
 
   def decimal!(value)
     amount = BigDecimal(value.to_s, exception: false)
-    raise ArgumentError, "#{REVIEW_MESSAGE} Invalid retained source amount." unless amount&.finite? && amount >= 0 && amount == amount.round(2)
+    raise ReportValidationError, "#{REVIEW_MESSAGE} Invalid retained source amount." unless amount&.finite? && amount >= 0 && amount == amount.round(2)
 
     amount
   end
