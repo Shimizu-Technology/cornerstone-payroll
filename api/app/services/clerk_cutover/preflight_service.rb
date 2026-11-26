@@ -122,7 +122,7 @@ module ClerkCutover
     def check_verifier_issuer
       verifier = ClerkTokenVerifier.new(env: @env)
       issuer = verifier.clerk_issuer
-      passed = issuer.present? && ClerkTokenVerifier.valid_production_https_origin?(issuer)
+      passed = issuer.present? && ClerkTokenVerifier.valid_production_https_origin?(issuer, env: @env)
 
       Check.new(
         name: "ClerkTokenVerifier resolves a valid HTTPS issuer",
@@ -134,7 +134,7 @@ module ClerkCutover
 
     def check_authorized_parties
       raw_parties = @env.fetch("CLERK_AUTHORIZED_PARTIES", "").split(",").map(&:strip).reject(&:empty?)
-      passed = raw_parties.present? && raw_parties.all? { |origin| ClerkTokenVerifier.valid_production_https_origin?(origin) }
+      passed = raw_parties.present? && raw_parties.all? { |origin| ClerkTokenVerifier.valid_production_https_origin?(origin, env: @env) }
 
       Check.new(
         name: "CLERK_AUTHORIZED_PARTIES is configured with explicit HTTPS origins",

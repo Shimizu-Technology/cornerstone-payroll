@@ -79,6 +79,57 @@ RSpec.describe LocalDeployment do
         .to raise_error(LocalDeployment::ConfigurationError, /RACK_ATTACK_REDIS_URL/)
     end
 
+    it "requires DATABASE_URL" do
+      expect { described_class.validate!(env: local_env.except("DATABASE_URL")) }.to raise_error(LocalDeployment::ConfigurationError, /requires DATABASE_URL/)
+    end
+
+    it "refuses libpq routing settings" do
+      %w[PGHOST PGHOSTADDR PGSERVICE PGSERVICEFILE PGSYSCONFDIR PGPORT PGDATABASE PGTARGETSESSIONATTRS PGLOADBALANCEHOSTS].each do |name|
+        expect { described_class.validate!(env: local_env.merge(name => "ep-prod.neon.tech")) }
+          .to raise_error(LocalDeployment::ConfigurationError, /Remove #{name}/)
+      end
+      expect { described_class.validate!(env: local_env.merge("PGOPTIONS" => "-c search_path=x")) }.to raise_error(LocalDeployment::ConfigurationError, /PGOPTIONS/)
+      expect(described_class.validate!(env: local_env.merge("PGOPTIONS" => DatabaseConnectionTimeouts::PG_OPTIONS))).to be(true)
+    end
+
+    it "refuses a socket URL that leaves the host to libpq settings" do
+      expect { described_class.validate!(env: local_env.merge("DATABASE_URL" => "postgres:///payroll", "PGHOST" => "ep-prod.neon.tech")) }
+        .to raise_error(LocalDeployment::ConfigurationError, /PGHOST/)
+      expect(described_class.loopback_url?("postgres:///payroll")).to be(false)
+    end
+
+    it "refuses URL parameters that route libpq elsewhere" do
+      [
+        "postgres://u@127.0.0.1:5432/payroll?hostaddr=54.1.2.3",
+        "postgres://u@127.0.0.1:5432/payroll?service=production",
+        "postgres://u@127.0.0.1:5432/payroll?servicefile=/tmp/x",
+        "postgres://u@127.0.0.1:5432/payroll?target_session_attrs=read-write",
+        "postgres://u@127.0.0.1:5432/payroll?load_balance_hosts=random",
+        "postgres://u@127.0.0.1:5432/payroll?replication=database",
+        "postgres://u@127.0.0.1:5432/payroll?HOSTADDR=54.1.2.3",
+        "postgres://u@127.0.0.1:5432/payroll?host=prod.example.com",
+        "postgres:///payroll?host=/tmp/pg,prod.example.com",
+        "postgres:///payroll?host=prod.example.com",
+        "postgres:///payroll?host=/tmp/pg&host=prod.example.com",
+        "postgres:///payroll?host=prod.example.com&host=/tmp/pg",
+        "postgres://127.0.0.1,prod.example.com/payroll",
+        "mysql://127.0.0.1/payroll",
+        "http://127.0.0.1/payroll"
+      ].each do |url|
+        expect(described_class.loopback_url?(url)).to be(false), url
+        expect { described_class.validate!(env: local_env.merge("DATABASE_URL" => url)) }.to raise_error(LocalDeployment::ConfigurationError), url
+      end
+      expect(described_class.loopback_url?("postgres://u@127.0.0.1:5432/payroll?sslmode=disable&options=#{CGI.escape(DatabaseConnectionTimeouts::PG_OPTIONS)}")).to be(true)
+    end
+
+    it "checks Redis URLs as Redis" do
+      expect { described_class.validate!(env: local_env.merge("RACK_ATTACK_REDIS_URL" => "postgres://127.0.0.1/payroll")) }
+        .to raise_error(LocalDeployment::ConfigurationError, /RACK_ATTACK_REDIS_URL/)
+      expect { described_class.validate!(env: local_env.merge("DATABASE_URL" => "redis://127.0.0.1:6379")) }
+        .to raise_error(LocalDeployment::ConfigurationError, /DATABASE_URL/)
+      expect(described_class.validate!(env: local_env.merge("RACK_ATTACK_REDIS_URL" => "rediss://localhost:56379/0"))).to be(true)
+    end
+
     it "requires a .localhost tenant root domain and local origins" do
       expect { described_class.validate!(env: local_env.merge("TENANT_ROOT_DOMAIN" => "shimizu-technology.com")) }
         .to raise_error(LocalDeployment::ConfigurationError, /TENANT_ROOT_DOMAIN/)
@@ -143,7 +194,25 @@ RSpec.describe LocalDeployment do
         expect(ClerkTokenVerifier.valid_production_https_origin?("https://payroll.cornerstone.localhost:8443")).to be(true)
         expect(ClerkTokenVerifier.valid_production_https_origin?("https://payroll.shimizu-technology.com")).to be(false)
         expect(RolloutEnvironment.clerk_authorized_parties_valid?(ENV)).to be(true)
+        expect(ClerkTokenVerifier.valid_production_https_origin?("https://example-local-1.clerk.accounts.dev")).to be(true)
       end
+    end
+
+    it "reads the environment it is given, not the process environment" do
+      expect(ENV["DEPLOYMENT_ENV"]).not_to eq("local")
+      expect(ClerkTokenVerifier.valid_production_https_origin?("https://payroll.cornerstone.localhost:8443", env: local_env)).to be(true)
+      expect(RolloutEnvironment.clerk_authorized_parties_valid?(local_env)).to be(true)
+      readiness = ProductionReadiness.new(env: local_env)
+      expect(readiness.send(:clerk_authorized_parties_valid?)).to be(true)
+      expect(readiness.send(:production_origins_valid?)).to be(true)
+      expect(readiness.send(:production_https_url?, local_env["FRONTEND_URL"])).to be(true)
+
+      hosted = ProductionReadiness.new(env: local_env.merge("DEPLOYMENT_ENV" => "production"))
+      expect(hosted.send(:clerk_authorized_parties_valid?)).to be(false)
+      expect(hosted.send(:production_https_url?, local_env["FRONTEND_URL"])).to be(false)
+
+      preflight = ClerkCutover::PreflightService.new(env: local_env).send(:check_authorized_parties)
+      expect(preflight.passed).to be(true)
     end
   end
 
@@ -156,6 +225,27 @@ RSpec.describe LocalDeployment do
       expect(described_class.outbound_allowed?("api.clerk.com", 80, false, env: local_env)).to be(false)
       expect(described_class.outbound_allowed?("api.resend.com", 443, true, env: local_env)).to be(false)
       expect(described_class.outbound_allowed?("cornerstone-payroll.onrender.com", 443, true, env: local_env)).to be(false)
+    end
+
+    it "blocks real Net::HTTP requests before opening a socket" do
+      # WebMock replaces Net::HTTP after boot; exercise the guarded class.
+      WebMock.disable!
+      with_env(local_env) do
+        http = Net::HTTP.new("api.resend.com", 443)
+        http.use_ssl = true
+        expect(http).not_to receive(:connect)
+        expect { http.request(Net::HTTP::Post.new("/emails")) }.to raise_error(StagingOutboundPolicy::Blocked, /local deployment policy/)
+      end
+    ensure
+      WebMock.enable!
+    end
+
+    it "checks each request's destination too" do
+      http = Net::HTTP.new("api.resend.com", 443)
+      http.use_ssl = true
+      expect { StagingOutboundPolicy.http_request!(http, Net::HTTP::Post.new("/emails"), env: local_env) }
+        .to raise_error(StagingOutboundPolicy::Blocked, /local deployment policy/)
+      expect(StagingOutboundPolicy.http_request!(Net::HTTP.new("127.0.0.1", 3000), Net::HTTP::Get.new("/up"), env: local_env)).to be(true)
     end
 
     it "is enforced by the outbound network guard" do
@@ -183,6 +273,37 @@ RSpec.describe LocalDeployment do
           message = JSON.parse(File.read(path))
           expect(message).to include("to" => [ "employee@example.test" ], "subject" => "Invite", "html" => "<p>Hi</p>", "idempotency_key" => "key-1")
           expect(message["attachments"]).to eq([ { "filename" => "stub.pdf", "bytes" => 3 } ])
+        end
+      end
+    end
+
+    it "counts byte-array attachments by length" do
+      Dir.mktmpdir do |dir|
+        response = described_class.capture_mail!({ to: [ "a@example.test" ], attachments: [ { filename: "w2.pdf", content: "PDF!".bytes } ] }, env: local_env.merge("LOCAL_MAIL_CAPTURE_DIR" => dir))
+        expect(JSON.parse(File.read(File.join(dir, "#{response['id']}.json")))["attachments"]).to eq([ { "filename" => "w2.pdf", "bytes" => 4 } ])
+      end
+    end
+
+    it "captures Action Mailer messages through the same transport, unredacted" do
+      Dir.mktmpdir do |dir|
+        with_env(local_env.merge("LOCAL_MAIL_CAPTURE_DIR" => dir)) do
+          mail = Mail.new { to "employee@example.test"; from "payroll@example.test"; subject "Your W-2"; body "Ready" }
+          expect(Resend::Emails).not_to receive(:send)
+          mail.deliver
+          message = JSON.parse(File.read(File.join(dir, Dir.children(dir).first)))
+          expect(message).to include("to" => [ "employee@example.test" ], "subject" => "Your W-2", "text" => "Ready")
+        end
+      end
+    end
+
+    it "ignores local capture and disk settings on a hosted deployment" do
+      Dir.mktmpdir do |dir|
+        with_env("DEPLOYMENT_ENV" => "production", "LOCAL_MAIL_CAPTURE_DIR" => dir, "R2_STORAGE_BACKEND" => "local", "ACTIVE_STORAGE_SERVICE" => "local", "RESEND_API_KEY" => "re_test") do
+          expect(Resend::Emails).to receive(:send).and_return({ "id" => "sent" })
+          expect(StagingMailTransport.deliver(to: [ "employee@example.test" ], subject: "Hi", text: "Hi")).to eq({ "id" => "sent" })
+          expect(Dir.children(dir)).to be_empty
+          expect(R2StorageService.new.send(:staging_local_storage?)).to be(false)
+          expect(StagingMailInterceptor.delivering_email(Mail.new { to "e@example.test" })).to be_nil
         end
       end
     end

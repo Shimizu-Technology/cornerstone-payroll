@@ -14,7 +14,7 @@ export function assertDeploymentFlags(env: BuildEnvironment, mode: string): void
   }
 }
 
-const HOSTED_MARKERS = ['NETLIFY', 'CI', 'GITHUB_ACTIONS', 'RENDER', 'RENDER_SERVICE_ID']
+const HOSTED_MARKERS = ['NETLIFY', 'CI', 'GITHUB_ACTIONS', 'RENDER', 'RENDER_SERVICE_ID', 'RENDER_EXTERNAL_URL', 'RENDER_GIT_COMMIT']
 
 // A local production copy (ops/local-prod) builds on a developer machine only,
 // with a Clerk development key and *.localhost origins.

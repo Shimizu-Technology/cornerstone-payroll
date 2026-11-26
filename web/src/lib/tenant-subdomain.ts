@@ -16,6 +16,10 @@ const reservedSlugs = new Set([
   'admin', 'app', 'my', 'status', 'docs', 'support', 'tax', 'aire', 'aire-api', 'plane', 'shimizu',
 ]);
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^$|()[\]{}\\]/g, '\\$&');
+}
+
 export function clientSubdomainHost(
   location: Pick<Location, 'hostname' | 'search'>,
   development = false,
@@ -25,7 +29,7 @@ export function clientSubdomainHost(
   const local = hostname === 'localhost' || hostname === '127.0.0.1';
   const simulatedHost = development && local ? new URLSearchParams(location.search).get('tenantHost') : null;
   const host = simulatedHost?.toLowerCase().replace(/\.$/, '') ?? hostname;
-  const clientHostname = new RegExp(`^(?!xn--)([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\\.${rootDomain.replace(/\./g, '\\.')}$`);
+  const clientHostname = new RegExp(`^(?!xn--)([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\\.${escapeRegExp(rootDomain)}$`);
   const slug = clientHostname.exec(host)?.[1];
   return slug && !reservedSlugs.has(slug) ? host : null;
 }
