@@ -12,7 +12,10 @@ const apiMocks = vi.hoisted(() => ({
   batchPdf: vi.fn(),
   resolveConfigurationReviewItem: vi.fn(),
   recordActivities: vi.fn(),
+  update: vi.fn(),
+  appGet: vi.fn(async () => ({ data: { enabled: false, status: 'not_invited' } })),
 }));
+const companyState = vi.hoisted(() => ({ activeCompany: undefined as Record<string, unknown> | undefined }));
 
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ hasCapability: () => true }),
@@ -20,13 +23,14 @@ vi.mock('@/contexts/AuthContext', () => ({
 }));
 
 vi.mock('@/contexts/CompanyContext', () => ({
-  useCompany: () => ({ activeCompanyId: 1 }),
+  useCompany: () => ({ activeCompanyId: 1, activeCompany: companyState.activeCompany }),
 }));
 
 vi.mock('@/services/api', () => ({
-  apiClient: { get: async () => ({ data: { enabled: false, status: 'not_invited' } }) },
+  apiClient: { get: apiMocks.appGet },
   employeesApi: {
     get: apiMocks.get,
+    update: apiMocks.update,
     resolveConfigurationReviewItem: apiMocks.resolveConfigurationReviewItem,
   },
   reportsApi: { employeePayHistory: apiMocks.employeePayHistory },
@@ -348,4 +352,59 @@ describe('EmployeeWorkspace imported setup certification', () => {
     }
   });
 
+});
+
+describe('EmployeeWorkspace Contact card', () => {
+  const withContact = {
+    ...employee, email: 'mo.old@example.net', phone: '+16715550100', city: 'Hagatna', state: 'GU', zip: '96910', contact_revision: 'rev-1',
+    intake_readiness: { profile_incomplete: true, missing_fields: ['address_line1'] },
+  } as unknown as Employee;
+
+  function renderOverview() {
+    return render(
+      <MemoryRouter initialEntries={['/companies/1/employees/2/overview']}>
+        <Routes><Route path="/companies/:companyId/employees/:id/:tab" element={<EmployeeWorkspace />} /></Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    companyState.activeCompany = undefined;
+    apiMocks.get.mockResolvedValue({ data: withContact });
+    apiMocks.employeePayHistory.mockResolvedValue({ report: { history: [], summary: {} } });
+  });
+  afterEach(cleanup);
+
+  it('opens the card from Edit contact details, and an address and email save refreshes intake and the app panel', async () => {
+    renderOverview();
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit contact details' }));
+    expect(document.activeElement).toBe(screen.getByLabelText('Email for Mo Owner'));
+    expect(screen.getByText('Profile incomplete')).toBeTruthy();
+    const panelReads = apiMocks.appGet.mock.calls.length;
+
+    const saved = { ...withContact, email: 'mo.new@example.net', address_line1: '1 Example St', contact_revision: 'rev-2' };
+    apiMocks.update.mockResolvedValueOnce({ data: saved, contact_warnings: [] });
+    apiMocks.get.mockResolvedValue({ data: { ...saved, intake_readiness: { profile_incomplete: false, missing_fields: [] } } });
+    fireEvent.change(screen.getByLabelText('Email for Mo Owner'), { target: { value: 'mo.new@example.net' } });
+    fireEvent.change(screen.getByLabelText('Street address for Mo Owner'), { target: { value: '1 Example St' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Mo Owner' }));
+
+    await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(2, expect.objectContaining({
+      email: 'mo.new@example.net', address_line1: '1 Example St', row_revision: 'rev-1', response_view: 'contact',
+    }), 1));
+    expect(await screen.findByText('mo.new@example.net')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('Profile incomplete')).toBeNull());
+    await waitFor(() => expect(apiMocks.appGet.mock.calls.length).toBeGreaterThan(panelReads));
+  });
+
+  it('shows contact read-only and hides Edit contact details in a read-only workspace', async () => {
+    companyState.activeCompany = { id: 1, workspace_can_write: false };
+    renderOverview();
+    expect(await screen.findByText('mo.old@example.net')).toBeTruthy();
+    await screen.findByText(/employee app isn't turned on/);
+    expect(screen.queryByRole('button', { name: 'Edit contact details' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Edit contact details' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit contact for Mo Owner' })).toBeNull();
+  });
 });

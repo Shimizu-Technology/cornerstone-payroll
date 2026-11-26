@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1151,6 +1151,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_110000) do
     t.index [ "requested_by_link_id" ], name: "index_employee_change_requests_on_requested_by_link_id"
     t.index [ "reviewed_by_id" ], name: "index_employee_change_requests_on_reviewed_by_id"
     t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text])", name: "employee_change_requests_kind_check"
+    t.check_constraint "status = ANY (ARRAY[0, 1, 2, 3, 4])", name: "employee_change_requests_status_check"
   end
 
   create_table "employee_compensation_changes", force: :cascade do |t|
