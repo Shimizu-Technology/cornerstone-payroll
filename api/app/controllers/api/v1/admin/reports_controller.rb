@@ -4,6 +4,8 @@ module Api
   module V1
     module Admin
       class ReportsController < BaseController
+        class FilingValidationError < ArgumentError; end
+
         EXTERNAL_FILING_OUTCOME_FIELDS = %i[
           filed_at
           paid_at
@@ -1116,8 +1118,7 @@ module Api
             type: "application/pdf",
             disposition: "attachment"
         rescue StandardError => e
-          Rails.logger.error("[Reports] full_print_package_pdf failed for pay_period=#{pp&.id}: #{e.class}: #{e.message}")
-          render json: { error: "Failed to generate full print package: #{e.message}" }, status: :unprocessable_entity
+          render_report_argument_error(e, fallback: "Could not generate the full print package.")
         end
 
         # POST /api/v1/admin/reports/check_signoff_sheet
@@ -1270,12 +1271,23 @@ module Api
           render_write_maintenance if WriteMaintenance.enabled?
         end
 
-        def render_report_argument_error(error)
+        def render_report_argument_error(error, fallback: nil)
           case error
           when PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError
             render_component_history_error(error)
-          else
+          when Efw2W2GuGenerator::InvalidFile, Form1099Pub1220Generator::InvalidFile
+            render json: { error: error.message, problems: error.problems }, status: :unprocessable_entity
+          when FilingValidationError
+            render json: { error: error.message, problems: [ error.message ] }, status: :unprocessable_entity
+          when PayrollReportingPeriod::InvalidPeriod, Form941GuAggregator::MissingWageBase, W2GuAggregator::MissingWageBase,
+            PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError
             render json: { error: error.message }, status: :unprocessable_entity
+          else
+            return render json: { error: error.message }, status: :unprocessable_entity unless fallback
+
+            Rails.logger.error("Report #{action_name} for company #{current_company_id}: #{error.class}")
+            Rails.error.report(error, handled: true, context: { company_id: current_company_id, report: action_name })
+            render json: { error: fallback }, status: :unprocessable_entity
           end
         end
 
@@ -1772,7 +1784,7 @@ module Api
 
           [ report_data, nil ]
         rescue ArgumentError => e
-          [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
+          [ nil, render_report_argument_error(e, fallback: "Could not prepare the tax summary.") ]
         end
 
         def build_quarterly_compliance_packet_data(official_form_941: false)
@@ -1817,7 +1829,7 @@ module Api
             status: :unprocessable_entity
           ) ]
         rescue ArgumentError => e
-          [ nil, render(json: { error: e.message }, status: :unprocessable_entity) ]
+          [ nil, render_report_argument_error(e, fallback: "Could not prepare the quarterly compliance packet.") ]
         end
 
         def quarterly_compliance_task_params
@@ -2012,22 +2024,22 @@ module Api
         def download_1099_filing_file(pdf:)
           response.set_header("Cache-Control", "no-store")
           year = Integer(params[:year], exception: false)
-          raise ArgumentError, "Only tax year 2026 is supported" unless year == 2026
-          raise ArgumentError, "Choose draft or final" unless params[:mode].in?(%w[draft final])
+          raise FilingValidationError, "Only tax year 2026 is supported" unless year == 2026
+          raise FilingValidationError, "Choose draft or final" unless params[:mode].in?(%w[draft final])
 
           company = Company.find(current_company_id)
           company.with_lock do
             revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
-            raise ArgumentError, "Not available in a practice copy" if company.practice_copy?
+            raise FilingValidationError, "Not available in a practice copy" if company.practice_copy?
             # The Pub 1220 file is the GuamTax e-file; a demo never produces one.
-            raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
+            raise FilingValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
 
             final = params[:mode] == "final"
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
-            raise ArgumentError, "Record that Cornerstone files this client's 1099s before downloading" unless decision&.responsible_party == "cornerstone"
+            raise FilingValidationError, "Record that Cornerstone files this client's 1099s before downloading" unless decision&.responsible_party == "cornerstone"
 
             gate = PayrollFilingResponsibilityGate.new(company: company, tax_year: year, filing_type: "form_1099").payload
-            raise ArgumentError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
+            raise FilingValidationError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
 
             if final && !Form1099Readiness.final?(company: company, year: year)
               return render json: { error: "Mark the 1099s ready first" }, status: :conflict
@@ -2049,15 +2061,15 @@ module Api
               file
             end
             current = ActiveRecord::Base.uncached { generate_file.call }
-            raise ArgumentError, "Filing inputs changed during generation; refresh and try again" unless current == file
+            raise FilingValidationError, "Filing inputs changed during generation; refresh and try again" unless current == file
 
             revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
             current_decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
-            raise ArgumentError, "Filing responsibility changed during generation" unless current_decision&.responsible_party == "cornerstone"
+            raise FilingValidationError, "Filing responsibility changed during generation" unless current_decision&.responsible_party == "cornerstone"
             # A locked history batch can add a gate blocker without the company lock.
             current_gate = PayrollFilingResponsibilityGate.new(company: company, tax_year: year, filing_type: "form_1099").payload
-            raise ArgumentError, "Filing blockers changed during generation; refresh and try again" if current_gate[:blockers].any?
-            raise ArgumentError, "Filing readiness changed during generation" if final && !Form1099Readiness.final?(company: company, year: year)
+            raise FilingValidationError, "Filing blockers changed during generation; refresh and try again" if current_gate[:blockers].any?
+            raise FilingValidationError, "Filing readiness changed during generation" if final && !Form1099Readiness.final?(company: company, year: year)
 
             AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "form1096#download" : "pub1220#download",
               record_type: "Company", record_id: company.id,
@@ -2066,30 +2078,30 @@ module Api
               type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
           end
         rescue ArgumentError => e
-          render json: { error: e.message, problems: e.respond_to?(:problems) ? e.problems : [ e.message ] }, status: :unprocessable_entity
+          render_report_argument_error(e, fallback: "Could not prepare the 1099 filing file.")
         end
 
         def download_wage_filing_file(pdf:)
           response.set_header("Cache-Control", "no-store")
           year = Integer(params[:year], exception: false)
-          raise ArgumentError, "Only tax year 2026 is supported" unless year == 2026
-          raise ArgumentError, "Choose draft or final" unless params[:mode].in?(%w[draft final])
+          raise FilingValidationError, "Only tax year 2026 is supported" unless year == 2026
+          raise FilingValidationError, "Choose draft or final" unless params[:mode].in?(%w[draft final])
 
           company = Company.find(current_company_id)
           company.with_lock do
             revalidate_current_company_write_access!(company: company, capability: pdf ? nil : :manage_client_administration)
             # The EFW2 file is the SSA/GuamTax e-file; a demo never produces one.
-            raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
+            raise FilingValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
             final = params[:mode] == "final"
             gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
-            raise ArgumentError, "Record that Cornerstone files this client's W-2s before downloading" unless decision&.responsible_party == "cornerstone"
-            raise ArgumentError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
+            raise FilingValidationError, "Record that Cornerstone files this client's W-2s before downloading" unless decision&.responsible_party == "cornerstone"
+            raise FilingValidationError, gate[:blockers].map { |b| b.is_a?(Hash) ? b[:message] : b }.join("; ") if gate[:blockers].any?
 
             report = W2GuAggregator.new(company, year).generate
             fingerprint = W2FilingInputsFingerprint.new(company: company, year: year, report: report).call
             readiness = W2FilingReadiness.find_by(company: company, year: year)
-            raise ArgumentError, "Mark W-2s ready on the current inputs before downloading a final file" if final && !readiness&.current?(fingerprint)
+            raise FilingValidationError, "Mark W-2s ready on the current inputs before downloading a final file" if final && !readiness&.current?(fingerprint)
 
             submitter = FilingSubmitter.find_by(organization_id: company.organization_id)
             generator = Efw2W2GuGenerator.new(company: company, year: year, submitter: submitter, report: report)
@@ -2098,7 +2110,7 @@ module Api
             wage_file = generator.generate unless company.demo?
             content = pdf ? W3ssPdfGenerator.new(company: company, report: report, draft: !final).generate : wage_file
             current = ActiveRecord::Base.uncached { W2FilingInputsFingerprint.new(company: company.reload, year: year).call }
-            raise ArgumentError, "Filing inputs changed during generation; refresh and try again" unless current == fingerprint
+            raise FilingValidationError, "Filing inputs changed during generation; refresh and try again" unless current == fingerprint
 
             AuditLog.record!(user: current_user, company_id: company.id, action: pdf ? "w3ss#download" : "efw2#download",
               record_type: "Company", record_id: company.id,
@@ -2107,7 +2119,7 @@ module Api
               type: pdf ? "application/pdf" : "text/plain; charset=us-ascii", disposition: "attachment"
           end
         rescue ArgumentError => e
-          render json: { error: e.message, problems: e.respond_to?(:problems) ? e.problems : [ e.message ] }, status: :unprocessable_entity
+          render_report_argument_error(e, fallback: "Could not prepare the wage filing file.")
         end
 
         def build_w2_gu_report_data
@@ -4953,7 +4965,7 @@ module Api
         rescue W2GuOfficialCopies::DoesNotFit => e
           render json: { error: e.message, problems: e.problems }, status: :unprocessable_entity
         rescue ArgumentError, PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e, fallback: "Could not prepare the W-2GU copies.")
         end
 
         # The report, sign-off and filing decision one download is drawn from
@@ -5020,7 +5032,10 @@ module Api
               }, status: :unprocessable_entity
             end
             unless state.report
-              return render json: { error: "The #{year} 1099 payees could not be loaded: #{state.report_error.to_s.delete_suffix('.')}." }, status: :unprocessable_entity
+              message = "The #{year} 1099 payees could not be loaded."
+              return render_report_argument_error(state.report_exception, fallback: message) if state.report_exception
+
+              return render json: { error: message }, status: :unprocessable_entity
             end
 
             copies = Form1099NecOfficialCopies.new(company: company, report: state.report, kind: kind, draft: !state.final, practice: company.practice_copy?)
@@ -5062,7 +5077,7 @@ module Api
         rescue Form1099NecOfficialCopies::DoesNotFit => e
           render json: { error: e.message, problems: e.problems }, status: :unprocessable_entity
         rescue ArgumentError, PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e, fallback: "Could not prepare the 1099-NEC copies.")
         end
 
         # Writes an official-copy download's audit entry, or refuses the file

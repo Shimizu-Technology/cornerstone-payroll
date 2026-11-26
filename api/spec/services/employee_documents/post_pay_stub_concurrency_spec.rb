@@ -33,6 +33,18 @@ RSpec.describe EmployeeDocuments::PostPayStub, :postgres_concurrency do
     item.reload
   end
 
+  def post_in_executor
+    Rails.application.executor.wrap do
+      ActiveRecord::Base.connection_pool.with_connection do |connection|
+        raise "Expected job query cache to be enabled" unless connection.query_cache_enabled
+
+        TenantScope.as_system(reason: "Test employee stub posting") do
+          described_class.new(PayrollItem.find(later.id)).call
+        end
+      end
+    end
+  end
+
   it "uploads outside the transaction and discards a PDF when an earlier replacement changes its YTD" do
     upload_started = Queue.new
     release_upload = Queue.new
@@ -48,11 +60,7 @@ RSpec.describe EmployeeDocuments::PostPayStub, :postgres_concurrency do
       true
     end
 
-    posting = Thread.new do
-      ActiveRecord::Base.connection_pool.with_connection do
-        described_class.new(PayrollItem.find(later.id)).call
-      end
-    end
+    posting = Thread.new { post_in_executor }
     expect(Timeout.timeout(10) { upload_started.pop }).to be(false)
     expect(EmployeeDocument.where(payroll_item_id: later.id)).to be_empty
 
@@ -72,6 +80,96 @@ RSpec.describe EmployeeDocuments::PostPayStub, :postgres_concurrency do
   ensure
     release_upload << true
     posting&.join(15)
+  end
+
+  it "posts a later stub while an earlier check's replacement refreshes its YTD, without a deadlock" do
+    allow(R2StorageService).to receive(:new).and_return(instance_double(R2StorageService, upload: true, delete: true))
+    posting_generated = Queue.new
+    release_posting = Queue.new
+    allow_any_instance_of(PayStubGenerator).to receive(:generate).and_wrap_original do |original, *args|
+      if Thread.current[:stub_posting]
+        Thread.current[:stub_posting] = false
+        posting_generated << true
+        release_posting.pop
+      end
+      original.call(*args)
+    end
+    results = Queue.new
+    backend = Queue.new
+
+    posting = Thread.new do
+      Thread.current[:stub_posting] = true
+      ActiveRecord::Base.connection_pool.with_connection do
+        described_class.new(PayrollItem.find(later.id)).call
+        results << [ :ok, :posting ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+    Timeout.timeout(10) { posting_generated.pop }
+
+    replacement = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do
+        backend << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()")
+        ReplaceCheckService.replace!(payroll_item: PayrollItem.find(earlier.id), corrected_inputs: { hours_worked: 80 },
+          reason: "Correct the July hours", actor: User.find(actor.id))
+        results << [ :ok, :replacement ]
+      rescue StandardError => e
+        results << [ :error, e ]
+      end
+    end
+    wait_for_database_lock!(backend.pop)
+    release_posting << true
+    [ posting, replacement ].each { |thread| Timeout.timeout(15) { thread.join } }
+
+    expect(2.times.map { results.pop }).to contain_exactly([ :ok, :posting ], [ :ok, :replacement ])
+    expect(EmployeeDocument.where(payroll_item_id: later.id).pluck(:revision)).to eq([ 1 ])
+    expect(later.reload.ytd_gross).to eq(2_400)
+  ensure
+    release_posting << true
+    posting&.join(15)
+    replacement&.join(15)
+  end
+
+  def wait_for_database_lock!(backend_pid)
+    Timeout.timeout(5) do
+      loop do
+        state = ActiveRecord::Base.connection.select_value(
+          "SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{Integer(backend_pid)}"
+        )
+        break if state == "Lock"
+
+        sleep 0.01
+      end
+    end
+  end
+
+  it "posts revision 1 once and deletes the other worker's staged object" do
+    uploads = Queue.new
+    release_upload = Queue.new
+    storage = instance_double(R2StorageService, delete: true)
+    allow(R2StorageService).to receive(:new).and_return(storage)
+    allow(storage).to receive(:upload) do |key, _bytes, **|
+      uploads << key
+      release_upload.pop
+      true
+    end
+
+    posters = Array.new(2) { Thread.new { post_in_executor } }
+    staged_keys = Timeout.timeout(10) { Array.new(2) { uploads.pop } }
+    expect(EmployeeDocument.where(payroll_item_id: later.id)).to be_empty
+    2.times { release_upload << true }
+    results = Timeout.timeout(15) { posters.map(&:value) }
+
+    document = EmployeeDocument.where(payroll_item_id: later.id).sole
+    expect(document.revision).to eq(1)
+    expect(results).to contain_exactly(nil, document)
+    losing_key = (staged_keys - [ document.storage_key ]).sole
+    expect(storage).to have_received(:delete).once.with(losing_key)
+    expect(storage).not_to have_received(:delete).with(document.storage_key)
+  ensure
+    2.times { release_upload << true }
+    posters&.each { |poster| poster.join(15) }
   end
 
   # Only what this example committed; a fixture that failed to build is skipped.
