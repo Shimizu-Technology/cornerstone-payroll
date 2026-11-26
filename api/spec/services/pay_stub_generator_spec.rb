@@ -42,6 +42,22 @@ RSpec.describe PayStubGenerator do
     )
   end
 
+  it "prints the income tax adjustment directly below income tax before the Medicare rows" do
+    payroll_item.update_columns(withholding_tax_adjustment: 12.50, medicare_tax: 20, additional_medicare_tax: 5.50)
+    pdf = described_class.new(payroll_item.reload, employee_copy: true).generate
+    rows = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.lines.map(&:strip).reject(&:empty?)
+    income_tax_index = rows.index { |row| row.start_with?("Guam income tax ") }
+
+    expect(income_tax_index).not_to be_nil
+    expect(rows.drop(income_tax_index).first(5)).to match([
+      /\AGuam income tax /,
+      /\A\(Guam income tax adjustment \+12\.50\)\z/,
+      /\ASocial Security /,
+      /\AMedicare /,
+      /\AAdditional Medicare /
+    ])
+  end
+
   it "prints the legal name with a suffix or with no trailing separator" do
     [ [ "JR", "Pat Stub Jr." ], [ nil, "Pat Stub" ] ].each do |suffix, legal_name|
       employee.update!(name_suffix: suffix)
