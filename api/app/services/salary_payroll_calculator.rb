@@ -96,7 +96,7 @@ class SalaryPayrollCalculator < PayrollCalculator
       end
     end
 
-    payroll_item.payroll_item_field_entries.each do |entry|
+    payroll_item.payroll_field_entries_for_calculation.each do |entry|
       amt = entry.amount.to_f
       next unless entry.active? && amt.positive?
 

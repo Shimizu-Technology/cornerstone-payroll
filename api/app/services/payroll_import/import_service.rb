@@ -507,6 +507,7 @@ module PayrollImport
         # PDF data
         regular_hours: pdf_row&.dig(:regular_hours) || 0.0,
         overtime_hours: pdf_row&.dig(:overtime_hours) || 0.0,
+        doubletime_hours: pdf_row&.dig(:doubletime_hours)&.to_d || 0.to_d,
         total_hours: pdf_row&.dig(:total_hours) || 0.0,
         pdf_employee_name: pdf_row&.dig(:employee_name),
         # Excel data
@@ -711,9 +712,11 @@ module PayrollImport
 
     def apply_imported_components!(payroll_item, components)
       normalized = Array(components).map { |component| validate_component!(component) }
-      payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }.each(&:destroy!)
+      entries = payroll_item.payroll_item_field_entries
+      # Destroy through the association so calculation sees only the retained and replacement entries.
+      entries.destroy(*entries.select { |entry| entry.source == "import" })
       normalized.each do |component|
-        payroll_item.payroll_item_field_entries.build(
+        entries.build(
           company_id: pay_period.company_id,
           label: component.fetch(:label),
           kind: component.fetch(:kind),

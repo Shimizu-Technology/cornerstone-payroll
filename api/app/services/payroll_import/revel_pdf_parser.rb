@@ -267,7 +267,10 @@ module PayrollImport
 
     def parse_employee_line(line)
       values = parse_fixed_columns(line)
-      values = parse_flexible_columns(line) if implausible_fixed_parse?(values)
+      # Extracted spacing can split a double-time value across fixed columns.
+      raw_doubletime = line[COLUMNS[:doubletime_hours]]&.strip
+      shifted_doubletime = raw_doubletime.present? && raw_doubletime != "-" && values[:doubletime_hours].nil?
+      values = parse_flexible_columns(line) if shifted_doubletime || implausible_fixed_parse?(values)
 
       values[:employee] = normalize_name(values[:employee]) if values[:employee]
 
@@ -282,7 +285,7 @@ module PayrollImport
         employee_name: values[:employee],
         regular_hours: values[:regular_hours] || 0.0,
         overtime_hours: values[:overtime_hours] || 0.0,
-        doubletime_hours: values[:doubletime_hours] || 0.0,
+        doubletime_hours: values[:doubletime_hours] || 0.to_d,
         regular_pay: values[:regular_pay] || 0.0,
         overtime_pay: values[:overtime_pay] || 0.0,
         total_hours: values[:total_hours] || 0.0,
@@ -338,7 +341,9 @@ module PayrollImport
       case field
       when :employee
         raw
-      when :regular_hours, :overtime_hours, :doubletime_hours,
+      when :doubletime_hours
+        BigDecimal(raw.delete(","), exception: false)
+      when :regular_hours, :overtime_hours,
            :regular_pay, :overtime_pay, :doubletime_pay,
            :total_hours, :total_pay
         clean = raw.gsub(",", "")
