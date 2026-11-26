@@ -109,7 +109,7 @@ RSpec.describe DemoCompany::ConvertToFlag do
           payroll_items pay_periods payroll_filing_events payroll_filing_records payroll_filing_responsibilities
           payroll_liability_entries payroll_liability_postings non_employee_checks time_tracking_sources
           employee_account_links company_assignments employees departments client_operating_profiles
-          employee_app_activations audit_logs
+          employee_app_activations historical_import_batches audit_logs
         ].each do |table|
           conn.execute("DELETE FROM #{table} WHERE company_id IN (#{c_list})")
         end
@@ -328,6 +328,63 @@ RSpec.describe DemoCompany::ConvertToFlag do
 
       expect(live.reload.demo?).to be(false)
       expect(sandbox.reload.demo?).to be(false)
+      expect(old_demo.reload).to be_legacy_demo
+      expect(demo_link.reload.payroll_environment).to eq("migration_rehearsal")
+      expect(AuditLog.where(action: described_class::AUDIT_ACTION)).to be_empty
+    end
+
+    it "refuses non-demo migration_rehearsal, backup_snapshot, and sandbox companies individually and in mixed batches" do
+      locked_batch = create(:historical_import_batch, company: live, status: "locked")
+      rehearsal_copy = create(
+        :company,
+        organization: organization,
+        name: "Client Migration Rehearsal",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "migration_rehearsal",
+        migration_source_company: live,
+        migration_source_batch: locked_batch,
+        migration_rehearsal_status: "ready"
+      )
+      backup_snapshot = create(
+        :company,
+        organization: organization,
+        name: "Client Backup Snapshot",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "backup_snapshot",
+        migration_source_company: live,
+        migration_rehearsal_status: "ready",
+        test_workspace_sealed_at: Time.current
+      )
+
+      [ rehearsal_copy, backup_snapshot, sandbox ].each do |non_demo|
+        expect {
+          described_class.new(organization: organization, actor: admin, company_ids: [ non_demo.id ], dry_run: true).call
+        }.to raise_error(described_class::Refused, /not an old-shape demo company/)
+
+        expect {
+          described_class.new(organization: organization, actor: admin, company_ids: [ non_demo.id ], dry_run: false).call
+        }.to raise_error(described_class::Refused, /not an old-shape demo company/)
+
+        expect {
+          described_class.new(organization: organization, actor: admin, company_ids: [ old_demo.id, non_demo.id ], dry_run: false).call
+        }.to raise_error(described_class::Refused, /not an old-shape demo company/)
+      end
+
+      expect(rehearsal_copy.reload).to have_attributes(
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "migration_rehearsal",
+        demo: false
+      )
+      expect(backup_snapshot.reload).to have_attributes(
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "backup_snapshot",
+        demo: false
+      )
+      expect(sandbox.reload).to have_attributes(
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "sandbox",
+        demo: false
+      )
       expect(old_demo.reload).to be_legacy_demo
       expect(demo_link.reload.payroll_environment).to eq("migration_rehearsal")
       expect(AuditLog.where(action: described_class::AUDIT_ACTION)).to be_empty
@@ -584,6 +641,39 @@ RSpec.describe DemoCompany::ConvertToFlag do
         expect(old_demo.reload).to be_legacy_demo
         expect(demo_link.reload.payroll_environment).to eq("migration_rehearsal")
       end
+    end
+
+    it "aborts with FAIL when demo:convert_to_flag is given a migration_rehearsal, backup_snapshot, or sandbox company" do
+      locked_batch = create(:historical_import_batch, company: live, status: "locked")
+      rehearsal_copy = create(
+        :company,
+        organization: organization,
+        name: "Rake Rehearsal Copy",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "migration_rehearsal",
+        migration_source_company: live,
+        migration_source_batch: locked_batch,
+        migration_rehearsal_status: "ready"
+      )
+      backup_snapshot = create(
+        :company,
+        organization: organization,
+        name: "Rake Backup Snapshot",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "backup_snapshot",
+        migration_source_company: live,
+        migration_rehearsal_status: "ready",
+        test_workspace_sealed_at: Time.current
+      )
+
+      [ rehearsal_copy, backup_snapshot, sandbox ].each do |non_demo|
+        expect {
+          run_task("demo:convert_to_flag", "ACTOR_ID" => admin.id.to_s, "COMPANY_IDS" => non_demo.id.to_s, "APPLY" => "true")
+        }.to raise_error(SystemExit).and output(/FAIL  demo:convert_to_flag Refusing to convert company ##{non_demo.id}/).to_stderr
+        expect(non_demo.reload[:demo]).to be(false)
+        expect(non_demo.payroll_environment).to eq("migration_rehearsal")
+      end
+      expect(AuditLog.where(action: described_class::AUDIT_ACTION)).to be_empty
     end
   end
 end
