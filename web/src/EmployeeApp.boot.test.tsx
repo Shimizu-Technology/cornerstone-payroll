@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode, type ReactNode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import EmployeeApp from './EmployeeApp';
@@ -46,11 +46,19 @@ const never = () => new Promise<Response>(() => undefined);
 const tenantUnavailableTitle = "This employee app isn't available yet";
 const connectionErrorTitle = "We couldn't open the app";
 
-function expectFocusedAlert(title: string) {
-  const heading = screen.getByRole('heading', { name: title });
-  expect(screen.getByRole('alert').contains(heading)).toBe(true);
-  expect(document.activeElement).toBe(heading);
-  expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+async function expectFocusedAlert(title: string) {
+  const assertFocused = () => {
+    const heading = screen.getByRole('heading', { name: title });
+    expect(screen.getByRole('alert').contains(heading)).toBe(true);
+    expect(document.activeElement).toBe(heading);
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  };
+  if (vi.isFakeTimers()) {
+    await act(async () => {});
+    assertFocused();
+    return;
+  }
+  await waitFor(assertFocused);
 }
 
 function changeClerkStatus(status: typeof clerk.status) {
@@ -106,7 +114,7 @@ it.each([
   render(<EmployeeApp />);
 
   await screen.findByRole('heading', { name: tenantUnavailableTitle });
-  expectFocusedAlert(tenantUnavailableTitle);
+  await expectFocusedAlert(tenantUnavailableTitle);
   expect(screen.getByText('If you were expecting access, contact your employer.')).toBeTruthy();
   expect(mounted).not.toHaveBeenCalled();
 });
@@ -119,7 +127,7 @@ it.each([
   render(<EmployeeApp />);
 
   await screen.findByRole('heading', { name: connectionErrorTitle });
-  expectFocusedAlert(connectionErrorTitle);
+  await expectFocusedAlert(connectionErrorTitle);
   expect(screen.getByText('Check your connection and try again. If this keeps happening, contact your employer.')).toBeTruthy();
   expect(mounted).not.toHaveBeenCalled();
 });
@@ -155,11 +163,11 @@ it('times out a hung branding request without mounting Clerk, even if the respon
 
   await act(async () => vi.advanceTimersByTimeAsync(1));
   expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
-  expectFocusedAlert(connectionErrorTitle);
+  await expectFocusedAlert(connectionErrorTitle);
 
   await act(async () => vi.advanceTimersByTimeAsync(1));
   await act(async () => respond(enabledBrand()));
-  expectFocusedAlert(connectionErrorTitle);
+  await expectFocusedAlert(connectionErrorTitle);
   expect(mounted).not.toHaveBeenCalled();
 });
 
@@ -182,7 +190,7 @@ it.each(['error', 'degraded'] as const)('shows a retry as soon as Clerk reports 
   await act(async () => {});
 
   changeClerkStatus(status);
-  expectFocusedAlert("We couldn't load sign-in");
+  await expectFocusedAlert("We couldn't load sign-in");
   expect(screen.queryByRole('status')).toBeNull();
 });
 
@@ -196,7 +204,7 @@ it('shows a retry after 15 seconds and recovers when Clerk gets ready at 16 seco
   expect(screen.getByRole('status').textContent).toBe('Loading');
 
   await act(async () => vi.advanceTimersByTimeAsync(1));
-  expectFocusedAlert("We couldn't load sign-in");
+  await expectFocusedAlert("We couldn't load sign-in");
   expect(screen.queryByRole('status')).toBeNull();
 
   await act(async () => vi.advanceTimersByTimeAsync(1_000));

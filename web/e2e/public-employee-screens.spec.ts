@@ -131,9 +131,11 @@ test.describe('employee masked pay amounts at 390x844', () => {
     await expect(latest).toContainText('$•••');
     await expect(latest).toContainText('Paid Nov 20, 2026');
     await expect(latest).toContainText('38.5 hours');
+    await expect(latest).toContainText('You worked 3.5 fewer hours than Nov 6.');
     await expect(latest).not.toContainText('$534.18');
     await expect(latest).not.toContainText('less than');
-    await expect(page.getByText('Amounts stay hidden on this device until you tap Show amounts.')).toBeVisible();
+    const explainer = page.getByText('Amounts stay hidden on this device until you tap Show amounts.');
+    await expect(explainer).toBeVisible();
     await expectNoHorizontalScroll(page);
 
     // Keyboard focus on the eye button shows the visible focus outline.
@@ -148,26 +150,32 @@ test.describe('employee masked pay amounts at 390x844', () => {
     expect(outline.style).not.toBe('none');
     expect(outline.width).toBeGreaterThanOrEqual(2);
 
-    // Stub detail: rates are masked, hours/dates stay visible, PDF warns "(shows amounts)".
+    // Stub detail: rates are masked, hours/dates stay visible, PDF warns "(shows amounts)", and explainer does not repeat.
     await latest.getByRole('link', { name: 'View pay stub' }).click();
     const stub = page.getByRole('article');
     await expect(stub).toContainText('36 hrs × $•••');
+    await expect(stub).toContainText('You worked 3.5 fewer hours than Nov 6.');
     await expect(stub).not.toContainText('$15.00');
     await expect(stub).not.toContainText('$534.18');
     await expect(stub.getByRole('button', { name: 'Download PDF (shows amounts)' })).toBeVisible();
+    await expect(explainer).toHaveCount(0);
     await expectNoHorizontalScroll(page);
 
-    // Tax forms: W-2GU PDF warns "(shows amounts)".
+    // Tax forms: W-2GU PDF warns "(shows amounts)" and no eye toggle renders since no amounts are inline.
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tax forms' }).click();
     await expect(page.getByRole('button', { name: 'Download W-2GU PDF (shows amounts)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Show amounts|Hide amounts/ })).toHaveCount(0);
     await expectNoHorizontalScroll(page);
 
-    // Reveal amounts, reload, and verify choice persists and explainer does not repeat.
+    // Reveal amounts from Home, reload, and verify choice persists on Home and Tax forms.
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Home' }).click();
     await page.getByRole('button', { name: 'Show amounts' }).click();
+    await expect(page.getByRole('region', { name: 'Latest pay' })).toContainText('$534.18');
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tax forms' }).click();
     await expect(page.getByRole('button', { name: 'Download W-2GU (PDF)' })).toBeVisible();
     await page.goto(`/?${tenantQuery}`);
     await expect(page.getByRole('region', { name: 'Latest pay' })).toContainText('$534.18');
-    await expect(page.getByText('Amounts stay hidden on this device until you tap Show amounts.')).toHaveCount(0);
+    await expect(explainer).toHaveCount(0);
   });
 
   test('fails closed to masked when localStorage throws', async ({ page }) => {

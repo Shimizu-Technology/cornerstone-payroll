@@ -45,6 +45,8 @@ export interface HideAmountsValue {
   explainerVisible: boolean;
   /** Persists that the one-time explainer has been shown on this device. */
   markExplainerShown: () => void;
+  /** Hides the one-time explainer after its first screen unmounts or navigates away. */
+  dismissExplainer: () => void;
 }
 
 /** "Hide amounts": every amount on screen shows as "$•••" while this is on (masked by default). */
@@ -53,6 +55,7 @@ export const HideAmountsContext = createContext<HideAmountsValue>({
   setHidden: () => undefined,
   explainerVisible: false,
   markExplainerShown: () => undefined,
+  dismissExplainer: () => undefined,
 });
 
 export function useHideAmounts(): HideAmountsValue {
