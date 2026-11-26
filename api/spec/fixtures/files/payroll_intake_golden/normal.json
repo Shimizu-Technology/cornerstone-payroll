@@ -1,0 +1,65 @@
+{
+  "can_apply": true,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 75.25,
+    "total_reported_tips": 12.75,
+    "total_overtime_hours": 1.5
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 75.25,
+      "overtime_hours": 1.5,
+      "reported_tips": 12.75,
+      "tips_paid_out": 12.75,
+      "payroll_inputs": {
+        "total_hours": 76.75,
+        "workbook_only": false,
+        "pay_rate": 15.5,
+        "tips_boh": 8.25,
+        "tips_foh": 4.5,
+        "tip_pool": "mixed",
+        "loan_deduction": 0.0,
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": null,
+        "payroll_components": [
+          {
+            "kind": "addition",
+            "label": "Fixture supplies",
+            "notes": null,
+            "amount": "12.34",
+            "source": "Synthetic receipt",
+            "category": "reimbursement",
+            "payee_name": null,
+            "tax_treatment": "non_taxable_addition",
+            "component_type": "REIMBURSEMENT",
+            "reporting_group": null,
+            "effective_pay_date": "2026-07-03"
+          }
+        ],
+        "hand_edited_hours": null
+      }
+    }
+  ]
+}

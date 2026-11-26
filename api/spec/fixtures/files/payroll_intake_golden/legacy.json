@@ -1,0 +1,67 @@
+{
+  "can_apply": true,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [
+    {
+      "code": "legacy_mosa_workbook",
+      "message": "This is the legacy {{adapter_display_name}} workbook. It was retained and validated, but use the generated change-only template next payroll for stable employee IDs.",
+      "severity": "warning"
+    },
+    {
+      "code": "workbook_period_end_differs",
+      "message": "The workbook says the period ends 6/26/2026, but Revel and this payroll end 6/27/2026. The pay date matches, so this payroll's dates are used. Update the template's period end to match Revel.",
+      "severity": "warning"
+    },
+    {
+      "code": "pay_period_workweek_offset",
+      "message": "This pay period starts on a different day than the client's saved overtime workweek. Overtime is used exactly as the source reports it. Update the workweek in Cornerstone if it is wrong.",
+      "severity": "warning"
+    }
+  ],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 72.0,
+    "total_reported_tips": 20.0,
+    "total_overtime_hours": 0.0
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 72.0,
+      "overtime_hours": 0.0,
+      "reported_tips": 20.0,
+      "tips_paid_out": 0.0,
+      "payroll_inputs": {
+        "total_hours": 72.0,
+        "workbook_only": false,
+        "pay_rate": 15.5,
+        "tips_boh": 12.75,
+        "tips_foh": 7.25,
+        "tip_pool": "mixed",
+        "loan_deduction": 9.5,
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": "0.0",
+        "period_pay": null,
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    }
+  ]
+}
