@@ -4430,7 +4430,8 @@ module Api
           ytd_summary_sheets(report).map do |sheet|
             next sheet unless sheet[:name] == "Company Totals"
 
-            rows = (report[:company_totals] || {}).map do |key, value|
+            # bridged_fields is a list for the screen; imported_basis names them.
+            rows = (report[:company_totals] || {}).except(:bridged_fields).map do |key, value|
               label = case key.to_sym
               when :source_labeled_after_tax_401k_in_pretax_bucket
                 "401(k) after-tax (imported as pre-tax)"
@@ -4494,7 +4495,7 @@ module Api
           end
           [
             { name: "Payroll Summary", rows: rows },
-            { name: "Company Totals", rows: (report[:company_totals] || {}).map { |key, value| [ key.to_s.humanize, value ] } },
+            { name: "Company Totals", rows: (report[:company_totals] || {}).except(:bridged_fields).map { |key, value| [ key.to_s.humanize, value ] } },
             payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),

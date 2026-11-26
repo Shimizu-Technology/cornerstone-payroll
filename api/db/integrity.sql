@@ -1241,3 +1241,16 @@ CREATE TRIGGER employee_app_activations_immutable
 BEFORE UPDATE OR DELETE ON employee_app_activations
 FOR EACH ROW
 EXECUTE FUNCTION protect_employee_app_activation();
+
+-- 20261127150000_create_payroll_item_bridge_overlap_dispositions.rb
+CREATE OR REPLACE FUNCTION prevent_payroll_item_bridge_overlap_disposition_mutation()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'payroll_item_bridge_overlap_dispositions are append-only';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS payroll_item_bridge_overlap_dispositions_append_only ON payroll_item_bridge_overlap_dispositions;
+CREATE TRIGGER payroll_item_bridge_overlap_dispositions_append_only
+BEFORE UPDATE OR DELETE ON payroll_item_bridge_overlap_dispositions
+FOR EACH ROW EXECUTE FUNCTION prevent_payroll_item_bridge_overlap_disposition_mutation();

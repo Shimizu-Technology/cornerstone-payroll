@@ -63,7 +63,7 @@ class EmployeeStatements
     end
 
     def payroll_detail
-      shared = EmployeePayStatements::Presenter.new(item).detail.except(:has_source_entries, :source_entries)
+      shared = EmployeePayStatements::Presenter.new(item).detail(employee_app: true).except(:has_source_entries, :source_entries)
       shared.merge(payroll_summary).merge(
         taxes: shared.fetch(:taxes).map { |row| row.merge(tax_kind(row[:label])) },
         earlier_versions: @statements.earlier_versions(document).map do |version|
