@@ -414,6 +414,7 @@ module Api
           invitation_response
         rescue StandardError => e
           Rails.logger.error("[UsersController] Practice login moved but its invitation could not be refreshed for user #{user.id}: #{e.class}")
+          UserInviteEmailService.record_email_status(user, false)
           invitation_status_response("failed", error: "The login was moved, but its invitation could not be sent. Use Resend.")
         end
 

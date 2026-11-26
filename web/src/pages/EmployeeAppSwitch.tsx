@@ -29,9 +29,12 @@ function formatDateTime(value: string | null): string {
 type Mutation = { method: 'PATCH' | 'PUT' | 'DELETE' | 'POST'; suffix: string; body: unknown };
 type FailureBody = SwitchFailure & { clerk_error?: { reason?: string } };
 
-// Some refusals carry no message of their own: the step-up refusal (a 403
-// with only clerk_error, when Clerk's prompt didn't take over) and gateway or
-// server errors. Say what happened rather than a bare "Could not save".
+// Payroll commits a switch change before it builds the reply, so only a
+// refusal that comes before the write (step-up, sign-in, permission, rate
+// limit) can promise nothing changed. A server error, timeout or lost
+// connection may arrive after the change was saved.
+const UNCONFIRMED = "Payroll couldn't confirm whether the change was saved. Choose Check again (or refresh the page) to see the current state before trying again.";
+
 function switchFailureMessage(status: number, body: FailureBody | null): SwitchFailure {
   if (body?.error) return body;
   const error = body?.clerk_error?.reason === 'reverification-error'
@@ -39,8 +42,7 @@ function switchFailureMessage(status: number, body: FailureBody | null): SwitchF
     : status === 401 ? 'Your sign-in has ended. Sign in again, then make the change. Nothing was changed.'
       : status === 403 ? "Your login isn't allowed to make this change. Nothing was changed."
         : status === 429 ? 'Too many tries in a short time. Wait a minute, then try again. Nothing was changed.'
-          : status >= 500 ? "Payroll couldn't save the change right now. Nothing was changed. Try again in a minute."
-            : 'Could not save the change. Nothing was changed. Try again.';
+          : UNCONFIRMED;
   return { ...body, error };
 }
 
@@ -86,7 +88,7 @@ function CompanySwitch({ companyId }: { companyId: number }) {
       return switchFailureMessage(response.status, body);
     } catch (failure) {
       if (isReverificationCancelledError(failure)) return { error: 'Sign-in check cancelled. Nothing was changed.' };
-      return { error: 'Could not save the change. Check your connection and try again.' };
+      return { error: UNCONFIRMED };
     }
   }, [send]);
 

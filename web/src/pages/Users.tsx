@@ -1,7 +1,7 @@
 import { formatGuamDateTime } from '@/lib/utils';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { roleLabel } from '@/lib/role-labels';
-import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
+import { invitationNotSent, invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useId, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, MailX, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
@@ -62,11 +62,6 @@ function errorCode(err: unknown): string | undefined {
 
 const sameIds = (left: number[], right: number[]) =>
   left.length === right.length && left.every((id, index) => id === right[index]);
-
-// Both mean no email left: the person can't sign in until someone resends.
-function inviteNotSent(response: InvitationDeliveryResponse): boolean {
-  return response.invitation_delivery_status === 'failed' || response.invitation_delivery_status === 'skipped';
-}
 
 function inviteFailureReason(response: InvitationDeliveryResponse): string {
   if (response.invitation_delivery_status === 'failed') {
@@ -301,7 +296,7 @@ export function Users() {
       setInviteWarning(null);
       if (invitationNeedsRetry(response)) {
         setSuccessMessage(null);
-        setInviteWarning({ user: response.data, reason: inviteFailureReason(response), confirmedFailure: inviteNotSent(response) });
+        setInviteWarning({ user: response.data, reason: inviteFailureReason(response), confirmedFailure: invitationNotSent(response) });
       } else {
         setSuccessMessage(`Account created. ${invitationOutcomeMessage(response)}`);
       }
@@ -326,7 +321,7 @@ export function Users() {
       setError(null);
       setSuccessMessage(null);
       setInviteWarning(null);
-      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: inviteNotSent(response) });
+      if (invitationNeedsRetry(response)) setInviteWarning({ user, reason: inviteFailureReason(response), confirmedFailure: invitationNotSent(response) });
       else setSuccessMessage(invitationOutcomeMessage(response));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to resend invitation';
@@ -433,7 +428,8 @@ export function Users() {
     setInviteWarning(null);
     const moved = `${user.name} now uses ${toName}. Their history in ${fromName} keeps their name.`;
     const inviteFailure = invitation && invitationNeedsRetry(invitation)
-      ? `${moved} ${inviteFailureReason(invitation)} Use Resend on their row to try again.` : null;
+      // The skipped message already says when to resend.
+      ? `${moved} ${inviteFailureReason(invitation)}${invitation.invitation_delivery_status === 'skipped' ? '' : ' Use Resend on their row to try again.'}` : null;
     if (inviteFailure) {
       setSuccessMessage(null);
       setError(inviteFailure);

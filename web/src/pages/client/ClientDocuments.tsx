@@ -315,6 +315,7 @@ export function ClientDocuments() {
                 <button
                   type="button"
                   aria-labelledby={`${fieldId}-file ${fieldId}-file-status`}
+                  aria-describedby={`${fieldId}-file-note`}
                   onClick={() => fileInputRef.current?.click()}
                   onDragEnter={() => setIsDragActive(true)}
                   onDragLeave={() => setIsDragActive(false)}
@@ -341,7 +342,7 @@ export function ClientDocuments() {
                       ? `${selectedFileCount} file${selectedFileCount === 1 ? '' : 's'} selected`
                       : 'Drag and drop files here, or click to browse'}
                   </p>
-                  <p className="mt-1 text-xs text-neutral-500">
+                  <p id={`${fieldId}-file-note`} className="mt-1 text-xs text-neutral-500">
                     {selectedFileCount > 0
                       ? `${formatFileSize(totalSelectedFileSize)} total • You can upload mixed file types together`
                       : MAX_UPLOAD_NOTE}

@@ -1,5 +1,10 @@
 import type { InvitationDeliveryResponse } from '@/services/api';
 
+// No email left: the person can't sign in until someone resends.
+export function invitationNotSent(response: InvitationDeliveryResponse): boolean {
+  return response.invitation_delivery_status === 'failed' || response.invitation_delivery_status === 'skipped';
+}
+
 export function invitationOutcomeMessage(response: InvitationDeliveryResponse): string {
   switch (response.invitation_delivery_status) {
     case 'captured': return 'Captured in staging (not sent).';

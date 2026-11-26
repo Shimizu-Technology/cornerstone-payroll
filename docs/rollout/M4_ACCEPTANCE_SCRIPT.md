@@ -63,7 +63,7 @@ Jules Reed was terminated before any app access existed, so they can't test form
 ### Before you start
 
 - [ ] Go-live runbook step 0 is done: slices deployed (including demo D6 and D7), demo seeded, client personas invited.
-- [ ] Two-step sign-in is on (G3). It applies to every login, employees included (Leon's Nov 25 revision of D9), so the client and employee personas need an authenticator app ready to enroll.
+- [ ] Two-step sign-in is on (G3). It applies to every login, employees included (the Nov 25 revision of D9), so the client and employee personas need an authenticator app ready to enroll.
 - [ ] The demo's employee app switches are on (runbook step 1). If D6 isn't deployed yet, run sections A and B now and mark section C Pending.
 - [ ] You have the QuickBooks sample files from `rake demo:quickbooks_sample`, from the private evidence location.
 - [ ] Note the demo's **Employee app rollout** counts before you start, so you can tell what this run changed.
