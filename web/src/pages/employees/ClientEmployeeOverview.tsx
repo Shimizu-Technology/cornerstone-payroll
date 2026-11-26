@@ -1,5 +1,6 @@
 import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
 import { ClientPayStubHistory } from '@/components/client-portal/ClientPayStubHistory';
+import { EmployeeContactCard } from '@/components/employees/EmployeeContactCard';
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Pencil } from 'lucide-react';
@@ -8,6 +9,7 @@ import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteClientEmployeeProfile } from '@/lib/company-write-access';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { employeeStatusConfig, employmentTypeLabels, formatCurrency, payFrequencyLabels } from '@/lib/utils';
 import { employeeEditPath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
@@ -26,6 +28,8 @@ export function ClientEmployeeOverview() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [contactEditRequest, setContactEditRequest] = useState(0);
+  const [appPanelVersion, setAppPanelVersion] = useState(0);
 
   useEffect(() => {
     if (!companyId || !employeeId || activeCompanyId !== companyId) return;
@@ -65,7 +69,27 @@ export function ClientEmployeeOverview() {
           <Badge variant={employee.status === 'active' ? 'success' : employee.status === 'terminated' ? 'danger' : 'default'}>{employeeStatusConfig[employee.status]?.label || employee.status}</Badge>
           <Badge variant={employee.payment_delivery_method ? 'info' : 'warning'}>{delivery.label}</Badge>
         </div>
-        <EmployeeAppPanel key={`${companyId}:${employeeId}`} companyId={companyId} companyName={activeCompany?.name || ""} employeeId={employeeId} audience="client" />
+        <EmployeeContactCard
+          key={`contact:${companyId}:${employeeId}`}
+          employee={employee}
+          companyId={companyId}
+          audience="client"
+          canEdit={!viewOnly && canWriteClientEmployeeProfile(activeCompany)}
+          viewOnly={viewOnly}
+          editRequest={contactEditRequest}
+          onSaved={(updated, { emailChanged }) => {
+            setEmployee((current) => (current ? { ...current, ...updated } : current));
+            if (emailChanged) setAppPanelVersion((version) => version + 1);
+          }}
+        />
+        <EmployeeAppPanel
+          key={`${companyId}:${employeeId}:${appPanelVersion}`}
+          companyId={companyId}
+          companyName={activeCompany?.name || ""}
+          employeeId={employeeId}
+          audience="client"
+          onEditContact={!viewOnly && canWriteClientEmployeeProfile(activeCompany) ? () => setContactEditRequest((request) => request + 1) : undefined}
+        />
         <Card>
           <CardHeader><CardTitle>How this employee is paid</CardTitle></CardHeader>
           <CardContent>
