@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type ReactElement } from 'react';
-import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, UserProfile, useReverification } from '@clerk/react';
+import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, useUser, UserProfile, useReverification } from '@clerk/react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
 import { ui as clerkUi } from '@clerk/ui';
@@ -39,19 +39,28 @@ function appearanceFor(brand: EmployeeBrand): ClerkProviderProps['appearance'] {
       formFieldLabel: { fontSize: '1rem', fontWeight: 700 },
       // 16px or larger so iOS doesn't zoom into the field.
       formFieldInput: { minHeight: '52px', borderRadius: '14px', fontSize: 'max(16px, 1rem)' },
+      formFieldInputGroup: { '& input': { paddingInlineEnd: '52px' } },
+      formFieldInputShowPasswordButton: { minWidth: '44px', minHeight: '44px' },
       formButtonPrimary: { minHeight: '52px', borderRadius: '999px', fontSize: '1.06rem', fontWeight: 700, boxShadow: 'none', backgroundImage: 'none' },
       socialButtonsBlockButton: { minHeight: '52px', borderRadius: '999px' },
       socialButtonsBlockButtonText: { fontSize: '1.06rem', fontWeight: 700, color: '#0f172a' },
       footer: { background: 'transparent' },
-      // Employees can't create an account here; sign-up starts from the link
-      // or code their employer sends (M4-2).
-      footerAction: { display: 'none' },
     },
   };
 }
 
 function ClerkSignInForm({ redirectTo }: { redirectTo: string }): ReactElement {
-  return <SignIn routing="hash" withSignUp={false} forceRedirectUrl={redirectTo} fallbackRedirectUrl="/" />;
+  return (
+    <SignIn
+      routing="hash"
+      withSignUp={false}
+      forceRedirectUrl={redirectTo}
+      fallbackRedirectUrl="/"
+      // Clerk also uses footerAction for switching factors. Hide only its
+      // SignInStart sign-up prompt, since employees start from an invite.
+      appearance={{ elements: { footerAction__signIn: { display: 'none' } } }}
+    />
+  );
 }
 
 // Opened from the Clerk invitation the API returns (M4-2); Clerk reads the
@@ -76,6 +85,8 @@ type Attempt = () => Promise<unknown>;
 /** Exported for tests. */
 export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
   const { isSignedIn, getToken, signOut } = useAuth();
+  const { user } = useUser();
+  const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const { openUserProfile } = useClerk();
   // Clerk shows its "confirm it's you" prompt when the fetcher returns the
   // API's reverification hint, at the level the hint names (first_factor
@@ -102,14 +113,15 @@ export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactEle
   }, [reverify]);
   const value = useMemo<EmployeeAuthValue>(() => ({
     isSignedIn: Boolean(isSignedIn),
+    email,
     getToken: (options) => getToken(options?.fresh ? { skipCache: true } : undefined),
-    signOut: () => signOut({ redirectUrl: '/' }),
+    signOut: (redirectUrl = '/') => signOut({ redirectUrl }),
     SignInForm: ClerkSignInForm,
     SignUpForm: ClerkSignUpForm,
     stepUp,
     openAccountSettings: () => openUserProfile(),
     AccountSecurityPanel: ClerkAccountSecurityPanel,
-  }), [isSignedIn, getToken, signOut, stepUp, openUserProfile]);
+  }), [isSignedIn, email, getToken, signOut, stepUp, openUserProfile]);
   return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
 }
 
@@ -148,6 +160,10 @@ export function ClerkAuthProvider({ publishableKey, brand, children }: { publish
         subtitle: brand.isFallback ? 'See your pay stubs and tax forms.' : `See your pay from ${brand.name}.`,
         subtitleCombined: brand.isFallback ? 'See your pay stubs and tax forms.' : `See your pay from ${brand.name}.`,
       },
+      emailCode: { subtitle: `to continue to ${brand.name}` },
+      emailCodeMfa: { subtitle: `to continue to ${brand.name}` },
+      emailLink: { subtitle: `to continue to ${brand.name}` },
+      emailLinkMfa: { subtitle: `to continue to ${brand.name}` },
     },
     signUp: {
       start: {

@@ -19,6 +19,7 @@ module Api
         else
           current_user.company_id
         end
+        links = Current.view_as_grant ? [] : openable_employee_links
         payload = {
           user: {
             id: current_user.id,
@@ -40,10 +41,14 @@ module Api
           roles: {
             staff: StaffRolePolicy.allowed?(current_user, :staff_workspace),
             client: current_user.client?,
-            employee_links_count: Current.view_as_grant ? 0 : employee_links_count
+            employee_links_count: links.size
           },
           features: current_company ? CompanyFeatures.for(current_company).summary : nil
         }
+        if current_user.portal_employee? && !Current.view_as_grant
+          companies = links.map(&:company).uniq
+          payload[:user][:employee_app_url] = EmployeeLinks::AppUrl.origin_for(companies.first) if companies.one?
+        end
         if @clerk_token_payload && MfaPolicy.enabled?
           payload[:mfa_required] = MfaPolicy.required_for?(user: current_user)
           payload[:mfa_verified] = MfaPolicy.verified_second_factor?(@clerk_token_payload)
@@ -53,9 +58,9 @@ module Api
 
       private
 
-      def employee_links_count
+      def openable_employee_links
         EmployeeLinks.openable_links(current_user, azp: @clerk_token_payload&.fetch("azp", nil),
-          origin: request.headers["Origin"]).size
+          origin: request.headers["Origin"])
       end
 
       def rls_system_reason

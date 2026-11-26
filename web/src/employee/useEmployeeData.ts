@@ -4,7 +4,7 @@ import { useReadySession } from './contexts';
 
 /**
  * Failures that belong to the whole session, not one screen: signed out, the
- * link gone (404), or two-step sign-in needed. Screens pass these to
+ * link gone (confirmed by the API client), or two-step sign-in needed. Screens pass these to
  * reportError so the session shows the right full screen.
  */
 export function isSessionError(error: unknown): error is EmployeeApiError {
@@ -22,8 +22,8 @@ export type DataState<T> =
  * Loads one thing for the open link and keeps it in session memory, so going
  * from the list to a stub and back doesn't reload. Memory is a Map in React
  * state: it's gone on reload, sign-out or a switch of employer, and nothing is
- * written to the device. A 401, a 404 or a two-step sign-in 403 goes to the session, which signs out
- * or shows its full screen; other failures stay on this screen with Try again.
+ * written to the device. Session failures sign out or show a full screen.
+ * Other failures stay on this screen with Try again.
  */
 export function useEmployeeData<T>(
   key: string | null,

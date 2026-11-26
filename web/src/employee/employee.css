@@ -1074,8 +1074,9 @@ body {
   .emp-stub-table thead th:not(:first-child) { width: 8.5rem; }
 }
 
-/* The year-to-date column only fits from 600px; the totals below cover phones. */
-.emp-ytd {
+/* Narrow stubs show YTD totals below the tables. Rows carrying only YTD
+   earnings would otherwise read as $0 paid for this check. */
+.emp-ytd, .emp-ytd-only {
   display: none;
 }
 
@@ -1085,6 +1086,11 @@ body {
     padding-left: 16px;
     color: #475569;
   }
+  .emp-ytd-only { display: table-row; }
+}
+
+.emp-security-profile :is(button, [role="button"], a[href]) {
+  min-height: 44px;
 }
 
 /* ---------- Help ---------- */

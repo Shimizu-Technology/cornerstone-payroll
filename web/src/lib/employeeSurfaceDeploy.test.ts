@@ -87,6 +87,7 @@ describe('employee site deploy files', () => {
     );
     expect(directive('connect-src')).toContain('https://employee-api.example.test');
     expect(directive('connect-src')).toContain('https://clerk.shimizu-technology.com');
+    expect(directive('manifest-src')).toBe('manifest-src blob:');
     expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");
     expect(directive('object-src')).toBe("object-src 'none'");
     expect(csp).not.toMatch(/unsafe-eval|script-src[^;]*unsafe-inline/);
@@ -233,7 +234,8 @@ describe('employee site deploy files', () => {
 
   it('writes headers and redirects and drops staff-only files from the output', () => {
     const dist = tempDir();
-    for (const file of ['index.html', 'sw.js', 'offline.html', 'sitemap.xml', 'robots.txt', 'manifest.json']) writeFileSync(path.join(dist, file), 'staff');
+    const staffFiles = ['sw.js', 'offline.html', 'sitemap.xml', 'manifest.json', 'favicon.svg', 'icon-192.png', 'icon-512.png', 'og-image.png'];
+    for (const file of ['index.html', 'robots.txt', ...staffFiles]) writeFileSync(path.join(dist, file), 'staff');
 
     finalizeEmployeeDist({
       distDir: dist,
@@ -247,7 +249,7 @@ describe('employee site deploy files', () => {
     expect(headers).toContain('https://us-assets.i.posthog.com');
     expect(readFileSync(path.join(dist, '_redirects'), 'utf8')).toContain('/index.html   200');
     expect(readFileSync(path.join(dist, 'robots.txt'), 'utf8')).toContain('Disallow: /');
-    for (const file of ['sw.js', 'offline.html', 'sitemap.xml']) expect(existsSync(path.join(dist, file))).toBe(false);
+    for (const file of staffFiles) expect(existsSync(path.join(dist, file))).toBe(false);
   });
 
   it('fails the employee build instead of shipping without its origins', () => {
@@ -259,7 +261,8 @@ describe('employee site deploy files', () => {
 
   it('generates staff _headers from VITE_API_URL and allows external HTTPS logos without dropping staff files', () => {
     const dist = tempDir();
-    for (const file of ['index.html', 'sw.js', 'offline.html', 'sitemap.xml']) writeFileSync(path.join(dist, file), 'staff');
+    const staffFiles = ['sw.js', 'offline.html', 'sitemap.xml', 'manifest.json', 'favicon.svg', 'icon-192.png', 'icon-512.png'];
+    for (const file of ['index.html', ...staffFiles]) writeFileSync(path.join(dist, file), 'staff');
 
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     expect(() => main({
@@ -277,7 +280,7 @@ describe('employee site deploy files', () => {
     const reportOnlyLine = headers.split('\n').map((line) => line.trim()).find((line) => line.startsWith('Content-Security-Policy-Report-Only:')) ?? '';
     const imgSrc = reportOnlyLine.split('; ').find((part) => part.startsWith('img-src ')) ?? '';
     expect(imgSrc.split(' ')).toContain('https:');
-    for (const file of ['sw.js', 'offline.html', 'sitemap.xml']) expect(existsSync(path.join(dist, file))).toBe(true);
+    for (const file of staffFiles) expect(existsSync(path.join(dist, file))).toBe(true);
   });
 
   it('assembles a real employee build with its headers, redirects and no staff service worker', async () => {
@@ -291,7 +294,9 @@ describe('employee site deploy files', () => {
     finalizeEmployeeDist({ distDir: outDir, deployDir, env });
 
     expect(existsSync(path.join(outDir, 'index.html'))).toBe(true);
+    expect(readFileSync(path.join(outDir, 'index.html'), 'utf8')).not.toMatch(/favicon\.svg|manifest\.json/);
     expect(existsSync(path.join(outDir, 'sw.js'))).toBe(false);
+    expect(existsSync(path.join(outDir, 'manifest.json'))).toBe(false);
     expect(readFileSync(path.join(outDir, '_headers'), 'utf8')).toContain('Cache-Control: no-store');
     expect(existsSync(path.join(outDir, '_redirects'))).toBe(true);
   }, 60_000);

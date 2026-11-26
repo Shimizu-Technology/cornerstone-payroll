@@ -52,6 +52,18 @@ RSpec.describe "Employee link isolation", type: :request do
     expect(context_status(bravo_link)).to eq(200)
   end
 
+  it "points an employee-only login to its employee app only when one employer is available" do
+    alpha_link
+    get "/api/v1/auth/me", headers: bearer("user_jordan")
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("user")).to include("role" => "portal_employee", "employee_app_url" => alpha_origin)
+
+    bravo_link
+    get "/api/v1/auth/me", headers: bearer("user_jordan")
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.fetch("user")).not_to have_key("employee_app_url")
+  end
+
   it "hides invited, revoked, expired-former links and companies with the app off, and never another user's link" do
     other = create(:user, role: :portal_employee, company: alpha, clerk_id: "user_other")
     others_link = create_link(alpha, user: other)

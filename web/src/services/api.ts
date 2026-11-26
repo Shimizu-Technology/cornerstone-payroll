@@ -4422,6 +4422,7 @@ interface AuthApiUser {
   organization_name?: string;
   company_id: number | null;
   company_name: string | null;
+  employee_app_url?: string | null;
   home_company_id: number | null;
   assigned_company_ids: number[];
   capabilities: string[];
