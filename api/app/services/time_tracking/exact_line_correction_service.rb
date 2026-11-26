@@ -238,7 +238,7 @@ module TimeTracking
       proof_on = @import.pay_period.end_date
       CanonicalPayload.checksum({ import: @import.attributes.slice("id", "pay_period_id", "external_batch_checksum", "source_payload_hash"),
         source: @source.attributes.slice("id", "company_id", "expected_source_instance_id", "connection_uuid", "remote_source_identifier", "base_url"),
-        line: context[:line], original: context[:original].attributes, original_period: context[:original].pay_period.attributes,
+        line: context[:line], original: context[:original].attributes, original_period: context[:original].pay_period.attributes.except("rollback_review_required"),
         original_batches_and_allocations: context[:original_proof], original_payment: context[:payment_proof],
         financial_succession: context[:target_proof],
         employee: PayrollCalculationContext.dated_employee_attributes(employee, proof_on),

@@ -312,7 +312,8 @@ it.each(['reports', 'checks', 'activity'] as const)('retains %s navigation after
 it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to Payroll and focuses it', async (action): Promise<void> => {
   vi.clearAllMocks();
   const user = userEvent.setup();
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  const reason = 'Correct fixture approval';
+  const prompt = vi.spyOn(window, 'prompt').mockReturnValue(reason);
   try {
     const period = { ...initialPayPeriod, status: 'approved' } as PayPeriod;
     apiMocks.get.mockResolvedValue({ pay_period: period });
@@ -343,12 +344,12 @@ it.each(['commit', 'rollback'] as const)('brings a new %s error from Reports to 
         expect(feedback.closest('[role="dialog"]')).toBeTruthy();
         continue;
       }
-      expect(apiAction).toHaveBeenLastCalledWith(12);
+      expect(apiAction).toHaveBeenLastCalledWith(12, reason);
       await waitFor(() => expect(screen.getByLabelText('Current payroll path').textContent).toBe('/companies/7/pay-runs/12/work'));
       expect(feedback.closest('details')?.id).toBe('payroll-commit');
       await waitFor(() => expect(document.activeElement?.id).toBe('payroll-feedback'));
     }
-  } finally { confirm.mockRestore(); }
+  } finally { prompt.mockRestore(); }
 });
 
 afterEach(() => {

@@ -304,7 +304,7 @@ RSpec.describe PayrollReview::RevisionService do
     client_service = described_class.new(pay_period: pay_period, actor: client)
     expect { client_service.request_changes!(revision_id: package.id, note: " ") }.to raise_error(described_class::Error, /Describe/)
     client_service.request_changes!(revision_id: package.id, note: "Correct hours")
-    lifecycle.unapprove!
+    lifecycle.unapprove!(reason: "Fixture payroll approval correction")
     expect(package.reload).to have_attributes(status: "superseded", changes_requested_by: client, change_request_note: "Correct hours")
     payroll_item.update!(hours_worked: 82)
     next_package = service.issue!
@@ -320,7 +320,7 @@ RSpec.describe PayrollReview::RevisionService do
     lifecycle.approve!
     package = pay_period.payroll_review_packages.current.first!
     client_decision(package)
-    lifecycle.unapprove!
+    lifecycle.unapprove!(reason: "Fixture payroll approval correction")
     expect(package.reload).to have_attributes(status: "superseded", approved_by: client)
     expect { service.verify_required_approval! }.to raise_error(described_class::Error, /before commit/)
     lifecycle.approve!

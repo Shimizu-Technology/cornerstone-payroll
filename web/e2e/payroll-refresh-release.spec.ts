@@ -1,3 +1,4 @@
+import { refreshSession } from './helpers/refresh-session';
 import { openPayrollActions, openPayrollStep, showPayrollTab } from './helpers/pay-run-actions';
 import { expect, request, test, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
@@ -6,7 +7,9 @@ import { resolve } from 'node:path';
 interface Scenario { period_id: number; item_id: number; employee_id: number; loan_id?: number }
 interface Fixture {
   company_id: number;
-  accountant_email: string;
+  accountant_subject: string;
+  admin_subject: string;
+  later_period_id: number;
   desktop: Scenario;
   mobile: Scenario;
   reopen: Scenario;
@@ -19,11 +22,30 @@ interface Fixture {
   unselected_employee_id: number;
 }
 interface Item { employee_id: number; hours_worked: string; overtime_hours: string; gross_pay: string; withholding_tax: string; net_pay: string; loan_payment: string; voided: boolean }
-interface Period { id: number; status: string; correction_status: string | null; source_pay_period_id: number | null; payroll_items: Item[] }
+interface Period { id: number; status: string; correction_status: string | null; rollback_review_required: boolean; source_pay_period_id: number | null; payroll_items: Item[] }
 
 if (process.env.E2E_REFRESH_LANE !== 'true') throw new Error('Payroll refresh tests require the isolated refresh lane.');
 const fixture = JSON.parse(readFileSync(process.env.E2E_FIXTURE_PATH || resolve('.e2e-fixtures/payroll-refresh.json'), 'utf8')) as Fixture;
 const apiBase = process.env.E2E_API_URL || `http://127.0.0.1:${process.env.E2E_API_PORT || '4317'}/api/v1/`;
+
+const webOrigin = new URL(process.env.E2E_BASE_URL || `http://127.0.0.1:${process.env.E2E_WEB_PORT || '4318'}`).origin;
+const apiRequests = `${new URL(apiBase).origin}/api/v1/**`;
+
+async function useSession(page: Page, subject: string, age = 0) {
+  await page.route(apiRequests, route => route.request().method() === 'OPTIONS' ? route.continue() :
+    route.continue({ headers: { ...route.request().headers(), authorization: refreshSession(subject, webOrigin, age) } }));
+  // The fixture issuer supplies a fresh signed session after reverification.
+  return () => { age = 0; };
+}
+
+async function confirmUnpaidPayroll(dialog: ReturnType<Page['getByRole']>) {
+  const input = dialog.getByLabel('Type the client and period exactly as shown');
+  const instructionId = await input.getAttribute('aria-describedby');
+  const confirmation = dialog.locator(`[id="${instructionId}"]`);
+  await expect(confirmation).toContainText('Synthetic Payroll Refresh QA');
+  await input.fill(await confirmation.innerText());
+  await dialog.getByRole('checkbox', { name: /I confirm all active payments/ }).check();
+}
 
 test.describe('Synthetic payroll refresh and unpaid correction', () => {
   test.describe.configure({ mode: 'serial' });
@@ -32,9 +54,10 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
 
   test.beforeAll(async () => {
     api = await request.newContext({ baseURL: apiBase, extraHTTPHeaders: {
-      'X-E2E-User-Email': fixture.accountant_email, 'X-Company-Id': String(fixture.company_id),
+      Authorization: refreshSession(fixture.accountant_subject, webOrigin, 0), 'X-Company-Id': String(fixture.company_id),
     } });
   });
+  test.beforeEach(async ({ page }) => { await useSession(page, fixture.accountant_subject); });
   test.afterAll(async () => { await api.dispose(); });
 
   async function period(id: number): Promise<Period> {
@@ -60,7 +83,12 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
   }
   async function calculate(page: Page, id: number): Promise<void> {
     if (await page.locator('#payroll-hours').getByRole('button', { name: 'Recalculate', exact: true, includeHidden: true }).count()) await openPayrollActions(page);
+    const calculation = page.waitForResponse(response => response.request().method() === 'POST' &&
+      new URL(response.url()).pathname.endsWith(`/pay_periods/${id}/run_payroll`));
     await page.locator('#payroll-hours').getByRole('button', { name: /^(Calculate Payroll|Recalculate)$/ }).filter({ visible: true }).click();
+    const result = await calculation;
+    expect(result.ok(), await result.text()).toBeTruthy();
+    expect((await result.json()).results.errors).toHaveLength(0);
     await expect.poll(async () => (await period(id)).status, { timeout: 30_000 }).toBe('calculated');
     const saved = await period(id);
     expect(saved.payroll_items).toHaveLength(1);
@@ -156,19 +184,52 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
   }
 
   test('one period void retires employee and FIT checks and restores the tracked balance', async ({ page }) => {
+    const laterPath = `admin/pay_periods/${fixture.later_period_id}`;
+    const calculation = await api.post(`${laterPath}/run_payroll`, { data: {
+      employee_ids: [fixture.desktop.employee_id],
+      hours: { [fixture.desktop.employee_id]: { regular: 1, overtime: 0 } },
+    } });
+    expect(calculation.ok(), await calculation.text()).toBeTruthy();
+    expect((await calculation.json()).results.errors).toHaveLength(0);
+    const approval = await api.post(`${laterPath}/approve`);
+    expect(approval.ok(), await approval.text()).toBeTruthy();
+    const commitment = await api.post(`${laterPath}/commit`);
+    expect(commitment.ok(), await commitment.text()).toBeTruthy();
+    expect((await period(fixture.later_period_id)).status).toBe('committed');
+
     await open(page, fixture.desktop.period_id);
     await showPayrollTab(page, 'Activity');
-    await page.getByRole('button', { name: 'Void This Pay Period', exact: true }).click();
+    const voidAction = page.getByRole('button', { name: 'Void This Pay Period', exact: true });
+    await expect(voidAction).toHaveCount(0);
+    const freshSignIn = await useSession(page, fixture.admin_subject, 30);
+    await page.reload();
+    await showPayrollTab(page, 'Activity');
+    await voidAction.click();
     const dialog = page.getByRole('dialog', { name: /Void Pay Period/ });
     await dialog.getByLabel(/Reason for voiding/).fill('Synthetic QA replaces an unissued payroll.');
-    await dialog.getByRole('checkbox', { name: /I confirm all active payments/ }).check();
-    await dialog.getByLabel(/Type VOID/).fill('VOID');
-    await dialog.getByRole('button', { name: 'Void Pay Period', exact: true }).click();
+    await confirmUnpaidPayroll(dialog);
+    const submit = dialog.getByRole('button', { name: 'Void Pay Period', exact: true });
+    await expect(submit).toBeDisabled();
+    await dialog.getByRole('checkbox', { name: /I acknowledge later committed payrolls/ }).check();
+    const voidPath = `/pay_periods/${fixture.desktop.period_id}/void`;
+    const staleResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(voidPath));
+    await submit.click();
+    const stale = await staleResponse;
+    expect(stale.status()).toBe(403);
+    expect((await stale.json()).clerk_error.reason).toBe('reverification-error');
+    expect((await period(fixture.desktop.period_id)).correction_status).toBeNull();
+
+    freshSignIn();
+    const freshResponse = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(voidPath));
+    await submit.click();
+    const fresh = await freshResponse;
+    expect(fresh.ok(), await fresh.text()).toBeTruthy();
     await expect.poll(async () => (await period(fixture.desktop.period_id)).correction_status, { timeout: 30_000 }).toBe('voided');
     expect((await period(fixture.desktop.period_id)).payroll_items.every(item => item.voided)).toBeTruthy();
     expect(Number((await loan(fixture.desktop.loan_id!)).current_balance)).toBe(3259.97);
     const response = await api.get(`admin/non_employee_checks?pay_period_id=${fixture.desktop.period_id}`);
     const checks = (await response.json()).non_employee_checks;
+    expect((await period(fixture.later_period_id)).rollback_review_required).toBe(true);
     expect(checks.every((row: { voided: boolean }) => row.voided)).toBeTruthy();
   });
 
@@ -181,12 +242,13 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
   });
 
   test('reopening unpaid payroll creates a linked draft and preserves entered wages', async ({ page }) => {
+    await useSession(page, fixture.admin_subject);
     await open(page, fixture.reopen.period_id);
     await showPayrollTab(page, 'Activity');
     await page.getByRole('button', { name: 'Reopen unpaid payroll', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Reopen unpaid payroll', exact: true });
     await dialog.getByLabel('Reason for reopening', { exact: true }).fill('Synthetic QA adds the saved loan to unissued pay.');
-    await dialog.getByRole('checkbox', { name: /I confirm all active payments/ }).check();
+    await confirmUnpaidPayroll(dialog);
     await dialog.getByRole('button', { name: 'Reopen and create draft', exact: true }).click();
     await expect(page).not.toHaveURL(new RegExp(`/pay-runs/${fixture.reopen.period_id}/`));
     await expect(page).toHaveURL(/\/pay-runs\/\d+\/work/);
@@ -221,12 +283,13 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
   });
 
   test('copied multi-rate payroll keeps original rates even after one rate is deactivated', async ({ page }) => {
+    await useSession(page, fixture.admin_subject);
     await open(page, fixture.multirate.period_id);
     await showPayrollTab(page, 'Activity');
     await page.getByRole('button', { name: 'Reopen unpaid payroll', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Reopen unpaid payroll', exact: true });
     await dialog.getByLabel('Reason for reopening', { exact: true }).fill('Synthetic QA preserves captured multi-rate earnings.');
-    await dialog.getByRole('checkbox', { name: /I confirm all active payments/ }).check();
+    await confirmUnpaidPayroll(dialog);
     await dialog.getByRole('button', { name: 'Reopen and create draft', exact: true }).click();
     await expect(page).not.toHaveURL(new RegExp(`/pay-runs/${fixture.multirate.period_id}/`));
     const id = Number(page.url().match(/\/pay-runs\/(\d+)\//)![1]);
@@ -266,6 +329,7 @@ test.describe('Synthetic payroll refresh and unpaid correction', () => {
 
   test('phone correction dialog blocks delivered payroll without changing its state', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    await useSession(page, fixture.admin_subject);
     await open(page, fixture.delivered.period_id);
     await showPayrollTab(page, 'Activity');
     await page.getByRole('button', { name: 'Reopen unpaid payroll', exact: true }).click();

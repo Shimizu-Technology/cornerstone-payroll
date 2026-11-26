@@ -78,7 +78,7 @@ RSpec.describe "Client payroll setting interactions", type: :request do
     get "/api/v1/admin/reports/payroll_register", params: { pay_period_id: period.id }
     expect(response).to have_http_status(:ok)
     expect(period.payroll_items.reload.order(:employee_id).map(&:attributes)).to eq(saved)
-    PayPeriodCorrectionService.void!(pay_period: period.reload, actor: admin, reason: "Local scenario reversal")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period.reload, actor: admin, reason: "Local scenario reversal")
     expect(EmployeeYtdTotal.where(employee: owners, year: 2026).sum(:retirement)).to eq(0)
   end
 

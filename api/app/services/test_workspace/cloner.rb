@@ -105,6 +105,7 @@ module TestWorkspace
         promotion_payment_disposition: nil,
         promoted_payment_prepared_at: nil,
         promoted_payment_prepared_by_id: nil,
+        rollback_review_required: false,
         status: "approved",
         parallel_run: true,
         correction_status: nil,

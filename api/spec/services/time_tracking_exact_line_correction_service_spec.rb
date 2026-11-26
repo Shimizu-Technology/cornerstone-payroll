@@ -32,6 +32,13 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     expect(summary[:paid][:line_count]).to eq(0)
   end
 
+  it "keeps an existing exact correction digest after a rollback review flag is set" do
+    preview = service.preview
+    original_period.update_columns(rollback_review_required: true)
+    expect(service.preview.fetch(:proof_digest)).to eq(preview.fetch(:proof_digest))
+    expect(confirm(preview)).to be_persisted
+  end
+
   it "confirms an existing proof after newer compensation activates" do
     activation = PayrollBusinessClock.today + 2
     change_compensation!(employee, effective_on: activation, pay_rate: 31)
@@ -539,8 +546,8 @@ RSpec.describe TimeTracking::ExactLineCorrectionService do
     disposition = confirm
     disposition.time_tracking_correction_receipt.update!(delivered_at: Time.current)
     item = disposition.corrective_payroll_item
-    expect { PayPeriodCorrectionService.void!(pay_period: item.pay_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
-    expect { PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: item.pay_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: 'reviewing correction') }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /source receipt can be reversed together/)
     expect { original_item.void!(user: actor, reason: 'reviewing correction') }.to raise_error(ArgumentError, /source receipt can be reversed together/)
     expect(item.reload).not_to be_voided
     expect(original_item.reload).not_to be_voided

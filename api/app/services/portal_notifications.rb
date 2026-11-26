@@ -218,12 +218,12 @@ module PortalNotifications
       Rails.logger.error("Payroll commit notification failed: period=#{period.id} error=#{error.class}")
     end
 
-    # Track H2 calls this within the rollback transaction with its immutable
-    # action ID. Let ledger errors propagate so H2 can roll back both writes.
-    def payroll_reopened!(period, actor:, action_id:)
+    # Record the alert in the rollback transaction with its immutable action ID.
+    # Let ledger errors propagate so the rollback and its audit writes fail.
+    def payroll_reopened!(period, actor:, action_id:, self_override: false)
       raise ArgumentError, "Payroll rollback action ID is required" if action_id.blank?
 
-      payroll_lifecycle_event!("payroll_reopened", period, actor: actor, revision: action_id)
+      payroll_lifecycle_event!("payroll_reopened", period, actor: actor, revision: action_id, self_override: self_override)
     end
 
     def employee_link_event!(event_type, link, generation:, now: Time.current)
@@ -302,11 +302,13 @@ module PortalNotifications
 
     private
 
-    def payroll_lifecycle_event!(event_type, period, actor:, revision:)
+    def payroll_lifecycle_event!(event_type, period, actor:, revision:, self_override: false)
       ApplicationRecord.transaction(requires_new: true) do
         EVENT_TYPES.fetch(event_type).fetch(:scopes).each_key do |scope|
+          metadata = { recipient_scope: scope, revision: revision }
+          metadata[:self_override] = true if scope == "super_admins" && self_override
           payroll_period!(event_type, period: period, actor: actor, dedupe: "#{period.id}:#{revision}:#{scope}",
-            metadata: { recipient_scope: scope, revision: revision })
+            metadata: metadata)
         end
       end
     end
