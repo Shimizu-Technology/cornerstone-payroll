@@ -9,6 +9,7 @@ import { BrandContext, useBrand, useEmployeeAuth, useEmployeeSession } from './e
 import { DevPreviewAuthProvider } from './employee/DevPreviewAuth';
 import { HideAmountsProvider } from './employee/HideAmounts';
 import { useSignOut } from './employee/hooks';
+import { useEmployeeInstallMetadata } from './employee/install';
 import { isSigningOut, redirectTarget } from './employee/routing';
 import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
@@ -203,6 +204,7 @@ const PREVIEW_VIEW_AS = import.meta.env.DEV && typeof window !== 'undefined'
 export default function EmployeeApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
   const { branding, retry } = useTenantBranding();
   const brand = useMemo(() => brandFrom(branding?.status === 'enabled' ? branding.branding : null), [branding]);
+  useEmployeeInstallMetadata(brand, !supportToken && (!TENANT_HOST || branding?.status === 'enabled'));
   const grant = viewAs ?? (PREVIEW_VIEW_AS ? { name: PREVIEW_VIEW_AS, minutesLeft: 27, onEnd: () => window.location.assign('/') } : null);
   // The neutral brand still supplies --action, so the retry buttons on the
   // startup error screens don't render white on white.

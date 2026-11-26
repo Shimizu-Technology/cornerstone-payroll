@@ -170,6 +170,17 @@ RSpec.describe "Demo identity boundary", type: :request do
   end
 
   describe "/auth/me" do
+    it "returns the demo app destination for an employee signed in on the staff host without counting that link there" do
+      employee_login = create(:user, role: :portal_employee, company: demo, email: allowed, clerk_id: "user_demo_employee")
+      EmployeeAccountLink.create!(user: employee_login, company: demo, employee: employee_at(demo), status: "active")
+
+      get "/api/v1/auth/me", headers: bearer("user_demo_employee").merge("Origin" => EmployeeLinkHelpers::PAYROLL_ORIGIN)
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("user")).to include("role" => "portal_employee", "employee_app_url" => demo_origin)
+      expect(response.parsed_body.dig("roles", "employee_links_count")).to eq(0)
+    end
+
     it "counts only the links the login can open" do
       live_login
       EmployeeAccountLink.create!(user: demo_login, company: live, employee: employee_at(live), status: "active")

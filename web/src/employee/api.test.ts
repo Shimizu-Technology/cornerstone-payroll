@@ -287,9 +287,21 @@ describe('employee API calls (M4-2, M4-4, M4-5, M4-7 contracts)', () => {
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('PATCH');
   });
 
-  it('keeps a plain 403 on a read as "not found"', async () => {
+  it('keeps a plain 403 as "not found" when the link check also fails', async () => {
     const api = client(async () => jsonResponse({}, 403));
     await expect(api.statements('42')).rejects.toMatchObject({ kind: 'not_found' });
+  });
+
+  it.each([200, 404])('treats a missing PDF as a resource failure only when the link check succeeds (%i)', async (contextStatus) => {
+    const fetchImpl = vi.fn<typeof fetch>(async url => new Response(null, { status: String(url).endsWith('/context') ? contextStatus : 404 }));
+    const api = client(fetchImpl);
+
+    await expect(api.statementPdf('42', '901')).rejects.toMatchObject({ kind: contextStatus === 200 ? 'resource_not_found' : 'not_found' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[1]).toEqual([
+      'https://api.example.test/api/v1/employee/context',
+      expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ 'X-Employee-Link-Id': '42' }) }),
+    ]);
   });
 
   it('asks for statements by year and page, and refuses unsafe ids', async () => {
@@ -297,7 +309,8 @@ describe('employee API calls (M4-2, M4-4, M4-5, M4-7 contracts)', () => {
     const api = client(fetchImpl);
     await api.statements('42', { year: 2026, page: 2 });
     expect(fetchImpl.mock.calls[0][0]).toBe('https://api.example.test/api/v1/employee/statements?page=2&year=2026');
-    await expect(api.statement('42', '../admin')).rejects.toMatchObject({ kind: 'not_found' });
+    await expect(api.statement('42', '../admin')).rejects.toMatchObject({ kind: 'resource_not_found' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('downloads a PDF as a Blob without caching', async () => {

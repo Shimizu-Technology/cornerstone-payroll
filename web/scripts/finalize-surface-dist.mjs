@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { loadEnv } from 'vite'
 
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const STAFF_ONLY_FILES = ['sw.js', 'offline.html', 'sitemap.xml']
+const STAFF_ONLY_FILES = ['sw.js', 'offline.html', 'sitemap.xml', 'manifest.json', 'favicon.svg', 'icon-192.png', 'icon-512.png', 'og-image.png']
 const ROBOTS_TXT = '# Employee app: nothing here is for search engines.\nUser-agent: *\nDisallow: /\n'
 const DEFAULT_STAFF_API_ORIGIN = 'https://cornerstone-payroll.onrender.com'
 const DEFAULT_STAFF_CLERK_ORIGIN = 'https://clerk.shimizu-technology.com'
@@ -145,6 +145,7 @@ export function contentSecurityPolicy({ apiOrigin: api, clerkOrigin, posthog = n
 
   return [
     "default-src 'self'",
+    "manifest-src blob:",
     `script-src ${scriptSrc}`,
     // Clerk's components and the Google Fonts stylesheet in index.html inject styles.
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",

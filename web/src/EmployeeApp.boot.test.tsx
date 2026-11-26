@@ -37,6 +37,7 @@ vi.mock('@clerk/react', () => ({
     isLoaded: clerk.isLoaded,
     isSignedIn: clerk.isSignedIn,
   }),
+  useUser: () => ({ user: null }),
   useReverification: () => vi.fn(),
 }));
 

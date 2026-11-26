@@ -1,18 +1,31 @@
 /** @vitest-environment jsdom */
 import { ClerkInstanceContext } from '@clerk/shared/react';
 import { cleanup, render } from '@testing-library/react';
-import { useContext, type ContextType, type ReactElement } from 'react';
+import { useContext, type ComponentProps, type ContextType, type ReactElement } from 'react';
+import type { ClerkProvider, SignIn } from '@clerk/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StepUpRequiredError } from './api';
-import { ClerkAuthBridge } from './ClerkAuth';
+import { ClerkAuthBridge, ClerkAuthProvider } from './ClerkAuth';
+import { brandFrom } from './brand';
 import { EmployeeAuthContext, type EmployeeAuthValue } from './contexts';
 
-const { openUserProfile } = vi.hoisted(() => ({ openUserProfile: vi.fn() }));
+const { openUserProfile, providerProps, signInProps, signOut } = vi.hoisted(() => ({
+  openUserProfile: vi.fn(),
+  providerProps: vi.fn<(props: ComponentProps<typeof ClerkProvider>) => void>(),
+  signInProps: vi.fn<(props: ComponentProps<typeof SignIn>) => void>(),
+  signOut: vi.fn(),
+}));
 
 vi.mock('@clerk/react', async (importOriginal) => ({
   ...await importOriginal<typeof import('@clerk/react')>(),
-  useAuth: () => ({ isLoaded: true, isSignedIn: true, getToken: vi.fn(async () => 'token'), signOut: vi.fn() }),
-  useClerk: () => ({ openUserProfile }),
+  ClerkProvider: (props: ComponentProps<typeof ClerkProvider>) => {
+    providerProps(props);
+    return props.children;
+  },
+  SignIn: (props: ComponentProps<typeof SignIn>) => { signInProps(props); return null; },
+  useAuth: () => ({ isLoaded: true, isSignedIn: true, getToken: vi.fn(async () => 'token'), signOut }),
+  useClerk: () => ({ openUserProfile, on: vi.fn(), off: vi.fn() }),
+  useUser: () => ({ user: { primaryEmailAddress: { emailAddress: 'employee@example.test' } } }),
 }));
 
 type Clerk = NonNullable<ContextType<typeof ClerkInstanceContext>>['value'];
@@ -36,6 +49,9 @@ function renderBridge(): { current: EmployeeAuthValue } {
 beforeEach(() => {
   openReverification.mockReset();
   openUserProfile.mockReset();
+  providerProps.mockClear();
+  signInProps.mockClear();
+  signOut.mockReset();
 });
 afterEach(cleanup);
 
@@ -60,4 +76,34 @@ describe('employee ClerkAuthBridge', () => {
     expect(openUserProfile).toHaveBeenCalledTimes(1);
     expect(auth.current.AccountSecurityPanel).toBeTypeOf('function');
   });
+
+  it('shows the Clerk account email and can sign out back to the claim route', async () => {
+    const auth = renderBridge();
+    expect(auth.current.email).toBe('employee@example.test');
+    await auth.current.signOut('/claim');
+    expect(signOut).toHaveBeenCalledExactlyOnceWith({ redirectUrl: '/claim' });
+  });
+});
+
+it('allows Clerk to show alternative factors while keeping sign-up invitation-only', () => {
+  const brand = brandFrom({ name: 'Example Kitchen', logo_url: null, primary_color: null, accent_color: null });
+  function SignInScreen(): ReactElement {
+    const { SignInForm } = useContext(EmployeeAuthContext)!;
+    return <SignInForm redirectTo="/claim" />;
+  }
+  render(
+    <ClerkInstanceContext.Provider value={{ value: clerk }}>
+      <ClerkAuthProvider publishableKey="test-key" brand={brand}><SignInScreen /></ClerkAuthProvider>
+    </ClerkInstanceContext.Provider>,
+  );
+
+  const provider = providerProps.mock.lastCall?.[0];
+  const signIn = signInProps.mock.lastCall?.[0];
+  expect(provider?.appearance?.elements).not.toHaveProperty('footerAction');
+  expect(provider?.appearance?.elements).toMatchObject({
+    formFieldInputShowPasswordButton: { minWidth: '44px', minHeight: '44px' },
+  });
+  expect(provider?.localization?.signIn?.emailCodeMfa?.subtitle).toBe('to continue to Example Kitchen');
+  expect(signIn).toMatchObject({ withSignUp: false, forceRedirectUrl: '/claim' });
+  expect(signIn?.appearance?.elements).toEqual({ footerAction__signIn: { display: 'none' } });
 });

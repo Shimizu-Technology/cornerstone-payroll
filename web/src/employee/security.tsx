@@ -33,7 +33,7 @@ export function SecurityScreen(): ReactElement {
           <p className="text-neutral-600">{askManager(brand, 'Need help? Ask your manager')}</p>
         </div>
       </div>
-      <div className="min-w-0 overflow-x-auto">
+      <div className="emp-security-profile min-w-0 overflow-x-auto">
         <AccountSecurityPanel />
       </div>
       <EmpButtonLink block to="/">Done</EmpButtonLink>
