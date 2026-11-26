@@ -29,6 +29,8 @@ RSpec.describe "Demo company contained commit", type: :request do
     expect(response).to have_http_status(:ok), response.body
 
     expect(period.reload).to be_committed
+    expect(PortalNotificationEvent.where(event_type: "payroll_committed", subject: period)
+      .pluck(Arel.sql("metadata->>'recipient_scope'"))).to contain_exactly("client_managers", "client_viewers")
     expect(period.payroll_items.first.check_number).to be_present
     expect(EmployeeYtdTotal.where(employee: employee, year: 2026).sum(:gross_pay)).to be_positive
     expect(PayrollLiabilityPosting.where(company: demo)).to be_empty
@@ -46,9 +48,11 @@ RSpec.describe "Demo company contained commit", type: :request do
   end
 
   it "voids a committed demo payroll without liability postings" do
+    allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!)
+    allow(MfaPolicy).to receive(:recently_step_up_verified?).and_return(true)
     post "/api/v1/admin/pay_periods/#{period.id}/commit", params: { expected_next_check_number: demo.next_check_number }
     expect(response).to have_http_status(:ok), response.body
-    post "/api/v1/admin/pay_periods/#{period.id}/void", params: { reason: "Entered the wrong week", unpaid_acknowledgement: true }
+    post "/api/v1/admin/pay_periods/#{period.id}/void", params: { confirmation: AdminOverrideService.payroll_confirmation(period), reason: "Entered the wrong week", unpaid_acknowledgement: true }
     expect(response).to have_http_status(:ok), response.body
     expect(period.reload.correction_status).to eq("voided")
     expect(PayrollLiabilityPosting.where(company: demo)).to be_empty

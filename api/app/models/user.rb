@@ -321,7 +321,8 @@ class User < ApplicationRecord
   def query_demo_client_company_ids
     company_assignments.active_access.joins(:company)
       .merge(Company.demo.active)
-      .where(companies: { organization_id: organization_id, migration_rehearsal_status: "ready", test_workspace_archived_at: nil })
+      .where(companies: { organization_id: organization_id, test_workspace_archived_at: nil })
+      .where("companies.demo = TRUE OR companies.migration_rehearsal_status = 'ready'")
       .order(:company_id).pluck(:company_id)
   end
 
@@ -349,7 +350,7 @@ class User < ApplicationRecord
   end
 
   def migration_rehearsal_company_requires_staff_role
-    return if company.blank? || !company.test_workspace? || staff_member? || (client? && practice_company_id == company_id)
+    return if company.blank? || !company.contained? || staff_member? || (client? && practice_company_id == company_id)
     # A demo company's client and employee-app logins are its own: only
     # allow-listed addresses (private configuration), never a practice login.
     return if (client? || portal_employee?) && company.demo? && practice_company_id.nil? &&

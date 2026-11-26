@@ -241,7 +241,7 @@ RSpec.describe "Staff Client Inbox", type: :request do
 
     # Committing period1 and unapproving period2 move both entries from waiting to handled.
     PayPeriodLifecycleService.new(pay_period: period1.reload, actor: staff).commit!
-    PayPeriodLifecycleService.new(pay_period: period2.reload, actor: staff).unapprove!
+    PayPeriodLifecycleService.new(pay_period: period2.reload, actor: staff).unapprove!(reason: "Fixture payroll approval correction")
 
     expect(rows(kind: "payroll_review", status: "waiting")).to be_empty
     handled = rows(kind: "payroll_review", status: "handled")

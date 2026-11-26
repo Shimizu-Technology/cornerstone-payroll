@@ -62,7 +62,8 @@ class PayPeriodLifecycleService
     raise InvalidTransitionError, e.message
   end
 
-  def unapprove!
+  def unapprove!(reason:)
+    reason = AdminOverrideService.reason!(reason)
     with_financial_pay_period_lock do
       unless pay_period.approved?
         raise InvalidTransitionError, "Can only unapprove an approved pay period"
@@ -76,6 +77,11 @@ class PayPeriodLifecycleService
         unapproved_at: Time.current,
         unapproved_by_id: actor&.id
       )
+      AuditLog.record!(user: actor, actor: Current.actor || AuditActor.system_job(self.class.name),
+        company_id: pay_period.company_id, action: "pay_periods#unapprove",
+        record_type: "PayPeriod", record_id: pay_period.id, subject_name: AuditRecordSnapshot.subject_name(pay_period),
+        metadata: { reason: reason, changed_fields: [ "status" ],
+          before_values: { status: "approved" }, after_values: { status: "calculated" } })
     end
 
     pay_period
@@ -133,6 +139,8 @@ class PayPeriodLifecycleService
         committed_at: Time.current,
         committed_by_id: actor&.id
       )
+
+      PortalNotifications.payroll_committed!(pay_period, actor: actor)
 
       apply_ytd_and_loan_effects!(committed_items)
       # A run paid before already-committed runs adds to their YTD.
@@ -405,7 +413,7 @@ class PayPeriodLifecycleService
   end
 
   def create_fit_tax_deposit_check!(items)
-    return if pay_period.company.demo?
+    return if pay_period.company.legacy_demo?
     return if NonEmployeeCheck.exists?(
       pay_period: pay_period,
       company_id: pay_period.company_id,

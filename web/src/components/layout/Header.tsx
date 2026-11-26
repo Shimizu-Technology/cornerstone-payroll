@@ -1,4 +1,5 @@
 import { Building2 } from 'lucide-react';
+import { DemoBadge } from '@/components/ui/demo-badge';
 import { useCompany } from '@/contexts/CompanyContext';
 
 interface HeaderProps {
@@ -29,6 +30,7 @@ export function Header({ title, description, subtitle, actions, contextLabel, co
                 <Building2 className="h-3.5 w-3.5 shrink-0 text-primary-700" />
                 <span className="text-neutral-600">{displayedLabel}</span>
                 <span className="max-w-[16rem] truncate text-neutral-950 sm:max-w-[22rem]">{displayedContext}</span>
+                {!contextValue && !organizationWide && activeCompany?.demo && <DemoBadge />}
               </span>
             )}
           </div>

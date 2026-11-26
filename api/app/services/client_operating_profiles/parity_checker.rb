@@ -34,7 +34,7 @@ module ClientOperatingProfiles
       differences = []
 
       companies.find_each do |company|
-        if company.test_workspace?
+        if company.contained?
           skipped_test_workspace_count += 1
           next
         end

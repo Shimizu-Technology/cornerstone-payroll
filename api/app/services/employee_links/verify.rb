@@ -148,6 +148,7 @@ module EmployeeLinks
         metadata: { failed_attempts: attempts, locked_until: link.activation_locked_until&.iso8601 })
       return unless locking
 
+      notify_lock!(link)
       PayrollTelemetry.log(:warn, "employee_links.activation_locked", company_id: link.company_id,
         employee_account_link_id: link.id, request_id: @request&.request_id)
       # One count at a time per company, each after the last one committed,
@@ -174,6 +175,14 @@ module EmployeeLinks
 
     # Staff watch the error-level log events (M4 runbook, Alerts); the audit
     # row stays the record. M4-9 shows it in the admin screens.
+    def notify_lock!(link)
+      ApplicationRecord.transaction(requires_new: true) do
+        PortalNotifications.employee_link_event!("employee_signup_locked", link, generation: link.activation_locked_at)
+      end
+    rescue StandardError => error
+      Rails.logger.error("Employee sign-up lock notification failed: link=#{link.id} error=#{error.class}")
+    end
+
     def alert_staff!(company_id)
       PayrollTelemetry.log(:error, "employee_links.activation_lock_alert", company_id: company_id,
         locks: ALERT_LOCKS, window_minutes: (ALERT_WINDOW / 60).to_i, request_id: @request&.request_id)

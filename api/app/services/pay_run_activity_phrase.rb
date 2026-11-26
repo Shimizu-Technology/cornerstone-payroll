@@ -22,9 +22,11 @@ class PayRunActivityPhrase
     "checks#reprint" => "reprinted the check for",
     "checks#replace_check" => "replaced the check for",
     "checks#reverse_paycheck" => "reversed the paycheck for",
-    "payroll_item#reversed" => "reversed the paycheck for"
+    "payroll_item#reversed" => "reversed the paycheck for",
+    "payroll_item#fit_override" => "changed final Guam income tax withholding for"
   }.freeze
   FIXED = {
+    "reopen_unpaid" => "reopened unpaid payroll",
     "checks#mark_all_printed" => "marked all checks printed",
     "checks#batch_pdf" => "downloaded all checks as one PDF",
     "payroll_imports#rematch" => "matched the import files again",

@@ -6,7 +6,13 @@ module Api
       class FilingSubmittersController < BaseController
         def show
           profile = FilingSubmitter.find_or_initialize_by(organization_id: current_company.organization_id)
-          render json: { exists: profile.persisted?, profile: profile.attributes.slice(*FilingSubmitter::FIELDS.map(&:to_s)), missing_fields: profile.missing_fields, problems: profile.filing_problems, can_edit: StaffRolePolicy.allowed?(current_user, :manage_organization) }
+          render json: {
+            exists: profile.persisted?,
+            profile: profile.attributes.slice(*FilingSubmitter::FIELDS.map(&:to_s)),
+            missing_fields: profile.missing_fields,
+            problems: profile.filing_problems,
+            can_edit: !current_company&.contained? && StaffRolePolicy.allowed?(current_user, :manage_organization)
+          }
         end
 
         def update

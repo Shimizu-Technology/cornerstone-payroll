@@ -266,6 +266,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   end
 
   def draw_document_status(pdf, _page_number)
+    DemoPdfFooter.draw_overlay_footer(pdf, company: company)
     return unless draft
 
     reason = practice ? "a practice copy" : "the #{year} W-2s are not marked ready"

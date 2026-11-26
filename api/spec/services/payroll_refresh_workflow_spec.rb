@@ -169,7 +169,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     original_check = period.non_employee_checks.first
     original_gross = item.gross_pay
     expect(original_check.amount).to eq(103.66.to_d)
-    revision = PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: "Refresh the saved repayment", scope_attributes: { includes_recurring_items: true })
+    revision = PayPeriodCorrectionService.reopen_unpaid!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Refresh the saved repayment", scope_attributes: { includes_recurring_items: true })
     expect(period.reload).to be_voided
     expect(item.reload).to be_voided
     expect(original_check.reload).to be_voided
@@ -186,7 +186,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     expect(EmployeeYtdTotal.find_by!(employee: employee, year: 2026).gross_pay).to eq(original_gross)
     expect(loan.reload.current_balance).to eq(2959.97.to_d)
     expect(company.non_employee_checks.active.where(check_type: "tax_deposit").count).to eq(1)
-    expect { PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: "Repeated correction") }.to raise_error(PayPeriodCorrectionService::CorrectionError)
+    expect { PayPeriodCorrectionService.reopen_unpaid!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Repeated correction") }.to raise_error(PayPeriodCorrectionService::CorrectionError)
     expect(loan.loan_transactions.payments.count).to eq(1)
   end
 
@@ -194,7 +194,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     commit_original
     item.void!(user: actor, reason: "Destroyed the original check")
     period.non_employee_checks.first.void!(reason: "Destroyed tax check")
-    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse unissued payroll")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Reverse unissued payroll")
     expect(item.check_events.where(event_type: "voided").count).to eq(1)
     expect(EmployeeYtdTotal.find_by!(employee: employee, year: 2026).gross_pay).to eq(0)
   end
@@ -202,7 +202,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
   it "rolls every retirement back if a later payment cannot be voided" do
     commit_original
     allow_any_instance_of(NonEmployeeCheck).to receive(:void!).and_raise(ArgumentError, "Concurrent payment evidence")
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse unissued payroll") }.to raise_error(ArgumentError)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Reverse unissued payroll") }.to raise_error(ArgumentError)
     expect(period.reload).not_to be_voided
     expect(item.reload).not_to be_voided
     expect(item.check_events.where(event_type: "voided")).to be_empty
@@ -213,7 +213,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     commit_original
     item.check_events.create!(event_type: "delivered", check_number: item.check_number, user: actor, effective_on: period.pay_date, evidence_type: "hand_delivery", details: { attested: true })
     item.update!(voided: true, voided_at: Time.current, void_reason: "Individual void recorded")
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /issued/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /issued/)
     expect(period.reload).not_to be_voided
   end
 
@@ -221,11 +221,11 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     commit_original
     check = period.non_employee_checks.sole
     check.update!(printed_at: Time.current, paid_at: Time.current, paid_by: actor, payment_date: period.pay_date)
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /payment/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /payment/)
     expect(item.reload).not_to be_voided
     check.update!(paid_at: nil, paid_by: nil)
     Form500Filing.create!(company: company, pay_period: period, status: "filed", fields: { reference: "Paper return" })
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /filing/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /filing/)
     expect(item.reload).not_to be_voided
   end
 
@@ -237,7 +237,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     check = period.non_employee_checks.sole
     entry = other_posting.entries.where(authority: PayrollLiabilityPostingService::GUAM_DRT).first
     PayrollLiabilityCheckAllocation.create!(company: company, non_employee_check: check, payroll_liability_entry: entry, amount: 1)
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /another payroll/)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /another payroll/)
     expect(item.reload).not_to be_voided
   end
 
@@ -245,7 +245,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     commit_original
     later = create(:pay_period, :committed, company: company, pay_date: period.pay_date + 1.day)
     create(:payroll_item, pay_period: later, employee: employee, gross_pay: 100)
-    expect { PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /later payroll/)
+    expect { PayPeriodCorrectionService.reopen_unpaid!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /later payroll/)
     expect(item.reload).not_to be_voided
   end
   it "preserves entered amounts, wage-rate hours, field overrides, and excluded employees in the revision" do
@@ -263,7 +263,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     entry = item.payroll_item_field_entries.create!(payroll_field_definition: field, label: field.name,
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "other", amount: 12, source: "manual")
     commit_original
-    revision = PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: "Refresh entered payroll setup")
+    revision = PayPeriodCorrectionService.reopen_unpaid!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Refresh entered payroll setup")
     revised = revision.payroll_items.sole
     %w[salary_override non_taxable_pay service_charge_wages custom_earnings custom_deductions payroll_adjustments timekeeping_context_snapshot].each do |attribute|
       expect(revised.public_send(attribute)).to eq(item.public_send(attribute))
@@ -278,7 +278,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     item.check_reconciliation_events.create!(company: company, pay_period: period, recorded_by: actor, event_type: "cleared",
       check_number: item.check_number, effective_on: period.pay_date, amount: item.net_pay,
       evidence_type: "bank_statement", evidence_reference: "Retained bank evidence", idempotency_key: SecureRandom.uuid)
-    expect { PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Unsafe reversal rejected") }
       .to raise_error(PayPeriodCorrectionService::InvalidStateError, /clearing evidence/)
     expect(period.reload).not_to be_voided
   end
@@ -297,7 +297,7 @@ RSpec.describe "Unpaid payroll revisions and named repayments" do
     commit_original
     source = create(:time_tracking_source, company: company, source_type: "aire_services")
     create(:time_tracking_import, :finalized_aire_batch, pay_period: period, time_tracking_source: source, status: "applied")
-    expect { PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: "Review source revision first") }
+    expect { PayPeriodCorrectionService.reopen_unpaid!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Review source revision first") }
       .to raise_error(PayPeriodCorrectionService::InvalidStateError, /source processing evidence/)
     expect(period.reload).not_to be_voided
     expect(item.reload).not_to be_voided

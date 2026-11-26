@@ -59,7 +59,7 @@ RSpec.describe "PR376 independent review edges" do
       corrected_inputs: { bonus: 925 }, pay_date: "2024-02-09", reason: "First negative correction", actor: actor)
     IssueCorrectivePaycheckService.issue!(original_pay_period: original.pay_period, employee: employee,
       corrected_inputs: { bonus: 900 }, pay_date: "2024-02-16", reason: "Second negative correction", actor: actor)
-    PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Void first negative adjustment")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: first_period, actor: actor, reason: "Void first negative adjustment", acknowledge_later_runs: true)
     following = calc(period("2024-02-23"), 75)
     expect(EmployeeYearFicaContext.reportable_items(employee: employee, year: 2024).sum(:social_security_tax)).to eq("10453.20".to_d)
     expect(original.reload.social_security_taxable_wages).to be_nil
@@ -95,7 +95,7 @@ RSpec.describe "PR376 independent review edges" do
       corrected_inputs: { bonus: 925 }, pay_date: "2024-02-09", reason: "First negative correction", actor: actor)
     IssueCorrectivePaycheckService.issue!(original_pay_period: original.pay_period, employee: employee,
       corrected_inputs: { bonus: 900 }, pay_date: "2024-02-16", reason: "Second negative correction", actor: actor)
-    PayPeriodCorrectionService.void!(pay_period: first_period, actor: actor, reason: "Void first negative adjustment")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: first_period, actor: actor, reason: "Void first negative adjustment", acknowledge_later_runs: true)
     following = calc(period("2024-02-23"), 75)
     expect(following.additional_medicare_taxable_wages).to eq(50)
     expect(following.additional_medicare_tax).to eq("0.45".to_d)

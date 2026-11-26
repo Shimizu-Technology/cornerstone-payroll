@@ -14,6 +14,38 @@ module PortalNotifications
   BATCH_WINDOW = 2.minutes
 
   CATEGORIES = {
+    "payroll_finalized" => {
+      audience: "client", default_mode: "digest", label: "Payroll finalized",
+      description: "Payroll is final and pay statements post on pay date."
+    },
+    "payroll_corrections" => {
+      audience: "client", default_mode: "immediate", label: "Payroll reopened",
+      description: "A finalized payroll was rolled back or reopened."
+    },
+    "payroll_corrections_staff" => {
+      audience: "staff", default_mode: "immediate", label: "Payroll reopened",
+      description: "A client's payroll was rolled back or reopened."
+    },
+    "payroll_super_admin" => {
+      audience: "staff", default_mode: "immediate", mandatory: true, label: "Payroll oversight",
+      description: "A payroll action requires super-admin visibility."
+    },
+    "payroll_viewer_updates" => {
+      audience: "client", default_mode: "digest", label: "Payroll decisions",
+      description: "Cornerstone records a decision on a payroll."
+    },
+    "contact_confirmations" => {
+      audience: "staff", default_mode: "digest", label: "Contact changes to confirm",
+      description: "An employee contact or delivery change needs confirmation."
+    },
+    "employee_app_follow_ups" => {
+      audience: "staff", default_mode: "digest", label: "Employee app follow-ups",
+      description: "Employee sign-ups are locked or invites are expiring."
+    },
+    "w2_posting" => {
+      audience: "staff", default_mode: "immediate", label: "W-2s ready to post",
+      description: "The current W-2 filing was marked ready."
+    },
     "tax_form_paper_copies" => {
       audience: "staff", default_mode: "immediate", label: "Paper tax form follow-ups",
       description: "An employee tax form email could not be delivered and a paper copy is due."
@@ -61,13 +93,23 @@ module PortalNotifications
   }.freeze
 
   EVENT_TYPES = {
+    "payroll_committed" => { category: "payroll_finalized", scopes: {
+      "client_managers" => "payroll_finalized", "client_viewers" => "payroll_finalized"
+    } },
+    "payroll_reopened" => { category: "payroll_corrections", scopes: {
+      "client_managers" => "payroll_corrections", "client_viewers" => "payroll_viewer_updates",
+      "account_team" => "payroll_corrections_staff", "super_admins" => "payroll_super_admin"
+    } },
+    "employee_signup_locked" => { category: "employee_app_follow_ups" },
+    "employee_invite_expiring" => { category: "employee_app_follow_ups" },
+    "w2_ready_to_post" => { category: "w2_posting" },
     "tax_form_paper_required" => { category: "tax_form_paper_copies" },
     "client_message" => { category: "client_messages", message: true },
     "client_upload" => { category: "client_uploads" },
     "employee_change_submitted" => { category: "employee_changes" },
-    "address_approval_requested" => { category: "address_approvals" },
-    "employee_contact_confirmation_requested" => { category: "employee_changes" },
-    "employee_contact_changed" => { category: "contact_changes" },
+    "address_approval_requested" => { category: "address_approvals", client_managers_only: true },
+    "employee_contact_confirmation_requested" => { category: "contact_confirmations" },
+    "employee_contact_changed" => { category: "contact_changes", client_managers_only: true },
     "employee_address_decided" => { category: "employee_address_decisions" },
     "staff_reply" => { category: "portal_replies", message: true },
     "employee_change_decided" => { category: "employee_change_decisions" },
@@ -133,10 +175,10 @@ module PortalNotifications
       end
     end
 
-    def employee_contact_changed!(entry, actor: entry.changed_by, notify_staff: false)
+    def employee_contact_changed!(entry, actor: entry.changed_by)
       record!(event_type: "employee_contact_changed", company: entry.company, actor: actor,
         subject: entry, dedupe_key: "employee_contact_changed:#{entry.id}")
-      if notify_staff
+      unless entry.after_values.key?("emergency_contacts")
         record!(event_type: "employee_contact_confirmation_requested", company: entry.company, actor: actor,
           subject: entry, dedupe_key: "employee_contact_confirmation_requested:#{entry.id}")
       end
@@ -170,9 +212,44 @@ module PortalNotifications
         dedupe_key: "#{event_type}:#{dedupe}", metadata: metadata.merge(period_id: period.id))
     end
 
+    def payroll_committed!(period, actor:)
+      payroll_lifecycle_event!("payroll_committed", period, actor: actor, revision: period.committed_at.utc.iso8601(6))
+    rescue StandardError => error
+      Rails.logger.error("Payroll commit notification failed: period=#{period.id} error=#{error.class}")
+    end
+
+    # Record the alert in the rollback transaction with its immutable action ID.
+    # Let ledger errors propagate so the rollback and its audit writes fail.
+    def payroll_reopened!(period, actor:, action_id:, self_override: false)
+      raise ArgumentError, "Payroll rollback action ID is required" if action_id.blank?
+
+      payroll_lifecycle_event!("payroll_reopened", period, actor: actor, revision: action_id, self_override: self_override)
+    end
+
+    def employee_link_event!(event_type, link, generation:, now: Time.current)
+      record!(event_type: event_type, company: link.company, actor: nil, subject: link,
+        dedupe_key: "#{event_type}:#{link.id}:#{generation.utc.iso8601(6)}",
+        metadata: { generation: generation.utc.iso8601(6) }, occurred_at: now)
+    end
+
+    def w2_ready_to_post!(filing, actor:)
+      ApplicationRecord.transaction(requires_new: true) do
+        revision = filing.attestation_history.length
+        dedupe_key = "w2_ready_to_post:#{filing.id}:#{revision}"
+        next if PortalNotificationEvent.exists?(dedupe_key: dedupe_key)
+        next unless EmployeeDocuments::PostW2GuCopies.new(company: filing.company, year: filing.year).posting_pending?
+
+        record!(event_type: "w2_ready_to_post", company: filing.company, actor: actor, subject: filing,
+          dedupe_key: dedupe_key, metadata: { tax_year: filing.year, revision: revision },
+          w2_posting_availability: { [ filing.company_id, filing.year, revision ] => true })
+      end
+    rescue StandardError => error
+      Rails.logger.error("W-2 posting notification failed: filing=#{filing.id} error=#{error.class}")
+    end
+
     # Repeating an event (a retried request, a replayed job) returns the saved
     # event instead of creating more alerts.
-    def record!(event_type:, company:, actor:, subject:, dedupe_key:, metadata: {}, occurred_at: Time.current)
+    def record!(event_type:, company:, actor:, subject:, dedupe_key:, metadata: {}, occurred_at: Time.current, w2_posting_availability: {})
       # Practice copies never notify. A demo company notifies like a client,
       # but only allow-listed recipients (DemoOutbound) are ever sent to.
       return if company.nil? || company.practice_copy?
@@ -180,8 +257,14 @@ module PortalNotifications
       existing = PortalNotificationEvent.find_by(dedupe_key: dedupe_key)
       return existing if existing
 
-      category = EVENT_TYPES.fetch(event_type).fetch(:category)
-      if event_type == "payroll_review_decided" && metadata.stringify_keys.slice("decision", "recipient_scope") ==
+      definition = EVENT_TYPES.fetch(event_type)
+      scope = metadata.stringify_keys["recipient_scope"]
+      category = definition[:scopes]&.fetch(scope) || definition.fetch(:category)
+      if event_type == "payroll_review_decided" && scope == "super_admins"
+        category = "payroll_super_admin"
+      elsif event_type == "payroll_review_decided" && scope == "client_viewers"
+        category = "payroll_viewer_updates"
+      elsif event_type == "payroll_review_decided" && metadata.stringify_keys.slice("decision", "recipient_scope") ==
           { "decision" => "cornerstone_override", "recipient_scope" => "client_managers" }
         category = "payroll_updates"
       end
@@ -190,7 +273,7 @@ module PortalNotifications
         event_type: event_type, category: category,
         subject: subject, dedupe_key: dedupe_key, metadata: metadata, occurred_at: occurred_at || Time.current
       )
-      targets, event.recipient_status = Recipients.resolve(event)
+      targets, event.recipient_status = Recipients.resolve(event, now: event.occurred_at, w2_posting_availability: w2_posting_availability)
       begin
         PortalNotificationEvent.transaction(requires_new: true) { event.save! }
       rescue ActiveRecord::RecordNotUnique
@@ -200,7 +283,7 @@ module PortalNotifications
         # Never silently dropped: the ledger shows there was nobody to notify.
         PortalNotificationDelivery.create!(portal_notification_event: event, company_id: event.company_id, channel: "email",
           recipient_key: "none", delivery_mode: CATEGORIES.dig(event.category, :default_mode), status: "skipped",
-          skip_reason: "no_recipients", deliver_after: event.occurred_at, completed_at: Time.current)
+          skip_reason: event.recipient_status, deliver_after: event.occurred_at, completed_at: Time.current)
       end
       targets.each { |target| create_delivery!(event, target) }
       event
@@ -218,6 +301,17 @@ module PortalNotifications
     end
 
     private
+
+    def payroll_lifecycle_event!(event_type, period, actor:, revision:, self_override: false)
+      ApplicationRecord.transaction(requires_new: true) do
+        EVENT_TYPES.fetch(event_type).fetch(:scopes).each_key do |scope|
+          metadata = { recipient_scope: scope, revision: revision }
+          metadata[:self_override] = true if scope == "super_admins" && self_override
+          payroll_period!(event_type, period: period, actor: actor, dedupe: "#{period.id}:#{revision}:#{scope}",
+            metadata: metadata)
+        end
+      end
+    end
 
     def create_delivery!(event, target)
       # Extra addresses have no account preferences; they follow the default.

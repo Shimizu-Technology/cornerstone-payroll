@@ -12,8 +12,12 @@ module Api
         # belongs in the same AuditLog stream as commit/void/run_payroll.
         # Read-only previews (`:corrective_paycheck_preview`,
         # `:supplemental_pay_periods`) are deliberately omitted.
-        audit_actions :approve, :unapprove, :commit, :run_payroll, :void, :record_client_approval,
-                      :create_correction_run, :reopen_unpaid, :refresh_setup, :generate_fit_check,
+        rescue_from AdminOverrideService::AccessDenied do |error|
+          render json: { error: error.message }, status: :forbidden
+        end
+
+        audit_actions :approve, :commit, :run_payroll, :record_client_approval,
+                      :create_correction_run, :refresh_setup, :generate_fit_check,
                       :corrective_paychecks, :adopt_confirmed_workweek, :connect_corrected_hours
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit,
@@ -100,15 +104,14 @@ module Api
 
         def correction_preflight
           preview = PayrollRevisionPaymentPreflight.new(pay_period: @pay_period)
-          render json: { correction_preflight: preview.call(reopen: true), void_preflight: preview.call }
+          render json: { correction_preflight: preview.call(reopen: true), void_preflight: preview.call,
+            confirmation: AdminOverrideService.payroll_confirmation(@pay_period) }
         end
 
         def reopen_unpaid
-          require_unpaid_acknowledgement!
-          correction = PayPeriodCorrectionService.reopen_unpaid!(
-            pay_period: @pay_period, actor: current_user, reason: params[:reason].to_s.strip,
-            scope_attributes: refresh_scope_attributes
-          )
+          return unless rollback_verification_passed?
+
+          correction = rollback_payroll!(reopen: true)
           render json: { source_pay_period: pay_period_json(@pay_period.reload),
             correction_run: pay_period_json(correction, include_items: true) }, status: :created
         rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, PayrollLiabilityPostingService::Error, ActiveRecord::RecordInvalid => e
@@ -679,9 +682,9 @@ module Api
         # POST /api/v1/admin/pay_periods/:id/unapprove
         # Roll back an approved pay period to calculated status.
         def unapprove
-          lifecycle_service.unapprove!
+          lifecycle_service.unapprove!(reason: AdminOverrideService.reason!(params[:reason]))
           render json: { pay_period: pay_period_json(@pay_period) }
-        rescue PayPeriodLifecycleService::Error => e
+        rescue ArgumentError, PayPeriodLifecycleService::Error, ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
@@ -747,15 +750,16 @@ module Api
         # check override dates, matching linked non-employee check dates, and the
         # stored YTD display snapshots used on generated stubs.
         def correct_pay_date
-          result = PayPeriodPayDateCorrectionService.call(
-            pay_period: @pay_period,
-            new_pay_date: params[:pay_date],
-            reason: params[:reason],
-            actor: current_user
-          )
+          result = nil
+          PayPeriod.transaction(requires_new: true) do
+            result = PayPeriodPayDateCorrectionService.call(
+              pay_period: @pay_period,
+              new_pay_date: params[:pay_date],
+              reason: params[:reason],
+              actor: current_user
+            )
 
-          unless result.noop
-            begin
+            unless result.noop
               AuditLog.record!(
                 user:        current_user,
                 company_id:  current_company_id,
@@ -772,8 +776,6 @@ module Api
                 ip_address:  request.remote_ip,
                 user_agent:  request.user_agent
               )
-            rescue StandardError => e
-              Rails.logger.error("[correct_pay_date] AuditLog failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
             end
           end
 
@@ -803,58 +805,12 @@ module Api
         # Voids a committed pay period. Reverses YTD totals and writes an
         # immutable correction audit event. Requires a mandatory reason.
         def void
-          reason = params[:reason].to_s.strip
-          if reason.blank?
-            return render json: { error: "A reason is required to void a pay period" }, status: :unprocessable_entity
-          end
+          return unless rollback_verification_passed?
 
-          begin
-            require_unpaid_acknowledgement!
-            event = PayPeriodCorrectionService.void!(
-              pay_period: @pay_period,
-              actor:      current_user,
-              reason:     reason
-            )
-            @pay_period.reload
-
-            begin
-              changes = audit_record_changes
-              AuditLog.record!(
-                user:        current_user,
-                company_id:  current_company_id,
-                action:      "void_pay_period",
-                record_type: "PayPeriod",
-                record_id:   @pay_period.id,
-                subject_name: AuditRecordSnapshot.subject_name(@pay_period),
-                metadata:    {
-                  changed_fields: changes[:changed_fields],
-                  before_values: changes[:before_values].presence,
-                  after_values: changes[:after_values].presence,
-                  redacted_fields: changes[:redacted_fields].presence,
-                  reason: reason,
-                  voided_at: event.created_at,
-                  business_summary: pay_period_business_summary(@pay_period, include_voided_period: true)
-                }.compact,
-                ip_address:  request.remote_ip,
-                user_agent:  request.user_agent,
-                request_id:  request.request_id
-              )
-              skip_default_audit_log!
-            rescue StandardError => e
-              Rails.logger.error("[CPR-71] AuditLog void_pay_period failed for pay_period=#{@pay_period.id}: #{e.class}: #{e.message}")
-            end
-
-            render json: {
-              pay_period: pay_period_json(@pay_period),
-              correction_event: correction_event_json(event)
-            }
-          rescue PayPeriodCorrectionService::CorrectionError, PayrollLiabilityPostingService::Error => e
-            render json: { error: e.message }, status: :unprocessable_entity
-          rescue ActiveRecord::RecordInvalid => e
-            render json: { error: e.record.errors.full_messages.join(", ") }, status: :unprocessable_entity
-          rescue ArgumentError => e
-            render json: { error: e.message }, status: :unprocessable_entity
-          end
+          event = rollback_payroll!
+          render json: { pay_period: pay_period_json(@pay_period.reload), correction_event: correction_event_json(event) }
+        rescue ArgumentError, PayPeriodCorrectionService::CorrectionError, PayrollLiabilityPostingService::Error, ActiveRecord::RecordInvalid => e
+          render json: { error: e.message }, status: :unprocessable_entity
         end
 
         # POST /api/v1/admin/pay_periods/:id/create_correction_run
@@ -1092,7 +1048,7 @@ module Api
           return {} unless record.is_a?(PayPeriod)
           return {} unless %w[run_payroll refresh_setup approve unapprove commit void].include?(action_name)
 
-          summary = pay_period_business_summary(record)
+          summary = AuditRecordSnapshot.pay_period_business_summary(record)
           if %w[run_payroll refresh_setup].include?(action_name) && defined?(@payroll_audit_results) && @payroll_audit_results
             summary[:employees_processed] = @payroll_audit_results.fetch(:success, []).size
             summary[:employees_failed] = @payroll_audit_results.fetch(:errors, []).size
@@ -1150,28 +1106,6 @@ module Api
             employee_id: employee.id, employee_name: employee.full_name,
             before_values: before.slice(*changed).transform_values(&:to_s),
             after_values: after.slice(*changed).transform_values(&:to_s)
-          }
-        end
-
-        def pay_period_business_summary(record, include_voided_period: false)
-          # A void audit describes the wages reversed, even after the parent
-          # period has left financial reports. Individually reversed rows stay excluded.
-          items = include_voided_period ? record.payroll_items.where(payroll_reversed_at: nil) : record.payroll_items.financially_reportable
-          aggregates = items.reportable.pick(
-            Arel.sql("COUNT(*)"),
-            Arel.sql("COALESCE(SUM(gross_pay), 0)"),
-            Arel.sql("COALESCE(SUM(total_deductions), 0)"),
-            Arel.sql("COALESCE(SUM(employer_social_security_tax), 0)"),
-            Arel.sql("COALESCE(SUM(employer_medicare_tax), 0)"),
-            Arel.sql("COALESCE(SUM(net_pay), 0)")
-          )
-          {
-            status: record.status,
-            employee_count: aggregates[0].to_i,
-            total_gross: aggregates[1].to_d.to_s("F"),
-            total_deductions: aggregates[2].to_d.to_s("F"),
-            employer_payroll_taxes: (aggregates[3].to_d + aggregates[4].to_d).to_s("F"),
-            total_net: aggregates[5].to_d.to_s("F")
           }
         end
 
@@ -1353,10 +1287,18 @@ module Api
           end
         end
 
-        def require_unpaid_acknowledgement!
-          unless [ true, "true" ].include?(params[:unpaid_acknowledgement])
-            raise ArgumentError, "Confirm that all employee and tax payments remain unissued and unpaid, and prepared paper checks will be destroyed"
-          end
+        def rollback_verification_passed?
+          require_direct_recent_verification!(impersonation_error: "Exit Sign in as before rolling back payroll.")
+          !performed?
+        end
+
+        def rollback_payroll!(reopen: false)
+          AdminOverrideService.rollback_payroll!(pay_period: @pay_period, actor: current_user,
+            verified: MfaPolicy.recently_step_up_verified?(@clerk_token_payload), impersonated: impersonated_session?,
+            reason: params[:reason], confirmation: params[:confirmation], reopen: reopen,
+            scope_attributes: reopen ? refresh_scope_attributes : {},
+            unpaid_acknowledgement: [ true, "true" ].include?(params[:unpaid_acknowledgement]),
+            acknowledge_later_runs: [ true, "true" ].include?(params[:acknowledge_later_runs]))
         end
 
         def purpose_fields_submitted?
@@ -1416,6 +1358,14 @@ module Api
           return unless StaffRolePolicy.allowed?(current_user, :view_record_activity)
 
           "/companies/#{pay_period.company_id}/year-end?year=#{year}#payroll-history-review"
+        end
+
+        def admin_rollback_recorded?(period)
+          rollback_ids = [ (period.id if period.voided?), period.source_pay_period_id ].compact
+          return false if rollback_ids.empty?
+
+          AdminOverride.exists?(company_id: period.company_id, subject_type: "PayPeriod",
+            subject_id: rollback_ids, action: %w[void_pay_period reopen_unpaid])
         end
 
         def pay_period_json(pay_period, include_items: false, list: false)
@@ -1485,7 +1435,8 @@ module Api
             void_reason:              pay_period.void_reason,
             source_pay_period_id:     pay_period.source_pay_period_id,
             superseded_by_id:         pay_period.superseded_by_id,
-            can_void:                        pay_period.can_void?,
+            can_void:                        pay_period.can_void? && !impersonated_session? && StaffRolePolicy.allowed?(current_user, :break_glass),
+            rollback_review_required: pay_period.rollback_review_required,
             can_create_correction_run:       pay_period.can_create_correction_run?,
             can_delete_draft_correction_run: pay_period.can_delete_draft_correction_run?,
             # Per-employee corrective paycheck (off-cycle supplemental period)
@@ -1503,6 +1454,7 @@ module Api
               AuditLog.where(company_id: pay_period.company_id, action: "checks#preview_pdf",
                 record_type: "PayPeriod", record_id: pay_period.id).newest_first.first
             end
+            json[:admin_rollback] = admin_rollback_recorded?(pay_period)
             json[:last_preview_download] = last_preview && {
               revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
             }

@@ -1,6 +1,9 @@
+import { refreshIssuer, refreshJwk } from './e2e/helpers/refresh-session';
 import { defineConfig, devices } from '@playwright/test';
 import { resolve } from 'node:path';
 
+const refreshLane = process.env.E2E_REFRESH_LANE === 'true';
+const refreshPublicJwk = refreshLane ? refreshJwk() : undefined;
 const externalBaseUrl = process.env.E2E_BASE_URL;
 const releaseLane = process.env.E2E_RELEASE_LANE === 'true' || process.env.E2E_REFRESH_LANE === 'true' || process.env.E2E_PAY_ITEMS_LANE === 'true';
 const fixturePath = process.env.E2E_FIXTURE_PATH || resolve(process.cwd(),
@@ -71,14 +74,20 @@ export default defineConfig({
     : [
         ...(releaseLane
           ? [{
-              command: `cd ../api && bundle exec rails server --environment test --binding 127.0.0.1 --port ${apiPort} --pid tmp/pids/e2e-${apiPort}.pid`,
+              command: `cd ../api && bundle exec ${refreshLane ? 'ruby ../scripts/e2e/payroll_refresh_qa_server.rb' : 'rails'} server --environment test --binding 127.0.0.1 --port ${apiPort} --pid tmp/pids/e2e-${apiPort}.pid`,
               url: `${localApiUrl}/up`,
               reuseExistingServer: false,
               timeout: 120_000,
               env: {
                 ...process.env,
                 RAILS_ENV: 'test',
-                AUTH_ENABLED: 'false',
+                AUTH_ENABLED: refreshLane ? 'true' : 'false',
+                ...(refreshPublicJwk ? {
+                  CLERK_ISSUER: refreshIssuer,
+                  CLERK_API_BASE: refreshIssuer,
+                  CLERK_AUTHORIZED_PARTIES: localBaseUrl,
+                  E2E_REFRESH_PUBLIC_JWK: JSON.stringify(refreshPublicJwk),
+                } : {}),
                 E2E_TEST_MODE: 'true',
                 E2E_FIXTURE_PATH: fixturePath,
                 CORS_ORIGINS: localBaseUrl,

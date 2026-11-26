@@ -91,7 +91,7 @@ module EmployeeAppSwitch
   # A live client or a demo company can use the employee app; other test
   # workspaces and inactive companies can't.
   def eligible_company?(company)
-    company.active? && company.organization&.active? && (company.live_payroll? || company.demo?)
+    company.active? && company.organization&.active? && company.operating?
   end
 
   # The stored values, from the profile version in effect today. Unlike

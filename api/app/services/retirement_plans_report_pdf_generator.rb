@@ -38,6 +38,7 @@ class RetirementPlansReportPdfGenerator
     end
 
     render_footer(pdf)
+    DemoPdfFooter.draw_prawn_footer(pdf, company: company, y: 38, height: 8)
     pdf.render
   end
 

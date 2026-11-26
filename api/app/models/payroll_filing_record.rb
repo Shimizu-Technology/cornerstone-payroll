@@ -8,7 +8,7 @@ class PayrollFilingRecord < ApplicationRecord
 
   belongs_to :company
   # A demo company never files; the database refuses these rows too.
-  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.legacy_demo? }
   has_many :events,
            -> { order(:occurred_at, :id) },
            class_name: "PayrollFilingEvent",

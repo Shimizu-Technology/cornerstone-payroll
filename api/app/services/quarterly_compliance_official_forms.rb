@@ -6,9 +6,10 @@ module QuarterlyComplianceOfficialForms
   class BaseForm < OfficialPdfOverlay
     attr_reader :report, :fields
 
-    def initialize(report:, template_path:, page_sizes:, fields: {})
+    def initialize(report:, template_path:, page_sizes:, fields: {}, demo: nil)
       @report = report.deep_symbolize_keys
       @fields = fields.to_h.deep_symbolize_keys
+      @demo = demo.nil? ? @report.dig(:meta, :demo) == true : demo == true
       super(template_path: template_path, page_sizes: page_sizes)
     end
 
@@ -26,6 +27,9 @@ module QuarterlyComplianceOfficialForms
           align: :center
         )
       end
+      # Keep DRAFT at y=18 so SW-2's EMPLOYER'S SIGNATURE label is untouched;
+      # draw the demo notice beneath it at ~y=7 (box 4..10pt).
+      DemoPdfFooter.draw_overlay_footer(pdf, demo: @demo, y: 10, height: 6, font_size: 6.0)
     end
 
     def meta
@@ -166,9 +170,9 @@ module QuarterlyComplianceOfficialForms
       quarter_total: [ [ 230.4, 526.968, 331.2, 540.969 ], [ 338.4, 526.968, 359.25, 540.969 ] ]
     }.freeze
 
-    def initialize(report:, fields: {})
+    def initialize(report:, fields: {}, demo: nil)
       self.class.ensure_supported_tax_year!(report.deep_symbolize_keys.dig(:meta, :year))
-      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE, PAGE_SIZE, PAGE_SIZE ])
+      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE, PAGE_SIZE, PAGE_SIZE ], demo: demo)
     end
 
     private
@@ -270,8 +274,8 @@ module QuarterlyComplianceOfficialForms
     }.freeze
     QUARTER_TOTAL = [ [ 453.6, 49.968, 545.2, 65.967 ], [ 554.4, 49.968, 574.0, 65.967 ] ].freeze
 
-    def initialize(report:, fields: {})
-      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
+    def initialize(report:, fields: {}, demo: nil)
+      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ], demo: demo)
     end
 
     private
@@ -494,8 +498,8 @@ module QuarterlyComplianceOfficialForms
       ]
     }.freeze
 
-    def initialize(report:, fields: {})
-      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
+    def initialize(report:, fields: {}, demo: nil)
+      super(report: report, fields: fields, template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ], demo: demo)
     end
 
     private
@@ -612,12 +616,12 @@ module QuarterlyComplianceOfficialForms
       page_total: [ 831.879761, 588.999878, 873.130005, 607.749939 ]
     }.freeze
 
-    def initialize(report:, fields: {})
+    def initialize(report:, fields: {}, demo: nil)
       symbolized_report = report.deep_symbolize_keys
       symbolized_fields = fields.to_h.deep_symbolize_keys
       @employee_pages = Array(symbolized_fields[:employees].presence || symbolized_report.dig(:swica, :employees)).each_slice(EMPLOYEES_PER_PAGE).to_a
       @employee_pages = [ [] ] if @employee_pages.empty?
-      super(report: symbolized_report, fields: symbolized_fields, template_path: TEMPLATE_PATH, page_sizes: @employee_pages.map { PAGE_SIZE })
+      super(report: symbolized_report, fields: symbolized_fields, template_path: TEMPLATE_PATH, page_sizes: @employee_pages.map { PAGE_SIZE }, demo: demo)
     end
 
     def generate

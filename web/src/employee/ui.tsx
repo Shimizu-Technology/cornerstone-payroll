@@ -206,6 +206,11 @@ export function Field({ label, hint, error, id, className, ...props }: FieldProp
   );
 }
 
+/** Small grey "Demo" pill (D-3). Render only when brand.demo or link.demo is true. */
+export function DemoPill(): ReactElement {
+  return <span className="emp-demo-pill">Demo</span>;
+}
+
 /** A message in a form: a problem (role=alert) or a confirmation (role=status). */
 export function FormMessage({ tone, children }: { tone: 'bad' | 'good' | 'info'; children: ReactNode }): ReactElement {
   return (

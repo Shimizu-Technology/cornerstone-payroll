@@ -5,7 +5,7 @@ require "set"
 # Milestone 3 build plan §2.1, plus employee notes and payroll history review.
 module RlsTables
   RLS_PROTECTED_TABLES = %w[
-    aire_history_operations aire_history_reviews aire_payroll_calendar_periods
+    admin_overrides aire_history_operations aire_history_reviews aire_payroll_calendar_periods
     aire_payroll_cutoff_overrides aire_payroll_entry_acknowledgements
     aire_verified_history_rollout_receipts audit_logs check_events check_print_generations
     check_print_runs check_reconciliation_events check_signoff_sheets

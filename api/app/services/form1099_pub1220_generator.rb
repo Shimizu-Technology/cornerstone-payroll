@@ -34,8 +34,8 @@ class Form1099Pub1220Generator
   end
 
   def generate
-    # The GuamTax e-file is an electronic filing; a demo never produces one.
-    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
+    # The GuamTax e-file is an electronic filing; a demo never produces one outside DEPLOYMENT_ENV=local.
+    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo? && !LocalDeployment.local?
 
     found = problems
     raise InvalidFile, found if found.any?
@@ -106,7 +106,7 @@ class Form1099Pub1220Generator
 
   def entity_problems(object, label)
     found = []
-    found << "#{label}: valid EIN required" unless tin(object.ein).match?(/\A\d{9}\z/) && tin(object.ein).chars.uniq.length > 1
+    found << "#{label}: valid EIN required" unless Efw2Formatting.valid_ein?(object.ein)
     identity_problems(object, label, found)
     found
   end

@@ -25,7 +25,7 @@ module PayrollImport
       return {} if same_rate && rates.first.rate != @employee.payroll_rate_on(@pay_period.end_date).to_d
 
       history = PayPeriod.committed
-      if @pay_period.company.test_workspace?
+      if @pay_period.company.practice_copy?
         baselines = PayPeriod.where(status: "approved", test_workspace_role: "baseline")
           .where.not(test_workspace_source_pay_period_id: nil)
         history = history.or(baselines)

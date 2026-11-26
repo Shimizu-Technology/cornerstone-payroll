@@ -159,7 +159,7 @@ RSpec.describe "Annual FICA review disclosure", type: :request do
     item.update_columns(tax_rule_snapshot: item.tax_rule_snapshot.merge("annual_fica_context" => old))
     run.update_columns(status: "approved", approved_at: Time.current, approved_by_id: actor.id)
     expect(run.annual_fica_review_note).to include(employee.full_name, BelowThresholdFicaContext::NOTE)
-    post "/api/v1/admin/pay_periods/#{run.id}/unapprove"
+    post "/api/v1/admin/pay_periods/#{run.id}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(calculate["annual_fica_review_note"]).to be_nil
     expect(fica_amounts).to eq(saved_amounts)

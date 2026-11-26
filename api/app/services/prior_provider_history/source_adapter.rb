@@ -63,7 +63,7 @@ module PriorProviderHistory
       rows = period.payroll_items.order(:id).map do |item|
         [ item.attributes, item.payroll_item_deductions.order(:id).map { |row| row.attributes.except("company_id") }, item.payroll_item_field_entries.order(:id).map { |row| row.attributes.except("company_id") } ]
       end
-      Digest::SHA256.hexdigest(JSON.generate(QuickbooksHistory::CanonicalJson.normalize([ period.attributes, rows ])))
+      Digest::SHA256.hexdigest(JSON.generate(QuickbooksHistory::CanonicalJson.normalize([ period.attributes.except("rollback_review_required"), rows ])))
     end
   end
 end
