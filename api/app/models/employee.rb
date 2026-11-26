@@ -446,9 +446,11 @@ class Employee < ApplicationRecord
     status == "active"
   end
 
-  def eligible_on?(date)
+  # w4_on: the date the W-4 is checked on, a payroll's pay_date when the
+  # caller is building that payroll (EmployeeIntakePolicy.payroll_ready?).
+  def eligible_on?(date, w4_on: date)
     date = date.to_date
-    return false unless EmployeeIntakePolicy.payroll_ready?(self, date)
+    return false unless EmployeeIntakePolicy.payroll_ready?(self, date, w4_on: w4_on.to_date)
     return false if hire_date.present? && date < hire_date
 
     event = employee_status_events.where("effective_date <= ?", date).order(effective_date: :desc, id: :desc).first
