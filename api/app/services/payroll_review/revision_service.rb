@@ -261,7 +261,8 @@ module PayrollReview
       # aborting the financial transaction or leaving a partial delivery ledger.
       ApplicationRecord.transaction(requires_new: true) do
         PortalNotifications.record!(event_type: event, company: pay_period.company, actor: actor, subject: pay_period,
-          dedupe_key: "#{event}:#{package.id}", metadata: { pay_period_id: pay_period.id, revision: package.revision, decision: decision }.compact)
+          dedupe_key: "#{event}:#{package.id}",
+          metadata: { pay_period_id: pay_period.id, review_package_id: package.id, revision: package.revision, decision: decision }.compact)
       end
     rescue StandardError => e
       Rails.logger.error("Payroll review notification failed: package=#{package.id} event=#{event} error=#{e.class}")

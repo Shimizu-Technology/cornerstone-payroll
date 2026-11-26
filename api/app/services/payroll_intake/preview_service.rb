@@ -21,6 +21,9 @@ module PayrollIntake
     }.freeze
 
     def self.source_reports_overtime?(source_type)
+      descriptor = PayrollIntake::Registry.find(source_type)
+      return descriptor.reports_overtime? if descriptor
+
       adapter = SOURCE_ADAPTERS[source_type.to_s]
       adapter.respond_to?(:reports_overtime?) && adapter.reports_overtime?
     end
@@ -85,9 +88,9 @@ module PayrollIntake
             company: company,
             pay_period: pay_period,
             source_type: source_type,
-            source_label: adapter_class::SOURCE_LABEL,
+            source_label: source_label,
             import_hash: import_hash,
-            parser_version: adapter_class::PARSER_VERSION,
+            parser_version: parser_version,
             package_id: SecureRandom.uuid,
             package_revision: next_package_revision,
             package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
@@ -139,8 +142,24 @@ module PayrollIntake
     attr_reader :pay_period, :company, :source_type, :pasted_text, :files, :actor, :storage, :file_snapshots,
                 :supersedes_package_id, :supersession_reason
 
+    def descriptor
+      @descriptor ||= PayrollIntake::Registry.find(source_type)
+    end
+
     def adapter_class
-      SOURCE_ADAPTERS[source_type]
+      descriptor&.adapter_class || SOURCE_ADAPTERS[source_type]
+    end
+
+    def parser_version
+      return adapter_class::PARSER_VERSION if adapter_class&.const_defined?(:PARSER_VERSION, false)
+
+      descriptor&.parser_version
+    end
+
+    def source_label
+      return adapter_class::SOURCE_LABEL if adapter_class&.const_defined?(:SOURCE_LABEL, false)
+
+      descriptor&.source_label
     end
 
     def snapshot_files!
@@ -168,7 +187,7 @@ module PayrollIntake
         digest = Digest::SHA256.new
         digest << source_type
         digest << "\n"
-        digest << adapter_class::PARSER_VERSION
+        digest << parser_version.to_s
         digest << "\n"
         digest << JSON.generate(workweek_evidence)
         digest << "\n"
@@ -187,7 +206,7 @@ module PayrollIntake
     # Loans. The same files need a new reviewed package after a worker returns
     # or a loan is set up, resumed or paid, rather than the old preview.
     def import_hash
-      @import_hash ||= if source_type == "mosa_revel"
+      @import_hash ||= if descriptor&.idempotency == "files_period_roster_loans_and_workweek" || source_type == "mosa_revel"
         Digest::SHA256.hexdigest("#{roster_import_hash}\n--employee-loans--\n#{loan_setup_signature}")
       else
         source_files_hash
@@ -654,7 +673,7 @@ module PayrollIntake
     end
 
     def deterministic_adapter?
-      adapter_class&.instance_methods(false)&.include?(:extract)
+      descriptor&.deterministic? || adapter_class&.instance_methods(false)&.include?(:extract)
     end
 
     def source_role_for(filename:, content_type:, position:, pasted:)

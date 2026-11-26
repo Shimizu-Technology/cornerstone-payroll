@@ -1,9 +1,15 @@
 import { Show, SignIn, SignUp, useClerk, useUser } from '@clerk/react';
-import { useState, type ComponentProps } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import { Link, Navigate, useLocation } from 'react-router';
 import { ShieldCheck, Clock3, Landmark } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { isMfaRequiredCode } from '@/services/api';
+import {
+  clearStoredAuthReturnPath,
+  readStoredAuthReturnPath,
+  rememberAuthReturnPath,
+  sanitizeAuthReturnPath,
+} from '@/lib/auth-return-url';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
@@ -306,6 +312,17 @@ function SignedInInvitation({ returnTo }: { returnTo: string }) {
 export function Login() {
   const { isAuthenticated, isLoading, authProblem, refreshUser, signOut } = useAuth();
   const { search } = useLocation();
+  const params = new URLSearchParams(search);
+  const hasTicket = Boolean(params.get('__clerk_ticket'));
+  const queryReturnTo = hasTicket ? null : sanitizeAuthReturnPath(params.get('return_to'));
+
+  useEffect(() => {
+    if (hasTicket) {
+      clearStoredAuthReturnPath();
+    } else if (queryReturnTo && queryReturnTo !== '/app' && queryReturnTo !== '/') {
+      rememberAuthReturnPath(queryReturnTo);
+    }
+  }, [hasTicket, queryReturnTo]);
 
   if (isLoading) {
     return (
@@ -330,15 +347,20 @@ export function Login() {
     );
   }
 
-  const params = new URLSearchParams(search);
-  const hasTicket = Boolean(params.get('__clerk_ticket'));
+  // Invitations always ignore any stale return_to and land on /app.
+  const returnTo = hasTicket ? '/app' : (queryReturnTo ?? readStoredAuthReturnPath() ?? '/app');
   if (isAuthenticated && !hasTicket) {
-    return <Navigate to="/app" replace />;
+    return <Navigate to={returnTo} replace />;
   }
 
   // Clerk reads the ticket from the current URL in either embedded form.
   const needsInviteSignUp = hasTicket && params.get('__clerk_status') === 'sign_up';
-  const clerkFormProps = { routing: 'hash', forceRedirectUrl: '/app', appearance: clerkAppearance } as const;
+  const clerkFormProps = {
+    routing: 'hash',
+    forceRedirectUrl: returnTo,
+    fallbackRedirectUrl: returnTo,
+    appearance: clerkAppearance,
+  } as const;
   const mfaRequired = authProblem?.status === 403 && isMfaRequiredCode(authProblem.code);
   const accessNotice = mfaRequired ? (
     <MfaPrompt />

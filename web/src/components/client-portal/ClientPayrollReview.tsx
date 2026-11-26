@@ -72,6 +72,11 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
     finally { setBusy(false); }
   };
   if (payPeriod.client_payroll_approval_required === false || (!review?.published_at && !payPeriod.payroll_review_history?.length)) return null;
+  const decisionNotificationCopy = review?.notification_status === 'sent'
+    ? 'Your Cornerstone account team was notified by email.'
+    : review?.notification_status === 'queued' || (review?.notification_status == null && review?.notification_queued)
+      ? 'Notification requested for your Cornerstone account team.'
+      : 'Recorded. Cornerstone will see it in Client Inbox.';
   return <Card className="border-primary-200">
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
       <div>
@@ -91,11 +96,11 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
         <p className="font-semibold">Approved by Cornerstone on your behalf</p>
         <p className="whitespace-pre-wrap break-words">{review.override_reason}</p>
       </div>}
-      {review?.status === 'approved' && review.approval_method !== 'cornerstone_override' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. Cornerstone has been notified.</p>}
+      {review?.status === 'approved' && review.approval_method !== 'cornerstone_override' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. {decisionNotificationCopy}</p>}
       {review?.change_request_note && <div role="status" className="space-y-1 rounded-lg bg-warning-50 p-4 text-warning-950">
         <p className="font-semibold">Changes requested by {review.changes_requested_by_name}</p>
         <p className="whitespace-pre-wrap break-words">{review.change_request_note}</p>
-        <p>Cornerstone has been notified. You’ll receive a new revision to review after the changes.</p>
+        <p>{decisionNotificationCopy} You’ll receive a new revision to review after the changes.</p>
       </div>}
       {viewOnly && canReview && review?.status === 'pending' && <ViewOnlyNotice />}
       {canDecide && <div className="max-w-3xl space-y-4">

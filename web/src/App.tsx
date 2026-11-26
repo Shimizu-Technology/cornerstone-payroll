@@ -14,6 +14,7 @@ import { FeedbackProvider } from '@/components/ui/action-feedback';
 import { Layout } from '@/components/layout/Layout';
 import { CompanyScopedRoute } from '@/components/routing/CompanyScopedRoute';
 import { isPublicPath } from '@/lib/public-routes';
+import { clearStoredAuthReturnPath, loginRedirectPath, readStoredAuthReturnPath } from '@/lib/auth-return-url';
 import { LegacyCompanyRedirect } from '@/components/routing/LegacyCompanyRedirect';
 import { AccountAccessNotice } from '@/components/auth/AccountAccessNotice';
 import { EmployeeAppAccessNotice } from '@/components/auth/EmployeeAppAccessNotice';
@@ -99,9 +100,17 @@ const AUTH_ENABLED = import.meta.env.VITE_AUTH_ENABLED === 'true';
 // Protected route wrapper
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, user, authProblem } = useAuth();
+  const location = useLocation();
+  const mfaBlocked = authProblem?.status === 403 && isMfaRequiredCode(authProblem.code);
 
-  if (authProblem?.status === 403 && isMfaRequiredCode(authProblem.code)) {
-    return <Navigate to="/login" replace />;
+  useEffect(() => {
+    if (isAuthenticated && !mfaBlocked) {
+      clearStoredAuthReturnPath();
+    }
+  }, [isAuthenticated, mfaBlocked]);
+
+  if (mfaBlocked) {
+    return <Navigate to={loginRedirectPath(location)} replace />;
   }
 
   // Skip auth check if disabled. A refused account still gets an explanation
@@ -132,10 +141,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={loginRedirectPath(location)} replace />;
   }
 
   return <>{children}</>;
+}
+
+function CallbackRedirect(): ReactElement {
+  const destination = readStoredAuthReturnPath() ?? '/app';
+  return <Navigate to={destination} replace />;
 }
 
 function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
@@ -362,7 +376,7 @@ function AppRoutes() {
       <Route path="/invite" element={<Invite />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="/terms" element={<TermsOfService />} />
-      <Route path="/callback" element={<Navigate to="/app" replace />} />
+      <Route path="/callback" element={<CallbackRedirect />} />
 
       {/* Protected routes */}
       <Route

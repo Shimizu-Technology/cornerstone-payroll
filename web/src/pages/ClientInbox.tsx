@@ -9,7 +9,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { clientInboxApi, mergeInboxRows, type InboxCounts, type InboxRow } from '@/services/clientInbox';
 
-const labels = { message: 'Message', document: 'Client upload', employee_change: 'Employee change', payroll_submission: 'Pay period files', file_request: 'File request' };
+const labels = { message: 'Message', document: 'Client upload', employee_change: 'Employee change', payroll_submission: 'Pay period files', payroll_review: 'Payroll review', file_request: 'File request' };
 const scrollPositions = new Map<string, number>();
 export function ClientInbox(): ReactElement {
   const [params, setParams] = useSearchParams();
@@ -109,6 +109,11 @@ export function ClientInbox(): ReactElement {
       navigate(`/companies/${row.company_id}/payroll-submissions/${row.id}?${target}`);
       return;
     }
+    if (row.kind === 'payroll_review') {
+      const returnTarget = new URLSearchParams({ return_to: location.pathname + location.search });
+      navigate(`/companies/${row.company_id}/pay-runs/${row.pay_period_id}/work?${returnTarget}`);
+      return;
+    }
     if (row.kind === 'message' || row.kind === 'file_request') {
       target.set('thread_id', String(row.kind === 'message' ? row.id : row.thread_id ?? ''));
       navigate(`/companies/${row.company_id}/client-messages?${target}`);
@@ -123,7 +128,7 @@ export function ClientInbox(): ReactElement {
       <Card><CardContent className="flex flex-wrap gap-x-8 gap-y-4 pt-6"><p><strong className="tabular-nums">{counts?.unread_count ?? '—'}</strong> unread (live clients) <span className="block text-xs text-neutral-600">{counts ? `${counts.unread_messages} conversations · ${counts.unread_documents} files` : 'Loading counts'}</span></p><p><strong className="tabular-nums">{counts?.waiting_count ?? '—'}</strong> waiting on staff (live clients) <span className="block text-xs text-neutral-600">{counts ? `${counts.waiting_payroll ?? 0} pay periods · ${counts.waiting_file_requests ?? 0} requested files · ${counts.pending_changes} pending employee changes · ` : ''}Reading does not complete the work</span></p></CardContent></Card>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="text-sm font-medium">Client<Select value={params.get('client') || ''} onChange={e => filter('client', e.target.value)}><option value="">All clients</option>{companies.filter(c => c.organization_id === user?.organization_id && c.active && !c.test_workspace_archived_at && !c.test_workspace_sealed_at && !c.test_workspace_expired && (c.payroll_environment === 'live' || (c.test_workspace_purpose === 'sandbox' && c.migration_rehearsal_status === 'ready'))).map(c => <option key={c.id} value={c.id}>{c.name}{c.test_workspace ? ' · Practice copy' : ''}</option>)}</Select></label>
-        <label className="text-sm font-medium">Kind<Select value={params.get('kind') || ''} onChange={e => filter('kind', e.target.value)}><option value="">All kinds</option><option value="message">Messages</option><option value="document">Client uploads</option><option value="employee_change">Employee changes</option><option value="payroll_submission">Pay period files</option><option value="file_request">File requests</option></Select></label>
+        <label className="text-sm font-medium">Kind<Select value={params.get('kind') || ''} onChange={e => filter('kind', e.target.value)}><option value="">All kinds</option><option value="message">Messages</option><option value="document">Client uploads</option><option value="employee_change">Employee changes</option><option value="payroll_submission">Pay period files</option><option value="payroll_review">Payroll reviews</option><option value="file_request">File requests</option></Select></label>
         <label className="text-sm font-medium">Status<Select value={params.get('status') || 'waiting'} onChange={e => filter('status', e.target.value)}><option value="waiting">Waiting on staff</option><option value="unread">Unread</option><option value="all">All activity</option><option value="handled">Handled</option></Select></label>
       </div>
       <div className="flex items-center justify-between gap-3"><p className="text-sm text-neutral-600">Most recent client activity first</p><Button variant="outline" disabled={busy} onClick={() => void load(undefined, true)}>Refresh</Button></div>

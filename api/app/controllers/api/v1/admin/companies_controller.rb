@@ -69,6 +69,17 @@ module Api
           render json: { company: company_payload(company, detailed: true) }
         end
 
+        # GET /api/v1/admin/companies/:id/intake_profile?on=YYYY-MM-DD
+        def intake_profile
+          company = authorize_intake_profile_company!
+          return unless company
+
+          as_of = parse_as_of_date
+          return unless as_of
+
+          render json: PayrollIntake::ProfileBuilder.new(company: company, on: as_of).call
+        end
+
         # POST /api/v1/admin/companies
         def create
           unless current_user&.organization_admin?
@@ -502,6 +513,67 @@ module Api
           raise ActiveRecord::RecordNotFound unless current_user&.can_access_company?(company.id)
 
           company
+        end
+
+        def authorize_intake_profile_company!
+          raw_id = params[:id].to_s
+          unless raw_id.match?(/\A[1-9]\d*\z/)
+            render json: { error: "Company not found" }, status: :not_found
+            return nil
+          end
+
+          company = Company.find_by(id: raw_id.to_i)
+          unless company
+            render json: { error: "Company not found" }, status: :not_found
+            return nil
+          end
+
+          header_company_id = request.headers["X-Company-Id"].presence
+          if header_company_id.present? && header_company_id.to_i != company.id
+            render json: { error: "Company context does not match the requested client" }, status: :forbidden
+            return nil
+          end
+
+          unless current_user&.can_access_company?(company.id)
+            render json: { error: "Not authorized" }, status: :forbidden
+            return nil
+          end
+
+          if company.test_workspace?
+            unless TestWorkspaceAccessPolicy.allowed?(
+              user: current_user,
+              company: company,
+              request_method: request.request_method,
+              capability: StaffRolePolicy.capability_for(controller_path: controller_path, action_name: action_name),
+              controller_path: controller_path,
+              action_name: action_name
+            )
+              render json: { error: company.demo? ? Company::DEMO_ACCESS_DENIED_MESSAGE : "Your test workspace access does not allow this action" }, status: :forbidden
+              return nil
+            end
+
+            unless company.migration_rehearsal_status == "ready"
+              render json: { error: "This test workspace is still being prepared. Try again after its verified copy is ready." }, status: :conflict
+              return nil
+            end
+          end
+
+          company
+        end
+
+        def parse_as_of_date
+          return PayrollBusinessClock.today if params[:on].blank?
+
+          raw = params[:on].to_s.strip
+          unless raw.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+            render json: { error: "Invalid date parameter 'on'. Expected YYYY-MM-DD." }, status: :unprocessable_entity
+            return nil
+          end
+
+          Date.iso8601(raw)
+        rescue Date::Error
+          render json: { error: "Invalid date parameter 'on'. Expected YYYY-MM-DD." }, status: :unprocessable_entity
+          nil
         end
 
         def payment_disposition_params

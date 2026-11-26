@@ -3,6 +3,8 @@
 # Bonus input belongs to one paycheck. Retain the latest explicit source amount
 # separately so a reimport cannot silently replace an operator's correction.
 class PayrollBonusInput
+  IMPORT_SOURCES = %w[mosa_revel import].freeze
+
   def self.manual!(item, value)
     next_amount = amount(value)
     # Older clients submit every form value, even on unrelated edits.
@@ -12,15 +14,18 @@ class PayrollBonusInput
     item.bonus_source = "manual" if changed || item.bonus_source.nil?
   end
 
-  def self.import!(item, value)
+  def self.import!(item, value, source: "mosa_revel")
     return if value.nil?
+    unless IMPORT_SOURCES.include?(source.to_s)
+      raise ArgumentError, "Unsupported bonus import source: #{source}"
+    end
 
     source_amount = amount(value)
     item.imported_bonus = source_amount
     return if manual?(item)
 
     item.bonus = source_amount
-    item.bonus_source = "mosa_revel"
+    item.bonus_source = source.to_s
   end
 
   def self.manual?(item)
