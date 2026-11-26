@@ -65,7 +65,7 @@ export function ClientEmployeeOverview() {
           {!viewOnly && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white" to={employeeEditPath(companyId, employeeId, { returnTo })}><Pencil className="h-4 w-4" />Edit employee</Link>}
         </div>}
       />
-      <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">
         <div className="flex flex-wrap gap-2">
           <Badge variant={employee.status === 'active' ? 'success' : employee.status === 'terminated' ? 'danger' : 'default'}>{employeeStatusConfig[employee.status]?.label || employee.status}</Badge>
           <Badge variant={employee.payment_delivery_method ? 'info' : 'warning'}>{delivery.label}</Badge>
@@ -110,7 +110,7 @@ export function ClientEmployeeOverview() {
           </CardContent>
         </Card>
         <ClientPayStubHistory key={employeeId} employeeId={employeeId} />
-      </main>
+      </div>
     </div>
   );
 }

@@ -430,7 +430,7 @@ export function GeneralTransmittals() {
         description="Start with a payroll period or a blank packet, customize every item, and preserve each generated version."
       />
 
-      <main className="space-y-6 p-6 lg:p-8">
+      <div className="space-y-6 p-6 lg:p-8">
         <section className="overflow-hidden rounded-2xl border border-primary-200 bg-gradient-to-br from-primary-950 via-primary-900 to-primary-800 text-white shadow-sm">
           <div className="grid gap-6 p-6 lg:grid-cols-[1.3fr_1fr] lg:p-8">
             <div className="max-w-2xl">
@@ -640,7 +640,7 @@ export function GeneralTransmittals() {
           </div>
 
         </div>
-      </main>
+      </div>
 
       <Dialog returnFocusRef={previewTriggerRef} open={Boolean(previewUrl)} onOpenChange={(open) => { if (!open) setPreviewUrl(null); }}>
         <DialogContent className="dialog-wide dialog-center-mobile !mx-auto flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden !rounded-2xl !p-0">
