@@ -40,6 +40,7 @@ RSpec.describe E2eReleaseFixture do
     manifest = JSON.parse(output.read)
 
     expect(manifest.fetch("schema_version")).to eq(1)
+    expect(PayPeriod.find(manifest.fetch("voided_pay_period_id")).can_create_correction_run?).to be(true)
     expect(manifest).not_to have_key("time_tracking_source_secret")
     expect(Organization.find(fixture.fetch(:organization_id)).slug).to eq("gate-0-synthetic-firm")
     expect(Employee.find(fixture.fetch(:employee_id)).full_name).to eq("Avery Example")

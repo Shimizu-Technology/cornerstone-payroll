@@ -378,7 +378,8 @@ class E2eReleaseFixture
         pay_date: Date.new(2026, 5, 1),
         notes: "Gate 0 correction navigation scenario"
       )
-      voided_period.update!(status: "committed", correction_status: "voided",
+      # Seed post-rollback history. The navigation test has no payment to commit.
+      voided_period.update_columns(status: "committed", correction_status: "voided",
         committed_at: Time.current, voided_at: Time.current, void_reason: "Synthetic correction navigation fixture")
 
       filter_race_period = create_pay_period!(

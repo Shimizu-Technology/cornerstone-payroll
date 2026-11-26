@@ -1360,6 +1360,14 @@ module Api
           "/companies/#{pay_period.company_id}/year-end?year=#{year}#payroll-history-review"
         end
 
+        def admin_rollback_recorded?(period)
+          rollback_ids = [ (period.id if period.voided?), period.source_pay_period_id ].compact
+          return false if rollback_ids.empty?
+
+          AdminOverride.exists?(company_id: period.company_id, subject_type: "PayPeriod",
+            subject_id: rollback_ids, action: %w[void_pay_period reopen_unpaid])
+        end
+
         def pay_period_json(pay_period, include_items: false, list: false)
           agg = pay_period_aggregates(pay_period)
           lifecycle = pay_period_lifecycle_summary(pay_period)
@@ -1446,9 +1454,7 @@ module Api
               AuditLog.where(company_id: pay_period.company_id, action: "checks#preview_pdf",
                 record_type: "PayPeriod", record_id: pay_period.id).newest_first.first
             end
-            rollback_ids = [ pay_period.id, pay_period.source_pay_period_id ].compact
-            json[:admin_rollback] = AdminOverride.exists?(company_id: pay_period.company_id, subject_type: "PayPeriod",
-              subject_id: rollback_ids, action: %w[void_pay_period reopen_unpaid])
+            json[:admin_rollback] = admin_rollback_recorded?(pay_period)
             json[:last_preview_download] = last_preview && {
               revision: last_preview.metadata["revision"], downloaded_at: last_preview.created_at.iso8601
             }
