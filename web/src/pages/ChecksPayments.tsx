@@ -118,6 +118,44 @@ export function initialFormState(): FormState {
   };
 }
 
+// A clone keeps the source payment's tax period and fills any missing field,
+// and the payment date, from the Guam business date.
+// eslint-disable-next-line react-refresh/only-export-components
+export function cloneFormState(check: NonEmployeeCheck): FormState {
+  const now = new Date();
+  const today = guamTaxPeriod(now);
+  return {
+    // A clone is a new standalone payment. Never carry an old payroll run
+    // association forward without also carrying its exact liability journal
+    // allocation, which intentionally cannot be cloned.
+    pay_period_id: null,
+    payable_to: check.payable_to || '',
+    amount: check.amount != null ? String(check.amount) : '',
+    check_type: check.check_type,
+    check_number: '',
+    payment_method: check.payment_method || 'check',
+    payment_period_type: check.payment_period_type === 'pay_period'
+      ? 'none'
+      : check.payment_period_type || 'none',
+    tax_year: check.tax_year ? String(check.tax_year) : today.tax_year,
+    tax_quarter: check.tax_quarter ? String(check.tax_quarter) : today.tax_quarter,
+    tax_month: check.tax_month ? String(check.tax_month) : today.tax_month,
+    due_date: check.due_date || '',
+    payment_date: guamBusinessDate(now),
+    confirmation_number: '',
+    memo: check.memo || '',
+    reference_number: check.reference_number || '',
+    description: check.description || '',
+    line_items: (check.line_items || []).map((lineItem) => ({
+      description: lineItem.description || '',
+      reference_number: lineItem.reference_number || '',
+      service_period: lineItem.service_period || '',
+      amount: lineItem.amount != null ? String(lineItem.amount) : '',
+    })),
+    liability_entry_ids: [],
+  };
+}
+
 const fieldClassName = 'rounded-xl';
 
 function periodPayload(form: Pick<FormState, 'payment_period_type' | 'tax_year' | 'tax_quarter' | 'tax_month'>) {
@@ -294,36 +332,7 @@ export function ChecksPayments() {
   const handleCloneCheck = (check: NonEmployeeCheck) => {
     setError(null);
     setShowForm(true);
-    setForm({
-      // A clone is a new standalone payment. Never carry an old payroll run
-      // association forward without also carrying its exact liability journal
-      // allocation, which intentionally cannot be cloned.
-      pay_period_id: null,
-      payable_to: check.payable_to || '',
-      amount: check.amount != null ? String(check.amount) : '',
-      check_type: check.check_type,
-      check_number: '',
-      payment_method: check.payment_method || 'check',
-      payment_period_type: check.payment_period_type === 'pay_period'
-        ? 'none'
-        : check.payment_period_type || 'none',
-      tax_year: check.tax_year ? String(check.tax_year) : String(new Date().getFullYear()),
-      tax_quarter: check.tax_quarter ? String(check.tax_quarter) : String(Math.floor(new Date().getMonth() / 3) + 1),
-      tax_month: check.tax_month ? String(check.tax_month) : String(new Date().getMonth() + 1),
-      due_date: check.due_date || '',
-      payment_date: guamBusinessDate(),
-      confirmation_number: '',
-      memo: check.memo || '',
-      reference_number: check.reference_number || '',
-      description: check.description || '',
-      line_items: (check.line_items || []).map((lineItem) => ({
-        description: lineItem.description || '',
-        reference_number: lineItem.reference_number || '',
-        service_period: lineItem.service_period || '',
-        amount: lineItem.amount != null ? String(lineItem.amount) : '',
-      })),
-      liability_entry_ids: [],
-    });
+    setForm(cloneFormState(check));
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
