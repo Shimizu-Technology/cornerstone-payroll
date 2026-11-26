@@ -28,6 +28,7 @@ module EmployeeLinks
 
       company = @employee.company
       EmployeeLinks.require_invitation_management!(@actor, company)
+      EmployeeAppSwitch::Enforcement.warm_attestation!(company)
 
       result = ApplicationRecord.transaction do
         EmployeeLinks.lock_for_issuance!(company)

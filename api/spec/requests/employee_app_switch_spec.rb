@@ -20,6 +20,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     {
       "REQUIRE_MFA" => "true", "CLERK_MFA_ATTESTED_INSTANCE_ID" => "ins_example", "CLERK_MFA_EVIDENCE_REF" => "evidence-ref",
       "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com",
+      # Staff web takes a demo's app state from the (stubbed) signed answer.
+      "EMPLOYEE_API_URL" => "https://employees-api.example.test",
       DemoOutbound::ENV_KEY => "demo.worker@demo-mail.example,demo.pending@demo-mail.example"
     }
   end
