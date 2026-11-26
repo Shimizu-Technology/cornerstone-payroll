@@ -3,8 +3,9 @@
 Backend API only (never the dashboard), and only this mirror's development
 instance. Before writing it refuses an instance that isn't a development one,
 and one it can't recognise as this mirror's. Recognised means its id matches
-CLERK_INSTANCE_ID in the keys file, or every origin it already allows is
-under .localhost. So a staging or shared test instance is never repointed.
+CLERK_INSTANCE_ID in the keys file, or it already allows at least one origin
+and every one is under .localhost. An instance with no allowed origins needs
+CLERK_INSTANCE_ID. So a staging or shared test instance is never repointed.
 It sets the allowed origins to the local HTTPS hosts and makes sure the staff
 login exists. It writes non-secret ids to the output file. Keys and passwords
 are read from files and never printed.
@@ -51,7 +52,7 @@ def call(secret, method, path, body=None):
 
 def local_origin(origin):
     host = urllib.parse.urlsplit(origin).hostname or ""
-    return host == "localhost" or host.endswith(".localhost")
+    return host.endswith(".localhost")
 
 
 def main():
@@ -69,9 +70,9 @@ def main():
     if expected:
         if instance.get("id") != expected:
             sys.exit("Refusing: the Clerk instance id does not match CLERK_INSTANCE_ID")
-    elif not all(local_origin(origin) for origin in existing):
-        sys.exit("Refusing: this Clerk instance already allows non-local origins; "
-                 "set CLERK_INSTANCE_ID in the keys file if it really is the local copy's instance")
+    elif not existing or not all(local_origin(origin) for origin in existing):
+        sys.exit("Refusing: can't tell this Clerk instance is the local copy's (it allows no origins, or non-local ones); "
+                 "add CLERK_INSTANCE_ID=ins_... to the keys file")
 
     if sorted(existing) != sorted(origins):
         call(secret, "PATCH", "/instance", {"allowed_origins": origins})

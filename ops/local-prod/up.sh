@@ -67,8 +67,6 @@ refuse_dotenv_files() {
 write_envs() {
   local owner_url="postgres://$DB_OWNER:$LP_OWNER_PASSWORD@127.0.0.1:$PG_PORT/$DB_NAME"
   local app_url="postgres://payroll_app:$LP_APP_PASSWORD@127.0.0.1:$PG_PORT/$DB_NAME"
-  local staff_guard=log worker_guard=log expect=""
-  if [[ "$PHASE" == enforced ]]; then staff_guard=raise worker_guard=raise expect="RLS_EXPECT_ENFORCED='true'"; fi
 
   # Every setting that decides production behaviour is pinned here; nothing
   # comes from the caller's shell or a .env file.
@@ -106,6 +104,21 @@ write_envs() {
     grep -E '^(SECRET_KEY_BASE|ACTIVE_RECORD_ENCRYPTION_[A-Z_]+|EMPLOYEE_SERVICE_ATTESTATION_SECRET)=' "$SECRETS"
   } >"$ENVS/common.env"
 
+  # Owner maintenance (migrations, rls:*, seeding): the guard is off, so the
+  # primary connection is the owner, as in the runbook's secured shell.
+  { cat "$ENVS/common.env"
+    echo "MIGRATION_DATABASE_URL='$owner_url'"
+    echo "RLS_CONTEXT_GUARD_MODE='off'"
+  } >"$ENVS/maint.env"
+  chmod 600 "$ENVS"/*.env
+}
+
+# The running processes' settings depend on the RLS phase, so these are
+# written only after prepare_database has checked the live database.
+write_process_envs() {
+  local staff_guard=log worker_guard=log expect=""
+  if [[ "$PHASE" == enforced ]]; then staff_guard=raise worker_guard=raise expect="RLS_EXPECT_ENFORCED='true'"; fi
+
   { cat "$ENVS/common.env"
     echo "PORT='$STAFF_PORT'"; echo "PIDFILE='$RUN/staff.pid'"
     echo "SOLID_QUEUE_IN_PUMA='false'"
@@ -125,13 +138,6 @@ write_envs() {
     echo "SOLID_QUEUE_IN_PUMA='false'"
     echo "RLS_CONTEXT_GUARD_MODE='raise'"; echo "$expect"
   } >"$ENVS/employee.env"
-
-  # Owner maintenance (migrations, rls:*, seeding): the guard is off, so the
-  # primary connection is the owner, as in the runbook's secured shell.
-  { cat "$ENVS/common.env"
-    echo "MIGRATION_DATABASE_URL='$owner_url'"
-    echo "RLS_CONTEXT_GUARD_MODE='off'"
-  } >"$ENVS/maint.env"
   chmod 600 "$ENVS"/*.env
 }
 
@@ -186,6 +192,8 @@ rls_phase() {
 # The repo's role script, with its interactive \password replaced by the
 # stored one. Built with shell builtins, so the password never reaches argv.
 runtime_role_sql() {
+  grep -qxF '\password payroll_app' "$API_DIR/db/rls_runtime_role.sql" ||
+    die "db/rls_runtime_role.sql no longer has its \\password payroll_app line; update runtime_role_sql in up.sh"
   local line
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" == '\password payroll_app' ]]; then
@@ -205,10 +213,14 @@ prepare_database() {
     runtime_role_sql | owner_psql -1 -f - >"$LOGS/rls_role.log" 2>&1 || die "rls_runtime_role.sql failed (see $LOGS/rls_role.log)"
   fi
 
+  # Decided from the live database, so rls:disable followed by a shadow run works.
   local current; current="$(rls_phase)"
-  if [[ "$PHASE" == shadow && ( "$current" == enforced || "$current" == partial ) ]]; then
-    die "the database is already $current; shadow needs fresh data (down.sh --purge) or rls:disable first (README)"
-  fi
+  case "$current" in
+    enforced | partial) [[ "$PHASE" == enforced ]] ||
+      die "the database is $current; shadow needs fresh data (down.sh --purge) or rls:disable first (README)" ;;
+    shadow | not_installed) ;;
+    *) die "can't read the database's RLS phase (rls:status said ${current}); see $LOGS" ;;
+  esac
   log "staging RLS policies (rls:install; the database is $current)"
   rails_maint rls:install >"$LOGS/rls_install.log" 2>&1 || die "rls:install failed (see $LOGS/rls_install.log)"
 
@@ -333,10 +345,6 @@ start_processes() {
 
 require_tools
 ensure_dirs
-# Refuse before rewriting any env file; prepare_database checks the database too.
-if [[ "$PHASE" == shadow && "$(cat "$STATE/phase" 2>/dev/null)" == enforced ]]; then
-  die "this copy is enforced; shadow needs fresh data (down.sh --purge) or rls:disable first (README)"
-fi
 ensure_secrets
 refuse_dotenv_files
 ensure_certs
@@ -344,6 +352,7 @@ write_envs
 start_postgres
 start_redis
 prepare_database
+write_process_envs
 configure_clerk
 bootstrap_data
 enforce_rls

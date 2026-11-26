@@ -62,7 +62,8 @@ try {
 
   if (kitchen) {
     const state = await call(`${apiOrigin}/api/v1/admin/employee_app_switch`, kitchen.id)
-    const checks = state.body?.data?.readiness?.checks ?? state.body?.data?.checks ?? []
+    const readiness = state.body?.data?.readiness ?? {}
+    const checks = [...(readiness.checks ?? []), ...Object.values(readiness.counsel_checks ?? {})]
     // Only the MFA check may be waived (REQUIRE_MFA off); anything else must pass.
     const failing = checks.filter((check) => check.status !== 'passed' && !(check.key === 'mfa' && check.status === 'waived')).map((check) => check.key)
     record('the switch page reports no failing readiness check', state.status === 200 && checks.length > 0 && failing.length === 0,
