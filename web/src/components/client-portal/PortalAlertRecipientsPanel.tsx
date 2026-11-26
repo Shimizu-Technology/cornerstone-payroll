@@ -106,18 +106,17 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
 
   const toggle = (id: number): void => {
     setSaved(false);
-    setSelectedIds((current) => {
-      if (current.includes(id)) {
-        if (leadUserId === id) {
-          setLeadUserId(null);
-          setBackupUserId(null);
-        } else if (backupUserId === id) {
-          setBackupUserId(null);
-        }
-        return current.filter((value) => value !== id);
+    if (selectedIds.includes(id)) {
+      if (leadUserId === id) {
+        setLeadUserId(null);
+        setBackupUserId(null);
+      } else if (backupUserId === id) {
+        setBackupUserId(null);
       }
-      return [...current, id];
-    });
+      setSelectedIds((current) => current.filter((value) => value !== id));
+    } else {
+      setSelectedIds((current) => (current.includes(id) ? current : [...current, id]));
+    }
   };
 
   const selectLead = (value: string): void => {

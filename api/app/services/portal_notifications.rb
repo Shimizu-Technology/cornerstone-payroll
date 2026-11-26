@@ -218,11 +218,12 @@ module PortalNotifications
       # Extra addresses have no account preferences; they follow the default.
       mode = target.user ? Preferences.mode_for(target.user, event.category) : CATEGORIES.dig(event.category, :default_mode)
       ledger_mode = mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode
+      intended_email = PortalNotificationRecipient.normalize_email(target.user&.email || target.email)
       attrs = { portal_notification_event: event, user: target.user, recipient_email: target.email,
-                recipient_key: target.key, company_id: event.company_id, channel: "email" }
-      skipped = ->(reason, delivery_mode = ledger_mode) do
+                intended_recipient_email: intended_email, recipient_key: target.key, company_id: event.company_id, channel: "email" }
+      skipped = ->(reason, delivery_mode = ledger_mode, deliver_after: event.occurred_at) do
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: delivery_mode, status: "skipped", skip_reason: reason,
-          deliver_after: event.occurred_at, completed_at: Time.current))
+          deliver_after: deliver_after, completed_at: Time.current))
       end
       # Rows recorded while email is off are final: enabling email later must
       # never send activity that happened before it was turned on.
@@ -236,6 +237,11 @@ module PortalNotifications
         skipped.call("preference_off")
       elsif coalesced?(event, target)
         skipped.call("coalesced")
+      elsif target.foreign_suppressed
+        # Suppress outbound delivery to foreign-organization accounts internally
+        # while keeping tenant-visible counts and statuses identical to an
+        # unregistered extra address.
+        skipped.call("foreign_account_suppressed", ledger_mode, deliver_after: deliver_after_for(mode, event.occurred_at))
       else
         deliver_after = deliver_after_for(mode, event.occurred_at)
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: mode, status: "pending", deliver_after: deliver_after))

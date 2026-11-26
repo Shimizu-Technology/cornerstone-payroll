@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe "Client portal alert recipients", :portal_notifications, type: :request do
+  include ActiveSupport::Testing::TimeHelpers
+
   let!(:company) { create(:company, name: "Recipient Client") }
   let!(:other_company) { create(:company, organization: company.organization) }
   let!(:admin) { create(:user, company: company, role: "admin", name: "Avery Admin") }
@@ -91,33 +93,102 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
     expect(response).to have_http_status(:ok), response.body
   end
 
-  it "keeps save response and recipient_count independent of foreign-organization accounts while suppressing delivery internally" do
-    foreign_email = "outside.partner@gmail.com"
-    save(emails: [ foreign_email ])
+  it "deduplicates canonical Gmail aliases on save and counts distinct canonical identities" do
+    save(emails: [ "alice.books@gmail.com", "alicebooks+alerts@gmail.com", "a.l.i.c.e.books@googlemail.com" ])
     expect(response).to have_http_status(:ok), response.body
-    count_before = response.parsed_body.dig("data", "recipient_count")
-    expect(count_before).to eq(1)
+    data = response.parsed_body.fetch("data")
+    expect(data.fetch("extra_emails")).to eq([ "alice.books@gmail.com" ])
+    expect(data.fetch("recipient_count")).to eq(1)
+    expect(PortalNotificationRecipient.where(company: company).count).to eq(1)
 
-    # A foreign organization later registers that mailbox (even via a Gmail alias).
+    # Even if two legacy Gmail alias rows exist in DB, recipient_count counts distinct canonical identities.
+    PortalNotificationRecipient.create!(company: company, email: "alicebooks+legacy@googlemail.com")
+    get path, headers: headers
+    expect(response.parsed_body.dig("data", "recipient_count")).to eq(1)
+  end
+
+  it "makes foreign-organization extra addresses indistinguishable from unregistered addresses across every tenant-visible field while suppressing delivery" do
+    ensure_verified_test_tax_years(2026)
+    company_unreg = create(:company, organization: company.organization, name: "Unreg Client", client_payroll_approval_required: true)
+    company_foreign = create(:company, organization: company.organization, name: "Foreign Match Client", client_payroll_approval_required: true)
+    client_unreg = create(:user, company: company_unreg, organization: company.organization, role: "client", client_access_level: "manager")
+    client_foreign = create(:user, company: company_foreign, organization: company.organization, role: "client", client_access_level: "manager")
+    create(:company_assignment, user: client_unreg, company: company_unreg)
+    create(:company_assignment, user: client_foreign, company: company_foreign)
+
     foreign_org = create(:organization)
     foreign_company = create(:company, organization: foreign_org)
     create(:user, company: foreign_company, organization: foreign_org, role: "admin", email: "outsidepartner+ops@googlemail.com")
 
-    # Save response and recipient_count remain identical and do not reveal the foreign account.
-    save(emails: [ foreign_email ])
-    expect(response).to have_http_status(:ok), response.body
-    expect(response.parsed_body.dig("data", "recipient_count")).to eq(count_before)
-    get path, headers: headers
-    expect(response.parsed_body.dig("data", "recipient_count")).to eq(count_before)
+    unreg_email = "never.registered@gmail.com"
+    foreign_email = "outside.partner@gmail.com"
 
-    # Internally, delivery to the foreign-organization account is suppressed.
-    client_user = create(:user, company: company, organization: company.organization, role: "client")
-    thread = create(:client_portal_thread, company: company, created_by: client_user)
-    message = create(:client_portal_message, company: company, client_portal_thread: thread, author: client_user)
+    save(emails: [ unreg_email ], headers: { "X-Company-Id" => company_unreg.id.to_s })
+    expect(response).to have_http_status(:ok), response.body
+    save_unreg = response.parsed_body.fetch("data").except("company_id", "extra_emails")
+
+    save(emails: [ foreign_email ], headers: { "X-Company-Id" => company_foreign.id.to_s })
+    expect(response).to have_http_status(:ok), response.body
+    save_foreign = response.parsed_body.fetch("data").except("company_id", "extra_emails")
+    expect(save_foreign).to eq(save_unreg)
+
+    # Trigger both a client message and a payroll review approval in each company with email enabled.
+    emp_u = create(:employee, company: company_unreg)
+    period_u = create(:pay_period, :calculated, company: company_unreg,
+      start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+    create(:payroll_item, company: company_unreg, pay_period: period_u, employee: emp_u, gross_pay: 1_000, net_pay: 850)
+    PayPeriodLifecycleService.new(pay_period: period_u, actor: admin).approve!
+
+    emp_f = create(:employee, company: company_foreign)
+    period_f = create(:pay_period, :calculated, company: company_foreign,
+      start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+    create(:payroll_item, company: company_foreign, pay_period: period_f, employee: emp_f, gross_pay: 1_000, net_pay: 850)
+    PayPeriodLifecycleService.new(pay_period: period_f, actor: admin).approve!
+
     with_portal_email do
-      event = PortalNotifications.message_created!(message)
-      expect(event.recipient_status).to eq("no_recipients")
-      expect(event.deliveries.sole).to have_attributes(status: "skipped", skip_reason: "no_recipients")
+      thread_u = create(:client_portal_thread, company: company_unreg, created_by: client_unreg)
+      PortalNotifications.message_created!(create(:client_portal_message, company: company_unreg, client_portal_thread: thread_u, author: client_unreg))
+      thread_f = create(:client_portal_thread, company: company_foreign, created_by: client_foreign)
+      PortalNotifications.message_created!(create(:client_portal_message, company: company_foreign, client_portal_thread: thread_f, author: client_foreign))
+
+      pkg_u = period_u.payroll_review_packages.current.first!
+      PayrollReview::RevisionService.new(pay_period: period_u, actor: client_unreg).approve!(
+        approver: client_unreg, recorded_by: client_unreg, method: "client_portal",
+        revision_id: pkg_u.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+      )
+      pkg_f = period_f.payroll_review_packages.current.first!
+      PayrollReview::RevisionService.new(pay_period: period_f, actor: client_foreign).approve!(
+        approver: client_foreign, recorded_by: client_foreign, method: "client_portal",
+        revision_id: pkg_f.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+      )
+
+      # Immediately after approval: every tenant-visible field matches identically.
+      get path, headers: { "X-Company-Id" => company_unreg.id.to_s }
+      get_unreg = response.parsed_body.fetch("data").except("company_id", "extra_emails")
+      get path, headers: { "X-Company-Id" => company_foreign.id.to_s }
+      get_foreign = response.parsed_body.fetch("data").except("company_id", "extra_emails")
+      expect(get_foreign).to eq(get_unreg)
+      expect(get_foreign["unnotified_event_count"]).to eq(0)
+
+      get "/api/v1/notification_settings"
+      missing_ids = response.parsed_body.dig("data", "administration", "clients_without_recipients").map { |row| row["company_id"] }
+      expect(missing_ids).not_to include(company_unreg.id, company_foreign.id)
+
+      expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload))
+        .to eq(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload))
+      expect(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_f))
+        .to eq(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_u))
+      expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f)).to eq("queued")
+
+      # After dispatch window: only the unregistered extra actually receives email, yet both show "sent".
+      travel_to(3.minutes.from_now) do
+        PortalNotifications::Dispatcher.run!
+        expect(captured_portal_emails.map { |mail| mail[:to] }).to include(unreg_email)
+        expect(captured_portal_emails.map { |mail| mail[:to] }).not_to include(foreign_email, "outsidepartner+ops@googlemail.com")
+        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload))
+          .to eq(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload))
+        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f)).to eq("sent")
+      end
     end
   end
 

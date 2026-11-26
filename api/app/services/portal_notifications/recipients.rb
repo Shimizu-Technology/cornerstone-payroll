@@ -11,7 +11,7 @@ module PortalNotifications
   module Recipients
     STAFF_ROLES = %w[super_admin org_admin admin manager accountant].freeze
 
-    Target = Struct.new(:user, :email) do
+    Target = Struct.new(:user, :email, :foreign_suppressed) do
       def key
         user ? "user:#{user.id}" : "email:#{email}"
       end
@@ -54,7 +54,10 @@ module PortalNotifications
 
             account_users = account_users_for_email(delivery.recipient_email)
             if account_users.any?
-              return "access_revoked" unless account_users.any? { |user| eligible_user?(user, event) }
+              return nil if account_users.any? { |user| eligible_user?(user, event) }
+
+              same_org = account_users.any? { |user| user.organization_id == event.organization_id }
+              return same_org ? "access_revoked" : "foreign_account_suppressed"
             end
           end
         end
@@ -69,6 +72,12 @@ module PortalNotifications
 
       def eligible_account_user_for_email(email, event)
         account_users_for_email(email).find { |user| eligible_user?(user, event) }
+      end
+
+      # Public so Preferences can verify staff eligibility before retiming an
+      # unowned extra-address delivery.
+      def eligible_for_event?(user, event)
+        eligible_user?(user, event)
       end
 
       def subject_available?(event)
@@ -149,10 +158,20 @@ module PortalNotifications
 
       def staff_targets(event)
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
-        users = User.where(id: listed.users.select(:user_id)).order(:id).to_a.select { |user| eligible_user?(user, event) }
-        seen_user_ids = users.map(&:id)
-        taken_canonicals = users.filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }
-        extra_emails = []
+        users = []
+        seen_user_ids = []
+        taken_canonicals = []
+        User.where(id: listed.users.select(:user_id)).order(:id).to_a.each do |user|
+          next unless eligible_user?(user, event)
+
+          canonical = PortalNotificationRecipient.canonical_email(user.email)
+          next if canonical.present? && taken_canonicals.include?(canonical)
+
+          users << user
+          seen_user_ids << user.id
+          taken_canonicals << canonical if canonical.present?
+        end
+        extra_targets = []
 
         listed.extra_emails.order(:email).pluck(:email).each do |email|
           normalized = PortalNotificationRecipient.normalize_email(email)
@@ -166,14 +185,19 @@ module PortalNotifications
               users << eligible
               seen_user_ids << eligible.id
               taken_canonicals << canonical
+            elsif account_users.none? { |user| user.organization_id == event.organization_id }
+              # Foreign-organization account: keep internal suppression while
+              # preserving tenant-visible counts/statuses as if unregistered.
+              extra_targets << Target.new(nil, normalized, true)
+              taken_canonicals << canonical
             end
           else
-            extra_emails << normalized
+            extra_targets << Target.new(nil, normalized, false)
             taken_canonicals << canonical
           end
         end
 
-        users.map { |user| Target.new(user, nil) } + extra_emails.map { |email| Target.new(nil, email) }
+        users.map { |user| Target.new(user, nil, false) } + extra_targets
       end
 
       def client_targets(event)

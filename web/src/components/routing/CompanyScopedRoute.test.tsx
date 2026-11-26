@@ -22,6 +22,10 @@ vi.mock('@/contexts/CompanyContext', () => ({
 describe('CompanyScopedRoute deep link client selection', () => {
   afterEach(cleanup);
   beforeEach(() => {
+    companyState.companies = [
+      { id: 11, name: 'Browser Last Client' },
+      { id: 22, name: 'Email Deep Link Client' },
+    ];
     companyState.activeCompanyId = 11;
     companyState.loading = false;
     companyState.scopeChangePending = false;
@@ -71,6 +75,26 @@ describe('CompanyScopedRoute deep link client selection', () => {
     expect(screen.queryByRole('heading', { name: 'Should not load' })).toBeNull();
     expect(screen.getByText('This client workspace could not be opened')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Go to dashboard' }).getAttribute('href')).toBe('/app');
+    expect(companyState.switchCompany).not.toHaveBeenCalled();
+  });
+
+  it('falls back to /app with no company-specific links when the user has no accessible companies', () => {
+    companyState.activeCompanyId = null;
+    companyState.companies = [];
+
+    render(
+      <MemoryRouter initialEntries={['/companies/999/pay-runs/99/overview']}>
+        <Routes>
+          <Route path="companies/:companyId" element={<CompanyScopedRoute />}>
+            <Route path="pay-runs/:id/:tab" element={<h1>Should not load</h1>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('heading', { name: 'Should not load' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Go to dashboard' }).getAttribute('href')).toBe('/app');
+    expect(screen.queryByRole('link', { name: /Open / })).toBeNull();
     expect(companyState.switchCompany).not.toHaveBeenCalled();
   });
 });
