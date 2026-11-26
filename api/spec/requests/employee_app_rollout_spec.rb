@@ -159,7 +159,6 @@ RSpec.describe "Employee app rollout administration", type: :request do
     end
 
     %i[staff client].each do |who|
-
       it "lets #{who} send email and reports the delivery result without returning the secret" do
         actor = public_send(who)
         allow(EmployeeLinks::InviteEmail).to receive(:deliver).and_return(:sent)
