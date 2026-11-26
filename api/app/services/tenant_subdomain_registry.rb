@@ -192,7 +192,7 @@ class TenantSubdomainRegistry
 
   # Live clients and demo companies (which run like one); never a practice copy.
   def self.live_companies
-    Company.active.live_payroll.or(Company.active.demo).joins(:organization).merge(Organization.active).where.not(subdomain_slug: nil)
+    Company.active.operating.joins(:organization).merge(Organization.active).where.not(subdomain_slug: nil)
   end
   private_class_method :live_companies
 end

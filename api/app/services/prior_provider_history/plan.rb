@@ -35,7 +35,7 @@ module PriorProviderHistory
     private
 
     def validate!
-      raise ArgumentError, "Prior-provider onboarding requires a live client" if company.test_workspace?
+      raise ArgumentError, "Prior-provider onboarding requires a live client" if company.practice_copy?
       raise ArgumentError, "Select 1–#{SourceAdapter::MAX_RUNS} periods" unless periods.size.in?(1..SourceAdapter::MAX_RUNS)
       raise ArgumentError, "Tax year must be 2000–2200 and match the takeover date" unless tax_year.in?(2000..2200) && takeover_on.year == tax_year
       raise ArgumentError, "Enter the previous provider's name" if payload["provider_name"].to_s.strip.blank? || payload["provider_name"].to_s.length > 200

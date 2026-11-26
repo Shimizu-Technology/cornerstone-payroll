@@ -5,11 +5,11 @@ module ClientOperatingProfiles
   # company that does not already have a profile row. Test workspaces are skipped
   # because read fallback covers them until SetupCloner copies source versions.
   class BackfillService
-    def self.call(companies: Company.live_payroll)
+    def self.call(companies: Company.operating)
       new(companies: companies).call
     end
 
-    def initialize(companies: Company.live_payroll)
+    def initialize(companies: Company.operating)
       @companies = companies
     end
 
@@ -40,7 +40,7 @@ module ClientOperatingProfiles
 
     def backfill_company(company, active_aire_company_ids)
       company.with_lock(requires_new: true) do
-        next if company.test_workspace? || company.client_operating_profiles.exists?
+        next if company.practice_copy? || company.client_operating_profiles.exists?
 
         ClientOperatingProfile.create!(
           LegacyProfileBuilder.attributes_for(company, active_aire_company_ids: active_aire_company_ids)

@@ -641,7 +641,7 @@ module Api
           allowed = (!capability || StaffRolePolicy.allowed?(current_user, capability, company: current_company)) &&
             TestWorkspaceAccessPolicy.allowed?(user: current_user, company: current_company, request_method: "POST",
               capability: capability, controller_path: path, action_name: "create") &&
-            !(current_company&.test_workspace? && TestWorkspaceSafetyPolicy.blocked?(controller_path: path, action_name: "create", request_method: "POST", demo: current_company.demo?))
+            !(current_company&.contained? && TestWorkspaceSafetyPolicy.blocked?(controller_path: path, action_name: "create", request_method: "POST", demo: current_company.demo?, legacy_demo: current_company.legacy_demo?))
           return { allowed: true, reason: nil } if allowed
 
           { allowed: false, reason: "Your access can't set up employee loans for this client. Ask an admin to set up the loan in Employee Loans, then match the files again." }

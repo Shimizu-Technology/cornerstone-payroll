@@ -54,7 +54,7 @@ module TestWorkspace
     attr_reader :company, :actor
 
     def authorize!
-      allowed = company&.test_workspace? && actor&.organization_admin? &&
+      allowed = company&.contained? && actor&.organization_admin? &&
         actor.organization_id == company.organization_id && StaffRolePolicy.allowed?(actor, :manage_organization)
       raise ArgumentError, "An organization administrator is required" unless allowed
     end

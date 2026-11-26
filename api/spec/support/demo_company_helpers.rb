@@ -15,6 +15,19 @@ module DemoCompanyHelpers
     )
   end
 
+  def create_live_demo_company(organization:, name: "Harbor Finch Live Demo", fixture_key: "harbor-finch-live-demo", **attributes)
+    create(
+      :company,
+      organization: organization,
+      name: name,
+      payroll_environment: "live",
+      demo: true,
+      test_workspace_manifest: fixture_key ? { "version" => 1, "purpose" => "demo", "demo_fixture_key" => fixture_key } : {},
+      auto_create_fit_check: false,
+      **attributes
+    )
+  end
+
   # A quick committed fixture without the calculator; DemoCompany::Seed specs
   # cover the full calculate-approve-commit path.
   def create_committed_demo_pay_period(company:, pay_date:, employee:, gross_pay: 2_000)
