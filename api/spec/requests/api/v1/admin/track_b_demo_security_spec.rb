@@ -105,8 +105,14 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
     end
 
     it "blocks shared organization mutations and admin invitations (#{shape_label})" do
-      expect(StagingMailTransport).not_to receive(:deliver)
-      expect(ClerkInvitationService).not_to receive(:new)
+      transferable_live = create(:company, organization: organization, name: "Transferable Live", ein: "66-7654329")
+      clerk_double = instance_double(
+        ClerkInvitationService,
+        configured?: true,
+        create_invitation: { success: true, invitation_id: "inv_live_1", status: "pending", url: "https://accounts.example.com/inv" }
+      )
+      allow(StagingMailTransport).to receive(:deliver).and_return({ success: true })
+      allow(ClerkInvitationService).to receive(:new).and_return(clerk_double)
 
       expect {
         patch "/api/v1/admin/organizations/#{organization.id}",
@@ -129,17 +135,45 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
       }.not_to change(Organization, :count)
       expect_refused_with_demo_message
 
-      post "/api/v1/admin/organizations/transfer_company",
-           params: { transfer: { company_id: live.id, name: "Moved Org", slug: "moved-org-demo" } },
-           headers: headers_for(demo)
+      expect {
+        post "/api/v1/admin/organizations/transfer_company",
+             params: { transfer: { company_id: transferable_live.id, source_organization_id: organization.id, name: "Moved Org", slug: "moved-org-demo" } },
+             headers: headers_for(demo)
+      }.not_to change(Organization, :count)
       expect_refused_with_demo_message
+      expect(transferable_live.reload.organization_id).to eq(organization.id)
+      expect(StagingMailTransport).not_to have_received(:deliver)
+      expect(ClerkInvitationService).not_to have_received(:new)
 
-      # Paired live-company control succeeds with the same valid payload.
+      # Paired live-company controls succeed with the same valid payloads (update, create, transfer, invite).
       patch "/api/v1/admin/organizations/#{organization.id}",
             params: { organization: { client_limit: 7 } },
             headers: headers_for(live)
       expect(response).to have_http_status(:ok), "#{response.status}: #{response.body}"
       expect(organization.reload.client_limit).to eq(7)
+
+      expect {
+        post "/api/v1/admin/organizations",
+             params: { organization: { name: "Live Created Org", slug: "live-created-org-#{shape_label.parameterize}" } },
+             headers: headers_for(live)
+      }.to change(Organization, :count).by(1)
+      expect(response).to have_http_status(:created), "#{response.status}: #{response.body}"
+
+      expect {
+        post "/api/v1/admin/organizations/transfer_company",
+             params: { transfer: { company_id: transferable_live.id, source_organization_id: organization.id, name: "Transferred Live Org", slug: "transferred-live-#{shape_label.parameterize}" } },
+             headers: headers_for(live)
+      }.to change(Organization, :count).by(1)
+      expect(response).to have_http_status(:created), "#{response.status}: #{response.body}"
+      expect(transferable_live.reload.organization_id).not_to eq(organization.id)
+
+      expect {
+        post "/api/v1/admin/organizations/#{organization.id}/admin_users",
+             params: { user: { name: "Live Admin", email: "live-org-admin-#{shape_label.parameterize}@example.com" } },
+             headers: headers_for(live)
+      }.to change(User, :count).by(1)
+      expect(response).to have_http_status(:created), "#{response.status}: #{response.body}"
+      expect(ClerkInvitationService).to have_received(:new)
     end
 
     it "refuses tax configs, filing submitters and retirement limits with paired live controls (#{shape_label})" do
@@ -324,6 +358,23 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
     end
 
     it "runs official EFW2 and Pub 1220 validators for local text downloads and keeps PDF format for PDF endpoints" do
+      # Create a valid submitter FIRST so the 422s below come strictly from the
+      # fictional SSN/TIN validator rather than a missing submitter profile.
+      FilingSubmitter.create!(
+        organization: organization,
+        name: "Cornerstone Payroll",
+        ein: "66-1234567",
+        address_line1: "238 Flores St",
+        city: "Hagatna",
+        state: "GU",
+        zip: "96910",
+        contact_name: "Pat Reyes",
+        contact_phone: "671-555-0199",
+        contact_email: "filings@example.com",
+        bso_user_id: "TESTBS01",
+        tcc: "T1234"
+      )
+
       # Fictional SSN 900-... triggers the official EFW2 validator instead of returning nil.
       fictional_employee = create(
         :employee,
@@ -339,6 +390,7 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
 
       get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }, headers: headers_for(demo)
       expect(response).to have_http_status(:unprocessable_entity), "#{response.status}: #{response.body}"
+      expect(response.parsed_body.fetch("error")).to include("valid SSN required")
 
       # W-3SS PDF still works for demos even with fictional SSNs.
       get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }, headers: headers_for(demo)
@@ -346,21 +398,7 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
       expect(response.media_type).to eq("application/pdf")
       expect(response.body.b).to start_with("%PDF".b)
 
-      # With a valid submitter and valid non-900 test SSN, local demo EFW2 returns real EFW2 text bytes.
-      FilingSubmitter.create!(
-        organization: organization,
-        name: "Cornerstone Payroll",
-        ein: "66-1234567",
-        address_line1: "238 Flores St",
-        city: "Hagatna",
-        state: "GU",
-        zip: "96910",
-        contact_name: "Pat Reyes",
-        contact_phone: "671-555-0199",
-        contact_email: "filings@example.com",
-        bso_user_id: "TESTBS01",
-        tcc: "T1234"
-      )
+      # With a valid non-900 test SSN, local demo EFW2 returns real EFW2 text bytes.
       fictional_employee.update!(ssn_encrypted: "234-56-7891")
 
       get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }, headers: headers_for(demo)
@@ -385,6 +423,7 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
 
       get "/api/v1/admin/reports/form_1099_pub1220", params: { year: 2026, mode: "draft" }, headers: headers_for(demo)
       expect(response).to have_http_status(:unprocessable_entity), "#{response.status}: #{response.body}"
+      expect(response.parsed_body.fetch("error")).to include("valid SSN required")
 
       # 1096 totals PDF still works for demos and returns a PDF.
       get "/api/v1/admin/reports/form_1096_totals", params: { year: 2026, mode: "draft" }, headers: headers_for(demo)
