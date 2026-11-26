@@ -110,7 +110,8 @@ export function ClientInbox(): ReactElement {
       return;
     }
     if (row.kind === 'payroll_review') {
-      navigate(`/companies/${row.company_id}/pay-runs/${row.pay_period_id}/work?${target}`);
+      const returnTarget = new URLSearchParams({ return_to: location.pathname + location.search });
+      navigate(`/companies/${row.company_id}/pay-runs/${row.pay_period_id}/work?${returnTarget}`);
       return;
     }
     if (row.kind === 'message' || row.kind === 'file_request') {

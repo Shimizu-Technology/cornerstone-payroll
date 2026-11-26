@@ -23,7 +23,7 @@ module PortalNotifications
 
     def run!
       keys = due_scope.distinct.order(:recipient_key).limit(RECIPIENT_LIMIT).pluck(:recipient_key)
-      keys.sum { |key| claim(key).count { |group| deliver(group) } }
+      keys.sum { |key| claim(key).sum { |group| deliver_claimed(group) } }
     end
 
     private
@@ -40,9 +40,10 @@ module PortalNotifications
     # Batches are versioned (portal-notification-v2-...) and never mix clients
     # or destinations. For legacy pre-v2 batches, a retry keeps the old key and
     # renders with the legacy generic renderer ONLY if every row in that batch
-    # is still authorized; otherwise revoked rows are dropped and the remaining
-    # authorized rows are split and re-keyed into fresh v2 batches so revoked
-    # clients are never rendered and a mutated payload never reuses an old key.
+    # is still authorized; provider-accepted batches never resend, in-flight or
+    # backoff siblings wait, and truly revoked rows are dropped and reconciled
+    # onto fresh v2 keys so revoked clients are never rendered and a mutated
+    # payload never reuses an old key.
     def claim(recipient_key)
       PortalNotificationDelivery.transaction do
         rows = due_scope.where(recipient_key: recipient_key).order(:id).lock("FOR UPDATE SKIP LOCKED")
@@ -58,7 +59,7 @@ module PortalNotifications
       end
     end
 
-    def claim_v2_groups(recipient_key, rows, salt: nil)
+    def claim_v2_groups(recipient_key, rows, salt: nil, increment_attempts: true)
       rows.group_by do |row|
         [
           row.delivery_mode,
@@ -70,44 +71,107 @@ module PortalNotifications
         ids = group.map(&:id).sort
         key = v2_batch_key(recipient_key: recipient_key, mode: mode, destination: destination, company_id: company_id,
           demo: demo, ids: ids, salt: salt)
-        build_claimed_group(group: group, key: key, mode: mode, events: group.map(&:event), legacy_renderer: false)
+        build_claimed_group(
+          recipient_key: recipient_key,
+          group: group,
+          key: key,
+          mode: mode,
+          events: group.map(&:event),
+          legacy_renderer: false,
+          app_user: effective_user_for(group.first).present?,
+          increment_attempts: increment_attempts
+        )
       end
     end
 
     def claim_attempted_batch(recipient_key, previous_key, group)
       all_batch_rows = PortalNotificationDelivery.where(batch_key: previous_key).order(:id)
-        .includes(portal_notification_event: [ :company, :subject ]).to_a
+        .includes(:user, portal_notification_event: [ :company, :subject ]).to_a
       kept_ids = group.map(&:id)
-      all_authorized = all_batch_rows.any? && all_batch_rows.all? { |row| kept_ids.include?(row.id) }
+      other_rows = all_batch_rows.reject { |row| kept_ids.include?(row.id) }
+
+      # If any sibling row in this batch was already accepted by the provider,
+      # never resend a duplicate under a new key: reconcile pending siblings as sent.
+      if (sent_sibling = other_rows.find { |row| row.status == "sent" })
+        mark_reconciled_sent!(kept_ids, sent_sibling)
+        return []
+      end
+
+      # Re-check any non-actively-claimed pending sibling before deciding whether
+      # to wait or reconcile revoked rows.
+      other_rows.each do |row|
+        next unless row.status == "pending"
+        next if row.claimed_at.present? && row.claimed_at >= now - CLAIM_TIMEOUT
+
+        skip_if_ineligible!(row)
+      end
+
+      # Another sibling is still claimed, in retry backoff, or not due yet: wait
+      # instead of splitting and sending a duplicate.
+      return [] if other_rows.any? { |row| row.status == "pending" }
+
       all_events = all_batch_rows.map(&:event)
+      if other_rows.empty?
+        return [ build_claimed_group(
+          recipient_key: recipient_key,
+          group: group,
+          key: previous_key,
+          mode: group.first.delivery_mode,
+          events: all_events,
+          legacy_renderer: !v2_batch_key?(previous_key),
+          app_user: group.first.user_id.present?
+        ) ]
+      end
 
       if !v2_batch_key?(previous_key)
-        if all_authorized
-          return [ build_claimed_group(group: group, key: previous_key, mode: group.first.delivery_mode,
-            events: all_events, legacy_renderer: true) ]
-        end
-
         return claim_v2_groups(recipient_key, group, salt: "reconciled:#{previous_key}")
       end
 
       # Single-company generic v2 batches contain no client/subject/date details,
       # so keeping the original key and generic payload preserves provider-side
       # deduplication if a previous attempt timed out after provider acceptance.
-      if all_authorized || (!Email.payroll_review_batch?(all_events) && all_events.map(&:company_id).uniq.one?)
-        [ build_claimed_group(group: group, key: previous_key, mode: group.first.delivery_mode,
-          events: all_events, legacy_renderer: false) ]
+      if !Email.payroll_review_batch?(all_events) && all_events.map(&:company_id).uniq.one?
+        [ build_claimed_group(
+          recipient_key: recipient_key,
+          group: group,
+          key: previous_key,
+          mode: group.first.delivery_mode,
+          events: all_events,
+          legacy_renderer: false,
+          app_user: group.first.user_id.present?
+        ) ]
       else
         claim_v2_groups(recipient_key, group, salt: "reconciled:#{previous_key}")
       end
     end
 
-    def build_claimed_group(group:, key:, mode:, events:, legacy_renderer:)
-      ids = group.map(&:id).sort
+    def mark_reconciled_sent!(ids, sent_sibling)
       PortalNotificationDelivery.where(id: ids).update_all(
-        [ "attempts = attempts + 1, claimed_at = ?, batch_key = ?, updated_at = ?", now, key, now ])
+        status: "sent",
+        sent_at: sent_sibling.sent_at || now,
+        provider_message_id: sent_sibling.provider_message_id,
+        claimed_at: nil,
+        next_attempt_at: nil,
+        last_error_class: nil,
+        completed_at: sent_sibling.completed_at || now,
+        updated_at: now
+      )
+    end
+
+    def build_claimed_group(recipient_key:, group:, key:, mode:, events:, legacy_renderer:, app_user:, increment_attempts: true)
+      ids = group.map(&:id).sort
+      if increment_attempts
+        PortalNotificationDelivery.where(id: ids).update_all(
+          [ "attempts = attempts + 1, claimed_at = ?, batch_key = ?, updated_at = ?", now, key, now ])
+      else
+        PortalNotificationDelivery.where(id: ids).update_all(
+          [ "claimed_at = ?, batch_key = ?, updated_at = ?", now, key, now ])
+      end
       first = group.first
       {
+        recipient_key: recipient_key,
         user: effective_user_for(first),
+        app_user: app_user,
         address: first.address,
         audience: first.event.audience,
         ids: ids,
@@ -184,12 +248,57 @@ module PortalNotifications
       nil
     end
 
+    # Recheck authorization immediately before rendering each claimed group so
+    # an access revocation or withdrawal that occurred while an earlier group
+    # was sending never renders or sends revoked client details.
+    def deliver_claimed(group)
+      revalidate_claimed_group(group).count { |ready| deliver(ready) }
+    end
+
+    def revalidate_claimed_group(group)
+      PortalNotificationDelivery.transaction do
+        rows = PortalNotificationDelivery.where(id: group.fetch(:ids), status: "pending", batch_key: group.fetch(:key))
+          .order(:id).lock("FOR UPDATE")
+          .includes(:user, portal_notification_event: [ :company, :subject ]).to_a
+        return [] if rows.empty?
+
+        kept = rows.reject { |row| skip_if_ineligible!(row) }
+        return [] if kept.empty?
+
+        kept_ids = kept.map(&:id)
+        all_batch_rows = PortalNotificationDelivery.where(batch_key: group.fetch(:key)).order(:id)
+          .includes(:user, portal_notification_event: [ :company, :subject ]).to_a
+        other_rows = all_batch_rows.reject { |row| kept_ids.include?(row.id) }
+
+        if (sent_sibling = other_rows.find { |row| row.status == "sent" })
+          mark_reconciled_sent!(kept_ids, sent_sibling)
+          return []
+        end
+
+        if kept.size == group.fetch(:ids).size && (!group.fetch(:legacy_renderer) || other_rows.empty?)
+          return [ group ]
+        end
+
+        all_events = all_batch_rows.map(&:event)
+        if v2_batch_key?(group.fetch(:key)) && !Email.payroll_review_batch?(all_events) && all_events.map(&:company_id).uniq.one?
+          return [ group.merge(ids: kept_ids) ]
+        end
+
+        claim_v2_groups(
+          group.fetch(:recipient_key),
+          kept,
+          salt: "reconciled:#{group.fetch(:key)}",
+          increment_attempts: false
+        )
+      end
+    end
+
     def deliver(group)
       email = Email.new(
         audience: group.fetch(:audience),
         delivery_mode: group.fetch(:mode),
         events: group.fetch(:events),
-        app_user: group.fetch(:user).present?,
+        app_user: group.fetch(:app_user) { group.fetch(:user).present? },
         legacy_renderer: group.fetch(:legacy_renderer, false)
       )
       demo_company = group.fetch(:events).map(&:company).find { |company| company&.demo? }

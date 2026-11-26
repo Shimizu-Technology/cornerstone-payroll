@@ -353,15 +353,15 @@ RSpec.describe "Published payroll review loop", type: :request do
     expect(response.parsed_body.dig("pay_period", "payroll_review_history")).to eq([])
   end
 
-  it "reports honest notification_queued status on client approval and change requests" do
+  it "reports honest notification_status and notification_queued on client approval and change requests" do
     staff_approve
     # With email delivery disabled (default in specs), no email is queued.
     @actor = client
     post "#{base}/request_changes", params: { revision_id: review.id, note: "Need update" }
     expect(response).to have_http_status(:ok), response.body
-    expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(false)
+    expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
     get base
-    expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(false)
+    expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
 
     # Unapprove and publish a fresh revision, then enable email with an account team assigned.
     @actor = staff
@@ -371,24 +371,29 @@ RSpec.describe "Published payroll review loop", type: :request do
     with_portal_email do
       client_approve
       expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(true)
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => true, "notification_status" => "queued")
       get base
-      expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(true)
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => true, "notification_status" => "queued")
+
+      # Once the dispatcher sends the email, status transitions from queued to sent.
+      PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "sent")
     end
 
-    # When email is enabled but transport is unconfigured (no sender / API key), notification_queued stays false.
+    # When email is enabled but transport is unconfigured (no sender / API key), notification stays not_sent.
     @actor = staff
     post "#{admin}/unapprove"
     staff_approve
     with_portal_email(transport: nil, from: nil) do
       client_approve
       expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(false)
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
       get base
-      expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(false)
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
     end
 
-    # When no account team is assigned, notification_queued stays false even with email enabled.
+    # When no account team is assigned, notification stays not_sent even with email enabled.
     @actor = staff
     post "#{admin}/unapprove"
     staff_approve
@@ -396,7 +401,7 @@ RSpec.describe "Published payroll review loop", type: :request do
     with_portal_email do
       client_approve
       expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(false)
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
     end
   end
 

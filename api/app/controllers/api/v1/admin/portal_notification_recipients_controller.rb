@@ -67,11 +67,22 @@ module Api
           listed_ids = listed_roles.keys
           eligible = PortalNotifications::Recipients.eligible_staff_for(current_company)
           eligible_ids = eligible.map(&:id)
-          eligible_emails = eligible.map { |user| PortalNotificationRecipient.normalize_email(user.email) }.compact
+          eligible_canonicals = eligible.filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
           emails = listed.extra_emails.order(:email).pluck(:email)
           active_ids = listed_ids & eligible_ids
-          account_emails = emails.any? ? User.where("LOWER(email) IN (?)", emails).pluck(:email).map { |e| PortalNotificationRecipient.normalize_email(e) } : []
-          active_extra_count = emails.count { |email| !account_emails.include?(email) || eligible_emails.include?(email) }
+          # Scope account matching to this organization so recipient_count stays
+          # independent of foreign-organization registrations.
+          same_org_canonicals = if emails.any?
+            PortalNotificationRecipient.matching_users_for_emails(
+              emails, scope: User.where(organization_id: current_company.organization_id)
+            ).filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
+          else
+            Set.new
+          end
+          active_extra_count = emails.count do |email|
+            canonical = PortalNotificationRecipient.canonical_email(email)
+            !same_org_canonicals.include?(canonical) || eligible_canonicals.include?(canonical)
+          end
           active_count = active_ids.size + active_extra_count
           lead_user_id = active_ids.find { |id| listed_roles[id] == "lead" }
           backup_user_id = active_ids.find { |id| listed_roles[id] == "backup" }

@@ -111,27 +111,41 @@ it('shows the published preview without decision controls when access is read-on
   expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
 });
 
-it('shows honest approval confirmation based on whether account-team email was queued', () => {
+it('shows honest approval confirmation across queued, sent, and not_sent states', () => {
   const { rerender } = render(
     <ClientPayrollReview
       payPeriod={{
         ...period,
         can_decide_payroll_review: false,
-        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_queued: true },
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_status: 'queued', notification_queued: true },
       }}
       companyId={3}
       onDone={onDone}
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team is queued to be emailed.');
-  expect(screen.getByRole('status').textContent).not.toContain('was emailed');
+  expect(screen.getByRole('status').textContent).not.toContain('was notified by email');
 
   rerender(
     <ClientPayrollReview
       payPeriod={{
         ...period,
         can_decide_payroll_review: false,
-        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_queued: false },
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_status: 'sent', notification_queued: false },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was notified by email.');
+  expect(screen.getByRole('status').textContent).not.toContain('queued to be emailed');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: { ...period.payroll_review!, status: 'approved', approved_by_name: 'Casey Manager', notification_status: 'not_sent', notification_queued: false },
       }}
       companyId={3}
       onDone={onDone}
@@ -141,7 +155,7 @@ it('shows honest approval confirmation based on whether account-team email was q
   expect(screen.getByRole('status').textContent).not.toContain('queued to be emailed');
 });
 
-it('shows honest change-request confirmation based on whether account-team email was queued', () => {
+it('shows honest change-request confirmation across queued, sent, and not_sent states', () => {
   const { rerender } = render(
     <ClientPayrollReview
       payPeriod={{
@@ -152,6 +166,7 @@ it('shows honest change-request confirmation based on whether account-team email
           status: 'changes_requested',
           changes_requested_by_name: 'Casey Manager',
           change_request_note: 'Fix regular hours',
+          notification_status: 'queued',
           notification_queued: true,
         },
       }}
@@ -160,7 +175,6 @@ it('shows honest change-request confirmation based on whether account-team email
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team is queued to be emailed.');
-  expect(screen.getByRole('status').textContent).not.toContain('was emailed');
 
   rerender(
     <ClientPayrollReview
@@ -172,6 +186,27 @@ it('shows honest change-request confirmation based on whether account-team email
           status: 'changes_requested',
           changes_requested_by_name: 'Casey Manager',
           change_request_note: 'Fix regular hours',
+          notification_status: 'sent',
+          notification_queued: false,
+        },
+      }}
+      companyId={3}
+      onDone={onDone}
+    />,
+  );
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was notified by email.');
+
+  rerender(
+    <ClientPayrollReview
+      payPeriod={{
+        ...period,
+        can_decide_payroll_review: false,
+        payroll_review: {
+          ...period.payroll_review!,
+          status: 'changes_requested',
+          changes_requested_by_name: 'Casey Manager',
+          change_request_note: 'Fix regular hours',
+          notification_status: 'not_sent',
           notification_queued: false,
         },
       }}

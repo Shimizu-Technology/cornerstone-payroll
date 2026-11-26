@@ -31,12 +31,14 @@ module PayrollReview
       }.tap do |payload|
         payload[:source_manifest] = review_package.source_manifest if include_source_manifest
         if include_notification_status
-          payload[:notification_queued] = decision_notification_queued?(review_package)
+          notification_status = decision_notification_status(review_package)
+          payload[:notification_status] = notification_status
+          payload[:notification_queued] = notification_status.nil? ? nil : notification_status == "queued"
         end
       end
     end
 
-    def self.decision_notification_queued?(review_package)
+    def self.decision_notification_status(review_package)
       return nil unless review_package.approved? || review_package.changes_requested_at.present?
 
       deliveries = PortalNotificationDelivery.joins(:portal_notification_event)
@@ -44,10 +46,15 @@ module PayrollReview
           company_id: review_package.company_id,
           portal_notification_events: { dedupe_key: "payroll_review_decided:#{review_package.id}" }
         )
-      return true if deliveries.where(status: "sent").exists?
-      return false unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
+      return "sent" if deliveries.where(status: "sent").exists?
+      return "not_sent" unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
 
-      deliveries.where(status: "pending").exists?
+      deliveries.where(status: "pending").exists? ? "queued" : "not_sent"
+    end
+
+    def self.decision_notification_queued?(review_package)
+      status = decision_notification_status(review_package)
+      status.nil? ? nil : status == "queued"
     end
   end
 end
