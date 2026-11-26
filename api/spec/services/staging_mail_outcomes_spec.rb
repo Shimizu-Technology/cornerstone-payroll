@@ -25,6 +25,11 @@ RSpec.describe "Staging mail outcomes" do
   let(:config) { create(:payroll_reminder_config, company: company, enabled: true, recipients: [ user.email ]) }
   let(:period) { create(:pay_period, company: company, start_date: Date.current - 14, end_date: Date.current, pay_date: Date.current + 2) }
   let(:invitation_url) { "https://clerk.payroll.example.test/v1/tickets/accept?ticket=tk_synthetic" }
+  # The invite job only acts for a login whose invite is still pending.
+  let(:invitee) do
+    create(:user, company: company, organization: user.organization, email: "PRIVATE_INVITEE@example.test",
+      clerk_id: "pending_invitee", invitation_status: "pending")
+  end
 
   it "returns a distinct invite capture outcome with redacted evidence" do
     expect(Resend::Emails).not_to receive(:send)
@@ -35,9 +40,9 @@ RSpec.describe "Staging mail outcomes" do
 
   it "completes a captured invite job without claiming delivery or retrying" do
     expect(Resend::Emails).not_to receive(:send)
-    expect(SendUserInviteEmailJob.perform_now(user.id, nil, invitation_url)).to eq(:captured)
-    expect(@output.string).to include("captured", "user_id=#{user.id}")
-    expect(@output.string).not_to include(user.email)
+    expect(SendUserInviteEmailJob.perform_now(invitee.id, nil, invitation_url)).to eq(:captured)
+    expect(@output.string).to include("captured", "user_id=#{invitee.id}")
+    expect(@output.string).not_to include(invitee.email)
   end
 
   it "logs invite failures with IDs and class but no message or recipient" do
@@ -49,7 +54,7 @@ RSpec.describe "Staging mail outcomes" do
 
   it "keeps a failed invite job exception free of recipient details" do
     allow(UserInviteEmailService).to receive(:send_invite).and_return(false)
-    expect { SendUserInviteEmailJob.new.perform(user.id) }.to raise_error(RuntimeError, "Failed to send invite email for user_id=#{user.id}")
+    expect { SendUserInviteEmailJob.new.perform(invitee.id) }.to raise_error(RuntimeError, "Failed to send invite email for user_id=#{invitee.id}")
   end
 
   it "runs the daily reminder job in shared mode with capture and no provider send" do

@@ -46,7 +46,7 @@ export default function StandingChangesSettings() {
   };
   return <>
     <Header title="Standing Changes" description="Default rows for this client’s pay period files" />
-    <main className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-4xl space-y-5 p-4 sm:p-6">
       <h2 className="text-lg font-semibold">Changes {activeCompany?.name || 'this client'} sends every period</h2>
       <p className="text-sm text-neutral-600">Staff enter a new amount or hours on the pay run each period, or choose None this period. Saving these defaults does not change a sent revision.</p>
       {!canEdit && <p role="status" className="text-sm text-neutral-700">These defaults are read-only for your current client access.</p>}
@@ -96,6 +96,6 @@ export default function StandingChangesSettings() {
           <div className="flex flex-wrap gap-2"><Button type="submit" disabled={!canEdit || busy || !draft.employee_id || (draft.kind === 'extra_hours' && !draft.employee_wage_rate_id)}>{busy ? 'Saving…' : 'Save default'}</Button>{draft.id && <Button type="button" variant="outline" onClick={() => setDraft(blank())}>Cancel edit</Button>}</div>
         </form>
       </>}
-    </main>
+    </div>
   </>;
 }

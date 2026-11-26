@@ -1,11 +1,17 @@
 import type { InvitationDeliveryResponse } from '@/services/api';
 
+// No email left: the person can't sign in until someone resends.
+export function invitationNotSent(response: InvitationDeliveryResponse): boolean {
+  return response.invitation_delivery_status === 'failed' || response.invitation_delivery_status === 'skipped';
+}
+
 export function invitationOutcomeMessage(response: InvitationDeliveryResponse): string {
   switch (response.invitation_delivery_status) {
     case 'captured': return 'Captured in staging (not sent).';
     case 'queued': return 'Invitation queued for email delivery.';
     case 'submitted': return 'Invitation submitted to the email provider.';
     case 'failed': return `Invitation email failed${response.invitation_error ? `: ${response.invitation_error}` : ''}. You can retry from the user list.`;
+    case 'skipped': return `Invitation email not sent${response.invitation_error ? `: ${response.invitation_error}` : ''}. Resend it from the user list once email is set up.`;
     case 'not_requested': return '';
     default: return 'Invitation delivery status is unavailable. Check the user before retrying.';
   }

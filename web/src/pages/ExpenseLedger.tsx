@@ -263,7 +263,7 @@ export function ExpenseLedger() {
           <Button disabled={financeReadOnly} onClick={() => setShowExpenseForm((value) => !value)}><Plus className="mr-2 h-4 w-4" />Bill or purchase</Button>
         </>} />
 
-      <main className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-[1500px] space-y-6 px-4 py-6 sm:px-6 lg:px-8">
         <FinanceBookSelector disabled={busy || loading} />
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
           Record payments from bank, card, or processor evidence. An invoice or receipt alone does not prove that a bill was paid.
@@ -346,7 +346,7 @@ export function ExpenseLedger() {
             </>}
           </aside>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
