@@ -131,6 +131,11 @@ describe('employee API contracts', () => {
     expect(profile.emergencyContacts).toHaveLength(1);
   });
 
+  it('keeps an address request the employer replaced', () => {
+    const profile = parseProfile({ address_request: { id: 10, status: 'superseded', requested: { address_line1: '2 Example Rd', city: 'Tamuning', state: 'GU', zip: '96913' }, submitted_at: '2026-11-19T22:30:00Z', decided_at: '2026-11-20T02:00:00Z' } });
+    expect(profile.addressRequest).toMatchObject({ id: '10', status: 'superseded' });
+  });
+
   it('dates an address request by its Guam day, as staff see it', () => {
     // 8:30 AM ChST on Aug 14 is still Aug 13 in UTC.
     const profile = parseProfile({ address_request: { id: 9, status: 'approved', requested: { address_line1: '1 Example Rd', city: 'Tamuning', state: 'GU', zip: '96913' }, submitted_at: '2026-08-13T22:30:00Z', decided_at: '2026-12-31T23:00:00Z' } });
