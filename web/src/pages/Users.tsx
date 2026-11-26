@@ -344,13 +344,20 @@ export function Users() {
     setIsSavingEdit(true);
     setEditError(null);
     try {
-      const payload: { name: string; role: UserRole; client_access_level?: ClientAccessLevel; company_ids?: number[] } = {
+      const editingUser = users.find(user => user.id === editingId);
+      const loadedAccess = editingUser?.client_access_level ?? 'manager';
+      const payload: {
+        name: string; role: UserRole; client_access_level?: ClientAccessLevel; expected_client_access_level?: ClientAccessLevel; company_ids?: number[];
+      } = {
         name: editName.trim(),
         role: editRole,
-        ...(editRole === 'client' ? { client_access_level: editClientAccess } : {}),
+        // Only an access level the admin changed is sent, with the level they
+        // saw, so a stale form can't quietly undo someone else's change.
+        ...(editRole === 'client' && editClientAccess !== loadedAccess
+          ? { client_access_level: editClientAccess, expected_client_access_level: loadedAccess }
+          : {}),
       };
 
-      const editingUser = users.find(user => user.id === editingId);
       if (editingUser?.practice_company_id) {
         // A practice-only login keeps exactly its own copy. A closed copy is
         // changed with Move, so a rename never touches its assignment.

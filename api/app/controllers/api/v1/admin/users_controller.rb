@@ -134,6 +134,14 @@ module Api
           end
 
           @user.with_lock do
+            # A client access change names the level the editor saw, so a stale
+            # form can't silently undo someone else's change.
+            expected_access = params.dig(:user, :expected_client_access_level)
+            if permitted.key?(:client_access_level) && expected_access.present? && expected_access != @user.client_access_level
+              return render json: { error: "This user's client access changed since you opened it. Refresh and try again.",
+                code: "client_access_changed" }, status: :conflict
+            end
+
             if @user.awaiting_clerk_binding? && @user.clerk_invitation_id.present? &&
               permitted.key?(:email) && permitted[:email] != @user.email
               @user.errors.add(:email, "cannot be changed while a Clerk invitation is on file")

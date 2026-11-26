@@ -20,6 +20,10 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
       date_of_birth: Date.new(1990, 4, 12))
   end
 
+  include ActiveSupport::Testing::TimeHelpers
+
+  let(:uuid_pattern) { /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/ }
+
   before { enable_employee_app!(company) }
 
   def change_email(actor, email)
@@ -85,7 +89,7 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
     invite!(employee, actor: staff)
 
     expect { change_email(client, "riley.new@example.net") }
-      .to have_enqueued_job(SendEmployeeEmailChangeNoticeJob).with(employee.id, "riley.old@example.net", kind_of(Integer))
+      .to have_enqueued_job(SendEmployeeEmailChangeNoticeJob).with(employee.id, "riley.old@example.net", match(uuid_pattern))
   end
 
   it "doesn't notify or audit for an employee who never had employee app access" do
@@ -102,7 +106,7 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
     expect(invite.link).to be_active
 
     expect { change_email(staff, "riley.new@example.net") }
-      .to have_enqueued_job(SendEmployeeEmailChangeNoticeJob).with(employee.id, "riley.old@example.net", kind_of(Integer))
+      .to have_enqueued_job(SendEmployeeEmailChangeNoticeJob).with(employee.id, "riley.old@example.net", match(uuid_pattern))
 
     expect(login.reload.email).to eq("riley.old@example.net")
     expect(invite.link.reload).to have_attributes(status: "active", user_id: login.id)
@@ -122,12 +126,27 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
       sent = []
       allow(PortalNotifications::Transport).to receive(:deliver) { |payload, **options| sent << [ payload, options ]; { "id" => "msg_1" } }
 
-      expect(SendEmployeeEmailChangeNoticeJob.new.perform(employee.id, "riley.old@example.net", 1_700_000_000)).to eq(:sent)
+      expect(SendEmployeeEmailChangeNoticeJob.new.perform(employee.id, "riley.old@example.net", "change-a")).to eq(:sent)
 
       payload, options = sent.sole
       expect(payload).to include(to: "riley.old@example.net", subject: "The email for your Example Bakery employee app was changed",
         text: "The email for your Example Bakery employee app was changed. If you didn't expect this, contact Example Bakery.")
-      expect(options).to eq(idempotency_key: "employee-email-changed-#{employee.id}-1700000000")
+      expect(options).to eq(idempotency_key: "employee-email-changed-change-a")
+    end
+
+    it "gives each change its own notice, even two in the same second" do
+      invite!(employee, actor: staff)
+      ids = []
+      allow(SendEmployeeEmailChangeNoticeJob).to receive(:perform_later) { |*args| ids << args.last }
+
+      freeze_time do
+        change_email(client, "riley.new@example.net")
+        change_email(client, "riley.newer@example.net")
+      end
+
+      expect(ids.size).to eq(2)
+      expect(ids.uniq.size).to eq(2)
+      expect(ids).to all(match(uuid_pattern))
     end
 
     it "keeps the address out of the job's log lines" do

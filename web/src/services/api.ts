@@ -905,7 +905,9 @@ export const usersApi = {
     api.get<{ data: User }>(`/admin/users/${id}`),
   create: (data: { email: string; name: string; role: User['role']; client_access_level?: ClientAccessLevel; company_ids?: number[] }) =>
     api.post<UserCreateResponse>('/admin/users', { user: data }),
-  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>> & { client_access_level?: ClientAccessLevel; company_ids?: number[] }) =>
+  update: (id: number, data: Partial<Pick<User, 'name' | 'role' | 'active'>> & {
+    client_access_level?: ClientAccessLevel; expected_client_access_level?: ClientAccessLevel; company_ids?: number[];
+  }) =>
     api.patch<{ data: User }>(`/admin/users/${id}`, { user: data }),
   activate: (id: number) =>
     api.post<{ data: User }>(`/admin/users/${id}/activate`),

@@ -7,7 +7,10 @@ import type { ClientPortalThread, PortalFileRequest } from '@/services/api';
 import { clientPayrollSubmissionsApi, type PayrollSubmissionsApi } from '@/services/payrollSubmissions';
 import { PeriodConversation } from './PeriodConversation';
 
-afterEach(cleanup);
+const auth = vi.hoisted(() => ({ isClientViewer: false }));
+vi.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => auth }));
+
+afterEach(() => { cleanup(); auth.isClientViewer = false; });
 
 const conversation = (status: PortalFileRequest['status']): ClientPortalThread => ({
   id: 5, company_id: 1, subject: 'Payroll', status: 'open', unread: false, created_at: '2026-11-12T00:00:00Z', updated_at: '2026-11-12T00:00:00Z',
@@ -28,4 +31,14 @@ it('asks the client for a requested file, then shows it as under review once sen
   view('responded');
   expect(await screen.findByText(/Cornerstone is reviewing it/)).toBeTruthy();
   expect(screen.queryByRole('link', { name: 'Send it in Messages' })).toBeNull();
+});
+
+it('shows a client viewer a failed load, with the view-only note instead of the message form', async () => {
+  auth.isClientViewer = true;
+  const api = { ...clientPayrollSubmissionsApi, threads: { ...clientPayrollSubmissionsApi.threads, get: vi.fn().mockRejectedValue(new Error('Could not load the conversation')), markRead: vi.fn() } } as unknown as PayrollSubmissionsApi;
+  render(<MemoryRouter><PeriodConversation api={api} periodRef="7" threadId={5} onThreadCreated={vi.fn()} /></MemoryRouter>);
+
+  expect((await screen.findByRole('alert')).textContent).toBe('Could not load the conversation');
+  expect(screen.getByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Send message' })).toBeNull();
 });
