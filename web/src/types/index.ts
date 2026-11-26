@@ -1595,6 +1595,8 @@ export interface PayrollReviewPackage {
   approval_notes?: string | null;
   approval_evidence_reference?: string | null;
   acknowledgement: string;
+  notification_queued?: boolean | null;
+  notification_status?: 'queued' | 'sent' | 'not_sent' | null;
 }
 
 export type PayrollLiabilityReconciliationStatus =

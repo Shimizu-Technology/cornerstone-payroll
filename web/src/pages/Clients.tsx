@@ -20,6 +20,7 @@ import { TestWorkspaceGuide, WorkspaceRoleGuide } from '@/components/test-worksp
 import { companiesApi, ApiError } from '@/services/api';
 import { RecordCreatorLine } from '@/components/records/RecordCreatorLine';
 import { RecordHistoryPanel } from '@/components/records/RecordHistoryPanel';
+import { PortalAlertRecipientsPanel } from '@/components/client-portal/PortalAlertRecipientsPanel';
 import type { CompanyListItem, CompanyFormData, MigrationPromotionPreview, MigrationRehearsalPreview, PromotionPaymentDisposition, TestWorkspaceCopyMode, TestWorkspacePreview } from '@/services/api';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -185,6 +186,9 @@ export function Clients() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editableFields, setEditableFields] = useState<string[] | null>(null);
   const [editingCompanyType, setEditingCompanyType] = useState<'client' | 'demo' | null>(null);
+  const [editingCanAdminister, setEditingCanAdminister] = useState(false);
+  const [editingIsTestWorkspace, setEditingIsTestWorkspace] = useState(false);
+  const autoOpenedEditRef = useRef(false);
   const canEditField = (field: keyof CompanyFormData) => editableFields ? editableFields.includes(field) : canManageClients || ['phone', 'email', 'address_line1', 'address_line2', 'city', 'state', 'zip'].includes(field);
   const canEditCore = canEditField('bank_name') || canEditField('check_stock_type') || canEditField('simple_payroll_register_enabled');
   const [form, setForm] = useState<CompanyFormData>({ ...emptyForm });
@@ -568,6 +572,10 @@ export function Clients() {
       const c = data.company;
       setEditableFields(c.editable_fields ?? null);
       setEditingCompanyType(c.company_type ?? null);
+      setEditingIsTestWorkspace(isTestWorkspace(c) && c.company_type !== 'demo');
+      setEditingCanAdminister(
+        canManageClients || c.client_capabilities?.includes('manage_client_administration') === true,
+      );
       setForm({
         name: c.name || '',
         ein: c.ein || '',
@@ -597,6 +605,19 @@ export function Clients() {
       setLoadingEditId(null);
     }
   };
+  const handleEditRef = useRef(handleEdit);
+  handleEditRef.current = handleEdit;
+
+  useEffect(() => {
+    if (autoOpenedEditRef.current || loading || companies.length === 0) return;
+    const rawEdit = new URLSearchParams(window.location.search).get('edit');
+    const editCompanyId = rawEdit && /^\d+$/.test(rawEdit) ? Number(rawEdit) : null;
+    if (!editCompanyId) return;
+    const match = companies.find((company) => company.id === editCompanyId && !isReadOnlyWorkspace(company));
+    if (!match) return;
+    autoOpenedEditRef.current = true;
+    void handleEditRef.current(match.id);
+  }, [companies, loading]);
 
   const handleOpenRename = (client: CompanyListItem) => {
     if (!canRenameClient(client) || client.migration_rehearsal_status === 'pending' || renameBusyRef.current) return;
@@ -664,6 +685,8 @@ export function Clients() {
     setShowForm(false);
     setEditableFields(null);
     setEditingCompanyType(null);
+    setEditingCanAdminister(false);
+    setEditingIsTestWorkspace(false);
     setEditingId(null);
     setForm({ ...emptyForm });
     setFormError(null);
@@ -1406,6 +1429,10 @@ export function Clients() {
               </Button>
             </div>
           </Card>
+        )}
+
+        {showForm && editingId && editingCanAdminister && !editingIsTestWorkspace && (
+          <PortalAlertRecipientsPanel key={editingId} companyId={editingId} />
         )}
 
         {canManageClients && <TestWorkspaceGuide />}
