@@ -51,6 +51,8 @@ Payroll web can't read the employee service's process settings, so each readines
 
 The screen shows the observed guard state and the database state side by side, as separate facts.
 
+**Demo early access on Payroll web and the worker.** These processes run the guard in log mode, so under the early-access waiver a demo's app reads as on there only while the employee service's signed answer says its guard is in raise mode as the restricted role. Each process caches that answer for 2 minutes, and a missing or failed answer for 15 seconds. Without a valid answer the demo's app reads as off: no invitations, and no employee mail from jobs. Set `EMPLOYEE_API_URL` and `EMPLOYEE_SERVICE_ATTESTATION_SECRET` on the worker as well as Payroll web. The employee service never uses this answer. It checks its own guard on every employee request, and so does any other process that serves employee routes.
+
 ### Loading the Terms version
 
 Sign-up and claim use the current server-published Terms. Publish each immutable version with the exact served Terms file so the API can return its SHA-256 digest.
