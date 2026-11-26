@@ -23,8 +23,8 @@ module Api
             company_id: company_id
           ).call
 
-          # A test workspace may look at the report but never launch a clear.
-          render json: report.merge(can_clear: current_company.present? && !current_company.test_workspace?)
+          # A contained company (test workspace or demo) may look at the report but never launch a clear.
+          render json: report.merge(can_clear: current_company.present? && !current_company.contained?)
         end
 
         # POST /api/v1/admin/employee_contact_hygiene/placeholder_emails
@@ -105,7 +105,7 @@ module Api
           # rehearsal can't clear its live source by naming its company ID.
           selected_id = request.headers["X-Company-Id"].to_s
           unless selected_id.present? && authorized_explicit_company_id(selected_id) == target_company.id &&
-              !target_company.test_workspace?
+              !target_company.contained?
             return render json: {
               error: target_company.demo? ? Company::DEMO_UNAVAILABLE_MESSAGE : "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
             }, status: :forbidden

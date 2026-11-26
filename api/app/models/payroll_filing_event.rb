@@ -5,7 +5,7 @@ class PayrollFilingEvent < ApplicationRecord
 
   belongs_to :payroll_filing_record, inverse_of: :events
   belongs_to :company
-  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.demo? }
+  validate { errors.add(:base, Company::DEMO_UNAVAILABLE_MESSAGE) if company&.legacy_demo? }
   belongs_to :recorded_by, class_name: "User"
   belongs_to :evidence_document, class_name: "ClientDocument", optional: true
   belongs_to :download_audit, class_name: "AuditLog", optional: true

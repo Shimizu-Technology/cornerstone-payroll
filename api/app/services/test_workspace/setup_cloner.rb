@@ -51,8 +51,8 @@ module TestWorkspace
     attr_reader :source_company, :target_company, :actor, :employee_lineage, :loan_balance_on
 
     def validate!
-      raise ArgumentError, "Target must be a test workspace" unless target_company.test_workspace?
       raise ArgumentError, "Demo companies are provisioned from their own fixture, never copied from a client" if target_company.demo?
+      raise ArgumentError, "Target must be a test workspace" unless target_company.test_workspace?
       raise ArgumentError, "Test workspace source changed" unless target_company.migration_source_company_id == source_company.id
       raise ArgumentError, "Source and test workspace must belong to the same organization" unless target_company.organization_id == source_company.organization_id
       raise ArgumentError, "Actor no longer belongs to this organization" unless actor.organization_id == target_company.organization_id

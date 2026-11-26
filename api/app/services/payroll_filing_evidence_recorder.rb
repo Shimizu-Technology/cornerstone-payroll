@@ -125,8 +125,8 @@ class PayrollFilingEvidenceRecorder
     raise Error, "Unsupported filing type" unless filing_type.in?(PayrollFilingRecord::FILING_TYPES)
     raise Error, "tax_year must be a valid tax year" unless tax_year.in?(2000..2200)
     raise Error, "quarter must be 1, 2, 3, or 4" if quarter.present? && !quarter.in?(1..4)
-    raise Error, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo?
-    raise Error, "Test workspaces cannot record filings" if company.test_workspace?
+    raise Error, Company::DEMO_UNAVAILABLE_MESSAGE if company.legacy_demo?
+    raise Error, "Test workspaces cannot record filings" if company.practice_copy?
     return if evidence_document.nil? && quarter.nil? && tax_year >= YearEnd::Checklist::FIRST_TAX_YEAR
 
     raise Error, "Evidence must belong to this company" unless evidence_document&.company_id == company.id

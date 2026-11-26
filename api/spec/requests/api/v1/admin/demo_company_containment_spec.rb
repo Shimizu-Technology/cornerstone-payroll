@@ -54,18 +54,19 @@ RSpec.describe "Demo company containment", type: :request do
     demo_client_message!
 
     expect(firm_totals).to eq(before)
-    expect(before[:year_end_clients]).to eq([ "Live Client" ])
+    expect(before[:year_end_clients]).to eq([ "Harbor Finch Kitchen", "Live Client" ])
+    expect(before[:year_end_counts]).to eq(needs_action: 1, check_needed: 0, ready: 0, not_filing: 0)
     expect(before[:year_end_hidden][:test_workspaces]).to eq(1)
     expect(before[:profitability_companies]).to eq([ live.id ])
   end
 
-  it "shows demo inbox activity only when the demo client is selected, and never in the badge" do
+  it "shows demo inbox activity in rows with demo: true, and never in the live-only badge counters" do
     demo_client_message!
 
     get "/api/v1/admin/client_inbox"
-    expect(response.parsed_body.fetch("data")).to be_empty
+    expect(response.parsed_body.fetch("data").sole).to include("company_id" => demo.id, "practice_copy" => false, "demo" => true)
     get "/api/v1/admin/client_inbox", params: { company_id: demo.id }
-    expect(response.parsed_body.fetch("data").sole).to include("company_id" => demo.id, "practice_copy" => false)
+    expect(response.parsed_body.fetch("data").sole).to include("company_id" => demo.id, "practice_copy" => false, "demo" => true)
     get "/api/v1/admin/client_inbox/counts"
     expect(response.parsed_body.values.grep(Integer).sum).to eq(0)
     get "/api/v1/admin/client_inbox/counts", params: { company_id: demo.id }
@@ -96,8 +97,9 @@ RSpec.describe "Demo company containment", type: :request do
     expect(PayrollFilingRecord.where(company: demo)).to be_empty
   end
 
-  it "does not precompute a demo's e-file check" do
-    expect(YearEnd::Checklist).not_to receive(:new)
+  it "runs the e-file preflight job for a demo company like an operating client" do
+    checklist = instance_double(YearEnd::Checklist, call: {})
+    expect(YearEnd::Checklist).to receive(:new).with(company: demo, year: 2026).and_return(checklist)
     YearEndEfileCheckJob.perform_now(demo.id, 2026, YearEnd::InputRevision.for(demo.id, 2026)[demo.id])
   end
 
@@ -215,7 +217,7 @@ RSpec.describe "Demo company containment", type: :request do
       allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(user.id)
     end
 
-    it "lets the assigned accountant prepare and download, never file or pay, and keeps others out" do
+    it "lets the assigned accountant prepare, download and record Form 500 outcomes, and keeps unassigned staff out" do
       act_as(unassigned)
       post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "prepared" } }
       expect(response).to have_http_status(:forbidden)
@@ -227,11 +229,8 @@ RSpec.describe "Demo company containment", type: :request do
       expect(response.body).to start_with("%PDF")
       post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "filed", payment_amount: "125.00",
         confirmation_number: "DRT-123", receipt_attached: true } }
-      expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
-      post "/api/v1/form_500s/save", params: { form_500: { pay_period_id: period.id, status: "prepared" } }
       expect(response).to have_http_status(:ok), response.body
-      expect(Form500Filing.find_by!(pay_period: period)).to have_attributes(status: "prepared", payment_amount: nil, confirmation_number: nil)
+      expect(Form500Filing.find_by!(pay_period: period)).to have_attributes(status: "filed", confirmation_number: "DRT-123", receipt_attached: true)
     end
   end
 end

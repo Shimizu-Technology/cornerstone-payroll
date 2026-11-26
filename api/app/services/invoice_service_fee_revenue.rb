@@ -17,7 +17,7 @@ class InvoiceServiceFeeRevenue
                 live_clients_only: false)
     invoices = Invoice.where(finance_book: finance_book, status: %w[open uncollectible]).includes(:line_items)
     if live_clients_only
-      non_live = Company.where.not(payroll_environment: "live").select(:id)
+      non_live = Company.contained.select(:id)
       invoices = invoices.where("invoices.company_id IS NULL OR invoices.company_id NOT IN (?)", non_live)
                          .where("invoices.invoice_recipient_id IS NULL OR invoices.invoice_recipient_id NOT IN (?)",
                                 InvoiceRecipient.where(company_id: non_live).select(:id))
