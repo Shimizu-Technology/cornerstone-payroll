@@ -157,6 +157,16 @@ RSpec.describe Employee, type: :model do
     end
   end
 
+  describe "#legal_name" do
+    it "adds the suffix in its printed form, even before validation normalizes it" do
+      employee = build(:employee, first_name: "Alex", middle_name: nil, last_name: "Testperson", name_suffix: "jr.")
+
+      expect(employee.legal_name).to eq("Alex Testperson Jr.")
+      employee.name_suffix = "iii"
+      expect(employee.legal_name).to eq("Alex Testperson III")
+    end
+  end
+
   describe "#active_wage_rates" do
     let!(:company) { create(:company) }
     let!(:department) { create(:department, company: company) }

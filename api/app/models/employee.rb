@@ -413,6 +413,13 @@ class Employee < ApplicationRecord
     [ first_name, middle_name, last_name ].compact_blank.join(" ")
   end
 
+  # The legal name with its suffix ("Jr.", "III"), for an employee reading
+  # their own record. W-2GU prints the coded suffix in its own box.
+  def legal_name
+    suffix = name_suffix.to_s.upcase.delete(".")
+    [ full_name, { "JR" => "Jr.", "SR" => "Sr." }.fetch(suffix, suffix) ].compact_blank.join(" ")
+  end
+
   def display_name
     contractor? && business_name.present? ? "#{full_name} (#{business_name})" : full_name
   end
@@ -439,9 +446,11 @@ class Employee < ApplicationRecord
     status == "active"
   end
 
-  def eligible_on?(date)
+  # w4_on: the date the W-4 is checked on, a payroll's pay_date when the
+  # caller is building that payroll (EmployeeIntakePolicy.payroll_ready?).
+  def eligible_on?(date, w4_on: date)
     date = date.to_date
-    return false unless EmployeeIntakePolicy.payroll_ready?(self, date)
+    return false unless EmployeeIntakePolicy.payroll_ready?(self, date, w4_on: w4_on.to_date)
     return false if hire_date.present? && date < hire_date
 
     event = employee_status_events.where("effective_date <= ?", date).order(effective_date: :desc, id: :desc).first

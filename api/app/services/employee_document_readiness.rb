@@ -60,7 +60,7 @@ class EmployeeDocumentReadiness
       raise BlockedError, "Recalculate payroll after confirming or changing withholding setup for: #{stale_withholding.map(&:employee_full_name).join(', ')}."
     end
     incomplete = Employee.where(company_id: pay_period.company_id, id: employee_ids).to_a.reject do |employee|
-      EmployeeIntakePolicy.payroll_ready?(employee, pay_period.end_date)
+      EmployeeIntakePolicy.payroll_ready?(employee, pay_period.end_date, w4_on: pay_period.pay_date)
     end
     if incomplete.any?
       raise BlockedError, "Confirm payroll setup and the eligible date before approving or committing payroll: #{incomplete.map(&:full_name).join(', ')}."

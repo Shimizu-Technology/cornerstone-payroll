@@ -481,6 +481,38 @@ describe('employee app shell', () => {
     expect(within(olderStub).getAllByRole('link', { name: /^Newer:/ }).length).toBeGreaterThan(0);
   });
 
+  it('says an adjusted QuickBooks check\'s PDF is the original stub from before the adjustment', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/pay');
+    const check = (id: string, adjusted: boolean) => ({
+      id, source: 'quickbooks', pay_date: adjusted ? '2026-03-13' : '2026-02-27', period_start: '2026-02-15', period_end: '2026-02-28',
+      gross_pay: '1500.00', net_pay: adjusted ? '1350.00' : '1200.00', hours_total: '80.00', original_pdf: true,
+      payment: { method: 'paper_check', status: null, issued_on: null, check_number_last4: '1088' },
+      adjustment_note: adjusted ? 'Includes recorded payroll adjustments.' : null,
+    });
+    const detail = (row: ReturnType<typeof check>) => ({ ...row, earnings: [], taxes: [], deductions: [], other_pay: [], ytd: { gross: null, net: null }, note: row.adjustment_note });
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen', status: 'active' }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [check('qb-2', true), check('qb-1', false)], years: [2026], next_page: null }),
+      '/employee/statements/qb-2': () => Response.json(detail(check('qb-2', true))),
+      '/employee/statements/qb-1': () => Response.json(detail(check('qb-1', false))),
+    }));
+    render(<EmployeeApp />);
+
+    const list = await screen.findByRole('list', { name: 'From QuickBooks records' });
+    await userEvent.click(within(list).getByRole('link', { name: /Mar 13/ }));
+    const adjusted = await screen.findByRole('article');
+    expect(within(adjusted).getByText('Includes recorded payroll adjustments.')).toBeTruthy();
+    expect(within(adjusted).getByRole('button', { name: /View original stub \(PDF\)/ })).toBeTruthy();
+    expect(within(adjusted).getByText('This PDF is the original QuickBooks stub from before the recorded adjustment, so its amounts differ from the ones above.')).toBeTruthy();
+
+    await userEvent.click(within(adjusted).getAllByRole('link', { name: /^Older:/ })[0]);
+    const unadjusted = await screen.findByRole('article');
+    await within(unadjusted).findByRole('button', { name: /View original stub \(PDF\)/ });
+    expect(within(unadjusted).queryByText(/from before the recorded adjustment/)).toBeNull();
+  });
+
   it('sets honest Step 1 copy, hides internal terms version, and keeps Step 2 entries on mismatch', async () => {
     window.history.pushState({}, '', '/activate');
     let activationCalls = 0;

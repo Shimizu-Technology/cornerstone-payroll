@@ -196,6 +196,7 @@ class PayPeriod < ApplicationRecord
 
   validate :end_date_after_start_date
   validate :pay_date_after_end_date
+  validate :pay_date_year_keeps_check_dates, on: :update, if: :will_save_change_to_pay_date?
   validate :fixed_semimonthly_schedule_dates,
            if: -> { new_record? || will_save_change_to_start_date? || will_save_change_to_end_date? || will_save_change_to_pay_date? || will_save_change_to_company_pay_schedule_id? || will_save_change_to_run_purpose? || will_save_change_to_cycle? }
   validate :supplemental_target_must_be_regular
@@ -885,6 +886,16 @@ class PayPeriod < ApplicationRecord
     if pay_date < end_date
       errors.add(:pay_date, "must be on or after end date")
     end
+  end
+
+  # Check dates must share the pay date's tax year (PayrollItem validates
+  # that when a check date changes), so a pay date can't leave them behind.
+  def pay_date_year_keeps_check_dates
+    return if pay_date.blank? || pay_date_in_database.blank? || pay_date.year == pay_date_in_database.year
+    return unless payroll_items.where.not(check_date: nil).where.not(check_date: pay_date.all_year).exists?
+
+    errors.add(:pay_date, "can't move to #{pay_date.year} while checks on this payroll are dated in another year. " \
+      "Clear or update those check dates first.")
   end
 
   def fixed_semimonthly_schedule_dates

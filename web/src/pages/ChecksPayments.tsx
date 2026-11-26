@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { PayrollLiabilityCenter } from '@/components/payroll/PayrollLiabilityCenter';
 import { CheckRegister } from '@/components/checks/CheckRegister';
 import { formatDateRange, formatGuamDate } from '@/lib/utils';
+import { guamBusinessDate, guamTaxPeriod } from '@/lib/payrollBusinessDate';
 
 const CHECK_TYPE_LABELS: Record<NonEmployeeCheckType, string> = {
   contractor: 'Contractor',
@@ -93,15 +94,9 @@ interface FormState {
   liability_entry_ids: number[];
 }
 
-function localDateString() {
-  const date = new Date();
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function initialFormState(): FormState {
+// Defaults follow the Guam business date, like the register export.
+// eslint-disable-next-line react-refresh/only-export-components
+export function initialFormState(): FormState {
   const today = new Date();
   return {
     pay_period_id: null,
@@ -111,16 +106,52 @@ function initialFormState(): FormState {
     check_number: '',
     payment_method: 'check',
     payment_period_type: 'month',
-    tax_year: String(today.getFullYear()),
-    tax_quarter: String(Math.floor(today.getMonth() / 3) + 1),
-    tax_month: String(today.getMonth() + 1),
+    ...guamTaxPeriod(today),
     due_date: '',
-    payment_date: localDateString(),
+    payment_date: guamBusinessDate(today),
     confirmation_number: '',
     memo: '',
     reference_number: '',
     description: '',
     line_items: [],
+    liability_entry_ids: [],
+  };
+}
+
+// A clone keeps the source payment's tax period and fills any missing field,
+// and the payment date, from the Guam business date.
+// eslint-disable-next-line react-refresh/only-export-components
+export function cloneFormState(check: NonEmployeeCheck): FormState {
+  const now = new Date();
+  const today = guamTaxPeriod(now);
+  return {
+    // A clone is a new standalone payment. Never carry an old payroll run
+    // association forward without also carrying its exact liability journal
+    // allocation, which intentionally cannot be cloned.
+    pay_period_id: null,
+    payable_to: check.payable_to || '',
+    amount: check.amount != null ? String(check.amount) : '',
+    check_type: check.check_type,
+    check_number: '',
+    payment_method: check.payment_method || 'check',
+    payment_period_type: check.payment_period_type === 'pay_period'
+      ? 'none'
+      : check.payment_period_type || 'none',
+    tax_year: check.tax_year ? String(check.tax_year) : today.tax_year,
+    tax_quarter: check.tax_quarter ? String(check.tax_quarter) : today.tax_quarter,
+    tax_month: check.tax_month ? String(check.tax_month) : today.tax_month,
+    due_date: check.due_date || '',
+    payment_date: guamBusinessDate(now),
+    confirmation_number: '',
+    memo: check.memo || '',
+    reference_number: check.reference_number || '',
+    description: check.description || '',
+    line_items: (check.line_items || []).map((lineItem) => ({
+      description: lineItem.description || '',
+      reference_number: lineItem.reference_number || '',
+      service_period: lineItem.service_period || '',
+      amount: lineItem.amount != null ? String(lineItem.amount) : '',
+    })),
     liability_entry_ids: [],
   };
 }
@@ -178,7 +209,7 @@ export function ChecksPayments() {
   const [linkLoading, setLinkLoading] = useState(false);
   const [checkRegisterRefreshVersion, setCheckRegisterRefreshVersion] = useState(0);
   const [paymentConfirmation, setPaymentConfirmation] = useState('');
-  const [paymentDate, setPaymentDate] = useState(localDateString());
+  const [paymentDate, setPaymentDate] = useState(guamBusinessDate());
 
   const loadChecks = useCallback(async () => {
     setLoading(true);
@@ -301,36 +332,7 @@ export function ChecksPayments() {
   const handleCloneCheck = (check: NonEmployeeCheck) => {
     setError(null);
     setShowForm(true);
-    setForm({
-      // A clone is a new standalone payment. Never carry an old payroll run
-      // association forward without also carrying its exact liability journal
-      // allocation, which intentionally cannot be cloned.
-      pay_period_id: null,
-      payable_to: check.payable_to || '',
-      amount: check.amount != null ? String(check.amount) : '',
-      check_type: check.check_type,
-      check_number: '',
-      payment_method: check.payment_method || 'check',
-      payment_period_type: check.payment_period_type === 'pay_period'
-        ? 'none'
-        : check.payment_period_type || 'none',
-      tax_year: check.tax_year ? String(check.tax_year) : String(new Date().getFullYear()),
-      tax_quarter: check.tax_quarter ? String(check.tax_quarter) : String(Math.floor(new Date().getMonth() / 3) + 1),
-      tax_month: check.tax_month ? String(check.tax_month) : String(new Date().getMonth() + 1),
-      due_date: check.due_date || '',
-      payment_date: localDateString(),
-      confirmation_number: '',
-      memo: check.memo || '',
-      reference_number: check.reference_number || '',
-      description: check.description || '',
-      line_items: (check.line_items || []).map((lineItem) => ({
-        description: lineItem.description || '',
-        reference_number: lineItem.reference_number || '',
-        service_period: lineItem.service_period || '',
-        amount: lineItem.amount != null ? String(lineItem.amount) : '',
-      })),
-      liability_entry_ids: [],
-    });
+    setForm(cloneFormState(check));
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
   };
 
@@ -549,7 +551,7 @@ export function ChecksPayments() {
     const blob = new Blob([stagingCsv(csv)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    const date = new Date().toISOString().slice(0, 10);
+    const date = guamBusinessDate();
     link.href = url;
     link.download = stagingFilename(`checks_payments_register_${date}.csv`);
     document.body.appendChild(link);
@@ -892,7 +894,7 @@ export function ChecksPayments() {
                           size="sm"
                           onClick={() => {
                             setPayingCheck(check);
-                            setPaymentDate(check.payment_date || localDateString());
+                            setPaymentDate(check.payment_date || guamBusinessDate());
                             setPaymentConfirmation(check.confirmation_number || '');
                           }}
                           disabled={busyId === check.id || (check.payment_method === 'check' && !['prepared', 'printed'].includes(check.check_status))}

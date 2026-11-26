@@ -131,6 +131,18 @@ describe('employee API contracts', () => {
     expect(profile.emergencyContacts).toHaveLength(1);
   });
 
+  it('dates an address request by its Guam day, as staff see it', () => {
+    // 8:30 AM ChST on Aug 14 is still Aug 13 in UTC.
+    const profile = parseProfile({ address_request: { id: 9, status: 'approved', requested: { address_line1: '1 Example Rd', city: 'Tamuning', state: 'GU', zip: '96913' }, submitted_at: '2026-08-13T22:30:00Z', decided_at: '2026-12-31T23:00:00Z' } });
+    expect(profile.addressRequest).toMatchObject({ submittedAt: '2026-08-14', decidedAt: '2027-01-01' });
+  });
+
+  it('files a check under its pay period\'s pay date year, as the API lists it, whatever its check date', () => {
+    const row = parseStatementSummary({ ...summary, pay_period: { ...summary.pay_period, pay_date: '2026-12-31' }, check_date: '2027-01-02' });
+    expect(row).toMatchObject({ payDate: '2027-01-02', taxYear: 2026 });
+    expect(parseStatementSummary({ id: 'qb-1', source: 'quickbooks', pay_date: '2026-08-14' })?.taxYear).toBe(2026);
+  });
+
   it('drops SSN fragments from profile data', () => {
     expect(parseProfile({ legal_name: 'Example Worker', ssn_last4: '0001' })).not.toHaveProperty('ssnLast4');
   });
