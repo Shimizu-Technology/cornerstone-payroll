@@ -2148,7 +2148,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/employee_pay_history_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include("FIT 250.33", "Combined Hours 78.1", "170.33", "39.1")
+      expect(pdf).to include("Guam income tax 250.33", "Combined Hours 78.1", "170.33", "39.1")
 
       get "/api/v1/admin/reports/employee_pay_history_xlsx", params: params
       expect(response).to have_http_status(:ok)
@@ -2718,7 +2718,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
       expect(pdf_text).to include(employee.full_name, zero_net_employee.full_name)
       expect(pdf_text).to include("Employer Social", "Security", "Medicare")
-      expect(pdf_text).to include("Employer Traditional 401(k)", "Employer Roth 401(k) Match")
+      expect(pdf_text).to include("Employer Traditional 401(k)")
+      expect(pdf_text).to match(/Employer Roth 401\(k\) +Other Employer[^\n]*\n[^\n]*\bMatch +Contributions/)
       expect(pdf_text).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
       expect(pdf_text).to include("Non taxable additions total", "Employer taxes total")
       expect(pdf_text).not_to include("non_taxable_additions_total", "employer_taxes_total")
