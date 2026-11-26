@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { PayrollFilesEntry } from '@/components/payroll-submissions/PayrollFilesEntry';
 import { clientDocumentsApi, clientPayPeriodsApi, clientReportsApi, type ClientPayrollHistoryResponse } from '@/services/api';
-import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useCompany } from '@/contexts/CompanyContext';
 import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { employeesPath, importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
@@ -261,7 +262,7 @@ export function ClientDashboard(): ReactElement {
                   className="flex w-full flex-wrap items-start justify-between gap-2 rounded-xl border border-transparent px-3 py-3 text-left transition-all hover:border-primary-200 hover:bg-primary-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
                 >
                   <div className="min-w-0">
-                    <p className="font-medium text-neutral-900">{payroll.period_description}</p>
+                    <p className="font-medium text-neutral-900">{formatDateRange(payroll.start_date, payroll.end_date) || payroll.period_description}</p>
                     <p className="text-sm text-neutral-500">
                       {formatDate(payroll.pay_date)} · {payroll.employee_count} employees · {clientPayrollStatus(payroll.record_type === 'imported' ? 'locked' : 'committed')}
                     </p>

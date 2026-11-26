@@ -68,14 +68,16 @@ RSpec.describe "Api::V1::Admin::CheckRegister", type: :request do
     expect(response.parsed_body.dig("event", "check_number")).to eq("8200")
   end
 
-  it "exports the same register as CSV" do
+  it "exports the same register as CSV with legal payee names" do
+    employee.update!(name_suffix: "III")
+
     get "/api/v1/admin/check_register/export", headers:, params: { from: "2026-08-01", to: "2026-08-31" }
 
     expect(response).to have_http_status(:ok)
     expect(response.media_type).to eq("text/csv")
     expect(response.headers.fetch("Cache-Control")).to include("no-store")
     expect(response.body).to include("Register Date,Check Number,Payee,Amount")
-    expect(response.body).to include("8200,Mo Shimizu,1425.75")
+    expect(response.body).to include("8200,Mo Shimizu III,1425.75")
     expect(response.body).to include("8201,Treasurer of Guam,430.25")
   end
 

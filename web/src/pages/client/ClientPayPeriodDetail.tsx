@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { MobileField, MobileRecordCard } from '@/components/ui/mobile-record';
 import { clientPayrollSubmissionsApi } from '@/services/payrollSubmissions';
 import { clientPayPeriodsApi } from '@/services/api';
-import { formatCurrency, formatDate, formatDateRange } from '@/lib/utils';
+import { formatCurrency } from '@/lib/utils';
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { clientPayRunStatus } from '@/lib/clientPayrollStatus';
 import { ClientPayrollReview } from '@/components/client-portal/ClientPayrollReview';
 import { ClientPayStubButton } from '@/components/client-portal/ClientPayStubButton';
@@ -309,18 +310,20 @@ function PayrollItemMobileCard({ item }: PayrollItemRowProps): ReactElement {
           <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(numericAmount(item.net_pay))}</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-3">
-        <MobileField label="Hours" value={formatItemHours(item)} />
-        <MobileField label="Rate" value={formatItemRate(item)} />
-        <MobileField label="Gross" value={formatCurrency(numericAmount(item.gross_pay))} />
-        <MobileField label="Non-taxable additions" value={formatCurrency(itemNonTaxableAdditions(item))} />
-        <MobileField label="Taxes" value={formatCurrency(itemTaxes(item))} />
-        <MobileField label="Retirement" value={formatCurrency(itemRetirement(item))} />
-        <MobileField label="Loans" value={formatCurrency(itemLoans(item))} />
-        <MobileField label="Insurance" value={formatCurrency(itemInsurance(item))} />
-        <MobileField label="Other deductions" value={formatCurrency(itemOtherDeductions(item))} />
-        <MobileField label="Total deductions" value={formatCurrency(numericAmount(item.total_deductions))} />
-      </div>
+      {item.details_error ? <p className="mt-4 text-sm text-neutral-700">{item.details_error}</p> : (
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <MobileField label="Hours" value={formatItemHours(item)} />
+          <MobileField label="Rate" value={formatItemRate(item)} />
+          <MobileField label="Gross" value={formatCurrency(numericAmount(item.gross_pay))} />
+          <MobileField label="Non-taxable additions" value={formatCurrency(itemNonTaxableAdditions(item))} />
+          <MobileField label="Taxes" value={formatCurrency(itemTaxes(item))} />
+          <MobileField label="Retirement" value={formatCurrency(itemRetirement(item))} />
+          <MobileField label="Loans" value={formatCurrency(itemLoans(item))} />
+          <MobileField label="Insurance" value={formatCurrency(itemInsurance(item))} />
+          <MobileField label="Other deductions" value={formatCurrency(itemOtherDeductions(item))} />
+          <MobileField label="Total deductions" value={formatCurrency(numericAmount(item.total_deductions))} />
+        </div>
+      )}
     </MobileRecordCard>
   );
 }
@@ -338,13 +341,15 @@ function PayrollItemRow({ item }: PayrollItemRowProps): ReactElement {
       <TableCell>{formatItemHours(item)}</TableCell>
       <TableCell>{formatItemRate(item)}</TableCell>
       <TableCell>{formatCurrency(item.gross_pay ?? 0)}</TableCell>
-      <TableCell>{formatCurrency(itemNonTaxableAdditions(item))}</TableCell>
-      <TableCell>{formatCurrency(itemTaxes(item))}</TableCell>
-      <TableCell>{formatCurrency(itemRetirement(item))}</TableCell>
-      <TableCell>{formatCurrency(itemLoans(item))}</TableCell>
-      <TableCell>{formatCurrency(itemInsurance(item))}</TableCell>
-      <TableCell>{formatCurrency(itemOtherDeductions(item))}</TableCell>
-      <TableCell>{formatCurrency(item.total_deductions ?? 0)}</TableCell>
+      {item.details_error ? <TableCell colSpan={7}>{item.details_error}</TableCell> : <>
+        <TableCell>{formatCurrency(itemNonTaxableAdditions(item))}</TableCell>
+        <TableCell>{formatCurrency(itemTaxes(item))}</TableCell>
+        <TableCell>{formatCurrency(itemRetirement(item))}</TableCell>
+        <TableCell>{formatCurrency(itemLoans(item))}</TableCell>
+        <TableCell>{formatCurrency(itemInsurance(item))}</TableCell>
+        <TableCell>{formatCurrency(itemOtherDeductions(item))}</TableCell>
+        <TableCell>{formatCurrency(item.total_deductions ?? 0)}</TableCell>
+      </>}
       <TableCell>{formatCurrency(item.net_pay ?? 0)}</TableCell>
     </TableRow>
   );

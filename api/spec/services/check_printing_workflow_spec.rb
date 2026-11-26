@@ -38,7 +38,8 @@ RSpec.describe "Unified check printing workflow" do
     end
   end
 
-  it "builds one mixed queue in check-number order" do
+  it "builds one mixed queue in check-number order with the employee's legal name" do
+    employee.update!(name_suffix: "III")
     UserPrinterProfileSelection.create!(user: actor, organization: company.organization,
       check_stock_type: company.check_stock_type, printer_profile: printer_profile)
     result = CheckPrintQueueService.new(pay_period: pay_period, actor: actor).call
@@ -47,6 +48,7 @@ RSpec.describe "Unified check printing workflow" do
       "non_employee_check:#{non_employee_check.id}",
       "payroll_item:#{employee_check.id}"
     ])
+    expect(result.fetch(:items).last.fetch(:payee)).to eq("#{employee.full_name} III")
     expect(result.dig(:meta, :unprinted)).to eq(2)
     expect(result.dig(:meta, :check_stock_type)).to eq("first_hawaiian_4up")
     expect(result.dig(:meta, :printer_profile, :id)).to eq(printer_profile.id)
@@ -82,6 +84,7 @@ RSpec.describe "Unified check printing workflow" do
   end
 
   it "prepares selected checks when the exact mixed package is saved" do
+    employee.update!(name_suffix: "JR")
     run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,
       actor: actor,
@@ -95,6 +98,7 @@ RSpec.describe "Unified check printing workflow" do
 
     expect(run.status).to eq("prepared")
     expect(run.manifest.map { |entry| entry.fetch("check_number") }).to eq(%w[1001 1002])
+    expect(run.manifest.last.fetch("payee")).to eq("#{employee.full_name} Jr.")
     expect(run).to have_attributes(starting_slot: 3, selected_count: 2)
     expect(run).to have_attributes(printer_profile_id: printer_profile.id)
     expect(run.calibration_snapshot).to include(
@@ -191,7 +195,7 @@ RSpec.describe "Unified check printing workflow" do
     }.to raise_error(ArgumentError, /Generate a current check package/)
   end
 
-  it "blocks issuance when the employee name on a prepared check changes" do
+  it "blocks issuance when the employee name suffix on a prepared check changes" do
     run = CheckPrintRunGenerationService.new(
       pay_period: pay_period,
       actor: actor,
@@ -204,7 +208,7 @@ RSpec.describe "Unified check printing workflow" do
     ).call
     expect(employee_check.reload.check_prepared?).to be(true)
 
-    employee.update!(first_name: "Changed")
+    employee.update!(name_suffix: "III")
     expect(CheckPrintRunHistoryVerifier.new(runs: [ run ]).call.fetch(run.id).first).to eq("outdated")
 
     expect {

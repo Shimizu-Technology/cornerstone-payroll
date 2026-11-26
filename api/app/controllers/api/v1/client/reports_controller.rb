@@ -5,6 +5,7 @@ module Api
     module Client
       class ReportsController < Api::V1::Admin::ReportsController
         include ClientPortalAccess
+        include ClientComponentHistoryErrors
 
         skip_before_action :require_staff_access!
         before_action :require_client_portal_access!
@@ -14,12 +15,6 @@ module Api
           payroll_register_pdf
           payroll_register_xlsx
         ]
-
-        def ytd_summary
-          render json: { report: build_period_summary_report(payroll_reporting_period) }
-        rescue ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
-        end
 
         private
 
@@ -82,6 +77,8 @@ module Api
                    .map do |pp|
             {
               id: pp.id,
+              start_date: pp.start_date,
+              end_date: pp.end_date,
               period_description: pp.period_description,
               pay_date: pp.pay_date,
               employee_count: pp.payroll_items.reportable.select(&:payroll_included?).size,

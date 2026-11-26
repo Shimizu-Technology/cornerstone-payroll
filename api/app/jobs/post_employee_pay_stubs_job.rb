@@ -30,7 +30,7 @@ class PostEmployeePayStubsJob < ApplicationJob
 
   def due_items(company_id, through_date)
     eligible_periods = PayPeriod.reportable_committed.where(company_id: company_id, pay_date: ..through_date)
-    items = PayrollItem.joins(:pay_period).where(company_id: company_id)
+    items = PayrollItem.joins(:pay_period, :employee).where(company_id: company_id)
     posted = EmployeeDocument.posted.where(company_id: company_id).where.not(payroll_item_id: nil)
     pending = items.reportable.where(pay_period_id: eligible_periods, payroll_reversed_at: nil, voided: false)
       .where("COALESCE(payroll_items.net_pay, 0) <= 0 OR payroll_items.payment_delivery_method = 'direct_deposit' OR payroll_items.check_number IS NOT NULL")
@@ -40,7 +40,7 @@ class PostEmployeePayStubsJob < ApplicationJob
           WHERE employee_documents.company_id = payroll_items.company_id
             AND employee_documents.payroll_item_id = payroll_items.id
             AND employee_documents.status = 'posted'
-            AND employee_documents.payroll_facts_checked_at >= GREATEST(payroll_items.updated_at, pay_periods.updated_at)
+            AND employee_documents.payroll_facts_checked_at >= GREATEST(payroll_items.updated_at, pay_periods.updated_at, employees.updated_at)
             AND (payroll_items.correction_for_payroll_item_id IS NULL OR employee_documents.replaces_document_id IS NOT NULL)
         )
       SQL

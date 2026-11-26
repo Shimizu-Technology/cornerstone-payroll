@@ -130,6 +130,7 @@ module PayrollReview
         validate_approver!(approver)
         deny_self_decision!(review_package, approver) if approval_method == "client_portal"
         validate_recording_method!(approval_method, approver, recorded_by, evidence_reference)
+        yield pay_period if block_given?
 
         review_package.update!(
           status: "approved",

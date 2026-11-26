@@ -42,6 +42,15 @@ RSpec.describe PayStubGenerator do
     )
   end
 
+  it "prints the legal name with a suffix or with no trailing separator" do
+    [ [ "JR", "Pat Stub Jr." ], [ nil, "Pat Stub" ] ].each do |suffix, legal_name|
+      employee.update!(name_suffix: suffix)
+      reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
+
+      expect(reader.pages.first.runs.map(&:text)).to include(legal_name)
+    end
+  end
+
   it "prints full original work dates and overtime on the standalone statement" do
     extend PriorPeriodEarningsFixture
     captured_prior_period_earnings(payroll_item)
@@ -131,6 +140,21 @@ RSpec.describe PayStubGenerator do
 
     expect(text).to include("$2,110.00")
     expect(text).not_to include("$2,010.00", "$2,310.00")
+  end
+
+  it "orders prior statement items by payday, period ID, and then payroll item ID" do
+    create_period = lambda do |pay_date|
+      create(:pay_period, :committed, company: company, run_purpose: "adjustment",
+        start_date: pay_date - 5.days, end_date: pay_date - 1.day, pay_date: pay_date)
+    end
+    march = create_period.call(Date.new(2026, 3, 21))
+    february_first = create_period.call(Date.new(2026, 2, 21))
+    february_second = create_period.call(Date.new(2026, 2, 21))
+    march_item = create(:payroll_item, pay_period: march, employee: employee, gross_pay: 100)
+    higher_period = create(:payroll_item, pay_period: february_second, employee: employee, gross_pay: 100)
+    lower_period = create(:payroll_item, pay_period: february_first, employee: employee, gross_pay: 100)
+
+    expect(PayrollStatementYtdSources.new(payroll_item).items).to eq([ lower_period, higher_period, march_item, payroll_item ])
   end
 
   it "includes the current paycheck in a draft pay stub preview" do

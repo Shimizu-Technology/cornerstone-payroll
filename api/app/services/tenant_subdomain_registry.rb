@@ -33,6 +33,11 @@ class TenantSubdomainRegistry
     slug.present? && !RESERVED_SLUGS.include?(slug.downcase)
   end
 
+  def self.tenant_shaped_origin?(origin)
+    slug = ORIGIN_PATTERN.match(origin.to_s)&.[](1)
+    slug.present? && SLUG_PATTERN.match?(slug) && !RESERVED_SLUGS.include?(slug)
+  end
+
   def self.allowed_origin?(origin)
     enabled_origin_company_id(origin).present?
   end

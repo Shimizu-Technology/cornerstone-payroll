@@ -84,6 +84,28 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:current_company_id).and_return(company.id)
   end
 
+  it "returns raw calendar dates for the dashboard's recent pay periods" do
+    get "/api/v1/client/reports/dashboard"
+
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("stats", "recent_payrolls").sole).to include(
+      "id" => pay_period.id, "start_date" => "2026-04-01", "end_date" => "2026-04-14", "pay_date" => "2026-04-18"
+    )
+  end
+
+  it "logs ambiguous YTD details and sends a client-safe message" do
+    error = PayrollComponentMirrors::AmbiguousHistoryError.new("Staff-only history repair instructions")
+    allow_any_instance_of(Api::V1::Client::ReportsController).to receive(:build_period_summary_report).and_raise(error)
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, action: "ytd_summary"
+    }).and_call_original
+
+    get "/api/v1/client/reports/ytd_summary", params: { year: 2026 }
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq("error" => "Payroll details are unavailable right now. Contact Cornerstone.")
+  end
+
   describe "expanded client report boundary" do
     let(:report_params) { { pay_period_id: pay_period.id, employee_id: employee.id, year: 2026, quarter: 2 } }
 
