@@ -106,7 +106,7 @@ class Form1099Pub1220Generator
 
   def entity_problems(object, label)
     found = []
-    found << "#{label}: valid EIN required" unless tin(object.ein).match?(/\A\d{9}\z/) && tin(object.ein).chars.uniq.length > 1
+    found << "#{label}: valid EIN required" unless Efw2Formatting.valid_ein?(object.ein)
     identity_problems(object, label, found)
     found
   end
