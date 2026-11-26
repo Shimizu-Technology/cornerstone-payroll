@@ -56,7 +56,7 @@ const POSTHOG_US_HOSTS = new Set(['app.posthog.com', 'us.posthog.com', 'us.i.pos
 const POSTHOG_EU_HOSTS = new Set(['eu.posthog.com', 'eu.i.posthog.com', 'eu-assets.i.posthog.com'])
 
 export function posthogOrigins(env = {}) {
-  if (env.VITE_DEPLOYMENT_ENV === 'staging') return null
+  if (env.VITE_DEPLOYMENT_ENV === 'staging' || env.VITE_DEPLOYMENT_ENV === 'local') return null
   if (env.VITE_PUBLIC_POSTHOG_ENABLED !== 'true') return null
   const key = String(env.VITE_PUBLIC_POSTHOG_KEY ?? '').trim()
   if (!key || key === 'YOUR_POSTHOG_KEY') return null
@@ -256,7 +256,7 @@ export function finalizeStaffDist({ distDir, env }) {
       production: env.VITE_DEPLOYMENT_ENV === 'production',
     })
     : DEFAULT_STAFF_CLERK_ORIGIN
-  const posthog = posthogOrigins(env) ?? (env.VITE_DEPLOYMENT_ENV === 'staging'
+  const posthog = posthogOrigins(env) ?? (['staging', 'local'].includes(env.VITE_DEPLOYMENT_ENV)
     ? null
     : { apiOrigin: DEFAULT_POSTHOG_HOST, assetsOrigin: 'https://us-assets.i.posthog.com' })
   const origins = { apiOrigin: httpOrigin, apiWsOrigin: wsOrigin, clerkOrigin, posthog }

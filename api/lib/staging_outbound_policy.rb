@@ -9,6 +9,7 @@ require "uri"
 require_relative "staging_database_policy"
 require_relative "connected_payroll_mode"
 require_relative "staging_storage_policy"
+require_relative "local_deployment"
 
 # Deployment containment is independent of Rails.env and company payroll mode.
 # Errors contain setting names only; never URLs, recipients, payloads or secrets.
@@ -22,7 +23,7 @@ class StagingOutboundPolicy
   class << self
     def staging?(env = ENV)
       value = env["DEPLOYMENT_ENV"]
-      raise ConfigurationError, "Invalid DEPLOYMENT_ENV" if value && !value.empty? && !%w[staging production test development].include?(value)
+      raise ConfigurationError, "Invalid DEPLOYMENT_ENV" if value && !value.empty? && !%w[staging production local test development].include?(value)
       value == "staging"
     end
 
@@ -53,9 +54,10 @@ class StagingOutboundPolicy
 
     def validate_deployment!(env: ENV, environment: Rails.env)
       staging?(env)
-      if (environment.to_s == "production" || env["RAILS_ENV"] == "production") && !%w[staging production].include?(env["DEPLOYMENT_ENV"])
-        raise ConfigurationError, "Production boot requires explicit DEPLOYMENT_ENV=production or staging"
+      if (environment.to_s == "production" || env["RAILS_ENV"] == "production") && !%w[staging production local].include?(env["DEPLOYMENT_ENV"])
+        raise ConfigurationError, "Production boot requires explicit DEPLOYMENT_ENV=production, staging or local"
       end
+      LocalDeployment.validate!(env: env)
       true
     end
 
@@ -227,6 +229,10 @@ class StagingOutboundPolicy
     # A final guard catches new or indirect transports, redirects and SDK calls.
     # Explicit per-family checks provide useful user-facing errors earlier.
     def http_host!(host, port, ssl, env: ENV)
+      if LocalDeployment.local?(env)
+        raise Blocked, "Outbound network disabled by local deployment policy" unless LocalDeployment.outbound_allowed?(host, port, ssl, env: env)
+        return true
+      end
       return true unless staging?(env)
       allowed = list("STAGING_INTEGRATION_HOSTS", env) + [ "api.clerk.com", URI(env.fetch("CLERK_ISSUER", "https://invalid")).host, "api.resend.com" ] + storage_hosts(env)
       denied = KNOWN_PRODUCTION_HOSTS + list("PRODUCTION_INTEGRATION_HOSTS", env)
@@ -265,6 +271,7 @@ class StagingOutboundPolicy
     end
 
     def http_request!(http, request, env: ENV, body: nil)
+      return http_host!(http.address, http.port, http.use_ssl?, env: env) if LocalDeployment.local?(env)
       return true unless staging?(env)
       http_host!(http.address, http.port, http.use_ssl?, env: env)
       host = http.address.downcase

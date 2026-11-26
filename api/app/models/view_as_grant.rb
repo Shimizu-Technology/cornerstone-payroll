@@ -73,7 +73,7 @@ class ViewAsGrant < ApplicationRecord
   end
 
   def employee_origin
-    "https://#{company.subdomain_slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+    TenantSubdomainRegistry.tenant_origin(company.subdomain_slug)
   end
 
   def record_access!(action, name)
