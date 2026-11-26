@@ -6,6 +6,7 @@ export function invitationOutcomeMessage(response: InvitationDeliveryResponse): 
     case 'queued': return 'Invitation queued for email delivery.';
     case 'submitted': return 'Invitation submitted to the email provider.';
     case 'failed': return `Invitation email failed${response.invitation_error ? `: ${response.invitation_error}` : ''}. You can retry from the user list.`;
+    case 'skipped': return `Invitation email not sent${response.invitation_error ? `: ${response.invitation_error}` : ''}. Resend it from the user list once email is set up.`;
     case 'not_requested': return '';
     default: return 'Invitation delivery status is unavailable. Check the user before retrying.';
   }

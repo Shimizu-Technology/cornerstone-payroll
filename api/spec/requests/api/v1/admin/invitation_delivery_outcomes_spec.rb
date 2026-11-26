@@ -13,7 +13,8 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
     original = ENV.to_h
     ENV.delete("DEPLOYMENT_ENV")
     ENV.delete("STAGING_MAIL_ALLOWLIST")
-    ENV.delete("RESEND_API_KEY")
+    # Configured, as in production; Resend itself is never called (below).
+    ENV["RESEND_API_KEY"] = "re_test_synthetic"
     ENV["RESEND_FROM_EMAIL"] = "sender@example.test"
     ENV["FRONTEND_URL"] = "https://payroll-web-staging.example.test"
     example.run
@@ -54,7 +55,6 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
       queued = []
       allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
       request_invitation(path)
-      ENV["RESEND_API_KEY"] = "synthetic"
       sent = []
       allow(StagingMailTransport).to receive(:deliver) { |payload| sent << payload && { "id" => "synthetic" } }
       SendUserInviteEmailJob.perform_now(*queued.sole)
@@ -66,6 +66,23 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
       expect(SendUserInviteEmailJob).to receive(:perform_later).and_return(double("enqueued job"))
       request_invitation(path)
       expect(response.parsed_body).to include("invitation_delivery_status" => "queued", "invitation_sent" => false, "invitation_error" => nil)
+    end
+
+    it "reports #{path} as skipped, not queued, when email delivery isn't configured" do
+      ENV.delete("RESEND_API_KEY")
+      logged = []
+      allow(Rails.logger).to receive(:error) { |line| logged << line }
+      expect(SendUserInviteEmailJob).not_to receive(:perform_later)
+      request_invitation(path)
+
+      body = response.parsed_body
+      expect(body).to include("invitation_delivery_status" => "skipped", "invitation_sent" => false)
+      expect(body.fetch("invitation_error")).to include("no invitation email was sent")
+      user = User.find(body.fetch(path == :create_organization ? "admin_user" : "data").fetch("id"))
+      expect(user.invite_email_status).to eq("skipped")
+      expect(user.invite_email_status_at).to be_present
+      expect(logged.join).to include("Skipped user_id=#{user.id}")
+      expect(logged.join).not_to include(user.email)
     end
 
     it "reports actual staging capture for #{path}, without queueing or contacting Resend" do
@@ -98,6 +115,44 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
       expect(response.parsed_body).to include("invitation_delivery_status" => "failed", "invitation_sent" => false)
       expect(response.parsed_body.fetch("invitation_error")).to be_present
     end
+  end
+
+  it "records a queued invite email, then what the job did with it, and lists it for staff" do
+    queued = []
+    allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
+    request_invitation(:resend)
+    expect(invitee.reload.invite_email_status).to eq("queued")
+
+    allow(StagingMailTransport).to receive(:deliver).and_raise(StandardError, "synthetic provider outage")
+    # retry_on schedules another attempt rather than raising here.
+    SendUserInviteEmailJob.perform_now(*queued.sole)
+    expect(invitee.reload.invite_email_status).to eq("failed")
+
+    get "/api/v1/admin/users"
+    row = response.parsed_body.fetch("data").find { |user| user.fetch("id") == invitee.id }
+    expect(row).to include("invitation_pending" => true, "invite_email_status" => "failed")
+    expect(row.fetch("invite_email_status_at")).to be_present
+
+    allow(StagingMailTransport).to receive(:deliver).and_return({ "id" => "synthetic" })
+    SendUserInviteEmailJob.perform_now(*queued.sole)
+    expect(invitee.reload.invite_email_status).to eq("sent")
+  end
+
+  it "records a skip in the job, without retrying, when email stops being configured after the enqueue" do
+    queued = []
+    allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
+    request_invitation(:resend)
+    ENV.delete("RESEND_API_KEY")
+    expect(StagingMailTransport).not_to receive(:deliver)
+
+    expect(SendUserInviteEmailJob.perform_now(*queued.sole)).to eq(:skipped)
+    expect(invitee.reload.invite_email_status).to eq("skipped")
+  end
+
+  it "records a failed enqueue on the login" do
+    allow(SendUserInviteEmailJob).to receive(:perform_later).and_return(false)
+    request_invitation(:resend)
+    expect(invitee.reload.invite_email_status).to eq("failed")
   end
 
   it "reports not_requested when creating an organization without an admin" do

@@ -115,3 +115,35 @@ describe('Invite User field errors', () => {
     expect(screen.queryByText('Email has already been taken')).toBeNull();
   });
 });
+
+describe('Invite email that never went out', () => {
+  it('says the email was skipped, not queued, and offers a retry', async () => {
+    apiMocks.users.create.mockResolvedValue({
+      data: { id: 9, email: 'new@example.test', name: 'New Person', role: 'accountant', invitation_pending: true },
+      invitation_delivery_status: 'skipped', invitation_sent: false,
+      invitation_error: "Email delivery isn't set up on this server, so no invitation email was sent",
+    });
+    const user = await openInvite();
+    await user.type(screen.getByLabelText('Email address'), 'new@example.test');
+    await user.click(screen.getByRole('button', { name: /Send Invitation/ }));
+
+    expect((await screen.findAllByText(/cannot sign in yet because no invitation was sent/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Email delivery isn't set up on this server/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Retry invitation' })).toBeTruthy();
+    expect(screen.queryByText(/queued/i)).toBeNull();
+  });
+
+  it.each(['skipped', 'failed'])('marks a pending login whose invite email was %s in the list', async (status) => {
+    apiMocks.users.list.mockResolvedValue({ data: [
+      { id: 4, email: 'pending@example.test', name: 'Pending Person', role: 'manager', active: true, invitation_pending: true, invite_email_status: status },
+      { id: 5, email: 'queued@example.test', name: 'Queued Person', role: 'manager', active: true, invitation_pending: true, invite_email_status: 'queued' },
+    ] });
+    render(<Users />);
+
+    expect((await screen.findAllByText('Invite email not sent')).length).toBeGreaterThan(0);
+    // Desktop table and phone cards each show the one affected login.
+    for (const badge of screen.getAllByText('Invite email not sent')) {
+      expect(badge.closest('tr, li, article, [data-user-row]')?.textContent ?? badge.parentElement?.parentElement?.textContent).toContain('Pending Person');
+    }
+  });
+});

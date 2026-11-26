@@ -56,6 +56,25 @@ RSpec.describe UserInviteEmailService do
     expect(logged.join).not_to include("owner+invite")
   end
 
+  it "skips without a mail transport, says so in the log and on the user, and records each later outcome" do
+    ENV.delete("RESEND_API_KEY")
+    allow(StagingMailTransport).to receive(:deliver)
+
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to eq(:skipped)
+    expect(StagingMailTransport).not_to have_received(:deliver)
+    expect(user.reload.invite_email_status).to eq("skipped")
+    expect(logged.join).to include("Skipped user_id=#{user.id}")
+
+    ENV["RESEND_API_KEY"] = "re_test_synthetic"
+    allow(StagingMailTransport).to receive(:deliver).and_raise(StandardError, "synthetic outage")
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to be(false)
+    expect(user.reload.invite_email_status).to eq("failed")
+
+    allow(StagingMailTransport).to receive(:deliver).and_return({ "id" => "em_2" })
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to be(true)
+    expect(user.reload.invite_email_status).to eq("sent")
+  end
+
   it "logs the Resend message id returned by Resend::Emails.send" do
     saved_key = Resend.api_key
     Resend.api_key = "re_test_synthetic"
