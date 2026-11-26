@@ -44,25 +44,17 @@ RSpec.describe "Demo company containment guards" do
   describe "Form 500" do
     let(:filing) { Form500Filing.new(company: demo, pay_period: period, fields: { "company_name" => demo.name }, status: "prepared") }
 
-    it "records preparation only for a demo" do
+    it "allows full Form 500 outcomes for a demo while still requiring the company to match the pay period" do
       expect(filing).to be_valid
       %w[filed paid].each do |status|
-        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: status)
-        expect(candidate).not_to be_valid, "accepted status #{status}"
-        expect(candidate.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: status,
+          payment_amount: 10, payment_date: Date.current, confirmation_number: "DRT-1", receipt_attached: true)
+        expect(candidate).to be_valid, "rejected status #{status}: #{candidate.errors.full_messages}"
       end
-      [ { payment_amount: 10 }, { payment_date: Date.current }, { confirmation_number: "DRT-1" }, { receipt_attached: true } ].each do |change|
-        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: "prepared", **change)
-        expect(candidate).not_to be_valid, "accepted #{change.inspect}"
-        expect(candidate.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
-      end
-    end
 
-    it "requires the filing's company to match its pay period and applies the demo rule to the pay period's company" do
       mismatched = Form500Filing.new(company: live, pay_period: period, fields: { "x" => 1 }, status: "filed", confirmation_number: "DRT-1")
       expect(mismatched).not_to be_valid
       expect(mismatched.errors[:company]).to include("must match the pay period's company")
-      expect(mismatched.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
 
       live_period = create(:pay_period, :committed, company: live)
       expect(Form500Filing.new(company: live, pay_period: live_period, fields: { "x" => 1 }, status: "filed", confirmation_number: "DRT-1")).to be_valid
@@ -82,7 +74,7 @@ RSpec.describe "Demo company containment guards" do
 
     it "voids a committed demo period without creating any liability posting" do
       expect(PayrollLiabilityPostingService.reverse!(pay_period: period, actor: admin, reason: "Demo void")).to eq([])
-      PayPeriodCorrectionService.void!(pay_period: period, actor: admin, reason: "Demo void")
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: admin, reason: "Demo void")
 
       expect(period.reload.correction_status).to eq("voided")
       expect(PayrollLiabilityPosting.where(company: demo)).to be_empty
@@ -160,11 +152,12 @@ RSpec.describe "Demo company containment guards" do
       expect(totals).to eq(forms: 0, box1_cents: 0, box4_cents: 0)
       pdf = Form1096TotalsPdfGenerator.new(company: demo, totals: { forms: 2, box1_cents: 123_456, box4_cents: 0 }, draft: false).generate
       text = PDF::Reader.new(StringIO.new(pdf)).pages.map(&:text).join("\n")
-      expect(text).to include("Total forms: 2", "1,234.56", "Keep this sheet with your records.")
-      expect(text).not_to match(/DRAFT|practice|demo|e-file|GuamTax/i)
+      expect(text).to include("Total forms: 2", "1,234.56", "Keep this sheet with your records.", DemoPdfFooter::TEXT)
+      expect(text).not_to match(/DRAFT|practice|e-file|GuamTax/i)
       live_text = PDF::Reader.new(StringIO.new(Form1096TotalsPdfGenerator.new(company: live, totals: { forms: 1, box1_cents: 1, box4_cents: 0 },
         draft: false).generate)).pages.map(&:text).join("\n")
       expect(live_text).to include("These totals match the GuamTax e-file.")
+      expect(live_text).not_to include(DemoPdfFooter::TEXT)
     end
   end
 

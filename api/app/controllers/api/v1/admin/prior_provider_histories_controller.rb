@@ -151,7 +151,7 @@ module Api
         end
 
         def can_manage?
-          PriorProviderHistory::Authorization.allowed?(current_user, current_company) && !current_company.test_workspace?
+          PriorProviderHistory::Authorization.allowed?(current_user, current_company) && !current_company.practice_copy?
         end
 
         def authorize_change!(lock: false)

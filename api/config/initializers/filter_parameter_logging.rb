@@ -120,7 +120,7 @@ Rails.application.config.filter_parameters += [
   SCOPED_SENSITIVE_RATE_QUERY_PATTERN,
   SCOPED_SENSITIVE_AMOUNT_PATH_PATTERN,
   SCOPED_SENSITIVE_AMOUNT_QUERY_PATTERN,
-  /(?:\A|\.)(?:employee_)?note(?:\.\d+)*\.(?:body|reason|hidden_reason)\z/i,
+  /\A(?:reason|confirmation)\z|(?:\A|\.)(?:employee_)?note(?:\.\d+)*\.(?:body|reason|hidden_reason)\z/i,
   /(?:(?:\A(?:employee_)?note|#{PARAM_BRACKET_OPEN}(?:employee_)?note#{PARAM_BRACKET_CLOSE})#{PARAM_ARRAY_SEGMENTS}#{PARAM_BRACKET_OPEN}(?:body|reason|hidden_reason)#{PARAM_BRACKET_CLOSE})/i,
   /\A(?:cc|bcc|recipients|reply_to)\z/i,
   /(?:\A|\.)data\.(?:to|from|cc|bcc|recipients|reply_to)\z/i

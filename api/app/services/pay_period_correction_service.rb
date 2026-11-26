@@ -38,7 +38,8 @@ class PayPeriodCorrectionService
   # @param actor      [User]        – user initiating the void
   # @param reason     [String]      – mandatory explanation
   # @return [PayPeriodCorrectionEvent]
-  def self.void!(pay_period:, actor:, reason:)
+  def self.void!(authorization:, pay_period:, actor:, reason:, acknowledge_later_runs: false)
+    require_override_authorization!(authorization)
     raise ArgumentError, "reason is required" if reason.blank?
 
     PayPeriod.transaction do
@@ -61,6 +62,12 @@ class PayPeriodCorrectionService
         raise InvalidStateError, "This payroll has an exact source accounting correction. Voiding is held until the correction disposition and source receipt can be reversed together; review the linked correction with payroll support."
       end
       payments = PayrollRevisionPaymentPreflight.new(pay_period: locked, lock: true).ensure_eligible!
+      later_ids = payments.result.fetch(:later_committed_run_ids)
+      if later_ids.any? && acknowledge_later_runs != true
+        raise InvalidStateError, "Acknowledge that later committed payrolls must be reviewed before voiding"
+      end
+      PayPeriod.where(company_id: locked.company_id, id: later_ids).update_all(rollback_review_required: true) if later_ids.any?
+
       PayrollLiabilityPaymentGuard.ensure_clear!(
         pay_period: locked,
         error_class: InvalidStateError,
@@ -230,12 +237,13 @@ class PayPeriodCorrectionService
 
   # An unpaid committed run is replaced, never reset to draft in place. Fresh
   # item IDs prevent previously reversed loan payments from being reapplied.
-  def self.reopen_unpaid!(pay_period:, actor:, reason:, scope_attributes: {})
+  def self.reopen_unpaid!(authorization:, pay_period:, actor:, reason:, scope_attributes: {})
+    require_override_authorization!(authorization)
     PayPeriod.transaction do
       Company.lock.find(pay_period.company_id)
       locked = PayPeriod.lock.find(pay_period.id)
       PayrollRevisionPaymentPreflight.new(pay_period: locked, lock: true).ensure_eligible!(reopen: true)
-      void!(pay_period: locked, actor: actor, reason: reason)
+      void!(authorization: authorization, pay_period: locked, actor: actor, reason: reason)
       correction = create_correction_run!(source_pay_period: locked.reload, actor: actor, reason: reason)
       correction.update!(scope_attributes.slice(:includes_base_salary, :includes_recurring_items))
       correction
@@ -283,6 +291,12 @@ class PayPeriodCorrectionService
   # ----------------------------------------------------------------
   # Private helpers
   # ----------------------------------------------------------------
+  private_class_method def self.require_override_authorization!(authorization)
+    return if AdminOverrideService.authorized_rollback?(authorization)
+
+    raise AdminOverrideService::AccessDenied, "Payroll rollback requires an authorized admin override"
+  end
+
   private_class_method def self.copy_payroll_items!(source:, target:)
     # Copy every payroll row into the correction run, even if the original paper
     # check was voided. Check voiding is an issuance/audit concern, not a payroll

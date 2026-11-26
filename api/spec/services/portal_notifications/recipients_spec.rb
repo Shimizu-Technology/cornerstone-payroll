@@ -72,7 +72,7 @@ RSpec.describe PortalNotifications::Recipients, :portal_notifications do
     it "never alerts the actor" do
       admin = create(:user, company: company, role: "admin")
       list_portal_recipient!(company, user: admin)
-      expect(resolved(client_message_event(actor: admin))).to eq([ [], "no_recipients" ])
+      expect(resolved(client_message_event(actor: admin))).to eq([ [], "actor_only" ])
     end
 
     it "adds normalized extra addresses, skipping one that matches a listed user" do

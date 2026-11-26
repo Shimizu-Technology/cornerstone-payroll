@@ -64,7 +64,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
 
       get "/api/v1/employee/links", headers: bearer("user_riley")
       expect(response.parsed_body).to eq("links" => [ { "id" => link.id, "company_name" => "Example Diner",
-        "subdomain_slug" => nil, "status" => "active", "former_access_until" => nil, "latest_pay_date" => nil } ])
+        "subdomain_slug" => nil, "demo" => false, "status" => "active", "former_access_until" => nil, "latest_pay_date" => nil } ])
 
       get "/api/v1/employee/context", headers: bearer("user_riley").merge("X-Employee-Link-Id" => link.id.to_s)
       expect(response).to have_http_status(:ok)
@@ -300,6 +300,7 @@ RSpec.describe "Employee link lifecycle", type: :request do
       link = invite.link.reload
       expect(link.activation_locked_until).to be_within(1.minute).of(24.hours.from_now)
       expect(link_audits(link, "activation_locked").count).to eq(1)
+      expect(PortalNotificationEvent.where(event_type: "employee_signup_locked", subject: link).count).to eq(1)
 
       expect(attempt).to eq(generic)
       expect(link.reload.failed_activation_attempts).to eq(5)

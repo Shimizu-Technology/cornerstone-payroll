@@ -179,7 +179,7 @@ RSpec.describe "Earned payroll and retired checks" do
     expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)
     expect(W2GuAggregator.new(company, 2024, include_historical: false).generate.fetch(:employees).map { |r| r[:employee_id] }).not_to include(employee.id)
     expect { ReversePaycheckService.call(payroll_item: item, actor: actor, reason: "Duplicate reversal request") }.to raise_error(ArgumentError, /already been reversed/)
-    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse remaining payroll wages")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Reverse remaining payroll wages")
     expect(CompanyYtdTotal.find_by!(company: company, year: 2024).gross_pay).to eq(0)
     expect(employee.ytd_totals_for(2024).reload.gross_pay).to eq(0)
     expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)

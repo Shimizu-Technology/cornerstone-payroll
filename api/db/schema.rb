@@ -10,10 +10,30 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "admin_overrides", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "actor_id", null: false
+    t.bigint "real_user_id"
+    t.string "subject_type", null: false
+    t.bigint "subject_id", null: false
+    t.string "action", null: false
+    t.text "reason", null: false
+    t.jsonb "before_snapshot", null: false
+    t.jsonb "after_snapshot", null: false
+    t.jsonb "preflight_result", null: false
+    t.boolean "self_override", default: false, null: false
+    t.datetime "created_at", null: false
+    t.index [ "actor_id" ], name: "index_admin_overrides_on_actor_id"
+    t.index [ "company_id" ], name: "index_admin_overrides_on_company_id"
+    t.index [ "real_user_id" ], name: "index_admin_overrides_on_real_user_id"
+    t.index [ "subject_type", "subject_id" ], name: "index_admin_overrides_on_subject"
+    t.check_constraint "char_length(btrim(reason)) >= 10 AND char_length(btrim(reason)) <= 1000", name: "admin_overrides_reason_length"
+  end
 
   create_table "aire_history_operations", force: :cascade do |t|
     t.bigint "actor_id", null: false
@@ -641,6 +661,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_150000) do
     t.string "city"
     t.boolean "client_payroll_approval_required", default: false, null: false
     t.datetime "created_at", null: false
+    t.boolean "demo", default: false, null: false
     t.string "ein"
     t.string "email"
     t.bigint "employee_intake_enabled_by_id"
@@ -683,10 +704,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_150000) do
     t.string "w2_delivery"
     t.index "lower((subdomain_slug)::text)", name: "index_live_and_demo_companies_on_lower_subdomain_slug", unique: true, where: "((subdomain_slug IS NOT NULL) AND (((payroll_environment)::text = 'live'::text) OR ((COALESCE(test_workspace_purpose, ''::character varying))::text = 'demo'::text)))"
     t.index "lower((subdomain_slug)::text)", name: "index_live_companies_on_lower_subdomain_slug", unique: true, where: "(((payroll_environment)::text = 'live'::text) AND (subdomain_slug IS NOT NULL))"
-    t.index "organization_id, ((test_workspace_manifest ->> 'demo_fixture_key'::text))", name: "index_demo_companies_on_organization_fixture_key", unique: true, where: "((COALESCE(test_workspace_purpose, ''::character varying))::text = 'demo'::text)"
+    t.index "organization_id, ((test_workspace_manifest ->> 'demo_fixture_key'::text))", name: "index_demo_companies_on_organization_fixture_key", unique: true, where: "(((demo = true) OR ((COALESCE(test_workspace_purpose, ''::character varying))::text = 'demo'::text)) AND (COALESCE((test_workspace_manifest ->> 'demo_fixture_key'::text), ''::text) <> ''::text))"
     t.index [ "active_printer_profile_id" ], name: "index_companies_on_active_printer_profile_id"
     t.index [ "created_by_id" ], name: "index_companies_on_created_by_id"
-    t.index [ "ein" ], name: "index_live_companies_on_ein", unique: true, where: "((payroll_environment)::text = 'live'::text)"
+    t.index [ "ein" ], name: "index_live_companies_on_ein", unique: true, where: "(((payroll_environment)::text = 'live'::text) AND (NOT demo))"
     t.index [ "employee_intake_enabled_by_id" ], name: "index_companies_on_employee_intake_enabled_by_id"
     t.index [ "id", "organization_id" ], name: "index_companies_on_id_and_organization_id", unique: true
     t.index [ "id", "payroll_environment" ], name: "idx_companies_payroll_environment_key", unique: true
@@ -697,6 +718,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_150000) do
     t.index [ "name" ], name: "index_companies_on_name"
     t.index [ "organization_id" ], name: "index_companies_on_organization_id"
     t.check_constraint "(num_nonnulls(brand_logo_storage_key, brand_logo_content_type, brand_logo_sha256, brand_logo_byte_size) = ANY (ARRAY[0, 4])) AND (brand_logo_content_type IS NULL OR (brand_logo_content_type::text = ANY (ARRAY['image/png'::character varying::text, 'image/webp'::character varying::text]))) AND (brand_logo_sha256 IS NULL OR brand_logo_sha256::text ~ '^[0-9a-f]{64}$'::text)", name: "company_brand_logo_shape"
+    t.check_constraint "NOT demo OR NOT test_workspace_manifest ? 'demo_fixture_key'::text OR COALESCE(test_workspace_manifest ->> 'demo_fixture_key'::text, ''::text) ~ '^[a-z0-9][a-z0-9-]{2,62}$'::text", name: "companies_demo_fixture_key_format"
+    t.check_constraint "NOT demo OR payroll_environment::text = 'live'::text", name: "companies_demo_requires_live_payroll"
+    t.check_constraint "NOT demo OR test_workspace_expires_at IS NULL AND test_workspace_archived_at IS NULL AND test_workspace_sealed_at IS NULL", name: "companies_demo_no_test_workspace_lifecycle"
     t.check_constraint "migration_rehearsal_status IS NULL OR (migration_rehearsal_status::text = ANY (ARRAY['pending'::character varying::text, 'ready'::character varying::text, 'failed'::character varying::text]))", name: "companies_migration_rehearsal_status_check"
     t.check_constraint "payroll_environment::text = 'live'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NULL AND test_workspace_purpose IS NULL OR payroll_environment::text = 'migration_rehearsal'::text AND COALESCE(test_workspace_purpose, ''::character varying)::text = 'demo'::text AND migration_source_company_id IS NULL AND migration_source_batch_id IS NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_expires_at IS NULL AND test_workspace_archived_at IS NULL AND test_workspace_sealed_at IS NULL AND COALESCE(test_workspace_manifest ->> 'demo_fixture_key'::text, ''::text) ~ '^[a-z0-9][a-z0-9-]{2,62}$'::text OR payroll_environment::text = 'migration_rehearsal'::text AND COALESCE(test_workspace_purpose, ''::character varying)::text <> 'demo'::text AND migration_source_company_id IS NOT NULL AND migration_rehearsal_status IS NOT NULL AND test_workspace_purpose IS NOT NULL AND (test_workspace_purpose::text <> 'migration_rehearsal'::text OR migration_source_batch_id IS NOT NULL)", name: "companies_test_workspace_shape_check"
     t.check_constraint "payroll_environment::text = ANY (ARRAY['live'::character varying::text, 'migration_rehearsal'::character varying::text])", name: "companies_payroll_environment_check"
@@ -3193,6 +3217,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_150000) do
     t.datetime "voided_at"
     t.bigint "voided_by_id"
     t.boolean "client_approval_retained", default: false, null: false
+    t.boolean "rollback_review_required", default: false, null: false
     t.index [ "calculated_by_id" ], name: "index_pay_periods_on_calculated_by_id"
     t.index [ "committed_by_id" ], name: "index_pay_periods_on_committed_by_id"
     t.index [ "company_id", "end_date" ], name: "index_pay_periods_on_company_id_and_end_date"
@@ -5380,6 +5405,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_150000) do
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "year_end_acknowledgements_year_check"
   end
 
+  add_foreign_key "admin_overrides", "companies"
+  add_foreign_key "admin_overrides", "users", column: "actor_id"
+  add_foreign_key "admin_overrides", "users", column: "real_user_id"
   add_foreign_key "aire_history_operations", "companies"
   add_foreign_key "aire_history_operations", "time_tracking_sources"
   add_foreign_key "aire_history_operations", "users", column: "actor_id"

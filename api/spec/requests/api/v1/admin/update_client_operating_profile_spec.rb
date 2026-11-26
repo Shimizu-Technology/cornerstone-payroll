@@ -302,7 +302,7 @@ RSpec.describe "PATCH /api/v1/admin/companies/:company_id/operating_profile", ty
       "amended" => true, "before_values" => { "year_end.kind_of_employer" => "N" },
       "after_values" => { "year_end.kind_of_employer" => "S" }
     )
-    expect(ClientOperatingProfiles::ParityChecker.call(on: start)).to be_passed
+    expect(ClientOperatingProfiles::ParityChecker.call(companies: Company.where(id: company.id), on: start)).to be_passed
   end
 
   it "allows the first draft date when it is already the legacy baseline start" do

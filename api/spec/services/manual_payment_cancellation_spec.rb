@@ -214,7 +214,7 @@ RSpec.describe "Manual allocation instrument cancellation" do
     expect(allocation.reload.status).to eq("committed")
     allow(ActiveRecord).to receive(:after_all_transactions_commit).and_yield
     expect(AireManualAllocationSyncJob).to receive(:perform_later).with(allocation.id)
-    PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Reverse the earned payroll explicitly")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Reverse the earned payroll explicitly")
     allow(client).to receive(:void_payroll_manual_allocation).and_return("manual_allocation" => { "id" => "501", "version" => 3 })
     service.sync!(allocation, raise_on_failure: true)
     service.sync!(allocation, raise_on_failure: true)

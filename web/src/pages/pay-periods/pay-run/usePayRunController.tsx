@@ -464,7 +464,7 @@ export function usePayRunController({
   // own list, that list wins. A void or check-print refresh while Checks is
   // still unopened refetches, so the Results warning can't go stale.
   const nonEmployeeChecksPeriodId = loadsNonEmployeeChecks && payPeriod?.status === 'committed'
-    && activeCompany?.payroll_environment !== 'migration_rehearsal' ? payPeriod.id : null;
+    && (Boolean(activeCompany?.demo) || activeCompany?.payroll_environment !== 'migration_rehearsal') ? payPeriod.id : null;
   const nonEmployeeChecksCorrectionStatus = payPeriod?.correction_status ?? null;
   useEffect(() => {
     if (nonEmployeeChecksPeriodId === null) return;
@@ -975,12 +975,17 @@ export function usePayRunController({
     const clientReviewWarning = payPeriod.client_payroll_approval_required && payPeriod.payroll_review?.published_at
       ? " This withdraws the client's review and any approval."
       : '';
-    if (!confirm('Roll back approval? This will return the pay period to "Calculated" status.' + clientReviewWarning)) return;
+    const reason = window.prompt('Enter a reason for returning this payroll to Calculated.' + clientReviewWarning)?.trim();
+    if (reason == null) return;
+    if (reason.length < 10 || reason.length > 1000) {
+      setError('Enter a reason between 10 and 1,000 characters.');
+      return;
+    }
     try {
       setProcessingAction('unapprove');
       setProcessing(true);
       setError(null);
-      const response = await payPeriodsApi.unapprove(payPeriod.id);
+      const response = await payPeriodsApi.unapprove(payPeriod.id, reason);
       setPayPeriod(response.pay_period);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to unapprove');

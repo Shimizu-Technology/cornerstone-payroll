@@ -242,6 +242,7 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
   end
 
   def draw_document_status(pdf, _page_number)
+    DemoPdfFooter.draw_overlay_footer(pdf, company: company)
     return unless draft
 
     reason = practice ? "a practice copy" : "the #{year} 1099s are not marked ready"

@@ -35,6 +35,8 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
   end
 
   before do
+    allow_any_instance_of(Api::V1::Admin::PayPeriodsController).to receive(:require_recent_verification!)
+    allow(MfaPolicy).to receive(:recently_step_up_verified?).and_return(true)
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController)
       .to receive(:current_company_id).and_return(company.id)
     allow_any_instance_of(Api::V1::Admin::PayPeriodsController)
@@ -62,7 +64,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
       it "voids a committed pay period and returns 200" do
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "Wrong employee included" },
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Wrong employee included" },
              as: :json
 
         expect(response).to have_http_status(:ok)
@@ -74,7 +76,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
       it "sets can_void to false after voiding" do
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "Test" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture Test rollback" }, as: :json
 
         json = JSON.parse(response.body)
         expect(json["pay_period"]["can_void"]).to be false
@@ -82,7 +84,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
       it "sets can_create_correction_run to true after voiding" do
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "Test" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture Test rollback" }, as: :json
 
         json = JSON.parse(response.body)
         expect(json["pay_period"]["can_create_correction_run"]).to be true
@@ -90,7 +92,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
       it "reverses employee YTD totals" do
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "YTD reversal test" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "YTD reversal test" }, as: :json
 
         ytd = EmployeeYtdTotal.find_by(employee_id: employee.id, year: 2024)
         expect(ytd.gross_pay.to_f).to eq(0.0)
@@ -99,7 +101,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       it "writes only one audit log entry for a successful void" do
         expect {
           post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-               params: { unpaid_acknowledgement: true, reason: "Audit dedupe test" }, as: :json
+               params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Audit dedupe test" }, as: :json
         }.to change(AuditLog, :count).by(1)
 
         audit = AuditLog.last
@@ -131,12 +133,12 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
         expect(response).to have_http_status(:unprocessable_entity)
         json = JSON.parse(response.body)
-        expect(json["error"]).to match(/reason is required/i)
+        expect(json["error"]).to match(/enter a reason/i)
       end
 
       it "returns 422 when reason is blank" do
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "  " }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "  " }, as: :json
 
         expect(response).to have_http_status(:unprocessable_entity)
       end
@@ -144,7 +146,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       it "returns 422 if pay period is not committed" do
         draft = create(:pay_period, company: company, status: "draft")
         post "/api/v1/admin/pay_periods/#{draft.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "test" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(draft), unpaid_acknowledgement: true, reason: "Fixture test rollback" }, as: :json
 
         expect(response).to have_http_status(:unprocessable_entity)
         json = JSON.parse(response.body)
@@ -154,11 +156,11 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       it "returns 422 on double-void attempt" do
         setup_ytd
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "First" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture First rollback" }, as: :json
         expect(response).to have_http_status(:ok)
 
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "Second" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture Second rollback" }, as: :json
         expect(response).to have_http_status(:unprocessable_entity)
         expect(JSON.parse(response.body)["error"]).to match(/already been voided/i)
       end
@@ -168,7 +170,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
         other_period  = create(:pay_period, :committed, company: other_company)
 
         post "/api/v1/admin/pay_periods/#{other_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "Cross-company" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(other_period), unpaid_acknowledgement: true, reason: "Cross-company" }, as: :json
 
         expect(response).to have_http_status(:not_found)
       end
@@ -181,7 +183,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
           .and_raise(ActiveRecord::RecordInvalid.new(bad_record))
 
         post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-             params: { unpaid_acknowledgement: true, reason: "trigger invalid" }, as: :json
+             params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "trigger invalid" }, as: :json
 
         expect(response).to have_http_status(:unprocessable_entity)
         expect(JSON.parse(response.body)["error"]).to be_present
@@ -323,7 +325,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
     it "returns correction events after a void" do
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "History test" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "History test" }, as: :json
 
       get "/api/v1/admin/pay_periods/#{committed_period.id}/correction_history"
       expect(response).to have_http_status(:ok)
@@ -356,7 +358,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
     it "includes correction_status in list response" do
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Index test" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture Index test rollback" }, as: :json
 
       get "/api/v1/admin/pay_periods"
       json = JSON.parse(response.body)
@@ -368,7 +370,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
       # Create a voided period + draft correction run
       setup_ytd
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Set up draft run" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Set up draft run" }, as: :json
       post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
            params: { unpaid_acknowledgement: true, reason: "Create draft correction run" }, as: :json
       new_id = JSON.parse(response.body)["correction_run"]["id"]
@@ -388,7 +390,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
     let!(:voided_period_for_delete) do
       setup_ytd
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Void to set up draft correction run" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Void to set up draft correction run" }, as: :json
       committed_period.reload
       committed_period
     end
@@ -526,7 +528,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
       # Step 1: void the committed period
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Initial void for re-correction chain" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Initial void for re-correction chain" }, as: :json
       expect(response).to have_http_status(:ok)
 
       # Step 2: create correction run #1
@@ -568,10 +570,10 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
     it "returns a meaningful error on double-void with operator guidance info" do
       setup_ytd
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "First void" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture First void rollback" }, as: :json
 
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Second void attempt" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Second void attempt" }, as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
       error_msg = JSON.parse(response.body)["error"].downcase
@@ -588,7 +590,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
 
     it "returns 422 when reason is blank on void" do
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "" }, as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body)["error"]).to match(/reason/i)
@@ -597,7 +599,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
     it "returns 422 when reason is blank on create_correction_run" do
       setup_ytd
       post "/api/v1/admin/pay_periods/#{committed_period.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Setting up" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Fixture Setting up rollback" }, as: :json
 
       post "/api/v1/admin/pay_periods/#{committed_period.id}/create_correction_run",
            params: { unpaid_acknowledgement: true, reason: "  " }, as: :json
@@ -609,7 +611,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
     it "cannot void a draft period (pre-condition error)" do
       draft = create(:pay_period, company: company, status: "draft")
       post "/api/v1/admin/pay_periods/#{draft.id}/void",
-           params: { unpaid_acknowledgement: true, reason: "Attempting void of draft" }, as: :json
+           params: { confirmation: AdminOverrideService.payroll_confirmation(draft), unpaid_acknowledgement: true, reason: "Attempting void of draft" }, as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
       expect(JSON.parse(response.body)["error"]).to match(/committed/i)
@@ -623,7 +625,7 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
     end
     expect(PayrollLiabilityPostingService).to receive(:reverse!).and_raise(PayrollLiabilityPostingService::Error, "Liability posting requires review")
     post "/api/v1/admin/pay_periods/#{committed_period.id}/reopen_unpaid",
-      params: { unpaid_acknowledgement: true, reason: "Correct synthetic unpaid payroll" }, as: :json
+      params: { confirmation: AdminOverrideService.payroll_confirmation(committed_period), unpaid_acknowledgement: true, reason: "Correct synthetic unpaid payroll" }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     expect(JSON.parse(response.body).fetch("error")).to eq("Liability posting requires review")
     retained.each { |model, rows| expect(model.order(:id).map(&:attributes)).to eq(rows) }

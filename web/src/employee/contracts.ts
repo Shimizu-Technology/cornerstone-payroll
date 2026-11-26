@@ -91,6 +91,8 @@ export interface EmployeeContextInfo {
   nextPayday: string | null;
   /** Per-company W-2 setting (§8a). Null when the company hasn't set it. */
   w2Delivery: W2Delivery | null;
+  /** True only for a demo company (D-3). */
+  demo?: boolean;
   /** The company's employee_portal.features switches. A missing switch counts as off. */
   features: { stubs: boolean; taxForms: boolean; profileRequests: boolean; deliveryConsent: boolean };
 }
@@ -104,6 +106,7 @@ export function parseContext(data: unknown): EmployeeContextInfo {
     formerAccessUntil: accessDay(body.former_access_until),
     nextPayday: isoDate(body.next_payday),
     w2Delivery: oneOf(body.w2_delivery, ['mailed', 'handed_out'] as const),
+    demo: bool(body.demo),
     features: {
       stubs: bool(features.stubs),
       taxForms: bool(features.tax_forms),

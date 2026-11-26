@@ -155,8 +155,9 @@ class Form500Generator
     }
   end
 
-  def initialize(fields:)
+  def initialize(fields:, demo: false)
     @fields = DEFAULT_CHECKBOXES.merge(fields.deep_symbolize_keys)
+    @demo = demo == true
   end
 
   def generate
@@ -216,6 +217,7 @@ class Form500Generator
       draw_checkbox(pdf, FIELD_RECTS[:quarter_4][copy_index], quarter_value == 4)
     end
 
+    DemoPdfFooter.draw_overlay_footer(pdf, demo: @demo)
     pdf.render
   end
 

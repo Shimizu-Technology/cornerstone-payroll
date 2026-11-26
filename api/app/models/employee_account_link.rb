@@ -223,7 +223,7 @@ class EmployeeAccountLink < ApplicationRecord
   end
 
   def employee_belongs_to_live_company
-    errors.add(:company, "must run live payroll") if company && !(company.live_payroll? || company.demo?)
+    errors.add(:company, "must run live payroll") if company && !company.operating?
     errors.add(:employee, "must belong to the link's company") if employee && employee.company_id != company_id
   end
 end

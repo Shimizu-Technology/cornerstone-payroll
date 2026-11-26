@@ -234,6 +234,7 @@ class CheckGenerator
     draw_check_face(pdf, check_y, voided, rehearsal_preview: rehearsal_preview)
     draw_stub(pdf, stub1_y, voided, rehearsal_preview: rehearsal_preview)
     draw_stub(pdf, stub2_y, voided, rehearsal_preview: rehearsal_preview)
+    DemoPdfFooter.draw_check_stub_footer(pdf, stub_bottom: stub2_y, page_width: PAGE_WIDTH, margin_x: M, company: company)
   end
 
   # -----------------------------------------------------------------------

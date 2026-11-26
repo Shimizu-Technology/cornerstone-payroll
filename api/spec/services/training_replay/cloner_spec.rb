@@ -81,6 +81,7 @@ RSpec.describe TrainingReplay::Cloner do
       amount: 25,
       start_date: Date.new(2026, 1, 1)
     )
+    [ baseline_source, first_practice_source ].each { |period| period.update_columns(rollback_review_required: true) }
     target = build_target
 
     described_class.new(company: target, actor: actor).call
@@ -108,6 +109,7 @@ RSpec.describe TrainingReplay::Cloner do
       second_practice_source.id
     ])
     expect(practices.map(&:status)).to eq(%w[draft draft])
+    expect([ baseline, *practices ]).to all(have_attributes(rollback_review_required: false))
     expect(practices.map { |period| period.payroll_items.sole.hours_worked }).to eq([ 72.to_d, 72.to_d ])
     expect(practices.map { |period| period.payroll_items.sole.gross_pay }).to eq([ 0.to_d, 0.to_d ])
     expect(target.payroll_items.where.not(check_number: nil)).to be_empty

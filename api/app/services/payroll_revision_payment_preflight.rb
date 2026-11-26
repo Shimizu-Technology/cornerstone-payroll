@@ -3,7 +3,7 @@
 # One conservative eligibility check shared by the read-only preview and the
 # locked mutation. A paper package is not evidence that a check was delivered.
 class PayrollRevisionPaymentPreflight
-  attr_reader :pay_period, :employee_items, :other_payments
+  attr_reader :pay_period, :employee_items, :other_payments, :result
 
   def initialize(pay_period:, lock: false, payroll_item: nil)
     @pay_period = pay_period
@@ -50,20 +50,19 @@ class PayrollRevisionPaymentPreflight
       end
     end
     blockers << "This payroll has recorded paid or submitted tax filing evidence; use the filing correction workflow" if filing_evidence?
+    later_ids = later_committed_runs.distinct.order(:id).pluck(:id)
     if reopen
       if pay_period.time_tracking_imports.where(status: "applied").any?(&:finalized_batch?) ||
           TimeTrackingEntryAllocation.where(payroll_item_id: employee_items.map(&:id)).exists? ||
           TimeTrackingManualAllocation.where(payroll_item_id: employee_items.map(&:id)).exists?
         blockers << "This payroll has linked time-source processing evidence; use a reviewed source correction"
       end
-      later = PayPeriod.reportable_committed.where(company_id: pay_period.company_id)
-        .where.not(id: pay_period.id).where("pay_date > ? OR (pay_date = ? AND committed_at > ?)", pay_period.pay_date, pay_period.pay_date, pay_period.committed_at)
-        .joins(:payroll_items).where(payroll_items: { employee_id: employee_items.map(&:employee_id) }).exists?
-      blockers << "A later payroll for these employees is committed; review dependent totals before reopening" if later
+      blockers << "A later payroll for these employees is committed; review dependent totals before reopening" if later_ids.any?
       blockers << "This payroll has supplemental paycheck corrections; use the reviewed correction workflow" if pay_period.supplemental_pay_periods.exists? || employee_items.any?(&:correction_entry?)
     end
     {
       eligible: blockers.empty?, blockers: blockers.uniq, requires_unpaid_acknowledgement: true,
+      later_committed_run_ids: later_ids,
       employee_checks: employee_items.filter_map do |item|
         next unless item.check_number.present? || item.net_pay.to_d.positive?
         { id: item.id, check_number: item.check_number, payee: item.employee_full_name,
@@ -77,10 +76,22 @@ class PayrollRevisionPaymentPreflight
   end
 
   def ensure_eligible!(reopen: false)
-    result = call(reopen: reopen)
+    @result = call(reopen: reopen)
     raise PayPeriodCorrectionService::InvalidStateError, result[:blockers].join(". ") unless result[:eligible]
     @eligible_for_retirement = true
     self
+  end
+
+  def later_committed_runs
+    PayPeriod.reportable_committed.where(company_id: pay_period.company_id)
+      .where.not(id: pay_period.id)
+      .where(<<~SQL.squish, date: pay_period.pay_date, committed_at: pay_period.committed_at, id: pay_period.id)
+        pay_periods.pay_date > :date OR (pay_periods.pay_date = :date AND
+          (pay_periods.committed_at > :committed_at OR
+            ((pay_periods.committed_at IS NULL OR CAST(:committed_at AS timestamp) IS NULL OR
+              pay_periods.committed_at = :committed_at) AND pay_periods.id > :id)))
+      SQL
+      .joins(:payroll_items).where(payroll_items: { employee_id: employee_items.map(&:employee_id) })
   end
 
   def retirement_payment_ids

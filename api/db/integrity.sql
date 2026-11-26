@@ -205,7 +205,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 20261003020500_create_check_supersession_rollout_approvals.rb
+-- 20261003020500_create_check_supersession_rollout_approvals.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
 CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
 BEGIN
   IF TG_OP <> 'INSERT' THEN
@@ -213,7 +213,7 @@ BEGIN
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM companies c JOIN users u ON u.id = NEW.approved_by_id
-    WHERE c.id = NEW.company_id AND c.payroll_environment = 'live'
+    WHERE c.id = NEW.company_id AND c.payroll_environment = 'live' AND NOT c.demo
       AND u.organization_id = c.organization_id AND u.active = true
       AND u.role IN (5, 6)
   ) OR length(btrim(NEW.reason)) < 20 THEN
@@ -227,7 +227,7 @@ CREATE TRIGGER protect_check_supersession_rollout_approvals
   BEFORE INSERT OR UPDATE OR DELETE ON check_supersession_rollout_approvals
   FOR EACH ROW EXECUTE FUNCTION protect_check_supersession_rollout_approval();
 
--- 20261003020600_enforce_check_supersession_rollout_approval.rb
+-- 20261003020600_enforce_check_supersession_rollout_approval.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
 CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
 BEGIN
   IF NOT EXISTS (
@@ -237,7 +237,7 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
   END IF;
-  IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live')
+  IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live' AND NOT demo)
     AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
     RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
   END IF;
@@ -1044,15 +1044,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 20261125160000_add_demo_test_workspace_purpose.rb
+-- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
 CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
+DECLARE
+  old_is_demo boolean := OLD.demo OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
 BEGIN
-  IF (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
-    OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo' AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
+  IF OLD.demo IS DISTINCT FROM NEW.demo
+    OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
+    OR (old_is_demo AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
     RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
       USING ERRCODE = 'check_violation';
   END IF;
-  IF COALESCE(OLD.test_workspace_purpose, '') = 'demo'
+  IF old_is_demo
+    AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS NOT NULL
     AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
     RAISE EXCEPTION 'demo fixture keys are immutable'
       USING ERRCODE = 'check_violation';
@@ -1063,7 +1067,7 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS companies_demo_shape_immutable ON companies;
 CREATE TRIGGER companies_demo_shape_immutable
-BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
+BEFORE UPDATE OF demo, payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_conversion();
 
@@ -1102,11 +1106,26 @@ BEFORE INSERT OR UPDATE OF company_id ON payroll_liability_entries
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_external_records();
 
+-- 20261127150000_harden_demo_flag_db_guards.rb
+CREATE OR REPLACE FUNCTION prevent_demo_company_time_tracking_source() RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM companies
+    WHERE id = NEW.company_id
+      AND (demo = true OR COALESCE(test_workspace_purpose, '') = 'demo')
+  ) THEN
+    RAISE EXCEPTION '% cannot belong to a demo company', TG_TABLE_NAME
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 DROP TRIGGER IF EXISTS time_tracking_sources_refuse_demo_company ON time_tracking_sources;
 CREATE TRIGGER time_tracking_sources_refuse_demo_company
 BEFORE INSERT OR UPDATE OF company_id ON time_tracking_sources
 FOR EACH ROW
-EXECUTE FUNCTION prevent_demo_company_external_records();
+EXECUTE FUNCTION prevent_demo_company_time_tracking_source();
 
 -- 20261125210000_refuse_demo_company_non_employee_checks.rb
 DROP TRIGGER IF EXISTS non_employee_checks_refuse_demo_company ON non_employee_checks;
@@ -1242,7 +1261,22 @@ BEFORE UPDATE OR DELETE ON employee_app_activations
 FOR EACH ROW
 EXECUTE FUNCTION protect_employee_app_activation();
 
--- 20261127150000_create_payroll_item_bridge_overlap_dispositions.rb
+CREATE OR REPLACE FUNCTION reject_admin_override_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'admin_overrides is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS admin_overrides_append_only ON admin_overrides;
+CREATE TRIGGER admin_overrides_append_only BEFORE UPDATE OR DELETE ON admin_overrides
+  FOR EACH ROW EXECUTE FUNCTION reject_admin_override_mutation();
+
+DROP TRIGGER IF EXISTS admin_overrides_no_truncate ON admin_overrides;
+CREATE TRIGGER admin_overrides_no_truncate BEFORE TRUNCATE ON admin_overrides
+  FOR EACH STATEMENT EXECUTE FUNCTION reject_admin_override_mutation();
+
+-- 20261127170000_create_payroll_item_bridge_overlap_dispositions.rb
 CREATE OR REPLACE FUNCTION prevent_payroll_item_bridge_overlap_disposition_mutation()
 RETURNS trigger AS $$
 BEGIN

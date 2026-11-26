@@ -14,7 +14,7 @@ module PriorProviderHistory
       return false if period && (!period.calculated? || period.committed_at.present? || period.pay_date >= PayrollBusinessClock.today ||
         !period.regular_cycle? || period.run_purpose != "regular" || period.parallel_run? ||
         period.correction_status.present? || period.corrects_pay_period_id.present?)
-      return false if company.test_workspace?
+      return false if company.practice_copy?
       return false if company.pay_periods.where("status = 'committed' OR committed_at IS NOT NULL").exists?
 
       scope = candidates(company)

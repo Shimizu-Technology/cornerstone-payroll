@@ -94,7 +94,8 @@ module Api
               title: report.fetch(:title),
               subtitle: "#{current_company.name} — #{report.fetch(:source_statement)}",
               filename: builder.filename(:pdf),
-              sheets: sheets
+              sheets: sheets,
+              demo: current_company.demo?
             )
             [ generator.generate, "application/pdf" ]
           end

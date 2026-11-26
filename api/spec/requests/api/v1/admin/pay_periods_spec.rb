@@ -968,7 +968,7 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       )
     end
 
-    it "does not mask a successful correction when audit logging fails" do
+    it "keeps the original pay date when the audit fails" do
       old_pay_date = Date.new(2026, 4, 15)
       new_pay_date = Date.new(2026, 4, 30)
       pay_period.update!(
@@ -987,10 +987,8 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
           reason: "Pay date was entered with the wrong date"
         }
 
-      expect(response).to have_http_status(:ok)
-      expect(pay_period.reload.pay_date).to eq(new_pay_date)
-      expect(response.parsed_body.dig("correction", "old_pay_date")).to eq(old_pay_date.to_s)
-      expect(response.parsed_body.dig("correction", "new_pay_date")).to eq(new_pay_date.to_s)
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(pay_period.reload.pay_date).to eq(old_pay_date)
     end
 
     it "treats same-date submissions as no-ops without writing a correction audit log" do
@@ -2332,10 +2330,20 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
   end
 
   describe "POST /api/v1/admin/pay_periods/:id/unapprove" do
+    it "rejects unapproval without an adequate reason" do
+      pay_period.update!(status: "approved", approved_by_id: admin_user.id, approved_at: 1.hour.ago)
+      [ nil, "short" ].each do |reason|
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove", params: { reason: reason }, as: :json
+
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(pay_period.reload).to be_approved
+      end
+    end
+
     it "returns an approved pay period to calculated with an audit timestamp" do
       pay_period.update!(status: "approved", approved_by_id: admin_user.id, approved_at: 1.hour.ago)
 
-      post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove"
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
 
       expect(response).to have_http_status(:ok)
       expect(pay_period.reload).to have_attributes(
@@ -2345,12 +2353,14 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
         unapproved_by_id: admin_user.id
       )
       expect(pay_period.unapproved_at).to be_present
+      expect(AuditLog.find_by!(action: "pay_periods#unapprove", record_id: pay_period.id).metadata.fetch("reason"))
+        .to eq("Correct fixture approval")
     end
 
     it "cannot unapprove a committed pay period" do
       pay_period.update!(status: "committed", committed_at: Time.current, committed_by_id: admin_user.id)
 
-      post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove"
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/unapprove", params: { reason: "Correct fixture approval" }, as: :json
 
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body["error"]).to eq("Can only unapprove an approved pay period")

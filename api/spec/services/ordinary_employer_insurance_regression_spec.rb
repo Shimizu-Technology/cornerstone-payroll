@@ -60,7 +60,7 @@ RSpec.describe "PR381 ordinary insurance obligation probe" do
       expect([ original, first, second ].map { |item| item.payroll_item_deductions.find_by!(deduction_type: type).amount }).to eq([ 27.6, 2.25, -4.5 ])
       stale = preview(hours_worked: 60).dig(:meta, :review_digest)
       removed, retained = voided == :first ? [ first, second ] : [ second, first ]
-      PayPeriodCorrectionService.void!(pay_period: removed.pay_period, actor: actor, reason: "Reverse employer insurance delta")
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: removed.pay_period, actor: actor, reason: "Reverse employer insurance delta", acknowledge_later_runs: true)
       expect { issue({ hours_worked: 60 }, digest: stale) }.to raise_error(IssueCorrectivePaycheckService::StalePreviewError)
       repair = issue(hours_worked: 60)
       expect([ original, retained, repair ].sum { |item| item.payroll_item_deductions.find_by!(deduction_type: type).amount }).to eq(27.6)

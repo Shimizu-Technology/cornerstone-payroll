@@ -3,11 +3,8 @@
 require "cgi"
 
 module PortalNotifications
-  # Portal notification emails. General portal alerts stay deliberately generic
-  # (no names, subjects, message bodies, file names or amounts). Payroll review
-  # emails (payroll_review_published, payroll_review_decided) use the branded
-  # #620 table layout and name only the client, pay period dates, and a
-  # company-scoped deep link — never amounts, employee names or reasons.
+  # Branded portal alerts use company names, dates and scoped destinations.
+  # Legacy rendering preserves the provider payload for older claimed batches.
   class Email
     SUBJECT = "New activity in Cornerstone Payroll"
     MESSAGE_LINE = "You have a new message in the portal."
@@ -25,6 +22,19 @@ module PortalNotifications
     FILE_REQUEST_EVENTS = %w[file_requested file_request_responded file_request_reviewed].freeze
     PAYROLL_REVIEW_EVENTS = %w[payroll_review_published payroll_review_decided].freeze
 
+    CATALOG_COPY = {
+      "payroll_committed" => [ "Payroll committed", "Payroll is final. Pay statements post on pay date." ],
+      "payroll_reopened" => [ "Payroll rolled back or reopened", "View the current payroll status in the portal." ],
+      "employee_change_submitted" => [ "Employee change request", "An employee change request is pending." ],
+      "address_approval_requested" => [ "Address request to review", "An employee address request is pending." ],
+      "employee_contact_changed" => [ "Employee contact changes", "Employee contact information changed." ],
+      "employee_contact_confirmation_requested" => [ "Contact changes to confirm", "Employee contact or delivery changes need confirmation." ],
+      "employee_signup_locked" => [ "Employee app sign-up locked", "An employee app sign-up was locked." ],
+      "employee_invite_expiring" => [ "Employee app invite expiring", "An invite is due to expire." ],
+      "tax_form_paper_required" => [ "Paper W-2 due", "A paper copy is due. The Year-end checklist shows the deadline." ],
+      "w2_ready_to_post" => [ "W-2s ready to post", "The W-2 posting checklist is available." ]
+    }.freeze
+
     attr_reader :subject, :lines, :link, :footer
 
     def self.payroll_review_batch?(events)
@@ -37,8 +47,12 @@ module PortalNotifications
       else EXTRA_ADDRESS_FOOTER_LINE
       end
 
-      if !legacy_renderer && self.class.payroll_review_batch?(events)
-        @branded_message = build_payroll_review_message(audience: audience, events: events, app_user: app_user)
+      unless legacy_renderer
+        @branded_message = if self.class.payroll_review_batch?(events)
+          build_payroll_review_message(audience: audience, events: events, app_user: app_user)
+        else
+          build_portal_message(audience: audience, delivery_mode: delivery_mode, events: events)
+        end
         @subject = @branded_message.subject
         @lines = [ @branded_message.heading, *@branded_message.paragraphs ]
         @link = @branded_message.action&.fetch(:url, nil)
@@ -111,6 +125,17 @@ module PortalNotifications
     # email's link reaches all the work it mentions. Digest batches split per
     # client; immediate payroll review emails split per client and pay period.
     def self.destination_group(event, delivery_mode: "immediate")
+      if event.event_type.in?(%w[payroll_committed payroll_reopened])
+        return [ event.event_type, event.company_id, event.subject_id, event.metadata["self_override"] ]
+      end
+      if event.event_type == "w2_ready_to_post"
+        return [ :w2_posting, event.company_id, event.metadata["tax_year"] ]
+      end
+      if event.event_type.in?(%w[employee_signup_locked employee_invite_expiring])
+        return :employee_rollout
+      end
+      return :messages if event.message_event? && !FILE_REQUEST_EVENTS.include?(event.event_type)
+      return [ :payroll, event.company_id, event.subject_id ] if event.subject_type == "PayrollSubmissionPeriod"
       # Keyed on the event, not its shared category: a file request is
       # answered or reviewed where the request card is.
       return [ :tax_form_paper, event.company_id, event.metadata["tax_year"] ] if event.event_type == "tax_form_paper_required"
@@ -159,6 +184,74 @@ module PortalNotifications
     end
 
     private
+
+    def build_portal_message(audience:, delivery_mode:, events:)
+      event = events.first
+      company_name = safe_display_text(event.company.name) || "your client"
+      period = event.subject if event.subject_type.in?(%w[PayPeriod PayrollSubmissionPeriod])
+      range = format_period_range(period)
+      context = [ range, event.metadata["tax_year"] ].compact.first
+      context = "#{company_name}#{context ? " (#{context})" : ""}"
+      copies = events.filter_map { |entry| CATALOG_COPY[entry.event_type] }.uniq
+      has_generic_updates = events.any? { |entry| !CATALOG_COPY.key?(entry.event_type) }
+      heading = if copies.one? && !has_generic_updates
+        copies.first.first
+      elsif delivery_mode == "digest"
+        "Daily portal digest"
+      else
+        "Portal update"
+      end
+      if event.event_type == "payroll_reopened" && event.super_admin_alert? && event.metadata["self_override"] == true
+        heading = "Payroll rolled back by its own operator"
+      end
+      details = copies.map(&:last)
+      details << (events.all?(&:message_event?) ? MESSAGE_LINE : UPDATE_LINE) if has_generic_updates
+      brand = EmployeeEmails::Brand.new(name: EmployeeEmails::Message::PRODUCT,
+        app_name: audience == "staff" ? "Account team" : "Portal", logo_url: nil,
+        primary_color: CORNERSTONE_BLUE, help_email: nil)
+
+      subject = "#{heading} — #{context}"
+      footer_lines = [ footer ]
+      if event.company.demo?
+        subject = "[Demo] #{subject}" unless subject.start_with?("[Demo] ")
+        footer_lines.unshift("Demo company. Not a real payroll record.")
+      end
+
+      EmployeeEmails::Message.new(
+        brand: brand, subject: subject, preheader: "#{heading} for #{context}.",
+        heading: heading, paragraphs: [ context, *details, SIGN_IN_LINE ],
+        action: { label: "Open portal", url: scoped_url(audience, event) }, footer_lines: footer_lines
+      )
+    end
+
+    def scoped_url(audience, event)
+      return self.class.employee_portal_url(event.company) if audience == "employee"
+
+      group = self.class.destination_group(event)
+      base = "#{self.class.frontend_url}/companies/#{event.company_id}"
+      if event.event_type.in?(%w[payroll_committed payroll_reopened])
+        # Voided originals are hidden in the client portal.
+        return "#{base}/pay-runs" if event.event_type == "payroll_reopened" && audience == "client"
+
+        return payroll_review_url(audience: audience, company_id: event.company_id, pay_period_id: event.subject_id)
+      end
+      if group.is_a?(Array)
+        return "#{base}/year-end?year=#{group.last}" if group.first.in?(%i[tax_form_paper w2_posting])
+        return "#{base}/contact-changes-to-confirm" if group.first == :contact_confirmation
+
+        group = group.first
+      end
+
+      path = case group
+      when :employee_rollout then "employee-app/rollout"
+      when :messages, :file_requests then audience == "staff" ? "client-messages" : "messages"
+      when :payroll then audience == "staff" ? "payroll-submissions" : "payroll-files"
+      when :changes then audience == "staff" ? "client-change-requests" : "change-requests"
+      when :contact_changes then "change-requests?view=contact"
+      else audience == "staff" ? "client-documents" : "documents"
+      end
+      "#{base}/#{path}"
+    end
 
     def build_payroll_review_message(audience:, events:, app_user:)
       company = events.first.company
@@ -368,6 +461,9 @@ module PortalNotifications
 
     def legacy_destination_group(event)
       return :pay_runs if event.event_type.start_with?("payroll_review_")
+
+      return :payroll if event.subject_type == "PayrollSubmissionPeriod"
+      return :general if event.message_event? && !FILE_REQUEST_EVENTS.include?(event.event_type)
 
       self.class.destination_group(event)
     end

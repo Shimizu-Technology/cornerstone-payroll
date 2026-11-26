@@ -40,5 +40,6 @@ class W3ssPdfGenerator < OfficialPdfOverlay
 
   def draw_document_status(pdf, _page_number)
     draw_text_box(pdf, [ 36, 762, 576, 786 ], "#{@draft ? 'DRAFT — ' : ''}For your records — do not mail when you e-file", size: 11, align: :center)
+    DemoPdfFooter.draw_overlay_footer(pdf, company: @company)
   end
 end

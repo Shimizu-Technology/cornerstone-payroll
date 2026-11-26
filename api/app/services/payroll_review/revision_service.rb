@@ -286,7 +286,9 @@ module PayrollReview
       event = "payroll_review_decided"
       notify!(package, event, decision: "cornerstone_override")
       notify!(package, event, decision: "cornerstone_override", recipient_scope: "client_managers")
-      notify!(package, event, decision: "self_override", recipient_scope: "super_admins") if package.self_override?
+      notify!(package, event, decision: "cornerstone_override", recipient_scope: "client_viewers")
+      notify!(package, event, decision: package.self_override? ? "self_override" : "cornerstone_override",
+        recipient_scope: "super_admins")
     end
 
     def validate_admin_recorder!(user)

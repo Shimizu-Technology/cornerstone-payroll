@@ -23,7 +23,9 @@ class PayrollRefreshQaFixture
       company = FactoryBot.create(:company, name: "Synthetic Payroll Refresh QA",
         pay_frequency: "semimonthly", auto_create_fit_check: true)
       actor = User.create!(company: company, organization: company.organization,
-        email: "refresh-accountant@example.test", name: "QA Accountant", role: "accountant", active: true)
+        email: "refresh-accountant@example.test", name: "QA Accountant", clerk_id: "user_refresh_accountant", role: "accountant", active: true)
+      admin = User.create!(company: company, organization: company.organization,
+        email: "refresh-admin@example.test", name: "QA Admin", role: "org_admin", clerk_id: "user_refresh_admin", active: true)
       company.organization.update!(primary_company: company)
       CompanyWorkweek.create!(company: company, starts_on_weekday: 0, starts_at_minutes: 0,
         timezone: "Pacific/Guam", effective_on: Date.new(2026, 1, 1), source: "operator_confirmed",
@@ -71,6 +73,12 @@ class PayrollRefreshQaFixture
       desktop_employee = build_employee.call("Desktop")
       desktop_loan = build_loan.call(desktop_employee)
       desktop_period, desktop_item = build_period.call(desktop_employee, "draft")
+      # The browser test commits this later run after the original payroll.
+      later_period = FactoryBot.create(:pay_period, company: company,
+        start_date: desktop_period.start_date, end_date: desktop_period.end_date, pay_date: desktop_period.pay_date + 1,
+        run_purpose: "adjustment", includes_base_salary: false, includes_recurring_items: false)
+      FactoryBot.create(:payroll_item, company: company, employee: desktop_employee, pay_period: later_period,
+        hours_worked: 0, overtime_hours: 0)
       mobile_employee = build_employee.call("Mobile")
       mobile_loan = build_loan.call(mobile_employee)
       mobile_period, mobile_item = build_period.call(mobile_employee, "draft")
@@ -118,7 +126,8 @@ class PayrollRefreshQaFixture
         { "label" => "Synthetic recurring bonus", "amount" => 100, "treatment" => "taxable_addition", "active" => true }
       ])
       {
-        schema_version: 1, company_id: company.id, accountant_email: actor.email,
+        schema_version: 1, company_id: company.id, accountant_subject: actor.clerk_id,
+        admin_subject: admin.clerk_id, later_period_id: later_period.id,
         desktop: { period_id: desktop_period.id, item_id: desktop_item.id, employee_id: desktop_employee.id, loan_id: desktop_loan.id },
         mobile: { period_id: mobile_period.id, item_id: mobile_item.id, employee_id: mobile_employee.id, loan_id: mobile_loan.id },
         reopen: { period_id: reopen_period.id, item_id: reopen_item.id, employee_id: reopen_employee.id, loan_id: reopen_loan.id },

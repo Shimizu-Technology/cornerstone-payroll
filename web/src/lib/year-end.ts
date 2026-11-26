@@ -30,6 +30,7 @@ export interface YearEndClientRow {
   company_id: number;
   name: string;
   active: boolean;
+  demo?: boolean;
   status: YearEndClientStatus;
   issue_count: number | null;
   efile_check_pending?: boolean;
@@ -352,7 +353,7 @@ export function isActiveStep<S extends YearEndStep>(step: S): step is Extract<S,
 }
 
 export interface YearEndChecklist {
-  company: { id: number; name: string; active: boolean; test_workspace: boolean };
+  company: { id: number; name: string; active: boolean; test_workspace: boolean; demo?: boolean };
   tax_year: number;
   status: YearEndClientStatus;
   issue_count: number;

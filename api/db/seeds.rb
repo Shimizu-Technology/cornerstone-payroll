@@ -128,26 +128,25 @@ if Rails.env.development?
   end
 
   company = organization.companies.find_or_create_by!(name: "Cornerstone Tax Services") do |c|
-    c.address_line1 = "123 Pale San Vitores Road"
+    c.address_line1 = "100 Development Seed Way"
     c.city = "Tamuning"
     c.state = "GU"
     c.zip = "96913"
-    c.phone = "(671) 646-1040"
-    c.email = "payroll@cornerstone-tax.com"
+    c.phone = "(671) 555-0100"
+    c.email = "payroll@development-seed.example"
     c.pay_frequency = "biweekly"
-    c.ein = "66-0000001"  # Placeholder EIN
+    c.ein = "07-0000001"  # Fictional EIN
   end
 
   # Departments
   admin_dept = Department.find_or_create_by!(company: company, name: "Administration")
   tax_dept = Department.find_or_create_by!(company: company, name: "Tax Services")
 
-  # Cornerstone's actual 4 employees — all hourly, biweekly
+  # Development seed employees — all hourly, biweekly
   employees_data = [
     {
-      first_name: "Audreana",
-      middle_name: "Monique P.",
-      last_name: "Lett",
+      first_name: "Employee",
+      last_name: "01",
       department: admin_dept,
       employment_type: "hourly",
       pay_rate: 15.00,
@@ -156,8 +155,8 @@ if Rails.env.development?
       hire_date: Date.new(2024, 1, 15)
     },
     {
-      first_name: "Kyleiah",
-      last_name: "San Nicolas",
+      first_name: "Employee",
+      last_name: "02",
       department: tax_dept,
       employment_type: "hourly",
       pay_rate: 13.00,
@@ -166,8 +165,8 @@ if Rails.env.development?
       hire_date: Date.new(2024, 3, 1)
     },
     {
-      first_name: "Alanna",
-      last_name: "Cruz",
+      first_name: "Employee",
+      last_name: "03",
       department: tax_dept,
       employment_type: "hourly",
       pay_rate: 13.00,
@@ -176,8 +175,8 @@ if Rails.env.development?
       hire_date: Date.new(2024, 6, 1)
     },
     {
-      first_name: "Kameren",
-      last_name: "Cruz",
+      first_name: "Employee",
+      last_name: "04",
       department: admin_dept,
       employment_type: "hourly",
       pay_rate: 18.00,

@@ -54,6 +54,18 @@ describe('Year-end clients list', () => {
     expect(screen.getAllByText('EIN missing').length).toBeGreaterThan(0);
     expect(screen.getAllByText('More may show after the employee e-file check.').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /Refresh/ })).toBeTruthy();
+    expect(screen.queryByText('Demo')).toBeNull();
+  });
+
+  it('shows a Demo chip next to demo companies in the year-end queue and never for real clients', async () => {
+    mocks.clients.mockResolvedValue(overview([
+      row({ company_id: 1, name: 'Tumon Bakery', demo: false }),
+      row({ company_id: 7, name: 'Sunset Grill', demo: true }),
+    ]));
+    renderPage();
+    expect((await screen.findAllByText('Sunset Grill')).length).toBeGreaterThan(0);
+    // Rendered once in the mobile card list and once in the desktop table for the single demo row.
+    expect(screen.getAllByText('Demo')).toHaveLength(2);
   });
 
   it('hides the previous year while the newly chosen year loads', async () => {

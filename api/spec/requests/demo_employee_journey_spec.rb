@@ -148,11 +148,13 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
 
       get "/api/v1/employee/context", headers: employee_headers(link)
       expect(response).to have_http_status(:ok), response.body
-      expect(response.body).not_to match(/demo|practice|test workspace/i)
+      expect(response.parsed_body["demo"]).to be(true)
+      expect(response.body).not_to match(/practice|test workspace/i)
       get "/api/v1/employee/links", headers: bearer("user_robin")
       expect(response.parsed_body.fetch("links").map { |row| row["company_name"] }).to eq([ "Harbor Finch Kitchen" ])
+      expect(response.parsed_body.fetch("links").map { |row| row["demo"] }).to eq([ true ])
 
-      # A committed payday posts a frozen stub that reads like a real one.
+      # A committed payday posts a frozen stub with the D-3 demo footer and no test-workspace jargon.
       item = pay!(robin, PayrollBusinessClock.today - 3)
       perform_enqueued_jobs { PostEmployeePayStubsJob.perform_now }
       document = EmployeeDocument.find_by!(payroll_item: item, status: "posted")
@@ -162,8 +164,8 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
       get "/api/v1/employee/statements/#{document.id}/pdf", headers: employee_headers(link)
       expect(response).to have_http_status(:ok)
       expect(response.body.b).to start_with("%PDF")
-      expect(pdf_text(response.body)).to include("Harbor Finch Kitchen")
-      expect(pdf_text(response.body)).not_to match(/demo|practice|sample|test workspace/i)
+      expect(pdf_text(response.body)).to include("Harbor Finch Kitchen", DemoPdfFooter::TEXT)
+      expect(pdf_text(response.body)).not_to match(/practice|sample|test workspace/i)
 
       # Consent with the draft disclosure, then a profile change and an address request.
       get "/api/v1/employee/delivery_consents", headers: employee_headers(link)
@@ -237,8 +239,8 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
     get "/api/v1/employee/tax_forms/#{form['id']}/pdf", headers: employee_headers(link)
     expect(response).to have_http_status(:ok)
     text = pdf_text(response.body)
-    expect(text).to include("Harbor Finch Kitchen")
-    expect(text).not_to match(/demo|practice|sample|not for filing|test workspace/i)
+    expect(text).to include("Harbor Finch Kitchen", DemoPdfFooter::TEXT)
+    expect(text).not_to match(/practice|sample|not for filing|test workspace/i)
   end
 
   it "shows a former employee's own history read-only" do

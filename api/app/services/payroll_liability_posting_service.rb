@@ -91,8 +91,8 @@ class PayrollLiabilityPostingService
   end
 
   def post!
-    # Demo payroll is simulated and never reaches the firm's liability ledger.
-    return nil if pay_period.company.demo?
+    # Legacy test-workspace demos still have a pre-migration DB trigger on this table.
+    return nil if pay_period.company.legacy_demo?
 
     PayPeriod.transaction do
       lock_company!
@@ -116,10 +116,10 @@ class PayrollLiabilityPostingService
     raise InvalidStateError, e.message
   end
 
-  # A demo period never posted liabilities, so a void has nothing to reverse
+  # A legacy demo period never posted liabilities, so a void has nothing to reverse
   # and must not capture a legacy backfill first.
   def reverse!
-    return [] if pay_period.company.demo?
+    return [] if pay_period.company.legacy_demo?
 
     PayPeriod.transaction do
       lock_company!
@@ -157,9 +157,9 @@ class PayrollLiabilityPostingService
     end
   end
 
-  # Likewise, a demo pay-date correction moves no liabilities.
+  # Likewise, a legacy demo pay-date correction moves no liabilities while the old trigger remains.
   def restate_for_pay_date!(old_pay_date:, new_pay_date:)
-    return nil if pay_period.company.demo?
+    return nil if pay_period.company.legacy_demo?
 
     PayPeriod.transaction do
       lock_company!
