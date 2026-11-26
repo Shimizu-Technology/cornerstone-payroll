@@ -38,7 +38,7 @@ interface AuthContextType {
   isAccountant: boolean;
   isClient: boolean;
   hasCapability: (capability: string) => boolean;
-  signOut: () => Promise<void>;
+  signOut: (options?: { redirectUrl: string }) => Promise<void>;
   refreshUser: (options?: { skipTokenCache?: boolean }) => Promise<void>;
 }
 
@@ -225,7 +225,8 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         if (!backendUnauthorized.current) {
           backendUnauthorized.current = true;
           setAuthProblem(problem);
-          setAuthToken(null);
+          clearAllDrafts();
+          authApi.logout();
           try {
             await clerkSignOut();
           } catch {
@@ -282,16 +283,22 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
         isAccountant: user?.role === 'accountant',
         isClient: user?.role === 'client',
         hasCapability: (capability) => user?.capabilities.includes(capability) === true,
-        signOut: async () => {
-          setUser(null);
-          setAuthProblem(null);
+        signOut: async (options) => {
+          const clearAccount = () => {
+            setUser(null);
+            setAuthProblem(null);
+          };
+          // Keeping the user until Clerk confirms sign-out keeps the invitation
+          // screen mounted so it can report a failed attempt and offer a retry.
+          if (!options) clearAccount();
           clearAllDrafts();
           resetAnalytics();
           authApi.logout();
           try {
-            await clerkSignOut();
+            await clerkSignOut(options);
+            if (options) clearAccount();
           } catch (error) {
-            if (authProblem?.status === 403 && isMfaRequiredCode(authProblem.code)) {
+            if (!options && authProblem?.status === 403 && isMfaRequiredCode(authProblem.code)) {
               setUser(null);
               setAuthProblem({ ...authProblem, signOutFailed: true });
             }

@@ -142,7 +142,8 @@ RSpec.describe CompanyFeatures do
     it "agrees with legacy columns for manual companies with and without active client portal users" do
       plain_manual = create(:company, organization: organization, name: "Plain Manual Co", client_payroll_approval_required: false)
       kpi_manual = create(:company, organization: organization, name: "KPI Manual Portal Co", client_payroll_approval_required: false)
-      create(:user, organization: organization, company: kpi_manual, role: "client", active: true)
+      kpi_client = create(:user, organization: organization, company: kpi_manual, role: "client", active: true)
+      CompanyAssignment.create!(user: kpi_client, company: kpi_manual)
 
       ClientOperatingProfiles::BackfillService.call(companies: Company.where(id: [ plain_manual.id, kpi_manual.id ]))
 
@@ -285,9 +286,9 @@ RSpec.describe CompanyFeatures do
       )
       create(:company_assignment, user: practice_login, company: open_sandbox)
 
-      expect(archived_client.accessible_company_ids).to eq([ home_archived_only.id ])
+      expect(archived_client.accessible_company_ids).to eq([])
       expect(reassigned_client.accessible_company_ids).to eq([ active_assigned.id ])
-      expect(foreign_assigned_client.accessible_company_ids).to eq([ home_foreign_assigned.id ])
+      expect(foreign_assigned_client.accessible_company_ids).to eq([])
       expect(practice_login.accessible_company_ids).to eq([ open_sandbox.id ])
 
       live_targets = [
@@ -300,10 +301,10 @@ RSpec.describe CompanyFeatures do
       ]
       ClientOperatingProfiles::BackfillService.call(companies: Company.where(id: live_targets.map(&:id)))
 
-      expect(described_class.for(home_archived_only).client_portal?).to be(true)
+      expect(described_class.for(home_archived_only).client_portal?).to be(false)
       expect(described_class.for(home_reassigned).client_portal?).to be(false)
       expect(described_class.for(active_assigned).client_portal?).to be(true)
-      expect(described_class.for(home_foreign_assigned).client_portal?).to be(true)
+      expect(described_class.for(home_foreign_assigned).client_portal?).to be(false)
       expect(described_class.for(foreign_company).client_portal?).to be(false)
       expect(described_class.for(practice_source).client_portal?).to be(false)
       expect(described_class.for(open_sandbox).client_portal?).to be(true)

@@ -24,6 +24,8 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
       @other_company = create(:company, organization: @company.organization)
       @requester = create(:user, company: @company, role: "client", name: "Demo Requester", clerk_id: "user_address_requester")
       @reviewer = create(:user, company: @company, role: "client", clerk_id: "user_address_reviewer")
+      create(:company_assignment, user: @requester, company: @company)
+      create(:company_assignment, user: @reviewer, company: @company)
       @staff = create(:user, company: @company, role: "admin", clerk_id: "user_address_staff")
       @employee = create(:employee, company: @company, first_name: "Demo", last_name: "Requester", address_line1: old_address)
       @coworker = create(:employee, company: @company, address_line1: old_address)
@@ -65,7 +67,9 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     get "#{requests_path}/#{id}", headers: headers(@reviewer)
     expect(response.parsed_body.fetch("data")).to include("can_review" => true, "original_values" => { "address_line1" => old_address })
     expect(response.parsed_body.fetch("data")).not_to have_key("direct_changes_applied")
-    observer = system_read { create(:user, company: @company, role: "client") }
+    observer = system_read do
+      create(:user, company: @company, role: "client").tap { |user| create(:company_assignment, user: user, company: @company) }
+    end
     patch "#{requests_path}/#{id}/approve", headers: headers(@reviewer)
     expect(response).to have_http_status(:ok), response.body
     system_read do

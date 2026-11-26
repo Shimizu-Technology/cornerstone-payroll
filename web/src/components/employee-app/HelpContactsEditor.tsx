@@ -42,13 +42,13 @@ export function HelpContactsEditor({ drafts, max, disabled, showProblems, server
                     {index === 0 ? 'Shown first' : `Shown ${ordinal(index + 1)}`}
                   </p>
                   <div className="flex gap-1">
-                    <Button type="button" variant="ghost" size="md" className="px-3" disabled={disabled || index === 0} onClick={() => move(index, -1)} aria-label={`Move ${label} up`}>
+                    <Button type="button" variant="ghost" size="md" className="min-h-11 min-w-11 px-3" disabled={disabled || index === 0} onClick={() => move(index, -1)} aria-label={`Move ${label} up`}>
                       <ArrowUp aria-hidden="true" className="size-4" />
                     </Button>
-                    <Button type="button" variant="ghost" size="md" className="px-3" disabled={disabled || index === drafts.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${label} down`}>
+                    <Button type="button" variant="ghost" size="md" className="min-h-11 min-w-11 px-3" disabled={disabled || index === drafts.length - 1} onClick={() => move(index, 1)} aria-label={`Move ${label} down`}>
                       <ArrowDown aria-hidden="true" className="size-4" />
                     </Button>
-                    <Button type="button" variant="ghost" size="md" className="px-3" disabled={disabled} onClick={() => onChange(drafts.filter((_, i) => i !== index))} aria-label={`Remove ${label}`}>
+                    <Button type="button" variant="ghost" size="md" className="min-h-11 px-3" disabled={disabled} onClick={() => onChange(drafts.filter((_, i) => i !== index))} aria-label={`Remove ${label}`}>
                       <Trash2 aria-hidden="true" className="size-4" />
                       <span className="ml-1">Remove</span>
                     </Button>

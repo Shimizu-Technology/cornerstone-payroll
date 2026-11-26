@@ -297,6 +297,10 @@ export function EmployeeForm() {
     || (loadedEmployee.w4_signed_on || '') !== (form.w4_signed_on || '')
     || (loadedEmployee.w4_source_reference || '') !== (form.w4_source_reference || '')
   ));
+  // A new, changed or newly received election must not take effect before it was signed (the API rejects it).
+  // Saved history such as an imported record keeps its dates; payroll skips it until the signed date.
+  const w4DateOrderEnforced = form.employment_type !== 'contractor' && (!isEditing || w4HasChanged || w4ElectionReceived);
+  const w4SignedAfterEffective = Boolean(form.w4_signed_on && form.w4_effective_on && form.w4_signed_on > form.w4_effective_on);
 
   const fetchEmployee = useCallback(async () => {
     if (!id) return;
@@ -888,8 +892,7 @@ export function EmployeeForm() {
     if (form.employment_type !== 'contractor' && !form.w4_effective_on && !allowsUnverifiedBlank('withholding_election')) {
       newErrors.w4_effective_on = ['Enter the date this W-4 became effective'];
     }
-    if (form.employment_type !== 'contractor' && (!isEditing || w4HasChanged || w4ElectionReceived)
-        && form.w4_effective_on && form.w4_signed_on && form.w4_effective_on < form.w4_signed_on) {
+    if (w4DateOrderEnforced && form.w4_effective_on && form.w4_signed_on && form.w4_effective_on < form.w4_signed_on) {
       newErrors.w4_effective_on = ['Set the effective date on or after the date the W-4 was signed.'];
     }
     if (payHasChanged && compensationHistory) {
@@ -1234,7 +1237,6 @@ export function EmployeeForm() {
   }
 
   const documentReadiness = loadedEmployee?.document_readiness;
-  const w4SignedAfterEffective = Boolean(form.w4_signed_on && form.w4_effective_on && form.w4_signed_on > form.w4_effective_on);
   const documentsNeeded = documentReadiness && !documentReadiness.ready_for_payroll ? documentReadiness.required - documentReadiness.satisfied : 0;
 
   if (isLoading) {
@@ -2137,12 +2139,16 @@ export function EmployeeForm() {
                 <label className="text-sm font-medium text-gray-700">Source document / reference (optional)
                   <Input maxLength={255} value={form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
                 </label>
-                {w4SignedAfterEffective && (
+                {w4SignedAfterEffective && (w4DateOrderEnforced ? (
                   <p role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900 md:col-span-2">
-                    This W-4 was signed on {form.w4_signed_on}, after its effective date of {form.w4_effective_on}. Paychecks dated before the signature would use an election the employee had not made yet. Check both dates; the effective date is usually on or after the signed date.
+                    Set the effective date on or after {form.w4_signed_on}, when this W-4 was signed. Payroll doesn't use a W-4 for paychecks dated before it was signed.
                   </p>
-                )}
-                <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. The effective date controls which paychecks use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
+                ) : (
+                  <p data-testid="w4-signed-after-effective-note" className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700 md:col-span-2">
+                    This W-4 applies to paychecks dated on or after {form.w4_signed_on}, when it was signed. Earlier paychecks use the previous W-4, or default withholding (single, no adjustments) if there isn't one.
+                  </p>
+                ))}
+                <p className="text-xs text-gray-500 md:col-span-2">The signed date identifies the source document. Paychecks dated on or after both the effective date and the signed date use this election. Recorded dates show when it was entered here; importing a record does not establish when a form was signed.</p>
               </div>
 
               {/* Step 2: Multiple Jobs */}

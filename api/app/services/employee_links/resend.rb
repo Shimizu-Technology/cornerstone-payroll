@@ -63,6 +63,7 @@ module EmployeeLinks
           closed.fetch(:invitation_id) == pending&.clerk_invitation_id
 
         @link.claim_user = route_login(employee)
+        @link.invited_by = @actor
         credentials = Credentials.issue(@link, delivery: @delivery, email: employee.email)
         @link.save!
         retire_pending_sign_up!(pending) if pending

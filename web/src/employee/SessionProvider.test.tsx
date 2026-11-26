@@ -11,7 +11,6 @@ import { SignOutProvider } from './SignOut';
 
 function auth(overrides: Partial<EmployeeAuthValue> = {}): EmployeeAuthValue {
   return {
-    isLoaded: true,
     isSignedIn: true,
     getToken: async () => 'tok',
     signOut: async () => undefined,
