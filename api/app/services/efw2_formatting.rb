@@ -66,9 +66,18 @@ module Efw2Formatting
     labels.length >= 2 && labels.all? { |label| label.match?(/\A[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\z/) } && TLDS.include?(labels.last.upcase)
   end
 
+  def valid_ein?(value)
+    ein = value.to_s.strip.delete("-")
+    ein.match?(/\A\d{9}\z/) && ein.chars.uniq.length > 1 && !BAD_EIN_PREFIXES.include?(ein[0, 2])
+  end
+
+  def reserved_ein_prefix?(value)
+    ein = value.to_s.strip.delete("-")
+    ein.match?(/\A\d{9}\z/) && BAD_EIN_PREFIXES.include?(ein[0, 2])
+  end
+
   def validate_identity(object, label, problems)
-    ein = object.ein.to_s.delete("-")
-    add_problem(problems, :ein_invalid, "#{label}: valid nine-digit EIN required") unless ein.match?(/\A\d{9}\z/) && !BAD_EIN_PREFIXES.include?(ein[0, 2])
+    add_problem(problems, :ein_invalid, "#{label}: valid nine-digit EIN required") unless valid_ein?(object.ein)
     add_problem(problems, :name_missing, "#{label}: name required") if clean(object.name).blank?
     validate_address(object, label, problems)
   end
