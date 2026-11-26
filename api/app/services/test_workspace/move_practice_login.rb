@@ -97,7 +97,7 @@ module TestWorkspace
          !actor.can_access_company?(target_company.id)
         refuse!("Choose a practice copy in this organization", :target_unavailable)
       end
-      unless target_company.test_workspace?
+      unless target_company.practice_copy?
         refuse!("A practice login can use a practice copy only, never a real client", :target_not_practice_copy)
       end
       unless target_company.sandbox?

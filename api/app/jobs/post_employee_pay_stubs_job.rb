@@ -11,7 +11,7 @@ class PostEmployeePayStubsJob < ApplicationJob
     through_date = guam_now.hour >= 6 ? guam_now.to_date : guam_now.to_date.yesterday
 
     # Demo companies post like a live client; the stubs stay inside Payroll.
-    Company.live_payroll.or(Company.demo).find_each do |company|
+    Company.operating.find_each do |company|
       features = CompanyFeatures.for(company)
       next unless features.employee_portal_feature?(:stubs)
 

@@ -34,8 +34,8 @@ class Form1099Pub1220Generator
   end
 
   def generate
-    # The GuamTax e-file is an electronic filing; a demo never produces one.
-    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
+    # The GuamTax e-file is an electronic filing; a demo never produces one outside DEPLOYMENT_ENV=local.
+    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo? && !LocalDeployment.local?
 
     found = problems
     raise InvalidFile, found if found.any?

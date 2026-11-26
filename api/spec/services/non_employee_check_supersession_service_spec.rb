@@ -285,4 +285,64 @@ RSpec.describe NonEmployeeCheckSupersessionService do
       approved_at: Time.current, created_at: Time.current
     } ]) }.to raise_error(ActiveRecord::StatementInvalid, /administrator/)
   end
+
+  describe "demo company supersession without live rollout approval" do
+    let(:demo_company) { create_live_demo_company(organization: company.organization) }
+    let(:demo_employee) { create(:employee, company: demo_company) }
+    let(:demo_period) do
+      create(:pay_period, :committed, company: demo_company,
+             start_date: Date.new(2026, 5, 1), end_date: Date.new(2026, 5, 15), pay_date: Date.new(2026, 5, 19))
+    end
+    let(:demo_item) do
+      create(:payroll_item, :printed, company: demo_company, pay_period: demo_period, employee: demo_employee,
+             check_number: "02045", net_pay: 215, payment_delivery_method: "paper_check")
+    end
+    let(:demo_check) do
+      create(:non_employee_check, :standalone, company: demo_company, check_type: "other",
+             payment_period_type: "none", tax_year: nil, tax_month: nil,
+             payable_to: demo_employee.full_name, amount: 215, check_number: "2045",
+             printed_at: Time.current, payment_method: "check")
+    end
+
+    it "completes a full supersession for a flagged demo without rollout approval while still gating real live companies", :unapproved do
+      create(:check_event, payroll_item: demo_item, user: actor, event_type: "delivered",
+                           effective_on: PayrollBusinessClock.today)
+
+      # Demo companies cannot receive live rollout approvals at model or DB trigger level.
+      demo_approval = CheckSupersessionRolloutApproval.new(
+        company: demo_company, approved_by: approver,
+        reason: "Demo companies must never carry a live rollout approval", approved_at: Time.current
+      )
+      expect(demo_approval).not_to be_valid
+      expect {
+        ActiveRecord::Base.transaction(requires_new: true) do
+          CheckSupersessionRolloutApproval.insert_all!([ {
+            company_id: demo_company.id, approved_by_id: approver.id,
+            reason: "Demo companies must never carry a live rollout approval",
+            approved_at: Time.current, created_at: Time.current
+          } ])
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /rollout approval requires/)
+
+      # Yet supersession runs end-to-end for a flagged demo without rollout approval.
+      evidence = described_class.new(check: demo_check, actor: actor).supersede!(
+        payroll_item_id: demo_item.id,
+        reason: "Same physical demo check verified against payroll item",
+        recipient_verified: true
+      )
+      expect(evidence).to be_persisted
+      expect(demo_check.reload.check_status).to eq("superseded")
+
+      # Paired real live company still refuses supersession without rollout approval.
+      create(:check_event, payroll_item: item, user: actor, event_type: "delivered",
+                           effective_on: PayrollBusinessClock.today)
+      expect {
+        described_class.new(check: check, actor: actor).supersede!(
+          payroll_item_id: item.id,
+          reason: "Same physical live check verified against payroll item",
+          recipient_verified: true
+        )
+      }.to raise_error(NonEmployeeCheckSupersessionService::Error, /approved for rollout/)
+    end
+  end
 end

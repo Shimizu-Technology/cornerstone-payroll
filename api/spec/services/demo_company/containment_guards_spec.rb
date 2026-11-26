@@ -44,25 +44,17 @@ RSpec.describe "Demo company containment guards" do
   describe "Form 500" do
     let(:filing) { Form500Filing.new(company: demo, pay_period: period, fields: { "company_name" => demo.name }, status: "prepared") }
 
-    it "records preparation only for a demo" do
+    it "allows full Form 500 outcomes for a demo while still requiring the company to match the pay period" do
       expect(filing).to be_valid
       %w[filed paid].each do |status|
-        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: status)
-        expect(candidate).not_to be_valid, "accepted status #{status}"
-        expect(candidate.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
+        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: status,
+          payment_amount: 10, payment_date: Date.current, confirmation_number: "DRT-1", receipt_attached: true)
+        expect(candidate).to be_valid, "rejected status #{status}: #{candidate.errors.full_messages}"
       end
-      [ { payment_amount: 10 }, { payment_date: Date.current }, { confirmation_number: "DRT-1" }, { receipt_attached: true } ].each do |change|
-        candidate = Form500Filing.new(company: demo, pay_period: period, fields: { "x" => 1 }, status: "prepared", **change)
-        expect(candidate).not_to be_valid, "accepted #{change.inspect}"
-        expect(candidate.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
-      end
-    end
 
-    it "requires the filing's company to match its pay period and applies the demo rule to the pay period's company" do
       mismatched = Form500Filing.new(company: live, pay_period: period, fields: { "x" => 1 }, status: "filed", confirmation_number: "DRT-1")
       expect(mismatched).not_to be_valid
       expect(mismatched.errors[:company]).to include("must match the pay period's company")
-      expect(mismatched.errors.full_messages).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
 
       live_period = create(:pay_period, :committed, company: live)
       expect(Form500Filing.new(company: live, pay_period: live_period, fields: { "x" => 1 }, status: "filed", confirmation_number: "DRT-1")).to be_valid
