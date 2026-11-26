@@ -23,11 +23,20 @@ module EmployeeAppSwitch
     # before asking again.
     ATTESTATION_CACHE_SECONDS = 120
     ATTESTATION_MISS_CACHE_SECONDS = 15
+    # The ask is bounded tighter than the readiness screen's, since an
+    # invitation or a job may be waiting on it.
+    ATTESTATION_OPEN_TIMEOUT = 1
+    ATTESTATION_READ_TIMEOUT = 2
+    # Processes that may take the employee service's answer: never the
+    # employee service itself.
+    ATTESTATION_ROLES = [ ProcessRole::ALL, ProcessRole::PAYROLL_WEB ].freeze
     RETIRED_ACTION = "employee_app_early_access#retired"
 
     STATE_CACHE = Concurrent::AtomicReference.new
     ROLE_CACHE = Concurrent::AtomicReference.new
     ATTESTATION_CACHE = Concurrent::AtomicReference.new
+    # One refresh at a time per process; the others wait for its answer.
+    ATTESTATION_LOCK = Mutex.new
 
     module_function
 
@@ -171,39 +180,60 @@ module EmployeeAppSwitch
     # needs its own guard, exactly as demo_request_allowed?. Staff web and
     # the worker serve no employee data on this answer, so they follow the
     # employee service's signed answer that its guard runs in raise mode as
-    # the restricted role (ServiceAttestation). Employee requests on any
-    # process still pass demo_request_allowed? as well.
+    # the restricted role (ServiceAttestation). That path is opt-in: only an
+    # `all` or `payroll_web` process with EMPLOYEE_API_URL set takes it.
+    # Employee requests on any process still pass demo_request_allowed?.
     def demo_reader_allowed?(company, env: ENV)
       return true unless company&.demo?
       return true if verified?
       return false unless waiver_state?
       return true if current_process_guarded?(env: env)
-      return false if employee_service_process?(env)
+      return false unless remote_attestation_allowed?(env)
 
       employee_service_attested?(env: env)
     end
 
-    def employee_service_process?(env = ENV)
-      env.fetch("APP_PROCESS_ROLE", ProcessRole::ALL) == ProcessRole::EMPLOYEE_WEB
+    def remote_attestation_allowed?(env = ENV)
+      ATTESTATION_ROLES.include?(env["APP_PROCESS_ROLE"].presence || ProcessRole::ALL) && env["EMPLOYEE_API_URL"].present?
+    end
+
+    # Asks for the employee service's answer ahead of a locked section (an
+    # invitation), so the re-check inside it reads the cache.
+    def warm_attestation!(company)
+      demo_app_open?(company) if company&.demo?
+      nil
     end
 
     # The employee service's live signed answer (checked for this nonce,
     # process and age), cached per process. Anything else (no secret or URL,
-    # unsigned, stale, unreachable, a guard not in raise mode) is false.
+    # unsigned, stale, unreachable, a guard not in raise mode) is false. A
+    # stale answer is never reused while another thread refreshes it.
     def employee_service_attested?(env: ENV)
-      cached = ATTESTATION_CACHE.get
-      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      return cached.first if cached && now < cached.last
+      cached = fresh_attestation
+      return cached.first if cached
 
-      value = begin
-        Readiness.ping_employee_service(env)[:observation]&.rls_guard_raise? == true
-      rescue StandardError => error
-        Rails.logger.warn("[EmployeeAppSwitch::Enforcement] employee service attestation failed: #{error.class}")
-        false
+      ATTESTATION_LOCK.synchronize do
+        cached = fresh_attestation
+        next cached.first if cached
+
+        value = fetch_attestation(env)
+        ttl = value ? ATTESTATION_CACHE_SECONDS : ATTESTATION_MISS_CACHE_SECONDS
+        ATTESTATION_CACHE.set([ value, Process.clock_gettime(Process::CLOCK_MONOTONIC) + ttl ].freeze)
+        value
       end
-      ttl = value ? ATTESTATION_CACHE_SECONDS : ATTESTATION_MISS_CACHE_SECONDS
-      ATTESTATION_CACHE.compare_and_set(cached, [ value, now + ttl ].freeze)
-      value
+    end
+
+    def fresh_attestation
+      cached = ATTESTATION_CACHE.get
+      cached if cached && Process.clock_gettime(Process::CLOCK_MONOTONIC) < cached.last
+    end
+
+    def fetch_attestation(env)
+      ping = Readiness.ping_employee_service(env, open_timeout: ATTESTATION_OPEN_TIMEOUT, read_timeout: ATTESTATION_READ_TIMEOUT)
+      ping[:observation]&.rls_guard_raise? == true
+    rescue StandardError => error
+      Rails.logger.warn("[EmployeeAppSwitch::Enforcement] employee service attestation failed: #{error.class}")
+      false
     end
 
     def current_process_guarded?(env: ENV)

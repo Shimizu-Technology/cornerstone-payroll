@@ -27,9 +27,13 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
   let(:shadow) { { phase: "shadow", enforced: false, kill_switch_bypass: false, enforced_tables: 0, protected_tables: 1 } }
   let(:guard_mode) { "raise" }
   let(:clock_offset) { [ 0.0 ] }
+  let(:subdomain) { false }
+  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::ROOT_DOMAIN}" }
 
   around do |example|
-    env = { attestation::SECRET_ENV => secret, "EMPLOYEE_API_URL" => base, "APP_PROCESS_ROLE" => nil }
+    env = { attestation::SECRET_ENV => secret, "EMPLOYEE_API_URL" => base, "APP_PROCESS_ROLE" => nil,
+            "PORTAL_EMAIL_NOTIFICATIONS_ENABLED" => "true", "PORTAL_EMAIL_TRANSPORT" => "capture",
+            "RESEND_FROM_EMAIL" => "payroll@example.test", DemoOutbound::ENV_KEY => "worker@demo-mail.example" }
     saved = env.keys.index_with { |key| ENV[key] }
     env.each { |key, value| ENV[key] = value }
     example.run
@@ -46,7 +50,8 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
       args == [ Process::CLOCK_MONOTONIC ] ? original.call(*args) + clock_offset.first : original.call(*args)
     end
     stub_employee_service!
-    enable_employee_app!(demo)
+    enable_employee_app!(demo, subdomain: subdomain)
+    PortalNotifications::Transport.clear_captured!
   end
 
   # The employee service's live answer, signed for the nonce Payroll sent.
@@ -80,6 +85,16 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
 
   def later!(seconds)
     clock_offset[0] += seconds
+  end
+
+  def without_attestation!
+    ENV[attestation::SECRET_ENV] = nil
+    enforcement.reset_cache!
+  end
+
+  def counters(link)
+    link.reload.slice(:status, :failed_activation_attempts, :activation_locked_until, :invite_generation, :user_id,
+      :invite_code_digest)
   end
 
   it "opens the rollout, invites and resends for a demo under early access once the employee service attests" do
@@ -182,5 +197,161 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
     allow(enforcement).to receive(:database_state).and_return(shadow.merge(phase: "enforced", enforced: true, enforced_tables: 1))
     enforcement.reset_cache!
     expect(app_open?).to be(true)
+  end
+
+  describe "employee sign-up on staff web" do
+    let(:issued) { invite!(employee, actor: staff, delivery: "code") }
+    let(:claimant) do
+      create(:user, role: :portal_employee, company: demo, organization: organization, clerk_id: "user_gate_claimant",
+        email: "worker@demo-mail.example", name: "Sample Worker", invitation_status: "accepted")
+    end
+
+    before { open_window! }
+
+    def claim!(**overrides)
+      post "/api/v1/employee/links/claim",
+        params: activation_params(employee, code: issued.code).except(:email).merge(overrides).to_json,
+        headers: bearer(claimant.clerk_id).merge("CONTENT_TYPE" => "application/json")
+    end
+
+    it "refuses activation alike for a match and a miss, before any attempt is counted" do
+      before_state = counters(issued.link)
+
+      post_activation(activation_params(employee, code: issued.code))
+      matched = [ response.status, response.parsed_body ]
+      post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
+      missed = [ response.status, response.parsed_body ]
+
+      expect(matched).to eq(missed)
+      expect(matched.first).to eq(422)
+      expect(counters(issued.link)).to eq(before_state)
+      expect(link_audits(issued.link, "activation_failed")).to be_empty
+    end
+
+    it "refuses a claim alike for a match and a miss, leaving the invite as it was" do
+      before_state = counters(issued.link)
+
+      claim!
+      matched = [ response.status, response.parsed_body ]
+      claim!(ssn_last4: "0000")
+      expect([ response.status, response.parsed_body ]).to eq(matched)
+      expect(matched.first).to eq(404)
+      expect(counters(issued.link)).to eq(before_state)
+      expect(claimant.reload.employee_account_links).to be_empty
+    end
+
+    it "lets the guarded employee service count a miss as before" do
+      allow(enforcement).to receive(:current_process_guarded?).and_return(true)
+      post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(issued.link.reload.failed_activation_attempts).to eq(1)
+    end
+  end
+
+  describe "employee data on staff web" do
+    let(:subdomain) { true }
+    let(:worker) do
+      create(:user, role: :portal_employee, company: demo, organization: organization, clerk_id: "user_gate_worker",
+        email: "worker@demo-mail.example", invitation_status: "accepted")
+    end
+    let!(:link) { EmployeeAccountLink.create!(user: worker, company: demo, employee: employee, status: "active") }
+
+    before { open_window! }
+
+    def employee_get(path)
+      get path, headers: bearer(worker.clerk_id, azp: demo_origin).merge("X-Employee-Link-Id" => link.id.to_s, "Origin" => demo_origin)
+    end
+
+    it "still denies the portal and its PDFs; a guarded process serves them" do
+      expect(app_open?).to be(true)
+      [ "/api/v1/employee/context", "/api/v1/employee/statements", "/api/v1/employee/statements/1/pdf",
+        "/api/v1/employee/tax_forms/1/pdf" ].each do |path|
+        employee_get(path)
+        expect(response).to have_http_status(:not_found), path
+      end
+      get "/api/v1/employee/links", headers: bearer(worker.clerk_id, azp: demo_origin)
+      expect(response.parsed_body["links"]).to eq([])
+
+      allow(enforcement).to receive(:current_process_guarded?).and_return(true)
+      employee_get("/api/v1/employee/context")
+      expect(response).to have_http_status(:ok), response.body
+    end
+  end
+
+  describe "employee mail" do
+    before { open_window! }
+
+    it "sends an email invite from staff web with the signed answer, and refuses it without" do
+      expect(invite!(employee, actor: staff).email_status).to eq(:captured)
+      expect(PortalNotifications::Transport.captured.flat_map { |mail| Array(mail[:to]) }).to include("worker@demo-mail.example")
+
+      other = create(:employee, company: demo, email: "other@demo-mail.example", date_of_birth: Date.new(1990, 5, 6))
+      without_attestation!
+      expect { invite!(other, actor: staff) }.to raise_error(EmployeeLinks::Error, /isn't turned on/)
+    end
+
+    it "sends a worker's activation notice with the signed answer, and suppresses it without" do
+      link = invite!(employee, actor: staff, delivery: "code").link
+      notice = -> { link.update_columns(activation_notice_email: "worker@demo-mail.example", activation_notice_status: "pending") }
+
+      notice.call
+      expect(SendEmployeeActivationNoticeJob.perform_now(link.id)).to eq(:captured)
+      expect(link.reload.activation_notice_status).to eq("sent")
+
+      notice.call
+      without_attestation!
+      expect(SendEmployeeActivationNoticeJob.perform_now(link.id)).to eq(:skipped)
+      expect(link.reload.activation_notice_status).to eq("skipped")
+    end
+  end
+
+  describe "the attestation path" do
+    before { open_window! }
+
+    it "is taken only by an all or payroll_web process with the employee service's URL set" do
+      env = ENV.to_h
+      expect(enforcement.remote_attestation_allowed?(env.except("APP_PROCESS_ROLE"))).to be(true)
+      expect(enforcement.remote_attestation_allowed?(env.merge("APP_PROCESS_ROLE" => ProcessRole::PAYROLL_WEB))).to be(true)
+      expect(enforcement.remote_attestation_allowed?(env.merge("APP_PROCESS_ROLE" => ProcessRole::EMPLOYEE_WEB))).to be(false)
+      expect(enforcement.remote_attestation_allowed?(env.merge("APP_PROCESS_ROLE" => "worker"))).to be(false)
+      expect(enforcement.remote_attestation_allowed?(env.merge("EMPLOYEE_API_URL" => nil))).to be(false)
+
+      ENV["EMPLOYEE_API_URL"] = nil
+      expect(app_open?).to be(false)
+      expect(a_request(:get, "#{base}/health/dependencies")).not_to have_been_made
+    end
+
+    it "makes one request when several threads find the cache empty" do
+      stub_request(:get, "#{base}/health/dependencies").to_return do |request|
+        sleep 0.2
+        nonce = request.headers[attestation::NONCE_HEADER.split("-").map(&:capitalize).join("-")]
+        signed = attestation.sign(nonce: nonce, dependencies_healthy: true,
+          env: { attestation::SECRET_ENV => secret, "APP_PROCESS_ROLE" => ProcessRole::EMPLOYEE_WEB, "RLS_CONTEXT_GUARD_MODE" => "raise" },
+          readiness: -> { instance_double(ProductionReadiness, employee_service_checks: []) })
+        { status: 200, body: { status: "ok", attestation: signed }.to_json }
+      end
+
+      answers = Array.new(4) { Thread.new { enforcement.employee_service_attested? } }.map(&:value)
+      expect(answers).to eq([ true ] * 4)
+      expect(a_request(:get, "#{base}/health/dependencies")).to have_been_made.once
+    end
+
+    it "asks with a short timeout" do
+      allow(EmployeeAppSwitch::Readiness).to receive(:ping_employee_service).and_call_original
+      app_open?
+      expect(EmployeeAppSwitch::Readiness).to have_received(:ping_employee_service)
+        .with(anything, open_timeout: enforcement::ATTESTATION_OPEN_TIMEOUT, read_timeout: enforcement::ATTESTATION_READ_TIMEOUT)
+      expect(enforcement::ATTESTATION_OPEN_TIMEOUT + enforcement::ATTESTATION_READ_TIMEOUT).to be <= 3
+    end
+
+    it "warms the answer before an invitation takes its locks" do
+      allow(enforcement).to receive(:warm_attestation!).and_call_original
+      expect(EmployeeLinks).to receive(:lock_for_issuance!).and_wrap_original do |original, *args|
+        expect(enforcement.fresh_attestation&.first).to be(true)
+        original.call(*args)
+      end
+      invite!(employee, actor: staff, delivery: "code")
+      expect(enforcement).to have_received(:warm_attestation!).with(demo)
+    end
   end
 end
