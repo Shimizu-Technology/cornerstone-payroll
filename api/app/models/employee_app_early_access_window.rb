@@ -33,12 +33,6 @@ class EmployeeAppEarlyAccessWindow < ApplicationRecord
     open.where(organization_id: organization_id).order(:id).first
   end
 
-  # Retires every open window once the database is verified to enforce
-  # RLS. Idempotent; returns the number retired.
-  def self.retire_open!(now: Time.current)
-    open.update_all(retired_at: now, updated_at: now)
-  end
-
   def approved_by
     set_by
   end

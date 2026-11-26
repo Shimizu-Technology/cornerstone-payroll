@@ -2,7 +2,7 @@
 
 # Synthetic source fixtures shared by FICA recovery and disclosure regressions.
 module FicaHistoryHelpers
-  def imported(person = employee, gross: 1000, tips: 0, employer: true)
+  def imported(person = employee, gross: 1000, tips: 0, employer: true, company: self.company, batch: self.batch)
     period = HistoricalPayPeriod.create!(historical_import_batch: batch, company: company,
       external_key: SecureRandom.uuid, source_label: "Synthetic import", start_date: "2026-01-01",
       end_date: "2026-01-14", pay_date: "2026-01-16", paycheck_count: 1, totals: {})
