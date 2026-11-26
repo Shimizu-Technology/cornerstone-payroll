@@ -17,7 +17,7 @@ module RevelPdfFixtureHelper
     "Fees".ljust(20)
   ].join.freeze
 
-  def build_revel_pdf(rows, period_start: nil, period_end: nil)
+  def build_revel_pdf(rows, period_start: nil, period_end: nil, reported_total_hours: nil)
     fixture = Tempfile.new([ "deidentified-revel-payroll", ".pdf" ])
     fixture.close
 
@@ -29,8 +29,15 @@ module RevelPdfFixtureHelper
       end
       pdf.move_down(4)
       pdf.text(REVEL_HEADER, size: 4)
-      rows.each { |row| pdf.text(revel_row(**row), size: 4) }
-      total_hours = rows.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours)) }
+      rows.each do |row|
+        name = row.fetch(:name)
+        if name.include?("\n")
+          first_line, name = name.split("\n", 2)
+          pdf.text(first_line, size: 4)
+        end
+        pdf.text(revel_row(**row.merge(name: name)), size: 4)
+      end
+      total_hours = reported_total_hours || rows.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours)) }
       total_pay = rows.sum { |row| row.fetch(:total_pay, row.fetch(:regular_pay)) }
       pdf.text("Totals".ljust(220) + decimal_field(total_hours) + decimal_field(total_pay), size: 4)
     end
