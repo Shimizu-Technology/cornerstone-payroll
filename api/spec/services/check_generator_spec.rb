@@ -579,7 +579,7 @@ RSpec.describe CheckGenerator do
           hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
         )
       ])
-      allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item).and_return(breakdown)
+      allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item, sources: instance_of(PayrollStatementYtdSources)).and_return(breakdown)
 
       row = generator.send(:pay_rows).find { |candidate| candidate.first == "Joint" }
 

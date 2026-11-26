@@ -278,6 +278,7 @@ RSpec.describe PayrollRegisterCsvExporter do
       report_data[:employees].last[:salary_type] = "annual"
       rows = CSV.parse(exporter.generate, headers: true)
       expect(rows.first["Base Guam income tax withheld"]).to eq("140.00")
+      expect(rows.first["Additional Guam income tax (W-4 4c)"]).to eq("5.00")
       expect(rows.first["Total Guam income tax withheld"]).to eq("145.00")
       expect(rows.first["Combined Hours"]).to eq("85.0")
       expect(rows.first["Rate Basis"]).to include("USD/hour", "primary rate")

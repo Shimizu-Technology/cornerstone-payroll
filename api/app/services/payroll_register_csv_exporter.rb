@@ -31,7 +31,7 @@ class PayrollRegisterCsvExporter
     "Non-Taxable Pay",
     "Gross Pay",
     "Base #{PayrollLabels::INCOME_TAX_WITHHELD}",
-    "Addtl Withholding",
+    PayrollLabels::ADDITIONAL_WITHHOLDING,
     "Social Security Tax",
     "Medicare Tax",
     "Employer Social Security",
