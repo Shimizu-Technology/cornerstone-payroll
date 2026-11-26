@@ -75,7 +75,7 @@ RSpec.describe "Client pay stubs", type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
-  it "matches the staff statement using stored YTD without changing any payroll data", :freeze_time do
+  it "matches the staff statement using live YTD without changing any payroll data", :freeze_time do
     source = create(:company, organization: company.organization)
     source_period = create(:pay_period, :committed, company: source)
     company.update!(payroll_environment: "migration_rehearsal", test_workspace_purpose: "sandbox",
@@ -96,7 +96,9 @@ RSpec.describe "Client pay stubs", type: :request do
     text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join
     staff_text = PDF::Reader.new(StringIO.new(PayStubGenerator.new(item.reload).generate)).pages.map(&:text).join
     expect(text).to eq(staff_text)
-    expect(text).to include("10,089", "1,234")
+    # Saved snapshots are left alone; the statement prints the live totals.
+    expect(text).to include("10,089")
+    expect(text).not_to include("1,234")
     expect(item.reload.ytd_gross.to_f).to eq(10099)
     expect(item.ytd_net.to_f).to eq(10089)
   end

@@ -193,6 +193,8 @@ class ReplaceCheckService
       # Step 5 — re-add to YTD with the new (corrected) values.
       employee_ytd.add_payroll_item!(@payroll_item)
       company_ytd.add_payroll_item!(@payroll_item)
+      # Later checks this year carry the corrected amounts in their YTD.
+      PayrollYtdSnapshotRefresh.after(pay_period: @payroll_item.pay_period, employee_ids: [ @payroll_item.employee_id ])
 
       # Step 6 — audit-log the replacement.
       after_snapshot = snapshot(@payroll_item)

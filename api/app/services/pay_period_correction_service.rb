@@ -178,6 +178,9 @@ class PayPeriodCorrectionService
     raise ArgumentError, "reason is required" if reason.blank?
 
     PayPeriod.transaction do
+      # Company, then period, as every payroll change takes them. The new run
+      # and its audit event reference the company.
+      Company.lock.find(source_pay_period.company_id)
       locked_source = PayPeriod.lock("FOR UPDATE").find(source_pay_period.id)
 
       raise NotVoidedError,          "Source pay period must be voided before creating a correction run" unless locked_source.voided?
@@ -248,6 +251,7 @@ class PayPeriodCorrectionService
     raise InvalidStateError, "Correction run is missing source pay period linkage" if source_id.nil?
 
     PayPeriod.transaction do
+      Company.lock.find(pay_period.company_id)
       source = PayPeriod.lock("FOR UPDATE").find(source_id)
 
       PayPeriodCorrectionEvent.record!(

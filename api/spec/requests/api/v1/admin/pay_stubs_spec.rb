@@ -256,7 +256,7 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.headers["X-Pay-Stubs-Generated"]).to eq("2")
       expect(CombinePDF.parse(response.body).pages.count).to eq(2)
-      expect(PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")).to include("Casey Correction", "-100.00")
+      expect(PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ")).to include("Casey Correction", "-$100.00")
     end
 
     it "does not expose a legacy-excluded row through an explicit selection" do

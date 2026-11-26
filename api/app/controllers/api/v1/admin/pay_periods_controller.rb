@@ -251,6 +251,9 @@ module Api
               correction_event = nil
 
               ActiveRecord::Base.transaction(requires_new: true) do
+                # Company first, as every payroll change takes it; the audit
+                # event below references the company.
+                Company.lock.find(@pay_period.company_id)
                 locked_run = PayPeriod.lock("FOR UPDATE").find(@pay_period.id)
                 unless locked_run.draft? && locked_run.correction_run?
                   locked_run.errors.add(:base, "Can only delete draft correction run pay periods")
