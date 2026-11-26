@@ -54,7 +54,7 @@ module Api
 
       def send_form500_pdf(disposition:, filename_prefix:)
         payload = render_payload
-        pdf = Form500Generator.new(fields: payload).generate
+        pdf = Form500Generator.new(fields: payload, demo: current_company.demo?).generate
         suffix = if @pay_period.pay_date
           quarter = ((@pay_period.pay_date.month - 1) / 3) + 1
           "#{@pay_period.pay_date.year}_Q#{quarter}"
