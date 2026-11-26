@@ -74,7 +74,7 @@ function ContactCard({ contact }: { contact: HelpContact }): ReactElement {
 }
 
 const QUESTIONS: ReadonlyArray<{ q: string; a: (company: string) => string }> = [
-  { q: 'Why is my pay different this time?', a: () => 'Open the pay stub and check the hours and each line. The line under take-home pay compares it with your last check when it can.' },
+  { q: 'Why is my pay different this time?', a: () => 'Open the pay stub and check the hours and each line. The line under take-home pay compares hours with your last check, and shows the dollar difference too when amounts are shown.' },
   { q: "My address or phone number changed", a: (company) => `Update your phone, email and emergency contacts in My info. A new home address is sent to ${company} to approve.` },
   { q: 'Where is my W-2GU?', a: () => 'In Tax forms, once it is posted. You also get a paper copy.' },
   { q: 'Something on my pay stub looks wrong', a: (company) => `Ask your manager at ${company}. They can check it with payroll.` },

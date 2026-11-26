@@ -144,8 +144,9 @@ for (const width of [390, 1280]) {
     await expect(page.getByText('Check #1034')).toBeVisible();
     await expectNoSideScroll(page);
 
+    await expect(page.getByRole('article')).toContainText('$•••');
     const download = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Download original PDF' }).click();
+    await page.getByRole('button', { name: 'Download original PDF (shows amounts)' }).click();
     expect((await download).suggestedFilename()).toBe('original-pay-stub-2026-09-25.pdf');
     expect(log.requests.find((request) => request.path === '/employee/statements/882/pdf')?.headers['x-employee-link-id']).toBe('42');
     expect(log.requests.some((request) => request.path === '/employee/statements/882')).toBe(false);

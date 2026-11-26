@@ -137,6 +137,7 @@ export function AdminEmployeeChangeRequestsPage() {
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
             <option value="cancelled">Cancelled</option>
+            <option value="superseded">Superseded</option>
             <option value="">All Statuses</option>
           </Select>
         </div>

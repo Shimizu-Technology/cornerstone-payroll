@@ -82,6 +82,7 @@ class AuditLogPresenter
     "employee_notes#reveal" => "viewed a hidden staff note for",
     "client_employees#create" => "added",
     "client_employees#update" => "updated",
+    "employee_change_requests#superseded" => "replaced a pending address request for",
     "users#created" => "created the user account for",
     "users#updated" => "updated the user account for",
     "users#activated" => "activated the user account for",

@@ -28,11 +28,15 @@ const operations: Record<EmployeeAppOperation, { label: string; description: str
   reset_sign_up: { label: 'Reset sign-up', description: 'Clear the unfinished sign-up and issue a new invitation. The employee will need to start again.' },
 };
 
-export function EmployeeAppPanel({ companyId, companyName, employeeId, audience }: {
+export function EmployeeAppPanel({ companyId, companyName, employeeId, audience, canEditContact = true, onEditContact }: {
   companyId: number;
   companyName: string;
   employeeId: number;
   audience: 'admin' | 'client';
+  /** False hides "Edit contact details": a read-only workspace or closed practice copy. */
+  canEditContact?: boolean;
+  /** Opens the page's Contact card editor; without it the link opens the employee form. */
+  onEditContact?: () => void;
 }) {
   const [access, setAccess] = useState<EmployeeAppAccess | null>(null);
   const [accessReadFailed, setAccessReadFailed] = useState(false);
@@ -106,7 +110,9 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
             </p>}
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="[overflow-wrap:anywhere]">{access.email || 'No email on file'}</span>
-              {!viewOnly && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={employeeEditPath(companyId, employeeId, { returnTo: location.pathname + location.search })}>Edit contact details</Link>}
+              {!viewOnly && canEditContact && (onEditContact
+                ? <button type="button" className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" onClick={onEditContact}>Edit contact details</button>
+                : <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={employeeEditPath(companyId, employeeId, { returnTo: location.pathname + location.search })}>Edit contact details</Link>)}
             </div>
             {feedback && <p role="status" className="rounded-lg bg-neutral-50 p-3 text-sm font-medium text-neutral-900">{feedback}</p>}
             {viewOnly && access.enabled && <ViewOnlyNotice />}

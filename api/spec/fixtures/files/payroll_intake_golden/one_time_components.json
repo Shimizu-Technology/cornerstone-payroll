@@ -1,0 +1,102 @@
+{
+  "can_apply": true,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [
+    {
+      "code": "zero_workbook_tips",
+      "severity": "info",
+      "message": "The workbook is included, but its tips total $0."
+    }
+  ],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 70.0,
+    "total_reported_tips": "0.0",
+    "total_overtime_hours": 0.0
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 70.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 70.0,
+        "workbook_only": false,
+        "pay_rate": "15.5",
+        "tips_boh": "0.0",
+        "tips_foh": "0.0",
+        "tip_pool": null,
+        "loan_deduction": "0.0",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": null,
+        "payroll_components": [
+          {
+            "kind": "addition",
+            "label": "Fixture bonus",
+            "notes": null,
+            "amount": "35.75",
+            "source": "Synthetic bonus instruction",
+            "category": "other",
+            "payee_name": null,
+            "tax_treatment": "taxable_addition",
+            "component_type": "BONUS",
+            "reporting_group": null,
+            "effective_pay_date": "2026-07-03"
+          },
+          {
+            "kind": "deduction",
+            "label": "Fixture repayment",
+            "notes": null,
+            "amount": "6.25",
+            "source": "Synthetic deduction instruction",
+            "category": "other",
+            "payee_name": "Fixture Payee",
+            "tax_treatment": "post_tax_deduction",
+            "component_type": "POST-TAX DEDUCTION",
+            "reporting_group": null,
+            "effective_pay_date": "2026-07-03"
+          }
+        ],
+        "hand_edited_hours": null
+      }
+    }
+  ],
+  "saved_components": [
+    {
+      "label": "Fixture bonus",
+      "kind": "addition",
+      "tax_treatment": "taxable_addition",
+      "amount": "35.75",
+      "source": "import",
+      "payee_name": null
+    },
+    {
+      "label": "Fixture repayment",
+      "kind": "deduction",
+      "tax_treatment": "post_tax_deduction",
+      "amount": "6.25",
+      "source": "import",
+      "payee_name": "Fixture Payee"
+    }
+  ]
+}

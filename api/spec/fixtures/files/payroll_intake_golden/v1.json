@@ -1,0 +1,51 @@
+{
+  "can_apply": true,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 70.0,
+    "total_reported_tips": "7.25",
+    "total_overtime_hours": 0.0
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 70.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "7.25",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 70.0,
+        "workbook_only": false,
+        "pay_rate": "15.5",
+        "tips_boh": "7.25",
+        "tips_foh": "0.0",
+        "tip_pool": "boh",
+        "loan_deduction": "4.75",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": "11.5",
+        "period_pay": null,
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    }
+  ]
+}
