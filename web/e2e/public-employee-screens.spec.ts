@@ -32,6 +32,12 @@ test.describe('employee screens on a desktop', () => {
 
     const latest = page.getByRole('region', { name: 'Latest pay' });
     const year = page.getByRole('region', { name: 'This year so far' });
+    // Masked by default until the person taps Show amounts.
+    await expect(latest).toContainText('$•••');
+    await expect(latest).not.toContainText('$534.18');
+    await expect(year).toContainText('$•••');
+    await expect(year).not.toContainText('$23,230.00');
+    await latest.getByRole('button', { name: 'Show amounts' }).click();
     await expect(latest).toContainText('$534.18');
     await expect(year).toContainText('$23,230.00');
     const [left, right] = [(await latest.boundingBox())!, (await year.boundingBox())!];
@@ -106,5 +112,81 @@ test.describe('employee screens on a desktop', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Set up your account' })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await snap(page, '06-sign-up');
+  });
+});
+
+test.describe('employee masked pay amounts at 390x844', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('masks pay amounts by default across screens, keeps hours/dates visible, and handles blocked storage', async ({ page }) => {
+    await signIn(page);
+    await mockEmployeeApi(page);
+    await page.goto(`/?${tenantQuery}`);
+
+    const latest = page.getByRole('region', { name: 'Latest pay' });
+    const showButton = latest.getByRole('button', { name: 'Show amounts' });
+    await expect(showButton).toBeVisible();
+    await expect(showButton).not.toHaveAttribute('aria-pressed');
+    expect((await showButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect(latest).toContainText('$•••');
+    await expect(latest).toContainText('Paid Nov 20, 2026');
+    await expect(latest).toContainText('38.5 hours');
+    await expect(latest).not.toContainText('$534.18');
+    await expect(latest).not.toContainText('less than');
+    await expect(page.getByText('Amounts stay hidden on this device until you tap Show amounts.')).toBeVisible();
+    await expectNoHorizontalScroll(page);
+
+    // Keyboard focus on the eye button shows the visible focus outline.
+    for (let presses = 0; presses < 12 && !(await showButton.evaluate((node) => node === document.activeElement)); presses += 1) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(showButton).toBeFocused();
+    const outline = await showButton.evaluate((node) => {
+      const style = getComputedStyle(node);
+      return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+    });
+    expect(outline.style).not.toBe('none');
+    expect(outline.width).toBeGreaterThanOrEqual(2);
+
+    // Stub detail: rates are masked, hours/dates stay visible, PDF warns "(shows amounts)".
+    await latest.getByRole('link', { name: 'View pay stub' }).click();
+    const stub = page.getByRole('article');
+    await expect(stub).toContainText('36 hrs × $•••');
+    await expect(stub).not.toContainText('$15.00');
+    await expect(stub).not.toContainText('$534.18');
+    await expect(stub.getByRole('button', { name: 'Download PDF (shows amounts)' })).toBeVisible();
+    await expectNoHorizontalScroll(page);
+
+    // Tax forms: W-2GU PDF warns "(shows amounts)".
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Tax forms' }).click();
+    await expect(page.getByRole('button', { name: 'Download W-2GU PDF (shows amounts)' })).toBeVisible();
+    await expectNoHorizontalScroll(page);
+
+    // Reveal amounts, reload, and verify choice persists and explainer does not repeat.
+    await page.getByRole('button', { name: 'Show amounts' }).click();
+    await expect(page.getByRole('button', { name: 'Download W-2GU (PDF)' })).toBeVisible();
+    await page.goto(`/?${tenantQuery}`);
+    await expect(page.getByRole('region', { name: 'Latest pay' })).toContainText('$534.18');
+    await expect(page.getByText('Amounts stay hidden on this device until you tap Show amounts.')).toHaveCount(0);
+  });
+
+  test('fails closed to masked when localStorage throws', async ({ page }) => {
+    await signIn(page);
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'localStorage', {
+        configurable: true,
+        get() {
+          throw new DOMException('blocked', 'SecurityError');
+        },
+      });
+    });
+    await mockEmployeeApi(page);
+    await page.goto(`/?${tenantQuery}`);
+
+    const latest = page.getByRole('region', { name: 'Latest pay' });
+    await expect(latest.getByRole('button', { name: 'Show amounts' })).toBeVisible();
+    await expect(latest).toContainText('$•••');
+    await expect(latest).not.toContainText('$534.18');
+    await expectNoHorizontalScroll(page);
   });
 });

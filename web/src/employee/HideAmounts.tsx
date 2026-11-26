@@ -1,43 +1,68 @@
-import { useCallback, useMemo, useState, type ReactNode, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { HideAmountsContext, useHideAmounts } from './contexts';
-import { readHideAmounts, writeHideAmounts } from './preferences';
+import {
+  readHideAmounts,
+  readHideAmountsExplained,
+  writeHideAmounts,
+  writeHideAmountsExplained,
+} from './preferences';
 
 export function HideAmountsProvider({ children }: { children: ReactNode }): ReactElement {
-  // Off by default: it would add a tap to the one thing people open the app for.
+  // Masked by default on every device until someone taps "Show amounts".
   const [hidden, setHiddenState] = useState(() => readHideAmounts());
+  const [explainerPersisted, setExplainerPersisted] = useState(() => readHideAmountsExplained());
+  const [explainerVisible, setExplainerVisible] = useState(() => hidden && !explainerPersisted);
+
+  const markExplainerShown = useCallback(() => {
+    writeHideAmountsExplained();
+    setExplainerPersisted(true);
+  }, []);
+
   const setHidden = useCallback((next: boolean) => {
     writeHideAmounts(next);
     setHiddenState(next);
-  }, []);
-  const value = useMemo(() => ({ hidden, setHidden }), [hidden, setHidden]);
+    if (next && !explainerPersisted) {
+      writeHideAmountsExplained();
+      setExplainerPersisted(true);
+      setExplainerVisible(true);
+    } else {
+      setExplainerVisible(false);
+    }
+  }, [explainerPersisted]);
+
+  const value = useMemo(
+    () => ({ hidden, setHidden, explainerVisible, markExplainerShown }),
+    [hidden, setHidden, explainerVisible, markExplainerShown],
+  );
   return <HideAmountsContext.Provider value={value}>{children}</HideAmountsContext.Provider>;
 }
 
-// Once per page load, the first time someone hides amounts, one line says what it does (§8a).
-let explained = false;
-
-/** The eye button. Its label says what tapping it will do. */
+/**
+ * The eye button. Uses a dynamic action label ("Show amounts" / "Hide amounts")
+ * without aria-pressed so screen readers never announce a conflicting state.
+ */
 export function HideAmountsToggle(): ReactElement {
-  const { hidden, setHidden } = useHideAmounts();
-  const [note, setNote] = useState(false);
+  const { hidden, setHidden, explainerVisible, markExplainerShown } = useHideAmounts();
   const Icon = hidden ? EyeOff : Eye;
-  const toggle = (): void => {
-    if (!hidden && !explained) {
-      explained = true;
-      setNote(true);
-    } else {
-      setNote(false);
+
+  useEffect(() => {
+    if (hidden && explainerVisible) {
+      markExplainerShown();
     }
-    setHidden(!hidden);
-  };
+  }, [hidden, explainerVisible, markExplainerShown]);
+
   return (
     <span className="emp-eye-wrap">
-      <button type="button" className="emp-eye" onClick={toggle}>
+      <button type="button" className="emp-eye" onClick={() => setHidden(!hidden)}>
         <Icon aria-hidden="true" className="size-5" />
         {hidden ? 'Show amounts' : 'Hide amounts'}
       </button>
-      {note && hidden && <span className="emp-eye-note" role="status">Amounts stay hidden on this device until you tap Show amounts.</span>}
+      {explainerVisible && hidden && (
+        <span className="emp-eye-note" role="status">
+          Amounts stay hidden on this device until you tap Show amounts.
+        </span>
+      )}
     </span>
   );
 }

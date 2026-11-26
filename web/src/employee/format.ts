@@ -131,3 +131,12 @@ export function addressLines(address: { line1: string; line2: string; city: stri
   const place = [address.city, [address.state, address.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   return [address.line1, address.line2, place].filter((line) => line.trim() !== '');
 }
+
+/**
+ * Labels a PDF download button. Downloads stay available while amounts are
+ * masked, and warn that the downloaded PDF shows dollar amounts.
+ */
+export function pdfDownloadLabel(baseLabel: string, hidden: boolean): string {
+  if (!hidden) return baseLabel;
+  return `${baseLabel.replace(/\s*\(PDF\)$/i, ' PDF')} (shows amounts)`;
+}

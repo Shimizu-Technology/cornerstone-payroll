@@ -403,18 +403,35 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
       }
     });
 
-    test('"Hide amounts" is remembered on this device', async ({ page }) => {
+    test('amounts are masked by default and the choice is remembered on this device', async ({ page }) => {
       await signIn(page);
       await mockApi(page);
       await page.goto(`/?${tenant}`);
 
-      await page.getByRole('button', { name: 'Hide amounts' }).click();
-      await expect(page.getByRole('button', { name: 'Show amounts' })).toBeVisible();
-      expect(await page.evaluate(() => localStorage.getItem('employee-app:hide-amounts'))).toBe('true');
+      const showButton = page.getByRole('button', { name: 'Show amounts' });
+      await expect(showButton).toBeVisible();
+      await expect(showButton).not.toHaveAttribute('aria-pressed');
+      expect((await showButton.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      const explainer = page.getByText('Amounts stay hidden on this device until you tap Show amounts.');
+      await expect(explainer).toBeVisible();
+
+      // Reloading on the same device keeps amounts masked without repeating the one-time explainer.
       await page.reload();
       await expect(page.getByRole('button', { name: 'Show amounts' })).toBeVisible();
+      await expect(explainer).toHaveCount(0);
+
+      // Showing amounts persists across reload on this device.
       await page.getByRole('button', { name: 'Show amounts' }).click();
       await expect(page.getByRole('button', { name: 'Hide amounts' })).toBeVisible();
+      expect(await page.evaluate(() => localStorage.getItem('employee-app:hide-amounts'))).toBe('false');
+      await page.reload();
+      await expect(page.getByRole('button', { name: 'Hide amounts' })).toBeVisible();
+
+      // Hiding again persists and does not repeat the one-time explainer.
+      await page.getByRole('button', { name: 'Hide amounts' }).click();
+      await expect(page.getByRole('button', { name: 'Show amounts' })).toBeVisible();
+      await expect(explainer).toHaveCount(0);
+      expect(await page.evaluate(() => localStorage.getItem('employee-app:hide-amounts'))).toBe('true');
     });
 
     test('the view-only banner names the person and has an End button', async ({ page }) => {
