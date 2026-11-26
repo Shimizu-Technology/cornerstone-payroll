@@ -439,7 +439,7 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       event = TenantScope.as_system(reason: "Verify staff notification") do
         PortalNotificationEvent.where(company: company, event_type: "employee_contact_confirmation_requested", subject: change_entry).sole
       end
-      expect(event.category).to eq("employee_changes")
+      expect(event.category).to eq("contact_confirmations")
       expect(event.recipient_status).to eq("recipients")
 
       # Verify Cornerstone staff can list and confirm the withdrawal even when profile_requests is off

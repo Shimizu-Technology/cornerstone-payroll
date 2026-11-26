@@ -102,8 +102,7 @@ module Api
 
         def record_contact_change!(before_values, after_values)
           EmployeeContactChangeToConfirm.record!(
-            employee: @employee, actor: current_user, before_values: before_values, after_values: after_values,
-            notify_staff: true
+            employee: @employee, actor: current_user, before_values: before_values, after_values: after_values
           )
         end
 

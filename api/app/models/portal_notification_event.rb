@@ -35,12 +35,26 @@ class PortalNotificationEvent < ApplicationRecord
     event_type == "payroll_review_decided" && metadata["decision"].in?(%w[cornerstone_override self_override])
   end
 
-  def self_override_alert?
-    override_decision? && metadata["recipient_scope"] == "super_admins"
+  def super_admin_alert?
+    metadata["recipient_scope"] == "super_admins"
+  end
+
+  def preference_category
+    super_admin_alert? ? "payroll_super_admin" : category
+  end
+
+  def client_viewers_only?
+    metadata["recipient_scope"] == "client_viewers"
+  end
+
+  def exclude_actor_address?
+    override_decision? || event_type.in?(%w[payroll_committed payroll_reopened employee_change_submitted
+      address_approval_requested employee_contact_changed
+      employee_contact_confirmation_requested w2_ready_to_post])
   end
 
   def client_managers_only?
     PortalNotifications::EVENT_TYPES.fetch(event_type)[:client_managers_only] == true ||
-      (override_decision? && metadata["recipient_scope"] == "client_managers")
+      metadata["recipient_scope"] == "client_managers"
   end
 end
