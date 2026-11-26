@@ -70,8 +70,8 @@ test.describe('employee app on a phone', () => {
     await expect(stub).toContainText('36 hrs × $15.00');
     await expect(stub).toContainText('2.5 hrs × $22.50');
     await expect(stub.getByRole('row', { name: /Tips/ })).toContainText('$16.25');
-    // Guam income tax, never "Federal".
-    await expect(stub).toContainText('Guam income tax');
+    await expect(stub.getByRole('row', { name: /^Guam income tax/ })).toContainText('$24.50');
+    await expect(stub.getByRole('row', { name: /^Medicare FICA/ })).toContainText('$8.88');
     await expect(stub).not.toContainText('Federal');
     await expect(stub.getByRole('region', { name: 'This year so far' })).toContainText('$23,230.00');
     await expectPhoneBasics(page);

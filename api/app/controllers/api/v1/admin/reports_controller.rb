@@ -1467,8 +1467,13 @@ module Api
         def resolved_transmittal_notes(pay_period, notes)
           # Upgrade only an exact match for the old app-generated defaults.
           # Custom wording, amounts, extra notes, and deliberately empty lists stay intact.
-          legacy = TransmittalLogPdfGenerator.default_notes(pay_period, include_additional: false)
-          notes.present? && notes == legacy ? TransmittalLogPdfGenerator.default_notes(pay_period) : notes
+          return notes if notes.blank?
+
+          generated_variants = [
+            TransmittalLogPdfGenerator.default_notes(pay_period, include_additional: false, legacy_label: true),
+            TransmittalLogPdfGenerator.default_notes(pay_period, legacy_label: true)
+          ]
+          generated_variants.include?(notes) ? TransmittalLogPdfGenerator.default_notes(pay_period) : notes
         end
 
         def save_transmittal_state!(pay_period, options)
@@ -3371,10 +3376,10 @@ module Api
           "Last Name", "First Name", "Employee Name", "Department", "Type", "Pay Rate",
           "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
           "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Non-Taxable Pay",
-          "Gross Pay", "Base FIT", "Additional W/H", "SS Tax", "Medicare Tax",
+          "Gross Pay", "Base #{PayrollLabels::INCOME_TAX_WITHHELD}", PayrollLabels::ADDITIONAL_WITHHOLDING, "SS Tax", "Medicare Tax",
           "Employer SS", "Employer Medicare", "401(k)", "Roth 401(k)",
           "Employer Match", "Employer Roth Match", "Straight Loan (One-Time)", "Installment Loan (Recurring)",
-          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date", "Rate Basis", "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)"
+          "Employer Contributions", "Employer Payroll Cost", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay", "Check Number", "Check Date", "Rate Basis", "Total #{PayrollLabels::INCOME_TAX_WITHHELD}", "Combined Hours", "Non-Taxable Additions (Total)"
         ].freeze
 
         CEO_PAYROLL_REGISTER_HINTS = [
@@ -3390,7 +3395,7 @@ module Api
         CEO_PAYROLL_REGISTER_HEADERS = [
           "#", "Employee", "Type", "Rate", "Regular Hours", "OT Hours", "Hourly Pay", "Salary",
           "Total Hourly and Salary Pay", "Tips 1", "Tips 2", "Total Tips", "Bonus", "Gross Pay", "Tips Out",
-          "Withholding (FIT)", "Add'l W/H", "Social Security", "Medicare", "Retirement (Pre-Tax + Roth)",
+          PayrollLabels::INCOME_TAX_WITHHELD, PayrollLabels::ADDITIONAL_WITHHOLDING, "Social Security", "Medicare", "Retirement (Pre-Tax + Roth)",
           "Straight Loan", "Installment Loan", "Employer Contributions", "Total Deductions", "Net Pay", "Employer Cost", "Check #", "Non-Taxable Additions"
         ].freeze
         CEO_PAYROLL_REGISTER_KEYS = %i[
@@ -3433,7 +3438,7 @@ module Api
           pp = report[:pay_period] || {}
           context = "Work period: #{pp[:start_date]} to #{pp[:end_date]} | Pay date: #{pp[:pay_date]}"
           # Sum saved numeric amounts, hours, and disclosure columns, never rates/IDs.
-          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total FIT (Base + Additional)", "Combined Hours", "Non-Taxable Additions (Total)", "Previous Provider Loans (Type Not Recorded)" ]
+          numeric_headers = PAYROLL_REGISTER_HEADERS[6..33] + [ "Total #{PayrollLabels::INCOME_TAX_WITHHELD}", "Combined Hours", "Non-Taxable Additions (Total)", "Previous Provider Loans (Type Not Recorded)" ]
           totals = headers.each_with_index.map do |header, index|
             if header == "Employee Name"
               "TOTALS"
@@ -3966,10 +3971,10 @@ module Api
         PAYROLL_SUMMARY_BY_EMPLOYEE_HEADERS = [
           "Last Name", "First Name", "Employee Name", "Type", "Gross Pay",
           "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings",
-          "Base FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
+          "Base #{PayrollLabels::INCOME_TAX_WITHHELD}", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)",
           "Loan Deduction", "Insurance", "Custom Deductions", "Total Deductions", "Net Pay",
           "Employer SS", "Employer Medicare", "Employer Match",
-          "Employer Roth Match", "Total Payroll Cost", "Additional FIT Withholding", "Total FIT (Base + Additional)", "Non-Taxable Additions (Total)"
+          "Employer Roth Match", "Total Payroll Cost", PayrollLabels::ADDITIONAL_WITHHOLDING, "Total #{PayrollLabels::INCOME_TAX_WITHHELD}", "Non-Taxable Additions (Total)"
         ].freeze
 
         def payroll_summary_by_employee_sheets(report, pay_period = nil)
@@ -4097,9 +4102,9 @@ module Api
             [ "Payroll Field Pre-Tax Deductions", summary[:total_payroll_field_pre_tax_deductions] ],
             [ "Payroll Field Post-Tax Deductions", summary[:total_payroll_field_post_tax_deductions] ],
             [ "Payroll Field Employer Contributions", summary[:total_payroll_field_employer_contributions] ],
-            [ "Base FIT", summary[:total_withholding] ],
-            [ "Additional FIT Withholding", summary[:total_additional_withholding] ],
-            [ "Total FIT (Base + Additional)", money(summary[:total_withholding].to_d + summary[:total_additional_withholding].to_d) ],
+            [ "Base #{PayrollLabels::INCOME_TAX_WITHHELD}", summary[:total_withholding] ],
+            [ PayrollLabels::ADDITIONAL_WITHHOLDING, summary[:total_additional_withholding] ],
+            [ "Total #{PayrollLabels::INCOME_TAX_WITHHELD}", money(summary[:total_withholding].to_d + summary[:total_additional_withholding].to_d) ],
             [ "SS Tax", summary[:total_social_security] ],
             [ "Medicare Tax", summary[:total_medicare] ],
             [ "401(k)", summary[:total_traditional_retirement] ],
@@ -4254,7 +4259,7 @@ module Api
           rows = [ [
             "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
             "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
-            "FIT", "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
+            PayrollLabels::INCOME_TAX_WITHHELD, "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
           ] ]
           Array(report[:history]).each do |item|
             rows << [
@@ -4290,7 +4295,7 @@ module Api
             [ "Payroll Field Pre-Tax Deductions", summary[:payroll_field_pre_tax_deductions_total] ],
             [ "Payroll Field Post-Tax Deductions", summary[:payroll_field_post_tax_deductions_total] ],
             [ "Payroll Field Employer Contributions", summary[:payroll_field_employer_contributions_total] ],
-            [ "FIT", summary[:withholding_tax] ],
+            [ PayrollLabels::INCOME_TAX, summary[:withholding_tax] ],
             [ "SS Tax", summary[:social_security_tax] ],
             [ "Medicare Tax", summary[:medicare_tax] ],
             [ "401(k)", summary[:retirement] ],
@@ -4317,7 +4322,7 @@ module Api
             [ "Payroll Field Pre-Tax Deductions", ytd[:payroll_field_pre_tax_deductions_total] ],
             [ "Payroll Field Post-Tax Deductions", ytd[:payroll_field_post_tax_deductions_total] ],
             [ "Payroll Field Employer Contributions", ytd[:payroll_field_employer_contributions_total] ],
-            [ "FIT", ytd[:withholding_tax] ],
+            [ PayrollLabels::INCOME_TAX, ytd[:withholding_tax] ],
             [ "SS Tax", ytd[:social_security_tax] ],
             [ "Medicare Tax", ytd[:medicare_tax] ],
             [ "401(k)", ytd[:retirement] ],
@@ -4335,12 +4340,12 @@ module Api
           totals = report[:totals] || {}
           rows = [ [ "Category", "Amount" ] ]
           totals.except(:base_withholding_tax, :additional_withholding).each do |key, value|
-            rows << [ key.to_s.humanize, value ]
+            rows << [ key == :withholding_tax ? PayrollLabels::INCOME_TAX : key.to_s.humanize, value ]
           end
           rows += [
             [ "Payroll Source", report.dig(:source, :statement) || report.dig(:source, :label) ],
-            [ "Base Withholding Tax", totals[:base_withholding_tax] ],
-            [ "Additional Withholding", totals[:additional_withholding] ]
+            [ "Base #{PayrollLabels::INCOME_TAX}", totals[:base_withholding_tax] ],
+            [ PayrollLabels::ADDITIONAL_WITHHOLDING, totals[:additional_withholding] ]
           ]
           meta = [ [ "Field", "Value" ], [ "Year", report.dig(:period, :year) ], [ "Quarter", report.dig(:period, :quarter) ], [ "Pay Periods", report[:pay_periods_included] ], [ "Employees", report[:employee_count] ] ]
           [
@@ -4408,7 +4413,7 @@ module Api
               label = case key.to_sym
               when :source_labeled_after_tax_401k_in_pretax_bucket
                 "401(k) after-tax (imported as pre-tax)"
-              when :withholding_tax then "Federal/Guam income tax"
+              when :withholding_tax then PayrollLabels::INCOME_TAX_WITHHELD
               when :social_security_tax then "Social Security tax"
               when :medicare_tax then "Medicare tax"
               when :retirement then "Traditional 401(k)"
@@ -4441,7 +4446,7 @@ module Api
             "401(k) after-tax (imported as pre-tax)",
             "Employer Social Security", "Employer Medicare", "Other Employer Taxes", "Employer Taxes Total",
             "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match", "Other Employer Contributions",
-            "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",
+            "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost", PayrollLabels::INCOME_TAX_WITHHELD, "SS Tax", "Medicare Tax",
             "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay", "Non-Taxable Additions (Total)"
           ] + component_columns.map { |column| "Breakdown Already Included - #{column[:label]}" } + provisional_column + [ "Combined Hours" ] ]
           Array(report[:employees]).each do |emp|

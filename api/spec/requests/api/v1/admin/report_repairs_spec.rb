@@ -54,8 +54,8 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
 
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
       text = pdf_text
-      expect(text).to include("FIT Deposit Total: $207.09", "Employee FIT Withheld $207.09")
-      expect(period.reload.transmittal.notes.join).to include("FIT Deposit Total: $207.09")
+      expect(text).to include("Guam income tax deposit total: $207.09", "Guam income tax withheld $207.09")
+      expect(period.reload.transmittal.notes.join).to include("Guam income tax deposit total: $207.09")
       expect(item.reload.attributes).to eq(original_amounts)
     end
 
@@ -65,7 +65,7 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
       expect(response.parsed_body.fetch("tax_totals")).to include("fit" => 10.0, "total_drt_deposit" => 10.0)
 
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
-      expect(pdf_text).to include("FIT Deposit Total: $10.00", "Employee FIT Withheld $10.00")
+      expect(pdf_text).to include("Guam income tax deposit total: $10.00", "Guam income tax withheld $10.00")
     end
 
     it "upgrades exact legacy automatic notes in the preview and generated cover" do
@@ -75,7 +75,7 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
       expect(response.parsed_body.dig("saved_transmittal", "notes").last).to include("$207.09")
       expect(period.reload.transmittal.notes).to eq(legacy_notes) # Preview is read-only.
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id, notes: legacy_notes }
-      expect(pdf_text).to include("FIT Deposit Total: $207.09")
+      expect(pdf_text).to include("Guam income tax deposit total: $207.09")
       expect(period.reload.transmittal.notes.last).to include("$207.09")
     end
 
@@ -84,7 +84,7 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
       legacy_notes = [ "FICA Obligation (Social Security & Medicare): $611.50", "FIT Deposit Total: $1,197.09 — check to Treasurer of Guam for DRT" ]
       Transmittal.create!(company: company, pay_period: period, notes: legacy_notes)
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
-      expect(pdf_text).to include("FIT Deposit Total: $1,207.09")
+      expect(pdf_text).to include("Guam income tax deposit total: $1,207.09")
     end
 
     it "preserves saved edited cover context when later exports omit parameters" do
@@ -107,10 +107,10 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
 
     it "retains an explicit empty notes list instead of restoring defaults" do
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id, notes: [] }, as: :json
-      expect(pdf_text).not_to include("FIT Deposit Total:")
+      expect(pdf_text).not_to include("Guam income tax deposit total:")
       expect(period.reload.transmittal.notes).to eq([])
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
-      expect(pdf_text).not_to include("FIT Deposit Total:")
+      expect(pdf_text).not_to include("Guam income tax deposit total:")
     end
 
     it "uses generated defaults for nullable saved notes and report lists" do
@@ -118,7 +118,7 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
 
       post "/api/v1/admin/reports/#{endpoint}", params: { pay_period_id: period.id }
 
-      expect(pdf_text).to include("FIT Deposit Total: $207.09", "Payroll Summary by Employee")
+      expect(pdf_text).to include("Guam income tax deposit total: $207.09", "Payroll Summary by Employee")
       expect(saved.reload.notes).to eq(TransmittalLogPdfGenerator.default_notes(period))
       expect(saved.report_list).to eq(TransmittalLogPdfGenerator::REPORT_LIST)
     end
@@ -169,8 +169,8 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
     expect(response.parsed_body.dig("saved_signoff", "notes")).to eq(notes)
     expect(saved.reload.attributes).to eq(original)
     post "/api/v1/admin/reports/check_signoff_pdf", params: { pay_period_id: period.id }
-    expect(pdf_text).to include("FIT Deposit Total: $197.09")
-    expect(pdf_text).not_to include("FIT Deposit Total: $207.09")
+    expect(pdf_text).to include("Guam income tax deposit total: $197.09")
+    expect(pdf_text).not_to include("Guam income tax deposit total: $207.09")
     expect(saved.reload.attributes).to eq(original)
   end
 
@@ -186,10 +186,10 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
 
     with_workbook do |workbook|
       totals = workbook.sheet("Totals").to_a.drop(1).to_h
-      expect(totals).to include("Employees" => 2, "Base FIT" => 200,
-        "Additional FIT Withholding" => 17.25, "Total FIT (Base + Additional)" => 217.25)
+      expect(totals).to include("Employees" => 2, "Base Guam income tax withheld" => 200,
+        "Additional Guam income tax (W-4 4c)" => 17.25, "Total Guam income tax withheld" => 217.25)
       contractor_totals = workbook.sheet("Contractor Totals").to_a.drop(1).to_h
-      expect(contractor_totals).to include("Additional FIT Withholding" => 99, "Total FIT (Base + Additional)" => 99)
+      expect(contractor_totals).to include("Additional Guam income tax (W-4 4c)" => 99, "Total Guam income tax withheld" => 99)
     end
   end
 
@@ -287,9 +287,9 @@ RSpec.describe "Payroll reporting QA repairs", type: :request do
     totals = headers.zip(sheet.row(6)).to_h
     expect(values).to include("Pay Rate" => 52000, "Rate Basis" => "USD/year (annual salary)",
       "Regular Hours" => 76, "Overtime Hours" => 5, "Combined Hours" => 81,
-      "Base FIT" => 197.09, "Additional W/H" => 10, "Total FIT (Base + Additional)" => 207.09)
+      "Base Guam income tax withheld" => 197.09, "Additional Guam income tax (W-4 4c)" => 10, "Total Guam income tax withheld" => 207.09)
     expect(totals).to include("Employee Name" => "TOTALS", "Gross Pay" => 3996.67,
-      "Total Deductions" => 512.84, "Net Pay" => 3483.83, "Total FIT (Base + Additional)" => 207.09, "Combined Hours" => 81)
+      "Total Deductions" => 512.84, "Net Pay" => 3483.83, "Total Guam income tax withheld" => 207.09, "Combined Hours" => 81)
     expect(totals["Pay Rate"]).to be_nil
     expect(sheet.excelx_format(5, headers.index("Gross Pay") + 1)).to include("0.00")
   ensure

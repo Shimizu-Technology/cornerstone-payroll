@@ -111,8 +111,8 @@ export function PayRunEmployeeResults({
                     <option value="gross:asc">Gross Low-High</option>
                     <option value="net:desc">Net High-Low</option>
                     <option value="net:asc">Net Low-High</option>
-                    <option value="fit:desc">FIT High-Low</option>
-                    <option value="fit:asc">FIT Low-High</option>
+                    <option value="fit:desc">Guam income tax high to low</option>
+                    <option value="fit:asc">Guam income tax low to high</option>
                   </Select>
                   <div className="relative min-w-0 sm:min-w-48 sm:flex-1">
                     <input
@@ -142,8 +142,8 @@ export function PayRunEmployeeResults({
                     <div><dt className="text-xs text-neutral-600">Gross</dt><dd className="font-medium tabular-nums">{formatCurrency(toNumber(item.gross_pay))}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Employee taxes</dt><dd className="tabular-nums">{formatCurrency(payrollTaxSummary(item).total)}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Total deductions</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.total_deductions))}</dd></div>
-                    <div><dt className="text-xs text-neutral-600">FIT</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.withholding_tax))}</dd></div>
-                    <div><dt className="text-xs text-neutral-600">Additional withholding</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.additional_withholding))}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">Guam income tax</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.withholding_tax))}</dd></div>
+                    <div><dt className="text-xs text-neutral-600">Additional Guam income tax (W-4 4c)</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.additional_withholding))}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Social Security</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.social_security_tax))}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Employee Medicare</dt><dd className="tabular-nums">{formatCurrency(payrollTaxSummary(item).totalMedicare)}</dd></div>
                     <div><dt className="text-xs text-neutral-600">Employer Medicare</dt><dd className="tabular-nums">{formatCurrency(toNumber(item.employer_medicare_tax))}</dd></div>
@@ -182,8 +182,8 @@ export function PayRunEmployeeResults({
                     {hasTips && <TableHead className={`min-w-[130px] bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Reported Tips</TableHead>}
                     {hasTipsPaidOut && <TableHead className={`min-w-[130px] bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Tips Paid Out</TableHead>}
                     {hasLoans && <TableHead title="Calculated total of linked loan repayments and any standalone loan deduction." className={`min-w-[130px] bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Loan deductions</TableHead>}
-                    <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>FIT</TableHead>
-                    <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Addtl W/H</TableHead>
+                    <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Guam income tax withheld</TableHead>
+                    <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>Additional Guam income tax (W-4 4c)</TableHead>
                     <TableHead className={`bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}>SS (6.2%)</TableHead>
                     <TableHead
                       className={`min-w-[150px] bg-neutral-50 text-right tabular-nums ${TABLE_STICKY_TOP_CLASS}`}
@@ -284,13 +284,13 @@ export function PayRunEmployeeResults({
                                     </span>
                                   )}
                                   {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
-                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))} for this pay period`}>
-                                      FIT Adj
+                                    <span className="inline-flex items-center rounded-full bg-orange-100 px-1.5 py-0.5 text-xs font-medium text-orange-700" title={`Guam income tax adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))} for this pay period`}>
+                                      Guam income tax adjustment
                                     </span>
                                   )}
                                   {item.withholding_tax_override != null && (
-                                    <span className="inline-flex items-center rounded-full bg-warning-100 px-1.5 py-0.5 text-xs font-medium text-warning-700" title="Final FIT manually overridden for this pay period">
-                                      FIT Override
+                                    <span className="inline-flex items-center rounded-full bg-warning-100 px-1.5 py-0.5 text-xs font-medium text-warning-700" title="Guam income tax manually overridden for this pay period">
+                                      Guam income tax override
                                     </span>
                                   )}
                                   {toNumber(item.additional_withholding) > 0 && (
@@ -517,10 +517,10 @@ export function PayRunEmployeeResults({
                           <TableCell className={`text-right tabular-nums text-neutral-950 ${rowTone}`}>
                             {formatCurrency(toNumber(item.withholding_tax))}
                             {item.withholding_tax_adjustment != null && toNumber(item.withholding_tax_adjustment) !== 0 && (
-                              <span className="ml-0.5 text-xs text-warning-800" title={`FIT adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
+                              <span className="ml-0.5 text-xs text-warning-800" title={`Guam income tax adjusted by ${formatCurrency(toNumber(item.withholding_tax_adjustment))}`}>†</span>
                             )}
                             {item.withholding_tax_override != null && (
-                              <span className="ml-0.5 text-xs text-warning-800" title="Final FIT manually overridden">*</span>
+                              <span className="ml-0.5 text-xs text-warning-800" title="Guam income tax manually overridden">*</span>
                             )}
                           </TableCell>
                           <TableCell className={`text-right tabular-nums text-neutral-950 ${rowTone}`}>

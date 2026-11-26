@@ -1,5 +1,6 @@
 
 
+import { GUAM_INCOME_TAX } from '@/lib/payrollLabels';
 import { formatCurrency } from '@/lib/utils';
 
 import { capturedSourceContext, capturedSourceHoursLocked } from '@/lib/captured-source-worksheet';
@@ -63,7 +64,7 @@ export const comparisonMetricLabels: Record<string, string> = {
   employee_count: 'Employees',
   gross_pay: 'Gross pay',
   net_pay: 'Net pay',
-  fit: 'FIT',
+  fit: GUAM_INCOME_TAX,
   social_security: 'Social Security',
   medicare: 'Medicare',
   total_deductions: 'Total deductions',

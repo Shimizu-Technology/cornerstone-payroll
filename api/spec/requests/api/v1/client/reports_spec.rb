@@ -820,14 +820,14 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response).to have_http_status(:ok)
     pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
     expect(pdf).to include(company.name, "Regular Hours 70.25", "Overtime Hours 4.50",
-      "Bonus $42.67", "Total FIT (Base + Additional) $132.34", "Employer Payroll Cost $1,584.20")
+      "Bonus $42.67", "Total Guam income tax withheld $132.34", "Employer Payroll Cost $1,584.20")
     expect(pdf).not_to include("TEST-100")
 
     get "/api/v1/client/reports/payroll_register_csv", params: params
     expect(response).to have_http_status(:ok)
     row = CSV.parse(response.body, headers: true)[-1]
     expect(row.fetch("Regular Hours").to_d).to eq(summary.fetch("total_hours").to_d)
-    expect(row.fetch("Total FIT (Base + Additional)")).to eq("132.34")
+    expect(row.fetch("Total Guam income tax withheld")).to eq("132.34")
     expect(response.body).not_to include("TEST-100")
 
     get "/api/v1/client/reports/payroll_register_xlsx", params: params
@@ -835,7 +835,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     workbook = Roo::Excelx.new(StringIO.new(response.body))
     rows = workbook.sheet("Employees").to_a
     expect(rows.last.fetch(rows.fetch(3).index("Regular Hours")).to_d).to eq(summary.fetch("total_hours").to_d)
-    expect(rows.last.fetch(rows.fetch(3).index("Total FIT (Base + Additional)"))).to eq(132.34)
+    expect(rows.last.fetch(rows.fetch(3).index("Total Guam income tax withheld"))).to eq(132.34)
     expect(workbook.sheets.flat_map { |name| workbook.sheet(name).to_a.flatten }).not_to include("TEST-100")
     expect(workbook.sheet("Payroll Adjustments Detail").column(8)).to include("Internal test memo")
   end

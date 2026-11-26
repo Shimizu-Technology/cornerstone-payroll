@@ -39,7 +39,7 @@ class TaxSummaryCsvExporter
       # Totals table
       csv << [ "Category", "Amount" ]
       csv << [ "Gross Wages",                  format_currency(totals[:gross_wages]) ]
-      csv << [ "Withholding Tax",              format_currency(totals[:withholding_tax]) ]
+      csv << [ PayrollLabels::INCOME_TAX,              format_currency(totals[:withholding_tax]) ]
       csv << [ "Social Security (Employee)",   format_currency(totals[:social_security_employee]) ]
       csv << [ "Social Security (Employer)",   format_currency(totals[:social_security_employer]) ]
       csv << [ "Medicare (Employee)",          format_currency(totals[:medicare_employee]) ]
@@ -58,8 +58,8 @@ class TaxSummaryCsvExporter
       end
       source = report.dig(:source, :statement) || report.dig(:source, :label)
       csv << [ "Payroll Source", source ] if source.present?
-      csv << [ "Base Withholding Tax", format_currency(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
-      csv << [ "Additional Withholding", format_currency(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
+      csv << [ "Base #{PayrollLabels::INCOME_TAX}", format_currency(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
+      csv << [ PayrollLabels::ADDITIONAL_WITHHOLDING, format_currency(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
     end
   end
 

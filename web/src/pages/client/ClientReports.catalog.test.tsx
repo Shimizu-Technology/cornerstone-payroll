@@ -36,7 +36,7 @@ it('lists every client report in three groups and guards missing selections', as
 });
 
 it('shows the imported payroll exclusion only for the selected tax range', async () => {
-  const statement = 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.';
+  const statement = 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in Guam income tax.';
   api.taxSummary.mockImplementation(async ({ quarter }: { quarter: string }) => ({
     report: { source: { label: 'Cornerstone', statement: quarter === '2' ? statement : null } },
   }));

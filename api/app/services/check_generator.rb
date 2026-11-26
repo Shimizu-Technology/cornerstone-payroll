@@ -543,8 +543,12 @@ class CheckGenerator
     end
   end
 
+  def ytd_sources
+    @ytd_sources ||= PayrollStatementYtdSources.new(payroll_item)
+  end
+
   def earnings_ytd_breakdown
-    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item, sources: ytd_sources)
   end
 
   def source_earning_labels
@@ -560,7 +564,7 @@ class CheckGenerator
     rows = []
 
     # Build FIT label with W-4 context
-    fit_parts = [ "Federal Income Tax" ]
+    fit_parts = [ PayrollLabels::INCOME_TAX ]
     w4 = paycheck_w4
     w4_notes = []
     w4_notes << "Step2" if ActiveModel::Type::Boolean.new.cast(w4[:step2_multiple_jobs])
@@ -576,9 +580,14 @@ class CheckGenerator
     rows << [ fit_parts.join(" "), fn(payroll_item.withholding_tax), fn(ytd[:fit]) ]
 
     rows << [ "Social Security", fn(payroll_item.social_security_tax), fn(ytd[:ss]) ]
-    rows << [ "Medicare", fn(payroll_item.medicare_tax), fn(ytd[:med]) ]
+    additional = payroll_item.additional_medicare_tax.to_d
+    additional_ytd = ytd_sources.additional_medicare_ytd
+    rows << [ PayrollLabels::STUB_TAXES.fetch(:medicare), fn(payroll_item.medicare_tax.to_d - additional), fn(ytd[:med] - additional_ytd.to_d) ]
+    if additional.nonzero? || additional_ytd.to_d.nonzero?
+      rows << [ PayrollLabels::STUB_TAXES.fetch(:additional_medicare), fn(additional), (fn(additional_ytd) if additional_ytd) ]
+    end
     if payroll_item.additional_withholding.to_d.nonzero? || ytd[:addl_wh].to_d.nonzero?
-      rows << [ "Addtl W/H (W-4 4c)", fn(payroll_item.additional_withholding), fn(ytd[:addl_wh]) ]
+      rows << [ PayrollLabels::COMPACT_ADDITIONAL_WITHHOLDING, fn(payroll_item.additional_withholding), fn(ytd[:addl_wh]) ]
     end
 
     rows << [
@@ -636,7 +645,7 @@ class CheckGenerator
   end
 
   def statement_ytd_breakdown
-    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
+    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item, sources: ytd_sources)
   end
 
   def ytd_custom_deductions_total
