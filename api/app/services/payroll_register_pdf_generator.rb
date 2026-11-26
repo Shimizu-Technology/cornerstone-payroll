@@ -24,8 +24,9 @@ class PayrollRegisterPdfGenerator
 
   attr_reader :report
 
-  def initialize(report_data)
-    @report = report_data
+  def initialize(report_data = nil, demo: nil, **report_keywords)
+    @report = report_data || report_keywords
+    @demo = demo.nil? ? @report.dig(:meta, :demo) == true : demo == true
   end
 
   def generate
@@ -65,9 +66,12 @@ class PayrollRegisterPdfGenerator
 
     pp = report[:pay_period] || {}
     company_name = report.dig(:meta, :company_name).presence
+    base_footer = [ company_name, (report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Register" : "Payroll Register"), "Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 ")
     render_with_footer(pdf,
-      [ company_name, (report.dig(:meta, :provisional) ? "TEST ONLY — Payroll Register" : "Payroll Register"), "Pay Period: #{pp[:start_date]} \u2013 #{pp[:end_date]}", "Pay Date: #{pp[:pay_date]}", "CONFIDENTIAL, FOR INTERNAL USE ONLY" ].compact.join(" \u2014 "),
-      font_size: 7
+      DemoPdfFooter.append(base_footer, demo: @demo),
+      font_size: 7,
+      height: @demo ? 26 : 16,
+      top: @demo ? 30 : 26
     )
   end
 

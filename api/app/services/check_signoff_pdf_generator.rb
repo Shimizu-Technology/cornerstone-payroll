@@ -24,6 +24,7 @@ class CheckSignoffPdfGenerator
       margin: [ 36, 40, 36, 40 ]
     )
     render_document(pdf)
+    DemoPdfFooter.draw_prawn_footer(pdf, company: company)
     pdf.render
   end
 

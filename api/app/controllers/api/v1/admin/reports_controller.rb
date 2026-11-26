@@ -98,7 +98,7 @@ module Api
           report_data, error_response = build_payroll_register_data
           return error_response if error_response
 
-          generator = PayrollRegisterPdfGenerator.new(report_data)
+          generator = PayrollRegisterPdfGenerator.new(report_data, demo: current_company&.demo?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -204,7 +204,7 @@ module Api
           report_data, error_response = build_tax_summary_data
           return error_response if error_response
 
-          generator = TaxSummaryPdfGenerator.new(report_data)
+          generator = TaxSummaryPdfGenerator.new(report_data, demo: current_company&.demo?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -339,7 +339,7 @@ module Api
           report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: true)
           return error_response if error_response
 
-          send_data QuarterlyComplianceOfficialForms::Form941.new(report: report_data).generate,
+          send_data QuarterlyComplianceOfficialForms::Form941.new(report: report_data, demo: current_company&.demo?).generate,
             filename: "federal_form_941_draft_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
             type: "application/pdf",
             disposition: "attachment"
@@ -392,7 +392,7 @@ module Api
           report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: true)
           return error_response if error_response
 
-          generator = QuarterlyCompliancePacketPdfGenerator.new(report_data)
+          generator = QuarterlyCompliancePacketPdfGenerator.new(report_data, demo: current_company&.demo?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -575,7 +575,7 @@ module Api
           report_data, error_response = build_w2_gu_report_data
           return error_response if error_response
 
-          generator = W2GuPdfGenerator.new(report_data)
+          generator = W2GuPdfGenerator.new(report_data, demo: current_company&.demo?)
           send_data generator.generate,
             filename: generator.filename,
             type: "application/pdf",
@@ -652,7 +652,7 @@ module Api
 
           company = Company.find(current_company_id)
           report = Form1099NecAggregator.new(company, year).generate
-          generator = Form1099NecPdfGenerator.new(report)
+          generator = Form1099NecPdfGenerator.new(report, demo: company.demo?)
           send_data generator.generate,
             filename: "1099-NEC_#{company.name.parameterize}_#{year}.pdf",
             type: "application/pdf",
@@ -1876,7 +1876,7 @@ module Api
           report_data, error_response = build_quarterly_compliance_packet_data(official_form_941: generator == QuarterlyComplianceOfficialForms::Form941)
           return error_response if error_response
 
-          send_data generator.new(report: report_data).generate,
+          send_data generator.new(report: report_data, demo: current_company&.demo?).generate,
             filename: "#{filename_prefix}_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
             type: "application/pdf",
             disposition: "attachment"
@@ -1900,7 +1900,7 @@ module Api
             end
           end
           fields = quarterly_compliance_official_form_fields(params[:form_type])
-          send_data config.fetch(:generator).new(report: report_data, fields: fields).generate,
+          send_data config.fetch(:generator).new(report: report_data, fields: fields, demo: current_company&.demo?).generate,
             filename: "#{config.fetch(:filename_prefix)}_#{report_data.dig(:meta, :year)}_q#{report_data.dig(:meta, :quarter)}.pdf",
             type: "application/pdf",
             disposition: disposition
@@ -3240,7 +3240,8 @@ module Api
             title: title,
             subtitle: subtitle,
             filename: filename,
-            sheets: sheets
+            sheets: sheets,
+            demo: current_company&.demo?
           )
           send_data generator.generate,
             filename: generator.filename,
