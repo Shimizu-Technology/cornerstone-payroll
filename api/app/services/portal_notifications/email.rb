@@ -24,6 +24,7 @@ module PortalNotifications
 
     CATALOG_COPY = {
       "payroll_committed" => [ "Payroll committed", "Payroll is final. Pay statements post on pay date." ],
+      "admin_override" => [ "Administrative change recorded", "Sign in to review your client workspace." ],
       "payroll_reopened" => [ "Payroll rolled back or reopened", "View the current payroll status in the portal." ],
       "employee_change_submitted" => [ "Employee change request", "An employee change request is pending." ],
       "address_approval_requested" => [ "Address request to review", "An employee address request is pending." ],

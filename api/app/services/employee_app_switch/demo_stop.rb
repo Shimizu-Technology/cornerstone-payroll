@@ -52,7 +52,7 @@ module EmployeeAppSwitch
       # Clerk calls run after commit, like every other session revocation. A
       # pending row from an earlier stop whose job was never queued goes too.
       unqueued = EmployeeAppClerkRevocation.unqueued.where(organization_id: @organization.id).pluck(:id)
-      EmployeeAppClerkRevocation.enqueue!(queued | unqueued)
+      ActiveRecord.after_all_transactions_commit { EmployeeAppClerkRevocation.enqueue!(queued | unqueued) }
       summary
     end
 

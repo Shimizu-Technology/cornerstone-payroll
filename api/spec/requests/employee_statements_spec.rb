@@ -101,7 +101,7 @@ RSpec.describe "Employee statements", type: :request do
       expect(row).not_to have_key("has_source_entries")
     end
 
-    it "keeps out drafts, uncommitted runs, voided and reversed payroll, and unposted items" do
+    it "shows financial withdrawals and paper voids while keeping drafts and unposted items out" do
       shown = stub_on(Date.new(2026, 9, 10))
       draft = post_stub!(item_for(period_on(Date.new(2026, 9, 24))))
       draft.payroll_item.pay_period.update_columns(status: "draft")
@@ -115,8 +115,18 @@ RSpec.describe "Employee statements", type: :request do
       withdrawn = post_stub!(item_for(period_on(Date.new(2026, 11, 12))), status: "withdrawn")
       item_for(period_on(Date.new(2026, 11, 19)))
 
-      expect(listed_ids).to eq([ shown.id.to_s ])
-      [ draft, voided_run, reversed, voided_check, withdrawn ].each do |document|
+      expect(listed_ids).to eq([ voided_check.id, reversed.id, voided_run.id, shown.id ].map(&:to_s))
+      [ voided_run, reversed ].each do |document|
+        get "/api/v1/employee/statements/#{document.id}", headers: headers_for
+        expect(response.parsed_body).to include("status" => "withdrawn", "pdf_available" => false,
+          "notice" => "This pay stub was withdrawn. A corrected one will follow.")
+        expect(response.parsed_body).not_to have_key("net_pay")
+      end
+      [ voided_run, reversed, voided_check ].each do |document|
+        get "/api/v1/employee/statements/#{document.id}/pdf", headers: headers_for
+        expect(response).to have_http_status(:not_found)
+      end
+      [ draft, withdrawn ].each do |document|
         get "/api/v1/employee/statements/#{document.id}", headers: headers_for
         expect([ response.status, response.body ]).to eq([ 404, "" ])
         get "/api/v1/employee/statements/#{document.id}/pdf", headers: headers_for
@@ -285,7 +295,7 @@ RSpec.describe "Employee statements", type: :request do
       travel_to(at) { EmployeeDocuments::PostPayStub.new(item.reload).call }
     end
 
-    it "lists a voided check only with its replacement, marked Corrected, with the original as replaced" do
+    it "labels a paper void until its corrected replacement posts" do
       post!(Time.utc(2026, 8, 20))
       original = EmployeeDocument.where(payroll_item: item).sole
       expect(listed_ids).to eq([ original.id.to_s ])
@@ -293,7 +303,9 @@ RSpec.describe "Employee statements", type: :request do
       item.update_columns(voided: true, updated_at: Time.utc(2026, 8, 21))
       post!(Time.utc(2026, 8, 21, 1))
       expect(original.reload).to be_withdrawn
-      expect(listed_ids).to eq([])
+      expect(listed_ids).to eq([ original.id.to_s ])
+      get "/api/v1/employee/statements/#{original.id}", headers: headers_for
+      expect(response.parsed_body).to include("notice" => "Check voided. A replacement is coming. This pay still counts toward your year.")
       get "/api/v1/employee/statements/#{original.id}/pdf", headers: headers_for
       expect(response).to have_http_status(:not_found)
 
@@ -355,7 +367,7 @@ RSpec.describe "Employee statements", type: :request do
       redo_period.update_columns(correction_status: "voided")
       travel_to(Time.utc(2026, 8, 29)) { EmployeeDocuments::PostPayStub.new(redo_item.reload).call }
       expect(redo_document.reload).to be_withdrawn
-      expect(listed_ids).to eq([ delta.id.to_s ])
+      expect(listed_ids).to eq([ delta.id.to_s, redo_document.id.to_s ])
       [ "", "/pdf" ].each do |suffix|
         get "/api/v1/employee/statements/#{original.id}#{suffix}", headers: headers_for
         expect([ response.status, response.body ]).to eq([ 404, "" ]), suffix

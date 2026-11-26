@@ -115,6 +115,24 @@ describe('employee app shell', () => {
     expect(contextChecks).toBeGreaterThan(1);
   });
 
+  it('shows a withdrawn pay stub notice without amounts or a download', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/pay/906');
+    const stub = {
+      id: '906', status: 'withdrawn', check_date: '2026-11-20', pdf_available: false,
+      notice: 'This pay stub was withdrawn. A corrected one will follow.',
+    };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [stub], years: [2026], next_page: null }),
+      '/employee/statements/906': () => Response.json(stub),
+    }));
+    render(<EmployeeApp />);
+    expect((await screen.findAllByText(stub.notice)).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /download/i })).toBeNull();
+  });
+
   it('masks amounts by default and remembers the choice on this device', async () => {
     signedIn();
     const statement = {

@@ -13,6 +13,10 @@ module Api
       class EmployeeAppSwitchesController < BaseController
         include RecentVerification
 
+        rescue_from AdminOverrideService::AccessDenied do |error|
+          render json: { error: error.message }, status: :forbidden
+        end
+
         before_action :no_store
         before_action :require_selected_company!
         before_action :require_switch_access!
@@ -27,7 +31,12 @@ module Api
             changes: params[:changes].try(:to_unsafe_h), reason: params[:reason], session_claims: @clerk_token_payload)
           # Failing checks are listed before a fresh step-up is asked for.
           update.preflight! if update.turning_on?
-          result = update.call
+          if update.turning_on?
+            require_direct_recent_verification!
+            return if performed?
+          end
+          result = record_override("employee_app_switch", snapshot: -> { EmployeeAppSwitch.switched_on_values(current_company.reload) },
+            fresh_required: update.turning_on?) { update.call }
           render json: { data: payload(EmployeeAppSwitch::Readiness.new(company: current_company)), saved: result.except(:values) }
         rescue EmployeeAppSwitch::StepUpRequired => error
           # The service refused; the concern renders Clerk's step-up prompt.
@@ -38,7 +47,7 @@ module Api
                          failing_checks: error.failures.map(&:as_json) }, status: :unprocessable_entity
         rescue EmployeeAppSwitch::Forbidden => error
           render json: { error: error.message }, status: :forbidden
-        rescue EmployeeAppSwitch::Invalid, ActiveRecord::RecordInvalid => error
+        rescue ArgumentError, EmployeeAppSwitch::Invalid, ActiveRecord::RecordInvalid => error
           render json: { error: error.message }, status: :unprocessable_entity
         end
 
@@ -46,33 +55,39 @@ module Api
           skip_default_audit_log!
           return unless verified_for_early_access!
 
-          EmployeeAppSwitch::EarlyAccess.set!(organization: current_company.organization, actor: current_user,
-            expires_on: params[:expires_on], company_ids: params[:company_ids], reason: params[:reason])
+          record_override("employee_app_early_access_set", organization_wide: true, fresh_required: true,
+            snapshot: -> { early_access_snapshot }) do |actor, reason|
+            EmployeeAppSwitch::EarlyAccess.set!(organization: current_company.organization, actor: actor,
+              expires_on: params[:expires_on], company_ids: params[:company_ids], reason: reason)
+          end
           render json: { data: payload(EmployeeAppSwitch::Readiness.new(company: current_company)) }
         rescue EmployeeAppSwitch::Forbidden => error
           render json: { error: error.message }, status: :forbidden
-        rescue EmployeeAppSwitch::Invalid, ActiveRecord::RecordInvalid => error
+        rescue ArgumentError, EmployeeAppSwitch::Invalid, ActiveRecord::RecordInvalid => error
           render json: { error: error.message }, status: :unprocessable_entity
         end
 
         def end_early_access
           skip_default_audit_log!
-          EmployeeAppSwitch::EarlyAccess.end!(organization: current_company.organization, actor: current_user, reason: params[:reason])
+          record_override("employee_app_early_access_end", organization_wide: true, snapshot: -> { early_access_snapshot }) do |actor, reason|
+            EmployeeAppSwitch::EarlyAccess.end!(organization: current_company.organization, actor: actor, reason: reason)
+          end
           render json: { data: payload(EmployeeAppSwitch::Readiness.new(company: current_company)) }
         rescue EmployeeAppSwitch::Forbidden => error
           render json: { error: error.message }, status: :forbidden
-        rescue EmployeeAppSwitch::Invalid => error
+        rescue ArgumentError, EmployeeAppSwitch::Invalid => error
           render json: { error: error.message }, status: :unprocessable_entity
         end
 
         def demo_stop
           skip_default_audit_log!
-          result = EmployeeAppSwitch::DemoStop.call(organization: current_company.organization, actor: current_user,
-            reason: params[:reason])
+          result = record_override("employee_app_demo_stop", organization_wide: true, snapshot: -> { demo_stop_snapshot }) do |actor, reason|
+            EmployeeAppSwitch::DemoStop.call(organization: current_company.organization, actor: actor, reason: reason)
+          end
           render json: { data: payload(EmployeeAppSwitch::Readiness.new(company: current_company)), stopped: result }
         rescue EmployeeAppSwitch::Forbidden => error
           render json: { error: error.message }, status: :forbidden
-        rescue EmployeeAppSwitch::Invalid => error
+        rescue ArgumentError, EmployeeAppSwitch::Invalid => error
           render json: { error: error.message }, status: :unprocessable_entity
         end
 
@@ -102,8 +117,25 @@ module Api
           render json: { error: StaffRolePolicy.error_message(:manage_employee_app_switch) }, status: :forbidden
         end
 
+        def record_override(action, snapshot:, organization_wide: false, fresh_required: false, &block)
+          AdminOverrideService.perform!(company: current_company, subject: current_company, actor: current_user,
+            capability: :manage_employee_app_switch, action: action, reason: params[:reason], impersonated: impersonated_session?,
+            verified: MfaPolicy.recently_step_up_verified?(@clerk_token_payload), fresh_required: fresh_required,
+            organization_wide: organization_wide, client_managers: !organization_wide, snapshot: snapshot, &block)
+        end
+
+        def early_access_snapshot
+          window = EmployeeAppEarlyAccessWindow.current_for(current_company.organization_id)
+          { "window_id" => window&.id, "company_ids" => window&.company_ids, "expires_on" => window&.expires_on }
+        end
+
+        def demo_stop_snapshot
+          early_access_snapshot.merge("demo_switches" => Company.demo.where(organization_id: current_company.organization_id)
+            .order(:id).lock.to_h { |company| [ company.id.to_s, EmployeeAppSwitch.on_anywhere(company) ] })
+        end
+
         def verified_for_early_access!
-          require_recent_verification!
+          require_direct_recent_verification!
           !performed?
         end
 

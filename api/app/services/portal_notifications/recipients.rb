@@ -133,6 +133,8 @@ module PortalNotifications
           end
         end
 
+        return subject.is_a?(Company) && subject.id == event.company_id if event.event_type == "admin_override"
+
         case subject
         when EmployeeDocumentNotice
           event.event_type == "tax_form_paper_required" && subject.company_id == event.company_id &&

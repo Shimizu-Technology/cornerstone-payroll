@@ -39,7 +39,7 @@ module Api
           statement = statements.find(params[:id])
           return head :not_found unless statement
 
-          previous = statements.previous_regular(statement.document) if statement.kind == :payroll
+          previous = statements.previous_regular(statement.document) if statement.kind == :payroll && !statement.withdrawn?
           payload = EmployeeStatements::Presenter.new(statement, statements: statements, previous: previous).detail
           record = statement.kind == :quickbooks ? statement.check : statement.document
           audit!("viewed", record: record, metadata: { source: payload[:source], statement_id: statement.id })
