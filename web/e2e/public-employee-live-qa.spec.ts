@@ -85,6 +85,10 @@ test('hides YTD-only earnings on a phone and restores their YTD column on deskto
   await page.route('**/api/v1/employee/statements/906', route => json(route, detail));
   await page.goto(`${employeeBaseUrl}/pay/906?${tenantQuery}`);
 
+  // Amounts start masked by default ($•••), then reveal to check exact YTD values.
+  await expect(page.getByRole('row', { name: /Regular/ })).toContainText('$•••');
+  await page.getByRole('button', { name: 'Show amounts' }).click();
+
   const earlierPay = page.getByRole('row', { name: /Earlier regular pay/, includeHidden: true });
   await expect(page.getByRole('row', { name: /Regular.*540\.00/ })).toBeVisible();
   await expect(earlierPay).toBeAttached();
@@ -108,6 +112,8 @@ test('shows a phone message when every earning is YTD-only', async ({ page }) =>
   await expect(notice).toBeVisible();
   await expect(earnings).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(earnings.getByRole('row', { name: /Earlier regular pay/ })).toContainText('$•••');
+  await page.getByRole('button', { name: 'Show amounts' }).click();
   await expect(earnings.getByRole('row', { name: /Earlier regular pay/ })).toContainText('$125.00');
   await expect(notice).toBeHidden();
 });
