@@ -57,4 +57,27 @@ namespace :demo do
   rescue DemoCompany::AssignEmployeeEmails::Refused, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, KeyError => e
     abort "FAIL  demo:assign_employee_emails #{e.message}"
   end
+
+  desc "Dry-run or apply simple demo names and invented addresses to existing demo companies (ORGANIZATION_ID, ACTOR_ID, optional COMPANY_IDS, APPLY=true). Safe to rerun."
+  task rename_fixture: :environment do
+    organization, actor = TenantScope.as_system(reason: "Find the demo rename organization and actor") do
+      [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
+    end
+    dry_run = ENV["APPLY"] != "true"
+    result = Current.set(user: actor) do
+      DemoCompany::RenameFixture.new(
+        organization: organization,
+        actor: actor,
+        dry_run: dry_run,
+        company_ids: ENV["COMPANY_IDS"]
+      ).call
+    end
+    summary = result.counts.map { |type, count| "#{type}=#{count}" }.join(" ")
+    summary = "none" if summary.blank?
+    puts "OK    demo:rename_fixture mode=#{result.dry_run ? 'dry_run' : 'applied'} " \
+         "companies=#{result.companies.map(&:id).join(',')} changes=#{result.changes.size} " \
+         "unmatched_employees=#{result.unmatched_employee_ids.size} #{summary}"
+  rescue DemoCompany::RenameFixture::Refused, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, KeyError, ArgumentError => e
+    abort "FAIL  demo:rename_fixture #{e.message}"
+  end
 end
