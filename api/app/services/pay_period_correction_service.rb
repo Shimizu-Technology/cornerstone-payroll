@@ -328,6 +328,7 @@ class PayPeriodCorrectionService
         withholding_tax_adjustment: source_item.withholding_tax_adjustment,
         withholding_tax_override: source_item.withholding_tax_override,
         import_source:            source_item.import_source,
+        import_origin:            source_item.import_origin,
         custom_columns_data:      source_item.custom_columns_data,
         timekeeping_source:       "correction_reference",
         timekeeping_context_snapshot: source_item.timekeeping_context_snapshot

@@ -576,7 +576,7 @@ class OperatingProfileCatalog
     end
 
     def registered_intake_adapters
-      REGISTERED_INTAKE_ADAPTERS
+      PayrollIntake::Registry.keys
     end
 
     def find(id)

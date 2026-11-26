@@ -3,35 +3,34 @@
 module PayrollIntake
   module Adapters
     class MosaRevel
-      PARSER_VERSION = "mosa_revel:v1"
-      SOURCE_TYPE = "mosa_revel"
-      SOURCE_LABEL = "MoSa Revel hours and payroll changes"
-      SOURCE_ROLES = {
-        "revel_hours" => { label: "Revel hours PDF" },
-        "supplemental_workbook" => { label: "Tips & loans workbook", waiver_label: "No tips or loans this period" }
-      }.freeze
+      DESCRIPTOR_PATH = Rails.root.join("config/payroll_intake/mosa_revel.yml")
+      DESCRIPTOR = PayrollIntake::Descriptor.from_yaml(DESCRIPTOR_PATH, adapter_class: self)
+      PARSER_VERSION = DESCRIPTOR.parser_version
+      SOURCE_TYPE = DESCRIPTOR.key
+      SOURCE_LABEL = DESCRIPTOR.source_label
+      SOURCE_ROLES = DESCRIPTOR.source_roles
+
+      def self.descriptor
+        DESCRIPTOR
+      end
 
       def self.source_roles
-        SOURCE_ROLES
+        descriptor.source_roles
       end
 
       # Each file can arrive on its own; a package is applied only once both
       # are present, or staff record that there are no tips or loans.
       def self.default_required_source_roles
-        SOURCE_ROLES.keys
+        descriptor.default_required_source_roles
       end
 
       def self.source_role_for(filename:, content_type:, **)
-        extension = File.extname(filename.to_s).downcase
-        return "revel_hours" if content_type == "application/pdf" || extension == ".pdf"
-        return "supplemental_workbook" if extension.in?(%w[.xls .xlsx])
-
-        "supporting_document"
+        descriptor.source_role_for(filename: filename, content_type: content_type)
       end
 
       # Revel splits regular and overtime hours itself.
       def self.reports_overtime?
-        true
+        descriptor.reports_overtime?
       end
 
       def initialize(pay_period:, company:)

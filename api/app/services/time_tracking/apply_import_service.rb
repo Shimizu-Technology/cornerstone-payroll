@@ -162,6 +162,7 @@ module TimeTracking
           end
 
           item.import_source = current_import_source
+          item.import_origin = "time_tracking"
           item.save!
           TimeTracking::EntryAllocationRecorder.new(
             time_tracking_import: @import,
