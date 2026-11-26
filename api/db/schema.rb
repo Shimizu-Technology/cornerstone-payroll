@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -5470,7 +5470,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
   add_foreign_key "direct_deposit_payment_confirmations", "payroll_items"
   add_foreign_key "direct_deposit_payment_confirmations", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_direct_deposit_payment_confirmations_company_parent"
   add_foreign_key "direct_deposit_payment_confirmations", "users"
-  add_foreign_key "employee_account_links", "companies", column: [ "company_id", "payroll_environment" ], primary_key: [ "id", "payroll_environment" ], name: "fk_employee_account_links_live_company"
+  add_foreign_key "employee_account_links", "companies", column: [ "company_id", "payroll_environment" ], primary_key: [ "id", "payroll_environment" ], name: "fk_employee_account_links_live_company", deferrable: :immediate
   add_foreign_key "employee_account_links", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_account_links_employee"
   add_foreign_key "employee_account_links", "users"
   add_foreign_key "employee_account_links", "users", column: "claim_user_id"
