@@ -62,7 +62,7 @@ class ViewAsGrant < ApplicationRecord
   # inside that company (the grant is pinned to it, and the context keeps
   # the demo boundary); never a practice copy's.
   def employee_context
-    return unless employee_view? && (company.live_payroll? || company.demo?)
+    return unless employee_view? && company.operating?
 
     features = CompanyFeatures.for(company)
     return unless features.employee_portal_enabled? && features.subdomain_enabled?

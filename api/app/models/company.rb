@@ -59,7 +59,7 @@ class Company < ApplicationRecord
 
   has_many :departments, dependent: :destroy
   has_many :company_assignments, dependent: :destroy
-  before_destroy :purge_test_workspace_compensation_history, if: :test_workspace?, prepend: true
+  before_destroy :purge_test_workspace_compensation_history, if: :contained?, prepend: true
   has_many :employees, dependent: :destroy
   has_many :time_tracking_sources, dependent: :destroy
   has_many :time_tracking_delegations, dependent: :destroy
@@ -139,14 +139,14 @@ class Company < ApplicationRecord
   validates :subdomain_slug,
             format: { with: TenantSubdomainRegistry::SLUG_PATTERN },
             exclusion: { in: TenantSubdomainRegistry::RESERVED_SLUGS },
-            uniqueness: { case_sensitive: false, conditions: -> { where("companies.payroll_environment = 'live' OR companies.test_workspace_purpose = 'demo'") } },
+            uniqueness: { case_sensitive: false, conditions: -> { operating } },
             allow_nil: true
   validate :subdomain_slug_change_requires_disabled_profile, if: -> { persisted? && will_save_change_to_subdomain_slug? }
   validate :valid_public_branding
   after_commit { TenantSubdomainRegistry.invalidate! }
 
-  validate :subdomain_requires_live_payroll, if: -> { !subdomain_slug.nil? && !live_payroll? }
-  validates :ein, uniqueness: { conditions: -> { where(payroll_environment: "live") } }, allow_blank: true, unless: :test_workspace?
+  validate :subdomain_requires_live_payroll, if: -> { !subdomain_slug.nil? && !operating? }
+  validates :ein, uniqueness: { conditions: -> { live_payroll } }, allow_blank: true, unless: :contained?
   validates :pay_frequency, inclusion: { in: %w[biweekly weekly semimonthly monthly] }
   # How paper W-2s reach employees (M4-5, §8a); nil when not set.
   W2_DELIVERY_OPTIONS = %w[mailed handed_out].freeze
@@ -156,6 +156,7 @@ class Company < ApplicationRecord
   validates :test_workspace_purpose, inclusion: { in: TEST_WORKSPACE_PURPOSES }, allow_nil: true
   validates :migration_source_company, presence: true, if: :practice_copy?
   validates :migration_rehearsal_status, presence: true, if: :test_workspace?
+  validate :demo_requires_live_payroll_when_flagged
   validate :test_workspace_source_is_valid
   validate :demo_shape_is_permanent, if: :demo?
   validate :demo_outputs_stay_simulated, if: :demo?
@@ -167,12 +168,22 @@ class Company < ApplicationRecord
   validate :payroll_intake_source_types_are_supported
   validate :payroll_intake_settings_are_supported
 
+  DEMO_SQL = "(companies.demo = TRUE OR (companies.payroll_environment = 'migration_rehearsal' AND companies.test_workspace_purpose = 'demo'))"
+  NOT_DEMO_SQL = "(companies.demo = FALSE AND (companies.test_workspace_purpose IS NULL OR companies.test_workspace_purpose <> 'demo'))"
+  OPERATING_SQL = "(companies.payroll_environment = 'live' OR (companies.payroll_environment = 'migration_rehearsal' AND companies.test_workspace_purpose = 'demo'))"
+  CONTAINED_SQL = "(companies.payroll_environment = 'migration_rehearsal' OR companies.demo = TRUE)"
+
   scope :active, -> { where(active: true) }
-  scope :live_payroll, -> { where(payroll_environment: "live") }
+  # Real paying clients only: live payroll AND not a demo company.
+  scope :live_payroll, -> { where(payroll_environment: "live", demo: false) }
   scope :migration_rehearsal, -> { where(payroll_environment: "migration_rehearsal") }
   scope :test_workspace, -> { where(payroll_environment: "migration_rehearsal") }
-  scope :demo, -> { test_workspace.where(test_workspace_purpose: "demo") }
-  scope :not_demo, -> { where(test_workspace_purpose: nil).or(where.not(test_workspace_purpose: "demo")) }
+  scope :demo, -> { where(DEMO_SQL) }
+  scope :not_demo, -> { where(NOT_DEMO_SQL) }
+  # Companies that operate like clients (real live clients plus demo companies).
+  scope :operating, -> { where(OPERATING_SQL) }
+  # Non-client companies subject to containment (practice copies and demos).
+  scope :contained, -> { where(CONTAINED_SQL) }
 
   def test_workspace?
     payroll_environment == "migration_rehearsal"
@@ -183,7 +194,7 @@ class Company < ApplicationRecord
   end
 
   def live_payroll?
-    payroll_environment == "live"
+    payroll_environment == "live" && !demo?
   end
 
   def training_replay?
@@ -198,11 +209,23 @@ class Company < ApplicationRecord
     test_workspace? && test_workspace_purpose == "backup_snapshot"
   end
 
-  # A permanent, source-free company for staff training and client demos. It
-  # is a test workspace for containment (filings, payments, integrations and
-  # firm totals stay closed) but presents and behaves like a live client.
+  # A permanent, source-free company for staff training and client demos.
+  # Reads both the legacy test-workspace demo shape and the new live+demo flag
+  # shape during the Track B expand phase.
   def demo?
+    self[:demo] == true || legacy_demo?
+  end
+
+  def legacy_demo?
     test_workspace? && test_workspace_purpose == "demo"
+  end
+
+  def operating?
+    live_payroll? || demo?
+  end
+
+  def contained?
+    test_workspace? || demo?
   end
 
   # A copied or replayed workspace that is visibly labelled as practice: every
@@ -444,7 +467,13 @@ class Company < ApplicationRecord
   end
 
   def subdomain_requires_live_payroll
-    errors.add(:subdomain_slug, "is only available to live companies") unless demo?
+    errors.add(:subdomain_slug, "is only available to live companies") unless operating?
+  end
+
+  def demo_requires_live_payroll_when_flagged
+    return unless self[:demo] == true && payroll_environment != "live"
+
+    errors.add(:demo, "requires a live payroll environment")
   end
 
   def demo_shape_is_permanent
@@ -453,29 +482,34 @@ class Company < ApplicationRecord
     errors.add(:test_workspace_expires_at, "must be blank for a demo company") if test_workspace_expires_at.present?
     errors.add(:test_workspace_archived_at, "must be blank for a demo company") if test_workspace_archived_at.present?
     errors.add(:test_workspace_sealed_at, "must be blank for a demo company") if test_workspace_sealed_at.present?
-    unless test_workspace_manifest.to_h["demo_fixture_key"].to_s.match?(DEMO_FIXTURE_KEY_PATTERN)
-      errors.add(:test_workspace_manifest, "must name the demo fixture")
+    if legacy_demo? || test_workspace_manifest.to_h.key?("demo_fixture_key")
+      unless test_workspace_manifest.to_h["demo_fixture_key"].to_s.match?(DEMO_FIXTURE_KEY_PATTERN)
+        errors.add(:test_workspace_manifest, "must name the demo fixture")
+      end
     end
   end
 
-  # A demo never creates FIT deposit checks or prints on preprinted bank stock.
+  # A demo never prints on preprinted bank stock (MICR). Legacy demos also
+  # stay off FIT auto-checks while the pre-migration DB trigger remains.
   def demo_outputs_stay_simulated
-    errors.add(:auto_create_fit_check, "isn't available for this client") if auto_create_fit_check?
+    errors.add(:auto_create_fit_check, "isn't available for this client") if legacy_demo? && auto_create_fit_check?
     errors.add(:check_stock_type, "isn't available for this client") if first_hawaiian_4up_checks?
   end
 
   def company_type_is_unchanged
-    was_demo = test_workspace_purpose_in_database == "demo"
-    if was_demo != (test_workspace_purpose == "demo") || (was_demo && will_save_change_to_payroll_environment?)
+    was_demo = demo_in_database == true || test_workspace_purpose_in_database == "demo"
+    if was_demo != demo? || (was_demo && will_save_change_to_payroll_environment?) ||
+       (demo_in_database == true && test_workspace_purpose.present?)
       errors.add(:base, "A demo company cannot be converted to or from another company type")
     end
-    if was_demo && test_workspace_manifest_in_database.to_h["demo_fixture_key"] != test_workspace_manifest.to_h["demo_fixture_key"]
+    old_fixture_key = test_workspace_manifest_in_database.to_h["demo_fixture_key"]
+    if was_demo && old_fixture_key.present? && old_fixture_key != test_workspace_manifest.to_h["demo_fixture_key"]
       errors.add(:test_workspace_manifest, "demo fixture key cannot change")
     end
   end
 
   def test_workspace_source_is_valid
-    if live_payroll? && (migration_source_company_id.present? || migration_source_batch_id.present? || migration_rehearsal_status.present? || test_workspace_purpose.present?)
+    if payroll_environment == "live" && (migration_source_company_id.present? || migration_source_batch_id.present? || migration_rehearsal_status.present? || test_workspace_purpose.present?)
       errors.add(:base, "Production clients cannot reference a test workspace source")
       return
     end

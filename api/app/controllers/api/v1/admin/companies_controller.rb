@@ -25,7 +25,7 @@ module Api
           test_workspace_preview create_test_workspace retry_test_workspace archive_test_workspace restore_test_workspace
           migration_promotion_preview create_migration_promotion_backup apply_migration_promotion
         ]
-        skip_before_action :enforce_test_workspace_safety!, only: %i[
+        skip_before_action :enforce_contained_company_safety!, only: %i[
           index create migration_rehearsal_preview create_migration_rehearsal retry_migration_rehearsal
           training_replay_preview create_training_replay retry_training_replay
           test_workspace_preview create_test_workspace retry_test_workspace archive_test_workspace restore_test_workspace

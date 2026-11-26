@@ -463,12 +463,14 @@ module TimeTracking
         PayrollCalculationContext.dated_wage_rate_attributes(employee, @proof_on) ]
     end
 
+    COMPANY_EXCLUDED_ATTRIBUTES = %w[demo].freeze
+
     def local_fingerprint(inventory)
       run_ids = inventory.flat_map { |entry| entry.dig("history_evidence", "baseline_lines").to_a.map { |line| line.dig("processing", "external_pay_period_id") } }.compact.uniq
       { "source" => checksum(@source.attributes.except("shared_secret", "last_synced_at", "updated_at")),
         "boundary" => @source.cutoff_enforcement_starts_on.iso8601,
         "category_configuration" => checksum(TimeTrackingCategoryMapping.where(time_tracking_source: @source).order(:id).map(&:attributes)),
-        "company" => checksum(@company.attributes),
+        "company" => checksum(@company.attributes.except(*COMPANY_EXCLUDED_ATTRIBUTES)),
         "mappings" => @saved_mapping_fingerprint,
         "placeholder_emails" => checksum(marked_placeholders.to_a.sort),
         "employees" => checksum(@employees.map { |employee| employee_fingerprint(employee) }),

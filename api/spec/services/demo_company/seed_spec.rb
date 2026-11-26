@@ -266,10 +266,18 @@ RSpec.describe DemoCompany::Seed do
     expect { described_class.new(organization: organization, actor: accountant).call }.to raise_error(described_class::Refused)
   end
 
-  it "leaves a live client's commit unchanged and refuses demo contractors and non-employee checks" do
-    demo = create_demo_company(organization: organization, fixture_key: "other-demo")
-    expect(build(:employee, company: demo, department: create(:department, company: demo), employment_type: "contractor")).not_to be_valid
-    expect(NonEmployeeCheck.new(company: demo)).to have_attributes(valid?: false)
+  it "leaves a live client's commit unchanged, lifts demo contractor checks, and still refuses demo time-tracking sources" do
+    legacy_demo = create_demo_company(organization: organization, fixture_key: "other-demo")
+    live_demo = create_live_demo_company(organization: organization, fixture_key: "live-flag-demo")
+
+    expect(build(:employee, company: legacy_demo, department: create(:department, company: legacy_demo), employment_type: "contractor")).to be_valid
+    expect(build(:employee, company: live_demo, department: create(:department, company: live_demo), employment_type: "contractor")).to be_valid
+    # Legacy demos stay guarded on non_employee_checks until the Track B Migrate phase drops the legacy trigger;
+    # new-shape live+demo companies can issue non-employee checks like live clients.
+    expect(NonEmployeeCheck.new(company: legacy_demo)).to have_attributes(valid?: false)
+    expect(build(:non_employee_check, company: live_demo)).to be_valid
+    expect(build(:time_tracking_source, company: legacy_demo)).not_to be_valid
+    expect(build(:time_tracking_source, company: live_demo)).not_to be_valid
 
     employee = create(:employee, company: live, department: create(:department, company: live))
     period = create(:pay_period, company: live, start_date: Date.new(2026, 8, 2), end_date: Date.new(2026, 8, 15), pay_date: Date.new(2026, 8, 21))
