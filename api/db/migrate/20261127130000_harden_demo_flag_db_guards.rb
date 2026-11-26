@@ -16,7 +16,86 @@
 class HardenDemoFlagDbGuards < ActiveRecord::Migration[8.1]
   def up
     execute "SET LOCAL lock_timeout = '5s'"
+    install_hardened_demo_guards
+  end
 
+  def down
+    execute "SET LOCAL lock_timeout = '5s'"
+    restore_legacy_demo_guards
+  end
+
+  private
+
+  def restore_legacy_demo_guards
+    execute <<~SQL
+      CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
+      BEGIN
+        IF (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
+          OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo' AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
+          RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
+            USING ERRCODE = 'check_violation';
+        END IF;
+        IF COALESCE(OLD.test_workspace_purpose, '') = 'demo'
+          AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
+          RAISE EXCEPTION 'demo fixture keys are immutable'
+            USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS companies_demo_shape_immutable ON companies;
+      CREATE TRIGGER companies_demo_shape_immutable
+      BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
+      FOR EACH ROW
+      EXECUTE FUNCTION prevent_demo_company_conversion();
+
+      DROP TRIGGER IF EXISTS time_tracking_sources_refuse_demo_company ON time_tracking_sources;
+      CREATE TRIGGER time_tracking_sources_refuse_demo_company
+      BEFORE INSERT OR UPDATE OF company_id ON time_tracking_sources
+      FOR EACH ROW
+      EXECUTE FUNCTION prevent_demo_company_external_records();
+
+      DROP FUNCTION IF EXISTS prevent_demo_company_time_tracking_source();
+
+      CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
+      BEGIN
+        IF TG_OP <> 'INSERT' THEN
+          RAISE EXCEPTION 'Check supersession rollout approvals are append-only';
+        END IF;
+        IF NOT EXISTS (
+          SELECT 1 FROM companies c JOIN users u ON u.id = NEW.approved_by_id
+          WHERE c.id = NEW.company_id AND c.payroll_environment = 'live'
+            AND u.organization_id = c.organization_id AND u.active = true
+            AND u.role IN (5, 6)
+        ) OR length(btrim(NEW.reason)) < 20 THEN
+          RAISE EXCEPTION 'Live-check rollout approval requires an active organization administrator and documented reason';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM companies c JOIN users u ON u.id = NEW.user_id
+          WHERE c.id = NEW.company_id AND u.organization_id = c.organization_id
+            AND u.active = true AND u.role IN (5, 6, 0, 1)
+        ) THEN
+          RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
+        END IF;
+        IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live')
+          AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
+          RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+    SQL
+  end
+
+  # Keep the current definitions last for the DatabaseIntegrity snapshot spec.
+  def install_hardened_demo_guards
     execute <<~SQL
       CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
       DECLARE
@@ -91,76 +170,6 @@ class HardenDemoFlagDbGuards < ActiveRecord::Migration[8.1]
           RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
         END IF;
         IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live' AND NOT demo)
-          AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
-          RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-    SQL
-  end
-
-  def down
-    execute "SET LOCAL lock_timeout = '5s'"
-
-    execute <<~SQL
-      CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
-      BEGIN
-        IF (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
-          OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo' AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
-          RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
-            USING ERRCODE = 'check_violation';
-        END IF;
-        IF COALESCE(OLD.test_workspace_purpose, '') = 'demo'
-          AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
-          RAISE EXCEPTION 'demo fixture keys are immutable'
-            USING ERRCODE = 'check_violation';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-
-      DROP TRIGGER IF EXISTS companies_demo_shape_immutable ON companies;
-      CREATE TRIGGER companies_demo_shape_immutable
-      BEFORE UPDATE OF payroll_environment, test_workspace_purpose, test_workspace_manifest ON companies
-      FOR EACH ROW
-      EXECUTE FUNCTION prevent_demo_company_conversion();
-
-      DROP TRIGGER IF EXISTS time_tracking_sources_refuse_demo_company ON time_tracking_sources;
-      CREATE TRIGGER time_tracking_sources_refuse_demo_company
-      BEFORE INSERT OR UPDATE OF company_id ON time_tracking_sources
-      FOR EACH ROW
-      EXECUTE FUNCTION prevent_demo_company_external_records();
-
-      DROP FUNCTION IF EXISTS prevent_demo_company_time_tracking_source();
-
-      CREATE OR REPLACE FUNCTION protect_check_supersession_rollout_approval() RETURNS trigger AS $$
-      BEGIN
-        IF TG_OP <> 'INSERT' THEN
-          RAISE EXCEPTION 'Check supersession rollout approvals are append-only';
-        END IF;
-        IF NOT EXISTS (
-          SELECT 1 FROM companies c JOIN users u ON u.id = NEW.approved_by_id
-          WHERE c.id = NEW.company_id AND c.payroll_environment = 'live'
-            AND u.organization_id = c.organization_id AND u.active = true
-            AND u.role IN (5, 6)
-        ) OR length(btrim(NEW.reason)) < 20 THEN
-          RAISE EXCEPTION 'Live-check rollout approval requires an active organization administrator and documented reason';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-
-      CREATE OR REPLACE FUNCTION enforce_check_supersession_rollout_approval() RETURNS trigger AS $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM companies c JOIN users u ON u.id = NEW.user_id
-          WHERE c.id = NEW.company_id AND u.organization_id = c.organization_id
-            AND u.active = true AND u.role IN (5, 6, 0, 1)
-        ) THEN
-          RAISE EXCEPTION 'Check supersession requires an active manager or administrator';
-        END IF;
-        IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND payroll_environment = 'live')
           AND NOT EXISTS (SELECT 1 FROM check_supersession_rollout_approvals WHERE company_id = NEW.company_id) THEN
           RAISE EXCEPTION 'Live-check supersession requires company-specific rollout approval';
         END IF;
