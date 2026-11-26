@@ -41,8 +41,8 @@ revel_hours:
   payroll_fields:
     regular_hours: hours_worked
     overtime_hours: overtime_hours
-    doubletime_hours: The preview retains decimal hours. Positive hours block apply with doubletime_not_supported.
-    total_hours: source evidence
+    doubletime_hours: The preview retains decimal hours. Positive hours or double-time pay block apply with doubletime_not_supported.
+    total_hours: A reported total more than 0.01 hours above the sum of regular, overtime, and double-time hours blocks apply with hours_do_not_reconcile.
     wage_and_pay: use Cornerstone compensation
 workbook:
   generated:

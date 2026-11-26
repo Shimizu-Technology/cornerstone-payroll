@@ -389,12 +389,14 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       expect(preview.fetch("can_apply")).to be(false)
       error = preview.fetch("source_rows").find { |row| row["employee_id"] == included_employee.id }.fetch("errors").sole
       expect(error).to include("code" => "doubletime_not_supported", "severity" => "error")
-      expect(error.fetch("message")).to include("Double-time hours can’t be imported automatically", "enter the double-time pay manually", "contact Cornerstone")
+      expect(error.fetch("message")).to include("Revel shows 2.25 double-time hours", "Exclude this row",
+        "enter this employee’s hours and double-time pay in the worksheet")
 
       import = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
       row = import.payroll_intake_session.rows.find_by!(employee: included_employee)
       expect(row.status).to eq("needs_review")
       expect(BigDecimal(row.source_payload.fetch("doubletime_hours").to_s)).to eq(BigDecimal("2.25"))
+      expect(BigDecimal(row.source_payload.fetch("doubletime_pay").to_s)).to eq(BigDecimal("67.50"))
 
       expect(PayrollImport::ImportService).not_to receive(:new)
 

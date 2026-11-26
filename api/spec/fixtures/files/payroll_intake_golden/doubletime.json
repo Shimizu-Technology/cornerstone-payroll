@@ -27,7 +27,7 @@
       "errors": [
         {
           "code": "doubletime_not_supported",
-          "message": "Double-time hours can’t be imported automatically yet. Review these hours and enter the double-time pay manually, or contact Cornerstone for help.",
+          "message": "Revel shows 3 double-time hours for this employee. Payroll can’t import double-time yet. Exclude this row, apply the rest, then enter this employee’s hours and double-time pay in the worksheet.",
           "severity": "error"
         }
       ],
@@ -55,5 +55,5 @@
     }
   ],
   "doubletime_hours": "3.0",
-  "apply_error": "Double-time hours can’t be imported automatically yet. Review these hours and enter the double-time pay manually, or contact Cornerstone for help."
+  "apply_error": "Revel shows 3 double-time hours for this employee. Payroll can’t import double-time yet. Exclude this row, apply the rest, then enter this employee’s hours and double-time pay in the worksheet."
 }

@@ -146,12 +146,13 @@ RSpec.describe "Payroll intake golden files", type: :request do
     expect_golden("normal", snapshot)
   end
 
-  it "keeps the reported overtime split even with a deliberately inconsistent Revel total" do
-    # The printed total and the row total are deliberately out of balance.
-    # Current intake preserves row evidence and uses the reported regular/OT split.
+  it "keeps the reported overtime split visible while blocking a Revel row with unaccounted hours" do
     data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 80, overtime: 31.75, total_hours: 125), reported_total_hours: 999),
       workbook: workbook_upload("overtime_heavy"))
-    expect_golden("overtime_heavy", mosa_preview(data))
+    snapshot = mosa_preview(data)
+    snapshot["apply_error"] = expect_apply_blocked(data)
+    expect(run.payroll_items).to be_empty
+    expect_golden("overtime_heavy", snapshot)
   end
 
   it "blocks applying a Revel row with double-time hours" do
@@ -162,6 +163,41 @@ RSpec.describe "Payroll intake golden files", type: :request do
     snapshot["apply_error"] = expect_apply_blocked(data)
     expect(run.payroll_items).to be_empty
     expect_golden("doubletime", snapshot)
+  end
+
+  it "blocks a PDF row when double-time drifts outside its column and lets staff apply the other row" do
+    set_up_payroll_tax
+    other_worker = create_worker(IntakeGoldenWorkbooks::NEW_HIRE)
+    affected_row = revel_row_for(worker, regular: 40, total_hours: 42.25)
+    path = build_revel_pdf([ affected_row, revel_row_for(other_worker, regular: 39) ],
+      period_start: run.start_date, period_end: run.end_date) do |row|
+      next revel_row(**row) unless row[:name] == affected_row[:name]
+
+      # PDF::Reader places 2.25 after column 159, in the regular pay field.
+      fields = %w[- - - 40.00 0.00 - 2.25 - - 42.25 600.00 -]
+      row.fetch(:name).ljust(40) + fields.map { |value| value.rjust(8).ljust(20) }.join
+    end
+    parsed = PayrollImport::RevelPdfParser.parse(path).find { |row| row[:employee_name] == affected_row[:name] }
+    expect(parsed).to include(regular_hours: 40.0, overtime_hours: 0.0, doubletime_hours: 0.to_d, total_hours: 42.25)
+
+    data = preview(pdf: portal_upload("revel.pdf", File.binread(path), PDF_MIME), workbook: workbook_upload("overtime_heavy"))
+    expect(response).to have_http_status(:ok), response.body
+    review = data.fetch("preview")
+    expect(review.fetch("can_apply")).to be(false)
+    affected = review.fetch("source_rows").find { |row| row["employee_id"] == worker.id }
+    error = affected.fetch("errors").sole
+    expect(error).to include("code" => "hours_do_not_reconcile", "severity" => "error",
+      "message" => include("2.25 more hours", "Exclude this row", "in the worksheet"))
+    expect(expect_apply_blocked(data)).to eq(error.fetch("message"))
+    expect(run.payroll_items).to be_empty
+
+    included = review.fetch("source_rows").find { |row| row["employee_id"] == other_worker.id }
+    apply_import(data, rows: [
+      { id: affected.fetch("id"), disposition: "excluded", disposition_reason: "Enter the hours and pay in the worksheet." },
+      { id: included.fetch("id"), disposition: "included" }
+    ])
+    expect(response).to have_http_status(:ok), response.body
+    expect(run.payroll_items.sole).to have_attributes(employee_id: other_worker.id, hours_worked: BigDecimal("39.00"))
   end
 
   it "matches an employee hired during the period by name in Revel and ID in the workbook" do

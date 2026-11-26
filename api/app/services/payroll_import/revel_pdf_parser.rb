@@ -288,6 +288,7 @@ module PayrollImport
         doubletime_hours: values[:doubletime_hours] || 0.to_d,
         regular_pay: values[:regular_pay] || 0.0,
         overtime_pay: values[:overtime_pay] || 0.0,
+        doubletime_pay: values[:doubletime_pay] || 0.to_d,
         total_hours: values[:total_hours] || 0.0,
         total_pay: values[:total_pay] || 0.0,
         hourly_rate: hourly_rate
@@ -341,10 +342,10 @@ module PayrollImport
       case field
       when :employee
         raw
-      when :doubletime_hours
+      when :doubletime_hours, :doubletime_pay
         BigDecimal(raw.delete(","), exception: false)
       when :regular_hours, :overtime_hours,
-           :regular_pay, :overtime_pay, :doubletime_pay,
+           :regular_pay, :overtime_pay,
            :total_hours, :total_pay
         clean = raw.gsub(",", "")
         begin

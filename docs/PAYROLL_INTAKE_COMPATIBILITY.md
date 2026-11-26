@@ -13,7 +13,7 @@ bundle exec ruby spec/fixtures/files/payroll_intake_golden/build_workbooks.rb
 | Workbook | Behavior captured in JSON |
 | --- | --- |
 | `normal.xlsx` | v2 hours, both tip pools, and a first apply with tips paid out and a non-taxable reimbursement. Also used for workbook-only rejection, a wrapped Revel name with conflicting report dates, and an applied portal revision with an audit entry. |
-| `overtime_heavy.xlsx` | Source-reported overtime with inconsistent Revel totals. Also used for the double-time apply block and to remove an omitted reimbursement on re-import after a worksheet edit. |
+| `overtime_heavy.xlsx` | Source-reported overtime with unaccounted Revel hours blocks apply. Also used to verify the double-time apply block and removal of an omitted reimbursement on re-import after a worksheet edit. |
 | `new_hire.xlsx` | A mid-period hire matches by name in Revel and by ID in the workbook. |
 | `terminated.xlsx` | Both sources flag the terminated worker for review and leave the rows unmatched for pay. |
 | `legacy.xlsx` | Row-4 legacy headers and date and workweek warnings. Apply requires saved tip treatment, deducts a direct loan, and clears an imported bonus with explicit zero. |
@@ -28,7 +28,7 @@ bundle exec ruby spec/fixtures/files/payroll_intake_golden/build_workbooks.rb
 
 The PDF-only fixture applies after staff records the missing-workbook waiver. The email fixture covers both a total mismatch and a successful apply with weekly overtime and already-paid tips.
 
-A Revel totals line ends the table. The parser skips its declared totals. The preview retains double-time hours as a decimal, and positive double-time hours block apply. Staff can review the hours and enter the double-time pay manually or contact Cornerstone.
+A Revel totals line ends the table. The parser skips its declared totals. The preview retains double-time hours and pay as decimals. Positive double-time hours or pay block apply, as does an employee's reported total when it exceeds the accounted hours by more than 0.01. Staff can exclude the affected row, apply the rest, then enter the employee's hours and pay in the worksheet.
 
 ## Blockers for the next steps
 

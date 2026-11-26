@@ -35,7 +35,9 @@ module RevelPdfFixtureHelper
           first_line, name = name.split("\n", 2)
           pdf.text(first_line, size: 4)
         end
-        pdf.text(revel_row(**row.merge(name: name)), size: 4)
+        row = row.merge(name: name)
+        text = block_given? ? yield(row) : revel_row(**row)
+        pdf.text(text, size: 4)
       end
       total_hours = reported_total_hours || rows.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours)) }
       total_pay = rows.sum { |row| row.fetch(:total_pay, row.fetch(:regular_pay)) }
