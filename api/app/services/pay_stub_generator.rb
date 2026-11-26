@@ -536,8 +536,8 @@ class PayStubGenerator
   def printable_deduction_rows
     deductions_data = []
 
-    taxes = tax_lines
-    taxes.first(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), (format_currency(ytd) if ytd) ] }
+    taxes = tax_lines.map { |label, amount, ytd| [ label, format_currency(amount), (format_currency(ytd) if ytd) ] }
+    deductions_data << taxes.first if taxes.any?
 
     if taxes.empty?
       # A contractor statement prints no tax rows or notes.
@@ -555,7 +555,7 @@ class PayStubGenerator
       ]
     end
 
-    taxes.drop(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), (format_currency(ytd) if ytd) ] }
+    deductions_data.concat(taxes.drop(1))
 
     statement_ytd_breakdown.deductions.each do |row|
       deductions_data << [ pay_stub_deduction_label(row), format_currency(row.current), format_currency(row.ytd) ]

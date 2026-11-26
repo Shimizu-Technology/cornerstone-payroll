@@ -58,8 +58,9 @@ describe('saved paycheck explanation', () => {
     const html = renderToStaticMarkup(<PaycheckWithholdingContext item={item} />);
     expect(html).toContain('$2,000.00');
     expect(html).toContain('annual credit');
+    expect(html).toContain('reduce Guam income tax to zero');
     expect(html).toContain('Election #445');
-    expect(html).toContain('manual federal withholding override of $0.00');
+    expect(html).toContain('manual Guam income tax override of $0.00');
   });
   it('does not substitute current setup when a historical snapshot is unavailable', () => {
     expect(renderToStaticMarkup(<PaycheckWithholdingContext item={{} as PayrollItem} />)).toContain('No W-4 snapshot was retained');
