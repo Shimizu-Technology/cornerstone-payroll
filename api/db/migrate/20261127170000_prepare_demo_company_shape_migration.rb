@@ -71,18 +71,16 @@ class PrepareDemoCompanyShapeMigration < ActiveRecord::Migration[8.1]
     select_value("SELECT current_schema()")
   end
 
-  # The same policy RlsDatabase.install! creates. A database that hasn't had
-  # the installer run yet gets it from the next `rls:install` or schema load.
+  # Stage the company policy on the new protected table and preserve the
+  # enforcement phase of the employee surface already in place.
   def stage_company_policy(table)
-    return unless select_value("SELECT to_regprocedure('app_current_company_id()') IS NOT NULL")
+    execute File.read(Rails.root.join("db/rls_policies.sql"))
+    execute "SELECT pg_temp.install_company_policy(current_schema(), #{connection.quote(table.to_s)}, NULL, NULL, false)"
+    return unless connection.select_value("SELECT relrowsecurity FROM pg_class WHERE oid = 'employee_account_links'::regclass")
 
     quoted = quote_table_name(table)
-    execute "DROP POLICY IF EXISTS company_isolation ON #{quoted}"
-    execute <<~SQL.squish
-      CREATE POLICY company_isolation ON #{quoted}
-      USING (current_setting('app.rls_mode', true) = 'system' OR (company_id = app_current_company_id()))
-      WITH CHECK (current_setting('app.rls_mode', true) = 'system' OR (company_id = app_current_company_id()))
-    SQL
+    execute "ALTER TABLE #{quoted} ENABLE ROW LEVEL SECURITY"
+    execute "ALTER TABLE #{quoted} FORCE ROW LEVEL SECURITY"
   end
 
   def restore_previous_demo_guards
