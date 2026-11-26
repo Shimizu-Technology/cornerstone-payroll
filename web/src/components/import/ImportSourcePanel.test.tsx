@@ -74,20 +74,20 @@ it('keeps the review open when the PDF chunk fails and retries the loader in pla
   expect(screen.queryByText('The PDF preview could not load.')).toBeNull();
 });
 
-it('tells the user to reload after a second consecutive PDF preview failure and keeps Download prominent', async () => {
+it('advises saving and reloading after a second consecutive PDF preview failure while keeping Retry and promoting Download', async () => {
   mocks.loadPdf
     .mockImplementationOnce(() => { throw new Error('Could not fetch preview chunk'); })
     .mockImplementationOnce(() => { throw new Error('Transitive chunk failed'); });
   render(<ImportSourcePanel payPeriodId={9} importId={30} documents={[pdf]} />, { onCaughtError: () => {} });
 
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'The PDF preview could not load.');
-  expect(screen.queryByText(/Reload the page to try again/)).toBeNull();
+  expect(screen.queryByText(/save your review and reload the page/)).toBeNull();
 
   fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
 
-  expect(await screen.findByText('Reload the page to try again.')).toBeTruthy();
-  expect(screen.queryByRole('button', { name: 'Retry preview' })).toBeNull();
-  expect(screen.getByRole('button', { name: 'Reload page' })).toBeTruthy();
+  expect(await screen.findByText("If the preview still won't load, save your review and reload the page.")).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Retry preview' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull();
   const downloadBtn = screen.getByRole('button', { name: 'Download PDF' });
   expect(downloadBtn.className).toContain('bg-primary-700');
 });

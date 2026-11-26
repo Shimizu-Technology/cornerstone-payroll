@@ -16,6 +16,8 @@ export interface EmployeeAppAccess extends EmployeeName {
   enabled: boolean;
   can_manage_invites: boolean;
   staff_actions: boolean;
+  /** Printed sign-up codes are for Cornerstone staff only; clients invite by email. */
+  can_print_codes?: boolean;
   access_id: number | null;
   activated_at?: string | null;
   invited_by_name?: string | null;
@@ -48,6 +50,7 @@ export type RolloutCount = 'ready_to_invite' | 'invited' | 'active' | 'needs_con
 export interface EmployeeAppRollout {
   enabled: boolean;
   can_manage_invites: boolean;
+  can_print_codes?: boolean;
   max_wave_size: number;
   counts: Record<RolloutCount, number>;
   candidates: (EmployeeName & { email: string | null; email_ready: boolean; email_review_required: boolean })[];

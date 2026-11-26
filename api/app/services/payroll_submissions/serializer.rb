@@ -122,6 +122,9 @@ module PayrollSubmissions
     end
 
     def allowed_actions(entry)
+      # A Client viewer reads the period; ClientPortalAccess refuses its writes.
+      return [] if @user&.client_viewer?
+
       record = entry.record
       status = record&.status || "waiting_for_files"
       run = @catalog.live_pay_period(entry)

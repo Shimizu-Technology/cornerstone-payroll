@@ -224,7 +224,7 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
               <p role="alert" className="text-sm text-neutral-700">The PDF preview could not load.</p>
               {preview.attempt >= 1 && (
-                <p className="max-w-sm text-sm text-neutral-600">Reload the page to try again.</p>
+                <p className="max-w-sm text-sm text-neutral-600">If the preview still won&apos;t load, save your review and reload the page.</p>
               )}
               <div className="flex flex-wrap justify-center gap-2">
                 <Button
@@ -236,16 +236,10 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
                 >
                   Download PDF
                 </Button>
-                {preview.attempt >= 1 ? (
-                  <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => window.location.reload()}>
-                    Reload page
-                  </Button>
-                ) : (
-                  <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => {
-                    const nextAttempt = preview.attempt + 1;
-                    setPreview({ View: createPdfPreview(retryChunk(error, nextAttempt)), attempt: nextAttempt });
-                  }}>Retry preview</Button>
-                )}
+                <Button type="button" variant="outline" size="sm" className="max-sm:min-h-11" onClick={() => {
+                  const nextAttempt = preview.attempt + 1;
+                  setPreview({ View: createPdfPreview(retryChunk(error, nextAttempt)), attempt: nextAttempt });
+                }}>Retry preview</Button>
               </div>
             </div>
           )}>

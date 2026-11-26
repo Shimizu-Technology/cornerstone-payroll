@@ -25,6 +25,9 @@ it.each([
   expect(document.querySelector('main h1')?.textContent).toBe(title);
   expect(document.querySelector('.version')?.textContent).toContain('Version 2026-12-01-draft');
   expect(document.querySelector('time')?.dateTime).toBe('2026-12-01');
+  for (const link of document.querySelectorAll('header a, footer a')) {
+    expect(getComputedStyle(link).minHeight).toBe('44px');
+  }
   const notice = document.querySelector('.draft-notice')!;
   expect(notice.textContent).toBe('Draft — pending legal review');
   expect(getComputedStyle(notice).display).not.toBe('none');

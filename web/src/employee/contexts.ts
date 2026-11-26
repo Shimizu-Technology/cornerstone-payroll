@@ -11,9 +11,10 @@ export function useBrand(): EmployeeBrand {
 
 export interface EmployeeAuthValue {
   isSignedIn: boolean;
+  email?: string | null;
   /** `fresh` skips the token cache, so a reverification that just finished counts. */
   getToken: (options?: { fresh?: boolean }) => Promise<string | null>;
-  signOut: () => Promise<void>;
+  signOut: (redirectTo?: '/' | '/claim') => Promise<void>;
   /** The sign-in form. `redirectTo` is the app path to open after signing in. */
   SignInForm: ComponentType<{ redirectTo: string }>;
   /** Clerk's sign-up, opened from the invitation link the API returns. `redirectTo` opens after. */
@@ -99,7 +100,7 @@ export function useEmployeeSession(): EmployeeSessionValue {
 
 export interface SignOutValue {
   /** Signs out and resolves true, or shows "Couldn't sign you out" and resolves false. */
-  signOut: () => Promise<boolean>;
+  signOut: (redirectTo?: '/' | '/claim') => Promise<boolean>;
 }
 
 export const SignOutContext = createContext<SignOutValue | null>(null);

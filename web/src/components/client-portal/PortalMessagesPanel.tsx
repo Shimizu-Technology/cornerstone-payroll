@@ -12,6 +12,7 @@ import { InboxReturnLink } from './InboxReturnLink';
 import { ResourceActivity, type ResourceActivityApi } from './ResourceActivity';
 import { useDisplayedMessages } from './useDisplayedMessages';
 import { MessageComposer, type ComposerSend } from './MessageComposer';
+import { ViewOnlyNotice } from './ViewOnlyNotice';
 import { MessageAttachments } from './MessageAttachments';
 import { FileRequestCard } from './FileRequestCard';
 import { stepLabel, type PortalDocumentsApi } from './portalFiles';
@@ -102,7 +103,9 @@ function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDoc
   refreshCompanies: () => Promise<void>;
 }): ReactElement {
   const panelRef = useRef<HTMLDivElement>(null);
-  const { user } = useAuth();
+  const { user, isClientViewer } = useAuth();
+  // A Client viewer reads conversations but can't start or answer them.
+  const viewOnly = audience === 'client' && isClientViewer === true;
   // Drafts belong to one person and one client.
   const draftScope = `${user?.id ?? 'anonymous'}:${companyId}`;
   const [searchParams, setSearchParams] = useSearchParams();
@@ -645,6 +648,7 @@ function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDoc
         </div>}
         <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className={`${mobileConversationOpen ? 'hidden lg:block' : 'block'} min-w-0 space-y-4`}>
+            {viewOnly ? <ViewOnlyNotice className="rounded-lg border border-neutral-200 bg-neutral-50 p-4" /> : <>
             <div className="flex flex-wrap gap-2 lg:hidden">
               <Button type="button" variant={newFormOpen ? 'outline' : 'primary'} aria-expanded={newFormOpen} aria-controls="portal-new-conversation" onClick={() => setNewFormOpen(open => !open)}>
                 <Plus className="mr-2 h-4 w-4" aria-hidden />{newFormOpen ? 'Hide new conversation' : 'New conversation'}
@@ -684,6 +688,7 @@ function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDoc
                 actions={staff ? <Button type="button" variant="ghost" className="hidden lg:inline-flex" disabled={unavailable} onClick={() => setRequestOpen({ threadId: null, subject: null })}><FileQuestion className="mr-2 h-4 w-4" aria-hidden />Request a file</Button> : undefined}
               />
             </div>
+            </>}
 
             <label className="block text-xs font-medium text-neutral-600">Show
               <Select value={filter} onChange={event => changeFilter(event.target.value)}>
@@ -778,9 +783,11 @@ function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDoc
 
                 <ResourceActivity key={selectedThread.id} id={selectedThread.id} api={api} revision={selectedThread.updated_at} />
                 <div className="border-t border-neutral-200 p-4">
-                  <MessageComposer key={selectedThread.id} draftKey={`${draftScope}:thread:${selectedThread.id}`} documentsApi={documentsApi}
-                    label={`Reply ${audienceLabel}`} placeholder={`Reply ${audienceLabel}`} submitLabel="Send" disabled={unavailable}
-                    onSend={payload => sendReply(selectedThread, payload)} />
+                  {viewOnly ? <ViewOnlyNotice /> : (
+                    <MessageComposer key={selectedThread.id} draftKey={`${draftScope}:thread:${selectedThread.id}`} documentsApi={documentsApi}
+                      label={`Reply ${audienceLabel}`} placeholder={`Reply ${audienceLabel}`} submitLabel="Send" disabled={unavailable}
+                      onSend={payload => sendReply(selectedThread, payload)} />
+                  )}
                 </div>
               </>
             ) : (

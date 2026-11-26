@@ -11,17 +11,17 @@ module ClientProfitability
     def self.parse(from, through)
       start_date = month(from, "from")
       end_date = month(through.presence || from, "through").end_of_month
-      raise ArgumentError, "The end month must be on or after the start month" if end_date < start_date
+      raise ReportValidationError, "The end month must be on or after the start month" if end_date < start_date
 
       months = ((end_date.year * 12) + end_date.month) - ((start_date.year * 12) + start_date.month) + 1
-      raise ArgumentError, "Choose at most #{MAX_MONTHS} months" if months > MAX_MONTHS
+      raise ReportValidationError, "Choose at most #{MAX_MONTHS} months" if months > MAX_MONTHS
 
       new(start_date, end_date)
     end
 
     def self.month(value, name)
       match = MONTH.match(value.to_s)
-      raise ArgumentError, "#{name} must be a month like 2026-10" unless match
+      raise ReportValidationError, "#{name} must be a month like 2026-10" unless match
 
       Date.new(match[1].to_i, match[2].to_i, 1)
     end

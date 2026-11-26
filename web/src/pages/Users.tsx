@@ -20,7 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { usersApi, companiesApi, ApiError } from '@/services/api';
-import type { User, UserRole } from '@/types';
+import type { ClientAccessLevel, User, UserRole } from '@/types';
 import type { CompanyListItem, InvitationDeliveryResponse } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { ClientManagementDialog } from '@/components/users/ClientManagementDialog';
@@ -44,7 +44,7 @@ const allRoleOptions: RoleOption[] = [
   { value: 'admin', label: 'Organization Admin (legacy)', scope: 'Every client in their organization', can: 'Same access as Organization Admin.', cannot: 'Legacy role name retained for existing accounts; use Organization Admin for new invitations.', assignment: 'Automatically receives all organization clients.', legacy: true },
   { value: 'manager', label: 'Manager', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees, configure client settings, and manage the shared printer-profile library.', cannot: 'Cannot manage users, organization tax configuration, or organization-wide audit history.', assignment: 'At least one payroll client should be assigned.' },
   { value: 'accountant', label: 'Accountant', scope: 'Only assigned payroll clients', can: 'Run payroll, manage employees and payroll fields, view assigned-client history, and create, select, or copy printer profiles.', cannot: 'Client management is off by default. An administrator can grant it separately for each assigned client. This never grants Users, source credentials, firm-wide settings, or another person’s printer-profile access.', assignment: 'At least one payroll client should be assigned.' },
-  { value: 'client', label: 'Client Portal User', scope: 'Only assigned client portal workspaces', can: 'Maintain employee records, upload documents, review payroll and reports, and submit approvals or change requests.', cannot: 'Cannot enter the internal payroll workspace, print checks, or see firm-wide settings and audit history.', assignment: 'Assign only the client companies this person represents.' },
+  { value: 'client', label: 'Client Portal User', scope: 'Only assigned client portal workspaces', can: 'As a Client manager: maintain employee records, upload documents, review payroll and reports, and submit approvals or change requests. A Client viewer can only view.', cannot: 'Cannot enter the internal payroll workspace, print checks, or see firm-wide settings and audit history.', assignment: 'Assign only the client companies this person represents.' },
   { value: 'employee', label: 'Employee', scope: 'No payroll workspace access today', can: 'Reserved for a future employee self-service experience.', cannot: 'Cannot currently sign in to staff or client payroll workspaces.', assignment: 'Do not use for active access until the employee portal is released.' },
 ];
 
@@ -73,6 +73,30 @@ function inviteFailureReason(response: InvitationDeliveryResponse): string {
 // The account list keeps the editor's "(legacy)" marker for older admin accounts.
 function accountRoleLabel(role: UserRole): string {
   return allRoleOptions.find((option) => option.value === role)?.label ?? roleLabel(role);
+}
+
+const clientAccessOptions: { value: ClientAccessLevel; label: string; hint: string }[] = [
+  { value: 'manager', label: 'Client manager', hint: 'Full client portal access: approve payroll, edit employees, upload documents, send messages and invite employees.' },
+  { value: 'viewer', label: 'Client viewer', hint: 'View only: sees payroll, employees, reports, documents and messages, and can’t change anything.' },
+];
+
+function clientAccessLabel(level: ClientAccessLevel | null | undefined): string {
+  return clientAccessOptions.find((option) => option.value === (level ?? 'manager'))?.label ?? 'Client manager';
+}
+
+function userRoleLabel(user: User): string {
+  return user.role === 'client' ? `${accountRoleLabel(user.role)} · ${clientAccessLabel(user.client_access_level)}` : accountRoleLabel(user.role);
+}
+
+function ClientAccessField({ value, onChange, disabled }: { value: ClientAccessLevel; onChange: (level: ClientAccessLevel) => void; disabled?: boolean }) {
+  return (
+    <div className="space-y-1">
+      <Select label="Client access" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value as ClientAccessLevel)}>
+        {clientAccessOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </Select>
+      <p className="text-xs text-neutral-600">{clientAccessOptions.find((option) => option.value === value)?.hint}</p>
+    </div>
+  );
 }
 
 type InviteFieldErrors = { email?: string; clients?: string };
@@ -128,6 +152,7 @@ export function Users() {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('accountant');
+  const [newClientAccess, setNewClientAccess] = useState<ClientAccessLevel>('manager');
   const [newError, setNewError, newErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   // Errors that belong to one field are shown under that field, not as a notice.
   const [newFieldErrors, setNewFieldErrors] = useState<InviteFieldErrors>({});
@@ -143,6 +168,10 @@ export function Users() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<UserRole>('employee');
+  const [editClientAccess, setEditClientAccess] = useState<ClientAccessLevel>('manager');
+  // The level the form opened with, so a list refresh mid-edit can't hide a
+  // change someone else made (expected_client_access_level).
+  const [editOpenedAccess, setEditOpenedAccess] = useState<ClientAccessLevel>('manager');
   const [editClientIds, setEditClientIds] = useState<number[]>([]);
   const [editError, setEditError, editErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -239,6 +268,7 @@ export function Users() {
     setNewName('');
     setNewEmail('');
     setNewRole('accountant');
+    setNewClientAccess('manager');
     setNewError(null);
     setNewFieldErrors({});
     setNewClientIds([]);
@@ -259,6 +289,7 @@ export function Users() {
         email: newEmail.trim(),
         name: newName.trim() || newEmail.trim().split('@')[0],
         role: newRole,
+        ...(newRole === 'client' ? { client_access_level: newClientAccess } : {}),
         company_ids: companyIds,
       };
       const response = await usersApi.create(payload);
@@ -305,6 +336,8 @@ export function Users() {
     setEditingId(user.id);
     setEditName(user.name);
     setEditRole(user.role);
+    setEditClientAccess(user.client_access_level ?? 'manager');
+    setEditOpenedAccess(user.client_access_level ?? 'manager');
     setEditClientIds(user.assigned_company_ids || []);
     setEditError(null);
     void loadCompanies();
@@ -315,12 +348,20 @@ export function Users() {
     setIsSavingEdit(true);
     setEditError(null);
     try {
-      const payload: { name: string; role: UserRole; company_ids?: number[] } = {
+      const editingUser = users.find(user => user.id === editingId);
+      const loadedAccess = editOpenedAccess;
+      const payload: {
+        name: string; role: UserRole; client_access_level?: ClientAccessLevel; expected_client_access_level?: ClientAccessLevel; company_ids?: number[];
+      } = {
         name: editName.trim(),
         role: editRole,
+        // Only an access level the admin changed is sent, with the level they
+        // saw, so a stale form can't quietly undo someone else's change.
+        ...(editRole === 'client' && editClientAccess !== loadedAccess
+          ? { client_access_level: editClientAccess, expected_client_access_level: loadedAccess }
+          : {}),
       };
 
-      const editingUser = users.find(user => user.id === editingId);
       if (editingUser?.practice_company_id) {
         // A practice-only login keeps exactly its own copy. A closed copy is
         // changed with Move, so a rename never touches its assignment.
@@ -698,6 +739,7 @@ export function Users() {
               </Select>
             </div>
             <RoleHint role={roleOptions.find((role) => role.value === newRole)} />
+            {newRole === 'client' && <div className="mt-3 max-w-md"><ClientAccessField value={newClientAccess} onChange={setNewClientAccess} disabled={isSavingNew} /></div>}
 
             {needsClientAssignment(newRole) && (
               <div className="mt-4 pt-4 border-t border-neutral-200">
@@ -753,6 +795,7 @@ export function Users() {
                               <option key={role.value} value={role.value}>{role.label}</option>
                             ))}
                           </Select>
+                          {editRole === 'client' && <ClientAccessField value={editClientAccess} onChange={setEditClientAccess} disabled={isSavingEdit} />}
                           {user.practice_company_id ? renderPracticeLoginPanel(user) : needsClientAssignment(editRole) ? renderClientAssignmentPicker(editClientIds, setEditClientIds, editRole) : (
                             <p className="rounded-xl bg-neutral-50 p-3 text-sm text-neutral-500">
                               This role does not use payroll client assignments. Saving will clear any existing client assignments.
@@ -780,7 +823,7 @@ export function Users() {
                             <StatusBadges user={user} />
                           </div>
                           <div className="mt-4 grid grid-cols-2 gap-3">
-                            <MobileField label="Role" value={accountRoleLabel(user.role)} />
+                            <MobileField label="Role" value={userRoleLabel(user)} />
                             <MobileField label="Last active" value={user.last_active_at ? formatGuamDateTime(user.last_active_at, { second: undefined }) : '—'} />
                           </div>
                           <div className="mt-3">{renderAssignedCompanies(user)}</div>
@@ -842,15 +885,18 @@ export function Users() {
                       </TableCell>
                       <TableCell className="min-w-[10rem] whitespace-normal">
                         {editingId === user.id ? (
-                          <Select aria-label="Role" value={editRole} disabled={Boolean(user.practice_company_id)} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
-                            {editRoleOptions.map((role) => (
-                              <option key={role.value} value={role.value}>{role.label}</option>
-                            ))}
-                          </Select>
+                          <div className="space-y-2">
+                            <Select aria-label="Role" value={editRole} disabled={Boolean(user.practice_company_id)} onChange={(e) => handleEditRoleChange(e.target.value as UserRole)}>
+                              {editRoleOptions.map((role) => (
+                                <option key={role.value} value={role.value}>{role.label}</option>
+                              ))}
+                            </Select>
+                            {editRole === 'client' && <ClientAccessField value={editClientAccess} onChange={setEditClientAccess} disabled={isSavingEdit} />}
+                          </div>
                         ) : (
                           <div>
                             <span className="inline-flex items-center gap-1.5">
-                              {accountRoleLabel(user.role)}
+                              {userRoleLabel(user)}
                             </span>
                             {renderAssignedCompanies(user)}
                           </div>

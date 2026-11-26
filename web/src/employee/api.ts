@@ -2,9 +2,9 @@
 // (except sign-up's activation, made before any session); every call except
 // links, claim and reactivate also carries X-Employee-Link-Id.
 // The API answers every employee failure with a bare 404 so it never reveals
-// whether a person or record exists, and this client keeps it that way: a 404
-// only ever becomes "unavailable" or "access ended", never a reason. The one
-// 403 it reads is two-step sign-in (MfaEnforceable, RecentVerification).
+// whether a person or record exists. Recheck the link before using a scoped
+// 404 to close the session. The client still never distinguishes inaccessible
+// from missing records. Recognized 403s handle two-step sign-in and step-up.
 // Response shapes live in contracts.ts.
 import { SUPPORT_HEADER } from '@/support/grant';
 import {
@@ -22,10 +22,11 @@ import {
  * - mfa_required: 403, this session didn't finish two-step sign-in.
  */
 export type EmployeeApiErrorKind =
-  | 'not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
+  | 'not_found' | 'resource_not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
   | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
-  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'terms_updated';
+  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'terms_updated'
+  | 'email_mismatch' | 'code_retired';
 
 export class EmployeeApiError extends Error {
   readonly kind: EmployeeApiErrorKind;
@@ -120,6 +121,11 @@ export function errorForStatus(status: number, retryAfterHeader: string | null =
   if (status === 401) return new EmployeeApiError('unauthorized', status);
   if (status === 403 && code === 'mfa_enrollment_required') return new EmployeeApiError('mfa_enrollment_required', status);
   if (status === 403 && code === 'mfa_required') return new EmployeeApiError('mfa_required', status);
+  // Sign-up and claim name these only after the invite check passed
+  // (EmployeeLinks::EMAIL_MISMATCH, CODE_RETIRED), so they reveal nothing.
+  if ((status === 403 || status === 422) && (code === 'email_mismatch' || code === 'code_retired')) {
+    return new EmployeeApiError(code, status);
+  }
   // Any other 403 is treated like 404 so nothing leaks.
   if (status === 403 || status === 404) return new EmployeeApiError('not_found', status);
   if (status === 429 && code === 'email_code_daily_limit') return new EmployeeApiError(code, status);
@@ -219,12 +225,13 @@ function statementsQuery(year: number | null, page: number): string {
 }
 
 function pathId(value: string): string {
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(value)) throw new EmployeeApiError('not_found');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(value)) throw new EmployeeApiError('resource_not_found');
   return value;
 }
 
 export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (...args) => fetch(...args), isOnline = () => navigator.onLine }: EmployeeApiOptions) {
   const base = parseApiBase(baseUrl);
+  const contextUrl = employeeUrl(base, '/employee/context');
 
   async function sessionToken(fresh = false): Promise<string> {
     let token: string | null;
@@ -273,7 +280,14 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
         if (hint) throw new StepUpRequiredError(hint);
         code = record(body)?.code ?? null;
       }
-      throw errorForStatus(response.status, response.headers.get('Retry-After'), code);
+      const error = errorForStatus(response.status, response.headers.get('Retry-After'), code);
+      if (error.kind === 'not_found' && linkId && url.pathname !== contextUrl.pathname && !signal?.aborted) {
+        // A missing record and a closed link have the same response. Only the
+        // separate context check can confirm that the link itself stopped working.
+        await send(contextUrl, { linkId, signal }, 'application/json');
+        throw new EmployeeApiError('resource_not_found', response.status);
+      }
+      throw error;
     }
     return response;
   }
@@ -424,9 +438,8 @@ export type EmployeeApi = ReturnType<typeof createEmployeeApi>;
 export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'error' | 'mfa_setup' | 'mfa_required';
 
 /**
- * A 404 before the shell has opened means the app is off for this employer or
- * the user has no link here: "isn't available". A 404 after it opened means the
- * link stopped working mid-session (revoked or former access ran out): "ended".
+ * A failed link check means "isn't available" during setup and "access ended"
+ * after the link has already opened. A resource failure stays on its screen.
  */
 export function problemFor(error: unknown, { opened }: { opened: boolean }): EmployeeProblem {
   if (!(error instanceof EmployeeApiError)) return 'error';

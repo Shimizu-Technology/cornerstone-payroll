@@ -1280,6 +1280,12 @@ module Api
             render json: { error: error.message, problems: error.problems }, status: :unprocessable_entity
           when FilingValidationError
             render json: { error: error.message, problems: [ error.message ] }, status: :unprocessable_entity
+          when HistoricalPayrollFilingSource::BridgeValidationError
+            render json: {
+              error: error.message,
+              code: error.code,
+              historical_import_batch_ids: error.historical_import_batch_ids
+            }, status: :unprocessable_entity
           when ReportValidationError, PayrollReportingPeriod::InvalidPeriod, Form941GuAggregator::MissingWageBase, W2GuAggregator::MissingWageBase,
             PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError
             render json: { error: error.message }, status: :unprocessable_entity
@@ -4396,7 +4402,7 @@ module Api
             rows = (report[:company_totals] || {}).map do |key, value|
               label = case key.to_sym
               when :source_labeled_after_tax_401k_in_pretax_bucket
-                "Historical 401(k) labeled after-tax (source pre-tax bucket)"
+                "401(k) after-tax (imported as pre-tax)"
               when :withholding_tax then "Federal/Guam income tax"
               when :social_security_tax then "Social Security tax"
               when :medicare_tax then "Medicare tax"

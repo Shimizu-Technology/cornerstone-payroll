@@ -11,8 +11,13 @@ module EmployeeLinks
   # organization, have no other open link at that company, and either be the
   # login the invite was routed to (confirmed as the same person, M4-3) or
   # carry the employee's first and last name. Every refusal is the same
-  # generic failure.
+  # generic failure, except these, named once the check passed
+  # (EmployeeLinks.claim_email_refusal): refusal == :email_mismatch when the
+  # Clerk account's verified primary email isn't the employee's email on file
+  # with proof of the inbox, or :code_retired for a code staff didn't issue.
   class Claim
+    attr_reader :refusal
+
     def self.call(...)
       new(...).call
     end
@@ -33,6 +38,7 @@ module EmployeeLinks
     def call
       return unless user_allowed?
 
+      @identity = clerk_identity
       replaced_invitation = nil
       # The claimant (and an abandoned pending sign-up on the link) are locked
       # before the link, so two claims by one login serialize and the second
@@ -40,7 +46,15 @@ module EmployeeLinks
       # A link on the other side of the demo boundary is refused before
       # anything on it is locked, counted or written. The login is re-read
       # each time, so the check under the lock sees its current home company.
-      admit = ->(link) { EmployeeLinks.demo_boundary_allows?(@user.reload, link.company) && EmployeeAppSwitch::Enforcement.demo_request_allowed?(link.company) }
+      # The demo session (azp) and browser Origin rules are part of admission,
+      # so a request that could never claim a demo link isn't counted as a
+      # guess against it (claimable? re-checks them under the lock).
+      origin = @request&.headers&.[]("Origin")
+      admit = lambda do |link|
+        EmployeeLinks.demo_boundary_allows?(@user.reload, link.company) &&
+          EmployeeAppSwitch::Enforcement.demo_request_allowed?(link.company) &&
+          EmployeeLinks.demo_request_allowed?(link.company, @azp) && EmployeeLinks.demo_origin_allowed?(link.company, origin)
+      end
       link = Verify.call(**@check, request: @request, admit: admit, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
         # Re-read the login under its lock (taken before the link's).
         @user.reload
@@ -89,8 +103,20 @@ module EmployeeLinks
       return false if link.user_id.present? && link.user_id != @user.id && !pending_sign_up?(link.user)
       return false if EmployeeAccountLink.where(user_id: @user.id, company_id: link.company_id, status: %w[invited active])
         .where.not(id: link.id).exists?
+      return false unless same_person?(link)
 
-      same_person?(link)
+      @refusal = EmployeeLinks.claim_email_refusal(link, @identity)
+      @refusal.nil?
+    end
+
+    # The signed-in Clerk account's addresses, read before any lock (Clerk
+    # calls stay outside transactions). nil when Clerk can't answer.
+    def clerk_identity
+      clerk_user = @clerk.fetch_user(@user.clerk_id)
+      ClerkInvitationService.email_summary(clerk_user) if clerk_user
+    rescue StandardError => error
+      Rails.logger.warn("[EmployeeLinks::Claim] Could not read the Clerk account: #{error.class}")
+      nil
     end
 
     def same_person?(link)

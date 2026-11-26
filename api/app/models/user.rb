@@ -4,6 +4,9 @@ require "digest"
 
 class User < ApplicationRecord
   INVITATION_STATUSES = %w[pending accepted].freeze
+  # A client portal login's access: manager (everything a client can do) or
+  # viewer (read-only; ClientPortalAccess refuses every write).
+  CLIENT_ACCESS_LEVELS = %w[manager viewer].freeze
   PRIMARY_PLATFORM_OWNER_EMAIL = "shimizutechnology@gmail.com"
 
   belongs_to :organization
@@ -42,6 +45,7 @@ class User < ApplicationRecord
   validates :name, presence: true
   validates :role, presence: true
   validates :invitation_status, inclusion: { in: INVITATION_STATUSES }
+  validates :client_access_level, inclusion: { in: CLIENT_ACCESS_LEVELS }
   # Why the login was last deactivated (M4-2). Only last_employee_link_closed
   # lets a rehired employee reactivate it themselves; an admin's deactivation
   # (any path that doesn't name a reason) never can.
@@ -55,6 +59,9 @@ class User < ApplicationRecord
   validate :demo_identity_is_fixed, on: :update
 
   before_validation :default_organization_from_company
+  # Only client logins have a client access level; any other role keeps the
+  # default, so a later role change back to client never starts read-only.
+  before_validation { self.client_access_level = "manager" unless client? }
   before_save :record_deactivation, if: :will_save_change_to_active?
   before_destroy :prevent_platform_owner_destroy
   after_update_commit :disconnect_cable_after_deactivation, if: :saved_change_to_active?
@@ -108,6 +115,10 @@ class User < ApplicationRecord
 
   def platform_admin?
     super_admin?
+  end
+
+  def client_viewer?
+    client? && client_access_level == "viewer"
   end
 
   # A Clerk session proves identity, but the local payroll account remains the

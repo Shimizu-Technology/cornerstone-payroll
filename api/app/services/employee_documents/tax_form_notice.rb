@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "cgi"
-
 module EmployeeDocuments
   # The "IMPORTANT TAX RETURN DOCUMENT AVAILABLE" email for a posted W-2GU
   # copy (M4-5). The subject is the wording 26 CFR 31.6051-1(j) requires for
@@ -107,18 +105,29 @@ module EmployeeDocuments
     end
 
     def payload(document, to)
-      employer = document.company.name
-      origin = EmployeeLinks::AppUrl.origin_for(document.company)
-      lines = [
-        "Your #{document.tax_year} Form W-2GU from #{employer} is now available in your employee app.",
-        (origin ? "Sign in to view or download it: #{origin}/taxes" : "Sign in to your employee app to view or download it."),
-        "You'll also get a paper copy, the same way as other years. If you weren't expecting this email, contact #{employer}."
-      ]
-      {
-        from: PortalNotifications::Transport.from_email, to: to, subject: SUBJECT,
-        text: lines.join("\n\n"),
-        html: lines.map { |line| "<p>#{CGI.escapeHTML(line)}</p>" }.join
-      }
+      brand = EmployeeEmails::Brand.for(document.company)
+      message(brand, tax_year: document.tax_year, employer: document.company.name,
+        app_url: EmployeeLinks::AppUrl.origin_for(document.company)).payload(to: to)
+    end
+
+    # The notice's sentences are its approved wording; keep them word for
+    # word. The button opens the app's tax forms page, never a document.
+    def message(brand, tax_year:, employer:, app_url:)
+      available = "Your #{tax_year} Form W-2GU from #{employer} is now available in your employee app."
+      paper = "You'll also get a paper copy, the same way as other years. If you weren't expecting this email, contact #{employer}."
+      taxes_url = "#{app_url}/taxes" if app_url
+      EmployeeEmails::Message.new(
+        brand: brand,
+        subject: SUBJECT,
+        heading: "Important tax return document available",
+        paragraphs: [ available, ("Sign in to your employee app to view or download it." unless taxes_url) ].compact,
+        action: (taxes_url && {
+          label: "Open the employee app", url: taxes_url, lead: "Sign in to view or download it.",
+          text_line: "Sign in to view or download it: #{taxes_url}"
+        }),
+        closing: [ paper ],
+        preheader: "Your #{tax_year} Form W-2GU is ready in your employee app."
+      )
     end
   end
 end
