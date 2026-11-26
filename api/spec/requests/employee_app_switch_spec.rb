@@ -733,6 +733,9 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
       expect(window.reload.retired_at).to be_present
       expect(window.status).to eq("retired")
+      CloseExpiredDemoEarlyAccessJob.perform_now
+      audit = AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: window.id).sole
+      expect(audit).to have_attributes(organization_id: organization.id, company_id: nil, actor_type: "system_job")
 
       allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
       EmployeeAppSwitch::Enforcement.reset_cache!
@@ -852,6 +855,47 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         expect(audit.metadata).to include("turned_off" => [ "employee_portal_enabled", "employee_portal.features.stubs" ])
         expect(audit.actor_type).to eq("system_job")
       end
+    end
+
+    it "keeps a verified company-scoped demo open and leaves retirement and its audit to the system sweep" do
+      window = open_window_for(demo, expires_on: PayrollBusinessClock.today + 5)
+      turn_on_directly!(demo, %w[employee_portal_enabled])
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+      EmployeeAppSwitch::Enforcement.reset_cache!
+
+      TenantScope.with_company(demo.id) do
+        expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+        expect(window.reload.retired_at).to be_nil
+      end
+
+      2.times { CloseExpiredDemoEarlyAccessJob.perform_now }
+      expect(window.reload.retired_at).to be_present
+      audit = AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: window.id).sole
+      expect(audit).to have_attributes(organization_id: organization.id, company_id: nil, actor_type: "system_job")
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+    end
+
+    it "rolls back retirement if its organization audit fails and retries without losing a window" do
+      window = open_window_for(demo, expires_on: PayrollBusinessClock.today + 5)
+      allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
+      first_attempt = true
+      allow(AuditLog).to receive(:record!).and_wrap_original do |record, **attributes|
+        if attributes[:action] == EmployeeAppSwitch::Enforcement::RETIRED_ACTION && first_attempt
+          first_attempt = false
+          raise ActiveRecord::RecordInvalid
+        end
+
+        record.call(**attributes)
+      end
+
+      CloseExpiredDemoEarlyAccessJob.perform_now
+      expect(window.reload.retired_at).to be_nil
+      expect(AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: window.id)).to be_empty
+
+      2.times { CloseExpiredDemoEarlyAccessJob.perform_now }
+      expect(window.reload.retired_at).to be_present
+      expect(AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: window.id).sole)
+        .to have_attributes(organization_id: organization.id, company_id: nil)
     end
 
     it "closes right away when an admin ends the window, and retires windows once the database enforces RLS" do

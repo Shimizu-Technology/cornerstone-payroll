@@ -143,34 +143,43 @@ module EmployeeAppSwitch
       demo_open?(company, today: today) && demo_reader_allowed?(company)
     end
 
-    # Once enforcement is verified, every open window retires for good.
-    # retired_at is the durable record; the audit row is written where an
-    # organization-wide row fits the scope (the sweep, a system request) and
-    # logged otherwise. Never raises: a failed write is retried on the next
-    # read or sweep.
+    # Company and support reads can open the demo as soon as enforcement is
+    # verified. The system sweep can retire any windows those reads leave open.
     def retire_windows!(now: Time.current)
-      windows = EmployeeAppEarlyAccessWindow.open.order(:id).to_a
-      return 0 if windows.empty?
+      return 0 if TenantScope.current&.mode == "company" || Current.view_as_grant
 
-      count = EmployeeAppEarlyAccessWindow.where(id: windows.map(&:id)).open.update_all(retired_at: now, updated_at: now)
-      Rails.logger.info("[EmployeeAppSwitch::Enforcement] retired early access windows=#{windows.map(&:id).join(',')}")
-      windows.each { |window| audit_retired!(window) } if count.positive? && TenantScope.current&.mode != "company"
+      actor = AuditActor.system_job(name)
+      count = TenantScope.as_system(reason: "Retire verified demo early access and record organization audits") do
+        Current.with_isolated_actor(actor) do
+          EmployeeAppEarlyAccessWindow.transaction(requires_new: true) do
+            # Set, end, and emergency stop lock the organization before the window.
+            # Skip a busy organization so a reader holding other locks can return.
+            open_windows = EmployeeAppEarlyAccessWindow.open
+            organization_ids = Organization.where(id: open_windows.select(:organization_id)).order(:id)
+              .lock("FOR KEY SHARE SKIP LOCKED").pluck(:id)
+            windows = open_windows.where(organization_id: organization_ids).order(:id).lock.to_a
+            windows.each do |window|
+              window.update!(retired_at: now, updated_at: now)
+              audit_retired!(window, actor: actor)
+            end
+            windows.size
+          end
+        end
+      end
+      Rails.logger.info("[EmployeeAppSwitch::Enforcement] retired early access windows=#{count}") if count.positive?
       count
     rescue StandardError => error
       Rails.logger.warn("[EmployeeAppSwitch::Enforcement] could not retire early access: #{error.class}")
       0
     end
 
-    def audit_retired!(window)
-      record = lambda do
-        AuditLog.record!(
-          actor: AuditActor.system_job(name), user: nil, organization_id: window.organization_id, company_id: nil,
-          action: RETIRED_ACTION, record_type: "EmployeeAppEarlyAccessWindow", record_id: window.id,
-          subject_name: EmployeeAppEarlyAccessWindow::NAME, event_category: "security",
-          metadata: { reason: "The database enforces row-level security", company_ids: window.company_ids }
-        )
-      end
-      TenantScope.current ? record.call : TenantScope.as_system(reason: "Retire demo early access", &record)
+    def audit_retired!(window, actor:)
+      AuditLog.record!(
+        actor: actor, user: nil, organization_id: window.organization_id, company_id: nil,
+        action: RETIRED_ACTION, record_type: "EmployeeAppEarlyAccessWindow", record_id: window.id,
+        subject_name: EmployeeAppEarlyAccessWindow::NAME, event_category: "security",
+        metadata: { reason: "The database enforces row-level security", company_ids: window.company_ids }
+      )
     end
 
     # Request-time check for a demo company's employee portal: under the

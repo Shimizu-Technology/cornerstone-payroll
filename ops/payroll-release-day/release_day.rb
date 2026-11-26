@@ -26,6 +26,46 @@ module PayrollReleaseDay
     PayrollFicaLegacyRecovery.new(company: company, year: year).inventory
   end
 
+  def inventory_all_companies(connection, year, selected_ids, event:)
+    TenantScope.as_system(reason: "Read the cross-company FICA release inventory before or after reconciliation") do
+      read_only_snapshot(connection) do
+        Company.order(:id).to_h do |company|
+          plan = inventory(company, year)
+          emit(event, name: company.name, selected: selected_ids.include?(company.id), **summary(plan))
+          [company.id, plan]
+        end
+      end
+    end
+  end
+
+  def read_only_snapshot(connection)
+    connection.transaction(isolation: :repeatable_read) do
+      connection.execute('SET TRANSACTION READ ONLY')
+      yield
+    end
+  end
+
+  def imported_inventory(company, year, employee_ids)
+    TenantScope.with_company(company.id) do
+      ImportedPaycheckFicaReconciliation.new(company: company, year: year, employee_ids: employee_ids).inventory
+    end
+  end
+
+  def held_employee_ids_due_for_review(company, year, through)
+    TenantScope.with_company(company.id) do
+      entries = inventory(company, year).fetch(:employee_years)
+      held_ids = entries.select { |entry| entry[:status] == 'held' }.map { |entry| entry.fetch(:employee_id) }.uniq.sort
+      # A mismatch can stay held after a source review. Avoid repeating that
+      # review so a later preview can still produce a stable plan digest.
+      latest_reviews = EmployeeYearFicaSourceReview.where(company: company, tax_year: year, employee_id: held_ids)
+        .order(:id).to_a.group_by(&:employee_id)
+      held_ids.reject do |id|
+        review = latest_reviews[id]&.last
+        review && review.through_pay_date >= through && review.external_ss_wage_bound.zero? && review.external_medicare_wage_bound.zero?
+      end
+    end
+  end
+
   def summary(inv)
     entries = inv.fetch(:employee_years)
     { company_id: inv[:company_id], tax_year: inv[:tax_year], employee_years: entries.size,
@@ -88,11 +128,7 @@ module PayrollReleaseDay
     base = {TAX_YEAR:year,ACTOR_ID:actor.id,REVIEW_REFERENCE:reference,THROUGH_PAY_DATE:through.iso8601,EXTERNAL_SS_WAGE_BOUND:0,EXTERNAL_MEDICARE_WAGE_BOUND:0}
     emit('context',mode:mode,commit:ENV['RENDER_GIT_COMMIT'],service:ENV['RENDER_SERVICE_ID'],deployment:ENV['DEPLOYMENT_ENV'],actor_id:actor.id,actor_name:actor.name,company_ids:ids,tax_year:year)
     before = timed('before_inventory') do
-      connection.transaction(isolation: :repeatable_read) do
-        connection.execute('SET TRANSACTION READ ONLY')
-        # Full 2026 company coverage, including excluded companies; no employee output.
-        Company.order(:id).to_h { |co| [co.id, inventory(co,year).tap { |inv| emit('before_inventory',name:co.name,selected:ids.include?(co.id),**summary(inv)) }] }
-      end
+      inventory_all_companies(connection, year, ids, event: 'before_inventory')
     end
     imported_employee_ids = ids.to_h do |id|
       # Preserve the original release scope: unresolved annual employee-years,
@@ -101,10 +137,9 @@ module PayrollReleaseDay
       [id, selected.map { |entry| entry.fetch(:employee_id) }.uniq.sort]
     end
     imported_plans = timed('imported_fica_inventory') do
-      connection.transaction(isolation: :repeatable_read) do
-        connection.execute('SET TRANSACTION READ ONLY')
+      read_only_snapshot(connection) do
         companies.to_h do |co|
-          plan = ImportedPaycheckFicaReconciliation.new(company: co, year: year, employee_ids: imported_employee_ids.fetch(co.id)).inventory
+          plan = imported_inventory(co, year, imported_employee_ids.fetch(co.id))
           # Aggregate signed per-component rounding residuals (cents) accepted
           # under the one-cent per-check tolerance; no employee identities.
           emit('imported_fica_plan', company_id: co.id, plan_digest: plan.fetch(:plan_digest), counts: plan.fetch(:counts),
@@ -134,16 +169,7 @@ module PayrollReleaseDay
       end
     end
     companies.each do |co|
-      inv = inventory(co,year)
-      held_ids = inv.fetch(:employee_years).select { |e| e[:status]=='held' }.map { |e| e.fetch(:employee_id) }.uniq.sort
-      # An imported-tax mismatch may stay held after source completeness was
-      # already reviewed. Re-appending identical reviews would change every
-      # imported plan on every apply, preventing a digest-locked second pass.
-      latest_reviews = EmployeeYearFicaSourceReview.where(company: co, tax_year: year, employee_id: held_ids).order(:id).to_a.group_by(&:employee_id)
-      held_ids.reject! do |id|
-        review = latest_reviews[id]&.last
-        review && review.through_pay_date >= through && review.external_ss_wage_bound.zero? && review.external_medicare_wage_bound.zero?
-      end
+      held_ids = held_employee_ids_due_for_review(co, year, through)
       next if held_ids.empty?
       variables = base.merge(COMPANY_ID:co.id,EMPLOYEE_IDS:held_ids.join(','))
       preview = timed('review_sources_preview',company_id:co.id) { task('payroll:fica_legacy:review_sources',variables.merge(DRY_RUN:1)) }
@@ -158,7 +184,7 @@ module PayrollReleaseDay
     # Source review may change the proposed imported proof dependencies. Never
     # apply such a newly generated plan without a fresh operator preview.
     companies.each do |co|
-      fresh = ImportedPaycheckFicaReconciliation.new(company: co, year: year, employee_ids: imported_employee_ids.fetch(co.id)).inventory
+      fresh = imported_inventory(co, year, imported_employee_ids.fetch(co.id))
       if mode == 'apply' && fresh.fetch(:plan_digest) != imported_plans.fetch(co.id).fetch(:plan_digest)
         raise "Imported FICA plan changed after source/recovery steps for company #{co.id}; retain receipts and run a fresh preview"
       end
@@ -182,14 +208,11 @@ module PayrollReleaseDay
         action:'Review against payment/YTD/liability evidence. This script never reverses or reissues paid wages.')
     end
     after = timed('after_inventory') do
-      connection.transaction(isolation: :repeatable_read) do
-        connection.execute('SET TRANSACTION READ ONLY')
-        Company.order(:id).to_h { |co| [co.id,inventory(co,year).tap { |inv| emit('after_inventory',name:co.name,selected:ids.include?(co.id),**summary(inv)) }] }
-      end
+      inventory_all_companies(connection, year, ids, event: 'after_inventory')
     end
     held = ids.to_h { |id| [id,after.fetch(id)[:employee_year_counts].fetch('held',0)] }.reject { |_,count| count.zero? }
     imported_held = companies.to_h do |co|
-      plan = ImportedPaycheckFicaReconciliation.new(company: co, year: year, employee_ids: imported_employee_ids.fetch(co.id)).inventory
+      plan = imported_inventory(co, year, imported_employee_ids.fetch(co.id))
       [co.id, plan.fetch(:employee_years).count { |entry| entry[:status] == 'held' }]
     end.reject { |_, count| count.zero? }
     if held.any? || imported_held.any?
