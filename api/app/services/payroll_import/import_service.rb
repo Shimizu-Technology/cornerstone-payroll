@@ -19,7 +19,7 @@ module PayrollImport
     # owner's period pay is kept as it is, unless the workbook sends a
     # different amount for that owner.
     def self.overwrite_required?(item, source_period_pay: nil)
-      return false if item.blank? || !item.persisted? || item.import_source == "mosa_revel"
+      return false if item.blank? || !item.persisted? || item.imported_by?("mosa_revel")
       return true if REPLACED_INPUTS.any? { |field| item.public_send(field).to_d.nonzero? }
       job_hours = Array(item.wage_rate_hours).sum { |entry| entry.to_h.stringify_keys.values_at("regular_hours", "overtime_hours").sum(&:to_d) }
       return true if job_hours.nonzero?
@@ -172,11 +172,14 @@ module PayrollImport
       apply_employment!(payroll_item, employee)
       deductions = row[:loan_deduction].to_d.positive? || Array(row[:loan_reconciliation_matches]).any? ||
         Array(row[:payroll_components]).any? { |component| component.to_h.with_indifferent_access[:kind] == "deduction" }
+      zero_hours = { "regular_hours" => "0.0", "overtime_hours" => "0.0" }
       payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
+        "missing_source_hours" => deductions,
         "mosa_missing_revel_hours" => deductions,
         # No hours came back, so a later Revel import asks before replacing
         # the hours staff enter now.
-        "mosa_imported_hours" => { "regular_hours" => "0.0", "overtime_hours" => "0.0" },
+        "imported_hours" => zero_hours,
+        "mosa_imported_hours" => zero_hours,
         "import_add_back" => evidence.deep_stringify_keys
       )
       apply_source_amounts!(payroll_item, employee, row, tips_paid_out_from_tips: tips_paid_out_from_tips)
@@ -222,13 +225,14 @@ module PayrollImport
       payroll_item.loan_deduction = row[:loan_deduction].to_f if row[:loan_deduction]
       PayrollBonusInput.import!(payroll_item, row[:bonus])
       payroll_item.import_source = "mosa_revel"
+      payroll_item.import_origin = "intake"
       payroll_item.sync_default_payroll_adjustments!(employee)
       apply_imported_components!(payroll_item, row[:payroll_components])
     end
 
     # What an earlier import wrote, or no hours at all when none did.
     def hours_imported_before(payroll_item)
-      recorded = payroll_item.custom_columns_data.to_h["mosa_imported_hours"]
+      recorded = payroll_item.imported_hours_snapshot
       return recorded if recorded.is_a?(Hash)
 
       @applied_hours ||= LivePreviewRowState.applied_hours_by_employee(pay_period)
@@ -326,17 +330,21 @@ module PayrollImport
               preserve_split = (row[:client_extra_hours] || restored) && row[:workbook_only] && payroll_item.wage_rate_hours.present?
               apply_wage_rate_choice!(payroll_item, employee, row) unless preserve_split
               apply_client_hours!(payroll_item, employee, row) if row[:client_extra_hours]
+              missing_hours = row[:missing_revel_hours_with_deductions] == true
+              recorded_hours = row[:workbook_only] ? hours_imported_before(payroll_item) : {
+                "regular_hours" => payroll_item.hours_worked.to_d.to_s("F"),
+                "overtime_hours" => payroll_item.overtime_hours.to_d.to_s("F")
+              }
               payroll_item.custom_columns_data = payroll_item.custom_columns_data.to_h.merge(
-                "mosa_missing_revel_hours" => row[:missing_revel_hours_with_deductions] == true,
+                "missing_source_hours" => missing_hours,
+                "mosa_missing_revel_hours" => missing_hours,
                 "client_change_evidence" => row[:client_change_evidence],
                 # The hours this import left on the row. A later import compares
                 # them with the saved row to find hours staff changed by hand.
                 # A workbook-only row keeps the hours staff entered, so they are
                 # not recorded as imported and a later Revel PDF asks first.
-                "mosa_imported_hours" => row[:workbook_only] ? hours_imported_before(payroll_item) : {
-                  "regular_hours" => payroll_item.hours_worked.to_d.to_s("F"),
-                  "overtime_hours" => payroll_item.overtime_hours.to_d.to_s("F")
-                }
+                "imported_hours" => recorded_hours,
+                "mosa_imported_hours" => recorded_hours
               )
 
               apply_source_amounts!(payroll_item, employee, row, tips_paid_out_from_tips: tips_paid_out_from_tips)

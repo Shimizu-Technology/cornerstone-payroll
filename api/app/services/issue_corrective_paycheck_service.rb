@@ -922,6 +922,7 @@ class IssueCorrectivePaycheckService
       holiday_hours:   deltas[:holiday_hours_delta],
       pto_hours:       deltas[:pto_hours_delta],
       timekeeping_source: "correction_reference",
+      import_origin: "correction",
       timekeeping_context_snapshot: original_item.timekeeping_context_snapshot,
       calculation_context_snapshot: corrected_item.calculation_context_snapshot.deep_dup.merge(
         "corrective_paycheck" => { "version" => 1, "component_ledger_version" => 1, "input_adjustments" => input_adjustments,
