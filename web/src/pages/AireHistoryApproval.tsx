@@ -80,7 +80,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
   const missingConfirmations = summary?.mappings.some((row) => row.confirmation_required && !confirmed.includes(row.source_user_uuid));
   return <>
     <Header title="Review AIRE history" description="Review the history once, then approve its accounting coverage. Calendar publication and connected payroll activation are separate operator steps." />
-    <main className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
       <Link className="text-sm text-primary-700 underline" to="/app/time-account-connection">My AIRE account connection</Link>
       {error && <div role="alert" className="rounded-xl border border-danger-200 bg-danger-50 p-4 text-danger-800">{error}</div>}
       {busy && <p role="status" className="text-neutral-600">{summary ? 'Checking fresh AIRE and Payroll evidence. Please keep this page open…' : 'Fetching authenticated AIRE history and committed Payroll registers…'}</p>}
@@ -157,7 +157,7 @@ function HistorySummary({ companyId }: { companyId: number }) {
           </>}
         </section>
       </>}
-    </main>
+    </div>
   </>;
 }
 

@@ -1,7 +1,7 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { invitationOutcomeMessage } from '@/lib/invitationOutcome';
+import { invitationNotSent, invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, Building2, Check, Mail, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
+import { AlertCircle, Building2, Check, Mail, MailX, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -26,6 +26,12 @@ export function Organizations() {
   const [meta, setMeta] = useState<PaginationMeta | null>(null);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // An invite email that didn't go out is a warning, and stays until dismissed by the next action.
+  const [successTone, setSuccessTone] = useState<'success' | 'warning'>('success');
+  const showSuccess = (message: string | null, tone: 'success' | 'warning' = 'success') => {
+    setSuccessTone(tone);
+    setSuccessMessage(message);
+  };
 
   const [isAdding, setIsAdding] = useState(false);
   const [isSavingNew, setIsSavingNew] = useState(false);
@@ -82,10 +88,10 @@ export function Organizations() {
   }, [fetchOrganizations]);
 
   useEffect(() => {
-    if (!successMessage) return;
+    if (!successMessage || successTone === 'warning') return;
     const timer = setTimeout(() => setSuccessMessage(null), 6000);
     return () => clearTimeout(timer);
-  }, [successMessage]);
+  }, [successMessage, successTone]);
 
   const parseClientLimit = (value: string) => {
     const parsed = Number.parseInt(value, 10);
@@ -133,7 +139,7 @@ export function Organizations() {
         } : undefined,
       });
 
-      setSuccessMessage(`Organization created. ${invitationOutcomeMessage(response)}`.trim());
+      showSuccess(`Organization created. ${invitationOutcomeMessage(response)}`.trim(), invitationNotSent(response) ? 'warning' : 'success');
       resetNewForm();
       setPage(1);
       await fetchOrganizations(1);
@@ -179,7 +185,7 @@ export function Organizations() {
         slug: transferSlug.trim(),
         issuer_legal_name: transferProfileId ? transferIssuer.trim() : undefined,
       });
-      setSuccessMessage(`${transferPreview.company.name} moved with its existing payroll history.`);
+      showSuccess(`${transferPreview.company.name} moved with its existing payroll history.`);
       setIsTransferring(false);
       setTransferPreview(null);
       setTransferCompanyId('');
@@ -226,7 +232,7 @@ export function Organizations() {
         unlimited_clients: editUnlimitedClients,
       });
       setEditingId(null);
-      setSuccessMessage('Organization updated');
+      showSuccess('Organization updated');
       await fetchOrganizations();
     } catch (err) {
       setEditError(err instanceof ApiError ? err.message : 'Failed to update organization');
@@ -256,7 +262,7 @@ export function Organizations() {
         email: adminEmail.trim(),
         name: adminName.trim() || undefined,
       });
-      setSuccessMessage(`Organization admin created. ${invitationOutcomeMessage(response)}`.trim());
+      showSuccess(`Organization admin created. ${invitationOutcomeMessage(response)}`.trim(), invitationNotSent(response) ? 'warning' : 'success');
       setAdminOrgId(null);
       await fetchOrganizations();
     } catch (err) {
@@ -276,7 +282,7 @@ export function Organizations() {
     setError(null);
     try {
       await usersApi.update(admin.id, { name: trimmed });
-      setSuccessMessage('Organization admin updated');
+      showSuccess('Organization admin updated');
       await fetchOrganizations();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update organization admin');
@@ -291,10 +297,10 @@ export function Organizations() {
     try {
       if (admin.active === false) {
         await usersApi.activate(admin.id);
-        setSuccessMessage('Organization admin activated');
+        showSuccess('Organization admin activated');
       } else {
         await usersApi.deactivate(admin.id);
-        setSuccessMessage('Organization admin deactivated');
+        showSuccess('Organization admin deactivated');
       }
       await fetchOrganizations();
     } catch (err) {
@@ -311,7 +317,7 @@ export function Organizations() {
     setError(null);
     try {
       await usersApi.delete(admin.id);
-      setSuccessMessage('Organization admin deleted');
+      showSuccess('Organization admin deleted');
       await fetchOrganizations();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to delete organization admin');
@@ -380,10 +386,13 @@ export function Organizations() {
             <p className="text-danger-700">{error}</p></ActionFeedback>
         )}
 
-        {successMessage && (
+        {successMessage && (successTone === 'warning' ? (
+          <ActionFeedback tone="warning" message={successMessage}><MailX className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+            <p className="text-amber-900">{successMessage}</p></ActionFeedback>
+        ) : (
           <ActionFeedback tone="success" message={successMessage}><Mail className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
             <p className="text-green-700">{successMessage}</p></ActionFeedback>
-        )}
+        ))}
 
         {isTransferring && (
           <Card className="mb-6 space-y-4 p-5">
