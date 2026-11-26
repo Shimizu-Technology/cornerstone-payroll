@@ -11,9 +11,11 @@ vi.mock('@/services/portal-notifications-api', () => ({ portalAlertRecipientsApi
 const base: PortalAlertRecipients = {
   company_id: 4,
   eligible_users: [
-    { id: 1, name: 'Dana Synthetic', email: 'dana@example.test', role: 'manager', selected: false },
-    { id: 2, name: 'Morgan Synthetic', email: 'morgan@example.test', role: 'admin', selected: false },
+    { id: 1, name: 'Dana Synthetic', email: 'dana@example.test', role: 'manager', selected: false, team_role: null },
+    { id: 2, name: 'Morgan Synthetic', email: 'morgan@example.test', role: 'admin', selected: false, team_role: null },
   ],
+  lead_user_id: null,
+  backup_user_id: null,
   ineligible_listed_users: [],
   extra_emails: [],
   recipient_count: 0,
@@ -29,22 +31,41 @@ describe('PortalAlertRecipientsPanel', () => {
     mocks.get.mockResolvedValue({ data: base });
   });
 
-  it('warns when nobody receives alerts and says email is off', async () => {
+  it('warns when no account team is assigned and says email is off', async () => {
     const onCount = vi.fn();
     render(<PortalAlertRecipientsPanel companyId={4} onRecipientCountChange={onCount} />);
     const warning = await screen.findByRole('alert');
-    expect(warning.textContent).toContain('No one receives this client’s portal alerts.'.replace('’', "'"));
+    expect(warning.textContent).toContain('No Cornerstone account team is assigned to this client.');
     expect(warning.textContent).toContain('2 in the last 30 days had nobody to notify');
     expect(screen.getByText(/Email delivery is off for now/)).toBeTruthy();
     expect(onCount).toHaveBeenLastCalledWith(0);
-    expect(screen.getByRole('button', { name: 'Save recipients' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Save account team' }).hasAttribute('disabled')).toBe(true);
   });
 
-  it('saves ticked staff and normalized, deduplicated extra addresses', async () => {
-    mocks.update.mockResolvedValue({ data: { ...base, recipient_count: 2, extra_emails: ['owner@example.test'],
-      eligible_users: base.eligible_users.map((user) => ({ ...user, selected: user.id === 1 })) } });
+  it('assigns Lead and Backup, ticks staff, and saves normalized deduplicated extra addresses', async () => {
+    mocks.update.mockResolvedValue({
+      data: {
+        ...base,
+        recipient_count: 3,
+        lead_user_id: 1,
+        backup_user_id: 2,
+        extra_emails: ['owner@example.test'],
+        eligible_users: base.eligible_users.map((user) => ({
+          ...user,
+          selected: true,
+          team_role: user.id === 1 ? 'lead' : 'backup',
+        })),
+      },
+    });
     render(<PortalAlertRecipientsPanel companyId={4} />);
-    fireEvent.click(await screen.findByLabelText(/Dana Synthetic/));
+
+    // Picking a Lead and Backup automatically selects both users on the account team.
+    const leadSelect = await screen.findByLabelText('Account lead');
+    const backupSelect = screen.getByLabelText('Backup (optional)');
+    fireEvent.change(leadSelect, { target: { value: '1' } });
+    fireEvent.change(backupSelect, { target: { value: '2' } });
+    expect((screen.getByLabelText(/Dana Synthetic/) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText(/Morgan Synthetic/) as HTMLInputElement).checked).toBe(true);
 
     const input = screen.getByLabelText('Extra email address');
     fireEvent.change(input, { target: { value: 'not-an-email' } });
@@ -57,10 +78,44 @@ describe('PortalAlertRecipientsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add address' }));
     expect(screen.getByText('That address is already on the list.')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save recipients' }));
-    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(4, { user_ids: [1], emails: ['owner@example.test'] }));
-    expect(await screen.findByText('Alert recipients saved.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save account team' }));
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(4, {
+      user_ids: [1, 2],
+      emails: ['owner@example.test'],
+      lead_user_id: 1,
+      backup_user_id: 2,
+    }));
+    expect(await screen.findByText('Account team saved.')).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('clears Lead when that person is unticked or switched to Backup', async () => {
+    mocks.get.mockResolvedValue({
+      data: {
+        ...base,
+        recipient_count: 1,
+        lead_user_id: 1,
+        eligible_users: base.eligible_users.map((user) => ({
+          ...user,
+          selected: user.id === 1,
+          team_role: user.id === 1 ? 'lead' : null,
+        })),
+      },
+    });
+    render(<PortalAlertRecipientsPanel companyId={4} />);
+
+    const leadSelect = await screen.findByLabelText('Account lead') as HTMLSelectElement;
+    const backupSelect = screen.getByLabelText('Backup (optional)') as HTMLSelectElement;
+    expect(leadSelect.value).toBe('1');
+
+    // Choosing Dana as Backup clears Lead.
+    fireEvent.change(backupSelect, { target: { value: '1' } });
+    expect(leadSelect.value).toBe('');
+    expect(backupSelect.value).toBe('1');
+
+    // Unticking Dana clears Backup too.
+    fireEvent.click(screen.getByLabelText(/Dana Synthetic/));
+    expect(backupSelect.value).toBe('');
   });
 
   it('removes an extra address and reports a failed save without losing the draft', async () => {
@@ -68,8 +123,8 @@ describe('PortalAlertRecipientsPanel', () => {
     mocks.update.mockRejectedValue(new Error('Check these email addresses'));
     render(<PortalAlertRecipientsPanel companyId={4} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Remove books@example.test' }));
-    expect(screen.getByText('Saving with nobody selected leaves this client without alerts.')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Save recipients' }));
+    expect(screen.getByText('Saving with nobody selected leaves this client without an account team.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save account team' }));
     expect(await screen.findByText('Check these email addresses')).toBeTruthy();
     expect(screen.queryByText('books@example.test')).toBeNull();
   });
@@ -78,7 +133,7 @@ describe('PortalAlertRecipientsPanel', () => {
     mocks.get.mockResolvedValue({ data: { ...base, recipient_count: 0, ineligible_listed_users: [{ id: 9, name: 'Former Staffer' }] } });
     render(<PortalAlertRecipientsPanel companyId={4} />);
     expect(await screen.findByText(/will be removed when you save: Former Staffer/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Save recipients' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Save account team' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('is read-only when the workspace cannot be changed', async () => {
@@ -86,15 +141,16 @@ describe('PortalAlertRecipientsPanel', () => {
     render(<PortalAlertRecipientsPanel companyId={4} readOnly />);
     const list = await screen.findByText('books@example.test');
     expect(within(list.closest('li') as HTMLElement).queryByRole('button')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Save recipients' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save account team' })).toBeNull();
     expect(screen.queryByLabelText('Extra email address')).toBeNull();
+    expect((screen.getByLabelText('Account lead') as HTMLSelectElement).disabled).toBe(true);
   });
 
-  it('offers a retry when recipients cannot load', async () => {
+  it('offers a retry when account team cannot load', async () => {
     mocks.get.mockRejectedValueOnce(new Error('Unavailable')).mockResolvedValueOnce({ data: base });
     render(<PortalAlertRecipientsPanel companyId={4} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Retry alert recipients' }));
-    expect(await screen.findByText('Dana Synthetic')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry account team' }));
+    expect(await screen.findByLabelText(/Dana Synthetic/)).toBeTruthy();
   });
 
   it('ignores a response for a previously selected client', async () => {
@@ -112,7 +168,6 @@ describe('PortalAlertRecipientsPanel', () => {
     let resolveFirst!: (value: { data: PortalAlertRecipients }) => void;
     mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
       .mockResolvedValueOnce({ data: { ...base, extra_emails: ['newest@example.test'], recipient_count: 1 } });
-    // StrictMode starts the load effect twice, as in development.
     render(<StrictMode><PortalAlertRecipientsPanel companyId={4} /></StrictMode>);
     expect(await screen.findByText('newest@example.test')).toBeTruthy();
     resolveFirst({ data: { ...base, extra_emails: ['stale@example.test'], recipient_count: 1 } });
@@ -129,10 +184,10 @@ describe('PortalAlertRecipientsPanel', () => {
     mocks.update.mockResolvedValue({ data: saved });
     render(<StrictMode><PortalAlertRecipientsPanel companyId={4} onRecipientCountChange={onCount} /></StrictMode>);
     fireEvent.click(await screen.findByLabelText(/Morgan Synthetic/));
-    fireEvent.click(screen.getByRole('button', { name: 'Save recipients' }));
-    expect(await screen.findByText('Alert recipients saved.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save account team' }));
+    expect(await screen.findByText('Account team saved.')).toBeTruthy();
 
-    resolveFirst({ data: base }); // started before the save, finishes after it
+    resolveFirst({ data: base });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect((screen.getByLabelText(/Morgan Synthetic/) as HTMLInputElement).checked).toBe(true);
@@ -163,7 +218,7 @@ describe('PortalAlertRecipientsPanel', () => {
     mocks.update.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
     const { unmount } = render(<PortalAlertRecipientsPanel companyId={4} onRecipientCountChange={onCount} />);
     fireEvent.click(await screen.findByLabelText(/Dana Synthetic/));
-    fireEvent.click(screen.getByRole('button', { name: 'Save recipients' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save account team' }));
     unmount();
     onCount.mockClear();
     resolveSave({ data: { ...base, recipient_count: 7 } });

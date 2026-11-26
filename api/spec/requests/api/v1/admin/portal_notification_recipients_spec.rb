@@ -14,8 +14,11 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
   end
 
-  def save(user_ids: [], emails: [], headers: self.headers)
-    put path, params: { user_ids: user_ids, emails: emails }, headers: headers, as: :json
+  def save(user_ids: [], emails: [], lead_user_id: nil, backup_user_id: nil, headers: self.headers)
+    payload = { user_ids: user_ids, emails: emails }
+    payload[:lead_user_id] = lead_user_id unless lead_user_id.nil?
+    payload[:backup_user_id] = backup_user_id unless backup_user_id.nil?
+    put path, params: payload, headers: headers, as: :json
   end
 
   before { act_as(admin) }
@@ -47,7 +50,7 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
     expect(log).to have_attributes(user_id: admin.id, company_id: company.id, subject_name: "Recipient Client")
     expect(log.metadata).to include("added_users" => [ { "id" => reviewer.id, "name" => "Riley Reviewer" } ],
       "added_emails" => [ "owner@example.test", "books@example.test" ], "removed_emails" => [], "recipient_count" => 3)
-    expect(AuditLogPresenter.new(log).headline).to include("updated portal alert recipients for", "Recipient Client")
+    expect(AuditLogPresenter.new(log).headline).to include("updated the Cornerstone account team for", "Recipient Client")
 
     save(user_ids: [], emails: [ "books@example.test" ])
     expect(PortalNotificationRecipient.where(company: company).pluck(:email)).to eq([ "books@example.test" ])
@@ -84,6 +87,38 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
 
     save(user_ids: [ reviewer.id ], emails: [ "books@example.test" ])
     expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "assigns, swaps, validates, and audits Lead and Backup roles on the account team" do
+    save(user_ids: [ admin.id, reviewer.id ], lead_user_id: admin.id, backup_user_id: reviewer.id)
+    expect(response).to have_http_status(:ok), response.body
+    data = response.parsed_body.fetch("data")
+    expect(data).to include("lead_user_id" => admin.id, "backup_user_id" => reviewer.id)
+    expect(data.fetch("eligible_users").find { |user| user["id"] == admin.id }["team_role"]).to eq("lead")
+    expect(data.fetch("eligible_users").find { |user| user["id"] == reviewer.id }["team_role"]).to eq("backup")
+
+    # Swapping Lead and Backup between two existing members works without hitting unique index collisions and writes an audit row.
+    expect do
+      save(user_ids: [ admin.id, reviewer.id ], lead_user_id: reviewer.id, backup_user_id: admin.id)
+    end.to change { AuditLog.where(action: "portal_notification_recipients#update").count }.by(1)
+    expect(response).to have_http_status(:ok), response.body
+    swapped = response.parsed_body.fetch("data")
+    expect(swapped).to include("lead_user_id" => reviewer.id, "backup_user_id" => admin.id)
+    audit = AuditLog.where(action: "portal_notification_recipients#update").newest_first.first
+    expect(audit.metadata).to include(
+      "lead_user_id" => reviewer.id,
+      "backup_user_id" => admin.id,
+      "lead_user" => {
+        "before" => { "id" => admin.id, "name" => "Avery Admin" },
+        "after" => { "id" => reviewer.id, "name" => "Riley Reviewer" }
+      }
+    )
+
+    # Rejects same person as both Lead and Backup or a Lead not included in user_ids.
+    save(user_ids: [ admin.id ], lead_user_id: admin.id, backup_user_id: admin.id)
+    expect(response).to have_http_status(:unprocessable_entity)
+    save(user_ids: [ admin.id ], lead_user_id: reviewer.id)
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   it "keeps each client's list separate" do

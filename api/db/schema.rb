@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_001500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -4288,12 +4288,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_110000) do
     t.bigint "added_by_id"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "team_role", limit: 20
     t.index [ "added_by_id" ], name: "index_portal_notification_recipients_on_added_by_id"
     t.index [ "company_id", "email" ], name: "idx_portal_notification_recipients_email", unique: true, where: "(email IS NOT NULL)"
     t.index [ "company_id", "user_id" ], name: "idx_portal_notification_recipients_user", unique: true, where: "(user_id IS NOT NULL)"
+    t.index [ "company_id" ], name: "idx_portal_notification_recipients_backup", unique: true, where: "((team_role)::text = 'backup'::text)"
+    t.index [ "company_id" ], name: "idx_portal_notification_recipients_lead", unique: true, where: "((team_role)::text = 'lead'::text)"
     t.index [ "company_id" ], name: "index_portal_notification_recipients_on_company_id"
     t.index [ "user_id" ], name: "index_portal_notification_recipients_on_user_id"
     t.check_constraint "(user_id IS NULL) <> (email IS NULL)", name: "portal_notification_recipients_one_target"
+    t.check_constraint "team_role IS NULL OR (team_role::text = ANY (ARRAY['lead'::character varying, 'backup'::character varying]::text[]))", name: "portal_notification_recipients_team_role_check"
+    t.check_constraint "team_role IS NULL OR user_id IS NOT NULL", name: "portal_notification_recipients_team_role_user_check"
   end
 
   create_table "portal_thread_read_receipts", force: :cascade do |t|

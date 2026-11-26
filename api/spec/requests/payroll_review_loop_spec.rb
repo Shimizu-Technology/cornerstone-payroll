@@ -353,6 +353,52 @@ RSpec.describe "Published payroll review loop", type: :request do
     expect(response.parsed_body.dig("pay_period", "payroll_review_history")).to eq([])
   end
 
+  it "reports honest notification_queued status on client approval and change requests" do
+    staff_approve
+    # With email delivery disabled (default in specs), no email is queued.
+    @actor = client
+    post "#{base}/request_changes", params: { revision_id: review.id, note: "Need update" }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(false)
+    get base
+    expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(false)
+
+    # Unapprove and publish a fresh revision, then enable email with an account team assigned.
+    @actor = staff
+    post "#{admin}/unapprove"
+    expect(response).to have_http_status(:ok)
+    staff_approve
+    with_portal_email do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(true)
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review", "notification_queued")).to be(true)
+    end
+
+    # When no account team is assigned, notification_queued stays false even with email enabled.
+    @actor = staff
+    post "#{admin}/unapprove"
+    staff_approve
+    PortalNotificationRecipient.where(company: company).delete_all
+    with_portal_email do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("payroll_review", "notification_queued")).to be(false)
+    end
+  end
+
+  it "excludes client viewers from payroll_review_published notifications" do
+    viewer = create(:user, company: company, role: "client", client_access_level: "viewer")
+    create(:company_assignment, user: viewer, company: company)
+
+    staff_approve
+
+    event = PortalNotificationEvent.find_by!(event_type: "payroll_review_published")
+    expect(event.deliveries.pluck(:user_id)).to eq([ client.id ])
+    expect(event.deliveries.pluck(:user_id)).not_to include(viewer.id)
+  end
+
   it "codes stale revisions separately from validation errors" do
     staff_approve
     @actor = client

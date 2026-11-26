@@ -96,7 +96,7 @@ export function NotificationSettings(): ReactElement {
   };
 
   const openClient = (companyId: number): void => {
-    if (switchCompany(companyId)) navigate('/settings/client-documents');
+    if (switchCompany(companyId)) navigate(`/settings/clients?edit=${companyId}#portal-alert-recipients`);
   };
 
   return (
@@ -123,7 +123,7 @@ export function NotificationSettings(): ReactElement {
               <CardHeader>
                 <CardTitle>Email alerts</CardTitle>
                 <CardDescription>
-                  Emails never include names, messages or file details, only a link to sign in.
+                  Emails never include pay amounts, employee names, messages or file details, only a link to sign in.
                   Daily digests arrive at {settings.digest_time_label.replace(/Chamorro Time$/i, 'Guam time')}. Unread counts in the app stay on either way.
                 </CardDescription>
               </CardHeader>
@@ -160,12 +160,12 @@ export function NotificationSettings(): ReactElement {
             {settings.administration && (
               <Card>
                 <CardHeader>
-                  <CardTitle>Clients with no alert recipients</CardTitle>
-                  <CardDescription>Portal work from the last 30 days that nobody on staff was set up to hear about.</CardDescription>
+                  <CardTitle>Clients with no account team</CardTitle>
+                  <CardDescription>Portal work from the last 30 days that nobody on staff was assigned to hear about.</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {settings.administration.clients_without_recipients.length === 0
-                    ? <p className="text-sm text-neutral-600">Every client with recent portal activity has alert recipients.</p>
+                    ? <p className="text-sm text-neutral-600">Every client with recent portal activity has a Cornerstone account team.</p>
                     : (
                       <ul className="divide-y divide-neutral-100">
                         {settings.administration.clients_without_recipients.map((client) => (
@@ -176,7 +176,7 @@ export function NotificationSettings(): ReactElement {
                                 {client.event_count} {client.event_count === 1 ? 'item' : 'items'} with nobody notified · latest {formatGuamDateTime(client.last_occurred_at)}
                               </p>
                             </div>
-                            <Button variant="outline" onClick={() => openClient(client.company_id)}>Choose recipients</Button>
+                            <Button variant="outline" onClick={() => openClient(client.company_id)}>Assign account team</Button>
                           </li>
                         ))}
                       </ul>

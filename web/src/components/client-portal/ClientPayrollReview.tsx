@@ -87,11 +87,11 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
         <p className="text-sm text-neutral-600">The preview includes paper checks, plus separate stubs for direct deposit and statement-only employees.</p>
         <Button variant="outline" className="h-auto whitespace-normal text-left" disabled={busy} onClick={() => void preview(false, true)}>All pay stubs (including paper-check employees)</Button>
       </>}
-      {review?.status === 'approved' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. Cornerstone has been notified.</p>}
+      {review?.status === 'approved' && <p role="status" className="font-semibold text-success-800">Revision {review.revision} approved by {review.approved_by_name}. {review.notification_queued ? 'Your Cornerstone account team was emailed.' : 'Recorded. Cornerstone will see it in Client Inbox.'}</p>}
       {review?.change_request_note && <div role="status" className="space-y-1 rounded-lg bg-warning-50 p-4 text-warning-950">
         <p className="font-semibold">Changes requested by {review.changes_requested_by_name}</p>
         <p className="whitespace-pre-wrap break-words">{review.change_request_note}</p>
-        <p>Cornerstone has been notified. You’ll receive a new revision to review after the changes.</p>
+        <p>{review.notification_queued ? 'Your Cornerstone account team was emailed.' : 'Recorded. Cornerstone will see it in Client Inbox.'} You’ll receive a new revision to review after the changes.</p>
       </div>}
       {viewOnly && canReview && review?.status === 'pending' && <ViewOnlyNotice />}
       {canDecide && <div className="max-w-3xl space-y-4">
