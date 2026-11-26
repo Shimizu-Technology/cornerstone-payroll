@@ -5,7 +5,7 @@ module TimeTracking
   # the separately proven payment owner of the same complete frozen work union.
   class PaidCorrectionTarget
     EVIDENCE_VERSION = 2
-    ITEM_OPERATIONAL_FIELDS = %w[updated_at check_date ytd_gross ytd_net ytd_withholding_tax
+    ITEM_OPERATIONAL_FIELDS = %w[updated_at check_date import_origin ytd_gross ytd_net ytd_withholding_tax
       ytd_social_security_tax ytd_medicare_tax ytd_retirement ytd_roth_retirement].freeze
     PERIOD_OPERATIONAL_FIELDS = %w[updated_at pay_date tax_sync_status tax_sync_attempts
       tax_sync_idempotency_key tax_sync_last_error tax_synced_at].freeze
@@ -142,7 +142,7 @@ module TimeTracking
           stored["target_period"].keys.sort == (PayPeriod.column_names - PERIOD_OPERATIONAL_FIELDS).sort
       when 1
         return nil if stored.key?("target_tax_year")
-        return nil unless stored["target"].keys.sort == PayrollItem.column_names.sort &&
+        return nil unless [ PayrollItem.column_names.sort, (PayrollItem.column_names - %w[import_origin]).sort ].include?(stored["target"].keys.sort) &&
           stored["target_period"].keys.sort == PayPeriod.column_names.sort
         normalized["version"] = EVIDENCE_VERSION
         normalized["target_tax_year"] = Date.iso8601(stored["target_period"].fetch("pay_date")).year

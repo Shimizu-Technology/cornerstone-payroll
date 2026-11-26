@@ -53,16 +53,39 @@ RSpec.describe "Track C B3 import_origin" do
     end
   end
 
-  describe "generalized intake checks without mosa_revel hard-coding" do
-    it "treats any intake_imported? item consistently for overwrite, hand-edit, job-sync, and deduction warnings" do
-      rate = employee.employee_wage_rates.create!(label: "Barista", rate: 20, is_primary: true, active: true)
+  describe "snapshot and digest stability across import_origin backfill (M1)" do
+    it "keeps PayrollReview::CalculationSnapshot checksum and legacy disposition digest unchanged when import_origin is set" do
+      item = create(:payroll_item, pay_period: pay_period, employee: employee, hours_worked: 40, import_source: "mosa_revel")
+      PayrollItem.where(id: item.id).update_all(import_origin: nil)
+      item.reload
+
+      before_review = PayrollReview::CalculationSnapshot.new(pay_period: pay_period).call
+      before_disposition = PayrollItemLegacyDispositionService.digest_for(item)
+
+      PayrollItem.where(id: item.id).update_all(import_origin: "intake")
+      item.reload
+
+      after_review = PayrollReview::CalculationSnapshot.new(pay_period: pay_period).call
+      after_disposition = PayrollItemLegacyDispositionService.digest_for(item)
+
+      expect(after_review.fetch(:checksum)).to eq(before_review.fetch(:checksum))
+      expect(after_review.dig(:snapshot, "payroll_items").sole).not_to have_key("import_origin")
+      expect(after_disposition).to eq(before_disposition)
+      expect(PayrollItemLegacyDispositionService.evidence_for(item).fetch("item_attributes")).not_to have_key("import_origin")
+      expect(TimeTracking::PaidCorrectionTarget::ITEM_OPERATIONAL_FIELDS).to include("import_origin")
+    end
+  end
+
+  describe "MoSa vs Spike isolation until B4 (M2) and rollback-safe JSON read order (L1)" do
+    it "preserves MoSa overwrite, hand-edit, job-sync, and proposal checks via imported_by?('mosa_revel')" do
+      rate = employee.employee_wage_rates.create!(label: "Server", rate: 20, is_primary: true, active: true)
       item = create(
         :payroll_item,
         pay_period: pay_period,
         employee: employee,
         hours_worked: 36,
         overtime_hours: 0,
-        import_source: "spike_email",
+        import_source: "mosa_revel",
         import_origin: "intake",
         custom_columns_data: {
           "imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" },
@@ -90,34 +113,38 @@ RSpec.describe "Track C B3 import_origin" do
       expect(item.deduction_review_warnings).to include(include("No Revel hours"))
     end
 
-    it "falls back to legacy mosa_imported_hours and mosa_missing_revel_hours JSON keys" do
-      item = create(
+    it "keeps spike_email rows behaving exactly as on main across all five MoSa checks" do
+      job_a = employee.employee_wage_rates.create!(label: "Barista", rate: 20, is_primary: true, active: true)
+      job_b = employee.employee_wage_rates.create!(label: "Roaster", rate: 22, is_primary: false, active: true)
+      spike_item = create(
         :payroll_item,
         pay_period: pay_period,
         employee: employee,
-        hours_worked: 0,
+        hours_worked: 36,
         overtime_hours: 0,
-        import_source: "mosa_revel",
+        import_source: "spike_email",
         import_origin: "intake",
         custom_columns_data: {
-          "mosa_imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" },
-          "mosa_missing_revel_hours" => true
+          "imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" },
+          "wage_rate_hours" => [
+            { "employee_wage_rate_id" => job_a.id, "label" => job_a.label, "rate" => 20.0,
+              "regular_hours" => 20.0, "overtime_hours" => 0.0, "holiday_hours" => 0.0, "pto_hours" => 0.0,
+              "is_primary" => true, "active" => true },
+            { "employee_wage_rate_id" => job_b.id, "label" => job_b.label, "rate" => 22.0,
+              "regular_hours" => 16.0, "overtime_hours" => 0.0, "holiday_hours" => 0.0, "pto_hours" => 0.0,
+              "is_primary" => false, "active" => true }
+          ]
         }
       )
 
-      expect(item.imported_hours_snapshot).to eq("regular_hours" => "40.0", "overtime_hours" => "0.0")
-      expect(item.missing_source_hours?).to be(true)
-      expect(item.deduction_review_warnings).to include(include("No Revel hours"))
+      expect(spike_item.intake_imported?).to be(true)
+      expect(PayrollImport::ImportService.overwrite_required?(spike_item)).to be(true)
+      expect(PayrollImport::LivePreviewRowState.hand_edited_hours(
+        { "employee_id" => employee.id, "employee_name" => employee.full_name, "regular_hours" => 41, "overtime_hours" => 0 },
+        spike_item
+      )).to be_nil
+      expect { spike_item.update!(hours_worked: 38) }.not_to raise_error
 
-      item.update!(hours_worked: 35)
-      hand_edit = PayrollImport::LivePreviewRowState.hand_edited_hours(
-        { "employee_id" => employee.id, "employee_name" => employee.full_name, "regular_hours" => 40, "overtime_hours" => 0 },
-        item
-      )
-      expect(hand_edit).to include("saved_regular_hours" => "35.0", "source_regular_hours" => "40.0")
-    end
-
-    it "marks client submission proposals as not requiring manual overwrite for intake-imported items" do
       owner = create(:employee, company: company, first_name: "Drew", last_name: "Owner",
         employment_type: "salary", salary_type: "variable", pay_rate: 40_000)
       create(:payroll_item, pay_period: pay_period, employee: owner, employment_type: "salary",
@@ -134,7 +161,46 @@ RSpec.describe "Track C B3 import_origin" do
       )
 
       proposals = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: pay_period).proposals
-      expect(proposals.sole.fetch(:overwrite_required)).to be(false)
+      expect(proposals.sole.fetch(:overwrite_required)).to be(true)
+    end
+
+    it "prefers mosa_* over stale new JSON keys during dual-write and falls back to new keys when mosa_* is absent" do
+      both_keys_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        hours_worked: 0,
+        overtime_hours: 0,
+        import_source: "mosa_revel",
+        import_origin: "intake",
+        custom_columns_data: {
+          "mosa_imported_hours" => { "regular_hours" => "38.0", "overtime_hours" => "1.0" },
+          "imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" },
+          "mosa_missing_revel_hours" => false,
+          "missing_source_hours" => true
+        }
+      )
+
+      expect(both_keys_item.imported_hours_snapshot).to eq("regular_hours" => "38.0", "overtime_hours" => "1.0")
+      expect(both_keys_item.missing_source_hours?).to be(false)
+
+      other_employee = create(:employee, company: company, first_name: "Riley", last_name: "NewKey", pay_rate: 20)
+      new_keys_only_item = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: other_employee,
+        hours_worked: 0,
+        overtime_hours: 0,
+        import_source: "mosa_revel",
+        import_origin: "intake",
+        custom_columns_data: {
+          "imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" },
+          "missing_source_hours" => true
+        }
+      )
+
+      expect(new_keys_only_item.imported_hours_snapshot).to eq("regular_hours" => "40.0", "overtime_hours" => "0.0")
+      expect(new_keys_only_item.missing_source_hours?).to be(true)
     end
   end
 

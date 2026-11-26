@@ -118,18 +118,21 @@ class PayrollItem < ApplicationRecord
     key.present? && import_source == key.to_s
   end
 
+  # Prefer the legacy mosa_* keys while both keys are dual-written so a code
+  # rollback + import + roll-forward never reads a stale new key; fall back to
+  # the neutral keys for rows written without mosa_*.
   def imported_hours_snapshot
     data = custom_columns_data.to_h
-    return data["imported_hours"] if data["imported_hours"].is_a?(Hash)
+    return data["mosa_imported_hours"] if data["mosa_imported_hours"].is_a?(Hash)
 
-    data["mosa_imported_hours"] if data["mosa_imported_hours"].is_a?(Hash)
+    data["imported_hours"] if data["imported_hours"].is_a?(Hash)
   end
 
   def missing_source_hours?
     data = custom_columns_data.to_h
-    return data["missing_source_hours"] == true if data.key?("missing_source_hours")
+    return data["mosa_missing_revel_hours"] == true if data.key?("mosa_missing_revel_hours")
 
-    data["mosa_missing_revel_hours"] == true
+    data["missing_source_hours"] == true
   end
 
   # ---------------------------------------------------------------------------
@@ -744,8 +747,9 @@ class PayrollItem < ApplicationRecord
 
   # Scalar worksheet/API edits must update the reviewed job bucket as well.
   # Otherwise a saved zero-hour bucket would overwrite emailed hours.
+  # Scoped to mosa_revel until B4 makes reviewed-hour tracking descriptor-driven.
   def synchronize_mosa_reviewed_hours!
-    return unless intake_imported?
+    return unless imported_by?("mosa_revel")
 
     changed_hours = { hours_worked: "regular_hours", overtime_hours: "overtime_hours",
       holiday_hours: "holiday_hours", pto_hours: "pto_hours" }.select { |field, _key| will_save_change_to_attribute?(field) }
