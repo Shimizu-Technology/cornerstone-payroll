@@ -195,6 +195,7 @@ module Api
               raise ActiveRecord::RecordInvalid, @employee
             end
             @employee.save!
+            EmployeeChangeRequest.supersede_pending_address!(employee: @employee, actor: current_user, changed_fields: @employee.saved_changes.keys)
             EmployeeContactValidator.record_same_person_confirmation_audit!(
               employee: @employee,
               result: @contact_validation_result,

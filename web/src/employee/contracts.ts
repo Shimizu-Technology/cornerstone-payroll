@@ -443,7 +443,7 @@ export interface EmergencyContact {
   phone: string;
 }
 
-export type AddressRequestStatus = 'pending' | 'approved' | 'rejected';
+export type AddressRequestStatus = 'pending' | 'approved' | 'rejected' | 'superseded';
 
 export interface AddressRequest {
   id: string;
@@ -487,7 +487,7 @@ export function parseProfile(data: unknown): EmployeeProfile {
   const request = record(body.address_request);
   const requested = parseAddress(request?.requested);
   const requestId = id(request?.id);
-  const status = oneOf(request?.status, ['pending', 'approved', 'rejected'] as const);
+  const status = oneOf(request?.status, ['pending', 'approved', 'rejected', 'superseded'] as const);
   return {
     legalName: text(body.legal_name),
     email: text(body.email),
