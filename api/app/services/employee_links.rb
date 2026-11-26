@@ -37,11 +37,13 @@ module EmployeeLinks
     raise Forbidden, "Cornerstone staff access required" unless staff_management_allowed?(actor, company)
   end
 
-  # Pilot capability: the client's own company users can manage invitations.
-  # Unlocking, revoking and resetting sign-up still require staff management.
+  # Pilot capability: the client's own company users can manage invitations
+  # (a Client manager, not a read-only Client viewer). Unlocking, revoking
+  # and resetting sign-up still require staff management.
   def self.manage_invitations_allowed?(actor, company)
     staff_management_allowed?(actor, company) ||
-      (actor.is_a?(User) && actor.client? && actor.payroll_access_allowed? && actor.can_access_company?(company.id))
+      (actor.is_a?(User) && actor.client? && !actor.client_viewer? && actor.payroll_access_allowed? &&
+        actor.can_access_company?(company.id))
   end
 
   def self.require_invitation_management!(actor, company)

@@ -13,6 +13,7 @@ import { clientPayrollStatus, clientPayRunStatus } from '@/lib/clientPayrollStat
 import { employeesPath, importedPayRunPath, newEmployeePath, payRunPath, payRunsPath } from '@/lib/routes';
 
 import { supportToken } from '@/support/grant';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 type ClientDashboardStats = Awaited<ReturnType<typeof clientReportsApi.dashboard>>['stats'];
 
@@ -59,6 +60,7 @@ function hasRenderablePayroll(payroll: ClientPayrollHistoryResponse): boolean {
 
 export function ClientDashboard(): ReactElement {
   const navigate = useNavigate();
+  const viewOnly = useClientViewOnly();
   const { activeCompanyId } = useCompany();
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -138,7 +140,7 @@ export function ClientDashboard(): ReactElement {
         title="Dashboard"
         description="Manage employees, review payroll, and securely share documents."
         mobileSticky={false}
-        actions={!supportToken && (
+        actions={!supportToken && !viewOnly && (
           <div className="hidden sm:block">
             <Button onClick={() => navigate(newEmployeeHref)}>Add employee</Button>
           </div>
@@ -193,7 +195,7 @@ export function ClientDashboard(): ReactElement {
 
         <PayrollFilesEntry />
 
-        {!supportToken && (
+        {!supportToken && !viewOnly && (
           <div className="sm:hidden">
             <Button className="w-full" onClick={() => navigate(newEmployeeHref)}>Add employee</Button>
           </div>

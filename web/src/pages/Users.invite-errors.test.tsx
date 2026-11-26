@@ -100,7 +100,7 @@ describe('Invite User field errors', () => {
     expect(screen.queryByText('Choose at least one client for a client portal user.')).toBeNull();
     await user.click(screen.getByRole('button', { name: /Send Invitation/ }));
     await waitFor(() => expect(apiMocks.users.create).toHaveBeenCalledExactlyOnceWith({
-      email: 'portal@example.test', name: 'portal', role: 'client', company_ids: [1],
+      email: 'portal@example.test', name: 'portal', role: 'client', client_access_level: 'manager', company_ids: [1],
     }));
   });
 

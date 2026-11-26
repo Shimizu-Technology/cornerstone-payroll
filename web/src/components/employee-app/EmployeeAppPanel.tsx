@@ -13,6 +13,8 @@ import {
 } from '@/services/employee-app-rollout-api';
 import { InviteDeliveryField } from './InviteDeliveryField';
 import { PrintedInvites } from './PrintedInvites';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 const labels: Record<EmployeeAppStatus, string> = {
   not_invited: 'Not invited', invited: 'Invited', active: 'Active',
@@ -40,6 +42,7 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
   const [printed, setPrinted] = useState<PrintedInvite[]>([]);
   const accessReadGeneration = useRef(0);
   const location = useLocation();
+  const viewOnly = useClientViewOnly() && audience === 'client';
   const getAccess = useCallback(() => employeeAppRolloutApi(companyId, audience).employee(employeeId), [companyId, audience, employeeId]);
 
   useEffect(() => {
@@ -103,9 +106,10 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience 
             </p>}
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="[overflow-wrap:anywhere]">{access.email || 'No email on file'}</span>
-              <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={employeeEditPath(companyId, employeeId, { returnTo: location.pathname + location.search })}>Edit contact details</Link>
+              {!viewOnly && <Link className="inline-flex min-h-11 items-center font-semibold text-primary-800 underline" to={employeeEditPath(companyId, employeeId, { returnTo: location.pathname + location.search })}>Edit contact details</Link>}
             </div>
             {feedback && <p role="status" className="rounded-lg bg-neutral-50 p-3 text-sm font-medium text-neutral-900">{feedback}</p>}
+            {viewOnly && access.enabled && <ViewOnlyNotice />}
             {actions.length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {actions.map((action) => (
@@ -151,8 +155,10 @@ function EmployeeAppAction({ access, operation, submit, onClose, onSuccess, refr
   refresh: () => void;
 }) {
   const reasonId = useId();
+  // Only Cornerstone staff print sign-up codes; everyone else invites by email.
+  const canPrintCodes = access.can_print_codes === true;
   const [delivery, setDelivery] = useState<InviteDelivery>(
-    operation === 'invite' ? (access.email ? 'email' : 'code') : (access.invite_delivery || 'code'),
+    !canPrintCodes ? 'email' : operation === 'invite' ? (access.email ? 'email' : 'code') : (access.invite_delivery || 'code'),
   );
   const [reason, setReason] = useState('');
   const [confirmEmail, setConfirmEmail] = useState(false);
@@ -193,7 +199,7 @@ function EmployeeAppAction({ access, operation, submit, onClose, onSuccess, refr
           </DialogHeader>
           <p className="text-sm font-semibold [overflow-wrap:anywhere]">{access.name}</p>
           {sendsInvite && !alreadyRegistered && <>
-            <InviteDeliveryField value={delivery} onChange={setDelivery} disabled={busy} />
+            {canPrintCodes && <InviteDeliveryField value={delivery} onChange={setDelivery} disabled={busy} />}
             {delivery === 'email' && (
               access.email
                 ? <div className="space-y-2 text-sm">
@@ -203,7 +209,9 @@ function EmployeeAppAction({ access, operation, submit, onClose, onSuccess, refr
                     {access.staff_actions ? 'I confirm any existing payroll account with this email belongs to this employee.' : 'If this is my payroll sign-in email, I confirm this is my own employee record.'}
                   </label>
                 </div>
-                : <p className="text-sm text-neutral-700">Add a personal email in contact details, or choose Printed code.</p>
+                : <p className="text-sm text-neutral-700">{canPrintCodes
+                  ? 'Add a personal email in contact details, or choose Printed code.'
+                  : 'Add the employee’s personal email in contact details first. The invite goes only to the email on file.'}</p>
             )}
           </>}
           {needsReason && (

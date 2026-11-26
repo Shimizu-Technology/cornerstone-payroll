@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeAppRolloutPath, employeeAppSettingsPath, employeeContactDetailsPath, employeePath } from '@/lib/routes';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 import {
   employeeAppOff, employeeAppRolloutApi, formatEmployeeAppDate, inviteEmailMessages,
   type EmployeeAppRollout as Rollout, type InviteDelivery, type PrintedInvite, type RolloutCount, type WaveOutcome,
@@ -29,16 +31,18 @@ const textLink = 'inline-flex min-h-11 items-center text-sm font-semibold text-p
 export function EmployeeAppRollout({ audience }: { audience: 'admin' | 'client' }) {
   const { activeCompany } = useCompany();
   const canManageSettings = useSelectedCompanyCapability('manage_client_administration');
+  const viewOnly = useClientViewOnly() && audience === 'client';
   if (!activeCompany) return <WorkspaceLoader label="Loading client" />;
   return <CompanyRollout key={`${activeCompany.id}:${audience}`} companyId={activeCompany.id} companyName={activeCompany.name} audience={audience}
-    showSettings={audience === 'client' || canManageSettings} />;
+    showSettings={audience === 'client' ? !viewOnly : canManageSettings} viewOnly={viewOnly} />;
 }
 
-function CompanyRollout({ companyId, companyName, audience, showSettings }: {
+function CompanyRollout({ companyId, companyName, audience, showSettings, viewOnly }: {
   companyId: number;
   companyName: string;
   audience: 'admin' | 'client';
   showSettings: boolean;
+  viewOnly: boolean;
 }) {
   const [rollout, setRollout] = useState<Rollout | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -107,6 +111,7 @@ function CompanyRollout({ companyId, companyName, audience, showSettings }: {
               </div>
             </CardContent>
           </Card>
+          {viewOnly && <Card><CardHeader><CardTitle>Invite a group</CardTitle></CardHeader><CardContent><ViewOnlyNotice /></CardContent></Card>}
           {rollout.can_manage_invites && <InviteWave rollout={rollout} companyId={companyId} companyName={companyName} audience={audience}
             recordPath={recordPath} refresh={() => setAttempt((value) => value + 1)} />}
           <Card>
@@ -160,6 +165,8 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
   refresh: () => void;
 }) {
   const searchId = useId();
+  // Only Cornerstone staff print sign-up codes; a client's invites go by email.
+  const canPrintCodes = rollout.can_print_codes === true;
   const [delivery, setDelivery] = useState<InviteDelivery>('email');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
@@ -200,7 +207,9 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
         <CardTitle>Invite a group</CardTitle>
         <CardDescription>
           {rollout.enabled
-            ? `Choose up to ${rollout.max_wave_size} employees. Use printed codes for employees without a personal email.`
+            ? canPrintCodes
+              ? `Choose up to ${rollout.max_wave_size} employees. Use printed codes for employees without a personal email.`
+              : `Choose up to ${rollout.max_wave_size} employees. Each invite goes to the employee’s email on file. For employees without a personal email, add one in contact details or ask Cornerstone for a printed sign-up code.`
             : audience === 'client'
               ? 'You can invite employees once Cornerstone turns the app on.'
               : 'You can invite employees once the app is turned on.'}
@@ -209,7 +218,7 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
       <CardContent className="space-y-4">
         {rollout.enabled && (
           <form className="space-y-3" onSubmit={(event) => void inviteWave(event)}>
-            <InviteDeliveryField value={delivery} onChange={(value) => { setDelivery(value); setSelected([]); }} disabled={busy} />
+            {canPrintCodes && <InviteDeliveryField value={delivery} onChange={(value) => { setDelivery(value); setSelected([]); }} disabled={busy} />}
             {delivery === 'email' && rollout.candidates.some((candidate) => candidate.email_review_required) && (
               <p className="text-sm text-neutral-600">For employees with an existing payroll login, review and send the email invite from their employee record.</p>
             )}

@@ -8,10 +8,13 @@ import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
 import { formatGuam } from '@/lib/payrollSubmissionFormat';
 import type { PayPeriod } from '@/types';
+import { ViewOnlyNotice } from './ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
   payPeriod: PayPeriod; companyId: number; onDone: () => Promise<void>;
 }) {
+  const viewOnly = useClientViewOnly();
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const [note, setNote] = useState('');
@@ -88,6 +91,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
         <p className="whitespace-pre-wrap break-words">{review.change_request_note}</p>
         <p>Cornerstone has been notified. You’ll receive a new revision to review after the changes.</p>
       </div>}
+      {viewOnly && canReview && review?.status === 'pending' && <ViewOnlyNotice />}
       {canDecide && <div className="max-w-3xl space-y-4">
         <label className="block text-sm font-medium" htmlFor="review-note">Note for Cornerstone (required to request changes)</label>
         <Textarea id="review-note" value={note} onChange={event => setNote(event.target.value)} maxLength={2000} disabled={busy} />

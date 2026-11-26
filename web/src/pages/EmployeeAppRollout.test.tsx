@@ -11,14 +11,18 @@ const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock('@/services/api', () => ({ apiClient: mocks }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 7, name: 'Example Bakery' }, companies: [] }) }));
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapability: () => false }));
-const auth = vi.hoisted(() => ({ capabilities: [] as string[] }));
+const auth = vi.hoisted(() => ({ capabilities: [] as string[], isClientViewer: false }));
 vi.mock('@/contexts/AuthContext', () => ({
-  useOptionalAuth: () => ({ hasCapability: (capability: string) => auth.capabilities.includes(capability) }),
+  useOptionalAuth: () => ({
+    hasCapability: (capability: string) => auth.capabilities.includes(capability),
+    isClientViewer: auth.isClientViewer,
+  }),
 }));
 
 const rollout: Rollout = {
   enabled: true,
   can_manage_invites: true,
+  can_print_codes: true,
   max_wave_size: 25,
   counts: { ready_to_invite: 2, invited: 0, active: 0, needs_contact_details: 0, locked: 0, former: 0 },
   candidates: [
@@ -30,7 +34,33 @@ const rollout: Rollout = {
 };
 
 describe('Employee app rollout', () => {
-  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); auth.capabilities = []; });
+  afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); auth.capabilities = []; auth.isClientViewer = false; });
+
+  it('gives a client manager email-only waves to the address on file, with no printed codes', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, can_print_codes: false } });
+    mocks.post.mockResolvedValue({ data: [{ id: 21, email_status: 'sent' }] });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
+
+    expect(await screen.findByText(/Each invite goes to the employee’s email on file/)).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: 'Printed code' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Create printed codes' })).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
+    await user.click(screen.getByRole('button', { name: 'Send email invites' }));
+    expect(mocks.post).toHaveBeenCalledWith('/client/employee_app_rollout/7/invite',
+      { employee_ids: [21], delivery: 'email' }, { companyId: 7 });
+  });
+
+  it('shows a client viewer the rollout with a view-only note instead of invites or settings', async () => {
+    auth.isClientViewer = true;
+    mocks.get.mockResolvedValue({ data: { ...rollout, can_manage_invites: false, can_print_codes: false } });
+    render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
+
+    expect(await screen.findByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+    expect(screen.getByText('Ready to invite by email').nextElementSibling?.textContent).toBe('2');
+    expect(screen.queryByRole('button', { name: 'Send email invites' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Branding and Help settings' })).toBeNull();
+  });
 
   it('tells a client who turns the app on and what to do meanwhile', async () => {
     mocks.get.mockResolvedValue({ data: { ...rollout, enabled: false } });

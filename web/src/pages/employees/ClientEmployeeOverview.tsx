@@ -14,11 +14,13 @@ import { employeeEditPath, employeesPath, safeInternalReturnPath } from '@/lib/r
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { clientEmployeesApi } from '@/services/api';
 import type { Employee } from '@/types';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 export function ClientEmployeeOverview() {
   const { companyId: companyIdParam, id: idParam } = useParams<{ companyId: string; id: string }>();
   const [searchParams] = useSearchParams();
   const { activeCompanyId, activeCompany } = useCompany();
+  const viewOnly = useClientViewOnly();
   const companyId = parsePositiveRouteId(companyIdParam);
   const employeeId = parsePositiveRouteId(idParam);
   const [employee, setEmployee] = useState<Employee | null>(null);
@@ -55,7 +57,7 @@ export function ClientEmployeeOverview() {
         description={[employmentTypeLabels[employee.employment_type] || employee.employment_type, employee.department?.name || 'No department'].join(' · ')}
         actions={<div className="flex flex-wrap gap-2">
           <Link className="inline-flex min-h-11 items-center gap-2 rounded-full border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-700" to={returnTo}><ArrowLeft className="h-4 w-4" />Back</Link>
-          <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white" to={employeeEditPath(companyId, employeeId, { returnTo })}><Pencil className="h-4 w-4" />Edit employee</Link>
+          {!viewOnly && <Link className="inline-flex min-h-11 items-center gap-2 rounded-full bg-primary-700 px-4 text-sm font-semibold text-white" to={employeeEditPath(companyId, employeeId, { returnTo })}><Pencil className="h-4 w-4" />Edit employee</Link>}
         </div>}
       />
       <main className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6 lg:p-8">

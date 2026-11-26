@@ -7,6 +7,8 @@ import { formatDate, formatGuam } from '@/lib/payrollSubmissionFormat';
 import { adminPortalFileRequestsApi, clientPortalFileRequestsApi, type PortalFileRequest } from '@/services/api';
 import { MessageComposer } from './MessageComposer';
 import { CATEGORY_LABELS, type PortalDocumentsApi } from './portalFiles';
+import { ViewOnlyNotice } from './ViewOnlyNotice';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 function badgeVariant(status: PortalFileRequest['status']): 'warning' | 'info' | 'success' | 'default' {
   if (status === 'requested') return 'warning';
@@ -25,6 +27,7 @@ export function FileRequestCard({ request, audience, draftScope, documentsApi, o
   documentsApi: PortalDocumentsApi;
   onChanged: () => void | Promise<void>;
 }): ReactElement {
+  const viewOnly = useClientViewOnly();
   const [answering, setAnswering] = useState(false);
   const [askingAgain, setAskingAgain] = useState(false);
   const [note, setNote] = useState('');
@@ -100,7 +103,8 @@ export function FileRequestCard({ request, audience, draftScope, documentsApi, o
       {error && <p role="alert" className="mt-2 text-sm text-danger-700">{error}</p>}
       {notice && <p role="status" className="mt-2 text-sm text-neutral-700">{notice}</p>}
 
-      {audience === 'client' && outstanding && (
+      {audience === 'client' && outstanding && viewOnly && <ViewOnlyNotice className="mt-4" />}
+      {audience === 'client' && outstanding && !viewOnly && (
         answering ? (
           <div className="mt-4 rounded-lg border border-neutral-200 bg-white p-4">
             <MessageComposer draftKey={`${draftScope}:request:${request.id}`} documentsApi={documentsApi} label="Note for Cornerstone (optional)"
