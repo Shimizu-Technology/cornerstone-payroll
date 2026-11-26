@@ -103,7 +103,10 @@ module PortalNotifications
         end
 
         scope.includes(:portal_notification_event).find_each do |delivery|
-          next if delivery.user_id.nil? && !Recipients.eligible_for_event?(user, delivery.event)
+          if delivery.user_id.nil? &&
+              Recipients.eligible_account_user_for_email(delivery.recipient_email, delivery.event)&.id != user.id
+            next
+          end
 
           deliver_after = PortalNotifications.deliver_after_for(mode, delivery.event.occurred_at)
           next if delivery.delivery_mode == mode && delivery.deliver_after == deliver_after

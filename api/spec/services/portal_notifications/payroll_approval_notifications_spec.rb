@@ -956,6 +956,24 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
           delivery_mode: "immediate",
           deliver_after: Time.utc(2026, 12, 1, 20, 32)
         )
+
+        # Even inside the same org, only the effective account resolved by the dispatcher can retime an email-only delivery.
+        effective_staff = create(:user, company: company, organization: organization, role: "admin", email: "shared.mailbox+first@gmail.com")
+        secondary_staff = create(:user, company: company, organization: organization, role: "admin", email: "sharedmailbox+second@googlemail.com")
+        create(:company_assignment, user: effective_staff, company: company)
+        create(:company_assignment, user: secondary_staff, company: company)
+
+        PortalNotifications::Preferences.update!(secondary_staff, { "client_messages" => "digest" })
+        expect(org_a_delivery.reload).to have_attributes(
+          delivery_mode: "immediate",
+          deliver_after: Time.utc(2026, 12, 1, 20, 32)
+        )
+
+        PortalNotifications::Preferences.update!(effective_staff, { "client_messages" => "digest" })
+        expect(org_a_delivery.reload).to have_attributes(
+          delivery_mode: "digest",
+          deliver_after: Time.utc(2026, 12, 1, 21, 0)
+        )
       end
     end
   end

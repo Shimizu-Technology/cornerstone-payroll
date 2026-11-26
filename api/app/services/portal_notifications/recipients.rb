@@ -74,12 +74,6 @@ module PortalNotifications
         account_users_for_email(email).find { |user| eligible_user?(user, event) }
       end
 
-      # Public so Preferences can verify staff eligibility before retiming an
-      # unowned extra-address delivery.
-      def eligible_for_event?(user, event)
-        eligible_user?(user, event)
-      end
-
       def subject_available?(event)
         subject = event.subject
         return payroll_review_publication_actionable?(event) if event.event_type == "payroll_review_published"
