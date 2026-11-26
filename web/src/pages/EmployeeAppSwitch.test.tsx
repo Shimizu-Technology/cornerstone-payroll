@@ -153,6 +153,25 @@ describe('EmployeeAppSwitch', () => {
     expect(within(dialog).getByText('Not ready to turn on yet. Fix the failing checks first.')).toBeTruthy();
   });
 
+  it.each([
+    [403, { clerk_error: { type: 'forbidden', reason: 'reverification-error' } }, "This change needs a fresh sign-in check, and it wasn't completed. Choose the change again and confirm it's you when asked. Nothing was changed."],
+    [401, null, 'Your sign-in has ended. Sign in again, then make the change. Nothing was changed.'],
+    [502, null, "Payroll couldn't save the change right now. Nothing was changed. Try again in a minute."],
+  ])('says why a %i refusal with no message of its own failed', async (status, body, message) => {
+    mocks.get.mockResolvedValue({ data: state({}, [passed('company', 'This is a live client or a demo company')]) });
+    mocks.send.mockResolvedValue(json(status, body));
+    renderPage();
+
+    const row = (await screen.findByText('Employee app', { selector: 'p' })).closest('li') as HTMLElement;
+    await userEvent.click(within(row).getByRole('button', { name: 'Turn on' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.type(within(dialog).getByLabelText('Reason'), 'Pilot week 1');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Turn on' }));
+
+    expect(await within(dialog).findByText(message)).toBeTruthy();
+    expect(within(dialog).queryByText(/^Could not save the change\.?$/)).toBeNull();
+  });
+
   it('shows demo early access and the kill switch only for a demo company', async () => {
     const demo = state({
       company: { id: 6, name: 'Harbor Finch Kitchen', demo: true, live: false, subdomain_slug: 'harborfinch' },
