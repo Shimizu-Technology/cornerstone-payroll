@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_26_080000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_26_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -5128,6 +5128,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_080000) do
     t.boolean "active", default: true, null: false
     t.string "clerk_id"
     t.string "clerk_invitation_id"
+    t.string "client_access_level", default: "manager", null: false
     t.bigint "company_id", null: false
     t.datetime "created_at", null: false
     t.string "email", null: false
@@ -5156,6 +5157,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_26_080000) do
     t.index [ "practice_company_id" ], name: "index_users_on_practice_company_id"
     t.index [ "workos_id" ], name: "index_users_on_workos_id", unique: true
     t.check_constraint "NOT platform_owner OR role = 5 AND active = true AND lower(email::text) = 'shimizutechnology@gmail.com'::text", name: "users_platform_owner_identity"
+    t.check_constraint "client_access_level::text = ANY (ARRAY['manager'::character varying::text, 'viewer'::character varying::text])", name: "users_client_access_level_check"
     t.check_constraint "deactivation_reason IS NULL OR (deactivation_reason::text = ANY (ARRAY['last_employee_link_closed'::character varying::text, 'pending_sign_up_closed'::character varying::text, 'deactivated'::character varying::text]))", name: "users_deactivation_reason_check"
     t.check_constraint "practice_company_id IS NULL OR company_id = practice_company_id AND role = 4", name: "users_practice_scope"
     t.boolean "view_as_allowed", default: false, null: false
