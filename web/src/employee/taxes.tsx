@@ -3,10 +3,12 @@ import { Download, FileText, Mail, MapPin, TriangleAlert } from 'lucide-react';
 import { Link } from 'react-router';
 import { askManager } from './brand';
 import type { TaxForm } from './contracts';
-import { useBrand, useReadySession } from './contexts';
+import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { DeliveryConsentSection } from './consent';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
+import { pdfDownloadLabel } from './format';
+import { HideAmountsToggle } from './HideAmounts';
 import { Card, Chip, EmpButton, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
 import { useEmployeeData } from './useEmployeeData';
 
@@ -39,10 +41,12 @@ function PaperCopyLine(): ReactElement {
 
 function W2Card({ form }: { form: TaxForm }): ReactElement {
   const { api, state: session } = useReadySession();
+  const { hidden } = useHideAmounts();
   const linkId = session.link.id;
   const fetchPdf = useCallback(() => api.taxFormPdf(linkId, form.id), [api, linkId, form.id]);
   const { state, start } = useDownload(fetchPdf, `w-2gu-${form.taxYear}.pdf`);
   const withdrawn = form.status === 'withdrawn';
+  const buttonLabel = pdfDownloadLabel('Download W-2GU (PDF)', hidden);
   return (
     <Card title={`${form.taxYear} W-2GU`} action={form.corrected && !withdrawn ? <Chip tone="warn">Corrected</Chip> : undefined}>
       <div className="space-y-4">
@@ -56,7 +60,7 @@ function W2Card({ form }: { form: TaxForm }): ReactElement {
             <p className="text-neutral-700">Your Wage and Tax Statement for {form.taxYear}. You need it to file your Guam tax return.</p>
             <EmpButton block variant="secondary" className="emp-narrow-button" onClick={start} disabled={state === 'working'} aria-busy={state === 'working'}>
               <Download aria-hidden="true" className="size-6" />
-              {state === 'working' ? 'Downloading…' : 'Download W-2GU (PDF)'}
+              {state === 'working' ? 'Downloading…' : buttonLabel}
             </EmpButton>
             {state === 'failed' && <p className="emp-field-error" role="alert">Couldn't download the form. Try again.</p>}
             {state === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to download the form.</p>}
@@ -91,7 +95,7 @@ function TaxFormsList(): ReactElement {
 export function TaxesTab(): ReactElement {
   const { state } = useReadySession();
   return (
-    <Page title="Tax forms">
+    <Page title="Tax forms" actions={<HideAmountsToggle />}>
       <div className="emp-cards-grid">
         {state.info.features.taxForms ? <TaxFormsList /> : (
           <Card>

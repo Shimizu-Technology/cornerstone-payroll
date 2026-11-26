@@ -393,6 +393,7 @@ body {
   align-items: center;
   gap: 8px;
   min-height: 44px;
+  min-width: 44px;
   padding: 0 8px;
   margin-right: -8px;
   border-radius: 10px;
@@ -400,6 +401,11 @@ body {
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
+}
+
+.emp-eye:active {
+  background: #e2e8f0;
+  color: #0f172a;
 }
 
 .emp-link {

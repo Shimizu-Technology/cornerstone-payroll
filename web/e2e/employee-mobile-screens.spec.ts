@@ -46,6 +46,10 @@ test.describe('employee app on a phone', () => {
 
     await expect(page.getByRole('heading', { level: 1, name: 'Hi, Tala' })).toBeVisible();
     const latest = page.getByRole('region', { name: 'Latest pay' });
+    // Amounts start masked; tapping Show amounts reveals them on this device.
+    await expect(latest).toContainText('$•••');
+    await expect(latest).not.toContainText('$534.18');
+    await latest.getByRole('button', { name: 'Show amounts' }).click();
     await expect(latest).toContainText('$534.18');
     await expect(latest).toContainText('Paid Nov 20, 2026');
     await expect(latest).toContainText('38.5 hours');
@@ -107,7 +111,7 @@ test.describe('employee app on a phone', () => {
 
     // A QuickBooks check with its original PDF offers it; one without says nothing about it.
     await quickbooks.getByRole('link', { name: /Aug 28/ }).click();
-    await expect(page.getByRole('button', { name: 'View original stub (PDF)' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'View original stub PDF (shows amounts)' })).toBeVisible();
     await expect(page.getByText('From QuickBooks records')).toBeVisible();
     await page.getByRole('link', { name: 'Pay', exact: true }).first().click();
     await page.getByRole('list', { name: 'From QuickBooks records' }).getByRole('link', { name: /Aug 14/ }).click();
@@ -121,13 +125,15 @@ test.describe('employee app on a phone', () => {
     await expect(page).toHaveURL(/year=2025/);
   });
 
-  test('Hide amounts hides every amount and the comparison line', async ({ page }) => {
+  test('amounts are masked by default, revealed with the eye button, and remembered across reloads and sign-out', async ({ page }) => {
     await signIn(page);
     await mockEmployeeApi(page);
     await page.goto(`/?${tenantQuery}`);
     const latest = page.getByRole('region', { name: 'Latest pay' });
-    await expect(latest).toContainText('$534.18');
-    await page.getByRole('button', { name: 'Hide amounts' }).click();
+    const showButton = latest.getByRole('button', { name: 'Show amounts' });
+    await expect(showButton).toBeVisible();
+    await expect(showButton).not.toHaveAttribute('aria-pressed');
+    await expect(latest).toContainText('$•••');
     await expect(latest).not.toContainText('$534.18');
     await expect(latest).not.toContainText('less than');
     await expect(latest.getByText('Amount hidden')).toBeAttached();
@@ -137,7 +143,33 @@ test.describe('employee app on a phone', () => {
     const [title, noteBox] = [(await latest.getByRole('heading', { name: 'Latest pay' }).boundingBox())!, (await note.boundingBox())!];
     expect(noteBox.y).toBeGreaterThanOrEqual(title.y + title.height);
     expect(await latest.getByRole('heading', { name: 'Latest pay' }).evaluate((node) => node.scrollWidth <= node.clientWidth && node.getBoundingClientRect().height < 40)).toBe(true);
+    await expectPhoneBasics(page);
     await snap(page, '05-hidden-amounts');
+
+    // Reloading on the same device keeps amounts masked and does not repeat the one-time note.
+    await page.reload();
+    await expect(latest).toContainText('$•••');
+    await expect(note).toHaveCount(0);
+
+    // Tapping Show amounts reveals them and survives reload and sign-out.
+    await latest.getByRole('button', { name: 'Show amounts' }).click();
+    await expect(latest).toContainText('$534.18');
+    await expect(latest).toContainText('$36.45 less than Nov 6');
+    await page.reload();
+    await expect(latest).toContainText('$534.18');
+
+    // Signing out keeps the device preference.
+    await page.getByRole('banner').getByRole('button', { name: /^Account/ }).click();
+    await page.getByRole('navigation', { name: 'Account' }).getByRole('button', { name: 'Sign out' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeVisible();
+    await page.getByRole('link', { name: 'Sign in' }).click();
+    await page.getByRole('button', { name: 'Continue as preview employee' }).click();
+    await expect(page.getByRole('region', { name: 'Latest pay' })).toContainText('$534.18');
+
+    // Hiding again masks amounts without repeating the one-time note.
+    await page.getByRole('button', { name: 'Hide amounts' }).click();
+    await expect(page.getByRole('region', { name: 'Latest pay' })).not.toContainText('$534.18');
+    await expect(note).toHaveCount(0);
   });
 
   test('a contact change asks to confirm it\'s you first, then saves', async ({ page }) => {
@@ -388,7 +420,7 @@ test.describe('employee app on a phone', () => {
     await expectPhoneBasics(page);
     await snap(page, '14-tax-forms', true);
     const download = page.waitForEvent('download');
-    await earlier.getByRole('button', { name: 'Download W-2GU (PDF)' }).click();
+    await earlier.getByRole('button', { name: 'Download W-2GU PDF (shows amounts)' }).click();
     expect((await download).suggestedFilename()).toBe('w-2gu-2025.pdf');
   });
 

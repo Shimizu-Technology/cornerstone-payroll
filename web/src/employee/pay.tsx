@@ -14,7 +14,7 @@ import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import {
-  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, shortDate, taxLabel, weekdayDate,
+  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, pdfDownloadLabel, shortDate, taxLabel, weekdayDate,
 } from './format';
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
@@ -532,14 +532,16 @@ function StubScreen({ id }: { id: string }): ReactElement {
 
 function StubPdfButton({ id, filename, label }: { id: string; filename: string; label: string }): ReactElement {
   const { api, state: session } = useReadySession();
+  const { hidden } = useHideAmounts();
   const linkId = session.link.id;
   const fetchPdf = useCallback(() => api.statementPdf(linkId, id), [api, linkId, id]);
   const { state, start } = useDownload(fetchPdf, filename);
+  const buttonLabel = pdfDownloadLabel(label, hidden);
   return (
     <div className="space-y-2">
       <EmpButton variant="secondary" block className="emp-narrow-button" onClick={start} disabled={state === 'working'} aria-busy={state === 'working'}>
         <Download aria-hidden="true" className="size-6" />
-        {state === 'working' ? 'Downloading…' : label}
+        {state === 'working' ? 'Downloading…' : buttonLabel}
       </EmpButton>
       {state === 'failed' && <p className="emp-field-error" role="alert">Couldn't download the PDF. Try again.</p>}
       {state === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to download the PDF.</p>}
@@ -580,14 +582,16 @@ function isYtdOnlyEarning(line: EarningLine): boolean {
 function EarningRow({ line }: { line: EarningLine }): ReactElement {
   const hours = formatHours(line.hours);
   const rate = formatMoney(line.rate);
-  const { hidden } = useHideAmounts();
-  const units = hours && Number(line.hours) !== 0
-    ? (rate && !hidden ? `${hours} hrs × ${rate}` : `${hours} hrs`) : null;
+  const hasHours = Boolean(hours && Number(line.hours) !== 0);
   return (
     <tr className={isYtdOnlyEarning(line) ? 'emp-ytd-only' : undefined}>
       <th scope="row">
         <span className="block">{line.label}</span>
-        {units && <span className="emp-term block">{units}</span>}
+        {hasHours && (
+          <span className="emp-term block">
+            {hours} hrs{rate && <> × <Amount>{rate}</Amount></>}
+          </span>
+        )}
       </th>
       <td><Money value={line.amount} /></td>
       <td className="emp-ytd"><Money value={line.ytd} /></td>
@@ -661,6 +665,19 @@ function PrevNext({ siblings, id, linkSuffix, className, newScreen }: { siblings
   );
 }
 
+const CURRENCY_IN_TEXT = /(-?\$\s?\d[\d,]*(?:\.\d{1,2})?)/g;
+
+/** Defends against a future stub note accidentally carrying a dollar figure. */
+function StubNote({ note }: { note: string }): ReactElement {
+  const parts = note.split(CURRENCY_IN_TEXT);
+  if (parts.length === 1) return <p className="emp-hint">{note}</p>;
+  return (
+    <p className="emp-hint">
+      {parts.map((part, index) => (index % 2 === 1 ? <Amount key={index}>{part}</Amount> : part))}
+    </p>
+  );
+}
+
 /** `newScreen`: on a phone each stub is its own screen, so Older and Newer move focus to its heading. */
 function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: string; siblings: StatementSummary[]; linkSuffix?: string; newScreen?: boolean }): ReactElement {
   const { state, reload } = useStatement(id);
@@ -698,7 +715,7 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
         <Comparison statement={stub} statements={siblings} />
       </div>
 
-      {stub.note && <p className="emp-hint">{stub.note}</p>}
+      {stub.note && <StubNote note={stub.note} />}
 
       {hasOnlyYtdEarnings && <p className="emp-no-current-earnings emp-hint">No earnings this pay period.</p>}
       {stub.earnings.length > 0 && (
