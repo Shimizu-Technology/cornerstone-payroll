@@ -21,8 +21,8 @@ module EmployeeDocuments
       document
     end
 
-    # An upload made before the caller takes its locks (W-2GU copies, M4-5),
-    # so no lock is held while storage is slow. record_staged! then writes
+    # Call outside the write transaction so no lock is held while storage
+    # is slow. record_staged! then writes
     # the row; a staged file whose row never commits is the caller's to
     # remove (remove_uncommitted_object).
     Staged = Struct.new(:key, :sha256, keyword_init: true)
@@ -33,12 +33,16 @@ module EmployeeDocuments
         .sub(/\.pdf\z/, "-#{SecureRandom.uuid}.pdf")
       R2StorageService.new.upload(key, bytes, content_type: "application/pdf")
       Staged.new(key: key, sha256: digest)
+    rescue StandardError
+      remove_uncommitted_object(key) if key
+      raise
     end
 
-    def self.record_staged!(staged, source:, posted_at:, revision:, payroll_facts: nil, tax_year: nil)
+    def self.record_staged!(staged, source:, posted_at:, revision:, payroll_facts: nil, tax_year: nil, predecessor: nil, payment_line: nil)
       EmployeeDocument.create!(
         source.model_name.singular => source, company_id: source.company_id, revision: revision, tax_year: tax_year,
-        storage_key: staged.key, sha256: staged.sha256, posted_at: posted_at, **(payroll_facts || {})
+        storage_key: staged.key, sha256: staged.sha256, posted_at: posted_at, **(payroll_facts || {}),
+        payment_line: payment_line, corrected: predecessor.present?, replaces_document: predecessor
       )
     end
 

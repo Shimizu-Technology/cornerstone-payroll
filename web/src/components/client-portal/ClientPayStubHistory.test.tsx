@@ -25,7 +25,7 @@ it('shows an empty state without download controls', async () => {
 
 it('shows imported checks under a From QuickBooks records heading', async () => {
   mocks.history.mockResolvedValue({
-    pay_stubs: [{ id: 9, pay_period_id: 2, period_description: 'Aug 1 – 14', pay_date: '2026-08-19', net_pay: 1100 }],
+    pay_stubs: [{ id: 9, pay_period_id: 2, period_description: '08/01/2026 - 08/14/2026', start_date: '2026-08-01', end_date: '2026-08-14', pay_date: '2026-08-19', net_pay: 1100 }],
     quickbooks_paychecks: [
       {
         id: 501,
@@ -41,6 +41,9 @@ it('shows imported checks under a From QuickBooks records heading', async () => 
   });
   render(<ClientPayStubHistory employeeId={10} />);
   expect(await screen.findByRole('heading', { name: 'From QuickBooks records' })).toBeTruthy();
-  expect(screen.getByText(/Pay date 2026-02-19/)).toBeTruthy();
+  expect(screen.getByText('Aug 1 – 14, 2026')).toBeTruthy();
+  expect(screen.getByText(/Pay date Aug 19, 2026/)).toBeTruthy();
+  expect(screen.getByText('Feb 1 – 14, 2026')).toBeTruthy();
+  expect(screen.getByText(/Pay date Feb 19, 2026/)).toBeTruthy();
   expect(screen.getByText(/\$1,125\.50/)).toBeTruthy();
 });

@@ -2348,7 +2348,7 @@ function EmployerLiabilityPanel() {
         <CardHeader>
           <CardTitle className="text-lg">Employer Tax Liability</CardTitle>
           <CardDescription>
-            Employer-side payroll tax obligations — Social Security match (6.2%) and Medicare match (1.45%).
+            This report shows what your business owes for its share of Social Security (6.2%) and Medicare (1.45%).
           </CardDescription>
           {report?.source?.statement && <CardDescription>{report.source.statement}</CardDescription>}
         </CardHeader>

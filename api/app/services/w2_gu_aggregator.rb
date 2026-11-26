@@ -5,6 +5,8 @@
 # Produces annual W-2GU summary data from committed payroll for a company.
 # This is a filing-prep dataset (JSON-first) for review/export.
 class W2GuAggregator
+  class MissingWageBase < ArgumentError; end
+
   SS_WAGE_BASE_BY_YEAR = {
     2020 => 137_700.00,
     2021 => 142_800.00,
@@ -356,7 +358,7 @@ class W2GuAggregator
   def ss_wage_base
     @ss_wage_base ||= AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_d || SS_WAGE_BASE_BY_YEAR.fetch(year).to_d
   rescue KeyError
-    raise ArgumentError, "SS wage base not configured for #{year}"
+    raise MissingWageBase, "SS wage base not configured for #{year}"
   end
 
   def historical_source

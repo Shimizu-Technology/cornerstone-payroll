@@ -1812,6 +1812,7 @@ export interface PayrollItem {
   loan_payment?: number;
   insurance_payment?: number;
   other_deductions?: number;
+  details_error?: string;
   total_deductions?: number;
   custom_deductions?: CustomDeduction[];
   custom_deductions_total?: number;

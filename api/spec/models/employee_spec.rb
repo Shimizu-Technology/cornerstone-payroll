@@ -159,11 +159,13 @@ RSpec.describe Employee, type: :model do
 
   describe "#legal_name" do
     it "adds the suffix in its printed form, even before validation normalizes it" do
-      employee = build(:employee, first_name: "Alex", middle_name: nil, last_name: "Testperson", name_suffix: "jr.")
+      employee = build(:employee, first_name: "Alex", middle_name: nil, last_name: "Testperson", name_suffix: " Jr. ")
 
       expect(employee.legal_name).to eq("Alex Testperson Jr.")
-      employee.name_suffix = "iii"
+      employee.name_suffix = " iii "
       expect(employee.legal_name).to eq("Alex Testperson III")
+      expect(employee).to be_valid
+      expect(employee.name_suffix).to eq("III")
     end
   end
 
