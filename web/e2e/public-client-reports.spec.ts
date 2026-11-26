@@ -50,7 +50,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       if (route.request().url().includes('_pdf')) return route.fulfill({ contentType: 'application/pdf', headers: { 'Content-Disposition': 'attachment; filename="report.pdf"' }, body: '%PDF-1.4 test' });
       return json(route, { report: null });
     });
-    const statement = 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT.';
+    const statement = 'Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in Guam income tax.';
     await page.route('**/api/v1/client/reports/tax_summary?**', (route) => json(route, {
       report: { source: { statement: new URL(route.request().url()).searchParams.get('quarter') === '2' ? statement : null } },
     }));

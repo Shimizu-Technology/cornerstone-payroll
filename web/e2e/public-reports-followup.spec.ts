@@ -96,10 +96,10 @@ for (const notes of [
 for (const { fica, fit, expected } of [
   { fica: 1234.56, fit: 789.12, expected: [
     'FICA Obligation (Social Security & Medicare): $1,234.56',
-    'FIT Deposit Total: $789.12 — check to Treasurer of Guam for DRT',
+    'Guam income tax deposit total: $789.12 — check to Treasurer of Guam for DRT',
   ] },
   { fica: 1234.56, fit: 0, expected: ['FICA Obligation (Social Security & Medicare): $1,234.56'] },
-  { fica: 0, fit: 789.12, expected: ['FIT Deposit Total: $789.12 — check to Treasurer of Guam for DRT'] },
+  { fica: 0, fit: 789.12, expected: ['Guam income tax deposit total: $789.12 — check to Treasurer of Guam for DRT'] },
   { fica: 0, fit: 0, expected: [] },
 ]) {
   test(`new transmittal notes contain only positive computed tax totals (FICA ${fica}, FIT ${fit})`, async ({ page }) => {
@@ -115,7 +115,7 @@ test('preview failure clears prior initialized notes and leaves no fallback inst
   await openEditor(page, false);
   await expectNotes(page, [
     'FICA Obligation (Social Security & Medicare): $1,234.56',
-    'FIT Deposit Total: $789.12 — check to Treasurer of Guam for DRT',
+    'Guam income tax deposit total: $789.12 — check to Treasurer of Guam for DRT',
   ]);
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Edit Full Print Package', exact: true })).toHaveCount(0);

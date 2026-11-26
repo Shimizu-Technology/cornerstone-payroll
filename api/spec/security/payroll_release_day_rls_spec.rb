@@ -16,7 +16,11 @@ RSpec.describe "FICA release-day runner with forced RLS", :rls do
   around do |example|
     previous_rake = Rake.application
     Rake.application = Rake::Application.new
-    connection.transaction(isolation: :repeatable_read) do
+    # Flush idle connections left by prior multi-threaded specs and keep the
+    # outer transaction non-joinable (matching Rails transactional fixtures) so
+    # inner transactions like RlsEnforcement.enforce_table! use real savepoints.
+    ActiveRecord::Base.connection_pool.flush(-1)
+    connection.transaction(isolation: :repeatable_read, joinable: false) do
       example.run
       raise ActiveRecord::Rollback
     end

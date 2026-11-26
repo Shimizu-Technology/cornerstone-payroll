@@ -42,6 +42,22 @@ RSpec.describe PayStubGenerator do
     )
   end
 
+  it "prints the income tax adjustment directly below income tax before the Medicare rows" do
+    payroll_item.update_columns(withholding_tax_adjustment: 12.50, medicare_tax: 20, additional_medicare_tax: 5.50)
+    pdf = described_class.new(payroll_item.reload, employee_copy: true).generate
+    rows = PDF::Reader.new(StringIO.new(pdf)).pages.first.text.lines.map(&:strip).reject(&:empty?)
+    income_tax_index = rows.index { |row| row.start_with?("Guam income tax ") }
+
+    expect(income_tax_index).not_to be_nil
+    expect(rows.drop(income_tax_index).first(5)).to match([
+      /\AGuam income tax /,
+      /\A\(Guam income tax adjustment \+12\.50\)\z/,
+      /\ASocial Security /,
+      /\AMedicare /,
+      /\AAdditional Medicare /
+    ])
+  end
+
   it "prints the legal name with a suffix or with no trailing separator" do
     [ [ "JR", "Pat Stub Jr." ], [ nil, "Pat Stub" ] ].each do |suffix, legal_name|
       employee.update!(name_suffix: suffix)
@@ -974,7 +990,7 @@ RSpec.describe PayStubGenerator do
       additional_withholding: 15)
 
     text = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate)).pages.map(&:text).join("\n")
-    row = text.lines.find { |line| line.include?("Additional Withholding") }
+    row = text.lines.find { |line| line.include?("Additional Guam income tax (W-4 4c)") }
 
     expect(row).to include("$0.00", "$15.00")
   end
@@ -1058,8 +1074,8 @@ RSpec.describe PayStubGenerator do
 
       reader = PDF::Reader.new(StringIO.new(described_class.new(payroll_item).generate))
       ytd = reader.pages.map(&:text).join("\n").split("YEAR-TO-DATE SUMMARY").last.gsub(/\s+/, " ")
-      expect(ytd).to include("Gross Earnings $100.00", "Non-Taxable Pay $20.00", "Additional Withholding $3.00",
-        "Federal/Guam Tax $5.00", "Social Security $6.20", "Medicare $1.45", "Deductions $9.00", "Net Pay $95.35")
+      expect(ytd).to include("Gross Earnings $100.00", "Non-Taxable Pay $20.00", "Additional Guam income tax (W-4 4c) $3.00",
+        "Guam income tax $5.00", "Social Security $6.20", "Medicare $1.45", "Deductions $9.00", "Net Pay $95.35")
       expect(reader.page_count).to eq(1)
     end
   end

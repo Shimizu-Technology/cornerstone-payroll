@@ -293,8 +293,11 @@ module Parity
           amount = money(match[2])
           values[label] = amount
           down = label.downcase
-          tax_labels[:income_tax] = label if down.include?("guam tax") || down.include?("income tax")
-          tax_labels[:additional_withholding] = label if down.include?("additional withholding")
+          if down.start_with?("additional withholding", "additional guam income tax")
+            tax_labels[:additional_withholding] = label
+          elsif down.include?("guam tax") || down.include?("income tax")
+            tax_labels[:income_tax] = label
+          end
           tax_labels[:social_security] = label if down == "social security"
           tax_labels[:medicare] = label if down == "medicare"
         end

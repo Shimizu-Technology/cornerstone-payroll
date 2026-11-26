@@ -89,11 +89,11 @@ describe('PayrollRegisterPreviewContent', () => {
   it('shows combined withholding, additional FIT, and a total FIT column', () => {
     render(<PayrollRegisterPreviewContent report={report} />);
 
-    expect(screen.getAllByText('Withholding')[0].nextElementSibling?.textContent).toBe('$225.00');
-    const table = screen.getByRole('columnheader', { name: 'Total FIT (Base + Additional)' }).closest('table')!;
+    expect(screen.getAllByText('Guam income tax')[0].nextElementSibling?.textContent).toBe('$225.00');
+    const table = screen.getByRole('columnheader', { name: 'Total Guam income tax withheld' }).closest('table')!;
     expect(table.tBodies[0].rows[1].lastElementChild?.textContent).toBe('$225.00');
     expect(table.tFoot?.rows[0].lastElementChild?.textContent).toBe('$225.00');
-    expect(screen.getAllByText('Additional FIT')[0].nextElementSibling?.textContent).toBe('$25.00');
+    expect(screen.getAllByText('Additional Guam income tax (W-4 4c)')[0].nextElementSibling?.textContent).toBe('$25.00');
   });
 
   it('makes rehearsal registers visibly test-only without labeling locked imports that way', () => {

@@ -60,7 +60,7 @@ RSpec.describe TaxSummaryCsvExporter do
 
     it "includes all tax category rows" do
       csv = exporter.generate
-      expect(csv).to include("Withholding Tax")
+      expect(csv).to include("Guam income tax")
       expect(csv).to include("Social Security (Employee)")
       expect(csv).to include("Social Security (Employer)")
       expect(csv).to include("Medicare (Employee)")

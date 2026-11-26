@@ -1771,39 +1771,39 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "base_withholding_tax" => 120.11, "additional_withholding" => 50.22
       )
       scope = report.dig("source", "statement")
-      expect(scope).to eq("Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT and $500.00 in gross wages.")
+      expect(scope).to eq("Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in Guam income tax and $500.00 in gross wages.")
 
       get "/api/v1/admin/reports/tax_summary_csv", params: params
       expect(response).to have_http_status(:ok)
       csv = CSV.parse(response.body)
       expect(csv.map(&:first)).to eq([
         "Tax Summary Report", "Client", "Description", "Reporting Basis", "Period", "Period Start", "Period End",
-        "Pay Periods Included", "Employee Count", nil, "Category", "Gross Wages", "Withholding Tax",
+        "Pay Periods Included", "Employee Count", nil, "Category", "Gross Wages", "Guam income tax",
         "Social Security (Employee)", "Social Security (Employer)", "Medicare (Employee)", "Medicare (Employer)",
         "Total Employment Taxes", nil, "Payroll Field Reconciliation", "Field",
-        "Payroll Source", "Base Withholding Tax", "Additional Withholding"
+        "Payroll Source", "Base Guam income tax", "Additional Guam income tax (W-4 4c)"
       ])
       expect(csv[10]).to eq([ "Category", "Amount" ])
       expect(csv[20]).to eq([ "Field", "Tax Treatment", "Category", "Paid By", "Employees", "Amount" ])
-      expect(csv[12]).to eq([ "Withholding Tax", "170.33" ])
-      expect(csv.last(3)).to eq([ [ "Payroll Source", scope ], [ "Base Withholding Tax", "120.11" ], [ "Additional Withholding", "50.22" ] ])
+      expect(csv[12]).to eq([ "Guam income tax", "170.33" ])
+      expect(csv.last(3)).to eq([ [ "Payroll Source", scope ], [ "Base Guam income tax", "120.11" ], [ "Additional Guam income tax (W-4 4c)", "50.22" ] ])
 
       get "/api/v1/admin/reports/tax_summary_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to match(/Withholding Tax \$170\.33.*Total Employment Taxes.*Payroll Source — #{Regexp.escape(scope)}.*Base Withholding Tax \$120\.11.*Additional Withholding \$50\.22/)
+      expect(pdf).to match(/Guam income tax \$170\.33.*Total Employment Taxes.*Payroll Source — #{Regexp.escape(scope)}.*Base Guam income tax \$120\.11.*Additional Guam income tax \(W-4 4c\) \$50\.22/)
 
       get "/api/v1/admin/reports/tax_summary_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
       rows = workbook.sheet("Summary").to_a
       expect(rows.map(&:first)).to eq([
-        "Category", "Gross wages", "Withholding tax", "Social security employee", "Social security employer",
+        "Category", "Gross wages", "Guam income tax", "Social security employee", "Social security employer",
         "Medicare employee", "Medicare employer", "Total employment taxes", "Payroll Source",
-        "Base Withholding Tax", "Additional Withholding"
+        "Base Guam income tax", "Additional Guam income tax (W-4 4c)"
       ])
-      expect(rows[2]).to eq([ "Withholding tax", 170.33 ])
-      expect(rows.last(3)).to eq([ [ "Payroll Source", scope ], [ "Base Withholding Tax", 120.11 ], [ "Additional Withholding", 50.22 ] ])
+      expect(rows[2]).to eq([ "Guam income tax", 170.33 ])
+      expect(rows.last(3)).to eq([ [ "Payroll Source", scope ], [ "Base Guam income tax", 120.11 ], [ "Additional Guam income tax (W-4 4c)", 50.22 ] ])
 
       get "/api/v1/admin/reports/tax_summary", params: { year: 2026, quarter: 1 }
       expect(response.parsed_body.dig("report", "totals", "withholding_tax")).to eq(0)
@@ -1857,7 +1857,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       report = response.parsed_body.fetch("report")
       expect(report.fetch("type")).to eq("employer_liability")
       scope = report.dig("source", "statement")
-      expect(scope).to eq("Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in FIT and $350.00 in gross wages.")
+      expect(scope).to eq("Imported QuickBooks/prior-provider payroll is not included. Excluded $90.00 in Guam income tax and $350.00 in gross wages.")
       totals = report.fetch("totals")
       expect(totals.fetch("withholding_tax")).to eq(170.33)
       employer_total = totals.fetch("social_security_employer").to_d + totals.fetch("medicare_employer").to_d
@@ -2138,32 +2138,32 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       csv = CSV.parse(response.body, headers: true)
       expect(csv.headers).to eq([
         "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
-        "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay", "FIT", "SS Tax", "Medicare Tax",
+        "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay", "Guam income tax withheld", "SS Tax", "Medicare Tax",
         "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
       ])
       expect(csv["Regular Hours"]).to eq([ "30.11", "30.0", nil ])
-      expect(csv["FIT"].map(&:to_d)).to eq(withholding.map(&:to_d))
+      expect(csv["Guam income tax withheld"].map(&:to_d)).to eq(withholding.map(&:to_d))
       expect(csv["Combined Hours"].map(&:to_d)).to eq(hours.map(&:to_d))
 
       get "/api/v1/admin/reports/employee_pay_history_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include("FIT 250.33", "Combined Hours 78.1", "170.33", "39.1")
+      expect(pdf).to include("Guam income tax 250.33", "Combined Hours 78.1", "170.33", "39.1")
 
       get "/api/v1/admin/reports/employee_pay_history_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
       rows = workbook.sheet("Pay History").to_a
-      expect(rows.drop(1).map { |row| row.fetch(rows.first.index("FIT")) }).to eq(withholding)
+      expect(rows.drop(1).map { |row| row.fetch(rows.first.index("Guam income tax withheld")) }).to eq(withholding)
       expect(rows.drop(1).map { |row| row.fetch(rows.first.index("Combined Hours")) }).to eq(hours)
       summary_rows = workbook.sheet("Period Summary").to_a
       expect(summary_rows.map(&:first)).to eq([
         "Metric", "Basis", "Start Date", "End Date", "Payroll Count", "Gross Pay", "Custom Earnings",
         "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions", "Payroll Field Pre-Tax Deductions",
-        "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions", "FIT", "SS Tax", "Medicare Tax",
+        "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions", "Guam income tax", "SS Tax", "Medicare Tax",
         "401(k)", "Roth 401(k)", "Tips", "Tips Paid Out", "Bonus", "Total Deductions", "Custom Deductions", "Net Pay", "Combined Hours"
       ])
-      expect(summary_rows.to_h).to include("FIT" => 250.33, "Combined Hours" => 78.1)
+      expect(summary_rows.to_h).to include("Guam income tax" => 250.33, "Combined Hours" => 78.1)
       expect(rows.first).to eq(csv.headers)
     end
 
@@ -2194,7 +2194,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "401(k) after-tax (imported as pre-tax)", "Employer Social Security", "Employer Medicare",
         "Other Employer Taxes", "Employer Taxes Total", "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match",
         "Other Employer Contributions", "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost",
-        "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay",
+        "Guam income tax withheld", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay",
         "Non-Taxable Additions (Total)", *breakdown_headers, "Combined Hours"
       ])
       expect(csv["Total Hours"]).to eq([ "60.11" ])
@@ -2718,7 +2718,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       pdf_text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join("\n")
       expect(pdf_text).to include(employee.full_name, zero_net_employee.full_name)
       expect(pdf_text).to include("Employer Social", "Security", "Medicare")
-      expect(pdf_text).to include("Employer Traditional 401(k)", "Employer Roth 401(k) Match")
+      expect(pdf_text).to include("Employer Traditional 401(k)")
+      expect(pdf_text).to match(/Employer Roth 401\(k\) +Other Employer[^\n]*\n[^\n]*\bMatch +Contributions/)
       expect(pdf_text).not_to include(unpaid_employee.full_name, zero_item_employee.full_name)
       expect(pdf_text).to include("Non taxable additions total", "Employer taxes total")
       expect(pdf_text).not_to include("non_taxable_additions_total", "employer_taxes_total")
@@ -4046,7 +4047,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     totals = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text)
       .drop_while { |text| !text.include?("Company Totals") }
       .take_while { |text| !text.include?("Payroll Sources") }.join("\n")
-    expect(totals).to include("$181,113.23", "$166,498.10", "1,000.00", "Pay date", "Federal/Guam income tax")
+    expect(totals).to include("$181,113.23", "$166,498.10", "1,000.00", "Pay date", "Guam income tax withheld")
     expect(totals).not_to include("pay_date", "$2,026.00", "166498.1", "Source labeled after tax 401k")
 
     get "/api/v1/admin/reports/ytd_summary_xlsx", params: { year: 2026 }

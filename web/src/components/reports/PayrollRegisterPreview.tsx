@@ -457,10 +457,10 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
     ...(historicalLoans ? [['Previous provider loans (type not recorded)', currency(total('historical_loan_deductions_unclassified'))]] : []),
     ['Employer contributions', currency(report.summary.total_employer_contributions)],
     ['Employer cost', currency(report.summary.total_employer_payroll_cost)],
-    ['Withholding', currency(Number(report.summary.total_withholding ?? 0) + Number(report.summary.total_additional_withholding ?? 0))],
+    ['Guam income tax', currency(Number(report.summary.total_withholding ?? 0) + Number(report.summary.total_additional_withholding ?? 0))],
     ['Deductions', currency(report.summary.total_deductions)],
     ['Total net', currency(Number(report.summary.total_net) + Number(contractorNet))],
-    ['Additional FIT', currency(report.summary.total_additional_withholding)],
+    ['Additional Guam income tax (W-4 4c)', currency(report.summary.total_additional_withholding)],
   ];
   const workerSections = [
     { label: 'W-2 employees', workers: report.employees },
@@ -507,8 +507,8 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 {additionColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Gross Pay</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Non-Taxable Additions</th>
-                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Withholding</th>
-                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Add&apos;l W/H</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Guam income tax withheld</th>
+                <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Additional Guam income tax (W-4 4c)</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Social Security</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Medicare</th>
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Pre-Tax Retirement</th>
@@ -524,7 +524,7 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
                 <th className="border-b border-r border-neutral-200 px-3 py-2.5 font-bold">Employer Cost</th>
                 {employerColumns.map((column) => <PayrollFieldHeader key={column.key} column={column} />)}
                 <th className="border-b border-neutral-200 px-3 py-2.5 font-bold">Check #</th>
-                <th className="border-b border-neutral-200 px-3 py-2.5 font-bold">Total FIT (Base + Additional)</th>
+                <th className="border-b border-neutral-200 px-3 py-2.5 font-bold">Total Guam income tax withheld</th>
               </tr>
             </thead>
             <tbody>
@@ -731,6 +731,7 @@ export function PayrollRegisterPreviewContent({ report }: { report: PayrollRegis
   return (
     <div className="reports-tables space-y-5">
       <PayrollReportReviewWarnings warnings={report.review_warnings} />
+      {report.pay_period.approval_marker && <p className="text-sm font-semibold">Client approval · {report.pay_period.approval_marker}</p>}
       {report.meta?.provisional && (
         <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950" role="status">
           <p className="font-bold">Test-only payroll register</p>

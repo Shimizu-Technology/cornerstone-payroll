@@ -63,13 +63,14 @@ const componentMocks = vi.hoisted(() => ({
   finalRecordEnabled: false,
 }));
 
+vi.mock('@/services/payroll-approval-api', () => ({ sendPayrollApprovalRequest: apiMocks.recordClientApproval }));
+
 vi.mock('@/services/api', () => ({
   default: { delete: apiMocks.delete },
   ApiError: class ApiError extends Error {},
   payPeriodsApi: {
     get: apiMocks.get,
     clientReview: apiMocks.clientReview,
-    recordClientApproval: apiMocks.recordClientApproval,
     liabilities: apiMocks.liabilities,
     payrollFieldInputs: apiMocks.payrollFieldInputs,
     runPayroll: apiMocks.runPayroll,
@@ -241,20 +242,20 @@ it('mounts Checks, Reports and Activity only when first opened and keeps them af
   expect(screen.getByTestId('processing-check-list-refresh-token').closest('section')?.hidden).toBe(true);
 });
 
-it('checks a committed run for a FIT deposit override without opening Checks', async (): Promise<void> => {
+it('checks a committed run for a Guam income tax deposit override without opening Checks', async (): Promise<void> => {
   vi.clearAllMocks();
   mockCommittedRunReads();
   apiMocks.nonEmployeeChecksList.mockResolvedValue({ non_employee_checks: [{ id: 5, check_type: 'tax_deposit', auto_generated_type: 'fit_deposit', amount: '25.00', voided: false }] });
   const item = { id: 1, employee_id: 30, employee_name: 'Ana Cruz', employment_type: 'hourly', pay_rate: 16, hours_worked: 4, overtime_hours: 0, gross_pay: 64, net_pay: 44, withholding_tax: 20 };
   const period = { ...initialPayPeriod, payroll_items: [item] } as unknown as PayPeriod;
   render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes><Route path="/companies/:companyId/pay-runs/:id/:tab" element={<RoutedFeedbackPayRun period={period} />} /></Routes></MemoryRouter>);
-  expect(await screen.findByText('FIT deposit overridden')).toBeTruthy();
+  expect(await screen.findByText('Guam income tax deposit overridden')).toBeTruthy();
   expect(apiMocks.nonEmployeeChecksList).toHaveBeenCalledTimes(1);
   expect(apiMocks.nonEmployeeChecksList).toHaveBeenCalledWith({ pay_period_id: period.id });
   expect(screen.queryByTestId('processing-check-list-refresh-token')).toBeNull();
 });
 
-it('rechecks the FIT deposit override after a void while Checks was never opened', async (): Promise<void> => {
+it('rechecks the Guam income tax deposit override after a void while Checks was never opened', async (): Promise<void> => {
   vi.clearAllMocks();
   mockCommittedRunReads();
   const overridden = { id: 5, check_type: 'tax_deposit', auto_generated_type: 'fit_deposit', amount: '25.00', voided: false };
@@ -272,12 +273,12 @@ it('rechecks the FIT deposit override after a void while Checks was never opened
   );
   apiMocks.get.mockResolvedValue({ pay_period: voided });
   const { rerender } = render(view(0));
-  expect(await screen.findByText('FIT deposit overridden')).toBeTruthy();
+  expect(await screen.findByText('Guam income tax deposit overridden')).toBeTruthy();
 
   // The void from Activity reloads the run and bumps the check refresh token.
   rerender(view(1));
   await waitFor(() => expect(apiMocks.nonEmployeeChecksList).toHaveBeenCalledTimes(2));
-  await waitFor(() => expect(screen.queryByText('FIT deposit overridden')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('Guam income tax deposit overridden')).toBeNull());
   expect(screen.queryByTestId('processing-check-list-refresh-token')).toBeNull();
 });
 
@@ -2161,7 +2162,7 @@ it('reveals actual withholding and FICA fields in phone tax detail', async () =>
   await renderLoanWorksheet('calculated');
   fireEvent.click(screen.getByRole('checkbox', { name: 'Show tax detail' }));
   const result = screen.getByRole('region', { name: /^Payroll result for / });
-  for (const label of ['FIT', 'Additional withholding', 'Social Security', 'Employee Medicare', 'Employer Medicare']) expect(within(result).getByText(label, { exact: true })).toBeTruthy();
+  for (const label of ['Guam income tax', 'Additional Guam income tax (W-4 4c)', 'Social Security', 'Employee Medicare', 'Employer Medicare']) expect(within(result).getByText(label, { exact: true })).toBeTruthy();
   expect(within(result).getByText('Net pay', { exact: true })).toBeTruthy();
 });
 
@@ -2514,4 +2515,38 @@ it('supersedes an old input-preserving reload while the new run is still loading
   expect(screen.getByLabelText('Current run hours').textContent).toBe('8');
   expect(controller.processing.payPeriod.id).toBe(13);
   expect(controller.hours.employees).toEqual([employee]);
+});
+
+it('ignores a completed client override after navigating to another run', async () => {
+  vi.clearAllMocks();
+  const previous = { ...initialPayPeriod, status: 'approved', notes: 'Previous override run' } as PayPeriod;
+  const next = { ...initialPayPeriod, id: 13, notes: 'Current override run' } as PayPeriod;
+  apiMocks.get.mockImplementation(async (id: number) => ({ pay_period: id === 13 ? next : previous }));
+  apiMocks.employeesList.mockResolvedValue({ data: [], meta: { total_pages: 1 } });
+  apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
+  apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });
+
+  let reloadReview!: () => void;
+  function Page() {
+    const navigate = useNavigate();
+    const result = usePayRunController({ initialPayPeriod: previous });
+    if (result.status !== 'ready') return null;
+    reloadReview = result.sections.blockers.reloadClientReview;
+    return <><button onClick={() => navigate('/companies/7/pay-runs/13/work')}>Next override run</button>
+      <output>{result.sections.blockers.payPeriod.notes}</output></>;
+  }
+
+  render(<MemoryRouter initialEntries={['/companies/7/pay-runs/12/work']}><Routes>
+    <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<Page />} />
+  </Routes></MemoryRouter>);
+  await screen.findByText('Previous override run');
+  const finishOverride = reloadReview;
+  fireEvent.click(screen.getByRole('button', { name: 'Next override run' }));
+  await screen.findByText('Current override run');
+  apiMocks.get.mockClear();
+
+  await act(async () => { finishOverride(); });
+
+  expect(apiMocks.get).not.toHaveBeenCalled();
+  expect(screen.getByText('Current override run')).toBeTruthy();
 });

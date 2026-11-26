@@ -296,6 +296,40 @@ RSpec.describe PostEmployeePayStubsJob do
       expect { run_at(cutoff + 10.minutes) }.not_to change { documents.count }
     end
 
+    def record_legacy_fingerprint
+      item.update_columns(additional_withholding: 0)
+      run_at(cutoff)
+      document = documents.sole
+      generator = PayStubGenerator.new(item.reload, employee_copy: true)
+      old_ytd = generator.send(:printed_ytd_facts, legacy: true).merge(taxes: [
+        [ "Federal/Guam Income Tax", item.withholding_tax.to_d.round(2).to_s("F") ],
+        [ "Social Security (6.2%)", item.social_security_tax.to_d.round(2).to_s("F") ],
+        [ "Medicare (1.45%)", item.medicare_tax.to_d.round(2).to_s("F") ]
+      ])
+      digest = Digest::SHA256.hexdigest([ item.employee.legal_name, *generator.send(:employee_payroll_current_facts, legacy: true), old_ytd ].to_json)
+      expect(digest).not_to eq(document.payroll_facts_sha256)
+      EmployeeDocument.where(id: document.id).update_all(payroll_facts_sha256: digest)
+      item.update_columns(updated_at: cutoff + 1.minute)
+      document
+    end
+
+    it "keeps the frozen posted stub when the old fingerprint still matches" do
+      original = record_legacy_fingerprint
+
+      expect { run_at(cutoff + 5.minutes) }.not_to change { documents.count }
+      expect(original.reload).to be_posted
+      expect(original.revision).to eq(1)
+    end
+
+    it "revises a legacy posting when Guam income tax actually changes" do
+      original = record_legacy_fingerprint
+      item.update_columns(withholding_tax: item.withholding_tax + 1)
+
+      expect { run_at(cutoff + 5.minutes) }.to change { documents.count }.by(1)
+      expect(original.reload).to be_replaced
+      expect(documents.last.revision).to eq(2)
+    end
+
     it "revises a stub posted under an earlier fingerprint format once, then keeps it current" do
       item
       run_at(cutoff)

@@ -4,6 +4,18 @@ require "rails_helper"
 require "bigdecimal"
 
 RSpec.describe PayrollRegisterCsvExporter do
+  it "appends an approval column without shifting existing columns" do
+    ordinary = CSV.parse(described_class.new(report_data).generate, headers: true)
+    report_data[:pay_period][:approval_marker] = "Override"
+    overridden = CSV.parse(described_class.new(report_data).generate, headers: true)
+
+    expect(overridden.headers.last).to eq("Approval")
+    expect(ordinary.headers).to eq(overridden.headers)
+    expect(ordinary.map { |row| row["Approval"] }).to all(be_nil)
+    expect(overridden.map { |row| row["Approval"] }).to all(eq("Override"))
+    expect(overridden.map { |row| row.fields[0...-1] }).to eq(ordinary.map { |row| row.fields[0...-1] })
+  end
+
   let(:report_data) do
     {
       type: "payroll_register",
@@ -255,7 +267,7 @@ RSpec.describe PayrollRegisterCsvExporter do
       rows = CSV.parse(exporter.generate, headers: true)
       totals = rows[-1]
 
-      expect(totals.fields.length).to eq(described_class::HEADERS.length)
+      expect(totals.fields.length).to eq(rows.headers.length)
       expect(totals["Regular Hours"]).to eq("80.0")
       expect(totals["Overtime Hours"]).to eq("5.0")
       expect(totals["Reported Tips"]).to eq("100.00")
@@ -277,12 +289,13 @@ RSpec.describe PayrollRegisterCsvExporter do
     it "distinguishes base FIT, additional FIT, combined hours, and salary rate units" do
       report_data[:employees].last[:salary_type] = "annual"
       rows = CSV.parse(exporter.generate, headers: true)
-      expect(rows.first["Base FIT"]).to eq("140.00")
-      expect(rows.first["Total FIT (Base + Additional)"]).to eq("145.00")
+      expect(rows.first["Base Guam income tax withheld"]).to eq("140.00")
+      expect(rows.first["Additional Guam income tax (W-4 4c)"]).to eq("5.00")
+      expect(rows.first["Total Guam income tax withheld"]).to eq("145.00")
       expect(rows.first["Combined Hours"]).to eq("85.0")
       expect(rows.first["Rate Basis"]).to include("USD/hour", "primary rate")
       expect(rows[1]["Rate Basis"]).to eq("USD/year (annual salary)")
-      expect(rows[-1]["Total FIT (Base + Additional)"]).to eq("365.00")
+      expect(rows[-1]["Total Guam income tax withheld"]).to eq("365.00")
       expect(rows[-1]["Combined Hours"]).to eq("85.0")
     end
 

@@ -190,7 +190,7 @@ class PayrollHistoryQuery
         OR pp.test_workspace_role = 'baseline'
         OR (
           pp.status = 'approved'
-          AND EXISTS (SELECT 1 FROM companies WHERE companies.id = pp.company_id AND companies.client_payroll_approval_required)
+          AND (pp.client_approval_retained OR EXISTS (SELECT 1 FROM companies WHERE companies.id = pp.company_id AND companies.client_payroll_approval_required))
           AND EXISTS (
             SELECT 1 FROM payroll_review_packages review_package
             WHERE review_package.pay_period_id = pp.id
@@ -251,7 +251,7 @@ class PayrollHistoryQuery
   end
 
   def client_review_fields(period, package)
-    return {} unless @audience == :client && period&.approved? && period.company.client_payroll_approval_required? && package&.published_at
+    return {} unless @audience == :client && period&.approved? && period.client_payroll_approval_required? && package&.published_at
 
     {
       client_review_status: package.changes_requested_at ? "changes_requested" : package.status,
@@ -268,7 +268,7 @@ class PayrollHistoryQuery
     editable = @audience == :staff && !imported && native_period&.can_edit?
     current_package = native_period&.payroll_review_packages&.find { |review_package| review_package.superseded_at.nil? }
     client_review_ready = !current_package&.changes_requested_at &&
-      (!native_period&.company&.client_payroll_approval_required? || (current_package&.approved? && current_package.published_at.present?))
+      (!native_period&.client_payroll_approval_required? || (current_package&.approved? && current_package.published_at.present?))
 
     {
       key: row.fetch("key"),

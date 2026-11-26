@@ -9,12 +9,12 @@ import { formatDateRange } from '@/lib/display-date';
 import { formatGuamDateTime } from '@/lib/utils';
 import { EmployeeApiError } from './api';
 import { askManager } from './brand';
-import type { AmountLine, EarlierVersion, EarningLine, StatementDetail, StatementPage, StatementSummary } from './contracts';
+import type { AmountLine, EarlierVersion, EarningLine, StatementDetail, StatementPage, StatementSummary, TaxLine } from './contracts';
 import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import {
-  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, pdfDownloadLabel, shortDate, splitCurrencySegments, taxLabel, weekdayDate,
+  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, pdfDownloadLabel, shortDate, splitCurrencySegments, weekdayDate,
 } from './format';
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
@@ -617,8 +617,10 @@ function EarningRow({ line }: { line: EarningLine }): ReactElement {
   );
 }
 
-function AmountRow({ line, tax = false }: { line: AmountLine; tax?: boolean }): ReactElement {
-  const { label, term } = tax ? taxLabel(line.label) : { label: line.label, term: null };
+function AmountRow({ line, tax }: { line: TaxLine; tax: true } | { line: AmountLine; tax?: false }): ReactElement {
+  const label = tax ? line.displayLabel ?? line.label : line.label;
+  const term = tax && line.kind === 'guam_income_tax' ? 'Withholding'
+    : tax && (line.kind === 'social_security' || line.kind === 'medicare' || line.kind === 'additional_medicare') ? 'FICA' : null;
   return (
     <tr>
       <th scope="row">

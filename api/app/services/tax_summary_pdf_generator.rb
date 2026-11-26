@@ -129,7 +129,7 @@ class TaxSummaryPdfGenerator
 
     rows = [
       [ "Gross Wages",                        fmt(totals[:gross_wages]),                true ],
-      [ "Withholding Tax",                    fmt(totals[:withholding_tax]),             false ],
+      [ PayrollLabels::INCOME_TAX,                    fmt(totals[:withholding_tax]),             false ],
       [ "Social Security Tax (Employee)",     fmt(totals[:social_security_employee]),    false ],
       [ "Social Security Tax (Employer)",     fmt(totals[:social_security_employer]),    false ],
       [ "Medicare Tax (Employee)",            fmt(totals[:medicare_employee]),           false ],
@@ -208,8 +208,8 @@ class TaxSummaryPdfGenerator
 
     totals = report[:totals] || {}
     rows = []
-    rows << [ "Base Withholding Tax", fmt(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
-    rows << [ "Additional Withholding", fmt(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
+    rows << [ "Base #{PayrollLabels::INCOME_TAX}", fmt(totals[:base_withholding_tax]) ] if totals.key?(:base_withholding_tax)
+    rows << [ PayrollLabels::ADDITIONAL_WITHHOLDING, fmt(totals[:additional_withholding]) ] if totals.key?(:additional_withholding)
     return if rows.empty?
 
     pdf.move_down 8

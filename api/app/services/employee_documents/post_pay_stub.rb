@@ -97,7 +97,7 @@ module EmployeeDocuments
 
       repairing_link = delta && latest && latest.replaces_document_id.nil?
       fingerprint = generator.employee_payroll_facts_sha256
-      if latest&.posted? && !repairing_link && latest.payroll_facts_sha256 == fingerprint
+      if latest&.posted? && !repairing_link && generator.matches_employee_payroll_facts?(latest.payroll_facts_sha256)
         latest.update!(payroll_facts_checked_at: checked_at)
         return
       end
