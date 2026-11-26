@@ -10,7 +10,9 @@ class SendEmployeeEmailChangeNoticeJob < ApplicationJob
   queue_as :default
   retry_on StandardError, wait: :polynomially_longer, attempts: 5
 
-  def perform(employee_id, to, changed_at)
-    EmployeeLinks::EmailChange.deliver!(employee_id: employee_id, to: to, changed_at: changed_at)
+  # change_id: one UUID per committed change (EmployeeLinks::EmailChange),
+  # the notice's idempotency key across retries.
+  def perform(employee_id, to, change_id)
+    EmployeeLinks::EmailChange.deliver!(employee_id: employee_id, to: to, change_id: change_id)
   end
 end

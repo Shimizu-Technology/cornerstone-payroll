@@ -31,7 +31,11 @@ module EmployeeLinks
       now = Time.current
       closed = links.select(&:invited?).each { |link| close_invite!(link, now) }
       record_audit!(employee, from, to, closed)
-      notify_after_commit(employee, from, now) if links.any? { |link| link.invited? || link.active? || link.former? }
+      return unless links.any? { |link| link.invited? || link.active? || link.former? }
+
+      # One id per change, so two changes in the same second never share a
+      # notice; the job's retries reuse it.
+      notify_after_commit(employee, from, SecureRandom.uuid)
     end
 
     def close_invite!(link, now)
@@ -58,13 +62,13 @@ module EmployeeLinks
       Current.actor || AuditActor.system_job("Employee email change")
     end
 
-    def notify_after_commit(employee, from, changed_at)
+    def notify_after_commit(employee, from, change_id)
       to = EmployeeLinks.normalized_email(from)
       return unless EmployeeLinks.email_format?(to)
 
       employee_id = employee.id
       ActiveRecord.after_all_transactions_commit do
-        SendEmployeeEmailChangeNoticeJob.perform_later(employee_id, to, changed_at.to_i)
+        SendEmployeeEmailChangeNoticeJob.perform_later(employee_id, to, change_id)
       rescue StandardError => error
         Rails.logger.warn("[EmployeeLinks::EmailChange] Couldn't enqueue the notice for employee #{employee_id}: #{error.class}")
       end
@@ -72,7 +76,7 @@ module EmployeeLinks
 
     # Returns :sent, :captured or :skipped; raises when the transport fails so
     # the job retries with the same idempotency key.
-    def deliver!(employee_id:, to:, changed_at:)
+    def deliver!(employee_id:, to:, change_id:)
       employee = Employee.find_by(id: employee_id)
       return :skipped unless employee && EmployeeLinks.email_format?(to)
       return :skipped unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
@@ -80,7 +84,7 @@ module EmployeeLinks
 
       response = DemoOutbound.scoped(employee.company, channel: CHANNEL) do
         PortalNotifications::Transport.deliver(payload(employee.company, to),
-          idempotency_key: "employee-email-changed-#{employee_id}-#{changed_at}")
+          idempotency_key: "employee-email-changed-#{change_id}")
       end
       return :skipped if response["suppressed"]
 

@@ -100,7 +100,28 @@ describe('Client access level', () => {
     await user.selectOptions(access, 'manager');
     await user.click(within(findRow()).getByRole('button', { name: /Save/ }));
     await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledWith(21, expect.objectContaining({
-      role: 'client', client_access_level: 'manager',
+      role: 'client', client_access_level: 'manager', expected_client_access_level: 'viewer',
     })));
+  });
+
+  it('leaves the access level out of a save that didn’t change it, so a stale form can’t undo it', async () => {
+    apiMocks.users.list.mockResolvedValue({ data: [viewer] });
+    apiMocks.users.update.mockResolvedValue({ data: viewer });
+    const user = userEvent.setup();
+    render(<Users />);
+
+    await screen.findAllByText('Client Portal User · Client viewer');
+    const findRow = () => screen.getAllByRole('row').find((candidate) => within(candidate).queryByText('viewer@example.test')) as HTMLElement;
+    await user.click(within(findRow()).getByRole('button', { name: 'Edit' }));
+    const name = within(findRow()).getByRole('textbox', { name: 'Name' });
+    await user.clear(name);
+    await user.type(name, 'Renamed Viewer');
+    await user.click(within(findRow()).getByRole('button', { name: /Save/ }));
+
+    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledOnce());
+    const payload = apiMocks.users.update.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload).toMatchObject({ name: 'Renamed Viewer', role: 'client' });
+    expect(payload).not.toHaveProperty('client_access_level');
+    expect(payload).not.toHaveProperty('expected_client_access_level');
   });
 });

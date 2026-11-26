@@ -97,10 +97,11 @@ export function PeriodConversation({ api, periodRef, threadId, onThreadCreated }
           </article>
         ))}
       </div>
+      {/* Outside the form, so a viewer still sees a failed load. */}
+      {error && <p role="alert" className="mt-3 text-sm text-danger-700">{error}</p>}
       {viewOnly ? <ViewOnlyNotice className="mt-3" /> : (
         <form onSubmit={send} className="mt-3 space-y-2">
           <LabeledTextarea label="Message" value={body} onChange={e => setBody(e.target.value)} rows={3} />
-          {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
           <Button type="submit" disabled={busy || !body.trim()}>{busy ? 'Sending…' : 'Send message'}</Button>
         </form>
       )}

@@ -14,6 +14,15 @@ const period = { id: 5, status: 'approved', can_decide_payroll_review: true, tot
 const onDone = vi.fn();
 beforeEach(() => { vi.resetAllMocks(); });
 afterEach(() => { cleanup(); auth.isClientViewer = false; });
+it('hides the decision from a client viewer even when the period says decisions are open', () => {
+  auth.isClientViewer = true;
+  render(<ClientPayrollReview payPeriod={period} companyId={3} onDone={onDone} />);
+  expect(period.can_decide_payroll_review).toBe(true);
+  expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
+  expect(screen.queryByLabelText('Note for Cornerstone (required to request changes)')).toBeNull();
+  expect(screen.getByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+});
 it('lets a client viewer open the preview but not approve or request changes', () => {
   auth.isClientViewer = true;
   render(<ClientPayrollReview payPeriod={{ ...period, can_decide_payroll_review: false }} companyId={3} onDone={onDone} />);

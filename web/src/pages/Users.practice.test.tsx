@@ -286,6 +286,6 @@ describe('Practice login whose copy was archived', () => {
     expect(within(table).queryByText('Production clients')).toBeNull();
     await user.click(within(table).getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledExactlyOnceWith(5, { name: 'Practice Login', role: 'client', client_access_level: 'manager' }));
+    await waitFor(() => expect(apiMocks.users.update).toHaveBeenCalledExactlyOnceWith(5, { name: 'Practice Login', role: 'client' }));
   });
 });

@@ -2,6 +2,7 @@
 
 module PayrollReview
   class RevisionService
+    VIEWER_CANNOT_DECIDE = "A Client viewer can't approve payroll or request changes. Choose a Client manager."
     class Error < StandardError; end
     class StaleRevisionError < Error; end
 
@@ -235,6 +236,9 @@ module PayrollReview
       unless approver&.active? && approver.client? && approver.can_access_company?(pay_period.company_id)
         raise Error, "Select an active client portal user assigned to this client."
       end
+      # A Client viewer is read-only, including approvals staff record for
+      # them (email attestation).
+      raise Error, VIEWER_CANNOT_DECIDE if approver.client_viewer?
     end
 
     def validate_recording_method!(method, approver, recorded_by, evidence_reference)

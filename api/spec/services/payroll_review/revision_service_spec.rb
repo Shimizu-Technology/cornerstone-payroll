@@ -234,6 +234,27 @@ RSpec.describe PayrollReview::RevisionService do
       acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
   end
 
+  it "refuses a Client viewer as the approver, including an email attestation staff record for them" do
+    viewer = create(:user, company: company, organization: organization, role: "client", active: true, client_access_level: "viewer")
+    CompanyAssignment.create!(user: viewer, company: company)
+    PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff).approve!
+    package = pay_period.payroll_review_packages.current.first!
+
+    expect do
+      service.approve!(approver: viewer, recorded_by: staff, method: "email_attestation", revision_id: package.id,
+        acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT, evidence_reference: "message-ref-1")
+    end.to raise_error(described_class::Error, described_class::VIEWER_CANNOT_DECIDE)
+    expect do
+      described_class.new(pay_period: pay_period, actor: viewer).approve!(approver: viewer, recorded_by: viewer,
+        method: "client_portal", revision_id: package.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT)
+    end.to raise_error(described_class::Error, described_class::VIEWER_CANNOT_DECIDE)
+    expect do
+      described_class.new(pay_period: pay_period, actor: viewer).request_changes!(revision_id: package.id, note: "Correct hours")
+    end.to raise_error(described_class::Error, described_class::VIEWER_CANNOT_DECIDE)
+    expect(package.reload).to have_attributes(status: "pending", approved_by_id: nil, changes_requested_at: nil)
+    expect(described_class.client_can_decide?(package, viewer)).to be(false)
+  end
+
   it "publishes at staff approval and accepts the current client decision before commit" do
     package = service.issue!
     lifecycle = PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff)

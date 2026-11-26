@@ -24,7 +24,9 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
   const [artifact, setArtifact] = useState<PdfArtifact | null>(null);
   const review = payPeriod.payroll_review;
   const canReview = payPeriod.status === 'approved' && !!review?.published_at;
-  const canDecide = canReview && review?.status === 'pending' && payPeriod.can_decide_payroll_review === true;
+  // The server's flag is already false for a Client viewer; this keeps the
+  // controls hidden even if a stale payload says otherwise.
+  const canDecide = !viewOnly && canReview && review?.status === 'pending' && payPeriod.can_decide_payroll_review === true;
 
   const handleFailure = async (cause: unknown, fallback: string) => {
     if (!active.current) return;

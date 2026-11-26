@@ -248,6 +248,16 @@ RSpec.describe "Api::V1::Admin::Users", type: :request do
       audit = AuditLog.where(action: "users#updated", record_id: viewer.id).order(:id).last
       expect(audit.metadata.fetch("changed_fields")).to eq([ "client_access_level" ])
 
+      # A change from a stale form (it saw viewer; it's manager now) is refused.
+      patch "/api/v1/admin/users/#{viewer.id}", params: { user: { client_access_level: "viewer", expected_client_access_level: "viewer" } }
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("client_access_changed")
+      expect(viewer.reload.client_access_level).to eq("manager")
+      # A name-only save leaves the level alone.
+      patch "/api/v1/admin/users/#{viewer.id}", params: { user: { name: "Renamed Viewer" } }
+      expect(response).to have_http_status(:ok)
+      expect(viewer.reload).to have_attributes(name: "Renamed Viewer", client_access_level: "manager")
+
       patch "/api/v1/admin/users/#{viewer.id}", params: { user: { client_access_level: "owner" } }
       expect(response).to have_http_status(:unprocessable_entity)
       expect(viewer.reload.client_access_level).to eq("manager")
