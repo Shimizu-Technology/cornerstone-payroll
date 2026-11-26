@@ -63,7 +63,7 @@ Jules Reed was terminated before any app access existed, so they can't test form
 ### Before you start
 
 - [ ] Go-live runbook step 0 is done: slices deployed (including demo D6 and D7), demo seeded, client personas invited.
-- [ ] Two-step sign-in is on (G3). The client personas have enrolled an authenticator app.
+- [ ] Two-step sign-in is on (G3). It applies to every login, employees included (Leon's Nov 25 revision of D9), so the client and employee personas need an authenticator app ready to enroll.
 - [ ] The demo's employee app switches are on (runbook step 1). If D6 isn't deployed yet, run sections A and B now and mark section C Pending.
 - [ ] You have the QuickBooks sample files from `rake demo:quickbooks_sample`, from the private evidence location.
 - [ ] Note the demo's **Employee app rollout** counts before you start, so you can tell what this run changed.
@@ -154,7 +154,7 @@ Needs the support-view permission on your staff login. It works in production on
 | A8.1 | Desktop [critical] | Client settings → **Sign in as**. Choose **Client portal**, pick Maren Fable, enter a reason, **Start view-only session**. | A fresh second-step check, then Maren's client portal with a "View only" banner and an **End** button. It says the session lasts up to 30 minutes and the client can see it in their support log. | ☐ Pass ☐ Fail | |
 | A8.2 | Desktop [critical] | In that session try to save anything (edit a contact on **Contact Details**, approve a change). | Refused. Nothing changes. | ☐ Pass ☐ Fail | |
 | A8.3 | Desktop | Choose **End**. | Back on your own staff view. | ☐ Pass ☐ Fail | |
-| A8.4 | Desktop | Start **Sign in as** with **Employee app** for a demo employee. | Today the code opens employee views only for live companies (`api/app/models/view_as_grant.rb:59-60`), so on the demo this option is unavailable or refused. Write what you see. The real check is go-live step 3 on the pilot. | ☐ Pass ☐ Fail | |
+| A8.4 | Desktop | Start **Sign in as** with **Employee app** for a demo employee. | A fresh second-step check, then Robin's employee app in a view-only session on the Kitchen's own site. Demo companies are allowed (`api/app/models/view_as_grant.rb:62-65`) once the Kitchen has the employee app and its subdomain on. Saving anything is refused. | ☐ Pass ☐ Fail | |
 | A8.5 | Desktop | Try **Sign in as** on another Cornerstone staff user. | Staff users aren't offered as targets. | ☐ Pass ☐ Fail | |
 | A8.6 | Desktop | Leave a session open past 30 minutes. | It ends on its own; the next page load refuses the grant. | ☐ Pass ☐ Fail | |
 
@@ -210,7 +210,7 @@ Use the phone's normal browser. Use the persona named in each row. Unless it say
 | C1.1 | Phone [critical] | Open the invite email on the phone and tap its link. | The Harbor Finch Kitchen sign-in page opens, with its name, logo and colors. **Set up your account**, **Step 1 of 2**. | ☐ Pass ☐ Fail | |
 | C1.2 | Phone [critical] | Enter Robin's date of birth and SSN last 4. **Continue**. | **Step 2 of 2**, **Your email**. | ☐ Pass ☐ Fail | |
 | C1.3 | Phone | Enter Robin's persona email. Leave **Send my pay stub notices to this email** ticked. Tick the Terms checkbox if shown. **Create account**. | "Next you'll choose a password, or use Google or an emailed code." The sign-up form opens. | ☐ Pass ☐ Fail | |
-| C1.4 | Phone [critical] | Choose a password and enter the emailed code. | Robin lands on **Home** with **Latest pay**. No two-step prompt (employee-only logins don't need one). | ☐ Pass ☐ Fail | |
+| C1.4 | Phone [critical] | Choose a password and enter the emailed code. | The app asks Robin to set up two-step sign-in (every login needs it while `REQUIRE_MFA` is on, employees included). After adding an authenticator app, Robin lands on **Home** with **Latest pay**. With `REQUIRE_MFA` off (before G3), there's no two-step prompt; write which mode you tested. | ☐ Pass ☐ Fail | |
 | C1.5 | Phone | Add the site to the Home Screen. | The icon and its label show the company's name. | ☐ Pass ☐ Fail | |
 
 ### C2. Sign up with a printed code, lockout and unlock (Sky Lark, Avery Sprig)
@@ -230,7 +230,7 @@ Use the phone's normal browser. Use the persona named in each row. Unless it say
 | C3.2 | Phone [critical] | Open the invite on the phone. Choose **Already have an account? Sign in**, sign in with Maren's client login and the authenticator code. | **Add your employee access**. | ☐ Pass ☐ Fail | |
 | C3.3 | Phone [critical] | Enter date of birth and SSN last 4, confirm it's you, **Add access**. | Maren's employee **Home**. The client portal login still works on the Payroll site. | ☐ Pass ☐ Fail | |
 | C3.4 | Phone | On **My info**, **Request a change** to the home address. | The request is pending. In the client portal it needs another admin (B12–B13). | ☐ Pass ☐ Fail | |
-| C3.5 | Phone | Sign out. Sign in on the employee site with only the password (no authenticator code). | The app shows **Complete two-step sign-in**: Maren is a manager, so the second step is required on the employee site too. | ☐ Pass ☐ Fail | |
+| C3.5 | Phone | Sign out. Sign in on the employee site with only the password (no authenticator code). | The app shows **Complete two-step sign-in**: the second step is required on the employee site too, as it is for every login. | ☐ Pass ☐ Fail | |
 
 ### C4. Two employers (Kit Wren)
 
