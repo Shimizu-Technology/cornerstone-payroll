@@ -36,7 +36,7 @@ class PayrollIntakeSession < ApplicationRecord
            dependent: :destroy,
            inverse_of: :payroll_intake_session
 
-  validates :source_type, inclusion: { in: SOURCE_TYPES }
+  validates :source_type, inclusion: { in: ->(_) { PayrollIntake::Registry.keys } }
   validates :status, inclusion: { in: STATUSES }
   validates :import_hash, presence: true
   validates :parser_version, presence: true
@@ -91,6 +91,10 @@ class PayrollIntakeSession < ApplicationRecord
 
   def mark_superseded!(actor: nil, at: Time.current)
     update!(superseded_at: at, superseded_by_user: actor)
+  end
+
+  def import_origin
+    PayrollIntake::ImportOrigin.build(session: self)
   end
 
   private

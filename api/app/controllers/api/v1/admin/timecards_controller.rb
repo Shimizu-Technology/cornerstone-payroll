@@ -187,6 +187,7 @@ module Api
               raise ActiveRecord::Rollback if multi_rate_error
 
               item.import_source = "timecard_ocr"
+              item.import_origin = "timecard_ocr"
               if item.new_record?
                 item.custom_earnings = employee.default_custom_earnings if item.custom_earnings.blank?
               end

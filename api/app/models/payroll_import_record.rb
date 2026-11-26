@@ -11,6 +11,15 @@ class PayrollImportRecord < ApplicationRecord
   has_many :payroll_submissions, through: :submission_imports
 
   validates :status, inclusion: { in: %w[pending previewed applied partially_applied failed] }
+  validate :import_origin_must_be_hash
 
   scope :for_pay_period, ->(pay_period_id) { where(pay_period_id: pay_period_id) }
+
+  private
+
+  def import_origin_must_be_hash
+    return if import_origin.is_a?(Hash)
+
+    errors.add(:import_origin, "must be a JSON object")
+  end
 end

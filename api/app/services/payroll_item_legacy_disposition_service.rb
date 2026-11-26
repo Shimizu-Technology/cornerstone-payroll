@@ -84,7 +84,7 @@ class PayrollItemLegacyDispositionService
       reasons: PayrollItemActivity.reasons(item)
     }
     {
-      "item_attributes" => item.attributes.sort.to_h,
+      "item_attributes" => item.attributes.except("import_origin").sort.to_h,
       "pay_period_status" => item.pay_period.status,
       "classification" => inspection.fetch(:classification).to_s,
       "reasons" => inspection.fetch(:reasons),
