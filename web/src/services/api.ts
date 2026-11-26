@@ -1679,8 +1679,6 @@ export const payPeriodsApi = {
       client_approval_required: boolean;
       authorized_client_approvers: Array<{ id: number; name: string; email: string }>;
     }>(`/admin/pay_periods/${id}/client_review`),
-  recordClientApproval: (id: number, data: { revision_id: number; client_approver_id: number; acknowledgement: string; evidence_reference: string; notes?: string }) =>
-    api.post<{ payroll_review: import('@/types').PayrollReviewPackage }>(`/admin/pay_periods/${id}/record_client_approval`, data),
   liabilities: (id: number) =>
     api.get<{ payroll_liability_reconciliation: PayrollLiabilityReconciliation }>(
       `/admin/pay_periods/${id}/payroll_liabilities`

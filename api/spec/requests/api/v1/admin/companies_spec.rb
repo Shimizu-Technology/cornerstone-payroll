@@ -383,12 +383,36 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
     let!(:calculated) { create(:pay_period, :calculated, company: client_company) }
     let(:reason) { "Client requested a change for future payroll." }
 
-    before { client_company.update!(client_payroll_approval_required: true) }
+    before do
+      client_company.update!(client_payroll_approval_required: true)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:require_recent_verification!)
+    end
 
-    def disable_approval(reason)
+    def disable_approval(reason, headers: {})
       patch "/api/v1/admin/companies/#{client_company.id}", params: {
         company: { client_payroll_approval_required: false, client_approval_disable_reason: reason }
-      }
+      }, headers: headers
+    end
+
+    context "with signed authentication claims" do
+      include EmployeeLinkHelpers
+
+      it "requires fresh direct sign-in to disable approval" do
+        admin_user.update!(clerk_id: "user_disable_approval_fixture")
+        allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:require_recent_verification!).and_call_original
+        disable_approval(reason, headers: bearer(admin_user.clerk_id, fva: [ 45, 45 ], two_factor_enabled: true))
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
+
+        disable_approval(reason, headers: bearer(admin_user.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true,
+          act: { sub: "user_actor_fixture" }))
+        expect(response).to have_http_status(:forbidden)
+        expect(client_company.reload).to be_client_payroll_approval_required
+
+        disable_approval(reason, headers: bearer(admin_user.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true))
+        expect(response).to have_http_status(:ok)
+        expect(client_company.reload).not_to be_client_payroll_approval_required
+      end
     end
 
     it "preserves the calculated run's gate and records the reason" do

@@ -3,7 +3,7 @@ import { isReverificationCancelledError } from '@clerk/react/errors';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
-import { getApiBaseUrl } from '@/services/api';
+import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 
 const acknowledgement = 'I am approving this exact payroll revision for the client under Cornerstone authority.';
 
@@ -21,18 +21,9 @@ export function ClientApprovalOverride({ companyId, periodId, revisionId, onDone
   const [error, setError] = useState('');
   const reasonLength = Array.from(reason.trim()).length;
   const valid = reasonLength >= 10 && reasonLength <= 500;
-  const request = useOptionalStepUpRequest((token: string) => fetch(
-    `${getApiBaseUrl()}/admin/pay_periods/${periodId}/override_client_approval`,
-    {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        'X-Company-Id': String(companyId),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ revision_id: revisionId, acknowledgement, override_reason: reason.trim() }),
-    },
+  const request = useOptionalStepUpRequest((token: string) => sendPayrollApprovalRequest(
+    token, companyId, `/admin/pay_periods/${periodId}/override_client_approval`, 'POST',
+    { revision_id: revisionId, acknowledgement, override_reason: reason.trim() },
   ));
 
   const submit = async (event: FormEvent) => {
@@ -44,6 +35,7 @@ export function ClientApprovalOverride({ companyId, periodId, revisionId, onDone
       const response = await request();
       if (!response.ok) {
         const data = await response.json().catch(() => null);
+        if (data?.code === 'stale_payroll_review_revision') onDone();
         throw new Error(data?.error || 'Could not approve for the client.');
       }
       onDone();
@@ -63,7 +55,8 @@ export function ClientApprovalOverride({ companyId, periodId, revisionId, onDone
 
   return <form onSubmit={submit} className="space-y-3">
     <label htmlFor={reasonId} className="block text-sm font-medium">Override reason (10–500 characters)</label>
-    <Textarea id={reasonId} required value={reason} onChange={event => setReason(event.target.value)} disabled={busy} />
+    <Textarea id={reasonId} required maxLength={500} value={reason} onChange={event => setReason(event.target.value)} disabled={busy} />
+    <p className="text-sm">{reason.length} / 500 characters</p>
     <p className="text-sm">The client will see this reason in their portal.</p>
     <label className="flex items-start gap-2 text-sm">
       <input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={busy} />
