@@ -42,16 +42,33 @@ const riley: ContactEmployee = {
 } as unknown as ContactEmployee;
 
 function renderCard(props: Partial<Parameters<typeof EmployeeContactCard>[0]> = {}) {
-  const onSaved = vi.fn();
+  const onRecordChange = vi.fn();
   const view = render(
     <MemoryRouter>
-      <EmployeeContactCard employee={riley} companyId={7} audience="admin" canEdit onSaved={onSaved} {...props} />
+      <EmployeeContactCard employee={riley} companyId={7} audience="admin" canEdit onRecordChange={onRecordChange} {...props} />
     </MemoryRouter>,
   );
-  return { ...view, onSaved };
+  return { ...view, onRecordChange };
 }
 
 const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+
+
+function conflictError(server: Partial<ContactEmployee>, fields: string[]) {
+  const data = { ...riley, contact_revision: 'rev-2', ...server };
+  return new ApiError('Someone else updated this employee while you were editing.', 409, undefined, {
+    error: 'Someone else updated this employee while you were editing.',
+    code: 'contact_revision_conflict',
+    conflicting_fields: fields,
+    contact_revision: data.contact_revision,
+    current_values: {},
+    data,
+  });
+}
+
+const openEditor = () => fireEvent.click(screen.getByRole('button', { name: 'Edit contact for Riley Santos' }));
+const type = (label: string, value: string) => fireEvent.change(field(`${label} for Riley Santos`), { target: { value } });
+const clickSave = () => fireEvent.click(screen.getByRole('button', { name: 'Save Riley Santos' }));
 
 beforeEach(() => {
   apiMocks.adminUpdate.mockReset();
@@ -91,7 +108,7 @@ describe('EmployeeContactCard', () => {
       data: { ...riley, email: 'riley.new@example.net', email_verified_at: null, contact_revision: 'rev-2' },
       contact_warnings: [],
     });
-    const { onSaved } = renderCard();
+    const { onRecordChange } = renderCard();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit contact for Riley Santos' }));
     fireEvent.change(field('Email for Riley Santos'), { target: { value: ' riley.new@example.net ' } });
@@ -107,7 +124,9 @@ describe('EmployeeContactCard', () => {
     expect(await screen.findByRole('status')).toBeTruthy();
     expect(screen.getByText('riley.new@example.net')).toBeTruthy();
     expect(screen.queryByText('Email confirmed')).toBeNull();
-    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ email: 'riley.new@example.net' }), { emailChanged: true });
+    expect(onRecordChange).toHaveBeenCalledWith(expect.objectContaining({ email: 'riley.new@example.net' }), { emailChanged: true, savedFields: ['email'] });
+    // Focus goes back to Edit once the editor closes.
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit contact for Riley Santos' }));
   });
 
   it('opens the editor from an outside request (the Edit contact details link) and uses the client endpoint', async () => {
@@ -229,5 +248,137 @@ describe('EmployeeContactCard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel editing Riley Santos' }));
     expect(screen.getByText('riley.old@example.net')).toBeTruthy();
     expect(apiMocks.adminUpdate).not.toHaveBeenCalled();
+  });
+
+  it('focuses Email on Edit and returns focus to Edit on Cancel', () => {
+    renderCard();
+    openEditor();
+    expect(document.activeElement).toBe(field('Email for Riley Santos'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel editing Riley Santos' }));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit contact for Riley Santos' }));
+  });
+
+  it('never sends a field typed back to its saved value, even after Use theirs moves the record on', async () => {
+    apiMocks.adminUpdate.mockRejectedValueOnce(conflictError({ email: 'coworker.set@example.net', city: 'Tamuning' }, ['email']));
+    const { onRecordChange } = renderCard();
+    openEditor();
+    type('City', 'Dededo');
+    type('City', 'Hagatna');
+    type('Email', 'mine@example.net');
+    clickSave();
+
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1));
+    expect(apiMocks.adminUpdate.mock.calls[0][1]).not.toHaveProperty('city');
+    fireEvent.click(await screen.findByRole('button', { name: 'Use theirs' }));
+
+    // Nothing of mine is left, so the editor closes on their record.
+    expect(screen.queryByLabelText('Email for Riley Santos')).toBeNull();
+    expect(screen.getByText('coworker.set@example.net')).toBeTruthy();
+    expect(screen.getByText('Tamuning, GU 96910')).toBeTruthy();
+    expect(onRecordChange).toHaveBeenLastCalledWith(expect.objectContaining({ city: 'Tamuning' }), { emailChanged: true, savedFields: [] });
+    expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a formatting-only phone edit on Keep yours, so it is not sent against the newer number', async () => {
+    apiMocks.adminUpdate
+      .mockRejectedValueOnce(conflictError({ email: 'coworker.set@example.net', phone: '+16715550111' }, ['email']))
+      .mockResolvedValueOnce({ data: { ...riley, email: 'mine@example.net', phone: '+16715550111', contact_revision: 'rev-3' }, contact_warnings: [] });
+    renderCard();
+    openEditor();
+    type('Mobile', '671-555-0100');
+    type('Email', 'mine@example.net');
+    clickSave();
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1));
+    expect(apiMocks.adminUpdate.mock.calls[0][1]).not.toHaveProperty('phone');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep yours' }));
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(2));
+    expect(apiMocks.adminUpdate.mock.calls[1][1]).toEqual({
+      email: 'mine@example.net', row_revision: 'rev-2', baseline_values: { email: 'coworker.set@example.net' }, response_view: 'contact',
+    });
+    expect(await screen.findByText('(671) 555-0111')).toBeTruthy();
+  });
+
+  it('after Keep yours fails validation, the retry sends only my email against the newer record', async () => {
+    apiMocks.adminUpdate
+      .mockRejectedValueOnce(conflictError({ email: 'coworker.set@example.net', city: 'Tamuning' }, ['email']))
+      .mockRejectedValueOnce(new ApiError('Validation failed', 422, { email: ['must be a valid email address'] }, {
+        details: { email: ['must be a valid email address'] },
+        contact_validation: { same_person_confirmation_required: false, warnings: [], email_error_code: 'invalid_email' },
+      }))
+      .mockResolvedValueOnce({ data: { ...riley, email: 'mine@example.net', city: 'Tamuning', contact_revision: 'rev-3' }, contact_warnings: [] });
+    renderCard();
+    openEditor();
+    type('City', 'Dededo');
+    type('City', 'Hagatna');
+    type('Email', 'mine@example');
+    clickSave();
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep yours' }));
+    expect((await screen.findByRole('alert')).textContent).toContain("This isn't a complete email address.");
+    expect(field('City for Riley Santos').value).toBe('Tamuning');
+
+    type('Email', 'mine@example.net');
+    clickSave();
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(3));
+    expect(apiMocks.adminUpdate.mock.calls[2][1]).toEqual({
+      email: 'mine@example.net', row_revision: 'rev-2', baseline_values: { email: 'coworker.set@example.net' }, response_view: 'contact',
+    });
+  });
+
+  it('reports a third person’s save that lands between the conflict and Keep yours', async () => {
+    apiMocks.adminUpdate
+      .mockRejectedValueOnce(conflictError({ email: 'second@example.net' }, ['email']))
+      .mockRejectedValueOnce(conflictError({ email: 'third@example.net', contact_revision: 'rev-3' }, ['email']))
+      .mockResolvedValueOnce({ data: { ...riley, email: 'mine@example.net', contact_revision: 'rev-4' }, contact_warnings: [] });
+    renderCard();
+    openEditor();
+    type('Email', 'mine@example.net');
+    clickSave();
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep yours' }));
+    expect(await screen.findByText('third@example.net')).toBeTruthy();
+    expect(apiMocks.adminUpdate.mock.calls[1][1]).toMatchObject({ row_revision: 'rev-2', baseline_values: { email: 'second@example.net' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep yours' }));
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(3));
+    expect(apiMocks.adminUpdate.mock.calls[2][1]).toMatchObject({ row_revision: 'rev-3', baseline_values: { email: 'third@example.net' } });
+    expect(await screen.findByText('mine@example.net')).toBeTruthy();
+  });
+
+  it('Cancel after Use theirs keeps their record and tells the page', async () => {
+    apiMocks.adminUpdate.mockRejectedValueOnce(conflictError({ email: 'coworker.set@example.net' }, ['email']));
+    const { onRecordChange } = renderCard();
+    openEditor();
+    type('Email', 'mine@example.net');
+    type('ZIP', '96913');
+    clickSave();
+    fireEvent.click(await screen.findByRole('button', { name: 'Use theirs' }));
+
+    // My ZIP wasn't in conflict, so the editor stays open with it.
+    expect(field('ZIP for Riley Santos').value).toBe('96913');
+    expect(field('Email for Riley Santos').value).toBe('coworker.set@example.net');
+    expect(onRecordChange).toHaveBeenCalledWith(expect.objectContaining({ email: 'coworker.set@example.net' }), { emailChanged: true, savedFields: [] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel editing Riley Santos' }));
+    expect(screen.getByText('coworker.set@example.net')).toBeTruthy();
+    expect(screen.getByText('Hagatna, GU 96910')).toBeTruthy();
+  });
+
+  it('opens from an outside request: scrolls without motion when reduced motion is on, and focuses Email', () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce'), addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    try {
+      const { rerender } = renderCard();
+      rerender(
+        <MemoryRouter>
+          <EmployeeContactCard employee={riley} companyId={7} audience="admin" canEdit editRequest={1} />
+        </MemoryRouter>,
+      );
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'auto' });
+      expect(document.activeElement).toBe(field('Email for Riley Santos'));
+    } finally {
+      vi.unstubAllGlobals();
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 });

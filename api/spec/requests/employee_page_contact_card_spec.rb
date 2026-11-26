@@ -107,12 +107,43 @@ RSpec.describe "Employee page Contact card", type: :request do
     end
   end
 
-  it "returns a plain field message for an invalid email" do
-    card_save(staff, { email: "not-an-email" })
-    expect(response).to have_http_status(:unprocessable_content), response.body
-    expect(response.parsed_body.dig("details", "email")).to be_present
-    expect(response.parsed_body.dig("contact_validation", "email_error_code")).to eq("invalid_email")
-    expect(employee.reload.email).to eq("riley.old@example.net")
+  %i[staff manager].each do |who|
+    it "returns a plain field message for an invalid email (#{who})" do
+      card_save(public_send(who), { email: "not-an-email" })
+      expect(response).to have_http_status(:unprocessable_content), response.body
+      expect(response.parsed_body.dig("details", "email")).to be_present
+      expect(response.parsed_body.dig("contact_validation", "email_error_code")).to eq("invalid_email")
+      expect(employee.reload.email).to eq("riley.old@example.net")
+    end
+  end
+
+  it "conflicts again when a third person saves between the conflict and a Keep yours retry" do
+    opened_revision = employee.contact_revision
+    travel 2.seconds do
+      employee.update!(email: "second.person@example.net")
+    end
+    card_save(manager, { email: "riley.new@example.net" }, revision: opened_revision, baseline: { email: "riley.old@example.net" })
+    expect(response).to have_http_status(:conflict), response.body
+    # Keep yours resends against the record the conflict returned.
+    rebased_revision = response.parsed_body.dig("data", "contact_revision")
+    rebased_email = response.parsed_body.dig("data", "email")
+
+    travel 4.seconds do
+      employee.update!(email: "third.person@example.net")
+    end
+    travel 6.seconds do
+      card_save(manager, { email: "riley.new@example.net" }, revision: rebased_revision, baseline: { email: rebased_email })
+    end
+    expect(response).to have_http_status(:conflict), response.body
+    expect(response.parsed_body.dig("data", "email")).to eq("third.person@example.net")
+    expect(employee.reload.email).to eq("third.person@example.net")
+
+    # Keeping mine against the newest record saves.
+    travel 8.seconds do
+      card_save(manager, { email: "riley.new@example.net" }, revision: employee.contact_revision, baseline: { email: "third.person@example.net" })
+    end
+    expect(response).to have_http_status(:ok), response.body
+    expect(employee.reload.email).to eq("riley.new@example.net")
   end
 
   it "refuses a Client viewer's save with a plain 403 and changes nothing" do

@@ -219,6 +219,7 @@ class ClientEmployeeUpdateService
           company: company
         )
         record_contact_changes!(direct_before, direct_attrs.keys) if track_profile_changes
+        EmployeeChangeRequest.supersede_pending_address!(employee: employee, actor: requested_by, changed_fields: direct_attrs.keys)
       end
       change_request = create_change_request!(
         approval_attrs: approval_attrs,

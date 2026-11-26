@@ -144,6 +144,17 @@ export function EmployeeWorkspace(): ReactElement {
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
 
+  // A contact save returns only contact fields. Intake readiness (a missing
+  // address, for one) is read again so its panel updates without a reload.
+  const refreshIntakeReadiness = async (savedEmployeeId: number): Promise<void> => {
+    try {
+      const { data } = await employeesApi.get(savedEmployeeId);
+      setEmployee((current) => (current && current.id === savedEmployeeId ? { ...current, intake_readiness: data.intake_readiness } : current));
+    } catch {
+      // The panel catches up on the next load; the save itself succeeded.
+    }
+  };
+
   const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
@@ -359,9 +370,10 @@ export function EmployeeWorkspace(): ReactElement {
               audience="admin"
               canEdit={!readOnly}
               editRequest={contactEditRequest}
-              onSaved={(updated, { emailChanged }) => {
+              onRecordChange={(updated, { emailChanged, savedFields }) => {
                 setEmployee((current) => (current ? { ...current, ...updated } : current));
                 if (emailChanged) setAppPanelVersion((version) => version + 1);
+                if (savedFields.length > 0) void refreshIntakeReadiness(updated.id);
               }}
             />
             <EmployeeAppPanel
@@ -370,7 +382,8 @@ export function EmployeeWorkspace(): ReactElement {
               companyName={activeCompany?.name || ""}
               employeeId={employee.id}
               audience="admin"
-              onEditContact={readOnly ? undefined : () => setContactEditRequest((request) => request + 1)}
+              canEditContact={!readOnly}
+              onEditContact={() => setContactEditRequest((request) => request + 1)}
             />
             <EmployeeOverview
               companyId={companyId}
