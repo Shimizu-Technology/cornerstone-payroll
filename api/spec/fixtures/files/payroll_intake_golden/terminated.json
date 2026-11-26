@@ -1,0 +1,107 @@
+{
+  "can_apply": false,
+  "pdf_count": 2,
+  "excel_count": 1,
+  "source_warnings": [
+    {
+      "code": "zero_workbook_tips",
+      "severity": "info",
+      "message": "The workbook is included, but its tips total $0."
+    }
+  ],
+  "unmatched_pdf_names": [
+    "Samplefern, Exita"
+  ],
+  "unmatched_excel_names": [
+    "Exita Samplefern"
+  ],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 3,
+    "ready_count": 1,
+    "review_count": 2,
+    "total_regular_hours": 65.0,
+    "total_reported_tips": "0.0",
+    "total_overtime_hours": 0.0
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 65.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 65.0,
+        "workbook_only": false,
+        "pay_rate": "15.5",
+        "tips_boh": "0.0",
+        "tips_foh": "0.0",
+        "tip_pool": null,
+        "loan_deduction": "0.0",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": null,
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    },
+    {
+      "source_employee_name": "Samplefern, Exita",
+      "employee_id": null,
+      "employee_name": null,
+      "row_kind": "unmatched_revel",
+      "errors": [
+        {
+          "code": "unmatched_revel_employee",
+          "message": "Exita Samplefern is terminated in Cornerstone.",
+          "severity": "error",
+          "employee_id": 905103,
+          "employee_name": "Exita Samplefern",
+          "employee_status": "terminated"
+        }
+      ],
+      "warnings": [],
+      "status": "needs_review",
+      "regular_hours": 0.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": null
+    },
+    {
+      "source_employee_name": "Exita Samplefern",
+      "employee_id": null,
+      "employee_name": null,
+      "row_kind": "unmatched_workbook",
+      "errors": [
+        {
+          "code": "unmatched_workbook_employee",
+          "message": "Exita Samplefern is terminated in Cornerstone.",
+          "severity": "error",
+          "employee_id": 905103,
+          "employee_name": "Exita Samplefern",
+          "employee_status": "terminated"
+        }
+      ],
+      "warnings": [],
+      "status": "needs_review",
+      "regular_hours": 0.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": null
+    }
+  ]
+}
