@@ -65,6 +65,7 @@ RSpec.describe PayPeriodCorrectionService do
 
       it "marks the pay period as voided" do
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor:      actor,
           reason:     "Data entry error"
@@ -79,6 +80,7 @@ RSpec.describe PayPeriodCorrectionService do
 
       it "returns a PayPeriodCorrectionEvent" do
         event = PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor:      actor,
           reason:     "Data entry error"
@@ -95,6 +97,7 @@ RSpec.describe PayPeriodCorrectionService do
         original = PayrollLiabilityPostingService.post!(pay_period: committed_period, actor: actor)
 
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor: actor,
           reason: "Reverse payroll liabilities"
@@ -116,6 +119,7 @@ RSpec.describe PayPeriodCorrectionService do
 
         expect {
           PayPeriodCorrectionService.void!(
+            authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
             pay_period: committed_period,
             actor: actor,
             reason: "Correct payroll"
@@ -132,6 +136,7 @@ RSpec.describe PayPeriodCorrectionService do
         before = committed_period.reload.attributes.slice(*retired)
 
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor: actor,
           reason: "Data entry error"
@@ -142,6 +147,7 @@ RSpec.describe PayPeriodCorrectionService do
 
       it "captures financial snapshot on the audit event" do
         event = PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor:      actor,
           reason:     "Test"
@@ -153,6 +159,7 @@ RSpec.describe PayPeriodCorrectionService do
 
       it "reverses employee YTD totals" do
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor:      actor,
           reason:     "Reversal test"
@@ -165,6 +172,7 @@ RSpec.describe PayPeriodCorrectionService do
 
       it "reverses company YTD totals" do
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period,
           actor:      actor,
           reason:     "Company YTD test"
@@ -183,6 +191,7 @@ RSpec.describe PayPeriodCorrectionService do
 
         expect {
           PayPeriodCorrectionService.void!(
+            authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
             pay_period: committed_period,
             actor:      actor,
             reason:     "Skip voided items test"
@@ -195,14 +204,14 @@ RSpec.describe PayPeriodCorrectionService do
       it "raises InvalidStateError for a draft period" do
         draft = create(:pay_period, company: company, status: "draft")
         expect {
-          PayPeriodCorrectionService.void!(pay_period: draft, actor: actor, reason: "test")
+          PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: draft, actor: actor, reason: "test")
         }.to raise_error(PayPeriodCorrectionService::InvalidStateError)
       end
 
       it "raises InvalidStateError for an approved period" do
         approved = create(:pay_period, :approved, company: company)
         expect {
-          PayPeriodCorrectionService.void!(pay_period: approved, actor: actor, reason: "test")
+          PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: approved, actor: actor, reason: "test")
         }.to raise_error(PayPeriodCorrectionService::InvalidStateError)
       end
     end
@@ -212,12 +221,14 @@ RSpec.describe PayPeriodCorrectionService do
 
       it "raises AlreadyVoidedError on second void attempt" do
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: committed_period, actor: actor, reason: "First"
         )
         committed_period.reload
 
         expect {
           PayPeriodCorrectionService.void!(
+            authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
             pay_period: committed_period, actor: actor, reason: "Second"
           )
         }.to raise_error(PayPeriodCorrectionService::AlreadyVoidedError)
@@ -233,6 +244,7 @@ RSpec.describe PayPeriodCorrectionService do
 
         expect {
           PayPeriodCorrectionService.void!(
+            authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
             pay_period: committed_period, actor: actor, reason: "test"
           )
         }.to raise_error(PayPeriodCorrectionService::AlreadySupersededError)
@@ -242,13 +254,13 @@ RSpec.describe PayPeriodCorrectionService do
     context "guard: blank reason" do
       it "raises ArgumentError for blank reason" do
         expect {
-          PayPeriodCorrectionService.void!(pay_period: committed_period, actor: actor, reason: "")
+          PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: committed_period, actor: actor, reason: "")
         }.to raise_error(ArgumentError, /reason is required/)
       end
 
       it "raises ArgumentError for nil reason" do
         expect {
-          PayPeriodCorrectionService.void!(pay_period: committed_period, actor: actor, reason: nil)
+          PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: committed_period, actor: actor, reason: nil)
         }.to raise_error(ArgumentError, /reason is required/)
       end
     end
@@ -270,6 +282,7 @@ RSpec.describe PayPeriodCorrectionService do
 
         expect {
           PayPeriodCorrectionService.void!(
+            authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
             pay_period: correction_run,
             actor: actor,
             reason: "attempt void orphan correction run"
@@ -292,6 +305,7 @@ RSpec.describe PayPeriodCorrectionService do
         source.update!(superseded_by_id: correction_run.id)
 
         PayPeriodCorrectionService.void!(
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
           pay_period: correction_run,
           actor: actor,
           reason: "Correction run had wrong pay date"
@@ -310,6 +324,7 @@ RSpec.describe PayPeriodCorrectionService do
 
         expect {
           PayPeriodCorrectionService.void!(
+            authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
             pay_period: committed_period, actor: actor, reason: "Atomicity test"
           )
         }.to raise_error("Simulated DB error")
@@ -495,6 +510,7 @@ RSpec.describe PayPeriodCorrectionService do
 
     it "returns correction events for the pay period" do
       PayPeriodCorrectionService.void!(
+        authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
         pay_period: committed_period,
         actor:      actor,
         reason:     "Audit trail test"
@@ -522,6 +538,7 @@ RSpec.describe PayPeriodCorrectionService do
              gross_pay: 100.0, net_pay: 80.0, voided: false)
 
       PayPeriodCorrectionService.void!(
+        authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
         pay_period: correction_run,
         actor: actor,
         reason: "Void incorrect correction run"
@@ -553,6 +570,7 @@ RSpec.describe PayPeriodCorrectionService do
 
     it "orders events chronologically" do
       PayPeriodCorrectionService.void!(
+        authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION),
         pay_period: committed_period,
         actor:      actor,
         reason:     "First event"

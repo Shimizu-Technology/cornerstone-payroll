@@ -39,6 +39,7 @@ interface Gate0Fixture {
   register_reconciliation_field_name: string;
   register_reconciliation_field_total: number;
   workflow_pay_period_id: number;
+  voided_pay_period_id: number;
   workflow_payroll_item_id: number;
   filter_race_pay_period_id: number;
   mutation_race_pay_period_id: number;
@@ -1780,7 +1781,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await openPayrollActions(page);
     await expect(page.getByRole('button', { name: 'Roll Back Approval' })).toBeVisible();
 
-    page.once('dialog', (dialog) => dialog.accept());
+    page.once('dialog', (dialog) => dialog.accept('Correct approval in the synthetic lifecycle test'));
     await openPayrollActions(page);
     await page.getByRole('button', { name: 'Roll Back Approval' }).click();
     await expect(page.locator('#payroll-results').getByRole('button', { name: 'Approve' })).toBeVisible();
@@ -2016,20 +2017,9 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
   });
 
   test('preserves a filtered pay-run return path when opening a correction workspace', async ({ page }): Promise<void> => {
-    const payPeriodResponse = await adminApi.get(`admin/pay_periods/${fixture.workflow_pay_period_id}`);
-    expect(payPeriodResponse.ok()).toBeTruthy();
-    const payPeriod = (await responseJson(payPeriodResponse)).pay_period as Record<string, unknown>;
-    if (payPeriod.correction_status !== 'voided') {
-      const voidResponse = await adminApi.post(
-        `admin/pay_periods/${fixture.workflow_pay_period_id}/void`,
-        { data: { reason: 'Verify filtered correction navigation', unpaid_acknowledgement: true } },
-      );
-      expect(voidResponse.ok()).toBeTruthy();
-    }
-
     const filteredReturnTo = `/companies/${fixture.company_id}/pay-runs?status=committed&year=2026`;
     await page.goto(
-      `/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(filteredReturnTo)}`,
+      `/companies/${fixture.company_id}/pay-runs/${fixture.voided_pay_period_id}/work?return_to=${encodeURIComponent(filteredReturnTo)}`,
     );
     await showPayrollTab(page, 'Activity');
     await page.getByRole('button', { name: 'Create Correction Run', exact: true }).click();

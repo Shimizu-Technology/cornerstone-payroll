@@ -1260,3 +1260,18 @@ CREATE TRIGGER employee_app_activations_immutable
 BEFORE UPDATE OR DELETE ON employee_app_activations
 FOR EACH ROW
 EXECUTE FUNCTION protect_employee_app_activation();
+
+CREATE OR REPLACE FUNCTION reject_admin_override_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'admin_overrides is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS admin_overrides_append_only ON admin_overrides;
+CREATE TRIGGER admin_overrides_append_only BEFORE UPDATE OR DELETE ON admin_overrides
+  FOR EACH ROW EXECUTE FUNCTION reject_admin_override_mutation();
+
+DROP TRIGGER IF EXISTS admin_overrides_no_truncate ON admin_overrides;
+CREATE TRIGGER admin_overrides_no_truncate BEFORE TRUNCATE ON admin_overrides
+  FOR EACH STATEMENT EXECUTE FUNCTION reject_admin_override_mutation();

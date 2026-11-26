@@ -291,6 +291,7 @@ it('continues sending explicit zero overrides and a signed Guam income tax adjus
   expect(extra.value).toBe('0.00');
   expect(adjustment.value).toBe('-12.34');
   expect(final.value).toBe('0.00');
+  await user.type(screen.getByLabelText('Reason for changing Guam income tax override'), 'Correct fixture withholding');
   await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
   await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1));
   expect(mocks.update.mock.calls[0][2]).toMatchObject({
@@ -314,6 +315,7 @@ it('clears saved tax overrides back to null and keeps the saved cleared fields b
     await user.tab();
     expect(input.value).toBe('');
   }
+  await user.type(screen.getByLabelText('Reason for changing Guam income tax override'), 'Correct fixture withholding');
   await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith(cleared));
   expect(mocks.update.mock.calls[0][2]).toMatchObject({

@@ -44,9 +44,9 @@ RSpec.describe "Retirement YTD across batch payroll", type: :request do
     PayPeriodLifecycleService.new(pay_period: current, actor: actor).approve!
     PayPeriodLifecycleService.new(pay_period: current, actor: actor).commit!
     expect(ytd.reload).to have_attributes(retirement: 675.to_d, roth_retirement: 200.to_d)
-    PayPeriodCorrectionService.void!(pay_period: prior, actor: actor, reason: "Testing old fixed contribution reversal")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: prior, actor: actor, reason: "Testing old fixed contribution reversal", acknowledge_later_runs: true)
     expect(ytd.reload).to have_attributes(retirement: 575.to_d, roth_retirement: 200.to_d)
-    expect { PayPeriodCorrectionService.void!(pay_period: prior, actor: actor, reason: "Repeat") }.to raise_error(PayPeriodCorrectionService::AlreadyVoidedError)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: prior, actor: actor, reason: "Repeat") }.to raise_error(PayPeriodCorrectionService::AlreadyVoidedError)
     expect(ytd.reload.retirement).to eq(575.to_d)
 
     later = create(:pay_period, company: company, start_date: Date.new(2024, 1, 29), end_date: Date.new(2024, 2, 11), pay_date: Date.new(2024, 2, 16))

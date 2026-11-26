@@ -15,6 +15,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
 
+  create_table "admin_overrides", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "actor_id", null: false
+    t.bigint "real_user_id"
+    t.string "subject_type", null: false
+    t.bigint "subject_id", null: false
+    t.string "action", null: false
+    t.text "reason", null: false
+    t.jsonb "before_snapshot", null: false
+    t.jsonb "after_snapshot", null: false
+    t.jsonb "preflight_result", null: false
+    t.boolean "self_override", default: false, null: false
+    t.datetime "created_at", null: false
+    t.index [ "actor_id" ], name: "index_admin_overrides_on_actor_id"
+    t.index [ "company_id" ], name: "index_admin_overrides_on_company_id"
+    t.index [ "real_user_id" ], name: "index_admin_overrides_on_real_user_id"
+    t.index [ "subject_type", "subject_id" ], name: "index_admin_overrides_on_subject"
+    t.check_constraint "char_length(btrim(reason)) >= 10 AND char_length(btrim(reason)) <= 1000", name: "admin_overrides_reason_length"
+  end
+
   create_table "aire_history_operations", force: :cascade do |t|
     t.bigint "actor_id", null: false
     t.jsonb "arguments", default: {}, null: false
@@ -3197,6 +3217,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
     t.datetime "voided_at"
     t.bigint "voided_by_id"
     t.boolean "client_approval_retained", default: false, null: false
+    t.boolean "rollback_review_required", default: false, null: false
     t.index [ "calculated_by_id" ], name: "index_pay_periods_on_calculated_by_id"
     t.index [ "committed_by_id" ], name: "index_pay_periods_on_committed_by_id"
     t.index [ "company_id", "end_date" ], name: "index_pay_periods_on_company_id_and_end_date"
@@ -5359,6 +5380,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
     t.check_constraint "tax_year >= 2000 AND tax_year <= 2200", name: "year_end_acknowledgements_year_check"
   end
 
+  add_foreign_key "admin_overrides", "companies"
+  add_foreign_key "admin_overrides", "users", column: "actor_id"
+  add_foreign_key "admin_overrides", "users", column: "real_user_id"
   add_foreign_key "aire_history_operations", "companies"
   add_foreign_key "aire_history_operations", "time_tracking_sources"
   add_foreign_key "aire_history_operations", "users", column: "actor_id"

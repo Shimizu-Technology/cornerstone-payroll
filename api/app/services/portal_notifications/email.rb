@@ -126,7 +126,7 @@ module PortalNotifications
     # client; immediate payroll review emails split per client and pay period.
     def self.destination_group(event, delivery_mode: "immediate")
       if event.event_type.in?(%w[payroll_committed payroll_reopened])
-        return [ event.event_type, event.company_id, event.subject_id ]
+        return [ event.event_type, event.company_id, event.subject_id, event.metadata["self_override"] ]
       end
       if event.event_type == "w2_ready_to_post"
         return [ :w2_posting, event.company_id, event.metadata["tax_year"] ]
@@ -200,6 +200,9 @@ module PortalNotifications
         "Daily portal digest"
       else
         "Portal update"
+      end
+      if event.event_type == "payroll_reopened" && event.super_admin_alert? && event.metadata["self_override"] == true
+        heading = "Payroll rolled back by its own operator"
       end
       details = copies.map(&:last)
       details << (events.all?(&:message_event?) ? MESSAGE_LINE : UPDATE_LINE) if has_generic_updates

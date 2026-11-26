@@ -13,9 +13,9 @@ module RecentVerification
     Current.view_as_grant.present? || @clerk_token_payload&.key?("act") == true
   end
 
-  def require_direct_recent_verification!
+  def require_direct_recent_verification!(impersonation_error: "Exit Sign in as before changing client approval.")
     if impersonated_session?
-      return render json: { error: "Exit Sign in as before changing client approval." }, status: :forbidden
+      return render json: { error: impersonation_error }, status: :forbidden
     end
 
     require_recent_verification!

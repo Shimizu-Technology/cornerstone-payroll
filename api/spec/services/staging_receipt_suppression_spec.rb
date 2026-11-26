@@ -131,7 +131,7 @@ RSpec.describe "durable staging receipt suppression" do
     end
 
     def financial_acknowledgement
-      PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct the mistaken deduction")
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct the mistaken deduction")
       period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period.reload, actor: actor, reason: "Correct the mistaken deduction")
       item = period.payroll_items.find_by!(employee: employee)
       PayrollCalculator.for(employee, item).calculate

@@ -7,7 +7,7 @@ module TimeTracking
     EVIDENCE_VERSION = 2
     ITEM_OPERATIONAL_FIELDS = %w[updated_at check_date import_origin ytd_gross ytd_net ytd_withholding_tax
       ytd_social_security_tax ytd_medicare_tax ytd_retirement ytd_roth_retirement].freeze
-    PERIOD_OPERATIONAL_FIELDS = %w[updated_at pay_date tax_sync_status tax_sync_attempts
+    PERIOD_OPERATIONAL_FIELDS = %w[rollback_review_required updated_at pay_date tax_sync_status tax_sync_attempts
       tax_sync_idempotency_key tax_sync_last_error tax_synced_at].freeze
 
     def initialize(allocation:, source:, line:)
@@ -143,7 +143,7 @@ module TimeTracking
       when 1
         return nil if stored.key?("target_tax_year")
         return nil unless [ PayrollItem.column_names.sort, (PayrollItem.column_names - %w[import_origin]).sort ].include?(stored["target"].keys.sort) &&
-          stored["target_period"].keys.sort == PayPeriod.column_names.sort
+          stored["target_period"].keys.sort == (PayPeriod.column_names - %w[rollback_review_required]).sort
         normalized["version"] = EVIDENCE_VERSION
         normalized["target_tax_year"] = Date.iso8601(stored["target_period"].fetch("pay_date")).year
         normalized["target"] = normalized["target"].except(*ITEM_OPERATIONAL_FIELDS)
