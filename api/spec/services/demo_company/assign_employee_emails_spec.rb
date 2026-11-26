@@ -30,15 +30,16 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
   end
 
   def emails_by_name(company)
-    Employee.where(company: company).where.not(email: nil).order(:id).pluck(:first_name, :email).to_h
+    Employee.where(company: company).where.not(email: nil).order(:id).pluck(:first_name, :last_name, :email)
+      .to_h { |first, last, email| [ "#{first} #{last}", email ] }
   end
 
   it "gives the roster's people their aliases in order, the same one at both employers, and is safe to rerun" do
     outcomes = assign(aliases.join(", "))
-    people = DemoCompany::Roster::PEOPLE.map { |person| person[:first] }.uniq.first(6)
+    people = DemoCompany::Roster::PEOPLE.map { |person| DemoCompany::Roster.full_name(person) }.uniq.first(6)
     expect(emails_by_name(kitchen)).to eq(people.zip(aliases).to_h)
-    # Kit Wren is the sixth person and works at both employers.
-    expect(emails_by_name(catering)).to eq("Kit" => aliases[5])
+    # Employee 06 is the sixth person and works at both employers.
+    expect(emails_by_name(catering)).to eq("Employee 06" => aliases[5])
     expect(outcomes.map(&:status).uniq).to eq([ "assigned" ])
     expect(outcomes.size).to eq(7)
     expect(AuditLog.where(action: "employees#demo_email_assigned").count).to eq(7)
@@ -60,7 +61,7 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
   end
 
   it "checks every target employee before writing any" do
-    Employee.find_by!(company: catering, first_name: "Kit").update_columns(first_name: "Kitt")
+    Employee.find_by!(company: catering, first_name: "Employee", last_name: "06").update_columns(last_name: "99")
     expect { assign(aliases) }.to raise_error(described_class::Refused, /nothing was changed/)
     expect(Employee.where.not(email: nil)).to be_empty
     expect(AuditLog.where(action: "employees#demo_email_assigned")).to be_empty
@@ -88,7 +89,7 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
     task.reenable
     saved = ENV.to_h.slice("ORGANIZATION_ID", "ACTOR_ID", "EMAILS")
     ENV.update("ORGANIZATION_ID" => organization.id.to_s, "ACTOR_ID" => admin.id.to_s, "EMAILS" => aliases.first(2).join(","))
-    expect { task.invoke }.to output(/OK    demo:assign_employee_emails Robin Lantern demo-mail\.example assigned/).to_stdout
+    expect { task.invoke }.to output(/OK    demo:assign_employee_emails Employee 01 demo-mail\.example assigned/).to_stdout
     task.reenable
     expect { task.invoke }.not_to output(/reviewer\+/).to_stdout
 
