@@ -422,6 +422,55 @@ RSpec.describe "Published payroll review loop", type: :request do
     end
   end
 
+  it "keeps extra-address-only decision status neutral and equal for unregistered and foreign-org addresses before and after dispatch" do
+    foreign_org = create(:organization)
+    foreign_company = create(:company, organization: foreign_org)
+    create(:user, company: foreign_company, organization: foreign_org, role: "admin", email: "outside.team+alerts@googlemail.com")
+
+    results = {}
+    [
+      [ :unregistered, "unregistered.extra@example.test" ],
+      [ :foreign_match, "outside.team@gmail.com" ]
+    ].each do |label, extra_email|
+      @actor = staff
+      post "#{admin}/unapprove" if period.reload.approved?
+      staff_approve
+      PortalNotificationRecipient.where(company: company).delete_all
+      PortalNotificationRecipient.create!(company: company, email: extra_email)
+
+      with_portal_email do
+        client_approve
+        expect(response).to have_http_status(:ok), response.body
+        decision_before = response.parsed_body.fetch("payroll_review").slice("notification_status", "notification_queued")
+
+        get base
+        expect(response).to have_http_status(:ok), response.body
+        detail_before = response.parsed_body.dig("pay_period", "payroll_review").slice("notification_status", "notification_queued")
+
+        PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+        expect(captured_portal_emails.size).to eq(label == :unregistered ? 1 : 0)
+
+        get base
+        expect(response).to have_http_status(:ok), response.body
+        detail_after = response.parsed_body.dig("pay_period", "payroll_review").slice("notification_status", "notification_queued")
+
+        results[label] = {
+          decision_before: decision_before,
+          detail_before: detail_before,
+          detail_after: detail_after
+        }
+      end
+    end
+
+    expect(results[:foreign_match]).to eq(results[:unregistered])
+    expected_neutral = { "notification_status" => "queued", "notification_queued" => true }
+    results.each_value do |snapshots|
+      expect(snapshots[:decision_before]).to eq(expected_neutral)
+      expect(snapshots[:detail_before]).to eq(expected_neutral)
+      expect(snapshots[:detail_after]).to eq(expected_neutral)
+    end
+  end
+
   it "excludes client viewers from payroll_review_published notifications" do
     viewer = create(:user, company: company, role: "client", client_access_level: "viewer")
     create(:company_assignment, user: viewer, company: company)

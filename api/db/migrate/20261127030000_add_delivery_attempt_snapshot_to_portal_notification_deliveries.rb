@@ -13,6 +13,18 @@ class AddDeliveryAttemptSnapshotToPortalNotificationDeliveries < ActiveRecord::M
 
   def down
     execute "SET LOCAL lock_timeout = '5s'"
+    active_v2_count = select_value(<<~SQL).to_i
+      SELECT COUNT(*)
+      FROM portal_notification_deliveries
+      WHERE batch_key LIKE 'portal-notification-v2-%'
+        AND (status = 'pending' OR claimed_at IS NOT NULL)
+    SQL
+    if active_v2_count.positive?
+      raise ActiveRecord::IrreversibleMigration,
+        "Cannot roll back 20261127030000 while #{active_v2_count} pending or claimed v2 portal_notification_deliveries " \
+        "still hold a batch_key. Drain or clear pending v2 deliveries before rolling back."
+    end
+
     remove_column :portal_notification_deliveries, :attempted_payload
     remove_column :portal_notification_deliveries, :claimed_by
     remove_column :portal_notification_deliveries, :intended_recipient_email

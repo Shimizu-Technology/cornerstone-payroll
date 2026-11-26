@@ -155,9 +155,9 @@ module PortalNotifications
         users = []
         seen_user_ids = []
         taken_canonicals = []
-        User.where(id: listed.users.select(:user_id)).order(:id).to_a.each do |user|
-          next unless eligible_user?(user, event)
-
+        eligible_listed_users = User.where(id: listed.users.select(:user_id)).order(:id).to_a.select { |user| eligible_user?(user, event) }
+        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.category) != "off" }
+        (opted_in + opted_out).each do |user|
           canonical = PortalNotificationRecipient.canonical_email(user.email)
           next if canonical.present? && taken_canonicals.include?(canonical)
 
@@ -174,7 +174,8 @@ module PortalNotifications
 
           account_users = account_users_for_email(normalized)
           if account_users.any?
-            eligible = account_users.find { |user| eligible_user?(user, event) }
+            eligible_accounts = account_users.select { |user| eligible_user?(user, event) }
+            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.category) != "off" } || eligible_accounts.first
             if eligible && !seen_user_ids.include?(eligible.id)
               users << eligible
               seen_user_ids << eligible.id
