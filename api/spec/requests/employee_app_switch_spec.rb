@@ -20,6 +20,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     {
       "REQUIRE_MFA" => "true", "CLERK_MFA_ATTESTED_INSTANCE_ID" => "ins_example", "CLERK_MFA_EVIDENCE_REF" => "evidence-ref",
       "CLERK_AUTHORIZED_PARTIES" => "https://payroll.example.com",
+      # Staff web takes a demo's app state from the (stubbed) signed answer.
+      "EMPLOYEE_API_URL" => "https://employees-api.example.test",
       DemoOutbound::ENV_KEY => "demo.worker@demo-mail.example,demo.pending@demo-mail.example"
     }
   end
@@ -598,10 +600,16 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(stored(demo)["employee_portal_enabled"]).to be(true)
       expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
 
-      # The full gate: an unguarded process (a worker, say) reads it as off,
-      # and so does any database state but the intended shadow one.
+      # The full gate: an unguarded process (a worker, say) follows the
+      # employee service's signed answer, and reads it as off without one;
+      # so does any database state but the intended shadow one.
       allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(false)
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+      unsigned_ping!
+      EmployeeAppSwitch::Enforcement.reset_cache!
       expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(false)
+      observe!
+      EmployeeAppSwitch::Enforcement.reset_cache!
       allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
       [ shadow_state.merge(phase: "partial"), shadow_state.merge(phase: "bypassed", kill_switch_bypass: true),
         shadow_state.merge(kill_switch_bypass: nil), shadow_state.merge(phase: "not_installed") ].each do |state|

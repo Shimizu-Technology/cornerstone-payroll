@@ -40,7 +40,7 @@ module EmployeeLinks
       # A link on the other side of the demo boundary is refused before
       # anything on it is locked, counted or written. The login is re-read
       # each time, so the check under the lock sees its current home company.
-      admit = ->(link) { EmployeeLinks.demo_boundary_allows?(@user.reload, link.company) }
+      admit = ->(link) { EmployeeLinks.demo_boundary_allows?(@user.reload, link.company) && EmployeeAppSwitch::Enforcement.demo_request_allowed?(link.company) }
       link = Verify.call(**@check, request: @request, admit: admit, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
         # Re-read the login under its lock (taken before the link's).
         @user.reload

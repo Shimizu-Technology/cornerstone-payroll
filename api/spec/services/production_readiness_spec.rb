@@ -380,6 +380,19 @@ RSpec.describe ProductionReadiness do
     expect(report.checks.length).to eq(21)
   end
 
+  it "warns when a process runs the RLS guard in raise mode on the default process role" do
+    name = "APP_PROCESS_ROLE is set where the RLS guard runs in raise mode"
+    expect(readiness.run(live: false).checks.map(&:name)).not_to include(name)
+
+    env["RLS_CONTEXT_GUARD_MODE"] = "raise"
+    report = readiness.run(live: false)
+    expect(report.warnings.map(&:name)).to include(name)
+    expect(report.as_json[:checks]).to include(a_hash_including(name: name, passed: false, advisory: true, status: "WARN"))
+
+    env["APP_PROCESS_ROLE"] = "payroll_web"
+    expect(readiness.run(live: false).warnings.map(&:name)).not_to include(name)
+  end
+
   it "warns when the Resend webhook secret is blank or malformed and reports only its format" do
     name = "Resend webhook signing secret is configured"
     [ "", "fixture-signing-value", "whsec_" ].each do |secret|
