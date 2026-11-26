@@ -1,6 +1,6 @@
 # Payroll intake compatibility
 
-Track C starts with the [`mosa_revel` layout descriptor](../api/config/payroll_intake/mosa_revel.yml) and [golden request specs](../api/spec/requests/api/v1/admin/payroll_intake_golden_spec.rb). The descriptor spec checks the workbook headers and merged cells against the current template generator and the frozen v2 fixture. It also checks the adapter and parser constants. The descriptor lists the existing parser, matching, and reconciliation specs that form part of the compatibility gate. The golden specs compare preview rows, apply gates, and persisted payroll results against checked-in JSON. Hours are numeric and money is stored as decimal strings. Legacy messages take the existing display label from the adapter at comparison time.
+Track C starts with the [`mosa_revel` layout descriptor](../api/config/payroll_intake/mosa_revel.yml) and [golden request specs](../api/spec/requests/api/v1/admin/payroll_intake_golden_spec.rb). The descriptor spec checks the workbook headers and merged cells against the current template generator and the frozen v2 fixture. It also checks the adapter and parser constants. The descriptor lists the existing parser, matching, and reconciliation specs that form part of the compatibility gate. The golden specs compare preview rows, apply gates, and persisted payroll results against checked-in JSON. Regular and overtime hours are numeric. Double-time hours and money use decimal strings. Legacy messages take the existing display label from the adapter at comparison time.
 
 ## Synthetic inputs
 
@@ -13,7 +13,7 @@ bundle exec ruby spec/fixtures/files/payroll_intake_golden/build_workbooks.rb
 | Workbook | Behavior captured in JSON |
 | --- | --- |
 | `normal.xlsx` | v2 hours, both tip pools, and a first apply with tips paid out and a non-taxable reimbursement. Also used for workbook-only rejection, a wrapped Revel name with conflicting report dates, and an applied portal revision with an audit entry. |
-| `overtime_heavy.xlsx` | Source-reported overtime with inconsistent Revel totals. Also used for double-time characterization and re-import after a worksheet edit. |
+| `overtime_heavy.xlsx` | Source-reported overtime with unaccounted Revel hours blocks apply. Also used to verify the double-time apply block and removal of an omitted reimbursement on re-import after a worksheet edit. |
 | `new_hire.xlsx` | A mid-period hire matches by name in Revel and by ID in the workbook. |
 | `terminated.xlsx` | Both sources flag the terminated worker for review and leave the rows unmatched for pay. |
 | `legacy.xlsx` | Row-4 legacy headers and date and workweek warnings. Apply requires saved tip treatment, deducts a direct loan, and clears an imported bonus with explicit zero. |
@@ -28,7 +28,7 @@ bundle exec ruby spec/fixtures/files/payroll_intake_golden/build_workbooks.rb
 
 The PDF-only fixture applies after staff records the missing-workbook waiver. The email fixture covers both a total mismatch and a successful apply with weekly overtime and already-paid tips.
 
-A Revel totals line ends the table and its declared totals are skipped. The PDF parser reads double-time hours, but `ImportService` drops them before the adapter's review check. The golden tests capture both current results.
+A Revel totals line ends the table. The parser skips its declared totals. The preview retains double-time hours and pay as decimals. Positive double-time hours or pay block apply, as does an employee's reported total when it exceeds the accounted hours by more than 0.01. Staff can exclude the affected row, apply the rest, then enter the employee's hours and pay in the worksheet.
 
 ## Blockers for the next steps
 
