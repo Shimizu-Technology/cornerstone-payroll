@@ -15,13 +15,18 @@ module DemoCompany
   #   refusing any non-demo company;
   # - employees by deterministic 900-area SSN digits (or explicit employee_map);
   # - QuickBooks HistoricalWorker and HistoricalPaycheck rows by employee_id,
-  #   keeping external_key and private_snapshot consistent so rerunning
-  #   DemoCompany::Seed or uploading QuickbooksSample stub PDFs still matches;
+  #   requiring every active QuickBooks batch to be locked with an applied YTD
+  #   bridge so a later cutover re-verification can never fail. Retained
+  #   historical_import_source_files, bundle_digest, source_file_manifest, and
+  #   previously frozen PDFs (stored check-print/stub PDFs) are immutable
+  #   artifacts and keep the old fictional names; each batch's old-to-new
+  #   external_key mappings are recorded in the AuditLog metadata;
   # - demo client and portal_employee logins by company_id, role, account links,
-  #   and optional client_user_map.
+  #   and optional client_user_map (refusing ambiguous client logins).
   #
   # Defaults to dry_run: true so operators can inspect planned changes before
   # passing dry_run: false (or APPLY=true in rake demo:rename_fixture).
+  # Apply runs atomically in a single database transaction, audit logs included.
   class RenameFixture
     class Refused < StandardError; end
 
@@ -46,46 +51,56 @@ module DemoCompany
 
     def call
       with_organization_lock do
-        companies = system_scope do
+        system_scope do
           authorize!
-          resolve_target_companies!
-        end
-
-        changes = []
-        unmatched_employee_ids = []
-        matched_by_company = {}
-
-        companies.each do |company|
-          company_changes, matched, unmatched = company_scope(company) { process_company!(company) }
-          changes.concat(company_changes)
-          unmatched_employee_ids.concat(unmatched)
-          matched_by_company[company.id] = matched
-        end
-
-        user_changes = system_scope { process_users!(companies, matched_by_company) }
-        changes.concat(user_changes)
-
-        unless dry_run
-          companies.each do |company|
-            company_changes = changes.select { |change| change.company_id == company.id }
-            next if company_changes.empty?
-
-            company_scope(company) { record_audit!(company, company_changes) }
+          if dry_run
+            execute_plan(apply: false)
+          else
+            ApplicationRecord.transaction { execute_plan(apply: true) }
           end
         end
-
-        Result.new(
-          dry_run: dry_run,
-          companies: companies,
-          changes: changes,
-          unmatched_employee_ids: unmatched_employee_ids.uniq.sort
-        )
       end
     end
 
     private
 
     attr_reader :organization, :actor, :dry_run, :company_ids, :employee_map, :client_user_map
+
+    def execute_plan(apply:)
+      companies = resolve_target_companies!(lock: apply)
+      changes = []
+      unmatched_employee_ids = []
+      matched_by_company = {}
+      batch_mappings_by_company = {}
+
+      companies.each do |company|
+        demo!(company)
+        company_changes, matched, unmatched, batch_mappings = evaluate_company(company, apply: apply)
+        changes.concat(company_changes)
+        unmatched_employee_ids.concat(unmatched)
+        matched_by_company[company.id] = matched
+        batch_mappings_by_company[company.id] = batch_mappings
+      end
+
+      user_changes = evaluate_users(companies, matched_by_company, apply: apply)
+      changes.concat(user_changes)
+
+      if apply
+        companies.each do |company|
+          company_changes = changes.select { |change| change.company_id == company.id }
+          next if company_changes.empty?
+
+          record_audit!(company, company_changes, batch_mappings_by_company.fetch(company.id, {}))
+        end
+      end
+
+      Result.new(
+        dry_run: dry_run,
+        companies: companies,
+        changes: changes,
+        unmatched_employee_ids: unmatched_employee_ids.uniq.sort
+      )
+    end
 
     def normalize_ids(raw)
       return nil if raw.nil?
@@ -114,10 +129,6 @@ module DemoCompany
       TenantScope.current ? yield : TenantScope.as_system(reason: "Rename demo fixture names and addresses", &)
     end
 
-    def company_scope(company, &)
-      TenantScope.current ? yield : TenantScope.with_company(company.id, &)
-    end
-
     def fixture_key(company) = company.test_workspace_manifest["demo_fixture_key"]
 
     def spec_for(company) = Seed::COMPANIES.find { |entry| entry[:key] == fixture_key(company) }
@@ -126,8 +137,9 @@ module DemoCompany
       raise Refused, "Refusing to modify #{company.name}: it is not a demo company" unless company.reload.demo?
     end
 
-    def resolve_target_companies!
+    def resolve_target_companies!(lock: false)
       scope = Company.where(organization_id: organization.id)
+      scope = scope.lock if lock
       companies = if company_ids
         found = scope.where(id: company_ids).order(:id).to_a
         missing = company_ids - found.map(&:id)
@@ -148,18 +160,6 @@ module DemoCompany
       companies
     end
 
-    def process_company!(company)
-      if dry_run
-        evaluate_company(company)
-      else
-        ApplicationRecord.transaction do
-          company.lock!
-          demo!(company)
-          evaluate_company(company, apply: true)
-        end
-      end
-    end
-
     def evaluate_company(company, apply: false)
       spec = spec_for(company)
       changes = []
@@ -176,9 +176,10 @@ module DemoCompany
       matched, unmatched, employee_changes = plan_and_apply_employees(company, spec[:key], apply: apply)
       changes.concat(employee_changes)
 
-      changes.concat(plan_and_apply_quickbooks_history(company, matched, apply: apply))
+      qb_changes, batch_mappings = plan_and_apply_quickbooks_history(company, matched, apply: apply)
+      changes.concat(qb_changes)
 
-      [ changes, matched, unmatched ]
+      [ changes, matched, unmatched, batch_mappings ]
     end
 
     def plan_company_updates(company, spec)
@@ -189,7 +190,9 @@ module DemoCompany
 
     def plan_and_apply_help_contacts(company, spec, apply:)
       changes = []
-      existing_by_position = company.help_contacts.order(:position).index_by(&:position)
+      contacts = company.help_contacts.order(:position)
+      contacts = contacts.lock if apply
+      existing_by_position = contacts.index_by(&:position)
       spec[:help].each_with_index do |expected, index|
         contact = existing_by_position[index + 1]
         next unless contact
@@ -254,27 +257,47 @@ module DemoCompany
     end
 
     def plan_and_apply_quickbooks_history(company, matched, apply:)
-      return [] if matched.empty?
-
-      changes = []
       batches = company.historical_import_batches
         .where(source_system: "quickbooks_online")
         .where.not(status: %w[failed reversed])
         .order(:id)
       batches = batches.lock if apply
+      batches = batches.to_a
+      return [ [], {} ] if batches.empty?
 
       batches.each do |batch|
-        changes.concat(rename_batch_workers(company, batch, matched, apply: apply))
-        changes.concat(rename_batch_paychecks(company, batch, matched, apply: apply))
+        unless batch.locked? && batch.historical_ytd_bridges.where(status: "applied").exists?
+          raise Refused, "Refusing to rename #{company.name}: QuickBooks import batch #{batch.id} must be locked with an applied YTD bridge"
+        end
       end
-      changes
+
+      return [ [], {} ] if matched.empty?
+
+      changes = []
+      batch_mappings = {}
+
+      batches.each do |batch|
+        worker_changes, worker_key_map = rename_batch_workers(company, batch, matched, apply: apply)
+        paycheck_changes, paycheck_key_map = rename_batch_paychecks(company, batch, matched, apply: apply)
+        changes.concat(worker_changes)
+        changes.concat(paycheck_changes)
+
+        next if worker_key_map.empty? && paycheck_key_map.empty?
+
+        batch_mappings[batch.id.to_s] = {
+          "bundle_digest" => batch.bundle_digest,
+          "worker_keys" => worker_key_map,
+          "paycheck_keys" => paycheck_key_map
+        }
+      end
+      [ changes, batch_mappings ]
     end
 
     def rename_batch_workers(company, batch, matched, apply:)
       workers = batch.historical_workers.where(employee_id: matched.keys).order(:id)
       workers = workers.lock if apply
       workers = workers.to_a
-      return [] if workers.empty?
+      return [ [], {} ] if workers.empty?
 
       planned = workers.filter_map do |worker|
         entry = matched.fetch(worker.employee_id)
@@ -293,9 +316,9 @@ module DemoCompany
 
         next if diff.empty?
 
-        { worker: worker, person: person, diff: diff }
+        { worker: worker, person: person, old_key: worker.external_key, diff: diff }
       end
-      return [] if planned.empty?
+      return [ [], {} ] if planned.empty?
 
       if apply
         stage_conflicting_keys!(
@@ -312,12 +335,20 @@ module DemoCompany
         end
       end
 
-      planned.map do |item|
+      key_map = planned.each_with_object({}) do |item, mapping|
+        next unless item[:diff].key?(:external_key)
+
+        mapping[item[:old_key]] = item[:diff][:external_key]
+      end
+
+      reported_changes = planned.map do |item|
         reported = item[:diff].except(:private_snapshot)
         reported[:private_snapshot] = "updated" if item[:diff].key?(:private_snapshot)
         Change.new(record_type: "historical_worker", record_id: item[:worker].id, company_id: company.id,
           key: item[:person][:key], changes: reported)
       end
+
+      [ reported_changes, key_map ]
     end
 
     def rewrite_worker_snapshot(worker, person, target_name, previous_full_name)
@@ -345,7 +376,7 @@ module DemoCompany
       paychecks = batch.historical_paychecks.where(employee_id: matched.keys).order(:source_row_number, :id)
       paychecks = paychecks.lock if apply
       paychecks = paychecks.to_a
-      return [] if paychecks.empty?
+      return [ [], {} ] if paychecks.empty?
 
       occurrences = Hash.new(0)
       planned = paychecks.filter_map do |paycheck|
@@ -361,9 +392,9 @@ module DemoCompany
         diff[:external_key] = target_key if paycheck.external_key != target_key
         next if diff.empty?
 
-        { paycheck: paycheck, person: person, diff: diff }
+        { paycheck: paycheck, person: person, old_key: paycheck.external_key, diff: diff }
       end
-      return [] if planned.empty?
+      return [ [], {} ] if planned.empty?
 
       if apply
         stage_conflicting_keys!(
@@ -376,10 +407,18 @@ module DemoCompany
         end
       end
 
-      planned.map do |item|
+      key_map = planned.each_with_object({}) do |item, mapping|
+        next unless item[:diff].key?(:external_key)
+
+        mapping[item[:old_key]] = item[:diff][:external_key]
+      end
+
+      reported_changes = planned.map do |item|
         Change.new(record_type: "historical_paycheck", record_id: item[:paycheck].id, company_id: company.id,
           key: item[:person][:key], changes: item[:diff])
       end
+
+      [ reported_changes, key_map ]
     end
 
     # Prevents transient unique-index collisions on (historical_import_batch_id,
@@ -396,20 +435,10 @@ module DemoCompany
       end
     end
 
-    def process_users!(companies, matched_by_company)
+    def evaluate_users(companies, matched_by_company, apply:)
       company_by_id = companies.index_by(&:id)
       matched_by_employee_id = matched_by_company.values.reduce({}, :merge)
 
-      if dry_run
-        evaluate_users(companies, company_by_id, matched_by_employee_id, apply: false)
-      else
-        ApplicationRecord.transaction do
-          evaluate_users(companies, company_by_id, matched_by_employee_id, apply: true)
-        end
-      end
-    end
-
-    def evaluate_users(companies, company_by_id, matched_by_employee_id, apply:)
       changes = []
       companies.each do |company|
         changes.concat(evaluate_client_users(company, matched_by_employee_id, apply: apply))
@@ -436,7 +465,7 @@ module DemoCompany
         Set.new
       end
 
-      assignments = assign_client_labels(users, linked_to_manager)
+      assignments = assign_client_labels!(company, users, linked_to_manager)
       changes = []
       users.each do |user|
         target_name = assignments[user.id]
@@ -450,7 +479,7 @@ module DemoCompany
       changes
     end
 
-    def assign_client_labels(users, linked_to_manager)
+    def assign_client_labels!(company, users, linked_to_manager)
       assignments = {}
       users.each do |user|
         if client_user_map.key?(user.id)
@@ -461,27 +490,42 @@ module DemoCompany
       end
 
       remaining = users.reject { |user| assignments.key?(user.id) }
+      return assignments if remaining.empty?
+
       unless assignments.value?(Roster::CLIENT_MANAGER_LABEL)
-        manager = remaining.find { |user| linked_to_manager.include?(user.id) } ||
-          remaining.find { |user| user.email.to_s.split("@", 2).first.to_s.match?(/manager/i) } ||
-          remaining.first
-        if manager
-          assignments[manager.id] = Roster::CLIENT_MANAGER_LABEL
-          remaining.delete(manager)
-        end
+        manager = resolve_unambiguous_manager!(company, remaining, linked_to_manager)
+        assignments[manager.id] = Roster::CLIENT_MANAGER_LABEL
+        remaining.delete(manager)
       end
 
-      extra_index = 1
-      remaining.each do |user|
-        label = if !assignments.value?(Roster::CLIENT_USER_LABEL)
-          Roster::CLIENT_USER_LABEL
-        else
-          extra_index += 1
-          "#{Roster::CLIENT_USER_LABEL} #{extra_index}"
-        end
-        assignments[user.id] = label
+      return assignments if remaining.empty?
+
+      if !assignments.value?(Roster::CLIENT_USER_LABEL) && remaining.one?
+        assignments[remaining.first.id] = Roster::CLIENT_USER_LABEL
+        return assignments
       end
-      assignments
+
+      raise Refused,
+            "Ambiguous client user logins on #{company.name} (user IDs: #{remaining.map(&:id).join(', ')}); " \
+            "pass CLIENT_USER_MAP (e.g. #{remaining.first.id}=Client User)"
+    end
+
+    def resolve_unambiguous_manager!(company, remaining, linked_to_manager)
+      linked_matches = remaining.select { |user| linked_to_manager.include?(user.id) }
+      return linked_matches.first if linked_matches.one?
+
+      if linked_matches.many?
+        raise Refused,
+              "Multiple client logins link to employee-10 on #{company.name} (user IDs: #{linked_matches.map(&:id).join(', ')}); " \
+              "pass CLIENT_USER_MAP"
+      end
+
+      email_matches = remaining.select { |user| user.email.to_s.split("@", 2).first.to_s.match?(/manager/i) }
+      return email_matches.first if email_matches.one?
+
+      raise Refused,
+            "Ambiguous client manager login on #{company.name} (user IDs: #{remaining.map(&:id).join(', ')}); " \
+            "pass CLIENT_USER_MAP (e.g. #{remaining.first.id}=#{Roster::CLIENT_MANAGER_LABEL})"
     end
 
     def evaluate_portal_employee_users(company, company_by_id, matched_by_employee_id, apply:)
@@ -512,7 +556,13 @@ module DemoCompany
       changes
     end
 
-    def record_audit!(company, company_changes)
+    def record_audit!(company, company_changes, batch_mappings)
+      metadata = {
+        fixture_key: fixture_key(company),
+        counts: company_changes.group_by(&:record_type).transform_values(&:size)
+      }
+      metadata[:historical_batch_key_mappings] = batch_mappings if batch_mappings.any?
+
       AuditLog.record!(
         user: actor,
         organization_id: organization.id,
@@ -521,10 +571,7 @@ module DemoCompany
         record_type: "Company",
         record_id: company.id,
         subject_name: company.name,
-        metadata: {
-          fixture_key: fixture_key(company),
-          counts: company_changes.group_by(&:record_type).transform_values(&:size)
-        }
+        metadata: metadata
       )
     end
   end

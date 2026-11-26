@@ -54,8 +54,7 @@ module DemoCompany
         entries.map do |person|
           company = companies.fetch(person[:company])
           id = TenantScope.with_company(company.id) do
-            Employee.where(company_id: company.id, ssn_encrypted: Roster.ssn_variants(person)).pick(:id) ||
-              Employee.where(company_id: company.id, first_name: person[:first], last_name: person[:last]).pick(:id)
+            Employee.where(company_id: company.id, ssn_encrypted: Roster.ssn_variants(person)).pick(:id)
           end
           raise Refused, "Seed the demo employers first (rake demo:seed); nothing was changed" unless id
 

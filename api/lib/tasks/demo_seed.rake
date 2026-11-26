@@ -58,26 +58,57 @@ namespace :demo do
     abort "FAIL  demo:assign_employee_emails #{e.message}"
   end
 
-  desc "Dry-run or apply simple demo names and invented addresses to existing demo companies (ORGANIZATION_ID, ACTOR_ID, optional COMPANY_IDS, APPLY=true). Safe to rerun."
+  desc "Dry-run or apply simple demo names and invented addresses to existing demo companies (ORGANIZATION_ID, ACTOR_ID, optional COMPANY_IDS, EMPLOYEE_MAP, CLIENT_USER_MAP, APPLY=true). Safe to rerun."
   task rename_fixture: :environment do
+    parse_id_map = lambda do |raw, env_name|
+      text = raw.to_s.strip
+      next {} if text.empty?
+
+      if text.start_with?("{")
+        parsed = JSON.parse(text)
+        raise ArgumentError, "#{env_name} must be a JSON object" unless parsed.is_a?(Hash)
+
+        parsed.each_with_object({}) do |(id, value), mapping|
+          mapping[Integer(id.to_s.strip)] = value.to_s.strip
+        end
+      else
+        text.split(",").each_with_object({}) do |pair, mapping|
+          id, value = pair.split("=", 2)
+          raise ArgumentError, "#{env_name} entries must be id=value" if id.blank? || value.blank?
+
+          mapping[Integer(id.strip)] = value.strip
+        end
+      end
+    end
+
     organization, actor = TenantScope.as_system(reason: "Find the demo rename organization and actor") do
       [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
     end
     dry_run = ENV["APPLY"] != "true"
+    employee_map = parse_id_map.call(ENV["EMPLOYEE_MAP"], "EMPLOYEE_MAP")
+    client_user_map = parse_id_map.call(ENV["CLIENT_USER_MAP"], "CLIENT_USER_MAP")
     result = Current.set(user: actor) do
       DemoCompany::RenameFixture.new(
         organization: organization,
         actor: actor,
         dry_run: dry_run,
-        company_ids: ENV["COMPANY_IDS"]
+        company_ids: ENV["COMPANY_IDS"],
+        employee_map: employee_map,
+        client_user_map: client_user_map
       ).call
+    end
+    if result.dry_run
+      result.changes.each do |change|
+        fields = change.changes.keys.map(&:to_s).sort.join(",")
+        puts "PLAN  #{change.record_type} id=#{change.record_id} fields=#{fields}"
+      end
     end
     summary = result.counts.map { |type, count| "#{type}=#{count}" }.join(" ")
     summary = "none" if summary.blank?
     puts "OK    demo:rename_fixture mode=#{result.dry_run ? 'dry_run' : 'applied'} " \
          "companies=#{result.companies.map(&:id).join(',')} changes=#{result.changes.size} " \
          "unmatched_employees=#{result.unmatched_employee_ids.size} #{summary}"
-  rescue DemoCompany::RenameFixture::Refused, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, KeyError, ArgumentError => e
+  rescue DemoCompany::RenameFixture::Refused, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound, KeyError, ArgumentError, JSON::ParserError => e
     abort "FAIL  demo:rename_fixture #{e.message}"
   end
 end

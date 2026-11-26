@@ -22,7 +22,7 @@ function employee(id: number, first_name: string, last_name: string, employment_
     id, company_id: 97, first_name, last_name, email: null, phone: '+16715550161', employment_type, pay_rate,
     pay_frequency: 'biweekly', filing_status: 'single', allowances: 0, additional_withholding: 0, w4_dependent_credit: 0,
     w4_step2_multiple_jobs: false, w4_step4a_other_income: 0, w4_step4b_deductions: 0, w4_form_version: 2020,
-    retirement_rate: 0, roth_retirement_rate: 0, status: 'active', address_line1: '100 Chalan Pasaheru', address_line2: '',
+    retirement_rate: 0, roth_retirement_rate: 0, status: 'active', address_line1: '101 Finch Cove Lane', address_line2: '',
     city: 'Hagåtña', state: 'GU', zip: '96910', email_verified_at: null, phone_confirmed_by_employee_at: null,
     contact_source: 'client', contact_revision: '2026-11-24T01:00:00.000000Z', updated_at: '2026-11-24T01:00:00Z',
   };
@@ -30,7 +30,7 @@ function employee(id: number, first_name: string, last_name: string, employment_
 
 async function mockDemoClient(page: Page): Promise<void> {
   await page.route('**/api/v1/auth/me', (route) => json(route, { user: {
-    id: 41, email: 'manager@harborfinch.example', name: 'Maren Fable', role: 'client',
+    id: 41, email: 'manager@harborfinch.example', name: 'Client Manager', role: 'client',
     organization_id: 4, organization_name: 'Cornerstone', company_id: 97,
     company_name: kitchen.name, home_company_id: 97, assigned_company_ids: [97],
   } }));
@@ -50,7 +50,7 @@ async function mockDemoClient(page: Page): Promise<void> {
     meta: { current_page: 1, per_page: 25, total_count: 1, total_pages: 1, statuses: { committed: 1 }, sources: {}, years: [2026] },
   }));
   await page.route('**/api/v1/client/employees**', (route) => json(route, {
-    data: [employee(501, 'Robin', 'Lantern', 'hourly', 17.5), employee(502, 'Ellis', 'Quill', 'salary', 52000)],
+    data: [employee(501, 'Employee', '01', 'hourly', 17.5), employee(502, 'Employee', '09', 'salary', 52000)],
     meta: { current_page: 1, total_pages: 1, total_count: 2, per_page: 50, needs_contact_details_count: 0 },
   }));
   await page.route('**/api/v1/client/departments**', (route) => json(route, { data: [] }));
@@ -72,7 +72,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     await page.screenshot({ path: testInfo.outputPath(`demo-client-pay-runs-${viewport.width}.png`), fullPage: true });
 
     await page.goto('/companies/97/employees');
-    await expect(page.getByText('Lantern').filter({ visible: true }).first()).toBeVisible();
+    await expect(page.getByText('Employee 01').filter({ visible: true }).first()).toBeVisible();
     await expect(page.locator('body')).not.toContainText(/demo|practice|test workspace/i);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`demo-client-employees-${viewport.width}.png`), fullPage: true });

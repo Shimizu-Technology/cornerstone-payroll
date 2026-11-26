@@ -25,7 +25,8 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
   before do
     DemoCompany::Roster::PEOPLE.each do |person|
       company = person[:company] == DemoCompany::Roster::KITCHEN ? kitchen : catering
-      create(:employee, company: company, first_name: person[:first], last_name: person[:last], email: nil)
+      create(:employee, company: company, first_name: person[:first], last_name: person[:last],
+        ssn_encrypted: person[:ssn], email: nil)
     end
   end
 
@@ -60,8 +61,8 @@ RSpec.describe DemoCompany::AssignEmployeeEmails do
       .to raise_error(described_class::Refused, /Seed the demo employers/)
   end
 
-  it "checks every target employee before writing any" do
-    Employee.find_by!(company: catering, first_name: "Employee", last_name: "06").update_columns(last_name: "99")
+  it "checks every target employee before writing any and ignores non-roster SSNs with matching names" do
+    Employee.find_by!(company: catering, first_name: "Employee", last_name: "06").update_columns(ssn_encrypted: "900-01-9999")
     expect { assign(aliases) }.to raise_error(described_class::Refused, /nothing was changed/)
     expect(Employee.where.not(email: nil)).to be_empty
     expect(AuditLog.where(action: "employees#demo_email_assigned")).to be_empty
