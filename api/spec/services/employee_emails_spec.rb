@@ -313,6 +313,60 @@ RSpec.describe "Employee emails" do
     end
   end
 
+  describe EmployeeLinks::EmailChange do
+    it "tells the old address in the branded layout, with no link and nothing else" do
+      mail = described_class.payload(company, "kai.old@example.net")
+
+      expect(mail).to include(to: "kai.old@example.net", subject: "The email for your Harbor Finch Kitchen employee app was changed",
+        from: %("Harbor Finch Kitchen via Cornerstone Payroll" <noreply@payroll.example.test>))
+      expect(heading_of(mail[:html])).to eq("The email for your Harbor Finch Kitchen employee app was changed")
+      expect(mail[:text].lines.map(&:chomp)).to include(
+        "If you made this change, you don't need to do anything. If you didn't, contact Harbor Finch Kitchen right away."
+      )
+      expect(mail[:html]).to include("If you didn&#39;t, contact Harbor Finch Kitchen right away.")
+      # No button, no sign-in link, no inbox preview hint of the new address.
+      expect(mail[:html]).not_to include("<a ", "href=")
+      expect(mail[:text]).not_to include("http")
+      expect(mail.values_at(:subject, :text, :html).join).not_to match(/\$\d|SSN|salary|pay stub/i)
+      expect(mail).not_to have_key(:reply_to)
+    end
+
+    it "names the employer's Help email, also as the reply-to, when there is one" do
+      company.help_contacts.create!(position: 1, name: "Front desk", email: "help@harborfinch.example.test")
+      mail = described_class.payload(company, "kai.old@example.net")
+
+      expect(mail[:reply_to]).to eq("help@harborfinch.example.test")
+      expect(mail[:text]).to include("You can reach Harbor Finch Kitchen at help@harborfinch.example.test.")
+      expect(mail[:html]).to include("You can reach Harbor Finch Kitchen at help@harborfinch.example.test.")
+    end
+
+    it "keeps a hostile employer name out of the headers and escaped in the body" do
+      company.update!(name: %(Evil" <x@y>\r\nBcc: victim@example.net =?UTF-8?B?UGF5?= \u202E<b>))
+      mail = described_class.payload(company, "kai.old@example.net")
+
+      [ mail[:from], mail[:subject] ].each do |header|
+        expect(header).not_to match(/[\p{Cc}\p{Cf}\u2028\u2029]/)
+        expect(header).not_to include("=?")
+      end
+      expect(Mail::Address.new(mail[:from]).address).to eq("noreply@payroll.example.test")
+      expect(mail[:html]).not_to include("<b>")
+      expect(mail[:html]).to include("&lt;b&gt;")
+    end
+
+    it "replies only to an allow-listed address for a demo company" do
+      demo = create_demo_company(organization: create(:organization), name: "Demo Kitchen", fixture_key: "demo-kitchen")
+      demo.help_contacts.create!(position: 1, name: "Real person", email: "real.person@harborfinch.example.com")
+      previous = ENV.fetch(DemoOutbound::ENV_KEY, nil)
+      ENV[DemoOutbound::ENV_KEY] = "allowed@demo-mail.example"
+
+      mail = described_class.payload(demo, "allowed@demo-mail.example")
+      expect(mail).not_to have_key(:reply_to)
+      expect(mail.values_at(:text, :html).join).not_to include("real.person")
+    ensure
+      ENV[DemoOutbound::ENV_KEY] = previous
+    end
+  end
+
   describe EmployeeDocuments::TaxFormNotice do
     let(:document) { Struct.new(:company, :tax_year).new(company, 2026) }
 
@@ -358,7 +412,10 @@ RSpec.describe "Employee emails" do
         paths = described_class.write!(dir)
 
         expect(paths.map { |path| File.basename(path) }).to include("invite_sign_up.html", "invite_sign_in.txt",
-          "activation_notice.html", "tax_form_notice.html")
+          "activation_notice.html", "email_change_notice.html", "email_change_notice.txt", "tax_form_notice.html")
+        expect(File.read(File.join(dir, "email_change_notice.html")))
+          .to include("The email for your Harbor Finch Kitchen employee app was changed")
+        expect(File.read(File.join(dir, "email_change_notice.txt"))).to include("Reply-To: help@harborfinch.example.test")
         expect(File.read(File.join(dir, "invite_sign_up.html"))).to include("Harbor Finch Kitchen", ">Set up your account</a>")
         expect(File.read(File.join(dir, "invite_sign_up.txt"))).to include("Reply-To: help@harborfinch.example.test")
         expect(File.read(File.join(dir, "invite_sign_in.html"))).to include('<img src="data:image/svg+xml;base64,')

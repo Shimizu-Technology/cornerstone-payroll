@@ -1,7 +1,5 @@
 # frozen_string_literal: true
 
-require "cgi"
-
 module EmployeeLinks
   # What a change to Employee#email means for the employee app. The employer
   # (client or staff) is the source of truth for the address, so the edit is
@@ -156,13 +154,25 @@ module EmployeeLinks
     end
 
     def payload(company, to)
-      employer = company.name
-      line = "The email for your #{employer} employee app was changed. If you didn't expect this, contact #{employer}."
-      {
-        from: PortalNotifications::Transport.from_email, to: to,
+      message(EmployeeEmails::Brand.for(company)).payload(to: to)
+    end
+
+    # Never the new address, a sign-in link or anything about pay. The help
+    # email is the Brand's (a demo's only when allow-listed), so the body and
+    # the reply-to name the same address.
+    def message(brand)
+      employer = brand.name
+      contact = ("You can reach #{employer} at #{brand.help_email}." if brand.help_email)
+      EmployeeEmails::Message.new(
+        brand: brand,
         subject: "The email for your #{employer} employee app was changed",
-        text: line, html: "<p>#{CGI.escapeHTML(line)}</p>"
-      }
+        heading: "The email for your #{employer} employee app was changed",
+        paragraphs: [
+          "If you made this change, you don't need to do anything. If you didn't, contact #{employer} right away.",
+          contact
+        ].compact,
+        preheader: "If you didn't make this change, contact #{employer} right away."
+      )
     end
   end
 end
