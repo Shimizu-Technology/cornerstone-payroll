@@ -23,7 +23,7 @@ export type DownloadState = 'idle' | 'working' | 'failed' | 'offline';
 
 /**
  * One download button's state: "Downloading…", then done, or a short message
- * with Try again. A 401 or 404 goes to the session instead.
+ * with Try again. A session failure goes to the app shell.
  */
 export function useDownload(fetchPdf: () => Promise<Blob>, filename: string): { state: DownloadState; start: () => void } {
   const { reportError } = useReadySession();

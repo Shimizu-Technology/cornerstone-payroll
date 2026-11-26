@@ -10,10 +10,8 @@ export function employeeIndexHtml(): string {
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
     <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#ffffff" />
     <meta name="format-detection" content="telephone=no" />
     <title>Employee app</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   </head>

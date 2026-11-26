@@ -6,7 +6,7 @@
 // address bar. Claim and reactivate need a sign-in first, which can leave the
 // page (Google sign-in is a full-page redirect), so the token is also kept in
 // sessionStorage: this tab only, gone when the tab closes, and cleared once
-// it's used, on Back to Welcome and on sign-out. Nothing else from sign-up,
+// it's used, on Back to Welcome and on sign-out unless switching accounts. Nothing else from sign-up,
 // and never pay data, is stored.
 const STORAGE_KEY = 'employee-invite-token';
 
