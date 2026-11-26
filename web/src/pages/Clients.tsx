@@ -17,6 +17,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { DemoBadge } from '@/components/ui/demo-badge';
 import { HelpTip } from '@/components/ui/help-tip';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { TestWorkspaceGuide, WorkspaceRoleGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
@@ -1503,7 +1504,10 @@ export function Clients() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="break-words font-semibold text-neutral-950">{c.name}</p>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="break-words font-semibold text-neutral-950">{c.name}</p>
+                            {c.demo && <DemoBadge />}
+                          </div>
                           {canSeeRecordHistory && <>
                             <RecordCreatorLine creator={c.creator} />
                             <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />
@@ -1625,7 +1629,10 @@ export function Clients() {
                         <div className="flex items-center gap-2">
                           {isTestWorkspace(c) ? <FlaskConical className="h-4 w-4 text-amber-700" /> : <Building2 className="w-4 h-4 text-neutral-400" />}
                           <div>
-                            <span className="font-medium text-neutral-900">{c.name}</span>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-medium text-neutral-900">{c.name}</span>
+                              {c.demo && <DemoBadge />}
+                            </div>
                             {canSeeRecordHistory && <>
                               <RecordCreatorLine creator={c.creator} />
                               <RecordHistoryPanel companyId={c.id} recordId={c.id} recordType="companies" />

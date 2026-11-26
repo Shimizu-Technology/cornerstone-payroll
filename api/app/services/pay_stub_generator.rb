@@ -67,11 +67,13 @@ class PayStubGenerator
     render_summaries(pdf)
 
     PdfPreviewWatermark.apply(pdf) if @preview
+    base_footer = @preview ? "PREVIEW" : "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}"
     render_with_footer(
       pdf,
-      @preview ? "PREVIEW" : "This is your official earnings statement. Please retain for your records.\nGenerated on #{guam_generated_timestamp}",
+      DemoPdfFooter.append(base_footer, company: company),
       font_size: 7,
-      height: 30
+      height: company&.demo? ? 38 : 30,
+      top: company&.demo? ? 42 : 26
     )
   end
 

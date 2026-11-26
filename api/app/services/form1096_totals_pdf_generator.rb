@@ -30,6 +30,7 @@ class Form1096TotalsPdfGenerator
       pdf.move_down 16
       # A client without an e-file gets the records-only footer.
       pdf.text @company.demo? ? "Keep this sheet with your records." : "These totals match the GuamTax e-file. Keep this sheet with your records."
+      DemoPdfFooter.draw_prawn_footer(pdf, company: @company)
     end.render
   end
   private
