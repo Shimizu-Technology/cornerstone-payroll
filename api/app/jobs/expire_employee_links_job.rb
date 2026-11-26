@@ -46,9 +46,10 @@ class ExpireEmployeeLinksJob < ApplicationJob
 
   def remind_expiring_invite(link, now)
     link.with_lock do
-      next unless link.invite_open?(now) && link.invite_expires_at <= now + EmployeeAppRollout::EXPIRING_WITHIN
+      next unless link.invite_open?(now) && link.invite_expires_at <= now + EmployeeAppRollout::EXPIRING_WITHIN &&
+        !link.activation_locked?(now) && link.portal_enabled? && link.employee.active?
 
-      PortalNotifications.employee_link_event!("employee_invite_expiring", link, generation: link.invite_expires_at)
+      PortalNotifications.employee_link_event!("employee_invite_expiring", link, generation: link.invite_expires_at, now: now)
     end
   rescue StandardError => error
     Rails.logger.error("[ExpireEmployeeLinksJob] invite reminder link=#{link.id} error=#{error.class}")

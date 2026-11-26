@@ -24,15 +24,15 @@ module PortalNotifications
 
     CATALOG_COPY = {
       "payroll_committed" => [ "Payroll committed", "Payroll is final. Pay statements post on pay date." ],
-      "payroll_reopened" => [ "Payroll rolled back or reopened", "Sign in to see the current payroll status." ],
+      "payroll_reopened" => [ "Payroll rolled back or reopened", "View the current payroll status in the portal." ],
       "employee_change_submitted" => [ "Employee change request", "An employee change request is pending." ],
       "address_approval_requested" => [ "Address request to review", "An employee address request is pending." ],
       "employee_contact_changed" => [ "Employee contact changes", "Employee contact information changed." ],
       "employee_contact_confirmation_requested" => [ "Contact changes to confirm", "Employee contact or delivery changes need confirmation." ],
-      "employee_signup_locked" => [ "Employee app sign-up locked", "A sign-up is locked." ],
+      "employee_signup_locked" => [ "Employee app sign-up locked", "An employee app sign-up was locked." ],
       "employee_invite_expiring" => [ "Employee app invite expiring", "An invite is due to expire." ],
-      "tax_form_paper_required" => [ "Paper W-2 due", "A paper copy is due. Sign in to review the deadline." ],
-      "w2_ready_to_post" => [ "W-2s ready to post", "Sign in to review the W-2 posting checklist." ]
+      "tax_form_paper_required" => [ "Paper W-2 due", "A paper copy is due. The Year-end checklist shows the deadline." ],
+      "w2_ready_to_post" => [ "W-2s ready to post", "The W-2 posting checklist is available." ]
     }.freeze
 
     attr_reader :subject, :lines, :link, :footer
@@ -193,7 +193,8 @@ module PortalNotifications
       context = [ range, event.metadata["tax_year"] ].compact.first
       context = "#{company_name}#{context ? " (#{context})" : ""}"
       copies = events.filter_map { |entry| CATALOG_COPY[entry.event_type] }.uniq
-      heading = if copies.one?
+      has_generic_updates = events.any? { |entry| !CATALOG_COPY.key?(entry.event_type) }
+      heading = if copies.one? && !has_generic_updates
         copies.first.first
       elsif delivery_mode == "digest"
         "Daily portal digest"
@@ -201,15 +202,22 @@ module PortalNotifications
         "Portal update"
       end
       details = copies.map(&:last)
-      details << (events.all?(&:message_event?) ? MESSAGE_LINE : UPDATE_LINE) if details.empty?
+      details << (events.all?(&:message_event?) ? MESSAGE_LINE : UPDATE_LINE) if has_generic_updates
       brand = EmployeeEmails::Brand.new(name: EmployeeEmails::Message::PRODUCT,
         app_name: audience == "staff" ? "Account team" : "Portal", logo_url: nil,
         primary_color: CORNERSTONE_BLUE, help_email: nil)
 
+      subject = "#{heading} — #{context}"
+      footer_lines = [ footer ]
+      if event.company.demo?
+        subject = "[Demo] #{subject}" unless subject.start_with?("[Demo] ")
+        footer_lines.unshift("Demo company. Not a real payroll record.")
+      end
+
       EmployeeEmails::Message.new(
-        brand: brand, subject: "#{heading} — #{context}", preheader: "#{heading} for #{context}.",
+        brand: brand, subject: subject, preheader: "#{heading} for #{context}.",
         heading: heading, paragraphs: [ context, *details, SIGN_IN_LINE ],
-        action: { label: "Open portal", url: scoped_url(audience, event) }, footer_lines: [ footer ]
+        action: { label: "Open portal", url: scoped_url(audience, event) }, footer_lines: footer_lines
       )
     end
 

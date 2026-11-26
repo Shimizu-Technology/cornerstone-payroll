@@ -24,6 +24,7 @@ module PortalNotifications
       # Truncate to PostgreSQL microsecond precision so claimed_at equality checks match stored timestamps.
       @now = now.change(usec: now.usec)
       @claim_token = SecureRandom.hex(16)
+      @w2_posting_availability = {}
     end
 
     def run!
@@ -294,7 +295,7 @@ module PortalNotifications
       event = row.event
       return "email_delivery_disabled" unless PortalNotifications.delivery_enabled?
       return "email_not_configured" unless Transport.configured?
-      return "resource_unavailable" unless Recipients.subject_available?(event)
+      return "resource_unavailable" unless Recipients.subject_available?(event, now: now, w2_posting_availability: @w2_posting_availability)
       return "destination_changed" if destination_changed?(row, expected_address: expected_address)
 
       revoked = Recipients.revocation_reason(row)
