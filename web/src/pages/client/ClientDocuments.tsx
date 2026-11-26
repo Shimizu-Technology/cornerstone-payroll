@@ -2,7 +2,7 @@ import { formatGuamDate, formatGuamDateTime } from '@/lib/utils';
 import { SubmissionDocumentGroups } from '@/components/documents/SubmissionDocumentGroups';
 import { uploadDocumentBatches } from '@/lib/document-upload-batches';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, ShieldCheck, Trash2, UploadCloud, Users, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -45,6 +45,7 @@ function formatFileSize(bytes: number) {
 }
 
 export function ClientDocuments() {
+  const fieldId = useId();
   const viewOnly = useClientViewOnly();
   const [documents, setDocuments] = useState<ClientDocument[]>([]);
   const [documentsMeta, setDocumentsMeta] = useState<ClientDocumentListMeta | null>(null);
@@ -263,8 +264,9 @@ export function ClientDocuments() {
               <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div className="md:col-span-2 grid gap-5 md:grid-cols-3 md:items-start">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Title</label>
+                  <label htmlFor={`${fieldId}-title`} className="mb-1 block text-sm font-medium text-gray-700">Title</label>
                   <Input
+                    id={`${fieldId}-title`}
                     value={form.title}
                     onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
                     placeholder={supportsSingleTitle ? 'Optional document title' : 'Used for single-file uploads only'}
@@ -277,8 +279,8 @@ export function ClientDocuments() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Category</label>
-                  <Select value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}>
+                  <label htmlFor={`${fieldId}-category`} className="mb-1 block text-sm font-medium text-gray-700">Category</label>
+                  <Select id={`${fieldId}-category`} value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}>
                     {documentCategories.map((category) => (
                       <option key={category.value} value={category.value}>
                         {category.label}
@@ -288,8 +290,8 @@ export function ClientDocuments() {
                 </div>
 
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-gray-700">Employee</label>
-                  <Select value={form.employee_id} onChange={(e) => setForm((prev) => ({ ...prev, employee_id: e.target.value }))}>
+                  <label htmlFor={`${fieldId}-employee`} className="mb-1 block text-sm font-medium text-gray-700">Employee</label>
+                  <Select id={`${fieldId}-employee`} value={form.employee_id} onChange={(e) => setForm((prev) => ({ ...prev, employee_id: e.target.value }))}>
                     <option value="">General company document</option>
                     {employeeOptions.map((employee) => (
                       <option key={employee.value} value={employee.value}>
@@ -301,7 +303,7 @@ export function ClientDocuments() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="mb-2 block text-center text-sm font-medium text-gray-700">File</label>
+                <p id={`${fieldId}-file`} className="mb-2 block text-center text-sm font-medium text-gray-700">File</p>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -312,6 +314,7 @@ export function ClientDocuments() {
                 />
                 <button
                   type="button"
+                  aria-labelledby={`${fieldId}-file ${fieldId}-file-status`}
                   onClick={() => fileInputRef.current?.click()}
                   onDragEnter={() => setIsDragActive(true)}
                   onDragLeave={() => setIsDragActive(false)}
@@ -333,7 +336,7 @@ export function ClientDocuments() {
                   <div className="rounded-2xl bg-white p-3 text-primary-700 shadow-sm">
                     <UploadCloud className="h-6 w-6" />
                   </div>
-                  <p className="mt-3 text-sm font-medium text-neutral-900">
+                  <p id={`${fieldId}-file-status`} className="mt-3 text-sm font-medium text-neutral-900">
                     {selectedFileCount > 0
                       ? `${selectedFileCount} file${selectedFileCount === 1 ? '' : 's'} selected`
                       : 'Drag and drop files here, or click to browse'}
@@ -375,8 +378,9 @@ export function ClientDocuments() {
               </div>
 
               <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium text-gray-700">Notes</label>
+                <label htmlFor={`${fieldId}-notes`} className="mb-1 block text-sm font-medium text-gray-700">Notes</label>
                 <Textarea
+                  id={`${fieldId}-notes`}
                   value={form.notes}
                   onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
                   rows={3}

@@ -7,7 +7,7 @@ import { LoadMoreFooter } from '@/components/ui/load-more';
 import type { BoundedListMeta } from '@/services/api';
 import { appendUniqueById } from '@/lib/paged-list';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Download, Eye, FileText, FolderOpen, Send, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -70,6 +70,7 @@ async function loadAllEmployees() {
 }
 
 export function AdminClientDocumentsPage() {
+  const fieldId = useId();
   const [searchParams] = useSearchParams();
   const deepDocumentId = Number(searchParams.get('document_id')) || null;
   const pageRef = useRef<HTMLDivElement>(null);
@@ -350,8 +351,9 @@ export function AdminClientDocumentsPage() {
             <form onSubmit={handleUpload} className="grid gap-4 md:grid-cols-2">
               <fieldset disabled={uploading} className="col-span-full grid min-w-0 gap-5 md:grid-cols-2">
               <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-700">Title</label>
+                <label htmlFor={`${fieldId}-title`} className="mb-1 block text-sm font-medium text-neutral-700">Title</label>
                 <Input
+                  id={`${fieldId}-title`}
                   value={uploadForm.title}
                   onChange={(event) => setUploadForm((current) => ({ ...current, title: event.target.value }))}
                   placeholder={supportsSingleTitle ? 'Optional document title' : 'Used for single-file uploads only'}
@@ -359,16 +361,16 @@ export function AdminClientDocumentsPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-700">Category</label>
-                <Select value={uploadForm.category} onChange={(event) => setUploadForm((current) => ({ ...current, category: event.target.value }))}>
+                <label htmlFor={`${fieldId}-category`} className="mb-1 block text-sm font-medium text-neutral-700">Category</label>
+                <Select id={`${fieldId}-category`} value={uploadForm.category} onChange={(event) => setUploadForm((current) => ({ ...current, category: event.target.value }))}>
                   {documentCategories.filter((option) => option.value).map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </Select>
               </div>
               <div>
-                <label className="mb-1 block text-sm font-medium text-neutral-700">Employee</label>
-                <Select value={uploadForm.employee_id} onChange={(event) => setUploadForm((current) => ({ ...current, employee_id: event.target.value }))}>
+                <label htmlFor={`${fieldId}-employee`} className="mb-1 block text-sm font-medium text-neutral-700">Employee</label>
+                <Select id={`${fieldId}-employee`} value={uploadForm.employee_id} onChange={(event) => setUploadForm((current) => ({ ...current, employee_id: event.target.value }))}>
                   <option value="">General company document</option>
                   {employeeOptions.map((employee) => (
                     <option key={employee.value} value={employee.value}>{employee.label}</option>
@@ -384,8 +386,9 @@ export function AdminClientDocumentsPage() {
                 Visible to client
               </label>
               <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium text-neutral-700">Notes</label>
+                <label htmlFor={`${fieldId}-notes`} className="mb-1 block text-sm font-medium text-neutral-700">Notes</label>
                 <Textarea
+                  id={`${fieldId}-notes`}
                   value={uploadForm.notes}
                   onChange={(event) => setUploadForm((current) => ({ ...current, notes: event.target.value }))}
                   rows={3}
@@ -393,7 +396,10 @@ export function AdminClientDocumentsPage() {
                 />
               </div>
               <div className="md:col-span-2">
+                <label htmlFor={`${fieldId}-files`} className="mb-1 block text-sm font-medium text-neutral-700">Files</label>
                 <input
+                  id={`${fieldId}-files`}
+                  aria-describedby={`${fieldId}-files-help`}
                   ref={fileInputRef}
                   type="file"
                   multiple
@@ -401,7 +407,7 @@ export function AdminClientDocumentsPage() {
                   onChange={(event) => setUploadForm((current) => ({ ...current, files: Array.from(event.target.files || []) }))}
                   className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
                 />
-                <p className="mt-2 text-sm text-neutral-500">Up to 25 MB each. Larger selections upload in smaller groups. Macros are not supported.</p>
+                <p id={`${fieldId}-files-help`} className="mt-2 text-sm text-neutral-500">Up to 25 MB each. Larger selections upload in smaller groups. Macros are not supported.</p>
                 {selectedFiles.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {selectedFiles.map((file) => (
