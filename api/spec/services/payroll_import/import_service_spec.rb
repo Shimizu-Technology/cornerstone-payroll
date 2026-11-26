@@ -160,6 +160,41 @@ RSpec.describe PayrollImport::ImportService do
   end
 
   describe "#apply!" do
+    context "with unreconciled or unsupported Revel hours" do
+      let(:worker) { create(:employee, company: company, first_name: "Jordan", last_name: "Fixture") }
+      let(:other_worker) { create(:employee, company: company) }
+      let(:row) { { employee_id: worker.id, regular_hours: "40.00", overtime_hours: "0.00", total_hours: "40.00" } }
+
+      before { create(:tax_table, tax_year: pay_period.pay_date.year) }
+
+      {
+        "double-time hours" => [ { doubletime_hours: "2.25", total_hours: "42.25" }, /2\.25 double-time hours/ ],
+        "unaccounted hours" => [ { total_hours: "42.25" }, /2\.25 more hours/ ],
+        "double-time pay alone" => [ { doubletime_pay: "67.50" }, /\$67\.50 in double-time pay/ ]
+      }.each do |scenario, (fields, message)|
+        it "rejects #{scenario} before writing any employee's payroll" do
+          expect {
+            service.apply!(matched: [ row.merge(employee_id: other_worker.id), row.merge(fields) ])
+          }.to raise_error(ArgumentError, message)
+
+          expect(pay_period.payroll_items).to be_empty
+          expect(pay_period.reload).to be_draft
+        end
+      end
+
+      it "allows a one-hundredth-hour variance and skips an excluded row with an hours gap" do
+        pay_period.pay_period_excluded_employees.create!(employee: other_worker)
+        result = service.apply!(matched: [
+          row.merge(total_hours: "40.01"),
+          row.merge(employee_id: other_worker.id, total_hours: "42.25")
+        ])
+
+        expect(result[:errors]).to be_empty
+        expect(result[:skipped]).to contain_exactly(include(employee_id: other_worker.id))
+        expect(pay_period.payroll_items.sole).to have_attributes(employee_id: worker.id, hours_worked: BigDecimal("40.00"))
+      end
+    end
+
     it "snapshots the delivery method before issuing review so profile edits cannot change imported payroll" do
       employee = create(:employee, company: company, payment_delivery_method: "direct_deposit")
       actor = create(:user, company: company, organization: company.organization)

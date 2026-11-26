@@ -198,7 +198,7 @@ class PayrollRetirementCalculation
         source(:built_in_roth, :roth, roth)
       ]
 
-      payroll_item.payroll_item_field_entries.each do |entry|
+      payroll_item.payroll_field_entries_for_calculation.each do |entry|
         next unless entry.active? && entry.kind == "deduction" && entry.employee_paid?
 
         group = retirement_group_for_field(entry)
@@ -590,7 +590,7 @@ class PayrollRetirementCalculation
   end
 
   def flexible_employer_sources
-    fields = payroll_item.payroll_item_field_entries.filter_map do |entry|
+    fields = payroll_item.payroll_field_entries_for_calculation.filter_map do |entry|
       next unless entry.active? && entry.employer_contribution?
       bucket = retirement_group_for_field(entry)
       next unless bucket && entry.amount.to_d.positive?
