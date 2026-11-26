@@ -48,11 +48,13 @@ module EmployeeLinks
       # each time, so the check under the lock sees its current home company.
       # The demo session (azp) and browser Origin rules are part of admission,
       # so a request that could never claim a demo link isn't counted as a
-      # guess against it (claimable? re-checks them under the lock).
+      # guess against it (claimable? re-checks them under the lock). As for
+      # sign-up, a demo link is refused first on a process without its own
+      # guard, in either state.
       origin = @request&.headers&.[]("Origin")
       admit = lambda do |link|
-        EmployeeLinks.demo_boundary_allows?(@user.reload, link.company) &&
-          EmployeeAppSwitch::Enforcement.demo_request_allowed?(link.company) &&
+        EmployeeAppSwitch::Enforcement.demo_sign_up_admitted?(link.company) &&
+          EmployeeLinks.demo_boundary_allows?(@user.reload, link.company) &&
           EmployeeLinks.demo_request_allowed?(link.company, @azp) && EmployeeLinks.demo_origin_allowed?(link.company, origin)
       end
       link = Verify.call(**@check, request: @request, admit: admit, lock_users: ->(first_read) { lock_targets(first_read) }) do |candidate|
