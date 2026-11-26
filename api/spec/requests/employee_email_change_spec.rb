@@ -188,7 +188,7 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
         recipient_email: "riley.old@example.net", status: "pending")
     end
 
-    it "sends a short message naming the employer, and nothing else, to the old address" do
+    it "sends a short branded message naming the employer, and nothing else, to the old address" do
       sent = []
       allow(PortalNotifications::Transport).to receive(:deliver) { |payload, **options| sent << [ payload, options ]; { "id" => "msg_1" } }
 
@@ -196,12 +196,60 @@ RSpec.describe "Employee email changes and the employee app", type: :request do
 
       payload, options = sent.sole
       expect(payload).to include(to: "riley.old@example.net", subject: "The email for your Example Bakery employee app was changed",
-        text: "The email for your Example Bakery employee app was changed. If you didn't expect this, contact Example Bakery.")
+        from: %("Example Bakery via Cornerstone Payroll" <noreply@example.test>))
+      expect(payload[:text]).to include("The email for your Example Bakery employee app was changed",
+        "If you made this change, you don't need to do anything. If you didn't, contact Example Bakery right away.")
+      expect(payload[:html]).to include("<h1", "Example Bakery")
+      expect(payload[:html]).not_to include("<a ")
       expect(options).to eq(idempotency_key: "employee-email-changed-change-a")
       expect(notice.reload).to have_attributes(status: "sent", attempts: 1)
       # Sent once: a repeat delivery does nothing.
       expect(SendEmployeeEmailChangeNoticeJob.new.perform(notice.id)).to eq(:skipped)
       expect(sent.size).to eq(1)
+    end
+
+    it "never puts the new address or a sign-in link in the notice" do
+      invite = invite!(employee, actor: staff)
+      sent = []
+      allow(PortalNotifications::Transport).to receive(:deliver) { |payload, **_options| sent << payload; { "id" => "msg_1" } }
+
+      change_email(client, "riley.new@example.net")
+      SendEmployeeEmailChangeNoticeJob.new.perform(notices.sole.id)
+
+      payload = sent.sole
+      expect(payload[:to]).to eq("riley.old@example.net")
+      body = payload.values_at(:subject, :text, :html).join
+      expect(body).not_to include("riley.new")
+      expect(body).not_to include(invite.token)
+      expect(payload[:text]).not_to include("http")
+      expect(payload[:html]).not_to include("href=")
+    end
+
+    it "sends a demo company's notice only through DemoOutbound, with a reply-to on the allow-list" do
+      demo = create_demo_company(organization: company.organization, name: "Demo Bakery", fixture_key: "demo-bakery")
+      demo.help_contacts.create!(position: 1, name: "Real person", email: "real.person@example.com")
+      demo.help_contacts.create!(position: 2, name: "Demo desk", email: "desk@demo-mail.example")
+      demo_employee = create(:employee, company: demo, email: "worker.old@demo-mail.example", date_of_birth: Date.new(1990, 1, 2))
+      previous = ENV.fetch(DemoOutbound::ENV_KEY, nil)
+      ENV[DemoOutbound::ENV_KEY] = "worker.old@demo-mail.example,desk@demo-mail.example"
+      sent = []
+      allow(PortalNotifications::Transport).to receive(:deliver).and_wrap_original do |_original, payload, **_options|
+        sent << DemoOutbound.filter_payload(payload)
+        { "id" => "msg_1" }
+      end
+
+      allowed = EmployeeEmailChangeNotice.create!(company: demo, employee: demo_employee, change_id: "change-demo",
+        recipient_email: "worker.old@demo-mail.example", status: "pending")
+      expect(EmployeeLinks::EmailChange.deliver_pending!(allowed.id)).to eq(:sent)
+      expect(sent.sole).to include(to: [ "worker.old@demo-mail.example" ], reply_to: [ "desk@demo-mail.example" ])
+      expect(sent.sole.values_at(:text, :html).join).not_to include("real.person")
+
+      outside = EmployeeEmailChangeNotice.create!(company: demo, employee: demo_employee, change_id: "change-demo-2",
+        recipient_email: "someone@example.net", status: "pending")
+      expect(EmployeeLinks::EmailChange.deliver_pending!(outside.id)).to eq(:skipped)
+      expect(sent.size).to eq(1)
+    ensure
+      ENV[DemoOutbound::ENV_KEY] = previous
     end
 
     it "gives each change its own notice, even two in the same second" do
