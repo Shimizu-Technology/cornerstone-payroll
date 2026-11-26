@@ -330,6 +330,7 @@ function AddressForm({ initial, requestId, onSaved, onClose }: { initial: Addres
 function RequestStatus({ request }: { request: AddressRequest }): ReactElement {
   if (request.status === 'pending') return <Chip tone="warn">Waiting for approval</Chip>;
   if (request.status === 'approved') return <Chip tone="good">Approved</Chip>;
+  if (request.status === 'superseded') return <Chip tone="warn">Replaced</Chip>;
   return <Chip tone="bad">Not approved</Chip>;
 }
 
@@ -389,6 +390,12 @@ function AddressCard({ profile, onSaved, editable, notice }: ProfileProps): Reac
                   {request.decidedAt ? `Your new address was approved on ${longDate(request.decidedAt)}.` : 'Your new address was approved.'} {state.info.w2Delivery === 'mailed' ? 'Your W-2 will be mailed here.' : 'This is the address on file for your W-2.'}
                   {request.decisionNote && <p className="mt-1 whitespace-pre-wrap break-words">{request.decisionNote}</p>}
                 </FormMessage>
+              )}
+              {request?.status === 'superseded' && (
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2"><RequestStatus request={request} />{request.decidedAt && <span className="emp-hint">{longDate(request.decidedAt)}</span>}</div>
+                  <p className="text-neutral-700">Replaced by a change from your employer. The address above is the one on file now.</p>
+                </div>
               )}
               {request?.status === 'rejected' && (
                 <div className="space-y-1">
