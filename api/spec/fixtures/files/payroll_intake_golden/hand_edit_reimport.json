@@ -1,0 +1,81 @@
+{
+  "can_apply": true,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 1,
+    "ready_count": 1,
+    "review_count": 0,
+    "total_regular_hours": 76.0,
+    "total_reported_tips": "11.5",
+    "total_overtime_hours": 3.5
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 76.0,
+      "overtime_hours": 3.5,
+      "reported_tips": "11.5",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 79.5,
+        "workbook_only": false,
+        "pay_rate": "15.5",
+        "tips_boh": "0.0",
+        "tips_foh": "11.5",
+        "tip_pool": "foh",
+        "loan_deduction": "0.0",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": null,
+        "payroll_components": [],
+        "hand_edited_hours": {
+          "employee_id": 905101,
+          "employee_name": "Testina Mockberry",
+          "saved_regular_hours": "73.0",
+          "saved_overtime_hours": "1.5",
+          "source_regular_hours": "76.0",
+          "source_overtime_hours": "3.5"
+        }
+      }
+    }
+  ],
+  "apply_error": {
+    "error": "Revel hours would replace hours entered by hand for Testina Mockberry. Review and confirm before applying.",
+    "details": {
+      "hand_edited_hours": [
+        {
+          "employee_id": 905101,
+          "employee_name": "Testina Mockberry",
+          "saved_regular_hours": "73.0",
+          "saved_overtime_hours": "1.5",
+          "source_regular_hours": "76.0",
+          "source_overtime_hours": "3.5"
+        }
+      ]
+    }
+  },
+  "saved_payroll": {
+    "hours_worked": 76.0,
+    "overtime_hours": 3.5,
+    "reported_tips": "11.5",
+    "tips_paid_out": "0.0",
+    "loan_deduction": "0.0",
+    "bonus": "0.0"
+  }
+}

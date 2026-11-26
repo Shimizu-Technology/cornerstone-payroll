@@ -1,0 +1,104 @@
+{
+  "can_apply": true,
+  "pdf_count": 1,
+  "excel_count": 1,
+  "source_warnings": [
+    {
+      "code": "zero_workbook_tips",
+      "severity": "info",
+      "message": "The workbook is included, but its tips total $0."
+    }
+  ],
+  "unmatched_pdf_names": [],
+  "unmatched_excel_names": [],
+  "source_roles": [
+    "revel_hours",
+    "supplemental_workbook"
+  ],
+  "complete": true,
+  "totals": {
+    "row_count": 2,
+    "ready_count": 2,
+    "review_count": 0,
+    "total_regular_hours": 55.0,
+    "total_reported_tips": "0.0",
+    "total_overtime_hours": 0.0
+  },
+  "rows": [
+    {
+      "source_employee_name": "Mockberry, Testina",
+      "employee_id": 905101,
+      "employee_name": "Testina Mockberry",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 55.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 55.0,
+        "workbook_only": false,
+        "pay_rate": "15.5",
+        "tips_boh": "0.0",
+        "tips_foh": "0.0",
+        "tip_pool": null,
+        "loan_deduction": "0.0",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": null,
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    },
+    {
+      "source_employee_name": "Propria Examplemere",
+      "employee_id": 905104,
+      "employee_name": "Propria Examplemere",
+      "row_kind": "matched",
+      "errors": [],
+      "warnings": [],
+      "status": "ready",
+      "regular_hours": 0.0,
+      "overtime_hours": 0.0,
+      "reported_tips": "0.0",
+      "tips_paid_out": "0.0",
+      "payroll_inputs": {
+        "total_hours": 0.0,
+        "workbook_only": true,
+        "pay_rate": "40000.0",
+        "tips_boh": "0.0",
+        "tips_foh": "0.0",
+        "tip_pool": null,
+        "loan_deduction": "0.0",
+        "loan_reconciliation_errors": [],
+        "loan_reconciliation_warnings": [],
+        "bonus": null,
+        "period_pay": "456.78",
+        "payroll_components": [],
+        "hand_edited_hours": null
+      }
+    }
+  ],
+  "saved_payroll": {
+    "hours_worked": 0.0,
+    "overtime_hours": 0.0,
+    "reported_tips": "0.0",
+    "tips_paid_out": "0.0",
+    "loan_deduction": "0.0",
+    "bonus": "0.0",
+    "salary_override": "456.78",
+    "period_pay_evidence": {
+      "notes": null,
+      "scope": "THIS EMPLOYEE ONLY",
+      "amount": "456.78",
+      "source": "Synthetic owner instruction",
+      "employee_id": 905104,
+      "source_type": "mosa_change_workbook",
+      "employee_name": "Propria Examplemere",
+      "effective_pay_date": "2026-07-03"
+    }
+  }
+}

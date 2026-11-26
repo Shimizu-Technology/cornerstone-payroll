@@ -1,4 +1,5 @@
 import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
+import { EmployeeContactCard } from '@/components/employees/EmployeeContactCard';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import {
@@ -128,6 +129,8 @@ export function EmployeeWorkspace(): ReactElement {
   const [reviewBusyCode, setReviewBusyCode] = useState<string | null>(null);
   const [reviewError, setReviewError, reviewErrorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [reviewNotice, setReviewNotice] = useState<string | null>(null);
+  const [contactEditRequest, setContactEditRequest] = useState(0);
+  const [appPanelVersion, setAppPanelVersion] = useState(0);
   useEffect(() => {
     if (loading || !employee || activeTab !== 'pay-setup') return;
     const targetId = location.hash.slice(1);
@@ -140,6 +143,17 @@ export function EmployeeWorkspace(): ReactElement {
   const loadRequestIdRef = useRef(0);
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
+
+  // A contact save returns only contact fields. Intake readiness (a missing
+  // address, for one) is read again so its panel updates without a reload.
+  const refreshIntakeReadiness = async (savedEmployeeId: number): Promise<void> => {
+    try {
+      const { data } = await employeesApi.get(savedEmployeeId);
+      setEmployee((current) => (current && current.id === savedEmployeeId ? { ...current, intake_readiness: data.intake_readiness } : current));
+    } catch {
+      // The panel catches up on the next load; the save itself succeeded.
+    }
+  };
 
   const load = useCallback(async (): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
@@ -349,7 +363,28 @@ export function EmployeeWorkspace(): ReactElement {
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <>
-            <EmployeeAppPanel key={`${companyId}:${employee.id}`} companyId={companyId} companyName={activeCompany?.name || ""} employeeId={employee.id} audience="admin" />
+            <EmployeeContactCard
+              key={`contact:${companyId}:${employee.id}`}
+              employee={employee}
+              companyId={companyId}
+              audience="admin"
+              canEdit={!readOnly}
+              editRequest={contactEditRequest}
+              onRecordChange={(updated, { emailChanged, savedFields }) => {
+                setEmployee((current) => (current ? { ...current, ...updated } : current));
+                if (emailChanged) setAppPanelVersion((version) => version + 1);
+                if (savedFields.length > 0) void refreshIntakeReadiness(updated.id);
+              }}
+            />
+            <EmployeeAppPanel
+              key={`${companyId}:${employee.id}:${appPanelVersion}`}
+              companyId={companyId}
+              companyName={activeCompany?.name || ""}
+              employeeId={employee.id}
+              audience="admin"
+              canEditContact={!readOnly}
+              onEditContact={() => setContactEditRequest((request) => request + 1)}
+            />
             <EmployeeOverview
               companyId={companyId}
               employee={employee}
