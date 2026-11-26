@@ -71,10 +71,10 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
       dispatch_at(3.minutes.from_now)
       expect(captured_portal_emails.size).to eq(1)
       email = captured_portal_emails.sole
-      expect(email).to include(to: "staff.reviewer@example.test", from: "alerts@example.test",
-        subject: "New activity in Cornerstone Payroll")
+      expect(email).to include(to: "staff.reviewer@example.test", from: %("Cornerstone Payroll" <alerts@example.test>),
+        subject: "Portal update — #{company.name}")
       expect(email[:text]).to include("You have a new message in the portal.", "Sign in to view it.",
-        "https://payroll.example.test/settings/client-documents")
+        "https://payroll.example.test/companies/#{company.id}/client-messages")
       expect(deliveries_for(staff).pluck(:status, :attempts, :batch_key).uniq).to eq([ [ "sent", 1, email[:idempotency_key] ] ])
       expect(deliveries_for(staff).first.provider_message_id).to start_with("captured-")
 
@@ -91,7 +91,8 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
 
       dispatch_at(3.minutes.from_now)
       links = captured_portal_emails.map { |email| email[:text][%r{https://\S+}] }
-      expect(links).to contain_exactly("https://payroll.example.test/settings/client-documents", "https://payroll.example.test/app/client-inbox")
+      expect(links).to contain_exactly("https://payroll.example.test/companies/#{company.id}/client-messages",
+        "https://payroll.example.test/companies/#{company.id}/payroll-submissions")
       expect(deliveries_for(staff).pluck(:status).uniq).to eq([ "sent" ])
     end
   end
@@ -106,13 +107,13 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
 
       dispatch_at(3.minutes.from_now)
 
-      email = captured_portal_emails.sole
-      content = [ email[:subject], email[:text], email[:html], email[:to] == staff.email ? "" : email[:to] ].join("\n")
-      forbidden = [ company.name, client.name, thread.subject, secret_body, "123-45-6789", "021000021", "9876543210",
-        "Jordan", document.title, document.file_name, "document_id", "thread_id", "?" ]
+      expect(captured_portal_emails.size).to eq(2)
+      content = captured_portal_emails.map { |email| email.values_at(:subject, :text, :html).join }.join
+      forbidden = [ thread.subject, secret_body, "123-45-6789", "021000021", "9876543210",
+        "Jordan", document.title, document.file_name, "document_id", "thread_id" ]
       forbidden.each { |value| expect(content).not_to include(value) }
-      expect(email[:text]).to include("You have a new message or update in the portal.")
-      (forbidden - [ "?" ] + [ staff.email ]).each { |value| expect(log.string).not_to include(value) }
+      expect(content).to include("You have a new message or update in the portal.", company.name)
+      (forbidden + [ staff.email, client.name, company.name ]).each { |value| expect(log.string).not_to include(value) }
       expect(log.string).to include("[PortalNotification] accepted")
     end
   end
@@ -133,7 +134,7 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
       dispatch_at(Time.utc(2026, 12, 1, 20, 59))
       expect(captured_portal_emails).to be_empty
       dispatch_at(Time.utc(2026, 12, 1, 21, 0))
-      expect(captured_portal_emails.sole[:text]).to include("You have updates waiting in Cornerstone Payroll.")
+      expect(captured_portal_emails.sole[:subject]).to include("Daily portal digest", company.name)
     end
   end
 
@@ -242,33 +243,20 @@ RSpec.describe PortalNotifications::Dispatcher, :portal_notifications do
     end
   end
 
-  it "retries a lost-response batch with the same key and email after part of it is revoked" do
-    document = create(:client_document, company: company)
+  it "suppresses a partially revoked branded batch after an ambiguous provider response" do
+    documents = create_list(:client_document, 2, company: company)
     with_portal_email do
-      client_message!
-      PortalNotifications.client_upload!(documents: [ document ], actor: client)
-      attempts = []
-      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
-        attempts << [ payload, idempotency_key ]
-        raise Timeout::Error # the provider may have accepted it; the response was lost
-      end
+      documents.each { |document| PortalNotifications.client_upload!(documents: [ document ], actor: client) }
+      allow(PortalNotifications::Transport).to receive(:deliver).and_raise(Timeout::Error)
       dispatch_at(3.minutes.from_now)
       expect(deliveries_for(staff).pluck(:status, :attempts).uniq).to eq([ [ "pending", 1 ] ])
 
-      document.update_columns(archived_at: Time.current)
-      allow(PortalNotifications::Transport).to receive(:deliver) do |payload, idempotency_key:|
-        attempts << [ payload, idempotency_key ]
-        { "id" => "provider-deduplicated" }
-      end
+      documents.first.update_columns(archived_at: Time.current)
       dispatch_at(10.minutes.from_now)
 
-      expect(attempts.size).to eq(2)
-      expect(attempts.last).to eq(attempts.first)
-      expect(attempts.last.first[:text]).to include("You have a new message or update in the portal.")
-      upload_row = deliveries_for(staff).joins(:portal_notification_event).find_by!(portal_notification_events: { event_type: "client_upload" })
-      message_row = deliveries_for(staff).joins(:portal_notification_event).find_by!(portal_notification_events: { event_type: "client_message" })
-      expect(upload_row).to have_attributes(status: "skipped", skip_reason: "resource_unavailable")
-      expect(message_row).to have_attributes(status: "sent", attempts: 2, batch_key: attempts.first.last)
+      expect(PortalNotifications::Transport).to have_received(:deliver).once
+      expect(deliveries_for(staff).pluck(:status, :skip_reason)).to contain_exactly(
+        [ "skipped", "resource_unavailable" ], [ "skipped", "access_revoked" ])
     end
   end
 

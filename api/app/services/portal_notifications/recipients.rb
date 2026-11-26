@@ -19,15 +19,22 @@ module PortalNotifications
 
     class << self
       # Returns [targets, recipient_status].
-      def resolve(event)
-        return [ [], "no_recipients" ] unless subject_available?(event) && company_open?(event.company_id)
+      def resolve(event, now: Time.current, w2_posting_availability: {})
+        return [ [], "no_recipients" ] unless subject_available?(event, now: now, w2_posting_availability: w2_posting_availability) && company_open?(event.company_id)
 
         targets = case event.audience
         when "staff" then staff_targets(event)
         when "employee" then [ employee_target(event) ].compact
         else client_targets(event)
         end
-        [ targets, targets.any? ? "recipients" : "no_recipients" ]
+        return [ targets, "recipients" ] if targets.any?
+
+        if event.audience == "staff" && event.actor_id && !event.super_admin_alert?
+          without_actor = event.dup
+          without_actor.actor = nil
+          return [ [], "actor_only" ] if staff_targets(without_actor).any? { |target| target.user&.id == event.actor_id }
+        end
+        [ [], "no_recipients" ]
       end
 
       # Staff users who could be ticked for this client: active, same
@@ -77,13 +84,13 @@ module PortalNotifications
         account_users_for_email(email).find { |user| eligible_user?(user, event) }
       end
 
-      def subject_available?(event)
+      def subject_available?(event, now: Time.current, w2_posting_availability: {})
         subject = event.subject
         return payroll_review_publication_actionable?(event) if event.event_type == "payroll_review_published"
 
         employee_submission = event.event_type == "employee_change_submitted" && subject.is_a?(EmployeeChangeRequest) &&
           subject.requested_by_link_id.present?
-        return false if employee_submission && subject.cancelled?
+        return false if event.event_type == "employee_change_submitted" && subject.is_a?(EmployeeChangeRequest) && !subject.pending?
 
         if event.event_type == "employee_contact_confirmation_requested" && subject.is_a?(EmployeeContactChangeToConfirm) &&
             subject.change_kind == "delivery_consent"
@@ -93,11 +100,37 @@ module PortalNotifications
           return false unless CompanyFeatures.for(event.company).employee_portal_feature?(:profile_requests)
         end
         if event.event_type == "employee_contact_confirmation_requested" && subject.is_a?(EmployeeContactChangeToConfirm)
-          return false if subject.after_values.key?("emergency_contacts")
+          return false if subject.after_values.key?("emergency_contacts") || subject.confirmed_at.present?
         end
         if event.category == "address_approvals"
           return subject.is_a?(EmployeeChangeRequest) && subject.company_id == event.company_id &&
             subject.pending? && subject.profile_address?
+        end
+
+        case event.event_type
+        when "payroll_committed"
+          return subject.is_a?(PayPeriod) && subject.company_id == event.company_id && subject.committed? &&
+            subject.correction_status != "voided" && subject.committed_at&.utc&.iso8601(6) == event.metadata["revision"]
+        when "payroll_reopened"
+          return subject.is_a?(PayPeriod) && subject.company_id == event.company_id &&
+            (!subject.committed? || subject.correction_status == "voided")
+        when "employee_signup_locked", "employee_invite_expiring"
+          return false unless subject.is_a?(EmployeeAccountLink) && subject.company_id == event.company_id &&
+            subject.invited? && subject.portal_enabled? && subject.employee.active?
+
+          if event.event_type == "employee_signup_locked"
+            return subject.activation_locked_at&.utc&.iso8601(6) == event.metadata["generation"]
+          end
+          return subject.invite_open?(now) && !subject.activation_locked?(now) &&
+            subject.invite_expires_at.utc.iso8601(6) == event.metadata["generation"]
+        when "w2_ready_to_post"
+          return false unless subject.is_a?(W2FilingReadiness) && subject.company_id == event.company_id &&
+            subject.status == "filing_ready" && subject.attestation_history.length == event.metadata["revision"]
+
+          key = [ event.company_id, subject.year, subject.attestation_history.length ]
+          return w2_posting_availability.fetch(key) do
+            w2_posting_availability[key] = EmployeeDocuments::PostW2GuCopies.new(company: event.company, year: subject.year).posting_pending?
+          end
         end
 
         case subject
@@ -164,7 +197,7 @@ module PortalNotifications
         seen_user_ids = []
         taken_canonicals = []
         eligible_listed_users = User.where(id: candidate_ids).order(:id).to_a.select { |user| eligible_user?(user, event) }
-        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.preference_category) != "off" }
+        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.category) != "off" }
         (opted_in + opted_out).each do |user|
           canonical = PortalNotificationRecipient.canonical_email(user.email)
           next if canonical.present? && taken_canonicals.include?(canonical)
@@ -185,7 +218,7 @@ module PortalNotifications
           account_users = account_users_for_email(normalized)
           if account_users.any?
             eligible_accounts = account_users.select { |user| eligible_user?(user, event) }
-            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.preference_category) != "off" } || eligible_accounts.first
+            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.category) != "off" } || eligible_accounts.first
             if eligible && !seen_user_ids.include?(eligible.id)
               users << eligible
               seen_user_ids << eligible.id
@@ -215,8 +248,8 @@ module PortalNotifications
           User.active.client.where(organization_id: event.organization_id, id: assigned).order(:id).to_a
         end
         eligible = candidates.select { |user| eligible_user?(user, event) }
-        if event.override_decision?
-          opted_in, opted_out = eligible.partition { |user| Preferences.mode_for(user, event.preference_category) != "off" }
+        if event.exclude_actor_address?
+          opted_in, opted_out = eligible.partition { |user| Preferences.mode_for(user, event.category) != "off" }
           eligible = (opted_in + opted_out).uniq { |user| PortalNotificationRecipient.canonical_email(user.email) || user.id }
         end
         eligible.map { |user| Target.new(user, nil) }
@@ -232,10 +265,10 @@ module PortalNotifications
 
         if event.audience == "staff"
           return false if event.super_admin_alert? && !user.super_admin?
-          return false if event.event_type == "payroll_rollback_staff" && user.super_admin?
+          return false if event.event_type == "payroll_reopened" && !event.super_admin_alert? && user.super_admin?
           return false unless staff_can_view_company?(user, company)
 
-          if event.event_type == "employee_contact_confirmation_requested"
+          if event.event_type.in?(%w[employee_contact_confirmation_requested tax_form_paper_required w2_ready_to_post])
             StaffRolePolicy.allowed?(user, :payroll_operations, company: company)
           else
             event.category != "employee_changes" || StaffRolePolicy.allowed?(user, :manage_client_configuration, company: company)
@@ -244,6 +277,7 @@ module PortalNotifications
           user.client? && user.payroll_access_allowed? && user.organization_id == company.organization_id &&
             user.can_access_company?(company.id) &&
             (!event.client_managers_only? || !user.client_viewer?) &&
+            (!event.client_viewers_only? || user.client_viewer?) &&
             (event.category != "employee_change_decisions" || event.subject.requested_by_id == user.id) &&
             (event.category != "address_approvals" || can_review_address?(event.subject, user)) &&
             (event.category != "contact_changes" || event.subject.changed_by_id != user.id)

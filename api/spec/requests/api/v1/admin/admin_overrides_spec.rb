@@ -90,6 +90,20 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
     expect(PortalNotificationEvent.where(subject: period)).to be_empty
   end
 
+  it "rolls back the financial action and audit writes when the notification ledger fails" do
+    allow(PortalNotificationDelivery).to receive(:create!).and_call_original
+    allow(PortalNotificationDelivery).to receive(:create!).with(satisfy { |attributes|
+      attributes.fetch(:portal_notification_event).super_admin_alert?
+    }).and_raise(ActiveRecord::RecordInvalid.new(PortalNotificationDelivery.new))
+
+    expect { rollback }.not_to change(PayPeriodCorrectionEvent, :count)
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(period.reload).not_to be_voided
+    expect(AdminOverride.where(subject: period)).to be_empty
+    expect(AuditLog.where(action: "void_pay_period", record_type: "PayPeriod", record_id: period.id)).to be_empty
+    expect(PortalNotificationEvent.where(subject: period)).to be_empty
+  end
+
   it "protects recorded overrides from SQL updates, deletes and truncation" do
     rollback
     expect(response).to have_http_status(:ok), response.body
@@ -118,30 +132,35 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
     with_portal_email do
       rollback
       expect(response).to have_http_status(:ok), response.body
-      staff, client, alert = %w[staff client super_admin].map do |audience|
-        PortalNotificationEvent.find_by!(event_type: "payroll_rollback_#{audience}", subject: period)
+      events = PortalNotificationEvent.where(event_type: "payroll_reopened", subject: period)
+      staff, client, viewer_update, alert = %w[account_team client_managers client_viewers super_admins].map do |scope|
+        events.find_by!("metadata->>'recipient_scope' = ?", scope)
       end
+      expect(events.count).to eq(4)
+      expect(events.map { |event| event.metadata.fetch("revision") }.uniq).to eq([ AdminOverride.find_by!(subject: period).id ])
       expect(client.deliveries.pluck(:user_id)).to eq([ manager.id ])
+      expect(viewer_update.deliveries.sole).to have_attributes(user_id: viewer.id, delivery_mode: "digest")
+      expect(alert.category).to eq("payroll_super_admin")
       expect(staff.deliveries.pluck(:user_id)).to eq([ accountant.id ])
       expect(alert.deliveries.sole).to have_attributes(user_id: super_admin.id, delivery_mode: "immediate", status: "pending")
       expect(PortalNotifications::Preferences.categories_for(super_admin)).not_to have_key("payroll_super_admin")
       expect { PortalNotifications::Preferences.update!(super_admin, "payroll_super_admin" => "off") }
         .to raise_error(ArgumentError, /Unknown notification category/)
 
-      [ staff, client, alert ].each do |event|
-        expect(event.metadata.keys - %w[pay_period_id self_override recipient_scope]).to be_empty
+      events.each do |event|
+        expect(event.metadata.keys - %w[period_id revision self_override recipient_scope]).to be_empty
         email = PortalNotifications::Email.new(audience: event.audience, delivery_mode: "immediate", events: [ event ])
         expect(email.subject).to include(company.name)
         expect(email.text).not_to include(reason)
         expect(email.html).not_to include(reason)
       end
       expect(alert.metadata["self_override"]).to be(true)
-      expect(staff.metadata["self_override"]).to be(false)
-      expect(client.metadata["self_override"]).to be(false)
+      expect([ staff, client, viewer_update ]).to all(satisfy { |event| !event.metadata.key?("self_override") })
 
       travel(3.minutes) { PortalNotifications::Dispatcher.run! }
       expect(alert.deliveries.sole.status).to eq("sent")
-      expect(captured_portal_emails.count { |email| email[:to] == super_admin.email }).to eq(1)
+      oversight_emails = captured_portal_emails.select { |email| email[:to] == super_admin.email }
+      expect(oversight_emails.sole.fetch(:subject)).to include("Payroll rolled back by its own operator")
     end
   end
 
