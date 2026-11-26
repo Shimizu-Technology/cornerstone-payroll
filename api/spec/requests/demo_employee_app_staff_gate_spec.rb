@@ -214,8 +214,17 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
         headers: bearer(claimant.clerk_id).merge("CONTENT_TYPE" => "application/json")
     end
 
-    it "refuses activation alike for a match and a miss, before any attempt is counted" do
+    def verify_enforcement!
+      allow(enforcement).to receive(:database_state).and_return(shadow.merge(phase: "enforced", enforced: true, enforced_tables: 1))
+      enforcement.reset_cache!
+    end
+
+    # A demo activation with no Origin header: refused before Verify takes
+    # any lock, with one answer for a match and a miss.
+    def expect_activation_refused_alike
+      issued
       before_state = counters(issued.link)
+      allow(EmployeeLinks).to receive(:lock_company!).and_call_original
 
       post_activation(activation_params(employee, code: issued.code))
       matched = [ response.status, response.parsed_body ]
@@ -226,6 +235,18 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
       expect(matched.first).to eq(422)
       expect(counters(issued.link)).to eq(before_state)
       expect(link_audits(issued.link, "activation_failed")).to be_empty
+      expect(EmployeeLinks).not_to have_received(:lock_company!)
+      expect(clerk_invitations).to be_empty
+    end
+
+    it "refuses activation alike for a match and a miss, before any attempt is counted" do
+      expect_activation_refused_alike
+    end
+
+    it "refuses activation alike for a match and a miss once RLS enforcement is verified, counting nothing" do
+      verify_enforcement!
+      expect(enforcement.demo_request_allowed?(demo)).to be(true)
+      expect_activation_refused_alike
     end
 
     it "refuses a claim alike for a match and a miss, leaving the invite as it was" do
@@ -274,6 +295,99 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
       post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
       expect(response).to have_http_status(:unprocessable_content)
       expect(issued.link.reload.failed_activation_attempts).to eq(1)
+      expect(link_audits(issued.link, "activation_failed").count).to eq(1)
+    end
+
+    it "lets the guarded employee service count a miss once RLS enforcement is verified" do
+      verify_enforcement!
+      allow(enforcement).to receive(:current_process_guarded?).and_return(true)
+      post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"))
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(issued.link.reload.failed_activation_attempts).to eq(1)
+    end
+  end
+
+  describe "demo sign-up admission with a live subdomain" do
+    let(:subdomain) { true }
+    let(:issued) { invite!(employee, actor: staff, delivery: "code") }
+    let(:claimant) do
+      create(:user, role: :portal_employee, company: demo, organization: organization, clerk_id: "user_gate_live_claimant",
+        email: "worker@demo-mail.example", name: "Sample Worker", invitation_status: "accepted")
+    end
+    let(:attacker_origin) { "https://attacker.example.test" }
+
+    before { open_window! }
+
+    def verify_enforcement!
+      allow(enforcement).to receive(:database_state).and_return(shadow.merge(phase: "enforced", enforced: true, enforced_tables: 1))
+      enforcement.reset_cache!
+    end
+
+    # Issues the invite under early access, then (verified) turns enforcement
+    # on with the window still open, leaving a cold cache and no recorded
+    # requests, so anything the check itself asks or writes shows.
+    def prepare!(verified:)
+      issued
+      verified ? verify_enforcement! : enforcement.reset_cache!
+      WebMock::RequestRegistry.instance.reset!
+      allow(enforcement).to receive(:fetch_attestation).and_call_original
+      allow(enforcement).to receive(:retire_windows!).and_call_original
+    end
+
+    def expect_no_side_effects!
+      expect(a_request(:get, "#{base}/health/dependencies")).not_to have_been_made
+      expect(enforcement).not_to have_received(:fetch_attestation)
+      expect(enforcement).not_to have_received(:retire_windows!)
+      expect(EmployeeAppEarlyAccessWindow.where(retired_at: nil)).to exist
+      expect(AuditLog.where(action: enforcement::RETIRED_ACTION).where(created_at: 1.minute.ago..)).to be_empty
+    end
+
+    [ false, true ].each do |verified|
+      state = verified ? "once RLS enforcement is verified" : "under early access"
+
+      it "refuses a matching activation with an Origin header like a miss, asking and writing nothing, #{state}" do
+        prepare!(verified: verified)
+        before_state = counters(issued.link)
+
+        [ attacker_origin, demo_origin ].each do |origin|
+          post_activation(activation_params(employee, code: issued.code), origin: origin)
+          matched = [ response.status, response.parsed_body ]
+          post_activation(activation_params(employee, code: issued.code, ssn_last4: "0000"), origin: origin)
+          expect([ response.status, response.parsed_body ]).to eq(matched), origin
+          expect(matched.first).to eq(422)
+        end
+        expect_no_side_effects!
+        expect(counters(issued.link)).to eq(before_state)
+        expect(clerk_invitations).to be_empty
+      end
+
+      it "refuses a matching claim from the demo's own session like a miss, asking and writing nothing, #{state}" do
+        prepare!(verified: verified)
+        clerk_account!(claimant.clerk_id, email: "worker@demo-mail.example")
+        before_state = counters(issued.link)
+        claim = lambda do |overrides = {}|
+          post "/api/v1/employee/links/claim",
+            params: activation_params(employee, code: issued.code).except(:email).merge(overrides).to_json,
+            headers: bearer(claimant.clerk_id, azp: demo_origin).merge("CONTENT_TYPE" => "application/json", "Origin" => demo_origin)
+          [ response.status, response.parsed_body ]
+        end
+
+        matched = claim.call
+        expect(claim.call(ssn_last4: "0000")).to eq(matched)
+        expect(matched.first).to eq(404)
+        expect_no_side_effects!
+        expect(counters(issued.link)).to eq(before_state)
+        expect(claimant.reload.employee_account_links).to be_empty
+      end
+    end
+
+    it "starts a sign-up on the guarded employee service once RLS enforcement is verified" do
+      verify_enforcement!
+      allow(enforcement).to receive(:current_process_guarded?).and_return(true)
+
+      post_activation(activation_params(employee, code: issued.code), origin: demo_origin)
+      expect_sign_up_started
+      expect(clerk_invitations.sole[:email]).to eq("worker@demo-mail.example")
     end
   end
 
