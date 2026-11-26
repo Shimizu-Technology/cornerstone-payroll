@@ -126,6 +126,19 @@ RSpec.describe PayrollIntake::Adapters::MosaRevel do
     )
   end
 
+  it "blocks a double-time pay amount when the reported hours reconcile" do
+    adapter = described_class.new(pay_period: pay_period, company: company)
+    result = adapter.normalize(extracted_rows: [
+      { row_kind: "matched", employee_id: employee.id, employee_name: employee.full_name,
+        regular_hours: 40, total_hours: 40, doubletime_pay: BigDecimal("67.50") }
+    ])
+
+    row = result.fetch(:rows).sole
+    expect(row.fetch(:status)).to eq("needs_review")
+    expect(row.fetch(:validation_errors).sole).to include(code: "doubletime_not_supported", severity: "error",
+      message: include("$67.50 in double-time pay", "Exclude this row", "in the worksheet"))
+  end
+
   it "rejects a Revel report for a different pay period" do
     expect {
       described_class.new(pay_period: pay_period, company: company).extract(

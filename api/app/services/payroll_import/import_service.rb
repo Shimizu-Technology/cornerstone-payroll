@@ -245,6 +245,16 @@ module PayrollImport
       rows_by_employee_id = matched.index_by { |row| row[:employee_id].to_i }
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
 
+      matched.each do |row|
+        next if excluded_employee_ids.include?(row[:employee_id]) || row[:restore_client_hours_only]
+
+        errors = RevelHoursValidation.errors(row)
+        next if errors.empty?
+
+        name = employees_by_id[row[:employee_id]]&.full_name
+        raise ArgumentError, [ name, errors.pluck(:message).join(" ") ].compact.join(" — ")
+      end
+
       # Fail before writing any source rows. A recurring bonus cannot stand in
       # for the period pay of a variable-salary employee on a regular run.
       missing_salary_names = employees_by_id.values.filter_map do |employee|
@@ -507,6 +517,8 @@ module PayrollImport
         # PDF data
         regular_hours: pdf_row&.dig(:regular_hours) || 0.0,
         overtime_hours: pdf_row&.dig(:overtime_hours) || 0.0,
+        doubletime_hours: pdf_row&.dig(:doubletime_hours)&.to_d || 0.to_d,
+        doubletime_pay: pdf_row&.dig(:doubletime_pay)&.to_d || 0.to_d,
         total_hours: pdf_row&.dig(:total_hours) || 0.0,
         pdf_employee_name: pdf_row&.dig(:employee_name),
         # Excel data
@@ -711,9 +723,11 @@ module PayrollImport
 
     def apply_imported_components!(payroll_item, components)
       normalized = Array(components).map { |component| validate_component!(component) }
-      payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }.each(&:destroy!)
+      entries = payroll_item.payroll_item_field_entries
+      # Destroy through the association so calculation sees only the retained and replacement entries.
+      entries.destroy(*entries.select { |entry| entry.source == "import" })
       normalized.each do |component|
-        payroll_item.payroll_item_field_entries.build(
+        entries.build(
           company_id: pay_period.company_id,
           label: component.fetch(:label),
           kind: component.fetch(:kind),

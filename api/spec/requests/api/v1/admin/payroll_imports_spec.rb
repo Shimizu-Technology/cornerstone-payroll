@@ -355,13 +355,48 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       )
     end
 
-    it "refuses to apply a source package with blocking row errors" do
-      import = create_preview!
-      import.payroll_intake_session.rows.find_by!(employee: included_employee).update!(
-        validation_errors: [
-          { code: "doubletime_not_supported", message: "Double-time requires review", severity: "error" }
-        ]
+    it "blocks applying double-time extracted from a Revel PDF" do
+      CompanyWorkweek.create!(
+        company: company, starts_on_weekday: pay_period.start_date.wday, starts_at_minutes: 0, timezone: "Pacific/Guam",
+        effective_on: pay_period.start_date, source: "operator_confirmed", confirmation_status: "confirmed",
+        confirmed_by: admin_user, confirmed_at: Time.current, notes: "Confirmed for request test"
       )
+      stored_files = {}
+      storage = instance_double(R2StorageService)
+      allow(R2StorageService).to receive(:new).and_return(storage)
+      allow(storage).to receive(:upload) { |key, data, content_type:| stored_files[key] = data }
+      allow(storage).to receive(:download_with_limit) { |key, max_bytes:| stored_files.fetch(key).byteslice(0, max_bytes) }
+      allow(storage).to receive(:delete) { |key| stored_files.delete(key) }
+      pdf_path = build_revel_pdf(
+        [ { name: "Example, Avery", regular_hours: 40, regular_pay: 600,
+            doubletime_hours: BigDecimal("2.25"), doubletime_pay: BigDecimal("67.50") } ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      )
+      workbook = Tempfile.new([ "synthetic-payroll-changes", ".xlsx" ])
+      workbook.binmode
+      workbook.write(PayrollImport::MosaSupplementalTemplate.new(pay_period).generate)
+      workbook.close
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: {
+             pdf_file: Rack::Test::UploadedFile.new(pdf_path, "application/pdf", true, original_filename: "payroll_#{pay_period.start_date}_to_#{pay_period.end_date}.pdf"),
+             excel_file: Rack::Test::UploadedFile.new(workbook.path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+           }
+
+      expect(response).to have_http_status(:ok), response.body
+      preview = response.parsed_body.fetch("preview")
+      expect(preview.fetch("can_apply")).to be(false)
+      error = preview.fetch("source_rows").find { |row| row["employee_id"] == included_employee.id }.fetch("errors").sole
+      expect(error).to include("code" => "doubletime_not_supported", "severity" => "error")
+      expect(error.fetch("message")).to include("Revel shows 2.25 double-time hours", "Exclude this row",
+        "enter this employee’s hours and double-time pay in the worksheet")
+
+      import = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
+      row = import.payroll_intake_session.rows.find_by!(employee: included_employee)
+      expect(row.status).to eq("needs_review")
+      expect(BigDecimal(row.source_payload.fetch("doubletime_hours").to_s)).to eq(BigDecimal("2.25"))
+      expect(BigDecimal(row.source_payload.fetch("doubletime_pay").to_s)).to eq(BigDecimal("67.50"))
 
       expect(PayrollImport::ImportService).not_to receive(:new)
 
@@ -370,8 +405,11 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
            as: :json
 
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body.fetch("error")).to match(/Double-time requires review/)
+      expect(response.parsed_body.fetch("error")).to include(error.fetch("message"))
       expect(import.reload.status).to eq("previewed")
+      expect(pay_period.reload.payroll_items).to be_empty
+    ensure
+      workbook&.unlink
     end
 
     it "refuses to apply when a retained source no longer matches its fingerprint" do
