@@ -123,6 +123,7 @@ module MigrationPromotion
         company: target_company,
         company_pay_schedule: source.company_pay_schedule_id && maps.fetch(:pay_schedules).fetch(source.company_pay_schedule_id),
         company_workweek: source.company_workweek_id && maps.fetch(:workweeks).fetch(source.company_workweek_id),
+        rollback_review_required: false,
         status: record_only ? "committed" : "calculated",
         parallel_run: false,
         run_purpose_source: "production_migration",

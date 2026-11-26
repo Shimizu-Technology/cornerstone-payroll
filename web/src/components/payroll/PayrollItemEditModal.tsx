@@ -133,6 +133,7 @@ export function PayrollItemEditModal({
     payroll_field_entries: [],
   });
   const [initialCustomDeductions, setInitialCustomDeductions] = useState<SavedDeductionField[]>([]);
+  const [fitOverrideReason, setFitOverrideReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [initialPayrollAdjustments, setInitialPayrollAdjustments] = useState<NormalizedPayrollAdjustment[]>([]);
   const [payrollFieldEntriesDirty, setPayrollFieldEntriesDirty] = useState(false);
@@ -171,6 +172,7 @@ export function PayrollItemEditModal({
         amount: Number(deduction.amount),
       }));
       setInitialCustomDeductions(savedDeductions);
+      setFitOverrideReason('');
       setFields({
         hours_worked: item.hours_worked || 0,
         overtime_hours: item.overtime_hours || 0,
@@ -288,6 +290,9 @@ export function PayrollItemEditModal({
     }));
   };
 
+  const finalFitOverride = fields.withholding_tax_override === '' ? null : Number(fields.withholding_tax_override);
+  const fitOverrideChanged = !!item && finalFitOverride !== (item.withholding_tax_override == null ? null : Number(item.withholding_tax_override));
+
   const handleSavedDeductionAmountChange = (index: number, amount: number | null) => {
     setFields(prev => ({
       ...prev,
@@ -381,7 +386,14 @@ export function PayrollItemEditModal({
         payload.salary_override = null;
       }
 
-      await payrollItemsApi.update(payPeriodId, item.id, payload as Partial<PayrollItem>);
+      if (fitOverrideChanged && fitOverrideReason.trim().length < 10) {
+        throw new Error('Enter at least 10 characters explaining the Guam income tax override change.');
+      }
+      if (fitOverrideChanged) {
+        await payrollItemsApi.update(payPeriodId, item.id, payload as Partial<PayrollItem>, { fitOverrideReason: fitOverrideReason.trim() });
+      } else {
+        await payrollItemsApi.update(payPeriodId, item.id, payload as Partial<PayrollItem>);
+      }
       const recalcResult = await payrollItemsApi.recalculate(payPeriodId, item.id);
       onSaved(recalcResult.payroll_item);
       onOpenChange(false);
@@ -921,6 +933,11 @@ export function PayrollItemEditModal({
                   <p className="text-xs text-gray-400 mt-0.5">
                     Advanced: leave blank for normal calculation; set to force the final Guam income tax amount for this pay period.
                   </p>
+                  {fitOverrideChanged && <div className="mt-2">
+                    <label htmlFor={`${inputId}-fit-reason`} className="block text-xs font-medium">Reason for changing Guam income tax override</label>
+                    <textarea id={`${inputId}-fit-reason`} className="w-full rounded border p-2 text-sm" value={fitOverrideReason}
+                      onChange={event => setFitOverrideReason(event.target.value)} maxLength={1000} required />
+                  </div>}
                 </div>
               </div>
             </div>

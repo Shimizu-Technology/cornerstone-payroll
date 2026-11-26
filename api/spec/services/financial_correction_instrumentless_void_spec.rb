@@ -25,7 +25,7 @@ RSpec.describe "Source-backed instrumentless whole-payroll void" do
     expect(original_item.net_pay).to eq(0)
     expect(original_item.check_number).to be_nil
     expect(original_item.check_events).to be_empty
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Correct the mistaken zero-net deduction")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Correct the mistaken zero-net deduction")
   end
 
   it "records the exact whole-void tombstone and reversals without inventing a paper instrument or cash event" do
@@ -41,7 +41,7 @@ RSpec.describe "Source-backed instrumentless whole-payroll void" do
     expect(ack.source_line_key).to eq(allocation.line_key)
     expect(ack.source_event_key).to include(event.id.to_s)
     expect(ack.attributes.values_at("payment_method", "payment_reference", "payment_effective_on")).to eq([ nil, nil, nil ])
-    expect { PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Do not repeat the void") }.to raise_error(PayPeriodCorrectionService::AlreadyVoidedError)
+    expect { PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Do not repeat the void") }.to raise_error(PayPeriodCorrectionService::AlreadyVoidedError)
     expect(original_item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
   end
 
@@ -64,7 +64,7 @@ RSpec.describe "Source-backed instrumentless whole-payroll void" do
   end
   it "does not reinterpret retained check history as an instrumentless predecessor" do
     original_item.check_events.create!(user: actor, event_type: "assigned", check_number: "30000")
-    PayPeriodCorrectionService.void!(pay_period: original_period, actor: actor, reason: "Review historical check ownership")
+    PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: original_period, actor: actor, reason: "Review historical check ownership")
     expect(original_item.aire_payroll_entry_acknowledgements.where(status: "payment_voided")).to be_empty
     period = PayPeriodCorrectionService.create_correction_run!(source_pay_period: original_period, actor: actor, reason: "Review historical check ownership")
     item = period.payroll_items.first!

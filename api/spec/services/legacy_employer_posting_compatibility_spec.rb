@@ -60,7 +60,7 @@ RSpec.describe "Reviewed pre-deploy employer postings" do
   [ :insurance, :employer ].each do |kind|
     it "keeps ambiguous #{kind} legacy voids available without certifying their capture" do
       item = uncaptured_legacy_item!(kind)
-      PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Void retained legacy payroll")
+      PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Void retained legacy payroll")
       expect(period.reload).to be_voided
       expect(PayrollLegacyEmployerComponents.eligible?(item)).to be(false)
       expect(period.payroll_liability_postings.joins(:entries).sum("payroll_liability_entries.amount")).to eq(0)

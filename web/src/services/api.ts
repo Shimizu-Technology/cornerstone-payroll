@@ -1698,17 +1698,15 @@ export const payPeriodsApi = {
   connectCorrectedHours: (id: number, expected_digest: string): Promise<{ corrected_hours: CorrectedHoursPreview }> =>
     api.post<{ corrected_hours: CorrectedHoursPreview }>(`/admin/pay_periods/${id}/connect_corrected_hours`, { expected_digest }),
   correctionPreflight: (id: number) =>
-    api.get<{ correction_preflight: PayrollCorrectionPreflight; void_preflight: PayrollCorrectionPreflight }>(`/admin/pay_periods/${id}/correction_preflight`),
-  reopenUnpaid: (id: number, data: { reason: string; unpaid_acknowledgement: boolean; includes_recurring_items?: boolean; includes_base_salary?: boolean }) =>
-    api.post<CorrectionRunResponse>(`/admin/pay_periods/${id}/reopen_unpaid`, data),
+    api.get<{ correction_preflight: PayrollCorrectionPreflight; void_preflight: PayrollCorrectionPreflight; confirmation: string }>(`/admin/pay_periods/${id}/correction_preflight`),
   adoptConfirmedWorkweek: (id: number): Promise<PayPeriodResponse> =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/adopt_confirmed_workweek`),
   approve: (id: number) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/approve`),
   restoreEmployee: (id: number, employeeId: number): Promise<{ expected_entries: PayPeriod['expected_entries']; add_back: AddBackResult }> =>
     api.delete<{ expected_entries: PayPeriod['expected_entries']; add_back: AddBackResult }>(`/admin/pay_periods/${id}/excluded_employees/${employeeId}`),
-  unapprove: (id: number) =>
-    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`),
+  unapprove: (id: number, reason: string) =>
+    api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/unapprove`, { reason }),
   commit: (id: number, snapshot?: PayrollCommitSnapshot) =>
     api.post<PayPeriodResponse>(`/admin/pay_periods/${id}/commit`, snapshot),
   promotedPaymentPreview: (id: number) =>
@@ -1796,8 +1794,6 @@ export const payPeriodsApi = {
     api.getBlob(`/admin/pay_periods/${id}/supplemental_template`),
 
   // CPR-71: Payroll correction workflow
-  void: (id: number, data: { reason: string; unpaid_acknowledgement?: boolean }) =>
-    api.post<VoidPayPeriodResponse>(`/admin/pay_periods/${id}/void`, data),
   createCorrectionRun: (
     id: number,
     data: {
@@ -2450,8 +2446,8 @@ export const payrollItemsApi = {
   // the write if that review is no longer current or pay was already entered.
   create: (payPeriodId: number, data: Partial<PayrollItem> & { employee_id: number; auto_calculate?: boolean }, options: { expectedImportId?: number } = {}) =>
     api.post<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items`, { employee_id: data.employee_id, payroll_item: data, auto_calculate: data.auto_calculate, expected_import_id: options.expectedImportId }),
-  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean; wage_rate_hours?: PayrollItemWageRateHours[] }, options: { expectedImportId?: number } = {}) =>
-    api.patch<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data, auto_calculate: data.auto_calculate, expected_import_id: options.expectedImportId }),
+  update: (payPeriodId: number, id: number, data: Partial<PayrollItem> & { auto_calculate?: boolean; wage_rate_hours?: PayrollItemWageRateHours[] }, options: { expectedImportId?: number; fitOverrideReason?: string } = {}) =>
+    api.patch<{ payroll_item: PayrollItem }>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`, { payroll_item: data, auto_calculate: data.auto_calculate, expected_import_id: options.expectedImportId, fit_override_reason: options.fitOverrideReason }),
   delete: (payPeriodId: number, id: number) =>
     api.delete<void>(`/admin/pay_periods/${payPeriodId}/payroll_items/${id}`),
   recalculate: (payPeriodId: number, id: number) =>
@@ -7073,6 +7069,7 @@ export const authApi = {
 };
 
 export interface PayrollCorrectionPreflight {
+  later_committed_run_ids?: number[];
   eligible: boolean;
   blockers: string[];
   employee_checks: PayrollCorrectionPayment[];

@@ -186,7 +186,7 @@ RSpec.describe "Connected payment cancellation" do
     item.void!(user: actor, reason: "Recovered damaged paper check")
     expect(item.check_events.voids.last.payment_cancellation?).to be true
     expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided")).to be_empty
-    event = PayPeriodCorrectionService.void!(pay_period: period, actor: actor, reason: "Explicit whole payroll reversal")
+    event = PayPeriodCorrectionService.void!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Explicit whole payroll reversal")
     expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
     TimeTracking::FinancialCorrectionService.record_instrumentless_void!(pay_period: period.reload, void_event: event)
     expect(item.aire_payroll_entry_acknowledgements.where(status: "payment_voided").count).to eq(1)
