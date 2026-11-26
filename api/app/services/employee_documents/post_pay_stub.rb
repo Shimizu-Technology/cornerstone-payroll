@@ -8,11 +8,18 @@ module EmployeeDocuments
       @notice_since = notice_since
     end
 
+    # Locks in the order every payroll change takes them: company, then pay
+    # period, then paycheck. The company lock is the one the new document's
+    # foreign key needs; taking it first means a replacement or commit that
+    # already holds the company never waits on a paycheck this posting holds.
     def call
-      period = @item.pay_period
-      period.with_lock("FOR SHARE", requires_new: true) do
-        @item.lock!
+      EmployeeDocument.transaction(requires_new: true) do
+        company = Company.lock("FOR KEY SHARE").find(@item.company_id)
+        period = PayPeriod.lock("FOR SHARE").find(@item.pay_period_id)
+        period.company = company
+        @item = PayrollItem.eager_load(:employee).lock("FOR UPDATE OF payroll_items").find(@item.id)
         @item.pay_period = period
+        @item.company = company
         reconcile(period)
       end
     end

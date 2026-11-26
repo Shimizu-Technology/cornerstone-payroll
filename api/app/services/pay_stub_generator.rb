@@ -22,6 +22,11 @@ class PayStubGenerator
     "pto" => "PTO",
     "tips" => "Reported Tips"
   }.freeze
+  # Each printed YTD total and the payroll item amount it accumulates.
+  STATEMENT_YTD_FIELDS = {
+    gross: :gross_pay, withholding_tax: :withholding_tax, social_security_tax: :social_security_tax,
+    medicare_tax: :medicare_tax, additional_withholding: :additional_withholding, net: :net_pay
+  }.freeze
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
@@ -80,30 +85,25 @@ class PayStubGenerator
   def statement
     {
       earnings: statement_earnings,
-      taxes: employee.contractor? ? [] : tax_lines.map { |label, amount, ytd| { label: label, amount: amount.to_d, ytd: ytd.to_d } },
+      taxes: tax_lines.map { |label, amount, ytd| { label: label, amount: amount.to_d, ytd: ytd.to_d } },
       deductions: statement_ytd_breakdown.deductions.map { |row| { label: pay_stub_deduction_label(row), amount: row.current.to_d, ytd: row.ytd.to_d } },
       other_pay: statement_ytd_breakdown.other_pay.map { |row| { label: row.label, amount: row.current.to_d, ytd: row.ytd.to_d } },
-      ytd: { gross: pay_ytd_total, net: payroll_item.ytd_net.to_d }
+      ytd: { gross: pay_ytd_total, net: statement_ytd_totals[:net] }
     }
   end
 
-  # Use current rows even when the PDF can attribute its independently computed
-  # YTD amounts. An earlier check can change that attribution without changing this check.
+  # This check's own facts plus every YTD amount the statement prints. A later
+  # change to an earlier check revises this statement only when it changes a
+  # printed YTD amount. Current rows use their own labels, so a relabelled YTD
+  # attribution alone does not. A stub posted under an earlier fingerprint
+  # format never matches, so its next recheck posts one revision carrying
+  # this one (production had no posted employee stubs when the format changed).
   def employee_payroll_facts_sha256
-    earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
-      .map { |line| line.except(:ytd) }
-    components = PayrollStatementYtdBreakdown::KINDS.map do |kind|
-      statement_ytd_breakdown.current_rows(kind).map { |row| [ row.label, row.current, row.semantic ] }
+    @employee_payroll_facts_sha256 ||= begin
+      # This check's components load in the same batch as the earlier checks'.
+      ytd_source_items
+      Digest::SHA256.hexdigest([ *employee_payroll_current_facts, printed_ytd_facts ].to_json)
     end
-    amounts = payroll_item.attributes.slice(
-      "gross_pay", "net_pay", "withholding_tax", "withholding_tax_override", "withholding_tax_adjustment",
-      "social_security_tax", "medicare_tax", "additional_withholding",
-      "ytd_net", "ytd_withholding_tax", "ytd_social_security_tax", "ytd_medicare_tax"
-    )
-    Digest::SHA256.hexdigest([
-      pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
-      self.class.employee_payment_line(payroll_item), amounts, earnings, components
-    ].to_json)
   end
 
   def self.employee_payment_line(item)
@@ -118,17 +118,54 @@ class PayStubGenerator
 
   private
 
+  def employee_payroll_current_facts
+    earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
+      .map { |line| line.except(:ytd) }
+    components = PayrollStatementYtdBreakdown::KINDS.map do |kind|
+      statement_ytd_breakdown.current_rows(kind).map { |row| [ row.label, row.current, row.semantic ] }
+    end
+    amounts = payroll_item.attributes.slice(
+      "gross_pay", "net_pay", "withholding_tax", "withholding_tax_override", "withholding_tax_adjustment",
+      "social_security_tax", "medicare_tax", "additional_withholding"
+    )
+    [
+      pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
+      self.class.employee_payment_line(payroll_item), amounts, earnings, components
+    ]
+  end
+
+  def printed_ytd_facts
+    fact = ->(amount) { amount&.to_d&.round(2)&.to_s("F") }
+    rows = ->(list) { list.map { |row| [ row.label, fact.call(row.ytd) ] } }
+    {
+      earnings: printed_earning_ytds.map { |ytd| fact.call(ytd) },
+      taxes: tax_lines.map { |label, _amount, ytd| [ label, fact.call(ytd) ] },
+      deductions: rows.call(statement_ytd_breakdown.deductions),
+      other_pay: rows.call(statement_ytd_breakdown.other_pay),
+      employer_contributions: rows.call(statement_ytd_breakdown.employer_contributions),
+      gross: fact.call(pay_ytd_total),
+      net: fact.call(statement_ytd_totals[:net])
+    }
+  end
+
+  # The earnings YTD column as statement_earnings prints it, without resolving
+  # the display labels, which the YTD amounts never depend on.
+  def printed_earning_ytds
+    rows = itemized_earnings_rows
+    return rows.map(&:ytd) if rows
+
+    unitemized_earning_lines(source_labels: ->(_label) { }).map { |line| line[:ytd] }
+  end
+
   def render_header(pdf)
     pdf.font_size(16) do
       pdf.text company.name, style: :bold
     end
 
-    if company.address_line1.present?
+    header_lines = [ *company.full_address.lines(chomp: true), company.phone ].compact_blank
+    if header_lines.any?
       pdf.font_size(9) do
-        pdf.text company.address_line1
-        pdf.text company.address_line2 if company.address_line2.present?
-        pdf.text "#{company.city}, #{company.state} #{company.zip}"
-        pdf.text company.phone if company.phone.present?
+        header_lines.each { |line| pdf.text line }
       end
     end
 
@@ -495,7 +532,9 @@ class PayStubGenerator
     taxes = tax_lines
     taxes.first(3).each { |label, amount, ytd| deductions_data << [ label, format_currency(amount), format_currency(ytd) ] }
 
-    if payroll_item.withholding_tax_override.present?
+    if taxes.empty?
+      # A contractor statement prints no tax rows or notes.
+    elsif payroll_item.withholding_tax_override.present?
       deductions_data << [
         "  (Final FIT Override Applied)",
         "",
@@ -547,13 +586,17 @@ class PayStubGenerator
 
   # Employee taxes as printed: income tax, Social Security and Medicare always,
   # then W-4 4c additional withholding when it has a current or YTD amount.
+  # A contractor paycheck has no employee taxes, on paper or in the employee
+  # app. The paycheck's saved type decides, not the worker's current one.
   def tax_lines
+    return [] if payroll_item.contractor?
+
     lines = [
-      [ "Federal/Guam Income Tax", payroll_item.withholding_tax, payroll_item.ytd_withholding_tax ],
-      [ "Social Security (6.2%)", payroll_item.social_security_tax, payroll_item.ytd_social_security_tax ],
-      [ "Medicare (1.45%)", payroll_item.medicare_tax, payroll_item.ytd_medicare_tax ]
+      [ "Federal/Guam Income Tax", payroll_item.withholding_tax, statement_ytd_totals[:withholding_tax] ],
+      [ "Social Security (6.2%)", payroll_item.social_security_tax, statement_ytd_totals[:social_security_tax] ],
+      [ "Medicare (1.45%)", payroll_item.medicare_tax, statement_ytd_totals[:medicare_tax] ]
     ]
-    ytd_addl = employee_ytd_additional_withholding
+    ytd_addl = statement_ytd_totals[:additional_withholding]
     if payroll_item.additional_withholding.to_d.nonzero? || ytd_addl.nonzero?
       lines << [ "Additional Withholding (W-4 4c)", payroll_item.additional_withholding, ytd_addl ]
     end
@@ -657,15 +700,17 @@ class PayStubGenerator
     ytd_data = [
       [ "Gross Earnings", format_currency(pay_ytd_total) ],
       [ "Non-Taxable Pay", format_currency(statement_ytd_breakdown.other_pay.sum(0.to_d) { |row| row.ytd.to_d }) ],
-      [ "Federal/Guam Tax", format_currency(payroll_item.ytd_withholding_tax) ],
-      [ "Social Security", format_currency(payroll_item.ytd_social_security_tax) ],
-      [ "Medicare", format_currency(payroll_item.ytd_medicare_tax) ],
+      [ "Federal/Guam Tax", format_currency(statement_ytd_totals[:withholding_tax]) ],
+      [ "Social Security", format_currency(statement_ytd_totals[:social_security_tax]) ],
+      [ "Medicare", format_currency(statement_ytd_totals[:medicare_tax]) ],
       [ "Deductions", format_currency(statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.ytd.to_d }) ],
-      [ "Net Pay", format_currency(payroll_item.ytd_net) ]
+      [ "Net Pay", format_currency(statement_ytd_totals[:net]) ]
     ]
 
-    if employee_ytd_additional_withholding.nonzero?
-      ytd_data.insert(3, [ "Additional Withholding", format_currency(employee_ytd_additional_withholding) ])
+    if payroll_item.contractor?
+      ytd_data.reject! { |label, _amount| label.in?([ "Federal/Guam Tax", "Social Security", "Medicare" ]) }
+    elsif statement_ytd_totals[:additional_withholding].nonzero?
+      ytd_data.insert(3, [ "Additional Withholding", format_currency(statement_ytd_totals[:additional_withholding]) ])
     end
 
     pdf.make_table(ytd_data, width: 250) do
@@ -682,24 +727,31 @@ class PayStubGenerator
   end
 
   def pay_ytd_total
-    @pay_ytd_total ||= begin
-      totals = employee.ytd_totals_before(
-        year: pay_period.pay_date.year,
-        pay_date: pay_period.pay_date,
-        pay_period_id: pay_period.id,
-        for_reporting: true
-      )
-      gross = totals.fetch(:gross_pay).to_d + payroll_item.gross_pay.to_d
-      earnings_ytd_breakdown.pay_ytd_total(gross)
+    @pay_ytd_total ||= earnings_ytd_breakdown.pay_ytd_total(statement_ytd_totals[:gross])
+  end
+
+  # Every YTD total the statement prints: the dated opening balance plus the
+  # same earlier and current paychecks the YTD rows add up, so the totals and
+  # rows always agree.
+  def statement_ytd_totals
+    @statement_ytd_totals ||= begin
+      opening = ytd_sources.historical_balance&.ytd_aggregate_totals || {}
+      STATEMENT_YTD_FIELDS.transform_values do |field|
+        (opening.fetch(field, 0).to_d + ytd_source_items.sum(0.to_d) { |item| item.public_send(field).to_d }).round(2)
+      end
     end
   end
 
+  def ytd_sources
+    @ytd_sources ||= PayrollStatementYtdSources.new(payroll_item)
+  end
+
   def earnings_ytd_breakdown
-    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item)
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item, sources: ytd_sources)
   end
 
   def source_earning_labels
-    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: earnings_ytd_breakdown.source_items)
+    @source_earning_labels ||= PayrollSourceEarningLabel.new(payroll_item, source_items: ytd_source_items)
   end
 
   def payroll_field_entries_for(*treatments)
@@ -711,8 +763,8 @@ class PayStubGenerator
   end
 
   def ytd_total_deductions
-    payroll_item.ytd_withholding_tax.to_d + payroll_item.ytd_social_security_tax.to_d + payroll_item.ytd_medicare_tax.to_d +
-      employee_ytd_additional_withholding + statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.ytd.to_d }
+    statement_ytd_totals.values_at(:withholding_tax, :social_security_tax, :medicare_tax, :additional_withholding).sum +
+      statement_ytd_breakdown.deductions.sum(0.to_d) { |row| row.ytd.to_d }
   end
 
   def current_total_deductions
@@ -721,7 +773,7 @@ class PayStubGenerator
   end
 
   def statement_ytd_breakdown
-    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item)
+    @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item, sources: ytd_sources)
   end
 
   def pay_stub_deduction_label(row)
@@ -735,21 +787,9 @@ class PayStubGenerator
     end
   end
 
+  # The same earlier and current paychecks as the statement's YTD rows.
   def ytd_source_items
-    @ytd_source_items ||= begin
-      pay_date = pay_period.pay_date
-      prior_periods = PayPeriod.reportable_for_company(company).where(
-        pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
-        .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)",
-          pay_date: pay_date, period_id: pay_period.id)
-      items = employee.payroll_items.financially_reportable.where(company_id: company.id, pay_period_id: prior_periods.select(:id))
-        .includes({ pay_period: :company }, :payroll_item_earnings, { payroll_item_field_entries: :payroll_field_definition },
-                  payroll_item_deductions: :deduction_type).to_a
-      # A draft/current check is absent from the prior committed scope. Include
-      # its components once; financially reversed payroll contributes no YTD money.
-      items << payroll_item if payroll_item.payroll_included? && pay_period.correction_status.in?([ nil, "correction" ])
-      items
-    end
+    ytd_sources.items
   end
 
   def ytd_payroll_field_totals
@@ -767,30 +807,8 @@ class PayStubGenerator
     end
   end
 
-  def employee_ytd_totals
-    @employee_ytd_totals ||= begin
-      year = payroll_item.pay_period.pay_date&.year || Date.current.year
-      payroll_item.employee.ytd_totals_before(
-        year: year,
-        pay_date: payroll_item.pay_period.pay_date,
-        pay_period_id: payroll_item.pay_period_id,
-        for_reporting: true
-      )
-    end
-  end
-
-  def employee_ytd_additional_withholding
-    current = if payroll_item.payroll_included? && pay_period.correction_status.in?([ nil, "correction" ])
-      payroll_item.additional_withholding.to_d
-    else
-      0.to_d
-    end
-    employee_ytd_totals[:additional_withholding].to_d + current
-  end
-
   def format_currency(amount)
-    return "$0.00" if amount.nil?
-    "$#{sprintf('%.2f', amount.to_f).reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse}"
+    MoneyText.currency(amount)
   end
 
   def format_hours(hours)

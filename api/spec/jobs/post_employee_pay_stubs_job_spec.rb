@@ -231,6 +231,118 @@ RSpec.describe PostEmployeePayStubsJob do
     end
   end
 
+  describe "printed YTD" do
+    def posted_text(document)
+      text = nil
+      expect(storage).to have_received(:upload).with(document.storage_key, satisfy { |bytes|
+        text = PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n").gsub(/\s+/, " ")
+      }, content_type: "application/pdf")
+      text
+    end
+
+    it "revises a posted stub when an earlier check's change moves a YTD amount it prints, and only then" do
+      earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 7, 20),
+        start_date: Date.new(2026, 7, 18), end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 6))
+      earlier = create(:payroll_item, pay_period: earlier_period, employee: employee, gross_pay: 1_000, net_pay: 800,
+        payment_delivery_method: "direct_deposit")
+      item
+      run_at(cutoff)
+      original = documents.sole
+
+      earlier.update_columns(gross_pay: 1_100, net_pay: 880)
+      item.update_columns(updated_at: cutoff + 1.minute)
+      run_at(cutoff + 5.minutes)
+
+      expect(documents.reload.pluck(:revision)).to eq([ 1, 2 ])
+      expect(original.reload).to be_replaced
+      expect(posted_text(documents.last)).to include("Gross Earnings $2,300.00", "Net Pay $1,840.00")
+      item.update_columns(updated_at: cutoff + 6.minutes)
+      expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocument, :count)
+    end
+
+    it "revises a later stub once when an earlier check moves one cent from bonus to salary" do
+      earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 7, 20),
+        start_date: Date.new(2026, 7, 18), end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 6))
+      earlier = create(:payroll_item, :salary, pay_period: earlier_period, employee: employee, bonus: 150,
+        gross_pay: 1_200, net_pay: 960, payment_delivery_method: "direct_deposit")
+      item
+      run_at(cutoff)
+      expect(posted_text(documents.sole)).to include("$1,050.00", "$150.00")
+
+      earlier.update_columns(bonus: 150.01)
+      item.update_columns(updated_at: cutoff + 1.minute)
+      expect { run_at(cutoff + 5.minutes) }.to change { documents.count }.by(1)
+      expect(posted_text(documents.last)).to include("$1,049.99", "$150.01", "Gross Earnings $2,400.00")
+
+      item.update_columns(updated_at: cutoff + 6.minutes)
+      expect { run_at(cutoff + 10.minutes) }.not_to change { documents.count }
+    end
+
+    it "revises a stub posted under an earlier fingerprint format once, then keeps it current" do
+      item
+      run_at(cutoff)
+      EmployeeDocument.where(id: documents.sole.id).update_all(payroll_facts_sha256: Digest::SHA256.hexdigest("earlier format"))
+      item.update_columns(updated_at: cutoff + 1.minute)
+
+      expect { run_at(cutoff + 5.minutes) }.to change { documents.count }.by(1)
+      expect(documents.last.payroll_facts_sha256).to eq(PayStubGenerator.new(item.reload, employee_copy: true).employee_payroll_facts_sha256)
+      item.update_columns(updated_at: cutoff + 6.minutes)
+      expect { run_at(cutoff + 10.minutes) }.not_to change { documents.count }
+    end
+
+    it "never downloads a stored PDF while posting or rechecking" do
+      allow(storage).to receive(:download)
+      earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 7, 20),
+        start_date: Date.new(2026, 7, 18), end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 6))
+      earlier = create(:payroll_item, pay_period: earlier_period, employee: employee, gross_pay: 1_000, net_pay: 800,
+        payment_delivery_method: "direct_deposit")
+      item
+      run_at(cutoff)
+      item.update_columns(updated_at: cutoff + 1.minute)
+      run_at(cutoff + 5.minutes)
+      earlier.update_columns(gross_pay: 1_100, net_pay: 880)
+      item.update_columns(updated_at: cutoff + 6.minutes)
+      run_at(cutoff + 10.minutes)
+      EmployeeDocument.where(id: documents.last.id).update_all(payroll_facts_sha256: Digest::SHA256.hexdigest("earlier format"))
+      item.update_columns(updated_at: cutoff + 11.minutes)
+      run_at(cutoff + 15.minutes)
+
+      expect(documents.reload.pluck(:revision)).to eq([ 1, 2, 3 ])
+      expect(storage).not_to have_received(:download)
+    end
+  end
+
+  def sql_statements
+    count = 0
+    counter = lambda do |*, payload|
+      next if payload[:cached] || payload[:name].in?(%w[SCHEMA TRANSACTION])
+      next if payload[:sql].match?(/\A\s*(BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)/i)
+
+      count += 1
+    end
+    ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { yield }
+    count
+  end
+
+  it "rechecks an unchanged stub in no more queries than before it checked printed YTD" do
+    (1..6).each do |index|
+      earlier_period = create(:pay_period, :committed, company: company, committed_at: Time.utc(2026, 1, 1),
+        start_date: Date.new(2026, 1, 1) + (14 * index), end_date: Date.new(2026, 1, 13) + (14 * index),
+        pay_date: Date.new(2026, 1, 16) + (14 * index))
+      create(:payroll_item, pay_period: earlier_period, employee: employee, gross_pay: 1_200, net_pay: 960,
+        payment_delivery_method: "direct_deposit")
+    end
+    item
+    run_at(cutoff)
+    item.update_columns(updated_at: cutoff + 1.minute)
+
+    # Measured on the earlier fingerprint, which read only this check: 11.
+    due = item.reload
+    statements = travel_to(cutoff + 5.minutes) { sql_statements { EmployeeDocuments::PostPayStub.new(due).call } }
+    expect(documents.sole.payroll_facts_checked_at).to eq(cutoff + 5.minutes)
+    expect(statements).to be <= 11
+  end
+
   it "leaves a reversed item withdrawn when there is no successor" do
     item
     run_at(cutoff)

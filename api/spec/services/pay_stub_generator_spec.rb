@@ -314,7 +314,7 @@ RSpec.describe PayStubGenerator do
       custom_earnings: [], service_charge_wages: -25, gross_pay: 975)
 
     rows = earnings_table(payroll_item)
-    expect(rows).to include([ "Service Charges", "—", "—", "$-25.00", "$-25.00" ])
+    expect(rows).to include([ "Service Charges", "—", "—", "-$25.00", "-$25.00" ])
     expect(rows.map { |row| row[3].delete("$,").to_d }.sum).to eq(payroll_item.gross_pay)
   end
 
@@ -499,7 +499,7 @@ RSpec.describe PayStubGenerator do
         correction = create(:payroll_item, company: company, employee: worker, pay_period: period, employment_type: "hourly",
           pay_rate: 14.37, hours_worked: 0, gross_pay: -143.70, net_pay: 0, correction_for_payroll_item_id: original.id)
 
-        expect(statement_rows(correction)).to eq([ [ "Taxable earnings adjustment", "—", "—", "$-143.70", "—" ] ])
+        expect(statement_rows(correction)).to eq([ [ "Taxable earnings adjustment", "—", "—", "-$143.70", "—" ] ])
       end
     end
 
@@ -685,7 +685,7 @@ RSpec.describe PayStubGenerator do
         expect(statement_rows(item)).to eq([
           [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "—" ],
           [ "Bonus", "—", "—", "$25.00", "—" ],
-          [ "Service Charges", "—", "—", "$-25.00", "—" ]
+          [ "Service Charges", "—", "—", "-$25.00", "—" ]
         ])
       end
 
@@ -859,7 +859,7 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$25.00")
   end
 
-  it "uses stored tax snapshots and source-backed retirement in total deductions YTD" do
+  it "uses live tax YTD, not stale saved snapshots, and source-backed retirement in total deductions YTD" do
     prior_period = create(:pay_period, :committed, company: company, pay_date: Date.new(2026, 3, 15))
     create(:payroll_item,
       pay_period: prior_period,
@@ -881,7 +881,8 @@ RSpec.describe PayStubGenerator do
       custom_deductions: []
     )
 
-    expect(described_class.new(payroll_item).send(:ytd_total_deductions)).to eq(2033.0)
+    # Three earlier taxes plus the earlier 401(k) and Roth rows, each 999.
+    expect(described_class.new(payroll_item).send(:ytd_total_deductions)).to eq(4995.0)
   end
 
   it "keeps field histories separate while including all saved deductions in the YTD total" do

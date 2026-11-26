@@ -511,7 +511,18 @@ class CheckGenerator
   # Data row builders
   # -----------------------------------------------------------------------
   def pay_rows
-    rows = earnings_ytd_breakdown.call.map do |earning|
+    rows = correction_pay_rows || itemized_pay_rows
+
+    rows << [
+      { content: "TOTAL", font_style: :bold }, "", "",
+      { content: fn(payroll_item.gross_pay), font_style: :bold },
+      { content: fn(pay_ytd_total), font_style: :bold }
+    ]
+    rows
+  end
+
+  def itemized_pay_rows
+    earnings_ytd_breakdown.call.map do |earning|
       [
         source_earning_labels.call(earning.source_label, compact: true) || stub_label(earning.label),
         earning.hours.present? ? fh(earning.hours) : "-",
@@ -520,13 +531,14 @@ class CheckGenerator
         fn(earning.ytd)
       ]
     end
+  end
 
-    rows << [
-      { content: "TOTAL", font_style: :bold }, "", "",
-      { content: fn(payroll_item.gross_pay), font_style: :bold },
-      { content: fn(pay_ytd_total), font_style: :bold }
-    ]
-    rows
+  # A correction saved without earning rows prints its own signed lines, as the
+  # earnings statement does, rather than rows rebuilt from today's setup.
+  def correction_pay_rows
+    SignedCorrectionEarnings.call(payroll_item)&.map do |line|
+      [ stub_label(line.label), line.hours.nil? ? "-" : fh(line.hours), line.rate.nil? ? "-" : fn(line.rate), fn(line.amount), "-" ]
+    end
   end
 
   def earnings_ytd_breakdown
@@ -547,10 +559,11 @@ class CheckGenerator
 
     # Build FIT label with W-4 context
     fit_parts = [ "Federal Income Tax" ]
+    w4 = paycheck_w4
     w4_notes = []
-    w4_notes << "Step2" if employee.w4_step2_multiple_jobs?
-    w4_notes << "4a" if employee.w4_step4a_other_income.to_f > 0
-    w4_notes << "4b" if employee.w4_step4b_deductions.to_f > 0
+    w4_notes << "Step2" if ActiveModel::Type::Boolean.new.cast(w4[:step2_multiple_jobs])
+    w4_notes << "4a" if w4[:step4a_other_income].to_d.positive?
+    w4_notes << "4b" if w4[:step4b_deductions].to_d.positive?
     if payroll_item.withholding_tax_override.present?
       fit_parts << "*Final Override"
     elsif payroll_item.withholding_tax_adjustment.to_f.nonzero?
@@ -572,6 +585,18 @@ class CheckGenerator
       { content: fn(ytd[:taxes]), font_style: :bold }
     ]
     rows
+  end
+
+  # The W-4 this paycheck was calculated with. Items saved before the
+  # calculation kept its W-4 fall back to the employee's current form.
+  def paycheck_w4
+    saved = payroll_item.tax_rule_snapshot.to_h["w4"]
+    if saved.is_a?(Hash) && %w[step2_multiple_jobs step4a_other_income step4b_deductions].all? { |key| saved.key?(key) }
+      return saved.slice("step2_multiple_jobs", "step4a_other_income", "step4b_deductions").symbolize_keys
+    end
+
+    { step2_multiple_jobs: employee.w4_step2_multiple_jobs?, step4a_other_income: employee.w4_step4a_other_income,
+      step4b_deductions: employee.w4_step4b_deductions }
   end
 
   def other_pay_rows
@@ -785,12 +810,11 @@ class CheckGenerator
   # Formatting helpers
   # -----------------------------------------------------------------------
   def fn(v)  # number without $
-    return "0.00" if v.nil?
-    ActiveSupport::NumberHelper.number_to_delimited(format("%.2f", v.to_f))
+    MoneyText.amount(v)
   end
 
   def fd(v)  # number with $
-    "$#{fn(v)}"
+    MoneyText.currency(v)
   end
 
   def fmt_nodollar(v)

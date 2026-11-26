@@ -153,7 +153,7 @@ RSpec.describe ReplaceCheckService do
       }, content_type: "application/pdf")
     end
 
-    it "keeps a later stub at revision one after correcting an earlier check and printing the later check" do
+    it "revises a later stub once when correcting an earlier check moves its YTD, and not for printing it" do
       pay_period.update_columns(start_date: Date.new(2024, 7, 1), end_date: Date.new(2024, 7, 14), pay_date: Date.new(2024, 7, 20))
       later_period = create(:pay_period, :committed, company: company, start_date: Date.new(2024, 8, 1),
         end_date: Date.new(2024, 8, 14), pay_date: Date.new(2024, 8, 20))
@@ -167,12 +167,49 @@ RSpec.describe ReplaceCheckService do
       old_ytd = PayStubGenerator.new(later).statement.fetch(:ytd).fetch(:gross)
       described_class.replace!(payroll_item: original_item, corrected_inputs: { hours_worked: 80 },
         reason: "Correct the earlier July check", actor: actor)
-      expect(PayStubGenerator.new(later.reload).statement.fetch(:ytd).fetch(:gross)).not_to eq(old_ytd)
+      new_ytd = PayStubGenerator.new(later.reload).statement.fetch(:ytd).fetch(:gross)
+      expect(new_ytd).to eq(old_ytd + 300)
+      expect(later.ytd_gross).to eq(new_ytd)
+
+      PostEmployeePayStubsJob.perform_now
+      revised = EmployeeDocument.posted.find_by!(payroll_item: later)
+      expect([ original.reload.status, revised.revision ]).to eq([ "replaced", 2 ])
 
       later.update!(check_printed_at: Time.current)
       PostEmployeePayStubsJob.perform_now
-      expect(EmployeeDocument.where(payroll_item: later).pluck(:id, :revision)).to eq([ [ original.id, 1 ] ])
-      expect(original.reload.payroll_facts_checked_at).to be >= later.updated_at
+      expect(EmployeeDocument.where(payroll_item: later).order(:revision).pluck(:id)).to eq([ original.id, revised.id ])
+      expect(revised.reload.payroll_facts_checked_at).to be >= later.updated_at
+    end
+
+    it "revises a later stub exactly once when an earlier check only moves pay between earnings rows" do
+      pay_period.update_columns(start_date: Date.new(2024, 7, 1), end_date: Date.new(2024, 7, 14), pay_date: Date.new(2024, 7, 20))
+      described_class.replace!(payroll_item: original_item, corrected_inputs: { hours_worked: 50, bonus: 150 },
+        reason: "Enter the July bonus", actor: actor)
+      later_period = create(:pay_period, :committed, company: company, start_date: Date.new(2024, 8, 1),
+        end_date: Date.new(2024, 8, 14), pay_date: Date.new(2024, 8, 20))
+      later = create(:payroll_item, :with_check, company: company, employee: employee, pay_period: later_period, check_number: "5102")
+      # As its commit saves them.
+      PayrollYtdSnapshotRefresh.refresh!(PayrollItem.where(id: later.id))
+      allow(R2StorageService).to receive(:new).and_return(instance_double(R2StorageService, upload: true))
+      features = instance_double(CompanyFeatures, employee_portal_feature?: true, employee_stubs_enabled_since: nil)
+      allow(CompanyFeatures).to receive(:for).with(company).and_return(features)
+      PostEmployeePayStubsJob.perform_now
+      original = EmployeeDocument.posted.find_by!(payroll_item: later)
+      earned = ->(item) { PayStubGenerator.new(item.reload).statement.fetch(:earnings).to_h { |line| [ line[:kind], line[:ytd] ] } }
+      snapshot = -> { later.reload.attributes.slice("ytd_gross", "ytd_net", "ytd_withholding_tax", "updated_at") }
+      before_rows = earned.call(later)
+      before_snapshot = snapshot.call
+
+      described_class.replace!(payroll_item: original_item, corrected_inputs: { hours_worked: 60, bonus: 0 },
+        reason: "The July bonus was regular pay", actor: actor)
+
+      expect(original_item.reload.gross_pay).to eq(900)
+      expect(snapshot.call).to eq(before_snapshot)
+      expect(before_rows["bonus"]).to eq(150)
+      expect(earned.call(later)).to eq("regular" => before_rows["regular"] + 150)
+      expect { PostEmployeePayStubsJob.perform_now }.to change { EmployeeDocument.where(payroll_item: later).count }.by(1)
+      expect(original.reload).to be_replaced
+      expect { PostEmployeePayStubsJob.perform_now }.not_to change(EmployeeDocument, :count)
     end
 
     it "rewrites the item with corrected values, keeps the same check #, and logs a replaced event" do

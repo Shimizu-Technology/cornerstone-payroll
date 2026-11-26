@@ -52,6 +52,7 @@ module QuickbooksHistory
           apply_acknowledgement: acknowledgement
         )
         record_adjustment_activation_events!(plan, timestamp)
+        refresh_live_ytd_snapshots!(rows)
         record_audit!(plan)
         bridge
       end
@@ -79,6 +80,16 @@ module QuickbooksHistory
           through_pay_date: plan.summary.fetch("through_pay_date")
         }
       )
+    end
+
+    # Committed Cornerstone paychecks already carry the opening balance in
+    # their YTD; a revised balance changes it.
+    def refresh_live_ytd_snapshots!(rows)
+      rows.group_by { |row| row.fetch("tax_year").to_i }.each do |year, balances|
+        periods = PayPeriod.reportable_committed.where(company_id: bridge.company_id).for_year(year)
+        PayrollYtdSnapshotRefresh.refresh!(PayrollItem.financially_reportable
+          .where(employee_id: balances.map { |row| row.fetch("employee_id") }, pay_period_id: periods.select(:id)))
+      end
     end
 
     def record_adjustment_activation_events!(plan, timestamp)
