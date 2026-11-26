@@ -308,17 +308,61 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
   describe "the attestation path" do
     before { open_window! }
 
-    it "is taken only by an all or payroll_web process with the employee service's URL set" do
+    it "is never taken by the employee service, an unknown role, or a process without the URL" do
+      allow(enforcement).to receive(:employee_service_attested?).and_call_original
       env = ENV.to_h
-      expect(enforcement.remote_attestation_allowed?(env.except("APP_PROCESS_ROLE"))).to be(true)
-      expect(enforcement.remote_attestation_allowed?(env.merge("APP_PROCESS_ROLE" => ProcessRole::PAYROLL_WEB))).to be(true)
-      expect(enforcement.remote_attestation_allowed?(env.merge("APP_PROCESS_ROLE" => ProcessRole::EMPLOYEE_WEB))).to be(false)
-      expect(enforcement.remote_attestation_allowed?(env.merge("APP_PROCESS_ROLE" => "worker"))).to be(false)
-      expect(enforcement.remote_attestation_allowed?(env.merge("EMPLOYEE_API_URL" => nil))).to be(false)
-
-      ENV["EMPLOYEE_API_URL"] = nil
-      expect(app_open?).to be(false)
+      [ env.merge("APP_PROCESS_ROLE" => ProcessRole::EMPLOYEE_WEB), env.merge("APP_PROCESS_ROLE" => "worker"),
+        env.merge("EMPLOYEE_API_URL" => nil) ].each do |refused|
+        expect(enforcement.demo_reader_allowed?(demo, env: refused)).to be(false), refused.slice("APP_PROCESS_ROLE").inspect
+      end
+      expect(enforcement).not_to have_received(:employee_service_attested?)
       expect(a_request(:get, "#{base}/health/dependencies")).not_to have_been_made
+
+      [ env.except("APP_PROCESS_ROLE"), env.merge("APP_PROCESS_ROLE" => ProcessRole::PAYROLL_WEB) ].each do |allowed|
+        enforcement.reset_cache!
+        expect(enforcement.demo_reader_allowed?(demo, env: allowed)).to be(true)
+      end
+      expect(enforcement).to have_received(:employee_service_attested?).twice
+    end
+
+    it "never retries the ask, and gives up at the deadline however slowly the answer comes" do
+      allow(Net::HTTP).to receive(:start).and_call_original
+      expect(app_open?).to be(true)
+      expect(Net::HTTP).to have_received(:start).with(anything, anything, hash_including(max_retries: 0))
+
+      enforcement.reset_cache!
+      stub_const("#{enforcement}::ATTESTATION_DEADLINE_SECONDS", 0.3)
+      stub_request(:get, "#{base}/health/dependencies").to_return { sleep 2; { status: 200, body: "{}" } }
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(app_open?).to be(false)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.5
+    end
+
+    it "waits only briefly for another thread's refresh, then reads the app as off" do
+      enforcement::ATTESTATION_LOCK.lock
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(Thread.new { enforcement.employee_service_attested? }.value).to be(false)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started)
+        .to be_between(enforcement::ATTESTATION_WAIT_SECONDS, enforcement::ATTESTATION_WAIT_SECONDS + 1)
+      expect(a_request(:get, "#{base}/health/dependencies")).not_to have_been_made
+    ensure
+      enforcement::ATTESTATION_LOCK.unlock if enforcement::ATTESTATION_LOCK.owned?
+    end
+
+    it "reads only the cached answer while an invitation holds the issuance lock" do
+      expect(EmployeeLinks).to receive(:lock_for_issuance!).and_wrap_original do |original, *args|
+        original.call(*args)
+        # The answer expires after the lock is taken: no ask from inside it.
+        later!(enforcement::ATTESTATION_CACHE_SECONDS + 1)
+      end
+      expect { invite!(employee, actor: staff, delivery: "code") }.to raise_error(EmployeeLinks::Error, /isn't turned on/)
+      expect(a_request(:get, "#{base}/health/dependencies")).to have_been_made.once
+      expect(EmployeeAccountLink.where(employee_id: employee.id)).to be_empty
+
+      # Once the transaction ends, the next read asks again.
+      expect(enforcement.cached_attestation_only?).to be(false)
+      expect(app_open?).to be(true)
+      expect(a_request(:get, "#{base}/health/dependencies")).to have_been_made.twice
     end
 
     it "makes one request when several threads find the cache empty" do

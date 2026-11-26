@@ -27,6 +27,13 @@ module EmployeeAppSwitch
     # invitation or a job may be waiting on it.
     ATTESTATION_OPEN_TIMEOUT = 1
     ATTESTATION_READ_TIMEOUT = 2
+    # The whole ask ends by then, however slowly a body trickles in.
+    ATTESTATION_DEADLINE_SECONDS = 3
+    # How long another caller waits for a refresh already under way before
+    # treating the demo's app as off.
+    ATTESTATION_WAIT_SECONDS = 0.5
+    ATTESTATION_WAIT_STEP = 0.05
+    CACHE_ONLY_KEY = :employee_app_switch_attestation_cache_only
     # Processes that may take the employee service's answer: never the
     # employee service itself.
     ATTESTATION_ROLES = [ ProcessRole::ALL, ProcessRole::PAYROLL_WEB ].freeze
@@ -35,7 +42,7 @@ module EmployeeAppSwitch
     STATE_CACHE = Concurrent::AtomicReference.new
     ROLE_CACHE = Concurrent::AtomicReference.new
     ATTESTATION_CACHE = Concurrent::AtomicReference.new
-    # One refresh at a time per process; the others wait for its answer.
+    # One refresh at a time per process; the others wait briefly for it.
     ATTESTATION_LOCK = Mutex.new
 
     module_function
@@ -204,34 +211,66 @@ module EmployeeAppSwitch
       nil
     end
 
+    # Until the current transaction ends, this thread reads only the cached
+    # answer and never asks the employee service: an invitation holding the
+    # company's issuance lock must not wait on the network while DemoStop
+    # waits on that lock. An expired answer then reads as off.
+    def cached_attestation_only!
+      ActiveSupport::IsolatedExecutionState[CACHE_ONLY_KEY] = ActiveRecord::Base.current_transaction
+    end
+
+    def cached_attestation_only?
+      ActiveSupport::IsolatedExecutionState[CACHE_ONLY_KEY]&.open? == true
+    end
+
     # The employee service's live signed answer (checked for this nonce,
     # process and age), cached per process. Anything else (no secret or URL,
-    # unsigned, stale, unreachable, a guard not in raise mode) is false. A
-    # stale answer is never reused while another thread refreshes it.
+    # unsigned, stale, unreachable, a guard not in raise mode) is false, and
+    # an expired answer is never served. One thread refreshes; another waits
+    # up to ATTESTATION_WAIT_SECONDS for it, then reads the app as off.
     def employee_service_attested?(env: ENV)
       cached = fresh_attestation
       return cached.first if cached
+      return false if cached_attestation_only?
 
-      ATTESTATION_LOCK.synchronize do
+      give_up_at = monotonic_now + ATTESTATION_WAIT_SECONDS
+      until ATTESTATION_LOCK.try_lock
+        return false if monotonic_now >= give_up_at
+
+        sleep(ATTESTATION_WAIT_STEP)
         cached = fresh_attestation
-        next cached.first if cached
+        return cached.first if cached
+      end
+      begin
+        cached = fresh_attestation
+        return cached.first if cached
 
         value = fetch_attestation(env)
         ttl = value ? ATTESTATION_CACHE_SECONDS : ATTESTATION_MISS_CACHE_SECONDS
-        ATTESTATION_CACHE.set([ value, Process.clock_gettime(Process::CLOCK_MONOTONIC) + ttl ].freeze)
+        ATTESTATION_CACHE.set([ value, monotonic_now + ttl ].freeze)
         value
+      ensure
+        ATTESTATION_LOCK.unlock
       end
     end
 
     def fresh_attestation
       cached = ATTESTATION_CACHE.get
-      cached if cached && Process.clock_gettime(Process::CLOCK_MONOTONIC) < cached.last
+      cached if cached && monotonic_now < cached.last
     end
 
+    def monotonic_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    # Only the network ask runs under the deadline; nothing here touches the
+    # database.
     def fetch_attestation(env)
-      ping = Readiness.ping_employee_service(env, open_timeout: ATTESTATION_OPEN_TIMEOUT, read_timeout: ATTESTATION_READ_TIMEOUT)
+      ping = Timeout.timeout(ATTESTATION_DEADLINE_SECONDS) do
+        Readiness.ping_employee_service(env, open_timeout: ATTESTATION_OPEN_TIMEOUT, read_timeout: ATTESTATION_READ_TIMEOUT)
+      end
       ping[:observation]&.rls_guard_raise? == true
-    rescue StandardError => error
+    rescue StandardError => error # Timeout::Error included
       Rails.logger.warn("[EmployeeAppSwitch::Enforcement] employee service attestation failed: #{error.class}")
       false
     end
