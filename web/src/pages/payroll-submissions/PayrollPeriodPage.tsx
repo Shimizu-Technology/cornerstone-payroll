@@ -142,7 +142,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
 
         <section aria-labelledby="revisions" className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="revisions" className="text-base font-semibold text-neutral-950">What the client sent</h2>
+            <h2 id="revisions" className="text-base font-semibold text-neutral-950">{audience === 'client' ? 'What you sent' : 'What the client sent'}</h2>
             {audience === 'client' && canSubmit && current && !editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}>Send an update or replace a file</Button>}
           </div>
           {period.submissions.length ? period.submissions.filter(revision => revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)

@@ -35,7 +35,7 @@ class Form1099Pub1220Generator
 
   def generate
     # The GuamTax e-file is an electronic filing; a demo never produces one.
-    raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
+    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
 
     found = problems
     raise InvalidFile, found if found.any?

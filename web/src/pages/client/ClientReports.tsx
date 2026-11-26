@@ -522,8 +522,8 @@ export function ClientReports() {
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Metric label="OT hours" value={(ytdSummary.company_totals.total_overtime_hours ?? 0).toFixed(2)} />
                   <Metric label="Health Insurance (payroll fields + historical)" value={formatCurrency(ytdSummary.company_totals.health_insurance_deductions ?? 0)} />
-                  <Metric label="Historical Loans (type unclassified)" value={formatCurrency(ytdSummary.company_totals.historical_loan_deductions_unclassified ?? 0)} />
-                  <Metric label="401(k) After Tax label in source pre-tax bucket" value={formatCurrency(ytdSummary.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)} />
+                  <Metric label="Loan repayments (imported)" value={formatCurrency(ytdSummary.company_totals.historical_loan_deductions_unclassified ?? 0)} />
+                  <Metric label="401(k) after-tax (imported as pre-tax)" value={formatCurrency(ytdSummary.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0)} />
                   <Metric label="Combined hours" value={finiteAmount(ytdSummary.company_totals.combined_hours).toFixed(2)} />
                 </div>
               )}
@@ -547,7 +547,7 @@ export function ClientReports() {
                       <MobileField label="Other deductions" value={formatCurrency(employee.custom_deductions_total ?? 0)} />
                       <MobileField label="Field deductions" value={formatCurrency(finiteAmount(employee.payroll_field_pre_tax_deductions_total) + finiteAmount(employee.payroll_field_post_tax_deductions_total))} />
                       <MobileField label="Health insurance" value={formatCurrency(employee.health_insurance_deductions ?? 0)} />
-                      <MobileField label="Historical loans" value={formatCurrency(employee.historical_loan_deductions_unclassified ?? 0)} />
+                      <MobileField label="Loan repayments (imported)" value={formatCurrency(employee.historical_loan_deductions_unclassified ?? 0)} />
                       <MobileField label="Employer contributions" value={formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)} />
                       <MobileField label="Total deductions" value={formatCurrency(employee.total_deductions ?? 0)} />
                       <MobileField label="FIT" value={formatCurrency(employee.withholding_tax)} />
@@ -569,7 +569,7 @@ export function ClientReports() {
                     <TableHead>Other ded.</TableHead>
                     <TableHead>Field ded.</TableHead>
                     <TableHead>Health insurance</TableHead>
-                    <TableHead>Historical loans</TableHead>
+                    <TableHead>Loan repayments (imported)</TableHead>
                     <TableHead>Employer contrib.</TableHead>
                     <TableHead>Total ded.</TableHead>
                     <TableHead>FIT</TableHead>

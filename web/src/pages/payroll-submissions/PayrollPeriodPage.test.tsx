@@ -53,6 +53,8 @@ afterEach(cleanup);
 it('shows the current revision and keeps the superseded one visible', async () => {
   renderAt('client');
   expect(await screen.findByRole('heading', { name: 'Payroll Nov 2 – 15, 2026' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'What you sent' })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'What the client sent' })).toBeNull();
   expect(screen.getByText(/Pay date Nov 20, 2026/)).toBeTruthy();
   const current = screen.getByRole('region', { name: 'Revision 2' });
   expect(within(current).getByText('Current')).toBeTruthy();

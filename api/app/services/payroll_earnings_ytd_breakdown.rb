@@ -6,7 +6,11 @@
 # only fall back to a semantic bucket when there is a single unambiguous
 # current row for that bucket.
 class PayrollEarningsYtdBreakdown
-  Row = Data.define(:label, :source_label, :category, :hours, :rate, :current, :ytd)
+  Row = Data.define(:label, :source_label, :category, :hours, :rate, :current, :ytd, :historical_only) do
+    def initialize(label:, source_label:, category:, hours:, rate:, current:, ytd:, historical_only: false)
+      super
+    end
+  end
   Component = Data.define(:label, :category, :hours, :rate, :amount)
 
   def initialize(payroll_item, sources: nil)
@@ -22,23 +26,26 @@ class PayrollEarningsYtdBreakdown
       {
         component: component,
         semantic: semantic_for(component.category, component.label),
-        ytd: 0.to_d
+        ytd: 0.to_d,
+        historical_only: false
       }
     end
 
     live_components.each { |component| add_to_target!(targets, component, semantic_fallback: false) }
-    historical_components.each { |component| add_to_target!(targets, component, semantic_fallback: true) }
+    historical_components.each { |component| add_to_target!(targets, component, semantic_fallback: true, historical: true) }
 
     targets.map do |target|
       component = target.fetch(:component)
+      historical_only = target.fetch(:historical_only, false)
       Row.new(
-        label: display_label(component),
+        label: display_label(component, historical_only: historical_only),
         source_label: component.label,
         category: component.category,
         hours: component.hours,
         rate: component.rate,
         current: component.amount.to_d.round(2),
-        ytd: target.fetch(:ytd).round(2)
+        ytd: target.fetch(:ytd).round(2),
+        historical_only: historical_only
       )
     end
   end
@@ -192,9 +199,9 @@ class PayrollEarningsYtdBreakdown
       item.taxable_payroll_adjustments_total.to_d
   end
 
-  def add_to_target!(targets, component, semantic_fallback:)
+  def add_to_target!(targets, component, semantic_fallback:, historical: false)
     target = target_for(targets, component, semantic_fallback: semantic_fallback)
-    target ||= append_ytd_only_target!(targets, component)
+    target ||= append_ytd_only_target!(targets, component, historical: historical)
     target[:ytd] += component.amount.to_d
   end
 
@@ -228,7 +235,7 @@ class PayrollEarningsYtdBreakdown
     nil
   end
 
-  def append_ytd_only_target!(targets, component)
+  def append_ytd_only_target!(targets, component, historical: false)
     ytd_component = Component.new(
       label: component.label,
       category: component.category,
@@ -239,7 +246,8 @@ class PayrollEarningsYtdBreakdown
     target = {
       component: ytd_component,
       semantic: semantic_for(component.category, component.label),
-      ytd: 0.to_d
+      ytd: 0.to_d,
+      historical_only: historical
     }
     targets << target
     target
@@ -267,7 +275,9 @@ class PayrollEarningsYtdBreakdown
       (component.category.blank? && semantic_for(component.category, component.label) == :non_taxable)
   end
 
-  def display_label(component)
+  def display_label(component, historical_only: false)
+    return "#{component.label.to_s.strip} (prior payroll)" if historical_only && component.label.to_s.strip.casecmp?("regular")
+
     case semantic_for(component.category, component.label)
     when :salary
       "Salary - #{employee.first_name&.first} #{employee.last_name}".strip

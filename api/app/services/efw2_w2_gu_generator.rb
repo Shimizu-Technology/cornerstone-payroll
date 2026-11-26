@@ -30,7 +30,7 @@ class Efw2W2GuGenerator
 
   def generate
     # The SSA/GuamTax wage file is an electronic filing; a demo never produces one.
-    raise ArgumentError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
+    raise ReportValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if @company.demo?
 
     validate_inputs!
     records = [ submitter_record, employer_record ]
