@@ -15,7 +15,7 @@ module PortalNotifications
       def configured?
         return true if capture?
 
-        from_email.present? && (StagingOutboundPolicy.staging? || ENV["RESEND_API_KEY"].present?)
+        from_email.present? && StagingMailTransport.available?
       end
 
       def from_email
