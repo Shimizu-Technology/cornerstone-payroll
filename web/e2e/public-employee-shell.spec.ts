@@ -405,7 +405,25 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
 
     test('amounts are masked by default and the choice is remembered on this device', async ({ page }) => {
       await signIn(page);
-      await mockApi(page);
+      const statement = {
+        id: 906,
+        pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20', run_purpose: 'regular' },
+        check_date: '2026-11-20',
+        gross_pay: '612.50',
+        net_pay: '534.18',
+        total_hours: '38.50',
+        payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-20', check_number_last4: null },
+        pdf_available: true,
+      };
+      await mockApi(page, {
+        context: (route) => json(route, { first_name: 'Maren', status: 'active', features: { stubs: true } }),
+      });
+      await page.route('**/api/v1/employee/statements**', (route) => {
+        if (route.request().url().includes('/statements/906')) {
+          return json(route, { ...statement, earnings: [], taxes: [], deductions: [], other_pay: [], ytd: { gross: '1000.00', net: '800.00' } });
+        }
+        return json(route, { statements: [statement], years: [2026], next_page: null });
+      });
       await page.goto(`/?${tenant}`);
 
       const showButton = page.getByRole('button', { name: 'Show amounts' });

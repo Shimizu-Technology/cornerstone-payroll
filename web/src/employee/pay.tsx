@@ -14,7 +14,7 @@ import { useBrand, useHideAmounts, useReadySession } from './contexts';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import {
-  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, pdfDownloadLabel, shortDate, taxLabel, weekdayDate,
+  comparisonLine, daysUntilLabel, formatHours, formatMoney, hoursLabel, longDate, paymentLine, paymentStatus, pdfDownloadLabel, shortDate, splitCurrencySegments, taxLabel, weekdayDate,
 } from './format';
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
@@ -114,11 +114,23 @@ function PaidLine({ statement }: { statement: StatementSummary }): ReactElement 
   );
 }
 
+function MaskedText({ text }: { text: string }): ReactElement {
+  const segments = splitCurrencySegments(text);
+  if (segments.length === 1 && !segments[0].isMoney) return <>{text}</>;
+  return (
+    <>
+      {segments.map((segment, index) => (
+        segment.isMoney ? <Amount key={index}>{segment.text}</Amount> : <span key={index}>{segment.text}</span>
+      ))}
+    </>
+  );
+}
+
 function Comparison({ statement, statements }: { statement: StatementSummary; statements: StatementSummary[] }): ReactElement | null {
   const { hidden } = useHideAmounts();
-  const line = comparisonLine(statement, statements);
-  // It names an amount, so it hides with the amounts.
-  if (!line || hidden) return null;
+  // While amounts are masked, keep the hours comparison visible and hide only the money part.
+  const line = comparisonLine(statement, statements, { hideMoney: hidden });
+  if (!line) return null;
   return <p className="emp-compare">{line}</p>;
 }
 
@@ -286,7 +298,7 @@ export function HomeTab(): ReactElement {
       {stubsOn ? <HomeWithPay /> : (
         <div className="emp-home-grid">
           <div className="emp-column">
-            <Card title="Latest pay" action={<HideAmountsToggle />}>
+            <Card title="Latest pay">
               <Placeholder icon={House} title="Your latest pay will show here">
                 <p>You'll see your take-home pay and your pay stub here as soon as they're added.</p>
               </Placeholder>
@@ -324,7 +336,7 @@ function HomeWithPay(): ReactElement {
   return (
     <div className="emp-home-grid">
       <div className="emp-column">
-        <Card title="Latest pay" action={<HideAmountsToggle />}>
+        <Card title="Latest pay" action={latest ? <HideAmountsToggle /> : undefined}>
           {body((check) => <LatestPay statement={check} statements={statements} />, <NoPayYet />)}
         </Card>
         {(state.status !== 'ready' || recent.length > 0) && (
@@ -409,7 +421,7 @@ export function PayTab(): ReactElement {
   const wide = useMediaQuery(WIDE_QUERY);
   if (!session.info.features.stubs) {
     return (
-      <Page title="Pay stubs" actions={<HideAmountsToggle />}>
+      <Page title="Pay stubs">
         <div className="emp-pay-grid">
           <Card title="Your pay"><PayComingSoon /></Card>
           <Card title="Pay stub" className="emp-wide-only">
@@ -442,9 +454,12 @@ function PayDesktop(): ReactElement {
   const fallbackId = listed[0]?.id ?? (newest.state.status === 'ready' ? inListOrder(newest.state.data.statements)[0]?.id : undefined);
   const selectedId = statementId ?? fallbackId ?? null;
   const suffix = year ? `?year=${year}` : '';
+  const hasAmounts = listed.length > 0
+    || (newest.state.status === 'ready' && newest.state.data.statements.length > 0)
+    || Boolean(selected.state.status === 'ready' && selected.state.data);
 
   return (
-    <Page title="Pay stubs" actions={<HideAmountsToggle />}>
+    <Page title="Pay stubs" actions={hasAmounts ? <HideAmountsToggle /> : undefined}>
       <div className="emp-pay-grid">
         <Card title="Your pay">
           {year === null
@@ -505,8 +520,9 @@ function PayListPhone(): ReactElement {
   } else {
     body = <SkeletonRows rows={5} label="Loading your pay stubs" />;
   }
+  const hasAmounts = newest.state.status === 'ready' && newest.state.data.statements.length > 0;
   return (
-    <Page title="Pay stubs" actions={<HideAmountsToggle />}>
+    <Page title="Pay stubs" actions={hasAmounts ? <HideAmountsToggle /> : undefined}>
       <Card>{body}</Card>
     </Page>
   );
@@ -518,11 +534,13 @@ function StubScreen({ id }: { id: string }): ReactElement {
   const suffix = year ? `?year=${year}` : '';
   const back = `/pay${suffix}`;
   const list = useStatements(year);
+  const statement = useStatement(id);
   const siblings = list.state.status === 'ready' ? inListOrder(list.state.data.statements) : [];
+  const hasAmounts = statement.state.status === 'ready' && statement.state.data !== null;
   return (
-    <Page title="Pay stub" actions={<HideAmountsToggle />} before={<BackLink to={back}>Pay</BackLink>}>
+    <Page title="Pay stub" actions={hasAmounts ? <HideAmountsToggle /> : undefined} before={<BackLink to={back}>Pay</BackLink>}>
       <Card>
-        <StubDetail id={id} siblings={siblings} linkSuffix={suffix} newScreen />
+        <StubDetailView state={statement.state} reload={statement.reload} siblings={siblings} linkSuffix={suffix} newScreen />
       </Card>
     </Page>
   );
@@ -586,7 +604,7 @@ function EarningRow({ line }: { line: EarningLine }): ReactElement {
   return (
     <tr className={isYtdOnlyEarning(line) ? 'emp-ytd-only' : undefined}>
       <th scope="row">
-        <span className="block">{line.label}</span>
+        <span className="block"><MaskedText text={line.label} /></span>
         {hasHours && (
           <span className="emp-term block">
             {hours} hrs{rate && <> × <Amount>{rate}</Amount></>}
@@ -604,7 +622,7 @@ function AmountRow({ line, tax = false }: { line: AmountLine; tax?: boolean }): 
   return (
     <tr>
       <th scope="row">
-        <span className="block">{label}</span>
+        <span className="block"><MaskedText text={label} /></span>
         {term && <span className="emp-term block">{term}</span>}
       </th>
       <td><Money value={line.amount} /></td>
@@ -665,22 +683,25 @@ function PrevNext({ siblings, id, linkSuffix, className, newScreen }: { siblings
   );
 }
 
-const CURRENCY_IN_TEXT = /(-?\$\s?\d[\d,]*(?:\.\d{1,2})?)/g;
-
-/** Defends against a future stub note accidentally carrying a dollar figure. */
-function StubNote({ note }: { note: string }): ReactElement {
-  const parts = note.split(CURRENCY_IN_TEXT);
-  if (parts.length === 1) return <p className="emp-hint">{note}</p>;
-  return (
-    <p className="emp-hint">
-      {parts.map((part, index) => (index % 2 === 1 ? <Amount key={index}>{part}</Amount> : part))}
-    </p>
-  );
-}
-
 /** `newScreen`: on a phone each stub is its own screen, so Older and Newer move focus to its heading. */
 function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: string; siblings: StatementSummary[]; linkSuffix?: string; newScreen?: boolean }): ReactElement {
   const { state, reload } = useStatement(id);
+  return <StubDetailView state={state} reload={reload} siblings={siblings} linkSuffix={linkSuffix} newScreen={newScreen} />;
+}
+
+function StubDetailView({
+  state,
+  reload,
+  siblings,
+  linkSuffix = '',
+  newScreen = false,
+}: {
+  state: DataState<StatementDetail | null>;
+  reload: () => void;
+  siblings: StatementSummary[];
+  linkSuffix?: string;
+  newScreen?: boolean;
+}): ReactElement {
   if (state.status === 'loading') return <SkeletonRows rows={6} label="Loading the pay stub" />;
   if (state.status === 'error') return <LoadProblem kind={state.kind} onRetry={reload} what="this pay stub" />;
   const stub = state.data;
@@ -715,7 +736,7 @@ function StubDetail({ id, siblings, linkSuffix = '', newScreen = false }: { id: 
         <Comparison statement={stub} statements={siblings} />
       </div>
 
-      {stub.note && <StubNote note={stub.note} />}
+      {stub.note && <p className="emp-hint"><MaskedText text={stub.note} /></p>}
 
       {hasOnlyYtdEarnings && <p className="emp-no-current-earnings emp-hint">No earnings this pay period.</p>}
       {stub.earnings.length > 0 && (

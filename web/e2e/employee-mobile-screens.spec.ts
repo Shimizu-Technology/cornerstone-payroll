@@ -136,6 +136,7 @@ test.describe('employee app on a phone', () => {
     await expect(latest).toContainText('$•••');
     await expect(latest).not.toContainText('$534.18');
     await expect(latest).not.toContainText('less than');
+    await expect(latest).toContainText('You worked 3.5 fewer hours than Nov 6.');
     await expect(latest.getByText('Amount hidden')).toBeAttached();
     const note = page.getByText('Amounts stay hidden on this device until you tap Show amounts.');
     await expect(note).toBeVisible();

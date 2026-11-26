@@ -8,7 +8,6 @@ import { DeliveryConsentSection } from './consent';
 import { useDownload } from './download';
 import { focusHeadingOnNextScreen } from './focus';
 import { pdfDownloadLabel } from './format';
-import { HideAmountsToggle } from './HideAmounts';
 import { Card, Chip, EmpButton, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
 import { useEmployeeData } from './useEmployeeData';
 
@@ -95,7 +94,7 @@ function TaxFormsList(): ReactElement {
 export function TaxesTab(): ReactElement {
   const { state } = useReadySession();
   return (
-    <Page title="Tax forms" actions={<HideAmountsToggle />}>
+    <Page title="Tax forms">
       <div className="emp-cards-grid">
         {state.info.features.taxForms ? <TaxFormsList /> : (
           <Card>

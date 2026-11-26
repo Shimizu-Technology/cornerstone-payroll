@@ -86,12 +86,15 @@ function plural(n: number, one: string, many: string): string {
 }
 
 /**
- * "$36.45 less than Nov 5. You worked 3.5 fewer hours." Null when it can't be
- * worked out: no earlier regular check (the API's `previous`, or the list
- * when the API didn't say), missing amounts, or a bonus, correction or
- * voided check on either side.
+ * "$36.45 less than Nov 6. You worked 3.5 fewer hours." When `hideMoney` is
+ * true, returns only the hours comparison ("You worked 3.5 fewer hours than
+ * Nov 6." or "Same hours as Nov 6."), or null when hours aren't comparable.
  */
-export function comparisonLine(current: StatementSummary, statements: StatementSummary[]): string | null {
+export function comparisonLine(
+  current: StatementSummary,
+  statements: StatementSummary[],
+  options: { hideMoney?: boolean } = {},
+): string | null {
   const comparable = (s: StatementSummary): boolean => s.source === 'payroll' && s.payment.status !== 'voided' && s.runPurpose === 'regular';
   if (!comparable(current)) return null;
   // The API names the previous regular check, even one on another page.
@@ -104,13 +107,23 @@ export function comparisonLine(current: StatementSummary, statements: StatementS
   const [now, before] = [toNumber(current.netPay), toNumber(previous.netPay)];
   if (now === null || before === null) return null;
 
-  const cents = Math.round((now - before) * 100);
   const when = shortDate(previous.payDate);
+  const [hoursNow, hoursBefore] = [toNumber(current.totalHours), toNumber(previous.totalHours)];
+  const hasComparableHours = hoursNow !== null && hoursBefore !== null && hoursNow !== 0 && hoursBefore !== 0;
+
+  if (options.hideMoney) {
+    if (!hasComparableHours) return null;
+    const diff = Math.round((hoursNow - hoursBefore) * 100) / 100;
+    if (diff === 0) return `Same hours as ${when}.`;
+    const amount = Math.abs(diff);
+    return `You worked ${amount} ${diff > 0 ? plural(amount, 'more hour', 'more hours') : plural(amount, 'fewer hour', 'fewer hours')} than ${when}.`;
+  }
+
+  const cents = Math.round((now - before) * 100);
   const money = cents === 0 ? `Same take-home pay as ${when}.`
     : `${USD.format(Math.abs(cents) / 100)} ${cents > 0 ? 'more' : 'less'} than ${when}.`;
 
-  const [hoursNow, hoursBefore] = [toNumber(current.totalHours), toNumber(previous.totalHours)];
-  if (hoursNow === null || hoursBefore === null || hoursNow === 0 || hoursBefore === 0) return money;
+  if (!hasComparableHours) return money;
   const diff = Math.round((hoursNow - hoursBefore) * 100) / 100;
   if (diff === 0) return `${money} Same hours.`;
   const amount = Math.abs(diff);
@@ -139,4 +152,45 @@ export function addressLines(address: { line1: string; line2: string; city: stri
 export function pdfDownloadLabel(baseLabel: string, hidden: boolean): string {
   if (!hidden) return baseLabel;
   return `${baseLabel.replace(/\s*\(PDF\)$/i, ' PDF')} (shows amounts)`;
+}
+
+// Matches currency expressions in free-text notes or imported line labels:
+// "$45.00", "-$45.00", "$-45.00", "$.50", "$15.125", "($45.00)", "$(45.00)",
+// "45.67 USD", "USD 45.67", "(45.67 USD)", "(USD 45.67)", "US$45.67".
+// Leaves dates, hours ("36.5 hrs"), percentages and check numbers untouched.
+const CURRENCY_NUMBER = '(?:\\d[\\d,]*(?:\\.\\d+)?|\\.\\d+)';
+const CURRENCY_IN_TEXT = new RegExp(
+  [
+    `\\(\\s*(?:US)?\\$\\s*[-+]?${CURRENCY_NUMBER}\\s*\\)`,
+    `\\(\\s*USD\\s*[-+]?${CURRENCY_NUMBER}\\s*\\)`,
+    `\\(\\s*[-+]?${CURRENCY_NUMBER}\\s*USD\\s*\\)`,
+    `(?:US)?\\$\\(\\s*${CURRENCY_NUMBER}\\s*\\)`,
+    `(?:(?<![A-Za-z0-9])[-+]\\s*)?(?:US)?\\$\\s*[-+]?${CURRENCY_NUMBER}`,
+    `(?:(?<![A-Za-z0-9])[-+]\\s*)?\\bUSD\\s*[-+]?${CURRENCY_NUMBER}`,
+    `(?:(?<![A-Za-z0-9])[-+]\\s*)?${CURRENCY_NUMBER}\\s*USD\\b`,
+  ].join('|'),
+  'gi',
+);
+
+export interface TextSegment {
+  text: string;
+  isMoney: boolean;
+}
+
+/** Splits free-text notes or imported line labels into plain text and currency segments. */
+export function splitCurrencySegments(text: string): TextSegment[] {
+  const segments: TextSegment[] = [];
+  let lastIndex = 0;
+  for (const match of text.matchAll(CURRENCY_IN_TEXT)) {
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, start), isMoney: false });
+    }
+    segments.push({ text: match[0], isMoney: true });
+    lastIndex = start + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex), isMoney: false });
+  }
+  return segments.length > 0 ? segments : [{ text, isMoney: false }];
 }
