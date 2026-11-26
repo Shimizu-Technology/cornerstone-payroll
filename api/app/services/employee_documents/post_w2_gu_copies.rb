@@ -50,6 +50,13 @@ module EmployeeDocuments
       nil
     end
 
+    def posting_pending?
+      return false if blocker
+
+      snapshot = W2GuOfficialCopies.snapshot(@company, @year)
+      snapshot[:final] && pending_employee_ids(snapshot.fetch(:report)).any?
+    end
+
     def call
       if (reason = blocker)
         return result(reason)

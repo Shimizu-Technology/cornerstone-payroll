@@ -42,6 +42,34 @@ RSpec.describe "Employee profile address review", :portal_notifications, type: :
     end
   end
 
+  it "queues address review only for eligible managers and digests for the account team" do
+    system_read do
+      link(@requester, @employee)
+      list_portal_recipient!(@company, user: @staff)
+      viewer = create(:user, company: @company, role: "client", client_access_level: "viewer")
+      create(:company_assignment, user: viewer, company: @company)
+      create(:user, :with_client_assignment, role: "client")
+      PortalNotificationPreference.create!(user: @reviewer, category: "address_approvals", delivery_mode: "off")
+    end
+    with_portal_email do
+      patch_employee(@employee, @requester, address_line1: new_address)
+      expect(response).to have_http_status(:ok), response.body
+      id = response.parsed_body.dig("change_request", "id")
+      system_read do
+        request = EmployeeChangeRequest.find(id)
+        review = PortalNotificationEvent.find_by!(subject: request, event_type: "address_approval_requested")
+        staff = PortalNotificationEvent.find_by!(subject: request, event_type: "employee_change_submitted")
+        expect(review.deliveries.sole).to have_attributes(user_id: @reviewer.id, delivery_mode: "immediate", skip_reason: "preference_off")
+        expect(staff.deliveries.sole).to have_attributes(user_id: @staff.id, delivery_mode: "digest", status: "pending")
+        PortalNotifications::Dispatcher.run!(now: 2.days.from_now)
+      end
+      payload = captured_portal_emails.sole
+      expect(payload).to include(to: @staff.email, subject: include(@company.name))
+      expect(payload[:text]).to include("/companies/#{@company.id}/client-change-requests")
+      expect(payload.to_json).not_to include(new_address, @employee.full_name)
+    end
+  end
+
   it "queues an admin's own address even when that login also has a link at another company" do
     system_read do
       link(@requester, @employee)
