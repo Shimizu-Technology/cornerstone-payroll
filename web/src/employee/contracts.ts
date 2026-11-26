@@ -36,9 +36,9 @@ export function guamDay(at: Date): string {
 }
 
 /**
- * The day an access date falls on in Guam. The API sends former_access_until
- * as an instant ("2028-03-01T23:59:59+10:00", end of that Guam day); a plain
- * date passes through.
+ * The Guam day of an API instant, such as former_access_until
+ * ("2028-03-01T23:59:59+10:00", end of that Guam day) or a request's
+ * submitted_at (UTC); a plain date passes through.
  */
 export function accessDay(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -149,7 +149,10 @@ export interface PreviousCheck {
 export interface StatementSummary {
   id: string;
   source: StatementSource;
+  /** The date printed on the check: its check date, else the pay period's pay date. */
   payDate: string;
+  /** The year the API lists the check under: its pay period's pay date (W-2GU's year). */
+  taxYear: number;
   periodStart: string | null;
   periodEnd: string | null;
   /** "regular", "bonus", "adjustment"…: only regular checks are compared with the one before. */
@@ -202,6 +205,7 @@ export function parseStatementSummary(value: unknown): StatementSummary | null {
     id: statementId,
     source,
     payDate,
+    taxYear: Number((isoDate(period.pay_date) ?? isoDate(row.pay_date) ?? payDate).slice(0, 4)),
     periodStart: isoDate(period.start_date) ?? isoDate(row.period_start),
     periodEnd: isoDate(period.end_date) ?? isoDate(row.period_end),
     runPurpose: text(period.run_purpose),
@@ -503,8 +507,8 @@ export function parseProfile(data: unknown): EmployeeProfile {
       id: requestId,
       status,
       requested,
-      submittedAt: isoDate(request.submitted_at),
-      decidedAt: isoDate(request.decided_at),
+      submittedAt: accessDay(request.submitted_at),
+      decidedAt: accessDay(request.decided_at),
       decisionNote: text(request.decision_note),
     } : null,
     otherRequestPending: bool(body.other_request_pending),

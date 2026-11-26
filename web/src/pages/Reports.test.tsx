@@ -545,3 +545,36 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
     expect(screen.getAllByText('Not recorded')).toHaveLength(2);
   });
 });
+
+describe('report date defaults', () => {
+  // 2026-01-01 00:30 in Guam is still Dec 31, 2025 in California and UTC.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2025-12-31T14:30:00Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("opens tax withholding on Guam's tax year", async () => {
+    apiMocks.taxSummary.mockClear();
+    apiMocks.taxSummary.mockReturnValue(new Promise(() => {}));
+    renderReportPanel(<Reports />);
+    fireEvent.click(screen.getByRole('button', { name: 'Review taxes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    await waitFor(() => expect(apiMocks.taxSummary).toHaveBeenCalledWith({ year: 2026, quarter: undefined }));
+  });
+
+  it("runs employee pay history from Guam's Jan 1 through Guam's today", async () => {
+    apiMocks.employeesList.mockResolvedValue({ data: [{ id: 1, first_name: 'Avery', last_name: 'Example' }] });
+    apiMocks.employeePayHistory.mockClear();
+    apiMocks.employeePayHistory.mockReturnValue(new Promise(() => {}));
+    renderReportPanel(<EmployeePayHistoryPanel />);
+    await screen.findByRole('combobox', { name: 'Employee' });
+    fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
+
+    await waitFor(() => expect(apiMocks.employeePayHistory).toHaveBeenCalledWith(1, { start_date: '2026-01-01', end_date: '2026-01-01' }));
+  });
+});

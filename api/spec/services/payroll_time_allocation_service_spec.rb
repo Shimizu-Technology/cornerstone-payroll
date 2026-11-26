@@ -352,4 +352,41 @@ RSpec.describe PayrollTimeAllocationService do
       .to raise_error(ActiveRecord::RecordInvalid, /Overtime status must be confirmed/)
     expect(payroll_item.reload.payroll_time_allocations).to be_empty
   end
+
+  context "with a confirmed intake-exception employee" do
+    def admit_with_w4_signed_on(signed_on)
+      employee.update_columns(
+        intake_exception: { "deferred_fields" => [ "withholding_election" ] },
+        intake_payroll_confirmed_at: Time.current,
+        intake_payroll_eligible_from: Date.new(2024, 1, 1)
+      )
+      employee.employee_w4_elections.create!(
+        **EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(w4_signed_on: signed_on),
+        company: company, effective_on: signed_on, source: "staff", reason: "Synthetic signed W-4"
+      )
+    end
+
+    # Readiness and the calculator check the W-4 on the pay date, so the
+    # scheduled days must too, or the run passes readiness and pays nothing.
+    it "schedules the period when the W-4 is signed after period end but by the pay date" do
+      create(:employee_work_profile, employee: employee)
+      admit_with_w4_signed_on(Date.new(2024, 1, 17))
+
+      described_class.call!(payroll_item: payroll_item)
+      payroll_item.calculate!
+
+      expect(payroll_item.reload).to have_attributes(scheduled_hours: 80.to_d, hours_worked: 80.to_d, gross_pay: 2_000.to_d)
+      expect(payroll_item.payroll_time_allocations.count).to eq(14)
+    end
+
+    it "schedules nothing when the W-4 is signed after the pay date" do
+      create(:employee_work_profile, employee: employee)
+      admit_with_w4_signed_on(Date.new(2024, 1, 20))
+
+      described_class.call!(payroll_item: payroll_item)
+
+      expect(employee.daily_time_records).to be_empty
+      expect(payroll_item.reload.payroll_time_allocations).to be_empty
+    end
+  end
 end

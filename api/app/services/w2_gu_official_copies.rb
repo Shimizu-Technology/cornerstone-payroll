@@ -52,6 +52,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     employer: [ 38.0, 636.0, 330.2, 696.0 ],
     first_name: [ 38.0, 588.0, 171.8, 600.0 ],
     last_name: [ 173.8, 588.0, 308.6, 600.0 ],
+    suffix: [ 310.6, 588.0, 330.2, 600.0 ],
     employee_address: [ 38.0, 528.0, 330.2, 586.0 ],
     box1: [ 333.2, 708.0, 451.6, 720.0 ],
     box2: [ 455.6, 708.0, 574.0, 720.0 ],
@@ -76,6 +77,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   TEXT_FIELDS = {
     first_name: { size: 9, problem: "the first name and middle initial are too long to fit Box e — shorten them on the employee's profile" },
     last_name: { size: 9, problem: "the last name is too long to fit Box e — shorten it on the employee's profile" },
+    suffix: { size: 9, min_font_size: 6.5, problem: "the name suffix is too long to fit Box e's Suff. box" },
     employee_address: { lift: 0, size: 9, valign: :top, min_font_size: 6.5,
       problem: "the address is too long to fit Box f — shorten it on the employee's profile" }
   }.freeze
@@ -383,6 +385,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     case field
     when :first_name then first_name_and_initial(employee)
     when :last_name then employee.last_name
+    when :suffix then employee.name_suffix
     when :employee_address then employee_address_lines(employee).join("\n")
     end
   end

@@ -83,6 +83,7 @@ class PayrollItem < ApplicationRecord
   validates :tips_paid_out, numericality: true, if: :correction_entry?
   validate :company_matches_pay_period
   validate :direct_deposit_has_no_check_number
+  validate :check_date_in_pay_date_year, if: :will_save_change_to_check_date?
   validate :custom_deductions_are_valid
   validate :payroll_adjustments_are_valid
   validate :imported_source_inputs_reconcile
@@ -233,6 +234,24 @@ class PayrollItem < ApplicationRecord
     TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: id).exists? ||
       TimeTrackingCorrectionDisposition.where(corrective_payroll_item_id: correction_payroll_items.select(:id)).exists? ||
       TimeTrackingCorrectionDisposition.where(original_allocation_id: time_tracking_entry_allocations.select(:id)).exists?
+  end
+
+  # Tax years go by the pay period's pay_date (W-2GU, year-to-date totals,
+  # the employee app's years), so a check dated in another year would be
+  # printed in one year and reported in the other. nil when the date fits.
+  # A committed payroll's pay date can't change tax year, so its fix is a
+  # check date in that year or a void and re-run.
+  def self.check_date_year_problem(check_date, pay_period)
+    pay_date = pay_period&.pay_date
+    return if check_date.blank? || pay_date.blank? || check_date.year == pay_date.year
+
+    fix = if pay_period.committed?
+      "use a check date in #{pay_date.year}, or void and re-run the payroll in #{check_date.year}"
+    else
+      "change the payroll's pay date instead"
+    end
+    "must be in #{pay_date.year}, the year of this payroll's pay date (#{pay_date.strftime('%b %-d, %Y')}). " \
+      "W-2GU and year-to-date totals count this check in that year; #{fix}."
   end
 
   # The same three links as source_accounting_correction_linked?, for a run.
@@ -879,6 +898,11 @@ class PayrollItem < ApplicationRecord
 
   def sync_company_from_pay_period
     self.company_id ||= pay_period&.company_id
+  end
+
+  def check_date_in_pay_date_year
+    problem = self.class.check_date_year_problem(check_date, pay_period)
+    errors.add(:check_date, problem) if problem
   end
 
   def company_matches_pay_period

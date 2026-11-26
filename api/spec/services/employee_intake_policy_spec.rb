@@ -230,6 +230,22 @@ RSpec.describe EmployeeIntakePolicy do
     expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
   end
 
+  it "checks the W-4 on the pay date, the date payroll calculates withholding with" do
+    employee = incomplete_employee
+    confirm(employee)
+    # Signed after the period ended but before payday.
+    employee.employee_w4_elections.update_all(w4_signed_on: Date.new(2026, 1, 17))
+    period = create(:pay_period, company: company, start_date: "2026-01-01", end_date: "2026-01-14", pay_date: "2026-01-19")
+    election = employee.reload.w4_election_on(period.pay_date)
+    expect(election).to be_present
+    expect(employee.w4_election_on(period.end_date)).to be_nil
+    create(:payroll_item, employee: employee, pay_period: period,
+      calculation_context_snapshot: { "intake_setup_fingerprint" => PayrollCalculationContext.intake_setup_fingerprint(employee: employee) },
+      tax_rule_snapshot: { "w4" => { "election_id" => election.id } })
+
+    expect { EmployeeDocumentReadiness.require_payroll_ready!(period) }.not_to raise_error
+  end
+
   it "preserves received-election intent and evidence through client approval" do
     employee = incomplete_employee
     confirm(employee)
