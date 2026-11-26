@@ -2190,8 +2190,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
         "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
         "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
-        "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
-        "401(k) After Tax Label in Source Pre-Tax Bucket", "Employer Social Security", "Employer Medicare",
+        "Loan repayments (imported)", "Health Insurance (Native Fields + Historical Source)",
+        "401(k) after-tax (imported as pre-tax)", "Employer Social Security", "Employer Medicare",
         "Other Employer Taxes", "Employer Taxes Total", "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match",
         "Other Employer Contributions", "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost",
         "FIT", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay",
@@ -2328,9 +2328,9 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/ytd_summary_csv", params: { start_date: "2026-01-01", end_date: "2026-05-31" }
       expect(response).to have_http_status(:ok)
       csv = CSV.parse(response.body, headers: true)
-      expect(csv.headers).to include("Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)")
+      expect(csv.headers).to include("Loan repayments (imported)", "Health Insurance (Native Fields + Historical Source)", "401(k) after-tax (imported as pre-tax)")
       expect(csv.first.fetch("Total OT Hours").to_f).to eq(12.4)
-      expect(csv.first.fetch("Historical Loans (Type Unclassified)").to_f).to eq(60.06)
+      expect(csv.first.fetch("Loan repayments (imported)").to_f).to eq(60.06)
     end
 
     it "combines linked snapshots with committed payroll and discloses excluded rows" do

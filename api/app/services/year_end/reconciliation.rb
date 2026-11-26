@@ -290,7 +290,7 @@ module YearEnd
     def ss_wage_base
       @ss_wage_base ||= AnnualTaxConfig.for_year(year)&.ss_wage_base&.to_d || W2GuAggregator::SS_WAGE_BASE_BY_YEAR.fetch(year).to_d
     rescue KeyError
-      raise ArgumentError, "SS wage base not configured for #{year}"
+      raise ReportValidationError, "SS wage base not configured for #{year}"
     end
 
     # The W-2GU applies the wage base to wages first for the whole year; the

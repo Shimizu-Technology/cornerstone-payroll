@@ -383,7 +383,7 @@ class CheckGenerator
     )
     memo_clearance = [ 52.0, -stub_cfg["memo_y_offset"].to_f + 16.0 ].max
     if table_y2 - other_pay_height - 6.0 < sect_bot + memo_clearance
-      raise ArgumentError, "The earnings cannot fit readably on this check stock. Use a separate earnings statement or adjust the stub layout. No work dates or earnings were omitted."
+      raise ReportValidationError, "The earnings cannot fit readably on this check stock. Use a separate earnings statement or adjust the stub layout. No work dates or earnings were omitted."
     end
 
     # The right column flows independently: use the space below taxes, and
@@ -480,7 +480,7 @@ class CheckGenerator
     table.height * scale
   rescue Prawn::Errors::CannotFit
     if title == "PAY"
-      raise ArgumentError, "The earnings cannot fit readably on this check stock. Use a separate earnings statement or adjust the stub layout. No work dates or earnings were omitted."
+      raise ReportValidationError, "The earnings cannot fit readably on this check stock. Use a separate earnings statement or adjust the stub layout. No work dates or earnings were omitted."
     end
     if title == "DEDUCTIONS"
       return draw_readable_deductions(pdf, x: x, y: y, w: w, data: data, max_height: max_height)
@@ -506,7 +506,7 @@ class CheckGenerator
     pdf.bounding_box([ x, y ], width: w) { table.draw }
     table.height
   rescue Prawn::Errors::CannotFit
-    raise ArgumentError, "The deductions cannot fit readably on this check stock. Adjust the stub layout or use a separate earnings statement before printing. No deductions were omitted."
+    raise ReportValidationError, "The deductions cannot fit readably on this check stock. Adjust the stub layout or use a separate earnings statement before printing. No deductions were omitted."
   end
 
   # -----------------------------------------------------------------------
@@ -712,7 +712,7 @@ class CheckGenerator
       columns(1..2).align = :right
     end
   rescue Prawn::Errors::CannotFit
-    raise ArgumentError, "The check summary cannot fit this printer layout. Widen the summary column or reduce summary padding before printing."
+    raise ReportValidationError, "The check summary cannot fit this printer layout. Widen the summary column or reduce summary padding before printing."
   end
 
   def draw_summary_box(pdf, x:, y:, w:, stub_cfg:, table:)
