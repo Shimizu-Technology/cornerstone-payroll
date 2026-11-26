@@ -27,8 +27,6 @@ class PayStubGenerator
     gross: :gross_pay, withholding_tax: :withholding_tax, social_security_tax: :social_security_tax,
     medicare_tax: :medicare_tax, additional_withholding: :additional_withholding, net: :net_pay
   }.freeze
-  # Saved YTD snapshots the employee-copy fingerprint held before it held the printed YTD.
-  LEGACY_YTD_SNAPSHOT_FACTS = %w[ytd_net ytd_withholding_tax ytd_social_security_tax ytd_medicare_tax].freeze
 
   attr_reader :payroll_item, :employee, :pay_period, :company
 
@@ -97,29 +95,15 @@ class PayStubGenerator
   # This check's own facts plus every YTD amount the statement prints. A later
   # change to an earlier check revises this statement only when it changes a
   # printed YTD amount. Current rows use their own labels, so a relabelled YTD
-  # attribution alone does not.
+  # attribution alone does not. A stub posted under an earlier fingerprint
+  # format never matches, so its next recheck posts one revision carrying
+  # this one (production had no posted employee stubs when the format changed).
   def employee_payroll_facts_sha256
     @employee_payroll_facts_sha256 ||= begin
       # This check's components load in the same batch as the earlier checks'.
       ytd_source_items
       Digest::SHA256.hexdigest([ *employee_payroll_current_facts, printed_ytd_facts ].to_json)
     end
-  end
-
-  # A stub posted under the earlier fingerprint held the saved tax and net YTD
-  # snapshots in place of the printed YTD, so the fingerprint alone cannot
-  # show which earnings or other YTD rows it printed. It stays current only
-  # while those facts hold, this statement would print the same tax and net
-  # YTD, and its frozen PDF prints the same amounts this statement would.
-  def employee_payroll_facts_current?(document)
-    sha256 = document.payroll_facts_sha256
-    return true if sha256 == employee_payroll_facts_sha256
-    return false unless sha256 == Digest::SHA256.hexdigest(employee_payroll_current_facts(LEGACY_YTD_SNAPSHOT_FACTS).to_json)
-    return false unless LEGACY_YTD_SNAPSHOT_FACTS.zip(%i[net withholding_tax social_security_tax medicare_tax]).all? do |column, key|
-      payroll_item.public_send(column).to_d.round(2) == statement_ytd_totals.fetch(key)
-    end
-
-    frozen_pdf_prints_same_amounts?(document)
   end
 
   def self.employee_payment_line(item)
@@ -134,31 +118,7 @@ class PayStubGenerator
 
   private
 
-  # Money amounts in print order. Zero amounts are left out, since the earlier
-  # layout printed a contractor's zero tax rows; amounts within a cent agree,
-  # since the earlier formatter rounded through Float.
-  def frozen_pdf_prints_same_amounts?(document)
-    bytes = R2StorageService.new.download(document.storage_key)
-    return false unless bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
-
-    frozen = printed_amounts(bytes)
-    current = printed_amounts(generate)
-    frozen.size == current.size && frozen.zip(current).all? { |old, new| (old - new).abs <= BigDecimal("0.01") }
-  rescue PDF::Reader::MalformedPDFError, PDF::Reader::UnsupportedFeatureError
-    false
-  end
-
-  def printed_amounts(bytes)
-    text = PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join("\n")
-    text.scan(/(-?)\$(-?)([\d,]+\.\d{2})/).filter_map do |sign, inner_sign, digits|
-      amount = BigDecimal(digits.delete(","))
-      next if amount.zero?
-
-      sign.present? || inner_sign.present? ? -amount : amount
-    end
-  end
-
-  def employee_payroll_current_facts(snapshot_columns = [])
+  def employee_payroll_current_facts
     earnings = unitemized_earning_lines(source_labels: PayrollSourceEarningLabel.new(payroll_item), include_ytd: false)
       .map { |line| line.except(:ytd) }
     components = PayrollStatementYtdBreakdown::KINDS.map do |kind|
@@ -166,7 +126,7 @@ class PayStubGenerator
     end
     amounts = payroll_item.attributes.slice(
       "gross_pay", "net_pay", "withholding_tax", "withholding_tax_override", "withholding_tax_adjustment",
-      "social_security_tax", "medicare_tax", "additional_withholding", *snapshot_columns
+      "social_security_tax", "medicare_tax", "additional_withholding"
     )
     [
       pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
