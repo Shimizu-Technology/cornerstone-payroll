@@ -1,13 +1,11 @@
 # frozen_string_literal: true
 
-require "cgi"
-
 module EmployeeLinks
   # Durable security notice sent to the employee's email address ON FILE
   # (persisted on the link inside the activation transaction before activation
   # changes any contact details) whenever their employee app link becomes
-  # active. Carries only the employer name and activation date in Guam time —
-  # never pay data or sign-in credentials.
+  # active. Carries only the employer's name and branding, the activation date
+  # in Guam time and a link to the app — never pay data or sign-in credentials.
   #
   # schedule! writes the pre-change address and pending status in the same
   # transaction as link activation and enqueues SendEmployeeActivationNoticeJob
@@ -17,7 +15,6 @@ module EmployeeLinks
     class DeliveryError < StandardError; end
 
     CHANNEL = "employee_link_activation_notice"
-    GUAM_TIME_ZONE = "Pacific/Guam"
     MAX_ATTEMPTS = 5
     RETRY_AFTER = 10.minutes
 
@@ -143,19 +140,23 @@ module EmployeeLinks
     end
 
     def payload(link, to, activated_at)
-      employer = link.company.name
-      date_guam = activated_at.in_time_zone(GUAM_TIME_ZONE).strftime("%B %-d, %Y")
-      lines = [
-        "Your #{employer} employee app account was set up on #{date_guam}.",
-        "If this wasn't you, contact #{employer}/Cornerstone."
-      ]
-      {
-        from: PortalNotifications::Transport.from_email,
-        to: to,
-        subject: "Your #{employer} employee app account was set up",
-        text: lines.join(" "),
-        html: lines.map { |line| "<p>#{CGI.escapeHTML(line)}</p>" }.join
-      }
+      brand = EmployeeEmails::Brand.for(link.company)
+      message(brand, activated_at: activated_at, app_url: AppUrl.origin_for(link.company)).payload(to: to)
+    end
+
+    def message(brand, activated_at:, app_url:)
+      date_guam = EmployeeEmails::Message.guam_date(activated_at)
+      EmployeeEmails::Message.new(
+        brand: brand,
+        subject: "Your #{brand.name} employee app account was set up",
+        heading: "Your employee app account is set up",
+        paragraphs: [
+          "Your #{brand.name} employee app account was set up on #{date_guam} (Guam time).",
+          "If this wasn't you, contact #{brand.name} or Cornerstone right away."
+        ],
+        action: (app_url && { label: "Open the employee app", url: app_url }),
+        preheader: "Your account was set up on #{date_guam}."
+      )
     end
   end
 end
