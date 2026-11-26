@@ -274,7 +274,9 @@ RSpec.describe DemoCompany::Seed do
     expect(build(:employee, company: live_demo, department: create(:department, company: live_demo), employment_type: "contractor")).to be_valid
     # Legacy demos stay guarded on non_employee_checks until the Track B Migrate phase drops the legacy trigger;
     # new-shape live+demo companies can issue non-employee checks like live clients.
-    expect(NonEmployeeCheck.new(company: legacy_demo)).to have_attributes(valid?: false)
+    legacy_check = build(:non_employee_check, company: legacy_demo)
+    expect(legacy_check).not_to be_valid
+    expect(legacy_check.errors[:base]).to include(Company::DEMO_UNAVAILABLE_MESSAGE)
     expect(build(:non_employee_check, company: live_demo)).to be_valid
     expect(build(:time_tracking_source, company: legacy_demo)).not_to be_valid
     expect(build(:time_tracking_source, company: live_demo)).not_to be_valid
