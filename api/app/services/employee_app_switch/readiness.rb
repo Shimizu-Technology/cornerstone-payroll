@@ -86,7 +86,8 @@ module EmployeeAppSwitch
     # Asks the employee service for its live dependency health and its signed
     # statement about its own process. EMPLOYEE_API_URL is its base URL
     # (configuration only; HTTPS in production). Redirects are never
-    # followed: anything but the answer itself counts as no answer.
+    # followed and a timed-out request is never retried: anything but the
+    # answer itself counts as no answer.
     def self.ping_employee_service(env = ENV, now: Time.current, open_timeout: 2, read_timeout: 4)
       uri = employee_health_uri(env["EMPLOYEE_API_URL"])
       return { configured: false, ok: false, observation: nil, attestation_error: :not_configured } unless uri
@@ -94,7 +95,7 @@ module EmployeeAppSwitch
       nonce = ServiceAttestation.new_nonce
       headers = { "Accept" => "application/json" }.merge(ServiceAttestation.request_headers(nonce, env: env))
       response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: open_timeout,
-        read_timeout: read_timeout) do |http|
+        read_timeout: read_timeout, max_retries: 0) do |http|
         http.request(Net::HTTP::Get.new(uri, headers))
       end
       code = response.code.to_i
