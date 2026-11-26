@@ -3,6 +3,8 @@ import { cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ClientPayPeriodDetail } from './ClientPayPeriodDetail';
+import { getVisibleOptionalColumns } from './clientPayPeriodColumns';
+import type { PayrollItem } from '@/types';
 
 const apiMocks = vi.hoisted(() => ({ getPayPeriod: vi.fn(), getSubmission: vi.fn() }));
 
@@ -123,30 +125,28 @@ it('renders Salary and /yr for salaried rows and includes Other deductions so ro
   renderDetail();
 
   expect(await screen.findByRole('columnheader', { name: 'Other deductions' })).toBeTruthy();
-  expect(screen.getByRole('columnheader', { name: 'Non-taxable additions' })).toBeTruthy();
+  expect(screen.queryByRole('columnheader', { name: 'Non-taxable additions' })).toBeNull();
 
   const salaryRow = screen.getByRole('row', { name: /Morgan Salary/ });
   const salaryCells = within(salaryRow).getAllByRole('cell').map(cell => cell.textContent?.trim());
   expect(salaryCells[1]).toBe('Salary');
   expect(salaryCells[2]).toBe('$68,000/yr');
-  expect(salaryCells[4]).toBe('$0.00');
-  expect(salaryCells[9]).toBe('$0.00');
-  expect(salaryCells[10]).toBe('$645.07');
+  expect(salaryCells[8]).toBe('$0.00');
+  expect(salaryCells[9]).toBe('$645.07');
 
   const serverRow = screen.getByRole('row', { name: /Casey Server/ });
   const serverCells = within(serverRow).getAllByRole('cell').map(cell => cell.textContent?.trim());
   expect(serverCells[1]).toBe('80');
   expect(serverCells[2]).toBe('$16.00/hr');
-  expect(serverCells[4]).toBe('$0.00');
-  expect(serverCells[9]).toBe('$15.00');
-  expect(serverCells[10]).toBe('$315.00');
+  expect(serverCells[8]).toBe('$15.00');
+  expect(serverCells[9]).toBe('$315.00');
 
   const parseDollars = (text: string | undefined) => Number((text ?? '0').replace(/[^0-9.-]/g, ''));
-  const serverSum = serverCells.slice(5, 10).reduce((acc, cell) => acc + parseDollars(cell), 0);
-  expect(Math.round(serverSum * 100) / 100).toBe(parseDollars(serverCells[10]));
+  const serverSum = serverCells.slice(4, 9).reduce((acc, cell) => acc + parseDollars(cell), 0);
+  expect(Math.round(serverSum * 100) / 100).toBe(parseDollars(serverCells[9]));
 
-  const salarySum = salaryCells.slice(5, 10).reduce((acc, cell) => acc + parseDollars(cell), 0);
-  expect(Math.round(salarySum * 100) / 100).toBe(parseDollars(salaryCells[10]));
+  const salarySum = salaryCells.slice(4, 9).reduce((acc, cell) => acc + parseDollars(cell), 0);
+  expect(Math.round(salarySum * 100) / 100).toBe(parseDollars(salaryCells[9]));
 });
 
 it('preserves negative Other deductions in fallback, omits unknown rate units, and shows non-taxable additions on desktop and mobile', async () => {
@@ -235,8 +235,9 @@ it('preserves negative Other deductions in fallback, omits unknown rate units, a
 
   const refundRow = await screen.findByRole('row', { name: /Riley Refund/ });
   const refundCells = within(refundRow).getAllByRole('cell').map(cell => cell.textContent?.trim());
-  expect(refundCells[9]).toBe('-$10.00');
-  expect(refundCells[10]).toBe('$46.79');
+  expect(screen.queryByRole('columnheader', { name: 'Loans' })).toBeNull();
+  expect(refundCells[8]).toBe('-$10.00');
+  expect(refundCells[9]).toBe('$46.79');
 
   const legacyRow = screen.getByRole('row', { name: /Pat Historical/ });
   const legacyCells = within(legacyRow).getAllByRole('cell').map(cell => cell.textContent?.trim());
@@ -247,11 +248,79 @@ it('preserves negative Other deductions in fallback, omits unknown rate units, a
   expect(reimbCells[2]).toBe('$900.00');
   expect(reimbCells[3]).toBe('$900.00');
   expect(reimbCells[4]).toBe('$50.00');
-  expect(reimbCells[10]).toBe('$223.15');
-  expect(reimbCells[11]).toBe('$726.85');
+  expect(reimbCells[9]).toBe('$223.15');
+  expect(reimbCells[10]).toBe('$726.85');
 
   const mobileList = screen.getByLabelText('Employee payroll details');
   expect(within(mobileList).getAllByText('Non-taxable additions').length).toBe(3);
   expect(within(mobileList).getByText('$50.00')).toBeTruthy();
   expect(within(mobileList).getByText('-$10.00')).toBeTruthy();
+});
+
+it('hides all five optional columns when every row in the period is zero and shows each when non-zero', async () => {
+  const zeroItem = {
+    id: 301,
+    employee_id: 31,
+    employee_name: 'Jordan Zero',
+    employment_type: 'hourly',
+    pay_rate: 15,
+    total_hours: 40,
+    hours_worked: 40,
+    gross_pay: 600,
+    withholding_tax: 40,
+    additional_withholding: 0,
+    social_security_tax: 37.2,
+    medicare_tax: 8.7,
+    state_withheld: 0,
+    retirement_payment: 0,
+    roth_retirement_payment: 0,
+    loan_payment: 0,
+    insurance_payment: 0,
+    other_deductions: 0,
+    total_deductions: 85.9,
+    net_pay: 514.1,
+  } as unknown as PayrollItem;
+
+  expect(getVisibleOptionalColumns([zeroItem])).toEqual({
+    nonTaxableAdditions: false,
+    retirement: false,
+    loans: false,
+    insurance: false,
+    otherDeductions: false,
+    count: 0,
+  });
+
+  expect(getVisibleOptionalColumns([
+    zeroItem,
+    { ...zeroItem, id: 302, loan_payment: 35, total_deductions: 120.9 } as unknown as PayrollItem,
+  ])).toEqual({
+    nonTaxableAdditions: false,
+    retirement: false,
+    loans: true,
+    insurance: false,
+    otherDeductions: false,
+    count: 1,
+  });
+
+  apiMocks.getPayPeriod.mockResolvedValue({
+    pay_period: {
+      id: 9,
+      company_id: 2,
+      start_date: '2026-08-01',
+      end_date: '2026-08-14',
+      pay_date: '2026-08-19',
+      status: 'committed',
+      employee_count: 1,
+      total_gross: 600,
+      total_net: 514.1,
+      payroll_items: [zeroItem],
+    },
+  });
+
+  renderDetail();
+
+  expect(await screen.findByRole('columnheader', { name: 'Net pay' })).toBeTruthy();
+  expect(screen.getAllByRole('columnheader').map((th) => th.textContent?.trim())).toEqual([
+    'Employee', 'Hours', 'Rate', 'Gross', 'Taxes', 'Total deductions', 'Net pay',
+  ]);
 });

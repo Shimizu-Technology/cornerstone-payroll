@@ -4,6 +4,15 @@ require "cgi"
 
 class UserInviteEmailService
   BRAND_NAME = "Cornerstone Payroll"
+  ROLE_LABELS = {
+    "super_admin" => "Super Admin",
+    "org_admin" => "Organization Admin",
+    "admin" => "Admin",
+    "manager" => "Manager",
+    "accountant" => "Accountant",
+    "employee" => "Employee",
+    "portal_employee" => "Employee"
+  }.freeze
 
   class << self
     # Returns true, :captured, :refused (a demo login's address is not on the
@@ -90,9 +99,17 @@ class UserInviteEmailService
       CGI.escapeHTML(value.to_s)
     end
 
+    def role_label(user)
+      if user.client?
+        user.client_viewer? ? "Client viewer" : "Client manager"
+      else
+        ROLE_LABELS.fetch(user.role.to_s) { user.role.to_s.tr("_", " ").split.map(&:capitalize).join(" ") }
+      end
+    end
+
     def invite_html(user:, invited_by:, button_link:, display_url:)
       inviter = h(invited_by&.name.presence || invited_by&.email.presence || "An administrator")
-      role = h(user.role.to_s.capitalize)
+      role = h(role_label(user))
 
       <<~HTML
         <!doctype html>
@@ -169,9 +186,9 @@ class UserInviteEmailService
                                 Getting started
                               </p>
                               <p style="margin: 0; font-size: 13px; line-height: 1.7; color: #374151;">
-                                Click the button below to create your account using
+                                Click the button below to finish setting up your account for
                                 <strong style="color: #111827;">#{h(user.email)}</strong>.
-                                Choose <strong style="color: #111827;">Sign up</strong> if this is your first time.
+                                This link opens account setup directly.
                               </p>
                             </td>
                           </tr>

@@ -32,8 +32,8 @@ export function SubmissionDocumentGroups({ documents, onPreview, onDownload, all
         {file.archived_at && <span className="block font-medium text-neutral-600">File archived · kept as evidence</span>}
       </span>
       <div className="flex shrink-0 flex-wrap gap-2">
-        <Button disabled={Boolean(file.archived_at) && !allowArchived} size="sm" variant="outline" onClick={() => void onPreview(file)} aria-label={`Preview ${file.file_name}`}>Preview</Button>
-        <Button disabled={Boolean(file.archived_at) && !allowArchived} size="sm" variant="outline" onClick={() => void onDownload(file)} aria-label={`Download ${file.file_name}`}>Download</Button>
+        <Button disabled={Boolean(file.archived_at) && !allowArchived} size="sm" variant="outline" className="min-h-11 sm:min-h-0 sm:pointer-coarse:min-h-11" onClick={() => void onPreview(file)} aria-label={`Preview ${file.file_name}`}>Preview</Button>
+        <Button disabled={Boolean(file.archived_at) && !allowArchived} size="sm" variant="outline" className="min-h-11 sm:min-h-0 sm:pointer-coarse:min-h-11" onClick={() => void onDownload(file)} aria-label={`Download ${file.file_name}`}>Download</Button>
         {extraActions?.(file)}
       </div>
     </li>)}</ul>

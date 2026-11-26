@@ -488,6 +488,22 @@ RSpec.describe PayStubGenerator do
       expect_rows_to_foot(item, rows)
     end
 
+    it "labels imported YTD Regular rows as Regular (prior payroll) alongside Regular Pay" do
+      worker = hourly_worker
+      apply_historical_ytd_balance(company: company, employee: worker,
+        through_period_end: Date.new(2026, 3, 31), through_pay_date: Date.new(2026, 4, 1),
+        gross_pay: 800, non_taxable_pay: 0,
+        source_breakdown: { "earnings_breakdown" => { "Regular" => "800.00" } })
+      item = calculated_item(worker, "hourly", Date.new(2026, 4, 15), hours_worked: 80)
+
+      rows = statement_rows(item)
+      expect(rows).to contain_exactly(
+        [ "Regular Pay", "80.00", "$14.37", "$1,149.60", "$1,149.60" ],
+        [ "Regular (prior payroll)", "—", "—", "$0.00", "$800.00" ]
+      )
+      expect_rows_to_foot(item, rows)
+    end
+
     context "when row YTD cannot be derived" do
       it "keeps dashes for an opening balance that was not itemized and retains the YTD total" do
         worker = hourly_worker

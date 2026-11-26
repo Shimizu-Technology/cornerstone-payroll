@@ -82,7 +82,7 @@ class PayrollFilingResponsibilityGate
     return Date.new(year, 1, 1)..Date.new(year, 12, 31) if quarter.nil?
 
     normalized_quarter = Integer(quarter)
-    raise ArgumentError, "quarter must be 1, 2, 3, or 4" unless normalized_quarter.in?(1..4)
+    raise ReportValidationError, "quarter must be 1, 2, 3, or 4" unless normalized_quarter.in?(1..4)
 
     first_month = ((normalized_quarter - 1) * 3) + 1
     Date.new(year, first_month, 1)..Date.new(year, first_month + 2, -1)
@@ -150,13 +150,13 @@ class PayrollFilingResponsibilityGate
 
   def validate_period!
     unless filing_type.in?(PayrollFilingResponsibility::FILING_TYPES)
-      raise ArgumentError, "filing_type must be form_941, guam_withholding, swica, w2_gu, or form_1099"
+      raise ReportValidationError, "filing_type must be form_941, guam_withholding, swica, w2_gu, or form_1099"
     end
 
     if filing_type.in?(PayrollFilingResponsibility::YEAR_END_FILING_TYPES)
-      raise ArgumentError, "quarter must be blank for annual filings" if quarter.present?
+      raise ReportValidationError, "quarter must be blank for annual filings" if quarter.present?
     elsif !quarter.in?(1..4)
-      raise ArgumentError, "quarter must be 1, 2, 3, or 4 for quarterly filings"
+      raise ReportValidationError, "quarter must be 1, 2, 3, or 4 for quarterly filings"
     end
   end
 

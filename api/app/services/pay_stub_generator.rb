@@ -333,6 +333,7 @@ class PayStubGenerator
   def itemized_earning_label(row)
     source_label = source_earning_labels.call(row.source_label)
     return source_label if source_label
+    return row.label if row.historical_only && row.source_label.to_s.strip.casecmp?("regular")
 
     if row.current.nonzero? && !stored_earning_rows?
       UNSTORED_EARNING_LABELS.fetch(row.category.to_s) { row.source_label }

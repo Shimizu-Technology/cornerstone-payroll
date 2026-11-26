@@ -64,12 +64,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.goto('/companies/12/pay-runs/91');
     await expect(page.getByRole('heading', { name: 'Pay period: Oct 5 – 18, 2026' })).toBeVisible();
     await expect(page.getByText("Details for this pay line aren't available yet. Contact Cornerstone.").filter({ visible: true })).toBeVisible();
-    await page.getByRole('button', { name: 'View pay stub' }).filter({ visible: true }).click();
+    await page.getByRole('button', { name: /View (pay )?stub for Synthetic Worker/ }).filter({ visible: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByLabel('Page 1 preview')).toBeVisible();
     await page.getByRole('button', { name: 'Close PDF preview' }).click();
     let download = page.waitForEvent('download');
-    await page.getByRole('button', { name: 'Download pay stub' }).filter({ visible: true }).click();
+    await page.getByRole('button', { name: /Download (pay )?stub for Synthetic Worker/ }).filter({ visible: true }).click();
     await download;
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.goto('/companies/12/employees/7/overview');
