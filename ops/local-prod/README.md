@@ -28,9 +28,22 @@ All state lives in `~/.local/share/cornerstone-local-prod` (override with `LOCAL
 
 - `secrets.env`, `env/*.env` (mode 600);
 - `pg/`, `redis/`, `logs/`, `run/` (pid files);
-- `certs/`, `mail/` (captured mail, one JSON file per message), `storage/`, `web/`, `Caddyfile`.
+- `certs/`, `mail/` (captured mail, one JSON file per message), `web/`, `Caddyfile`;
+- `storage/` (Active Storage and the R2 service's disk objects, through `LOCAL_STORAGE_ROOT`).
 
-Clerk keys are read from `~/.config/shimizu/clerk-payroll-local.env` and are never printed.
+Clerk keys are read from `~/.config/shimizu/clerk-payroll-local.env` and are never printed. `clerk_setup.py` changes an instance only if it is a development instance and either:
+- its id matches an optional `CLERK_INSTANCE_ID=ins_…` line in that file, or
+- every origin it already allows is under `.localhost`.
+
+So a staging or shared test instance is never repointed.
+
+### Safety rails
+
+- **Settings come only from the generated env files.** The API skips `api/.env` when `DEPLOYMENT_ENV=local`. `up.sh` stops if `web/` has a `.env*` file other than `.env.example`.
+- **Secrets stay off the command line.** psql reads passwords from `pgpass` (mode 600), and SQL that sets passwords goes in on stdin.
+- **Pid files are checked before anything is signalled.** A pid must be a positive integer, and its process's command line must match the service (Puma on its own port, `bin/jobs`, this Caddyfile, Redis on 56379, Postgres on this data directory). Anything else is reported and left alone.
+- **Ports are checked before each start.** If something else already listens on a port the mirror needs, `up.sh` stops.
+- **`down.sh --purge` deletes only a marked directory.** The directory must carry the `.cornerstone-local-prod` marker and must not be `/`, `$HOME`, `/tmp` or an ancestor of this repo. Postgres and Caddy must already be stopped.
 
 ### Database and RLS
 
@@ -47,7 +60,7 @@ Clerk keys are read from `~/.config/shimizu/clerk-payroll-local.env` and are nev
 
 Every app process gets complete URLs: `DATABASE_URL` (owner; cache, queue and cable pools) and `RLS_DATABASE_URL` (`payroll_app`; the primary pool). `MIGRATION_DATABASE_URL` is given only to owner maintenance commands. Local mode refuses `PG*` routing variables, so none are exported.
 
-`up.sh` never un-enforces a database. To run in shadow, start from fresh data (`down.sh --purge`, then `LOCAL_PROD_RLS_PHASE=shadow up.sh`), or run `rls:disable` first.
+`up.sh` never un-enforces a database. Asked for shadow on an enforced database, it stops with a message. To run in shadow, start from fresh data (`down.sh --purge`, then `LOCAL_PROD_RLS_PHASE=shadow up.sh`), or run `rls:disable` first.
 
 To rehearse a rollback, run any `rls:*` task with the maintenance environment:
 

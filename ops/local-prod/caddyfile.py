@@ -17,7 +17,7 @@ def parse_headers(path):
     rules, current = [], None
     with open(path, encoding="utf-8") as handle:
         for raw in handle:
-            line = raw.rstrip("\n")
+            line = raw.rstrip("\r\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
             if not line[0].isspace():
@@ -48,8 +48,16 @@ def quote(value):
     return f"`{value}`"
 
 
-def site_body(dist):
-    lines = [f"\troot * {dist}"]
+# Netlify's default for responses its _headers don't set (the staff surface).
+NETLIFY_DEFAULT_CACHE = "public, max-age=0, must-revalidate"
+# Files the build writes for the host, never served by Netlify.
+HIDDEN = ("/_headers", "/_redirects", "/.built-from")
+
+
+def site_body(dist, default_cache=None):
+    lines = [f'\troot * "{dist}"', f"\t@hidden path {' '.join(HIDDEN)}"]
+    if default_cache:
+        lines.append(f"\theader ?Cache-Control {quote(default_cache)}")
     headers = os.path.join(dist, "_headers")
     for index, (pattern, values) in enumerate(parse_headers(headers) if os.path.exists(headers) else []):
         matcher = "" if pattern == "/*" else f"@h{index}"
@@ -58,6 +66,7 @@ def site_body(dist):
         for name, value in values:
             lines.append(f"\theader {matcher + ' ' if matcher else ''}{name} {quote(value)}")
     lines.append("\troute {")
+    lines.append("\t\trespond @hidden 404")
     redirects = os.path.join(dist, "_redirects")
     for index, (source, target, status, force) in enumerate(parse_redirects(redirects) if os.path.exists(redirects) else []):
         if status == "200":
@@ -70,7 +79,9 @@ def site_body(dist):
             lines.append(f"\t\t@r{index} {{\n\t\t\tpath {source}\n" + ("" if force else "\t\t\tnot file\n") + "\t\t}")
             lines.append(f"\t\trewrite @r{index} {target}")
         else:
-            lines.append(f"\t\tredir {source} {target} {status}")
+            # Without "!", Netlify redirects only when no file matches.
+            lines.append(f"\t\t@r{index} {{\n\t\t\tpath {source}\n" + ("" if force else "\t\t\tnot file\n") + "\t\t}")
+            lines.append(f"\t\tredir @r{index} {target} {status}")
     lines.append("\t\tfile_server")
     lines.append("\t}")
     return "\n".join(lines)
@@ -79,16 +90,16 @@ def site_body(dist):
 def main():
     state, root, port, staff_port, employee_port, admin = sys.argv[1:7]
     certs = os.path.join(state, "certs")
-    tls = f"\ttls {certs}/site.pem {certs}/site-key.pem"
+    tls = f'\ttls "{certs}/site.pem" "{certs}/site-key.pem"'
     blocks = [
         "{\n"
         f"\tadmin {admin}\n"
         "\tdefault_bind 127.0.0.1 [::1]\n"
         "\tauto_https disable_redirects\n"
         "\tskip_install_trust\n"
-        f"\tstorage file_system {state}/caddy\n"
+        f'\tstorage file_system "{state}/caddy"\n'
         "}",
-        f"https://payroll.{root}:{port} {{\n{tls}\n{site_body(os.path.join(state, 'web', 'staff'))}\n}}",
+        f"https://payroll.{root}:{port} {{\n{tls}\n{site_body(os.path.join(state, 'web', 'staff'), NETLIFY_DEFAULT_CACHE)}\n}}",
         f"https://api.{root}:{port} {{\n{tls}\n\treverse_proxy 127.0.0.1:{staff_port}\n}}",
         f"https://employee-api.{root}:{port} {{\n{tls}\n\treverse_proxy 127.0.0.1:{employee_port}\n}}",
         # Every other name is a client's employee address, as on the employee site.

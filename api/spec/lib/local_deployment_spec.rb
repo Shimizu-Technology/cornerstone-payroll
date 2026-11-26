@@ -329,6 +329,17 @@ RSpec.describe LocalDeployment do
     end
   end
 
+  it "keeps a local copy's objects in its own data directory when given one" do
+    with_env(local_env.merge("LOCAL_STORAGE_ROOT" => "/tmp/local-prod/storage")) do
+      expect(R2StorageService.new.send(:local_storage_root).to_s).to eq("/tmp/local-prod/storage/local_r2_storage")
+    end
+    with_env("DEPLOYMENT_ENV" => "production", "LOCAL_STORAGE_ROOT" => "/tmp/local-prod/storage") do
+      expect(R2StorageService.new.send(:local_storage_root).to_s).not_to include("/tmp/local-prod")
+    end
+    expect { described_class.validate!(env: local_env.merge("LOCAL_STORAGE_ROOT" => "relative/storage")) }
+      .to raise_error(LocalDeployment::ConfigurationError, /LOCAL_STORAGE_ROOT/)
+  end
+
   it "fails production readiness on a local copy" do
     check = ProductionReadiness.new(env: local_env).send(:base_configuration_checks).find { |item| item.name.include?("not a local production copy") }
     expect(check.passed).to be(false)
