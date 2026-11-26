@@ -72,9 +72,9 @@ it('selects only committed and baseline payroll when newer runs await approval',
   ] });
   render(<ClientReports />);
   await waitFor(() => expect(api.register).toHaveBeenCalledWith(7));
-  expect(screen.queryByRole('option', { name: '2026-06-01 - 2026-06-14' })).toBeNull();
-  expect(screen.queryByRole('option', { name: '2026-05-01 - 2026-05-14' })).toBeNull();
-  expect(screen.getByRole('option', { name: '2026-03-01 - 2026-03-14' })).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'Jun 1 – 14, 2026' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'May 1 – 14, 2026' })).toBeNull();
+  expect(screen.getByRole('option', { name: 'Mar 1 – 14, 2026' })).toBeTruthy();
 });
 
 it('keeps payroll reports available on employee-list failure and retries all employee pages', async () => {
@@ -97,7 +97,7 @@ it('reads every page of pay periods before choosing finished payroll', async () 
   render(<ClientReports />);
   await waitFor(() => expect(api.register).toHaveBeenCalledWith(4));
   expect(api.periods).toHaveBeenNthCalledWith(2, { page: 2, per_page: 100 });
-  expect(screen.getByRole('option', { name: '2026-01-01 - 2026-01-14' })).toBeTruthy();
+  expect(screen.getByRole('option', { name: 'Jan 1 – 14, 2026' })).toBeTruthy();
 });
 
 it('keeps reading past fifty pages until the last page the server reports', async () => {

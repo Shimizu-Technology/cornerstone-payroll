@@ -277,7 +277,7 @@ RSpec.describe "Legacy employer benefit report compatibility", type: :request do
       payroll_register_xlsx ytd_summary ytd_summary_pdf ytd_summary_csv ytd_summary_xlsx].each do |action|
       report_get(action)
       expect(response).to have_http_status(:unprocessable_entity), "#{action}: #{response.status}"
-      expect(response.parsed_body.fetch("error")).to include("ambiguous", "reviewed component reconciliation")
+      expect(response.parsed_body.fetch("error")).to eq("This report is unavailable until the payroll details are reviewed.")
     end
   end
 end

@@ -52,7 +52,7 @@ afterEach(cleanup);
 
 it('shows the current revision and keeps the superseded one visible', async () => {
   renderAt('client');
-  expect(await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Payroll Nov 2 – 15, 2026' })).toBeTruthy();
   expect(screen.getByText(/Pay date Nov 20, 2026/)).toBeTruthy();
   const current = screen.getByRole('region', { name: 'Revision 2' });
   expect(within(current).getByText('Current')).toBeTruthy();
@@ -134,7 +134,7 @@ it('marks a period seen only once it is shown in the foreground, through the dis
   const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(false);
   mocks.get.mockResolvedValue({ data: period({ latest_client_event_id: 77 }) });
   renderAt('staff');
-  await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' });
+  await screen.findByRole('heading', { name: 'Payroll Nov 2 – 15, 2026' });
   expect(mocks.seen).not.toHaveBeenCalled();
   focus.mockReturnValue(true);
   window.dispatchEvent(new Event('focus'));
@@ -214,6 +214,6 @@ it('warns staff, and only staff, when the linked pay run is voided or ambiguous'
   expect((await screen.findByRole('alert')).textContent).toBe(warning);
   cleanup();
   renderAt('client');
-  await screen.findByRole('heading', { name: 'Payroll Nov 2–15, 2026' });
+  await screen.findByRole('heading', { name: 'Payroll Nov 2 – 15, 2026' });
   expect(screen.queryByText(warning)).toBeNull();
 });

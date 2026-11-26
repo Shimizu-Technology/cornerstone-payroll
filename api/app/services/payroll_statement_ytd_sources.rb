@@ -52,7 +52,8 @@ class PayrollStatementYtdSources
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)", pay_date: pay_date, period_id: @pay_period.id)
       prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
       items = @employee.payroll_items.financially_reportable.reportable
-        .where(company_id: @company.id, pay_period_id: prior_periods.select(:id)).eager_load(:pay_period).to_a
+        .where(company_id: @company.id, pay_period_id: prior_periods.select(:id))
+        .eager_load(:pay_period).order("pay_periods.pay_date", :id).to_a
       # Every period here is this company's.
       items.each { |item| item.pay_period.association(:company).target = @company }
 

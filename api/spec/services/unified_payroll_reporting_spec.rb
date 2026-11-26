@@ -27,6 +27,17 @@ RSpec.describe UnifiedPayrollReporting do
     )
   end
 
+  it "counts Regular OT in overtime hours only" do
+    check = financial_row_class.new(hours_breakdown: [
+      { label: "Regular Pay", amount: "40" }, { label: "Hourly", amount: "8" },
+      { label: "Regular OT", amount: "5" }
+    ])
+    reporting = described_class.new(company_id: 1, period: instance_double(PayrollReportingPeriod))
+
+    expect(reporting.send(:recorded_hours_component, check, described_class::REGULAR_HOURS)).to eq(48)
+    expect(reporting.send(:recorded_hours_component, check, described_class::OVERTIME_HOURS)).to eq(5)
+  end
+
   describe "historical employer cost classification" do
     it "separates employer taxes, 401(k) matches, and unclassified contributions across source and adjustments" do
       source = financial_row_class.new(

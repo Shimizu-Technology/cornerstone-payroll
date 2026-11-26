@@ -65,7 +65,7 @@ class CheckPrintQueueService
       source_type: "payroll_item",
       source_id: item.id,
       check_number: item.check_number.to_s,
-      payee: item.employee.full_name,
+      payee: item.employee.legal_name,
       amount: item.net_pay.to_d.to_f,
       kind: "employee",
       kind_label: "Employee check",

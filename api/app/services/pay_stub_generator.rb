@@ -182,7 +182,7 @@ class PayStubGenerator
   def render_employee_info(pdf)
     pdf.font_size(9) do
       data = [
-        [ "Employee:", employee.full_name ],
+        [ "Employee:", employee.legal_name ],
         [ "Employee ID:", employee.id.to_s ],
         [ "SSN:", "XXX-XX-#{employee.ssn_last_four || '****'}" ],
         [ "Department:", employee.department&.name || "N/A" ]

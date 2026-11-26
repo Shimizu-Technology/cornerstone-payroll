@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Download, Loader2, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { PdfDocumentView } from '@/components/documents/PdfPreview';
 import { SheetPreview } from '@/components/documents/SheetPreview';
 import { importSourceFiles } from '@/lib/importSources';
 import { isJsonBlob, readSheetPreview, type SheetPreviewData } from '@/lib/sheetPreview';
 import { cn } from '@/lib/utils';
 import { payrollIntakeImportsApi, type ImportSourceDocument } from '@/services/api';
+
+const PdfDocumentView = lazy(() => import('@/components/documents/PdfPreview').then((module) => ({ default: module.PdfDocumentView })));
 
 type TabKey = 'pdf' | 'workbook';
 type Loaded =
@@ -181,7 +182,9 @@ export function ImportSourcePanel({ payPeriodId, importId, documents, className 
             <p className="max-w-sm text-sm text-neutral-700">{state.message}</p>
           </div>
         ) : state.status === 'pdf' ? (
-          <PdfDocumentView blob={state.blob} className="flex-1" />
+          <Suspense fallback={<p role="status" className="p-4 text-sm text-neutral-600">Loading PDF preview…</p>}>
+            <PdfDocumentView blob={state.blob} className="flex-1" />
+          </Suspense>
         ) : (
           <SheetPreview data={state.data} className="flex-1" />
         )}
