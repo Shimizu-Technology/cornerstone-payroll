@@ -58,6 +58,12 @@ class W2FilingInputsFingerprint
         .order(:id).map { |item| item.attributes.slice(*ITEM_FIELDS).merge("pay_date" => item.pay_period.pay_date.iso8601) },
       responsibility: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
     }
+    # Only when one exists, so fingerprints of clients without any overlap
+    # stay exactly as they were.
+    overlap_dispositions = PayrollItemBridgeOverlapDisposition.where(company_id: company.id)
+      .joins(payroll_item: :pay_period).where(pay_periods: { pay_date: year_range })
+      .order(:id).pluck(:id, :payroll_item_id, :historical_import_batch_id, :decision, :historical_paycheck_id)
+    snapshot[:bridge_overlap_dispositions] = overlap_dispositions if overlap_dispositions.any?
     Digest::SHA256.hexdigest(JSON.generate(QuickbooksHistory::CanonicalJson.normalize(snapshot)))
   end
 

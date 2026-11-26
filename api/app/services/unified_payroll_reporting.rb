@@ -23,9 +23,9 @@ class UnifiedPayrollReporting
 
   def self.basis_label(basis)
     {
-      BRIDGED => "From the applied opening YTD balance",
+      BRIDGED => "Gross, non-taxable pay, income tax, Social Security, Medicare, deductions and net pay from the applied opening YTD balance; other figures as imported",
       AS_IMPORTED => "As imported",
-      MIXED => "Partly from the applied opening YTD balance, partly as imported"
+      MIXED => "Partly from the applied opening YTD balance (gross, non-taxable pay, taxes, deductions and net pay), otherwise as imported"
     }.fetch(basis.to_s, basis.to_s.humanize)
   end
 
@@ -98,6 +98,7 @@ class UnifiedPayrollReporting
       gross_pay: (row.fetch(:gross_pay, 0).to_d + totals[:gross_pay]).to_f,
       non_taxable_additions_total: row.fetch(:non_taxable_additions_total, 0).to_d + totals[:non_taxable_pay],
       imported_basis: totals[:imported_basis],
+      bridged_fields: totals[:bridged_fields] || [],
       bonus: (row.fetch(:bonus, 0).to_d + totals[:bonus]).to_f,
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
       installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
@@ -138,6 +139,7 @@ class UnifiedPayrollReporting
       gross_pay: (row.fetch(:gross_pay, 0).to_d + totals[:gross_pay]).to_f,
       non_taxable_additions_total: row.fetch(:non_taxable_additions_total, 0).to_d + totals[:non_taxable_pay],
       imported_basis: totals[:imported_basis],
+      bridged_fields: totals[:bridged_fields] || [],
       bonus: (row.fetch(:bonus, 0).to_d + totals[:bonus]).to_f,
       straight_loan_deductions: row.fetch(:straight_loan_deductions, 0).to_f,
       installment_loan_payments: row.fetch(:installment_loan_payments, 0).to_f,
@@ -235,7 +237,10 @@ class UnifiedPayrollReporting
       bonus: 0,
       custom_earnings_total: 0,
       custom_deductions_total: 0,
+      # Gross as imported, which includes non-taxable reimbursements; the
+      # period summary shows those under non-taxable additions instead.
       gross_pay: paycheck.gross_pay.to_f,
+      non_taxable_pay: totals[:non_taxable_pay].to_f,
       withholding_tax: paycheck.federal_income_tax.to_f,
       additional_withholding: 0.0,
       total_income_tax_withheld: paycheck.federal_income_tax.to_f,
@@ -281,6 +286,7 @@ class UnifiedPayrollReporting
       custom_earnings_total: 0,
       custom_deductions_total: 0,
       gross_pay: adjustment.gross_pay.to_f,
+      non_taxable_pay: totals[:non_taxable_pay].to_f,
       withholding_tax: adjustment.federal_income_tax.to_f,
       additional_withholding: 0.0,
       total_income_tax_withheld: adjustment.federal_income_tax.to_f,
@@ -385,7 +391,9 @@ class UnifiedPayrollReporting
       totals[field] = (totals[field] - covered[field] + balances.values.sum(0.to_d, &figure)).round(2)
     end
     complete = (paychecks + adjustments).all? { |row| balances.key?(bridge_key(row)) }
-    totals.merge(imported_basis: complete ? BRIDGED : MIXED)
+    # Only these fields come from the balance; every other figure (hours,
+    # retirement, employer costs, deduction categories) stays as imported.
+    totals.merge(imported_basis: complete ? BRIDGED : MIXED, bridged_fields: BRIDGE_FIGURES.keys.map(&:to_s))
   end
 
   # Every money figure stays BigDecimal; callers convert at the response.
@@ -474,20 +482,31 @@ class UnifiedPayrollReporting
     end
   end
 
-  # Every imported row a covering balance was built from, loaded only for the
-  # balances a totals call actually reaches.
+  # Every imported row each covering balance was built from, for all of the
+  # range's balances in two queries, keyed as range_balances is.
   def bridge_sources(key)
-    @bridge_sources ||= {}
-    @bridge_sources[key] ||= begin
-      batch_id, employee_id, year = key
-      year_range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
-      {
-        paychecks: HistoricalPaycheck.where(historical_import_batch_id: batch_id, employee_id: employee_id, pay_date: year_range).order(:id).pluck(:id),
-        adjustments: HistoricalPaycheckAdjustment.joins(:historical_paycheck)
-          .where(historical_paychecks: { historical_import_batch_id: batch_id, employee_id: employee_id }, effective_pay_date: year_range)
-          .order(:id).pluck(:id)
-      }
+    @bridge_sources ||= begin
+      keys = range_balances.keys
+      sources = keys.index_with { { paychecks: [], adjustments: [] } }
+      if keys.any?
+        batch_ids = keys.map(&:first).uniq
+        employee_ids = keys.map(&:second).uniq
+        years = keys.map(&:third)
+        dates = Date.new(years.min, 1, 1)..Date.new(years.max, 12, 31)
+        HistoricalPaycheck.where(historical_import_batch_id: batch_ids, employee_id: employee_ids, pay_date: dates)
+          .order(:id).pluck(:id, :historical_import_batch_id, :employee_id, :pay_date).each do |id, batch_id, employee_id, pay_date|
+            sources[[ batch_id, employee_id, pay_date.year ]]&.fetch(:paychecks)&.push(id)
+          end
+        HistoricalPaycheckAdjustment.joins(:historical_paycheck)
+          .where(historical_paychecks: { historical_import_batch_id: batch_ids, employee_id: employee_ids }, effective_pay_date: dates)
+          .order(:id).pluck(:id, "historical_paychecks.historical_import_batch_id", "historical_paychecks.employee_id", :effective_pay_date)
+          .each do |id, batch_id, employee_id, pay_date|
+            sources[[ batch_id, employee_id, pay_date.year ]]&.fetch(:adjustments)&.push(id)
+          end
+      end
+      sources
     end
+    @bridge_sources.fetch(key)
   end
 
   def non_taxable_pay(row)

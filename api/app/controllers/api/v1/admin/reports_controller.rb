@@ -2470,7 +2470,7 @@ module Api
             payroll_count: items.map(&:pay_period_id).uniq.length,
             imported_payroll_count: 0,
             imported_opening_summary_count: 0,
-            gross_pay: items.sum { |item| item.gross_pay.to_f },
+            gross_pay: items.sum(0.to_d) { |item| item.gross_pay.to_d },
             non_taxable_additions_total: items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
             total_hours: items.sum(0.to_d) { |item| item.hours_worked.to_d },
             total_overtime_hours: items.sum(0.to_d) { |item| item.overtime_hours.to_d },
@@ -2484,13 +2484,13 @@ module Api
             withholding_tax: items.sum(0.to_d, &:total_income_tax_withheld),
             base_withholding_tax: items.sum(0.to_d) { |item| item.withholding_tax.to_d },
             additional_withholding: items.sum(0.to_d) { |item| item.additional_withholding.to_d },
-            social_security_tax: items.sum { |item| item.social_security_tax.to_f },
-            medicare_tax: items.sum { |item| item.medicare_tax.to_f },
-            retirement: retirement_totals[:retirement].to_f,
-            roth_retirement: retirement_totals[:roth_retirement].to_f,
-            tips: items.sum { |item| item.reported_tips.to_f },
-            tips_paid_out: items.sum { |item| item.tips_paid_out.to_f },
-            bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
+            social_security_tax: items.sum(0.to_d) { |item| item.social_security_tax.to_d },
+            medicare_tax: items.sum(0.to_d) { |item| item.medicare_tax.to_d },
+            retirement: retirement_totals[:retirement].to_d,
+            roth_retirement: retirement_totals[:roth_retirement].to_d,
+            tips: items.sum(0.to_d) { |item| item.reported_tips.to_d },
+            tips_paid_out: items.sum(0.to_d) { |item| item.tips_paid_out.to_d },
+            bonus: items.sum(0.to_d) { |item| payroll_summary_bonus_amount(item).to_d },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
@@ -2498,7 +2498,7 @@ module Api
             **employer_cost_totals,
             total_deductions: custom_totals[:total_deductions],
             custom_deductions_total: custom_totals[:custom_deductions_total],
-            net_pay: items.sum { |item| item.net_pay.to_f },
+            net_pay: items.sum(0.to_d) { |item| item.net_pay.to_d },
             combined_hours: items.sum(0.to_d, &:combined_hours)
           }
           if historical_paychecks.any? || historical_adjustments.any?
@@ -2518,11 +2518,11 @@ module Api
             start_date: period.start_date,
             end_date: period.end_date,
             period_basis: "pay_date",
-            gross_pay: items.sum { |item| item.gross_pay.to_f },
+            gross_pay: items.sum(0.to_d) { |item| item.gross_pay.to_d },
             non_taxable_additions_total: items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
             total_hours: items.sum(0.to_d) { |item| item.hours_worked.to_d },
             total_overtime_hours: items.sum(0.to_d) { |item| item.overtime_hours.to_d },
-            bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
+            bonus: items.sum(0.to_d) { |item| payroll_summary_bonus_amount(item).to_d },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
@@ -2538,13 +2538,13 @@ module Api
             withholding_tax: items.sum(0.to_d, &:total_income_tax_withheld),
             base_withholding_tax: items.sum(0.to_d) { |item| item.withholding_tax.to_d },
             additional_withholding: items.sum(0.to_d) { |item| item.additional_withholding.to_d },
-            social_security_tax: items.sum { |item| item.social_security_tax.to_f },
-            medicare_tax: items.sum { |item| item.medicare_tax.to_f },
-            retirement: retirement_totals[:retirement].to_f,
-            roth_retirement: retirement_totals[:roth_retirement].to_f,
-            total_deductions: items.sum { |item| item.total_deductions.to_f },
+            social_security_tax: items.sum(0.to_d) { |item| item.social_security_tax.to_d },
+            medicare_tax: items.sum(0.to_d) { |item| item.medicare_tax.to_d },
+            retirement: retirement_totals[:retirement].to_d,
+            roth_retirement: retirement_totals[:roth_retirement].to_d,
+            total_deductions: items.sum(0.to_d) { |item| item.total_deductions.to_d },
             custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
-            net_pay: items.sum { |item| item.net_pay.to_f },
+            net_pay: items.sum(0.to_d) { |item| item.net_pay.to_d },
             payroll_count: items.map(&:pay_period_id).uniq.length,
             employee_count: items.map(&:employee_id).uniq.length,
             imported_payroll_count: 0,
@@ -2560,7 +2560,13 @@ module Api
           payroll_period_summary_numbers(row)
         end
 
+        # Sums stay BigDecimal; the response keeps its numeric (Float) fields.
+        SUMMARY_FLOAT_FIELDS = %i[
+          gross_pay social_security_tax medicare_tax retirement roth_retirement tips tips_paid_out bonus net_pay total_deductions
+        ].freeze
+
         def payroll_period_summary_numbers(row)
+          SUMMARY_FLOAT_FIELDS.each { |key| row[key] = row[key].to_f if row.key?(key) }
           %i[total_hours total_overtime_hours withholding_tax base_withholding_tax additional_withholding combined_hours].each { |key| row[key] = row.fetch(key).to_f }
           row
         end

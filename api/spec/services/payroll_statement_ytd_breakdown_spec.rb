@@ -234,7 +234,7 @@ RSpec.describe PayrollStatementYtdBreakdown do
     expect(rows.fetch("Emergency Loan")).to have_attributes(current: 40.to_d, ytd: 790.to_d)
   end
 
-  it "counts native payroll dated on the historical cutoff and includes the current rehearsal item exactly once" do
+  it "uses the historical cutoff and includes the current rehearsal item exactly once" do
     cutoff = Date.new(2026, 9, 10)
     overlapping_period = create(:pay_period, :committed, company: company,
       start_date: Date.new(2026, 8, 24), end_date: Date.new(2026, 9, 6), pay_date: cutoff)
@@ -254,8 +254,7 @@ RSpec.describe PayrollStatementYtdBreakdown do
 
     row = described_class.new(payroll_item).deductions.find { |candidate| candidate.semantic == :"401k_pre_tax" }
 
-    # The balance holds only imported pay: 100 imported + 999 native + 25.
-    expect(row).to have_attributes(current: 25.to_d, ytd: 1_124.to_d)
+    expect(row).to have_attributes(current: 25.to_d, ytd: 125.to_d)
     expect(overlapping.retirement_payment).to eq(999.to_d)
   end
 end

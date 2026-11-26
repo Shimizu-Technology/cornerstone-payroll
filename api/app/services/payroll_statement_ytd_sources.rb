@@ -65,10 +65,10 @@ class PayrollStatementYtdSources
     end
   end
 
-  # Reportable native paychecks count even when dated on or before the
-  # opening balance's through date: the balance holds only imported pay, and
-  # W-2GU, payroll calculation and the saved YTD snapshots all count them.
-  # Only an explicit legacy disposition or reversal excludes a paycheck.
+  # A native paycheck dated on or before the opening balance's through date
+  # counts only once it is recorded as a payment distinct from the imported
+  # ones (PayrollBridgeOverlap); a duplicate, or one still awaiting review,
+  # stays out, as the balance is taken to hold it.
   def items
     @items ||= begin
       prior_periods = PayPeriod.reportable_for_company(@company)
@@ -76,17 +76,31 @@ class PayrollStatementYtdSources
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)", pay_date: pay_date, period_id: @pay_period.id)
       items = @employee.payroll_items.financially_reportable.reportable
         .where(company_id: @company.id, pay_period_id: prior_periods.select(:id))
-        .eager_load(:pay_period).order("pay_periods.pay_date", "pay_periods.id", :id).to_a
+      if historical_cutoff
+        items = items.where("pay_periods.pay_date > ? OR payroll_items.id IN (?)", historical_cutoff, distinct_overlap_ids)
+      end
+      items = items.eager_load(:pay_period).order("pay_periods.pay_date", "pay_periods.id", :id).to_a
       # Every period here is this company's.
       items.each { |item| item.pay_period.association(:company).target = @company }
 
-      items << payroll_item if payroll_item.payroll_included? && @pay_period.correction_status.in?([ nil, "correction" ])
+      if payroll_item.payroll_included? && @pay_period.correction_status.in?([ nil, "correction" ]) &&
+          (historical_cutoff.nil? || pay_date > historical_cutoff || distinct_overlap_ids.exists?(payroll_item_id: payroll_item.id))
+        items << payroll_item
+      end
       preload_components(items.reject { |item| item.equal?(payroll_item) })
       items
     end
   end
 
+  def historical_cutoff
+    historical_balance&.through_pay_date
+  end
+
   private
+
+  def distinct_overlap_ids
+    PayrollBridgeOverlap.distinct_item_ids(company_id: @company.id, batch_id: historical_balance.historical_ytd_bridge.historical_import_batch_id)
+  end
 
   # The saved paycheck's own components load in the same batch queries. A
   # draft or preview may hold unsaved components in memory; those stay as built.

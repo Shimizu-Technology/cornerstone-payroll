@@ -63,8 +63,9 @@ RSpec.describe "Pay period detail read", type: :request do
     it "stays bounded when every eligibility branch is present" do
       period = build_detail_read_period(ordinary_rows: 4)
 
-      # 66: one lookup per run for the opening balances behind the stub's YTD gross (StatementYtdGross).
-      expect(query_count(period)).to be <= 66
+      # 67: two queries per run (opening balances, earlier paychecks) for the
+      # statement YTD each row shows (StatementYtdFigures); not per row.
+      expect(query_count(period)).to be <= 67
     end
 
     it "does not ask for evidence a draft run never reaches" do

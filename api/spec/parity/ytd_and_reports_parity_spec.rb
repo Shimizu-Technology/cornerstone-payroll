@@ -339,7 +339,7 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         expect(money(full_row["withholding_tax"])).to eq((balance.federal_income_tax + fixture.items.fetch(:prior_provider_ytd_p2).total_income_tax_withheld).round(2))
         expect(full_report.dig("source_summary", "historical_ytd_bridge", "totals_basis")).to eq(UnifiedPayrollReporting::BRIDGED)
         expect(staff_api.ytd_summary_pdf_text(year: Parity::FixtureBuilder::TAX_YEAR))
-          .to include("Imported figures From the applied opening YTD balance")
+          .to include("Imported figures Gross, non-taxable pay, income tax, Social Security, Medicare, deductions and net pay from the applied opening YTD balance; other figures as imported")
 
         # A range that starts after January 1 cannot use a year-to-date balance.
         part_row, part_report = row_for.call(start_date: "2026-01-10", end_date: "2026-12-31")
@@ -525,54 +525,43 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
     context "native payroll on or before bridge cutoff (L16)" do
       let(:include_w2_copies) { false }
       let(:fixture_scenarios) { [ :prior_provider_ytd ] }
+      let(:employee) { fixture.employees.fetch(:prior_provider_ytd) }
+      let(:balance) { fixture.qb_records.fetch(:ytd_balance) }
+      let(:later_item) { fixture.items.fetch(:prior_provider_ytd_p2) }
+      let(:year) { Parity::FixtureBuilder::TAX_YEAR }
 
-      it "counts the bridge and every native paycheck once on W-2GU and the statement when a native run sits inside the cutoff" do
-        # A native run paid on the bridge's own through date. Current guards
-        # refuse to create or commit one (the first bridge needs a client with
-        # no pay periods, and every period must follow the boundary), so this is
-        # older data: the period skips only that check, then commits through
-        # the real lifecycle.
-        employee = fixture.employees.fetch(:prior_provider_ytd)
-        balance = fixture.qb_records.fetch(:ytd_balance)
-        overlap_period = PayPeriod.new(
-          company: fixture.company,
-          status: "approved",
-          start_date: Date.new(2026, 1, 1),
-          end_date: Date.new(2026, 1, 14),
-          pay_date: Parity::FixtureBuilder::QB_PERIOD_PAY
-        )
-        overlap_period.save!(validate: false)
-        overlap_item = overlap_period.payroll_items.build(
-          company: fixture.company,
-          employee: employee,
-          employment_type: "hourly",
-          pay_rate: BigDecimal("22.00"),
-          hours_worked: BigDecimal("40.00"),
-          payment_delivery_method: "direct_deposit"
-        )
-        PayrollCalculator.for(employee, overlap_item).calculate
-        overlap_item.save!
-        # Commit also refuses a period inside the boundary today; only that
-        # check is lifted (until this example ends), so snapshots and events
-        # are the real ones.
+      # A native run paid inside the bridge window. Current guards refuse to
+      # create or commit one (the first bridge needs a client with no pay
+      # periods, and every period must follow the boundary), so this is older
+      # data: the period skips only that check, then commits through the real
+      # lifecycle. amounts: saved figures that repeat an imported paycheck.
+      def overlap_run!(pay_date:, hours: BigDecimal("40.00"), amounts: nil)
+        period = PayPeriod.new(company: fixture.company, status: "approved",
+          start_date: pay_date - 15, end_date: pay_date - 2, pay_date: pay_date)
+        period.save!(validate: false)
+        item = period.payroll_items.build(company: fixture.company, employee: employee, employment_type: "hourly",
+          pay_rate: BigDecimal("22.00"), hours_worked: hours, payment_delivery_method: "direct_deposit")
+        PayrollCalculator.for(employee, item).calculate
+        item.save!
         allow_any_instance_of(PayPeriod).to receive(:starts_after_historical_ytd_boundary)
         TenantScope.with_company(fixture.company.id) do
-          PayPeriodLifecycleService.new(pay_period: overlap_period, actor: fixture.staff_user).commit!
+          PayPeriodLifecycleService.new(pay_period: period, actor: fixture.staff_user).commit!
         end
-        expect(overlap_period.reload).to be_committed
-        expect(overlap_item.reload.check_number).to be_nil
-        expect(balance.through_pay_date).to eq(overlap_period.pay_date)
+        expect(period.reload).to be_committed
+        # Older data whose saved figures equal the imported paycheck's.
+        item.update_columns(**amounts) if amounts
+        item.reload
+      end
 
-        # The bridge holds only the imported QuickBooks paycheck and its
-        # adjustment, so the native run is new pay, not a copy of it.
-        qb_check = fixture.qb_records.fetch(:paycheck)
-        qb_adjustment = fixture.qb_records.fetch(:adjustment)
-        expect(balance.federal_income_tax).to eq(qb_check.federal_income_tax + qb_adjustment.federal_income_tax)
-        expect(balance.gross_pay).to eq(qb_check.gross_pay + qb_adjustment.gross_pay)
+      def w2_boxes
+        row = staff_api.extract_w2_employee_row(employee_id: employee.id, year: year)
+        row.slice(:box1_wages, :box2_income_tax, :box3_ss_wages, :box4_ss_tax, :box5_medicare_wages, :box6_medicare_tax)
+      end
 
-        native = [ overlap_item, fixture.items.fetch(:prior_provider_ytd_p2).reload ]
-        total = ->(field) { native.sum(0.to_d) { |item| item.public_send(field).to_d } }
-        expected_w2 = {
+      # Bridge plus each counted native paycheck, exactly once.
+      def expected_boxes(native)
+        total = ->(field) { native.sum(0.to_d) { |item| item.reload.public_send(field).to_d } }
+        {
           box1_wages: (balance.fit_taxable_wages + total.call(:fit_taxable_wages)).round(2),
           box2_income_tax: (balance.federal_income_tax + total.call(:withholding_tax) + total.call(:additional_withholding)).round(2),
           box3_ss_wages: (balance.social_security_taxable_wages + total.call(:social_security_taxable_wages)).round(2),
@@ -580,29 +569,114 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
           box5_medicare_wages: (balance.medicare_taxable_wages + total.call(:medicare_taxable_wages)).round(2),
           box6_medicare_tax: (balance.medicare_tax + total.call(:medicare_tax)).round(2)
         }
-        w2_row = staff_api.extract_w2_employee_row(employee_id: employee.id, year: Parity::FixtureBuilder::TAX_YEAR)
-        expect(w2_row).to be_present
-        expect(w2_row.slice(*expected_w2.keys)).to eq(expected_w2)
+      end
 
-        # The statement, as of the later paycheck, counts the same pay.
+      def statement_ytd
         doc = fixture.ensure_stub_posted!(:prior_provider_ytd_p2)
-        emp_stmt = employee_api(:prior_provider_ytd).extract_paycheck(statement_id: doc.id)
-        expect(emp_stmt.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + total.call(:gross_pay)).round(2))
+        doc = EmployeeDocument.where(payroll_item_id: later_item.id).order(revision: :desc).first if doc.reload.replaced?
+        employee_api(:prior_provider_ytd).extract_paycheck(statement_id: doc.id)
+      end
+
+      def preflight_codes
+        W2GuPreflightValidator.new(company: fixture.company, year: year).run.fetch(:findings).map { |finding| finding[:code] }
+      end
+
+      def recheck_later_stub!
+        TenantScope.as_system(reason: "Parity spec rechecks the later stub") do
+          EmployeeDocuments::PostPayStub.new(later_item.reload, now: Parity::FixtureBuilder::POSTING_NOW + 1.day).call
+        end
+      end
+
+      def assert_statement_matches_w2!(stmt, boxes)
         assert_parity_table!(
           fixture: :prior_provider_ytd,
           views: {
-            employee_api: emp_stmt.dig(:ytd).merge(income_tax_total: emp_stmt.dig(:ytd, :total_income_tax)),
-            staff_w2_gu: { social_security: w2_row[:box4_ss_tax], medicare_total: w2_row[:box6_medicare_tax], income_tax_total: w2_row[:box2_income_tax] }
+            employee_api: { income_tax: stmt.dig(:ytd, :total_income_tax), social_security: stmt.dig(:ytd, :social_security), medicare: stmt.dig(:ytd, :medicare_total) },
+            staff_w2_gu: { income_tax: boxes[:box2_income_tax], social_security: boxes[:box4_ss_tax], medicare: boxes[:box6_medicare_tax] }
           },
-          figures: %i[income_tax_total social_security medicare_total]
+          figures: %i[income_tax social_security medicare]
         )
+      end
 
-        # The overlap paycheck's own statement includes itself.
-        overlap_doc = TenantScope.as_system(reason: "Parity spec posts overlap stub") do
-          EmployeeDocuments::PostPayStub.new(overlap_item, now: Time.current).call
-        end
-        overlap_stmt = employee_api(:prior_provider_ytd).extract_paycheck(statement_id: overlap_doc.id)
-        expect(overlap_stmt.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + overlap_item.gross_pay.to_d).round(2))
+      it "counts a distinct native payment once, on W-2GU and on the statement" do
+        original = fixture.ensure_stub_posted!(:prior_provider_ytd_p2)
+        overlap = overlap_run!(pay_date: Date.new(2026, 1, 9))
+        expect(PayrollBridgeOverlap.new(company_id: fixture.company.id, year: year).call.map(&:proposal)).to eq([ :distinct ])
+
+        # Until recorded: the statement keeps leaving it out, W-2GU keeps it, and filing is blocked.
+        expect(statement_ytd.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + later_item.gross_pay.to_d).round(2))
+        expect(w2_boxes).to eq(expected_boxes([ overlap, later_item ]))
+        expect(preflight_codes).to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+        expect(employee_api(:prior_provider_ytd).statement_detail(original.id)["ytd_note"]).to eq(PayrollBridgeOverlap::EMPLOYEE_NOTE)
+
+        recorded = PayrollBridgeOverlapDispositionService.record_evident!(company_id: fixture.company.id, year: year, actor: fixture.staff_user)
+        expect(recorded.map(&:decision)).to eq([ PayrollItemBridgeOverlapDisposition::DISTINCT ])
+        expect(preflight_codes).not_to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+
+        # Its figures were wrong before: the later stub revises once.
+        revised = recheck_later_stub!
+        expect(revised.revision).to eq(2)
+        expect(original.reload).to be_replaced
+        stmt = statement_ytd
+        expect(stmt.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + overlap.gross_pay.to_d + later_item.gross_pay.to_d).round(2))
+        boxes = w2_boxes
+        expect(boxes).to eq(expected_boxes([ overlap, later_item ]))
+        assert_statement_matches_w2!(stmt, boxes)
+        expect(employee_api(:prior_provider_ytd).statement_detail(revised.id)["ytd_note"]).to be_nil
+      end
+
+      it "counts a native row repeating an imported paycheck only once, on W-2GU and on the statement" do
+        qb_check = fixture.qb_records.fetch(:paycheck)
+        original = fixture.ensure_stub_posted!(:prior_provider_ytd_p2)
+        duplicate = overlap_run!(pay_date: qb_check.pay_date, hours: BigDecimal("80.00"), amounts: {
+          gross_pay: qb_check.gross_pay, net_pay: qb_check.net_pay, withholding_tax: qb_check.federal_income_tax,
+          social_security_tax: qb_check.social_security_tax, medicare_tax: qb_check.medicare_tax
+        })
+        overlap = PayrollBridgeOverlap.new(company_id: fixture.company.id, year: year).call.sole
+        expect([ overlap.proposal, overlap.matched_paycheck_id ]).to eq([ :duplicate, qb_check.id ])
+
+        # Before a decision W-2GU still counts it (as before this change), so filing is blocked.
+        before = w2_boxes
+        expect(preflight_codes).to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+
+        recorded = PayrollBridgeOverlapDispositionService.record_evident!(company_id: fixture.company.id, year: year, actor: fixture.staff_user)
+        expect(recorded.map { |row| [ row.decision, row.historical_paycheck_id ] }).to eq([ [ PayrollItemBridgeOverlapDisposition::DUPLICATE, qb_check.id ] ])
+
+        boxes = w2_boxes
+        expect(boxes).to eq(expected_boxes([ later_item ]))
+        expect(before[:box2_income_tax] - boxes[:box2_income_tax]).to eq(duplicate.withholding_tax.to_d)
+        expect(before[:box4_ss_tax] - boxes[:box4_ss_tax]).to eq(duplicate.social_security_tax.to_d)
+        expect(before[:box6_medicare_tax] - boxes[:box6_medicare_tax]).to eq(duplicate.medicare_tax.to_d)
+        expect(preflight_codes).not_to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+        # The statement never counted it, so its stub stays as posted.
+        recheck_later_stub!
+        expect(original.reload).to be_posted
+        expect(original.revision).to eq(1)
+        stmt = statement_ytd
+        expect(stmt.dig(:ytd, :gross)).to eq((balance.statement_gross_pay + later_item.gross_pay.to_d).round(2))
+        assert_statement_matches_w2!(stmt, boxes)
+      end
+
+      it "leaves ambiguous evidence for staff review and records the decision staff make" do
+        qb_check = fixture.qb_records.fetch(:paycheck)
+        overlap_item = overlap_run!(pay_date: qb_check.pay_date)
+        overlap = PayrollBridgeOverlap.new(company_id: fixture.company.id, year: year).call.sole
+        expect(overlap.proposal).to eq(:ambiguous)
+
+        expect(PayrollBridgeOverlapDispositionService.record_evident!(company_id: fixture.company.id, year: year, actor: fixture.staff_user)).to eq([])
+        expect(preflight_codes).to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+        expect {
+          PayrollBridgeOverlapDispositionService.decide!(payroll_item: overlap_item, historical_import_batch_id: overlap.batch_id,
+            decision: PayrollItemBridgeOverlapDisposition::DISTINCT, actor: fixture.staff_user, reason: "Checked", evidence_digest: "0" * 64)
+        }.to raise_error(PayrollBridgeOverlapDispositionService::Error, /evidence changed/)
+
+        PayrollBridgeOverlapDispositionService.decide!(payroll_item: overlap_item, historical_import_batch_id: overlap.batch_id,
+          decision: PayrollItemBridgeOverlapDisposition::DISTINCT, actor: fixture.staff_user,
+          reason: "Bank statement shows two deposits on 01/16", evidence_digest: overlap.evidence_digest)
+        expect(preflight_codes).not_to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+        boxes = w2_boxes
+        expect(boxes).to eq(expected_boxes([ overlap_item, later_item ]))
+        assert_statement_matches_w2!(statement_ytd, boxes)
       end
     end
   end

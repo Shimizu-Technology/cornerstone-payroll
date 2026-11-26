@@ -48,7 +48,7 @@ it('names prior-provider payments separately from QuickBooks', () => {
 it('says when imported totals come from the opening balance and when they are shown as imported', () => {
   const bridged = { applied: true, tax_years: [ 2026 ], totals_basis: 'historical_ytd_bridge' as const };
   const { unmount } = render(<PayrollSourceNotice summary={{ ...summary, historical_ytd_bridge: bridged }} />);
-  expect(screen.getByText(/the same figures as pay stubs and W-2GU/)).toBeTruthy();
+  expect(screen.getByText(/the same figures as pay stubs and W-2GU/).textContent).toContain('Hours, 401(k), employer costs and other categories are shown as imported.');
   unmount();
   render(<PayrollSourceNotice summary={{ ...summary, historical_ytd_bridge: { ...bridged, totals_basis: 'as_imported' } }} />);
   expect(screen.getByText(/Imported figures are shown as imported/)).toBeTruthy();

@@ -1421,7 +1421,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
               {report.history.map((history) => (
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
                   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{formatDate(history.pay_date)}</p><p className="mt-1 break-words text-xs text-neutral-600">{formatDateRange(history.period_start, history.period_end) || history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
-                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}{Number(history.non_taxable_pay ?? 0) !== 0 && <span className="block text-xs font-normal text-neutral-600">incl. {fmt(history.non_taxable_pay ?? 0)} non-taxable</span>}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm">
                     <summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary>
                     <dl className="mt-3 grid grid-cols-2 gap-3">
@@ -1467,7 +1467,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_earnings_total ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}{Number(h.non_taxable_pay ?? 0) !== 0 && <span className="block text-xs text-neutral-600">incl. {fmt(h.non_taxable_pay ?? 0)} non-taxable</span>}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>

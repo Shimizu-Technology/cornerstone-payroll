@@ -58,12 +58,14 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
   );
 }
 
+const BRIDGED_FIELDS = 'Gross, non-taxable pay, Guam income tax, Social Security, Medicare, deductions and net pay';
+
 // Full-year totals use the applied opening balance, as pay stubs and W-2GU do.
 // A range that starts after January 1 can't, so its imported rows show as imported.
 function totalsBasisNote(summary: PayrollSourceSummary): string | null {
   const basis = summary.historical_ytd_bridge?.totals_basis;
-  if (basis === 'historical_ytd_bridge') return 'Imported totals use the applied opening year-to-date balance, the same figures as pay stubs and W-2GU.';
-  if (basis === 'mixed') return 'Some imported totals use the applied opening year-to-date balance; the rest are shown as imported.';
+  if (basis === 'historical_ytd_bridge') return `${BRIDGED_FIELDS} for imported history come from the applied opening year-to-date balance, the same figures as pay stubs and W-2GU. Hours, 401(k), employer costs and other categories are shown as imported.`;
+  if (basis === 'mixed') return `For some employees, ${BRIDGED_FIELDS.toLowerCase()} for imported history come from the applied opening year-to-date balance; everything else is shown as imported.`;
   if (basis === 'as_imported' && summary.historical_ytd_bridge.applied) return 'Imported figures are shown as imported. The opening year-to-date balance covers the year from January 1, so it applies only to ranges that include its whole period.';
   return null;
 }

@@ -970,12 +970,17 @@ class Employee < ApplicationRecord
     )
     return ytd_totals_for_scope(scope, tax_year: year) unless for_reporting
 
-    # Statements report the same population as their YTD breakdowns and W-2GU:
-    # no legacy-disposed rows and only an opening balance already paid by this
-    # date. The balance holds only imported pay, so every reportable native
-    # paycheck counts. Payroll calculation keeps the unfiltered totals.
+    # Statements report the same population as their YTD breakdowns: no
+    # legacy-disposed rows, only an opening balance already paid by this date,
+    # and live pay inside that balance only once recorded as a distinct
+    # payment (PayrollBridgeOverlap). Payroll calculation keeps the
+    # unfiltered totals.
     balance = reportable_historical_ytd_balance(year, pay_date)
     scope = scope.reportable
+    if balance
+      distinct = PayrollBridgeOverlap.distinct_item_ids(company_id: company_id, batch_id: balance.historical_ytd_bridge.historical_import_batch_id)
+      scope = scope.where("pay_periods.pay_date > ? OR payroll_items.id IN (?)", balance.through_pay_date, distinct)
+    end
     ytd_totals_for_scope(scope, tax_year: year, for_reporting: true, historical_balance: balance)
   end
 
