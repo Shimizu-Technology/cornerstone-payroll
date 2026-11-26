@@ -19,7 +19,7 @@ module PayrollImport
     # owner's period pay is kept as it is, unless the workbook sends a
     # different amount for that owner.
     def self.overwrite_required?(item, source_period_pay: nil)
-      return false if item.blank? || !item.persisted? || item.intake_imported?
+      return false if item.blank? || !item.persisted? || item.imported_by?("mosa_revel")
       return true if REPLACED_INPUTS.any? { |field| item.public_send(field).to_d.nonzero? }
       job_hours = Array(item.wage_rate_hours).sum { |entry| entry.to_h.stringify_keys.values_at("regular_hours", "overtime_hours").sum(&:to_d) }
       return true if job_hours.nonzero?
