@@ -66,7 +66,7 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
 
     commit_thread = lifecycle_thread(results, :commit!)
     first_at_posting.pop
-    unapprove_thread = lifecycle_thread(results, :unapprove!)
+    unapprove_thread = lifecycle_thread(results, :unapprove!, reason: "Review draft payroll before approval")
     release_first << true
     [ commit_thread, unapprove_thread ].each { |thread| Timeout.timeout(10) { thread.join } }
 
@@ -223,8 +223,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
       second_thread = financial_revision_thread(results, :reopen)
     ensure
       release << true
+      [ first_thread, second_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     end
-    [ first_thread, second_thread ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     outcomes = 2.times.map { results.pop }
     expect(outcomes.count { |status, _| status == :ok }).to eq(1)
     expect(outcomes.count { |status, error| status == :error && error.is_a?(PayPeriodCorrectionService::InvalidStateError) }).to eq(1)
@@ -265,8 +265,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
       expect(reversal.join(0.2)).to be_nil
     ensure
       release << true
+      [ delivery, reversal ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     end
-    [ delivery, reversal ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     outcomes = 2.times.map { results.pop }
     expect(outcomes).to include([ :ok, :delivered ])
     expect(outcomes.any? { |status, error| status == :error && error.is_a?(PayPeriodCorrectionService::InvalidStateError) }).to be(true)
@@ -308,8 +308,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
       expect(attachment.join(0.2)).to be_nil
     ensure
       release << true
+      [ reversal, attachment ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     end
-    [ reversal, attachment ].compact.each { |thread| Timeout.timeout(10) { thread.join } }
     expect(2.times.map { results.pop }).to contain_exactly([ :ok, :void ], [ :ok, 422 ])
     expect(pay_period.reload).to be_voided
     expect(payment.reload.pay_period_id).to be_nil
@@ -323,7 +323,8 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
       ActiveRecord::Base.connection_pool.with_connection do
         backend_pid << ActiveRecord::Base.connection.select_value("SELECT pg_backend_pid()") if backend_pid
         method = operation == :reopen ? :reopen_unpaid! : :void!
-        PayPeriodCorrectionService.public_send(method, pay_period: PayPeriod.find(pay_period.id),
+        PayPeriodCorrectionService.public_send(method,
+          authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: PayPeriod.find(pay_period.id),
           actor: User.find(actor.id), reason: "Correct an unissued payroll")
         results << [ :ok, operation ]
       rescue StandardError => e
@@ -346,12 +347,12 @@ RSpec.describe PayPeriodLifecycleService, :postgres_concurrency, type: :service 
     end
   end
 
-  def lifecycle_thread(results, operation)
+  def lifecycle_thread(results, operation, **options)
     Thread.new do
       ActiveRecord::Base.connection_pool.with_connection do
         period = PayPeriod.find(pay_period.id)
         thread_actor = User.find(actor.id)
-        described_class.new(pay_period: period, actor: thread_actor, ip_address: "127.0.0.1").public_send(operation)
+        described_class.new(pay_period: period, actor: thread_actor, ip_address: "127.0.0.1").public_send(operation, **options)
         results << [ :ok, operation ]
       rescue StandardError => e
         results << [ :error, e ]
