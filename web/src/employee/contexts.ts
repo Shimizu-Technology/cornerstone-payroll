@@ -10,7 +10,6 @@ export function useBrand(): EmployeeBrand {
 }
 
 export interface EmployeeAuthValue {
-  isLoaded: boolean;
   isSignedIn: boolean;
   /** `fresh` skips the token cache, so a reverification that just finished counts. */
   getToken: (options?: { fresh?: boolean }) => Promise<string | null>;
