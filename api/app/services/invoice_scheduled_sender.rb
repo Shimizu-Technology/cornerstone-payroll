@@ -40,7 +40,7 @@ class InvoiceScheduledSender
         invoice = schedule.invoice
         artifact = invoice.primary_artifact
         raise ArgumentError, "An issued PDF is required before sending" unless artifact&.content_type == "application/pdf"
-        raise ArgumentError, "Invoice sender email is not configured" if !StagingOutboundPolicy.staging? && ENV["RESEND_API_KEY"].blank? || schedule.sender_email.blank?
+        raise ArgumentError, "Invoice sender email is not configured" if !StagingMailTransport.available? || schedule.sender_email.blank?
 
         bytes = InvoiceArtifactStorageService.new.download(artifact)
         raise ArgumentError, "Invoice artifact is unavailable" if bytes.nil?

@@ -18,7 +18,7 @@ module PayrollCors
   end
 
   def self.tenant_origin_allowed?(origin, env)
-    return false unless TenantSubdomainRegistry::ORIGIN_PATTERN.match?(origin)
+    return false unless TenantSubdomainRegistry.origin_pattern.match?(origin)
 
     path = TenantSubdomainRegistry.cors_path(env.fetch("PATH_INFO"))
     public_methods = case path

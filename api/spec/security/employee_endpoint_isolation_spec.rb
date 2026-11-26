@@ -993,7 +993,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
     allow(EmployeeAppSwitch::Enforcement).to receive(:database_state)
       .and_return({ phase: "enforced", enforced: true, kill_switch_bypass: false, enforced_tables: 1, protected_tables: 1 })
     EmployeeAppSwitch::Enforcement.reset_cache!
-    demo_origin = "https://demo-iso.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+    demo_origin = "https://demo-iso.#{TenantSubdomainRegistry::DEFAULT_ROOT_DOMAIN}"
     enable_all_employee_features!(demo)
     demo_worker = create(:user, company: demo, organization: organization, role: :portal_employee,
       email: "demo.employee@demo-iso.example", name: "Kit Wren", clerk_id: "user_iso_demo_employee")

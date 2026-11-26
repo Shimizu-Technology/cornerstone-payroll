@@ -74,7 +74,7 @@ RSpec.describe "Demo employee journey", :portal_notifications, type: :request do
   end
 
   def origin_for(company)
-    "https://#{company.subdomain_slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+    "https://#{company.subdomain_slug}.#{TenantSubdomainRegistry::DEFAULT_ROOT_DOMAIN}"
   end
 
   # A demo employee's session and browser requests come from the demo's own
