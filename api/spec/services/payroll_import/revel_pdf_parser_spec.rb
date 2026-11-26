@@ -72,12 +72,13 @@ RSpec.describe PayrollImport::RevelPdfParser do
     it "returns the complete downstream import shape with numeric, plausible values" do
       required_keys = %i[
         employee_name regular_hours overtime_hours regular_pay overtime_pay
-        total_hours total_pay hourly_rate
+        doubletime_hours total_hours total_pay hourly_rate
       ]
 
       described_class.parse(fixture_pdf).each do |record|
         expect(record.keys).to include(*required_keys)
         expect(record[:total_hours]).to be_a(Numeric)
+        expect(record[:doubletime_hours]).to be_a(BigDecimal).and eq(BigDecimal("0.00"))
         expect(record[:total_pay]).to be_a(Numeric)
         expect(record[:total_hours]).to be_between(0, 200)
         expect(record[:total_pay]).to be >= 0
@@ -86,6 +87,15 @@ RSpec.describe PayrollImport::RevelPdfParser do
   end
 
   describe "fallback parsing" do
+    it "keeps fixed-column double-time hours as a decimal" do
+      line = revel_row(name: "Example, Avery", regular_hours: 40, regular_pay: 600,
+        doubletime_hours: BigDecimal("2.25"), doubletime_pay: BigDecimal("67.50"))
+
+      hours = parser.send(:parse_fixed_columns, line).fetch(:doubletime_hours)
+
+      expect(hours).to be_a(BigDecimal).and eq(BigDecimal("2.25"))
+    end
+
     it "flags fixed-column values that require the flexible parser" do
       expect(parser.send(:implausible_fixed_parse?, employee: "Fixture, Casey", total_hours: 240.00, total_pay: 240.00)).to be(true)
       expect(parser.send(:implausible_fixed_parse?, employee: "", total_hours: 40.0, total_pay: 400.0)).to be(true)

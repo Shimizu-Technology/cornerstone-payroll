@@ -229,7 +229,7 @@ class PayrollCalculator
   end
 
   def restore_capped_payroll_field_entries!
-    payroll_item.payroll_item_field_entries.each do |entry|
+    payroll_item.payroll_field_entries_for_calculation.each do |entry|
       uncapped_amount = entry.metadata.is_a?(Hash) ? entry.metadata["uncapped_amount"] : nil
       next if uncapped_amount.blank?
 
@@ -367,7 +367,7 @@ class PayrollCalculator
   end
 
   def record_payroll_field_employer_contributions
-    payroll_item.payroll_item_field_entries.each do |entry|
+    payroll_item.payroll_field_entries_for_calculation.each do |entry|
       next unless entry.active? && entry.employer_contribution? && entry.amount.to_f.positive?
 
       deduction = payroll_item.payroll_item_deductions.build(
@@ -380,7 +380,7 @@ class PayrollCalculator
   end
 
   def record_payroll_field_employee_deductions
-    payroll_item.payroll_item_field_entries.each do |entry|
+    payroll_item.payroll_field_entries_for_calculation.each do |entry|
       next unless entry.active? && entry.kind == "deduction" && entry.amount.to_f.positive?
       next if payroll_item.named_loan_payments.key?(entry.metadata.to_h["employee_loan_id"].to_s)
       next unless entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
@@ -407,7 +407,7 @@ class PayrollCalculator
       return (payroll_item.company || pay_period.company).deduction_types.find(identity.fetch("deduction_type_id"))
     end
     label = entry.label
-    shared_label = payroll_item.payroll_item_field_entries.count do |field|
+    shared_label = payroll_item.payroll_field_entries_for_calculation.count do |field|
       field.active? && field.label == entry.label && field.tax_treatment == entry.tax_treatment
     end > 1
     if shared_label
@@ -720,7 +720,7 @@ class PayrollCalculator
       loan = assignment.employee_loan
       next unless loan
 
-      entry = payroll_item.payroll_item_field_entries.find { |candidate| candidate.payroll_field_definition_id == assignment.payroll_field_definition_id && candidate.active? }
+      entry = payroll_item.payroll_field_entries_for_calculation.find { |candidate| candidate.payroll_field_definition_id == assignment.payroll_field_definition_id && candidate.active? }
       next unless entry
 
       requested = entry.source == "employee_default" ? (loan.payment_amount || entry.amount) : (entry.metadata || {}).fetch("loan_requested_amount", entry.amount)
@@ -736,7 +736,7 @@ class PayrollCalculator
     loan = loan_for_deduction_type(payroll_item_deduction.deduction_type_id)
     return loan if loan
 
-    field_entry = payroll_item.payroll_item_field_entries.find do |entry|
+    field_entry = payroll_item.payroll_field_entries_for_calculation.find do |entry|
       entry.active? && entry.category == "loan" && entry.label == payroll_item_deduction.label
     end
     return unless field_entry&.payroll_field_definition_id
@@ -841,7 +841,7 @@ class PayrollCalculator
   def reduce_payroll_field_deductions_by!(amount)
     return amount unless amount.positive?
 
-    deductions = payroll_item.payroll_item_field_entries.select do |entry|
+    deductions = payroll_item.payroll_field_entries_for_calculation.select do |entry|
       entry.active? && entry.tax_treatment.in?(%w[pre_tax_deduction post_tax_deduction])
     end
 
