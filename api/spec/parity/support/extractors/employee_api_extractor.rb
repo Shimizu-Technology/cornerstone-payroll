@@ -79,8 +79,10 @@ module Parity
           }
         end
 
-        taxes = parse_taxes(detail.fetch("taxes", []))
+        ytd_summary = detail.fetch("ytd", {})
+        taxes = parse_taxes(detail.fetch("taxes", []), ytd_present: !ytd_summary["gross"].nil?)
         deductions = parse_deductions(detail.fetch("deductions", []))
+        employer_contributions = parse_employer_contributions(detail.fetch("employer_contributions", []))
         earnings = detail.fetch("earnings", [])
         other_pay = parse_other_pay(detail.fetch("other_pay", []))
 
@@ -91,7 +93,7 @@ module Parity
 
         payment = detail.fetch("payment", {})
         pay_period = detail.fetch("pay_period", {})
-        ytd_summary = detail.fetch("ytd", {})
+        non_taxable_current = other_pay.values.sum(0.to_d) { |row| row[:amount].to_d }.round(2)
 
         {
           list_present: list_entry.present?,
@@ -99,11 +101,12 @@ module Parity
           source_label: detail["source_label"],
           gross_pay: money(detail["gross_pay"]),
           net_pay: money(detail["net_pay"]),
+          non_taxable_pay: non_taxable_current,
           taxes: taxes[:amounts],
           tax_labels: taxes[:labels],
           tax_display_labels: taxes[:display_labels],
           deductions: deductions[:rows],
-          employer_contributions: {}, # Employee API omits employer contributions (L7)
+          employer_contributions: employer_contributions,
           other_pay: other_pay,
           hours: {
             regular: regular_hours,
@@ -119,6 +122,8 @@ module Parity
             total_income_tax: sum_present(taxes[:ytd][:income_tax], taxes[:ytd][:additional_withholding]),
             social_security: taxes[:ytd][:social_security],
             medicare_total: taxes[:ytd][:medicare_total],
+            retirement_401k: deductions[:rows].dig(:retirement_401k, :ytd) || money(0),
+            roth_401k: deductions[:rows].dig(:roth_401k, :ytd) || money(0),
             deductions: deductions[:ytd_total],
             net: money(ytd_summary["net"])
           },
@@ -130,9 +135,11 @@ module Parity
           },
           payment: {
             method: payment["method"],
-            check_number: payment["check_number_last4"],
+            check_number: normalize_check_number(payment["check_number_last4"]),
             status: payment["status"],
-            payment_label: employee_payment_label(payment)
+            # Only populate payment_label if the employee API actually emits a label field;
+            # never synthesize copy from payment.method for parity assertions.
+            payment_label: payment["label"] || detail["payment_method_label"]
           },
           status: {
             visible: true,
@@ -148,7 +155,7 @@ module Parity
 
       private
 
-      def parse_taxes(rows)
+      def parse_taxes(rows, ytd_present: false)
         amounts = {
           income_tax: money(0),
           additional_withholding: money(0),
@@ -157,7 +164,7 @@ module Parity
           additional_medicare: nil,
           medicare_total: money(0)
         }
-        ytd_has_values = rows.any? { |r| !r["ytd"].nil? }
+        ytd_has_values = ytd_present || rows.any? { |r| !r["ytd"].nil? }
         ytd = {
           income_tax: ytd_has_values ? money(0) : nil,
           additional_withholding: ytd_has_values ? money(0) : nil,
@@ -166,35 +173,49 @@ module Parity
         }
         labels = {}
         display_labels = {}
+        medicare_row_amount = nil
+        medicare_row_ytd = nil
+        addl_med_ytd = nil
 
         rows.each do |row|
           kind = row["kind"].to_s
-          case kind
-          when "guam_income_tax"
-            amounts[:income_tax] = money(row["amount"])
-            ytd[:income_tax] = money(row["ytd"])
-            labels[:income_tax] = row["label"]
-            display_labels[:income_tax] = row["display_label"]
-          when "additional_guam_income_tax"
+          label_down = row["label"].to_s.downcase
+
+          if kind == "additional_medicare" || label_down.start_with?("additional medicare")
+            amounts[:additional_medicare] = money(row["amount"])
+            addl_med_ytd = money(row["ytd"])
+            labels[:additional_medicare] = row["label"]
+            display_labels[:additional_medicare] = row["display_label"]
+          elsif kind == "additional_guam_income_tax" || label_down.include?("additional withholding") || label_down.include?("w-4 4c")
             amounts[:additional_withholding] = money(row["amount"])
             ytd[:additional_withholding] = money(row["ytd"])
             labels[:additional_withholding] = row["label"]
             display_labels[:additional_withholding] = row["display_label"]
-          when "social_security"
+          elsif kind == "guam_income_tax" || label_down.include?("income tax")
+            amounts[:income_tax] = money(row["amount"])
+            ytd[:income_tax] = money(row["ytd"])
+            labels[:income_tax] = row["label"]
+            display_labels[:income_tax] = row["display_label"]
+          elsif kind == "social_security" || label_down.start_with?("social security")
             amounts[:social_security] = money(row["amount"])
             ytd[:social_security] = money(row["ytd"])
             labels[:social_security] = row["label"]
             display_labels[:social_security] = row["display_label"]
-          when "medicare"
-            amounts[:medicare_total] = money(row["amount"])
-            ytd[:medicare_total] = money(row["ytd"])
+          elsif kind == "medicare" || label_down.start_with?("medicare")
+            medicare_row_amount = money(row["amount"])
+            medicare_row_ytd = money(row["ytd"])
             labels[:medicare] = row["label"]
             display_labels[:medicare] = row["display_label"]
-          when "additional_medicare"
-            amounts[:additional_medicare] = money(row["amount"])
-            labels[:additional_medicare] = row["label"]
-            display_labels[:additional_medicare] = row["display_label"]
           end
+        end
+
+        if amounts[:additional_medicare]
+          amounts[:medicare_base] = medicare_row_amount || money(0)
+          amounts[:medicare_total] = (amounts[:medicare_base] + amounts[:additional_medicare]).round(2)
+          ytd[:medicare_total] = sum_present(medicare_row_ytd, addl_med_ytd) if ytd_has_values
+        elsif medicare_row_amount
+          amounts[:medicare_total] = medicare_row_amount
+          ytd[:medicare_total] = medicare_row_ytd if ytd_has_values
         end
 
         amounts[:total_income_tax] = (amounts[:income_tax] + amounts[:additional_withholding]).round(2)
@@ -215,20 +236,26 @@ module Parity
         { rows: mapped, ytd_total: rows.any? { |r| !r["ytd"].nil? } ? ytd_total : money(0) }
       end
 
-      def parse_other_pay(rows)
-        rows.each_with_object({}) do |row, acc|
-          acc[row["label"].to_s.downcase.gsub(/[^a-z0-9]+/, "_").to_sym] = {
-            label: row["label"], amount: money(row["amount"]), ytd: money(row["ytd"])
+      def parse_employer_contributions(rows)
+        Array(rows).each_with_object({}) do |row, acc|
+          next unless row.is_a?(Hash)
+
+          label = row["label"] || row["display_label"]
+          key = canonical_employer_contribution_key(label)
+          acc[key] = {
+            label: label,
+            amount: money(row["amount"]),
+            ytd: money(row["ytd"])
           }
         end
       end
 
-      def canonical_deduction_key(label)
-        text = label.to_s.downcase
-        return :retirement_401k if text.include?("401(k)") && !text.include?("roth")
-        return :roth_401k if text.include?("roth")
-
-        text.gsub(/[^a-z0-9]+/, "_").gsub(/\A_|_\z/, "").to_sym
+      def parse_other_pay(rows)
+        rows.each_with_object({}) do |row, acc|
+          acc[row["label"].to_s.downcase.gsub(/[^a-z0-9]+/, "_").gsub(/\A_|_\z/, "").to_sym] = {
+            label: row["label"], amount: money(row["amount"]), ytd: money(row["ytd"])
+          }
+        end
       end
 
       def sum_earning_hours(earnings, kind)
@@ -243,14 +270,6 @@ module Parity
         return nil if present.empty?
 
         present.sum(0.to_d).round(2)
-      end
-
-      def employee_payment_label(payment)
-        case payment["method"]
-        when "direct_deposit" then "Direct deposit"
-        when "paper_check"
-          payment["check_number_last4"].present? ? "Check ##{payment['check_number_last4']}" : "Paper check"
-        end
       end
     end
   end

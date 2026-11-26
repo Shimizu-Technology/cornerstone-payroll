@@ -25,11 +25,13 @@ module Parity
         employer_contributions = parse_employer_contributions(sections["EMPLOYER CONTRIBUTIONS"] || [])
         summary = parse_single_amount_rows(sections["SUMMARY"] || [])
         ytd_summary = parse_ytd_summary(sections["YEAR-TO-DATE SUMMARY"] || [])
+        non_taxable_current = other_pay.values.sum(0.to_d) { |row| row[:amount].to_d }.round(2)
 
         {
           employee_name: meta[:employee_name],
           gross_pay: earnings[:gross_current] || summary["Gross Pay"],
           net_pay: summary["NET PAY"],
+          non_taxable_pay: non_taxable_current,
           taxes: deductions_and_taxes[:tax_amounts],
           tax_labels: deductions_and_taxes[:tax_labels],
           ytd_tax_labels: ytd_summary[:tax_labels],
@@ -48,6 +50,8 @@ module Parity
             ),
             social_security: deductions_and_taxes[:tax_ytd][:social_security],
             medicare_total: deductions_and_taxes[:tax_ytd][:medicare_total],
+            retirement_401k: deductions_and_taxes[:deductions].dig(:retirement_401k, :ytd) || money(0),
+            roth_401k: deductions_and_taxes[:deductions].dig(:roth_401k, :ytd) || money(0),
             deductions: ytd_summary[:values]["Deductions"],
             net: ytd_summary[:values]["Net Pay"]
           },
@@ -58,7 +62,7 @@ module Parity
           },
           payment: {
             method: meta[:payment_method],
-            check_number: meta[:check_number],
+            check_number: normalize_check_number(meta[:check_number]),
             payment_label: meta[:payment_label]
           },
           raw_lines: lines
@@ -190,6 +194,9 @@ module Parity
         }
         tax_labels = {}
         deductions = {}
+        medicare_row_amount = nil
+        medicare_row_ytd = nil
+        addl_med_ytd = nil
 
         lines.each do |line|
           next if line.start_with?("Description ") || line.start_with?("TOTAL DEDUCTIONS")
@@ -200,7 +207,11 @@ module Parity
           ytd = money(match[3])
           down = label.downcase
 
-          if down.include?("additional withholding") || down.include?("w-4 4c")
+          if down.start_with?("additional medicare")
+            tax_amounts[:additional_medicare] = current
+            addl_med_ytd = ytd
+            tax_labels[:additional_medicare] = label
+          elsif down.include?("additional withholding") || down.include?("w-4 4c") || down.include?("extra guam income tax")
             tax_amounts[:additional_withholding] = current
             tax_ytd[:additional_withholding] = ytd
             tax_labels[:additional_withholding] = label
@@ -212,17 +223,23 @@ module Parity
             tax_amounts[:social_security] = current
             tax_ytd[:social_security] = ytd
             tax_labels[:social_security] = label
-          elsif down.start_with?("additional medicare")
-            tax_amounts[:additional_medicare] = current
-            tax_labels[:additional_medicare] = label
           elsif down.start_with?("medicare")
-            tax_amounts[:medicare_total] = current
-            tax_ytd[:medicare_total] = ytd
+            medicare_row_amount = current
+            medicare_row_ytd = ytd
             tax_labels[:medicare] = label
           else
             key = canonical_deduction_key(label)
             deductions[key] = { label: label, amount: current, ytd: ytd }
           end
+        end
+
+        if tax_amounts[:additional_medicare]
+          tax_amounts[:medicare_base] = medicare_row_amount || money(0)
+          tax_amounts[:medicare_total] = (tax_amounts[:medicare_base] + tax_amounts[:additional_medicare]).round(2)
+          tax_ytd[:medicare_total] = sum_present(medicare_row_ytd, addl_med_ytd) || money(0)
+        elsif medicare_row_amount
+          tax_amounts[:medicare_total] = medicare_row_amount
+          tax_ytd[:medicare_total] = medicare_row_ytd || money(0)
         end
 
         tax_amounts[:total_income_tax] = (tax_amounts[:income_tax] + tax_amounts[:additional_withholding]).round(2)
@@ -253,7 +270,7 @@ module Parity
           next unless (match = line.match(TWO_AMOUNT_ROW))
 
           label = match[1].strip
-          key = label.downcase.include?("401(k)") ? :employer_401k_match : label.downcase.gsub(/[^a-z0-9]+/, "_").to_sym
+          key = canonical_employer_contribution_key(label)
           acc[key] = { label: label, amount: money(match[2]), ytd: money(match[3]) }
         end
       end
@@ -282,14 +299,6 @@ module Parity
           tax_labels[:medicare] = label if down == "medicare"
         end
         { values: values, tax_labels: tax_labels }
-      end
-
-      def canonical_deduction_key(label)
-        text = label.to_s.downcase
-        return :retirement_401k if text.include?("401(k)") && !text.include?("roth")
-        return :roth_401k if text.include?("roth")
-
-        text.gsub(/[^a-z0-9]+/, "_").gsub(/\A_|_\z/, "").to_sym
       end
 
       def sum_present(*values)

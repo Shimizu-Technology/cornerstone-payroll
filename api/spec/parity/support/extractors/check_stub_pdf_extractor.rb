@@ -9,10 +9,15 @@ module Parity
       include Parity::CanonicalSchema
       include PdfBoxText
 
-      # Top-check default layout bounds (CheckGenerator: PAGE_WIDTH=612, SECTION_HEIGHT=264).
-      CHECK_FACE_BOX = [ 0, 528, 612, 792 ].freeze
-      STUB1_LEFT_BOX = [ 0, 264, 338, 528 ].freeze
-      STUB1_RIGHT_BOX = [ 338, 264, 612, 528 ].freeze
+      # Section bounds (CheckGenerator: PAGE_WIDTH=612, SECTION_HEIGHT=264).
+      # Supports both top_check (face 528..792, stub1 264..528) and
+      # bottom_check (stub1 528..792, face 0..264).
+      TOP_BAND = [ 0, 528, 612, 792 ].freeze
+      BOTTOM_BAND = [ 0, 0, 612, 264 ].freeze
+      MID_LEFT_BOX = [ 0, 264, 338, 528 ].freeze
+      MID_RIGHT_BOX = [ 338, 264, 612, 528 ].freeze
+      TOP_LEFT_BOX = [ 0, 528, 338, 792 ].freeze
+      TOP_RIGHT_BOX = [ 338, 528, 612, 792 ].freeze
 
       TWO_NUM_ROW = /\A(.+?)\s+(-?\$?[\d,]+\.\d{2})\s+(-?\$?[\d,]+\.\d{2})\z/
       PAY_ROW = /\A(.+?)\s+(-|-?[\d,]+\.\d{2})\s+(-|-?[\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})\s+(-|-?[\d,]+\.\d{2})\z/
@@ -22,10 +27,17 @@ module Parity
         page = reader.pages.first
         void_watermark = page.runs(merge: false).select { |run| run.font_size >= 20 }.map(&:text).join.include?("VOID")
 
-        face_lines = text_in_box(page, CHECK_FACE_BOX).lines(chomp: true).map(&:strip).reject(&:empty?)
-        left_lines = text_in_box(page, STUB1_LEFT_BOX).lines(chomp: true).map(&:strip).reject(&:empty?)
-        right_lines = text_in_box(page, STUB1_RIGHT_BOX).lines(chomp: true).map(&:strip).reject(&:empty?)
+        top_text = text_in_box(page, TOP_BAND)
+        bottom_check = top_text.include?("TAXES") && top_text.include?("SUMMARY")
+        face_box = bottom_check ? BOTTOM_BAND : TOP_BAND
+        left_box = bottom_check ? TOP_LEFT_BOX : MID_LEFT_BOX
+        right_box = bottom_check ? TOP_RIGHT_BOX : MID_RIGHT_BOX
 
+        face_lines = text_in_box(page, face_box).lines(chomp: true).map(&:strip).reject(&:empty?)
+        left_lines = text_in_box(page, left_box).lines(chomp: true).map(&:strip).reject(&:empty?)
+        right_lines = text_in_box(page, right_box).lines(chomp: true).map(&:strip).reject(&:empty?)
+
+        check_number = parse_printed_check_number(face_lines + left_lines)
         left = parse_left_column(left_lines)
         right = parse_right_column(right_lines)
 
@@ -34,6 +46,7 @@ module Parity
           check_face_lines: face_lines,
           gross_pay: left[:gross_current] || right[:summary_current]["Total Pay"],
           net_pay: right[:net_pay],
+          non_taxable_pay: right[:summary_current]["Non-Taxable Pay"] || money(0),
           taxes: right[:tax_amounts],
           tax_labels: right[:tax_labels],
           deductions: right[:deductions],
@@ -48,7 +61,10 @@ module Parity
             total_income_tax: sum_present(right[:tax_ytd][:income_tax], right[:tax_ytd][:additional_withholding]),
             social_security: right[:tax_ytd][:social_security],
             medicare_total: right[:tax_ytd][:medicare_total],
+            taxes_printed_total: right[:tax_ytd][:printed_total],
             taxes_total: right[:summary_ytd]["Taxes"],
+            retirement_401k: right[:deductions].dig(:retirement_401k, :ytd) || money(0),
+            roth_401k: right[:deductions].dig(:roth_401k, :ytd) || money(0),
             deductions: right[:summary_ytd]["Deductions"],
             net: nil # Check stub PDF SUMMARY box prints current NET PAY only
           },
@@ -56,6 +72,9 @@ module Parity
             period_start: left[:period_start],
             period_end: left[:period_end],
             pay_date: left[:pay_date]
+          },
+          payment: {
+            check_number: normalize_check_number(check_number)
           },
           status: {
             voided: void_watermark
@@ -66,6 +85,15 @@ module Parity
       end
 
       private
+
+      def parse_printed_check_number(lines)
+        lines.each do |line|
+          if (match = line.match(/Check\s*#\s*(\d+)/i))
+            return match[1]
+          end
+        end
+        nil
+      end
 
       def parse_left_column(lines)
         employee_name = lines.first unless lines.first&.start_with?("PAY ")
@@ -142,7 +170,7 @@ module Parity
               current = money(m[2])
               ytd = money(m[3])
               if label.start_with?("ER ")
-                key = label.downcase.include?("401(k)") ? :employer_401k_match : label.downcase.gsub(/[^a-z0-9]+/, "_").to_sym
+                key = canonical_employer_contribution_key(label)
                 employer_contributions[key] = { label: label, amount: current, ytd: ytd }
               else
                 key = label.downcase.gsub(/[^a-z0-9]+/, "_").gsub(/\A_|_\z/, "").to_sym
@@ -180,19 +208,24 @@ module Parity
           social_security: money(0),
           medicare_base: nil,
           additional_medicare: nil,
-          medicare_total: money(0)
+          medicare_total: money(0),
+          printed_total: nil
         }
         tax_ytd = {
           income_tax: money(0),
           additional_withholding: money(0),
           social_security: money(0),
-          medicare_total: money(0)
+          medicare_total: money(0),
+          printed_total: nil
         }
         tax_labels = {}
         deductions = {}
         summary_current = {}
         summary_ytd = {}
         net_pay = nil
+        medicare_row_amount = nil
+        medicare_row_ytd = nil
+        addl_med_ytd = nil
 
         lines.each do |line|
           if line.start_with?("TAXES ")
@@ -204,7 +237,6 @@ module Parity
           elsif (m = line.match(/\ANET PAY:\s*(-?\$[\d,]+\.\d{2})\z/))
             net_pay = money(m[1])
           elsif section == :taxes
-            next if line.start_with?("TOTAL ")
             next unless (m = line.match(TWO_NUM_ROW))
 
             label = m[1].strip
@@ -212,7 +244,14 @@ module Parity
             ytd = money(m[3])
             down = label.downcase
 
-            if down.include?("addtl w/h") || down.include?("w-4 4c") || down.include?("additional")
+            if label == "TOTAL"
+              tax_amounts[:printed_total] = current
+              tax_ytd[:printed_total] = ytd
+            elsif down.start_with?("additional medicare") || down.include?("addtl medicare")
+              tax_amounts[:additional_medicare] = current
+              addl_med_ytd = ytd
+              tax_labels[:additional_medicare] = label
+            elsif down.include?("addtl w/h") || down.include?("w-4 4c") || down.include?("additional withholding") || down.include?("extra guam income tax")
               tax_amounts[:additional_withholding] = current
               tax_ytd[:additional_withholding] = ytd
               tax_labels[:additional_withholding] = label
@@ -225,8 +264,8 @@ module Parity
               tax_ytd[:social_security] = ytd
               tax_labels[:social_security] = label
             elsif down.start_with?("medicare")
-              tax_amounts[:medicare_total] = current
-              tax_ytd[:medicare_total] = ytd
+              medicare_row_amount = current
+              medicare_row_ytd = ytd
               tax_labels[:medicare] = label
             end
           elsif section == :deductions
@@ -245,6 +284,15 @@ module Parity
           end
         end
 
+        if tax_amounts[:additional_medicare]
+          tax_amounts[:medicare_base] = medicare_row_amount || money(0)
+          tax_amounts[:medicare_total] = (tax_amounts[:medicare_base] + tax_amounts[:additional_medicare]).round(2)
+          tax_ytd[:medicare_total] = sum_present(medicare_row_ytd, addl_med_ytd) || money(0)
+        elsif medicare_row_amount
+          tax_amounts[:medicare_total] = medicare_row_amount
+          tax_ytd[:medicare_total] = medicare_row_ytd || money(0)
+        end
+
         tax_amounts[:total_income_tax] = (tax_amounts[:income_tax] + tax_amounts[:additional_withholding]).round(2)
         tax_amounts[:total_taxes] = (tax_amounts[:total_income_tax] + tax_amounts[:social_security] + tax_amounts[:medicare_total]).round(2)
 
@@ -257,14 +305,6 @@ module Parity
           summary_ytd: summary_ytd,
           net_pay: net_pay
         }
-      end
-
-      def canonical_deduction_key(label)
-        text = label.to_s.downcase
-        return :retirement_401k if text.include?("401(k)") && !text.include?("roth")
-        return :roth_401k if text.include?("roth")
-
-        text.gsub(/[^a-z0-9]+/, "_").gsub(/\A_|_\z/, "").to_sym
       end
 
       def sum_present(*values)

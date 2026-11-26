@@ -51,14 +51,20 @@ module Parity
         @ctx.response.parsed_body.fetch("report")
       end
 
+      # Returns raw profile fields as serialized by Client::EmployeesController,
+      # plus ui_display_name matching ClientEmployeeOverview.tsx:56 (`${first_name} ${last_name}`).
       def profile(employee_id)
         @ctx.get "/api/v1/client/employees/#{employee_id}", headers: @headers
         raise "GET /api/v1/client/employees/#{employee_id} failed: #{@ctx.response.status} #{@ctx.response.body}" unless @ctx.response.successful?
 
         raw = @ctx.response.parsed_body.fetch("data")
         {
-          name: build_name(raw),
+          first_name: raw["first_name"],
+          middle_name: raw["middle_name"],
+          last_name: raw["last_name"],
           name_suffix: raw["name_suffix"],
+          legal_name: raw["legal_name"],
+          ui_display_name: [ raw["first_name"], raw["last_name"] ].compact_blank.join(" "),
           email: raw["email"],
           phone: normalize_phone(raw["phone"]),
           address_line1: raw["address_line1"],
@@ -77,6 +83,36 @@ module Parity
         item = period.fetch("payroll_items", []).find { |row| row["employee_id"].to_i == employee_id.to_i }
         return { status: { visible: false } } if item.nil?
 
+        parse_pay_period_item(period, item)
+      end
+
+      def parse_pay_period_item(period, item)
+        if item["details_error"].present?
+          return {
+            employee_name: item["employee_name"],
+            gross_pay: money(item["gross_pay"]),
+            net_pay: money(item["net_pay"]),
+            hours: {
+              regular: hours(item["hours_worked"]),
+              overtime: hours(item["overtime_hours"]),
+              combined: hours(item["total_hours"])
+            },
+            dates: {
+              period_start: iso_date(period["start_date"]),
+              period_end: iso_date(period["end_date"]),
+              pay_date: iso_date(period["pay_date"])
+            },
+            status: {
+              visible: true,
+              details_available: false,
+              details_error: item["details_error"],
+              pay_stub_available: item["pay_stub_available"],
+              correction: period["run_purpose"] == "correction",
+              run_purpose: period["run_purpose"]
+            }
+          }
+        end
+
         income_tax = money(item["withholding_tax"])
         addl_wh = money(item["additional_withholding"])
         ss_tax = money(item["social_security_tax"])
@@ -85,14 +121,20 @@ module Parity
         med_base = (med_total - addl_med).round(2)
 
         deductions = {}
-        if money(item["retirement_payment"]).nonzero?
-          deductions[:retirement_401k] = { label: nil, amount: money(item["retirement_payment"]), ytd: nil }
+        ret = money(item["retirement_payment"])
+        if ret&.nonzero?
+          deductions[:retirement_401k] = { label: nil, amount: ret, ytd: nil }
+        end
+        roth = money(item["roth_retirement_payment"])
+        if roth&.nonzero?
+          deductions[:roth_401k] = { label: nil, amount: roth, ytd: nil }
         end
 
         {
           employee_name: item["employee_name"],
           gross_pay: money(item["gross_pay"]),
           net_pay: money(item["net_pay"]),
+          non_taxable_pay: money(item["non_taxable_additions_total"]) || money(0),
           taxes: {
             income_tax: income_tax,
             additional_withholding: addl_wh,
@@ -116,6 +158,7 @@ module Parity
           },
           status: {
             visible: true,
+            details_available: true,
             pay_stub_available: item["pay_stub_available"],
             correction: period["run_purpose"] == "correction",
             run_purpose: period["run_purpose"]
@@ -159,7 +202,7 @@ module Parity
           },
           payment: {
             method: row["payment_delivery_method"],
-            check_number: row["check_number"],
+            check_number: normalize_check_number(row["check_number"]),
             status: evidence["status"],
             payment_label: row["payment_method_label"]
           },
@@ -184,6 +227,7 @@ module Parity
             social_security: money(row["social_security_tax"]),
             medicare_total: money(row["medicare_tax"]),
             retirement_401k: money(row["retirement"]),
+            roth_401k: money(row["roth_retirement"]),
             net: money(row["net_pay"])
           },
           hours: {
@@ -192,14 +236,6 @@ module Parity
             combined: hours(row["combined_hours"])
           }
         }
-      end
-
-      private
-
-      def build_name(raw)
-        suffix = raw["name_suffix"].to_s.strip.upcase.delete(".")
-        formatted_suffix = { "JR" => "Jr.", "SR" => "Sr." }.fetch(suffix, suffix)
-        [ raw["first_name"], raw["middle_name"], raw["last_name"], formatted_suffix ].compact_blank.join(" ")
       end
     end
   end
