@@ -88,7 +88,19 @@ RSpec.describe "Moving a practice-only login between practice copies", type: :re
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body["invitation_delivery_status"]).to eq("failed")
     expect(login.reload).to have_attributes(practice_company_id: new_copy.id, clerk_invitation_id: "inv_reissued",
-      invite_nonce_digest: be_present)
+      invite_nonce_digest: be_present, invite_email_status: "failed")
+  end
+
+  it "records a failed invite email when refreshing the moved login's invitation raises" do
+    archive_old_copy!
+    login.update_columns(clerk_id: "pending_practice", invitation_status: "pending", invite_email_status: "sent")
+    allow_any_instance_of(Api::V1::Admin::UsersController).to receive(:create_clerk_invitation).and_raise(StandardError, "synthetic")
+
+    move!
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body["invitation_error"]).to include("Use Resend")
+    expect(login.reload.invite_email_status).to eq("failed")
   end
 
   it "denies a user who is not an organization administrator" do
