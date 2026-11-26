@@ -8,7 +8,7 @@ module Api
 
         def index
           render json: { data: AnnualRetirementLimit.order(tax_year: :desc).as_json,
-            can_manage: current_user.super_admin? && !current_company&.test_workspace? }
+            can_manage: current_user.super_admin? && !current_company&.contained? }
         end
 
         def create

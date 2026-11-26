@@ -54,6 +54,10 @@ module YearEnd
                               PAYEE_IDENTITY_UNRESOLVED PAYEE_DUPLICATE_TIN FORM_1099_NOT_MARKED_READY].freeze
     # Employer items only the W-2 filing needs; they never hold up the 1099s.
     W2_ONLY_EMPLOYER_CODES = %w[EMPLOYER_CONTACT_NAME_MISSING EMPLOYER_EFILE_INVALID].freeze
+    # Expected demo preflight notice for fictional 9xx SSNs: shown in the
+    # checklist without loosening the official EFW2 validator or blocking sign-off.
+    DEMO_EXPECTED_CODES = %w[DEMO_RESERVED_SSN_EXPECTED].freeze
+    DEMO_RESERVED_SSN_PATTERN = /\A9\d{2}(?!00)\d{2}(?!0000)\d{4}\z/
 
     def call
       # Taken before the steps run, so a change made while they run leaves
@@ -68,9 +72,9 @@ module YearEnd
       # the 1099 items (payees and the 1099 sign-off) live, so only the rest
       # of the checklist has to have checked out.
       only_1099_open = status == "needs_action" && decisions_recorded? && files_any? &&
-        steps.all? { |step| step[:issues].all? { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) } }
+        steps.all? { |step| step[:issues].all? { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) || issue[:code].in?(DEMO_EXPECTED_CODES) } }
       status == "ready" || only_1099_open ? ReadyCheck.record(company.id, year, revision) : ReadyCheck.clear(company.id, year)
-      issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].length } +
+      issue_count = steps.reject { |step| step[:key].in?(SIGN_OFF_STEPS) }.sum { |step| step[:issues].count { |issue| !issue[:code].in?(DEMO_EXPECTED_CODES) } } +
         (sign_off_needed?(steps) ? 1 : 0)
       next_step = steps.find { |step| step[:status] == "action_needed" }
       steps = numbered(steps)
@@ -80,6 +84,7 @@ module YearEnd
         company: {
           id: company.id,
           name: company.name,
+          demo: company.demo?,
           active: company.active?,
           test_workspace: company.practice_copy?
         },
@@ -147,20 +152,39 @@ module YearEnd
 
     def efw2_people_issues
       missing = w2_employees.to_h { |employee| [ employee.id, person_row(employee, w2: true)&.fetch(:missing_fields, []) || [] ] }
-      efw2_problems.filter_map do |problem|
+      employees_by_id = w2_employees.index_by(&:id)
+      demo_reserved_ssn_employee_ids = []
+      issues = efw2_problems.filter_map do |problem|
         message = problem[:message]
         next unless problem[:scope] == :employee
         fields = missing.fetch(problem[:employee_id], [])
         next if (fields.include?("ssn") && problem[:code] == :ssn_invalid) || (fields.include?("address") && problem[:code].in?(%i[address_missing address_invalid]))
 
+        if company.demo? && problem[:code] == :ssn_invalid &&
+            employees_by_id[problem[:employee_id]]&.ssn_digits.to_s.match?(DEMO_RESERVED_SSN_PATTERN)
+          demo_reserved_ssn_employee_ids << problem[:employee_id]
+          next
+        end
+
         issue("EMPLOYEE_EFILE_INVALID", message, employee_id: problem[:employee_id])
       end
+      if demo_reserved_ssn_employee_ids.any?
+        ids = demo_reserved_ssn_employee_ids.uniq
+        issues << issue(
+          "DEMO_RESERVED_SSN_EXPECTED",
+          "Expected demo e-file preflight error: #{ids.length} demo #{'employee'.pluralize(ids.length)} use fictional 9xx SSNs, which the official EFW2 validator rejects.",
+          expected_for_demo: true,
+          employee_ids: ids
+        )
+      end
+      issues
     end
 
-    # A demo never e-files, so it runs no e-file preflight and records no
-    # e-file check. Its paper-form checks (missing W-2 details) still run.
+    # Runs for every operating company (live clients and demos), never practice copies.
+    # The official EFW2 validator is never loosened; demo 9xx SSNs are grouped
+    # into one labeled expected preflight error above.
     def efile_preflight?
-      year == 2026 && files?("w2_gu") && !company.demo?
+      year == 2026 && files?("w2_gu") && !company.practice_copy?
     end
 
     def efw2_problems
@@ -242,7 +266,7 @@ module YearEnd
       steps
         .select { |step| step[:key].in?(%w[filing_decision employer people reconciliation review_warnings prior_provider]) }
         .flat_map { |step| step[:issues] }
-        .reject { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) }
+        .reject { |issue| issue[:code].in?(FORM_1099_ONLY_CODES) || issue[:code].in?(DEMO_EXPECTED_CODES) }
     end
 
     def form_1099_blockers_from(steps)
@@ -812,7 +836,7 @@ module YearEnd
       readiness, fingerprint = w2_readiness
       filing = readiness&.review_payload(fingerprint: fingerprint)
       current = readiness&.current?(fingerprint)
-      earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| !issue[:code].in?(FORM_1099_ONLY_CODES) } }
+      earlier_blockers = earlier_steps.sum { |step| step[:issues].count { |issue| !issue[:code].in?(FORM_1099_ONLY_CODES) && !issue[:code].in?(DEMO_EXPECTED_CODES) } }
 
       issues = []
       unless current
@@ -1062,10 +1086,9 @@ module YearEnd
     end
 
     # A demo company prepares, reviews and downloads every copy like a live
-    # client, but never produces an e-file. The reason reads like any other
-    # unavailable step.
+    # client, and never produces an e-file outside DEPLOYMENT_ENV=local.
     def demo_efile_reason
-      Company::DEMO_UNAVAILABLE_MESSAGE if company.demo?
+      Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !LocalDeployment.local?
     end
 
     # January 31 of the next year, or the next business day after a weekend.
@@ -1095,11 +1118,12 @@ module YearEnd
     end
 
     def step(key, title, issues, summary:, data:)
+      blocking = issues.reject { |entry| entry[:code].in?(DEMO_EXPECTED_CODES) }
       {
         key: key,
         number: STEP_KEYS.index(key) + 1,
         title: title,
-        status: issues.empty? ? "done" : "action_needed",
+        status: blocking.empty? ? "done" : "action_needed",
         summary: summary,
         issues: issues,
         data: data

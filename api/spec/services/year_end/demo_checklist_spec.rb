@@ -39,25 +39,31 @@ RSpec.describe YearEnd::Checklist, "for a demo company" do
     expect(efile).to include(available: false, unavailable_reason: Company::DEMO_UNAVAILABLE_MESSAGE)
   end
 
-  it "does not flag the fictional reserved-area SSNs or mention practice, test or demo status" do
+  it "runs e-file preflight and collapses fictional 9xx SSNs into one labeled expected error without blocking sign-off" do
     result = checklist
+    people_step = result[:steps].find { |entry| entry[:key] == "people" }
     codes = result[:steps].flat_map { |entry| Array(entry[:issues]) }.map { |issue| issue[:code] }
 
+    expect(result.dig(:company, :demo)).to be(true)
+    expect(codes).to include("DEMO_RESERVED_SSN_EXPECTED")
     expect(codes).not_to include("EMPLOYEE_EFILE_INVALID")
-    expect(result.to_json).not_to match(/practice copy|test workspace|demo/i)
+    expect(people_step[:status]).to eq("done")
+    expect(people_step[:issues].sole).to include(code: "DEMO_RESERVED_SSN_EXPECTED", expected_for_demo: true)
+    expect(result[:status]).to eq("ready")
+    expect(result[:issue_count]).to eq(0)
+    expect(described_class.new(company: company.reload, year: 2026, user: admin).w2_mark_ready_blockers).to be_empty
+    expect(YearEnd::EfileCheck.read_many([ company.id ], 2026)[company.id]).to be_present
   end
 
-  it "runs no e-file preflight and writes no e-file check, but keeps the paper W-2 checks" do
-    expect(YearEnd::EfileCheck).not_to receive(:record)
-    expect(Efw2W2GuGenerator).not_to receive(:new)
+  it "still flags real paper W-2 and non-9xx EFW2 errors as blockers" do
     employee.update_columns(address_line1: nil)
 
     result = checklist
-    described_class.new(company: company.reload, year: 2026, user: admin).w2_mark_ready_blockers
+    blockers = described_class.new(company: company.reload, year: 2026, user: admin).w2_mark_ready_blockers
     codes = result[:steps].flat_map { |entry| Array(entry[:issues]) }.map { |issue| issue[:code] }
-    expect(codes).to include("EMPLOYEE_DETAILS_MISSING")
-    expect(codes).not_to include("EMPLOYEE_EFILE_INVALID", "EMPLOYER_EFILE_INVALID")
-    expect(YearEnd::EfileCheck.read_many([ company.id ], 2026)).to be_empty
+    expect(codes).to include("EMPLOYEE_DETAILS_MISSING", "DEMO_RESERVED_SSN_EXPECTED")
+    expect(blockers.map { |entry| entry[:code] }).to include("EMPLOYEE_DETAILS_MISSING")
+    expect(blockers.map { |entry| entry[:code] }).not_to include("DEMO_RESERVED_SSN_EXPECTED")
   end
 
   it "keeps the official EFW2 validator refusing the reserved area" do

@@ -17,16 +17,15 @@ class ClientInboxQuery
   def companies
     scope = Company.active.joins(:organization).where(organizations: { status: "active" }).where(organization_id: @user.organization_id, test_workspace_archived_at: nil, test_workspace_sealed_at: nil)
     scope = scope.where("companies.test_workspace_expires_at IS NULL OR companies.test_workspace_expires_at > ?", Time.current)
-    # A demo company's activity shows only when that client is selected, so it
-    # never mixes into the firm-wide "All clients" list or the badge.
-    purposes = Company.demo.where(id: @params[:company_id]).exists? ? %w[sandbox demo] : %w[sandbox]
-    scope = scope.where("companies.payroll_environment = ? OR (companies.test_workspace_purpose IN (?) AND companies.migration_rehearsal_status = ?)", "live", purposes, "ready")
+    # Operating companies (real live clients plus demo companies) and ready
+    # sandboxes appear in inbox rows; summary counters stay live-only (NOT demo).
+    scope = scope.where("#{Company::OPERATING_SQL} OR (companies.test_workspace_purpose = 'sandbox' AND companies.migration_rehearsal_status = 'ready')")
     scope = scope.where(id: accessible_ids) unless @user.organization_admin?
     scope
   end
 
   def summary
-    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current, actionable_reviews_only: true)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live'")
+    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current, actionable_reviews_only: true)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live' AND counted_company.demo = FALSE")
     row.transform_values(&:to_i)
   end
 
@@ -162,12 +161,12 @@ class ClientInboxQuery
     when "waiting" then conditions << "waiting"
     when "handled" then conditions << "NOT waiting"
     end
-    "SELECT inbox.*, c.name AS company_name, (c.payroll_environment = 'migration_rehearsal' AND c.test_workspace_purpose IS DISTINCT FROM 'demo') AS practice_copy FROM (#{sql}) inbox JOIN companies c ON c.id = inbox.company_id#{conditions.any? ? " WHERE #{conditions.join(' AND ')}" : ''}"
+    "SELECT inbox.*, c.name AS company_name, (c.payroll_environment = 'migration_rehearsal' AND c.test_workspace_purpose IS DISTINCT FROM 'demo') AS practice_copy, (c.demo = TRUE OR (c.payroll_environment = 'migration_rehearsal' AND c.test_workspace_purpose = 'demo')) AS demo FROM (#{sql}) inbox JOIN companies c ON c.id = inbox.company_id#{conditions.any? ? " WHERE #{conditions.join(' AND ')}" : ''}"
   end
 
   def serialize(row, requests = {}, review_packages = {})
     payload = { id: row["id"].to_i, key: "#{row['kind']}:#{row['id']}", company_id: row["company_id"].to_i,
-      company_name: row["company_name"], practice_copy: row["practice_copy"], sender_name: row["sender_name"], kind: row["kind"], title: row["title"],
+      company_name: row["company_name"], practice_copy: row["practice_copy"], demo: row["demo"], sender_name: row["sender_name"], kind: row["kind"], title: row["title"],
       activity_at: row["activity_at"], unread: row["unread"], waiting: row["waiting"] }
     if (request = requests[row["id"].to_i]) && row["kind"] == "file_request"
       payload.merge!(thread_id: request.client_portal_thread_id, state: request.status, state_label: request.status_label)

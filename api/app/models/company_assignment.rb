@@ -46,7 +46,7 @@ class CompanyAssignment < ApplicationRecord
   def client_management_grant_shape
     return unless client_management?
 
-    errors.add(:client_management, "is only available for live accountant assignments") unless user&.accountant? && (company&.live_payroll? || company&.demo?) && workspace_access_level.nil?
+    errors.add(:client_management, "is only available for live accountant assignments") unless user&.accountant? && company&.operating? && workspace_access_level.nil?
     return unless new_record? || will_save_change_to_client_management? || validation_context == :client_management_update
 
     actor = User.find_by(id: granted_by_id)
@@ -78,7 +78,7 @@ class CompanyAssignment < ApplicationRecord
       errors.add(:company, "must belong to the same kind of client as the login")
       return
     end
-    return if !company.test_workspace? || user.staff_member? || (user.client? && company.demo?)
+    return if !company.practice_copy? || user.staff_member?
 
     errors.add(:company, "test workspaces are available only to payroll staff")
   end

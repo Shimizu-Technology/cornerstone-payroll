@@ -5,7 +5,7 @@ module Api
     module Admin
       class RecordActivitiesController < BaseController
         # Company history remains readable while a copy is preparing or needs repair.
-        skip_before_action :enforce_test_workspace_safety!, if: -> { params[:record_type] == "companies" }
+        skip_before_action :enforce_contained_company_safety!, if: -> { params[:record_type] == "companies" }
 
         DEFAULT_PER_PAGE = 25
         MAX_PER_PAGE = 100

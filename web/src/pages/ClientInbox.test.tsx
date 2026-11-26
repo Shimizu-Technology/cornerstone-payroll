@@ -183,3 +183,13 @@ it('offers only ready open practice copies and sends the selected company id', a
   fireEvent.change(screen.getByLabelText('Client'), { target: { value: '3' } });
   await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ company_id: 3 })));
 });
+
+it('includes a demo company in the client filter dropdown', async () => {
+  mocks.companies.push({
+    id: 9, organization_id: 1, name: 'Harbor Finch Kitchen', active: true,
+    payroll_environment: 'live', test_workspace: false, demo: true,
+  } as CompanyListItem);
+  render(<MemoryRouter><ClientInbox /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  expect(screen.getByRole('option', { name: 'Harbor Finch Kitchen' })).toBeTruthy();
+});

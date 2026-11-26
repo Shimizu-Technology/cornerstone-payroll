@@ -67,9 +67,8 @@ module PortalNotifications
       def retime_pending_deliveries!(user, category, mode)
         return unless PortalNotificationDelivery::DELIVERY_MODES.include?(mode)
 
-        accessible_company_ids = Company.active
+        accessible_company_ids = Company.active.operating
           .where(organization_id: user.organization_id, id: user.accessible_company_ids)
-          .where("payroll_environment = 'live' OR test_workspace_purpose = 'demo'")
           .pluck(:id)
         return if accessible_company_ids.empty?
 

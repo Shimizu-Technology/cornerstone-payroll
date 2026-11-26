@@ -28,7 +28,7 @@ module PayrollSubmissions
       return unless item.kind == "owner_pay" && @before_pay_date
 
       history = PayPeriod.committed
-      if @company.test_workspace?
+      if @company.practice_copy?
         history = history.or(PayPeriod.where(status: "approved", test_workspace_role: "baseline").where.not(test_workspace_source_pay_period_id: nil))
       end
       previous = item.employee.payroll_items.financially_reportable.joins(:pay_period).merge(history)

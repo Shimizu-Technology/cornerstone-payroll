@@ -245,7 +245,7 @@ module PortalNotifications
 
       def company_open?(company_id)
         company = Company.includes(:organization).find_by(id: company_id)
-        company&.active? && (company.live_payroll? || company.demo?) && company.organization&.active?
+        company&.active? && company.operating? && company.organization&.active?
       end
 
       def listed_user?(company_id, user_id)
