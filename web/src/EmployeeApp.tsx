@@ -57,7 +57,9 @@ function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElemen
   const { state } = useEmployeeSession();
   const brand = useBrand();
   // On the shared host, the chosen employer's name stands in for client branding.
-  const shown = state.status === 'ready' ? employerBrand(brand, state.link.companyName) : brand;
+  const shown = state.status === 'ready'
+    ? employerBrand(brand, state.link.companyName, Boolean(state.link.demo || state.info.demo))
+    : brand;
   return (
     <BrandContext.Provider value={shown}>
       <SignedInScreens viewAs={viewAs} />

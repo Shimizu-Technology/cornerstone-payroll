@@ -77,7 +77,7 @@ RSpec.describe "Client subdomains", type: :request do
       expect(response.headers["Cache-Control"]).to eq("no-store")
       expect(response.parsed_body).to eq(
         "name" => "Example Employer", "app_name" => nil, "logo_url" => "https://example.test/mark.png",
-        "primary_color" => "#214F44", "accent_color" => "#FAD625", "main_phone" => "6715551234"
+        "primary_color" => "#214F44", "accent_color" => "#FAD625", "main_phone" => "6715551234", "demo" => false
       )
     end
   end
@@ -131,7 +131,7 @@ RSpec.describe "Client subdomains", type: :request do
 
     expect(response.parsed_body).to eq(
       "name" => "Example Employer", "app_name" => nil, "logo_url" => nil, "primary_color" => nil, "accent_color" => nil,
-      "main_phone" => "6715551234"
+      "main_phone" => "6715551234", "demo" => false
     )
   end
 

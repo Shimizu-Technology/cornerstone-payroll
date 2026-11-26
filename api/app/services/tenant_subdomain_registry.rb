@@ -107,7 +107,8 @@ class TenantSubdomainRegistry
       logo_url: uploaded_logo_url(company, slug, logo_base_url) || https_url(branding["logo_url"]),
       primary_color: hex_color(branding["primary_color"]),
       accent_color: hex_color(branding["accent_color"]),
-      main_phone: (company.phone.to_s.strip.presence unless branding["show_main_phone"] == false)
+      main_phone: (company.phone.to_s.strip.presence unless branding["show_main_phone"] == false),
+      demo: company.demo?
     }
   end
 

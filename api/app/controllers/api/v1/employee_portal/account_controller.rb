@@ -65,6 +65,7 @@ module Api
             id: link.id,
             company_name: link.company.name,
             subdomain_slug: link.company.subdomain_slug,
+            demo: link.company.demo?,
             status: link.status,
             former_access_until: link.former_access_until&.iso8601,
             latest_pay_date: latest_pay_date_for(link)&.iso8601
