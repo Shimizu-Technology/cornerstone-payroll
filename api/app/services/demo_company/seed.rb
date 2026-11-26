@@ -239,11 +239,10 @@ module DemoCompany
 
     def company_key(company) = fixture_key(company)
 
-    # Matches by the deterministic fictional SSN first so a rerun stays
-    # idempotent even if a demo employee's name was edited or renamed.
+    # Matches strictly by the deterministic fictional SSN so a rerun stays
+    # idempotent and never collides with a custom employee sharing a name.
     def find_employee(company, person)
-      Employee.find_by(company: company, ssn_encrypted: Roster.ssn_variants(person)) ||
-        Employee.find_by(company: company, first_name: person[:first], last_name: person[:last])
+      Employee.find_by(company: company, ssn_encrypted: Roster.ssn_variants(person))
     end
 
     # Fills the fields the employee app and payroll need, without overwriting
