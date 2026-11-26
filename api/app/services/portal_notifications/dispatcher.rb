@@ -87,7 +87,7 @@ module PortalNotifications
       end
     end
 
-    def claim_fresh_v2_groups(recipient_key, rows)
+    def claim_fresh_v2_groups(recipient_key, rows, salt: nil)
       rows.group_by do |row|
         [
           row.delivery_mode,
@@ -98,7 +98,7 @@ module PortalNotifications
       end.map do |(mode, destination, company_id, demo), group|
         ids = group.map(&:id).sort
         key = v2_batch_key(recipient_key: recipient_key, mode: mode, destination: destination, company_id: company_id,
-          demo: demo, ids: ids)
+          demo: demo, ids: ids, salt: salt)
         claim_rows!(ids: ids, key: key, expected_address: group.first.address, recipient_key: recipient_key, legacy_renderer: false)
       end
     end
@@ -147,6 +147,12 @@ module PortalNotifications
         ) ]
       end
 
+      # A v2 batch whose earlier claim crashed before persisting attempted_payload
+      # never called the provider, so surviving authorized rows can safely re-key.
+      if v2_batch_key?(previous_key) && all_batch_rows.all? { |row| row.attempted_payload.nil? }
+        return claim_fresh_v2_groups(recipient_key, kept, salt: "reconciled:#{previous_key}")
+      end
+
       # Authorization changed after an attempt whose provider outcome may be
       # ambiguous: never mint a new idempotency key and resend duplicates.
       mark_revoked_unclaimed!(kept.map(&:id))
@@ -173,6 +179,7 @@ module PortalNotifications
           status: "sent",
           sent_at: sent_sibling.sent_at || now,
           provider_message_id: sent_sibling.provider_message_id,
+          attempted_payload: nil,
           claimed_at: nil,
           claimed_by: nil,
           next_attempt_at: nil,
@@ -187,6 +194,7 @@ module PortalNotifications
         status: "sent",
         sent_at: sent_sibling.sent_at || now,
         provider_message_id: sent_sibling.provider_message_id,
+        attempted_payload: nil,
         claimed_at: nil,
         claimed_by: nil,
         next_attempt_at: nil,
@@ -202,6 +210,7 @@ module PortalNotifications
         .update_all(
           status: "skipped",
           skip_reason: "access_revoked",
+          attempted_payload: nil,
           claimed_at: nil,
           claimed_by: nil,
           next_attempt_at: nil,
@@ -214,6 +223,7 @@ module PortalNotifications
       owned_scope(ids).update_all(
         status: "skipped",
         skip_reason: reason,
+        attempted_payload: nil,
         claimed_at: nil,
         claimed_by: nil,
         next_attempt_at: nil,
@@ -263,11 +273,14 @@ module PortalNotifications
 
       if require_claim
         updated = owned_scope([ row.id ]).update_all(
-          status: "skipped", skip_reason: reason, claimed_at: nil, claimed_by: nil, completed_at: now, updated_at: now
+          status: "skipped", skip_reason: reason, attempted_payload: nil, claimed_at: nil, claimed_by: nil, completed_at: now, updated_at: now
         )
-        row.assign_attributes(status: "skipped", skip_reason: reason, claimed_at: nil, claimed_by: nil, completed_at: now) if updated.positive?
+        row.assign_attributes(status: "skipped", skip_reason: reason, attempted_payload: nil, claimed_at: nil, claimed_by: nil, completed_at: now) if updated.positive?
       else
-        row.update!(status: "skipped", skip_reason: reason, claimed_at: nil, claimed_by: nil, completed_at: now)
+        row.update!(status: "skipped", skip_reason: reason, attempted_payload: nil, claimed_at: nil, claimed_by: nil, completed_at: now)
+      end
+      if reason == "foreign_account_suppressed"
+        Rails.logger.info("[PortalNotification] foreign account suppressed delivery=#{row.id} company=#{row.company_id}")
       end
       true
     end
@@ -300,6 +313,9 @@ module PortalNotifications
       nil
     end
 
+    # Rows whose destination email changed after enqueue, claim, or first
+    # attempt are deliberately dropped (skipped as destination_changed) rather
+    # than resent to either the old or new mailbox.
     def destination_changed?(row, expected_address: nil)
       current_address = PortalNotificationRecipient.normalize_email(row.address)
       return true if current_address.blank?
@@ -325,6 +341,9 @@ module PortalNotifications
       return false unless prepared
 
       deliver(prepared)
+    rescue StandardError => error
+      record_failure!(group, error)
+      false
     end
 
     def prepare_delivery(group)
@@ -360,9 +379,10 @@ module PortalNotifications
             all_events.map(&:company_id).uniq.one?
 
           if !single_company_generic_v2
-            first_attempt_unpersisted = v2_batch_key?(final_key) &&
-              all_batch_rows.all? { |row| row.attempted_payload.nil? && row.attempts == 1 }
-            if first_attempt_unpersisted
+            # A v2 batch with no persisted attempted_payload on any row never
+            # reached the provider (even after a crashed claim with attempts > 1).
+            never_sent = v2_batch_key?(final_key) && all_batch_rows.all? { |row| row.attempted_payload.nil? }
+            if never_sent
               # Provider has never been called for this batch yet: reconcile onto
               # a fresh key containing ONLY the freshly authorized rows.
               first = kept.first
@@ -397,7 +417,7 @@ module PortalNotifications
           persisted.symbolize_keys
         else
           legacy = group.fetch(:legacy_renderer, false)
-          events_for_render = legacy || other_rows.any? ? all_events : kept.map(&:event)
+          events_for_render = kept.map(&:event)
           app_user = legacy ? first.user_id.present? : effective_user_for(first).present?
           email = Email.new(
             audience: first.event.audience,
@@ -407,7 +427,7 @@ module PortalNotifications
             legacy_renderer: legacy
           )
           rendered = email.payload(from: Transport.from_email, to: fresh_address)
-          owned_scope(kept_ids).where(attempted_payload: nil).update_all(attempted_payload: rendered, updated_at: now)
+          kept.each { |row| row.update!(attempted_payload: rendered) if row.attempted_payload.nil? }
           rendered
         end
 
@@ -462,7 +482,7 @@ module PortalNotifications
 
     def complete!(group, **attributes)
       owned_scope(group[:ids]).update_all(
-        attributes.merge(claimed_at: nil, claimed_by: nil, next_attempt_at: nil, last_error_class: nil, completed_at: now, updated_at: now))
+        attributes.merge(attempted_payload: nil, claimed_at: nil, claimed_by: nil, next_attempt_at: nil, last_error_class: nil, completed_at: now, updated_at: now))
     end
 
     # Only the error class is kept or logged: provider messages can echo
@@ -471,7 +491,7 @@ module PortalNotifications
       owned_scope(group[:ids]).find_each do |row|
         if row.attempts >= MAX_ATTEMPTS
           owned_scope([ row.id ]).update_all(
-            status: "failed", claimed_at: nil, claimed_by: nil, next_attempt_at: nil,
+            status: "failed", attempted_payload: nil, claimed_at: nil, claimed_by: nil, next_attempt_at: nil,
             last_error_class: error.class.name, completed_at: now, updated_at: now
           )
         else

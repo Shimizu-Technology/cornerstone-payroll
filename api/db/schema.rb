@@ -4244,7 +4244,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_030000) do
     t.datetime "updated_at", null: false
     t.string "intended_recipient_email"
     t.string "claimed_by", limit: 64
-    t.jsonb "attempted_payload"
+    t.text "attempted_payload"
     t.index [ "batch_key" ], name: "index_portal_notification_deliveries_on_batch_key"
     t.index [ "company_id" ], name: "index_portal_notification_deliveries_on_company_id"
     t.index [ "deliver_after", "recipient_key" ], name: "idx_portal_notification_deliveries_due", where: "((status)::text = 'pending'::text)"

@@ -180,14 +180,25 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
         .to eq(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_u))
       expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f)).to eq("queued")
 
-      # After dispatch window: only the unregistered extra actually receives email, yet both show "sent".
+      # After deliver_after passes but BEFORE dispatch runs: BOTH still show "queued".
       travel_to(3.minutes.from_now) do
+        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload)).to eq("queued")
+        expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload)).to eq("queued")
+        expect(PayrollReview::PackagePresenter.decision_notification_queued?(pkg_f)).to be(true)
+
+        log = StringIO.new
+        allow(Rails).to receive(:logger).and_return(ActiveSupport::Logger.new(log))
+
+        # After dispatch processes both in the same pass: only the unregistered extra actually receives email,
+        # both transition to "sent", and ops logs record the suppression without PII.
         PortalNotifications::Dispatcher.run!
         expect(captured_portal_emails.map { |mail| mail[:to] }).to include(unreg_email)
         expect(captured_portal_emails.map { |mail| mail[:to] }).not_to include(foreign_email, "outsidepartner+ops@googlemail.com")
         expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f.reload))
           .to eq(PayrollReview::PackagePresenter.decision_notification_status(pkg_u.reload))
         expect(PayrollReview::PackagePresenter.decision_notification_status(pkg_f)).to eq("sent")
+        expect(log.string).to include("[PortalNotification] foreign account suppressed")
+        expect(log.string).not_to include(foreign_email, "outsidepartner+ops@googlemail.com")
       end
     end
   end

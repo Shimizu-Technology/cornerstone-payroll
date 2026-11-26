@@ -613,6 +613,15 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         dispatch_at(3.minutes.from_now)
         expect(attempts.size).to eq(1)
 
+        delivery = PortalNotificationDelivery.where(user: staff_lead).joins(:portal_notification_event)
+          .find_by!(portal_notification_events: { event_type: "payroll_review_decided" })
+        raw_ciphertext = PortalNotificationDelivery.connection.select_value(
+          "SELECT attempted_payload FROM portal_notification_deliveries WHERE id = #{delivery.id}"
+        )
+        expect(raw_ciphertext).to be_present
+        expect(raw_ciphertext).not_to include("Pacific Harbor Grill", staff_lead.email)
+        expect(delivery.reload.attempted_payload).to include("to" => staff_lead.email)
+
         # Mutate company name and pay_date before retry — retry must still send exact persisted payload.
         company.update!(name: "Renamed Harbor Bistro")
         pay_period.update_columns(pay_date: Date.new(2026, 11, 25))
@@ -622,6 +631,122 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(attempts.last).to eq(attempts.first)
         expect(attempts.last[:payload][:subject]).to include("Pacific Harbor Grill")
         expect(attempts.last[:payload][:subject]).not_to include("Renamed Harbor Bistro")
+        expect(delivery.reload.attempted_payload).to be_nil
+      end
+    end
+
+    it "re-keys surviving rows when an earlier claim crashed before persisting attempted_payload (even with attempts >= 2)" do
+      PortalNotificationPreference.create!(user: client_manager, category: "payroll_updates", delivery_mode: "digest")
+      second_period = create(:pay_period, :calculated, company: company,
+        start_date: Date.new(2026, 11, 15), end_date: Date.new(2026, 11, 28), pay_date: Date.new(2026, 12, 4))
+      create(:payroll_item, company: company, pay_period: second_period, employee: employee, gross_pay: 1_500, net_pay: 1_200)
+
+      with_portal_email do
+        travel_to(Time.utc(2026, 12, 1, 20, 30)) do
+          PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+          PayPeriodLifecycleService.new(pay_period: second_period, actor: staff_lead).approve!
+        end
+
+        rows = PortalNotificationDelivery.where(user: client_manager).order(:id).to_a
+        crashed_key = "portal-notification-v2-crashedclaim123"
+        # Simulate two crashed claims that never persisted attempted_payload or called the provider.
+        PortalNotificationDelivery.where(id: rows.map(&:id)).update_all(
+          batch_key: crashed_key, attempts: 2, claimed_at: nil, claimed_by: nil, attempted_payload: nil
+        )
+        PayPeriodLifecycleService.new(pay_period: second_period.reload, actor: staff_lead).unapprove!
+
+        dispatch_at(Time.utc(2026, 12, 1, 21, 5))
+
+        expect(captured_portal_emails.size).to eq(1)
+        kept_row = PortalNotificationDelivery.joins(:portal_notification_event)
+          .find_by!(user: client_manager, portal_notification_events: { subject_id: pay_period.id })
+        revoked_row = PortalNotificationDelivery.joins(:portal_notification_event)
+          .find_by!(user: client_manager, portal_notification_events: { subject_id: second_period.id })
+        expect(revoked_row).to have_attributes(status: "skipped", skip_reason: "resource_unavailable")
+        expect(kept_row.status).to eq("sent")
+        expect(kept_row.batch_key).to start_with("portal-notification-v2-")
+        expect(kept_row.batch_key).not_to eq(crashed_key)
+        expect(kept_row.attempted_payload).to be_nil
+      end
+    end
+
+    it "isolates rendering errors so later batches still send and the failing batch stops at MAX_ATTEMPTS" do
+      PortalNotificationRecipient.create!(company: company, user: staff_backup, team_role: "backup")
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        # Force Email.new to fail only for the first batch in dispatch order so the later batch must still send.
+        bad_delivery, good_delivery = [
+          PortalNotificationDelivery.find_by!(user: staff_lead),
+          PortalNotificationDelivery.find_by!(user: staff_backup)
+        ].sort_by(&:recipient_key)
+        allow(PortalNotifications::Email).to receive(:new).and_wrap_original do |original, **kwargs|
+          raise RuntimeError, "synthetic render failure" if bad_delivery.reload.claimed_at.present?
+
+          original.call(**kwargs)
+        end
+
+        start = 3.minutes.from_now
+        dispatch_at(start)
+
+        expect(good_delivery.reload.status).to eq("sent")
+        expect(captured_portal_emails.map { |m| m[:to] }).to eq([ good_delivery.user.email ])
+        expect(bad_delivery.reload).to have_attributes(
+          status: "pending", attempts: 1, last_error_class: "RuntimeError", claimed_at: nil
+        )
+        expect(bad_delivery.next_attempt_at).to be_present
+
+        # Advance through remaining retry backoffs until MAX_ATTEMPTS marks it failed and clears attempted_payload.
+        at = start
+        PortalNotifications::Dispatcher::RETRY_BACKOFF.each do |wait|
+          at += wait
+          dispatch_at(at)
+        end
+
+        expect(bad_delivery.reload).to have_attributes(
+          status: "failed",
+          attempts: PortalNotifications::Dispatcher::MAX_ATTEMPTS,
+          last_error_class: "RuntimeError",
+          next_attempt_at: nil,
+          attempted_payload: nil
+        )
+      end
+    end
+
+    it "sends only one delivery when two selected staff accounts share a canonical Gmail mailbox while keeping Lead and Backup roles" do
+      lead_gmail = create(:user, company: company, organization: organization, role: "manager", email: "team.lead@gmail.com")
+      backup_gmail = create(:user, company: company, organization: organization, role: "admin", email: "teamlead+backup@googlemail.com")
+      create(:company_assignment, user: lead_gmail, company: company)
+      create(:company_assignment, user: backup_gmail, company: company)
+
+      PortalNotifications::RecipientListUpdate.call!(
+        company: company, actor: staff_backup,
+        user_ids: [ lead_gmail.id, backup_gmail.id ], emails: [],
+        lead_user_id: lead_gmail.id, backup_user_id: backup_gmail.id
+      )
+      expect(PortalNotificationRecipient.where(company: company).lead.pick(:user_id)).to eq(lead_gmail.id)
+      expect(PortalNotificationRecipient.where(company: company).backup.pick(:user_id)).to eq(backup_gmail.id)
+
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        event = PortalNotificationEvent.find_by!(event_type: "payroll_review_decided")
+        expect(event.deliveries.count).to eq(1)
+        expect(PortalNotificationRecipient.where(company: company).lead.pick(:user_id)).to eq(lead_gmail.id)
+        expect(PortalNotificationRecipient.where(company: company).backup.pick(:user_id)).to eq(backup_gmail.id)
+
+        dispatch_at(3.minutes.from_now)
+        expect(captured_portal_emails.size).to eq(1)
       end
     end
 

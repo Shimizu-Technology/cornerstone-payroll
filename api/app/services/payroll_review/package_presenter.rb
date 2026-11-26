@@ -43,26 +43,22 @@ module PayrollReview
 
       # Derive status from a single read so a concurrent pending -> sent
       # transition cannot momentarily look like not_sent. Foreign-account
-      # suppressed extra addresses mirror the same queued -> sent lifecycle as
-      # an unregistered extra address so tenant responses stay indistinguishable.
+      # suppressed rows stay pending until Dispatcher processes them in its
+      # normal pass, so queued -> sent transitions at the exact same point as an
+      # unregistered address without ever sending outbound email.
       rows = PortalNotificationDelivery.joins(:portal_notification_event)
         .where(
           company_id: review_package.company_id,
           portal_notification_events: { dedupe_key: "payroll_review_decided:#{review_package.id}" }
         )
-        .pluck(:status, :skip_reason, :deliver_after)
+        .pluck(:status, :skip_reason)
 
-      now = Time.current
-      return "sent" if rows.any? { |status, _reason, _after| status == "sent" }
-      if rows.any? { |status, reason, after| status == "skipped" && reason == "foreign_account_suppressed" && after <= now }
+      if rows.any? { |status, reason| status == "sent" || (status == "skipped" && reason == "foreign_account_suppressed") }
         return "sent"
       end
       return "not_sent" unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
 
-      queued = rows.any? do |status, reason, after|
-        status == "pending" || (status == "skipped" && reason == "foreign_account_suppressed" && after > now)
-      end
-      queued ? "queued" : "not_sent"
+      rows.any? { |status, _reason| status == "pending" } ? "queued" : "not_sent"
     end
 
     def self.decision_notification_queued?(review_package)
