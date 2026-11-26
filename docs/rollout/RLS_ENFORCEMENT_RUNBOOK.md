@@ -9,7 +9,7 @@
 3. Schedule the flip right after a completed pay run at low traffic. Confirm the run is committed and all payment, print and reconciliation work intended for the window is complete. Pause starts, edits, calculations, imports, approvals, finalizations and print work for the duration. Inspect the queue for in-flight work. Leave the queue worker available for the non-payroll smoke checks. Open draft rows alone do not establish that payroll is in progress. Get explicit confirmation from the payroll operator.
 4. Verify a recent restorable backup and create a named Neon branch or snapshot from the production recovery point after the pay run. Record its UTC recovery point and retention privately. Keep it isolated from live services and outbound integrations. Confirm the owner can connect to the direct endpoint and has a separate owner session ready for emergency rollback. Rehearse the rollback on a contained copy. Use the catalog checks in the readiness report against production before the change. [Neon branching and recovery](https://neon.com/storage).
 5. Confirm primary direct connection headroom for overlapping Render instances, the worker and owner sessions. Confirm the staff web and worker use `log`, the employee API uses `raise`, and all three primary connections use the same production primary through the direct `payroll_app` role. Keep queue, cache and cable URLs, worker start settings, and employee API role and pool cap as deployed.
-6. Confirm a demo window covers the active demo through the window, the demo flags and their switch activations are on, and an existing demo employee can sign in on its own employee address and open a known statement. Record the expected counts and amounts from approved fixtures for the smoke tests. Employee access under the waiver is expected to pause temporarily during partial enforcement. Confirm whether any real company has employee access and have its switch admin available for emergency shutdown. Confirm whether View As is approved on staff web, since the move to `raise` can activate it if the other prerequisites are already set.
+6. Record all pre-flip open early-access windows privately. Confirm a window covers the active demo through the cutover, the demo flags and their switch activations are on, and an existing demo employee can sign in on its own employee address and open a known statement. Record the expected counts and amounts from approved fixtures for the smoke tests. Employee access under the waiver is expected to pause temporarily during partial enforcement. Confirm whether any real company has employee access and have its switch admin available for emergency shutdown. Confirm whether View As is approved on staff web, since the move to `raise` can activate it if the other prerequisites are already set.
 7. From `api/` in each deployed service environment, run the checks below. `production:readiness` includes live cache, storage and provider probes. Record its output privately. The owner **dry run** also creates temporary comparison objects. Use the read-only SQL from the report for catalog-only verification.
 
    ```sh
@@ -56,8 +56,36 @@ Leave `RLS_DATABASE_URL` on all three services. Use `MIGRATION_DATABASE_URL` onl
    ```
 
    The task skips tables already enforced, commits per table, and pauses five seconds between batches of ten by default. It stops before the next table if the database kill switch changes. A lock or other failure can leave tables enforced. Inspect `rls:status` before choosing whether to resume the same command or roll back. Require `all_enforced: true`, `All protected tables are enabled and forced`, and a fresh status of `enforced`, all registered tables enabled and forced, the mismatch list empty, and the kill switch off.
-5. **Apply the readiness expectation.** Set `RLS_EXPECT_ENFORCED=true` and use **Save and deploy** on the employee API first, worker second, staff web third. After each deploy, verify health, revision, `rls:status` and `bundle exec rails production:readiness` in that service's environment. Require PASS for runtime role and kill-switch privileges, selected policy phase, restricted login-link function, and kill switch off. Also require all `employee_web:` checks on the employee API and a worker heartbeat less than five minutes old. Confirm the unauthenticated employee API `/health/dependencies` reports `ok` and the staff switch screen reports that the employee service and database checks pass. Treat service config, the health endpoint and DB status as separate observations.
-6. Repeat full smoke tests and record the outcome. Reopen payroll changes only after the required checks pass and the payroll operator agrees.
+5. **Retire the early-access windows.** Immediately after full enforcement is verified, run the job synchronously from `api/` in the deployed worker's runtime environment with the guard in `raise`.
+
+   ```sh
+   RAILS_ENV=production bundle exec rails runner 'CloseExpiredDemoEarlyAccessJob.perform_now'
+   ```
+
+   Check the stored `retired_at` and matching organization audit for every pre-flip open window. From the owner SQL session, pass the privately recorded window IDs as the `psql` variable `pre_flip_window_ids` using PostgreSQL array syntax. The query returns only counts.
+
+   ```sql
+   BEGIN READ ONLY;
+   SELECT count(*) AS recorded_windows,
+          count(*) FILTER (WHERE w.retired_at IS NOT NULL) AS retired_windows,
+          count(*) FILTER (WHERE audit.rows = 1) AS windows_with_one_audit
+   FROM public.employee_app_early_access_windows w
+   CROSS JOIN LATERAL (
+     SELECT count(*) AS rows
+     FROM public.audit_logs a
+     WHERE a.action = 'employee_app_early_access#retired'
+       AND a.record_type = 'EmployeeAppEarlyAccessWindow'
+       AND a.record_id = w.id
+       AND a.organization_id = w.organization_id
+       AND a.company_id IS NULL
+   ) audit
+   WHERE w.id = ANY (:'pre_flip_window_ids'::bigint[]);
+   COMMIT;
+   ```
+
+   All three counts must equal the pre-flip cohort size. If a busy organization or window was skipped, resolve the lock, rerun the job, and repeat the query before continuing.
+6. **Apply the readiness expectation.** Set `RLS_EXPECT_ENFORCED=true` and use **Save and deploy** on the employee API first, worker second, staff web third. After each deploy, verify health, revision, `rls:status` and `bundle exec rails production:readiness` in that service's environment. Require PASS for runtime role and kill-switch privileges, selected policy phase, restricted login-link function, and kill switch off. Also require all `employee_web:` checks on the employee API and a worker heartbeat less than five minutes old. Confirm the unauthenticated employee API `/health/dependencies` reports `ok` and the staff switch screen reports that the employee service and database checks pass. Treat service config, the health endpoint and DB status as separate observations.
+7. Repeat full smoke tests and record the outcome. Reopen payroll changes only after the required checks pass and the payroll operator agrees.
 
 ## Smoke tests
 
@@ -116,4 +144,4 @@ If any table has flipped, the lead and switch admin coordinate the following ste
    SELECT bypass_enabled FROM rls_admin.rls_kill_switch WHERE singleton;
    ```
 
-5. Run shadow readiness on all three, repeat staff/client/worker smoke tests, and reconcile affected writes and jobs before removing the payroll pause. Real employee access stays off pending restored enforcement. A demo with a still-valid unretired window can resume. If the old window was retired, the expiry sweep can close the demo's stored flags and revoke their activations. Let that reconcile, then have a super admin create a fresh approved window and the switch admin restore the required flags through the UI. Verify the same demo login and document access. Use the backup or Neon recovery branch only for a separate, explicitly authorized data recovery.
+5. Run shadow readiness on all three, repeat staff/client/worker smoke tests, and reconcile affected writes and jobs before removing the payroll pause. Real employee access stays off pending restored enforcement. If rollback happens before the first sweep or system read retires a window, its still-valid waiver can apply again once shadow mode is restored and the bypass is cleared. If the old window was retired, the expiry sweep can close the demo's stored flags and revoke their activations. Let that reconcile, then have a super admin create a fresh approved window and the switch admin restore the required flags through the UI. Verify the same demo login and document access. Use the backup or Neon recovery branch only for a separate, explicitly authorized data recovery.
