@@ -23,6 +23,6 @@ module RolloutEnvironment
 
   def clerk_authorized_parties_valid?(env = ENV)
     parties = env.fetch("CLERK_AUTHORIZED_PARTIES", "").split(",").map(&:strip).reject(&:empty?)
-    parties.present? && parties.all? { |party| ClerkTokenVerifier.valid_production_https_origin?(party) }
+    parties.present? && parties.all? { |party| ClerkTokenVerifier.valid_production_https_origin?(party, env: env) }
   end
 end

@@ -1,4 +1,4 @@
-import { assertDeploymentFlags, assertStagingOrigin, stagingBrowserContainment } from './build/staging'
+import { assertDeploymentFlags, assertLocalBuild, assertStagingOrigin, stagingBrowserContainment } from './build/staging'
 import { employeeIndexHtml } from './build/employee-html'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -13,6 +13,7 @@ export default defineConfig(({ mode, command }) => {
     throw new Error('VITE_APP_SURFACE must be staff or employee')
   }
   assertDeploymentFlags(env, command === 'build' ? 'production' : mode)
+  if (env.VITE_DEPLOYMENT_ENV === 'local' && command === 'build') assertLocalBuild(env)
   if (env.VITE_DEPLOYMENT_ENV === 'staging' && (mode !== 'test' || command === 'build')) {
     assertStagingOrigin(env.VITE_STAGING_AIRE_FRONTEND_ORIGIN, 'VITE_STAGING_AIRE_FRONTEND_ORIGIN')
     for (const key of ['VITE_STAGING_SNAPSHOT_AT', 'VITE_STAGING_CODE_SHA', 'VITE_API_URL', 'VITE_CLERK_PUBLISHABLE_KEY']) {

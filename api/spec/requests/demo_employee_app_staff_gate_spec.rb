@@ -28,7 +28,7 @@ RSpec.describe "Demo employee app gate on staff web and the worker", type: :requ
   let(:guard_mode) { "raise" }
   let(:clock_offset) { [ 0.0 ] }
   let(:subdomain) { false }
-  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::ROOT_DOMAIN}" }
+  let(:demo_origin) { "https://harborfinch.#{TenantSubdomainRegistry::DEFAULT_ROOT_DOMAIN}" }
 
   around do |example|
     env = { attestation::SECRET_ENV => secret, "EMPLOYEE_API_URL" => base, "APP_PROCESS_ROLE" => nil,

@@ -34,7 +34,7 @@ module Api
             return render json: { error: "Reminders must be enabled with at least one recipient" }, status: :unprocessable_entity
           end
 
-          unless StagingOutboundPolicy.staging? || ENV["RESEND_API_KEY"].present?
+          unless StagingMailTransport.available?
             return render json: { error: "Email service not configured" }, status: :unprocessable_entity
           end
 
