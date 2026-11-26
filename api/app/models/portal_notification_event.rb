@@ -3,7 +3,7 @@
 # A typed portal event, saved in the same transaction as the domain change.
 # Metadata holds record IDs and counts only; never names, bodies or file titles.
 class PortalNotificationEvent < ApplicationRecord
-  RECIPIENT_STATUSES = %w[recipients no_recipients].freeze
+  RECIPIENT_STATUSES = %w[recipients no_recipients actor_only].freeze
   STAFF_CATEGORIES = PortalNotifications::CATEGORIES.select { |_key, category| category[:audience] == "staff" }.keys.freeze
 
   belongs_to :organization
@@ -39,16 +39,22 @@ class PortalNotificationEvent < ApplicationRecord
     metadata["recipient_scope"] == "super_admins"
   end
 
-  def exclude_actor_address?
-    override_decision? || event_type.start_with?("payroll_rollback_")
-  end
-
   def preference_category
     super_admin_alert? ? "payroll_super_admin" : category
   end
 
+  def client_viewers_only?
+    metadata["recipient_scope"] == "client_viewers"
+  end
+
+  def exclude_actor_address?
+    override_decision? || event_type.in?(%w[payroll_committed payroll_reopened employee_change_submitted
+      address_approval_requested employee_contact_changed
+      employee_contact_confirmation_requested w2_ready_to_post])
+  end
+
   def client_managers_only?
     PortalNotifications::EVENT_TYPES.fetch(event_type)[:client_managers_only] == true ||
-      (override_decision? && metadata["recipient_scope"] == "client_managers")
+      metadata["recipient_scope"] == "client_managers"
   end
 end

@@ -55,7 +55,10 @@ class AdminOverrideService
           unpaid_acknowledgement: unpaid_acknowledgement, acknowledge_later_runs: acknowledge_later_runs
         ),
         snapshot: -> { period.attributes.slice(*PERIOD_SNAPSHOT_FIELDS) },
-        audit_metadata: { business_summary: totals }, notify: PortalNotifications.method(:payroll_rollback!),
+        audit_metadata: { business_summary: totals },
+        notify: ->(entry) do
+          PortalNotifications.payroll_reopened!(period, actor: actor, action_id: entry.id, self_override: entry.self_override?)
+        end,
         self_override: [ period.created_by_id, period.approved_by_id, period.committed_by_id ].include?(actor.id)
       ) do
         if reopen
