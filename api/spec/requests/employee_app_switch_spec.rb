@@ -598,10 +598,16 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(stored(demo)["employee_portal_enabled"]).to be(true)
       expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
 
-      # The full gate: an unguarded process (a worker, say) reads it as off,
-      # and so does any database state but the intended shadow one.
+      # The full gate: an unguarded process (a worker, say) follows the
+      # employee service's signed answer, and reads it as off without one;
+      # so does any database state but the intended shadow one.
       allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(false)
+      expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
+      unsigned_ping!
+      EmployeeAppSwitch::Enforcement.reset_cache!
       expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(false)
+      observe!
+      EmployeeAppSwitch::Enforcement.reset_cache!
       allow(EmployeeAppSwitch::Enforcement).to receive(:current_process_guarded?).and_return(true)
       [ shadow_state.merge(phase: "partial"), shadow_state.merge(phase: "bypassed", kill_switch_bypass: true),
         shadow_state.merge(kill_switch_bypass: nil), shadow_state.merge(phase: "not_installed") ].each do |state|

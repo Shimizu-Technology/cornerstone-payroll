@@ -18,16 +18,23 @@ module EmployeeAppSwitch
   module Enforcement
     CACHE_SECONDS = 5
     ROLE_CACHE_SECONDS = 30
+    # How long this process trusts the employee service's signed answer that
+    # its guard runs in raise mode, and how long a missing answer is reused
+    # before asking again.
+    ATTESTATION_CACHE_SECONDS = 120
+    ATTESTATION_MISS_CACHE_SECONDS = 15
     RETIRED_ACTION = "employee_app_early_access#retired"
 
     STATE_CACHE = Concurrent::AtomicReference.new
     ROLE_CACHE = Concurrent::AtomicReference.new
+    ATTESTATION_CACHE = Concurrent::AtomicReference.new
 
     module_function
 
     def reset_cache!
       STATE_CACHE.set(nil)
       ROLE_CACHE.set(nil)
+      ATTESTATION_CACHE.set(nil)
     end
 
     # Read fresh on this process (the switch screen and readiness checks).
@@ -110,14 +117,14 @@ module EmployeeAppSwitch
     end
 
     # The full gate every reader uses (CompanyFeatures, so requests, jobs and
-    # mail alike): the window rule above AND, under the waiver, this process
-    # running the guard in raise mode as the restricted role with no bypass.
-    # A job on an unguarded worker therefore sees the demo's app as off and
-    # does nothing.
+    # mail alike): the window rule above AND, under the waiver, the employee
+    # service's guard in raise mode as the restricted role with no bypass
+    # (demo_reader_allowed?). Without that, a job sees the demo's app as off
+    # and does nothing.
     def demo_app_open?(company, today: PayrollBusinessClock.today)
       return true unless company&.demo?
 
-      demo_open?(company, today: today) && demo_request_allowed?(company)
+      demo_open?(company, today: today) && demo_reader_allowed?(company)
     end
 
     # Once enforcement is verified, every open window retires for good.
@@ -158,6 +165,45 @@ module EmployeeAppSwitch
       return true if verified?
 
       waiver_state? && current_process_guarded?
+    end
+
+    # Whether a demo's app reads as on under the waiver. The employee service
+    # needs its own guard, exactly as demo_request_allowed?. Staff web and
+    # the worker serve no employee data on this answer, so they follow the
+    # employee service's signed answer that its guard runs in raise mode as
+    # the restricted role (ServiceAttestation). Employee requests on any
+    # process still pass demo_request_allowed? as well.
+    def demo_reader_allowed?(company, env: ENV)
+      return true unless company&.demo?
+      return true if verified?
+      return false unless waiver_state?
+      return true if current_process_guarded?(env: env)
+      return false if employee_service_process?(env)
+
+      employee_service_attested?(env: env)
+    end
+
+    def employee_service_process?(env = ENV)
+      env.fetch("APP_PROCESS_ROLE", ProcessRole::ALL) == ProcessRole::EMPLOYEE_WEB
+    end
+
+    # The employee service's live signed answer (checked for this nonce,
+    # process and age), cached per process. Anything else (no secret or URL,
+    # unsigned, stale, unreachable, a guard not in raise mode) is false.
+    def employee_service_attested?(env: ENV)
+      cached = ATTESTATION_CACHE.get
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return cached.first if cached && now < cached.last
+
+      value = begin
+        Readiness.ping_employee_service(env)[:observation]&.rls_guard_raise? == true
+      rescue StandardError => error
+        Rails.logger.warn("[EmployeeAppSwitch::Enforcement] employee service attestation failed: #{error.class}")
+        false
+      end
+      ttl = value ? ATTESTATION_CACHE_SECONDS : ATTESTATION_MISS_CACHE_SECONDS
+      ATTESTATION_CACHE.compare_and_set(cached, [ value, now + ttl ].freeze)
+      value
     end
 
     def current_process_guarded?(env: ENV)
