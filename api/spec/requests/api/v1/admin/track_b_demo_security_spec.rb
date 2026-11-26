@@ -496,6 +496,7 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
 
       conn.transaction do
         conn.execute("SET LOCAL session_replication_role = replica")
+        conn.execute("DELETE FROM demo_shape_conversions WHERE organization_id = #{org_id}")
         conn.execute("DELETE FROM audit_logs WHERE organization_id = #{org_id}")
         conn.execute("DELETE FROM invoice_billing_profiles WHERE organization_id = #{org_id}")
         conn.execute("DELETE FROM finance_books WHERE organization_id = #{org_id}")

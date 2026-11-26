@@ -138,7 +138,7 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
         %w[
           employee_documents employee_ytd_totals company_ytd_totals payroll_items pay_periods
           client_portal_messages client_portal_threads employee_app_activations client_operating_profiles
-          employee_account_links company_assignments employees departments audit_logs
+          employee_account_links company_assignments employees departments demo_shape_conversions audit_logs
         ].each do |table|
           conn.execute("DELETE FROM #{table} WHERE company_id IN (#{c_list})")
         end
@@ -318,13 +318,46 @@ RSpec.describe DemoCompany::VerifyShapeMigration do
       after: :missing
     )
 
-    # Non-zero time_tracking_history must FAIL even if matching in both before and after.
-    with_history_before = before_snapshot.deep_dup
-    with_history_after = after_snapshot.deep_dup
-    [ with_history_before, with_history_after ].each do |snap|
-      snap["companies"][old_demo.id.to_s]["payroll_checksums"]["time_tracking_history"]["history_reviews_count"] = 1
+    # Non-zero time_tracking_history must FAIL even if matching in both before and after (including imports_count).
+    %w[sources_count imports_count history_reviews_count verified_history_receipts_count].each do |history_key|
+      with_history_before = before_snapshot.deep_dup
+      with_history_after = after_snapshot.deep_dup
+      [ with_history_before, with_history_after ].each do |snap|
+        snap["companies"][old_demo.id.to_s]["payroll_checksums"]["time_tracking_history"][history_key] = 1
+      end
+      res = described_class.diff(with_history_before, with_history_after, expected_company_ids: [ old_demo.id ])
+      expect(res).not_to be_passed
+      expect(res.unexpected_diffs.map { |d| d[:path] }).to include(
+        "before.companies.#{old_demo.id}.payroll_checksums.time_tracking_history.#{history_key}",
+        "after.companies.#{old_demo.id}.payroll_checksums.time_tracking_history.#{history_key}"
+      )
     end
-    expect(described_class.diff(with_history_before, with_history_after, expected_company_ids: [ old_demo.id ])).not_to be_passed
+
+    # Hollow/empty sections, missing paid-correction evidence, and imports_count: 1 on both sides must FAIL.
+    hollow_before = before_snapshot.deep_dup
+    hollow_after = after_snapshot.deep_dup
+    [ hollow_before, hollow_after ].each do |snap|
+      entry = snap["companies"][old_demo.id.to_s]
+      entry["identity"] = {}
+      entry["logins"] = []
+      entry["employee_app"] = {}
+      entry["counters"] = {}
+      entry["payroll_checksums"].delete("paid_correction_evidence_counts")
+      entry["payroll_checksums"].delete("paid_correction_evidence_sha256")
+      entry["payroll_checksums"]["time_tracking_history"]["imports_count"] = 1
+    end
+    hollow_diff = described_class.diff(hollow_before, hollow_after, expected_company_ids: [ old_demo.id ])
+    expect(hollow_diff).not_to be_passed
+    hollow_paths = hollow_diff.unexpected_diffs.map { |d| d[:path] }
+    expect(hollow_paths).to include(
+      "before.companies.#{old_demo.id}.identity.company_id",
+      "before.companies.#{old_demo.id}.logins",
+      "before.companies.#{old_demo.id}.employee_app.eligible_company",
+      "before.companies.#{old_demo.id}.counters.client_caps",
+      "before.companies.#{old_demo.id}.payroll_checksums.paid_correction_evidence_sha256",
+      "before.companies.#{old_demo.id}.payroll_checksums.paid_correction_evidence_counts",
+      "before.companies.#{old_demo.id}.payroll_checksums.time_tracking_history.imports_count"
+    )
   end
 
   describe "rake verification tasks" do

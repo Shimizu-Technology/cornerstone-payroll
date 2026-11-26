@@ -37,7 +37,8 @@ RSpec.describe DemoCompany::ConvertToFlag do
       ein: "66-7654321",
       migration_rehearsal_created_by: admin,
       migration_rehearsal_created_at: Time.utc(2026, 11, 20, 10, 0, 0),
-      migration_rehearsal_completed_at: Time.utc(2026, 11, 20, 10, 5, 0)
+      migration_rehearsal_completed_at: Time.utc(2026, 11, 20, 10, 5, 0),
+      migration_rehearsal_error: "Original legacy note preserved for exact revert"
     )
   end
   let!(:second_demo) do
@@ -49,7 +50,8 @@ RSpec.describe DemoCompany::ConvertToFlag do
       ein: "07-2026102",
       migration_rehearsal_created_by: admin,
       migration_rehearsal_created_at: Time.utc(2026, 11, 20, 10, 0, 0),
-      migration_rehearsal_completed_at: Time.utc(2026, 11, 20, 10, 5, 0)
+      migration_rehearsal_completed_at: Time.utc(2026, 11, 20, 10, 5, 0),
+      migration_rehearsal_error: "Original legacy note preserved for exact revert"
     )
   end
   let(:employee_email) { "reviewer+hf-emp1@demo-mail.example" }
@@ -109,7 +111,7 @@ RSpec.describe DemoCompany::ConvertToFlag do
           payroll_items pay_periods payroll_filing_events payroll_filing_records payroll_filing_responsibilities
           payroll_liability_entries payroll_liability_postings non_employee_checks time_tracking_sources
           employee_account_links company_assignments employees departments client_operating_profiles
-          employee_app_activations historical_import_batches audit_logs
+          employee_app_activations historical_import_batches demo_shape_conversions audit_logs
         ].each do |table|
           conn.execute("DELETE FROM #{table} WHERE company_id IN (#{c_list})")
         end
@@ -183,13 +185,18 @@ RSpec.describe DemoCompany::ConvertToFlag do
     end
   end
 
-  describe "apply, idempotency, and targeted revert" do
-    it "converts an old-shape demo and its links atomically, stays idempotent, and supports targeted per-company revert" do
+  def with_write_maintenance(enabled)
+    saved = ENV["WRITE_MAINTENANCE"]
+    ENV["WRITE_MAINTENANCE"] = enabled ? "true" : nil
+    yield
+  ensure
+    ENV["WRITE_MAINTENANCE"] = saved
+  end
+
+  describe "apply, idempotency, and conversion-bound fenced revert" do
+    it "records an append-only conversion, stays idempotent, requires WriteMaintenance to revert, and blocks invented or repeat reverts" do
       expect(old_demo).to be_legacy_demo
       expect(demo_link.payroll_environment).to eq("migration_rehearsal")
-      before_snapshot = DemoCompany::VerifyShapeMigration.capture(
-        organization: organization, actor: admin, company_ids: [ old_demo.id ], tax_year: 2026
-      )
 
       expect(TenantSubdomainRegistry).to receive(:invalidate!).at_least(:once).and_call_original
 
@@ -202,10 +209,13 @@ RSpec.describe DemoCompany::ConvertToFlag do
           dry_run: false
         ).call
       }.to change { AuditLog.where(action: described_class::AUDIT_ACTION, record_id: old_demo.id).count }.by(1)
+        .and change { DemoShapeConversion.where(company_id: old_demo.id).count }.by(1)
 
       expect(result.dry_run).to be(false)
       expect(result.converted_company_ids).to eq([ old_demo.id ])
       expect(result.already_converted_company_ids).to eq([])
+      conversion_id = result.conversion_ids.fetch(old_demo.id)
+      expect(conversion_id).to be_a(Integer).and be_positive
 
       old_demo.reload
       demo_link.reload
@@ -239,26 +249,73 @@ RSpec.describe DemoCompany::ConvertToFlag do
       }.not_to change(AuditLog, :count)
       expect(rerun.converted_company_ids).to eq([])
       expect(rerun.already_converted_company_ids).to eq([ old_demo.id ])
+      expect(rerun.conversion_ids).to eq({})
       expect(rerun.changes).to be_empty
       expect(old_demo.reload.updated_at).to eq(company_updated_at)
       expect(demo_link.reload.updated_at).to eq(link_updated_at)
 
-      # Targeted per-company revert restores exact captured legacy shape without touching live client.
-      live_updated_at = live.reload.updated_at
-      revert_dry = DemoCompany::RevertToLegacyShape.new(
-        organization: organization, actor: admin, company_ids: [ old_demo.id ], before_snapshot: before_snapshot, dry_run: true
-      ).call
-      expect(revert_dry).to have_attributes(dry_run: true, reverted_company_ids: [ old_demo.id ], links_reverted: 1)
-      expect(old_demo.reload[:demo]).to be(true)
-
-      revert_applied = nil
+      # Revert REFUSES unless WriteMaintenance is enabled (both service and SQL helper).
+      with_write_maintenance(false) do
+        expect {
+          DemoCompany::RevertToLegacyShape.new(
+            organization: organization, actor: admin, conversion_id: conversion_id, dry_run: false
+          ).call
+        }.to raise_error(DemoCompany::RevertToLegacyShape::Refused, /WriteMaintenance must be enabled/)
+      end
       expect {
-        revert_applied = DemoCompany::RevertToLegacyShape.new(
-          organization: organization, actor: admin, company_ids: [ old_demo.id ], before_snapshot: before_snapshot, dry_run: false
-        ).call
-      }.to change { AuditLog.where(action: DemoCompany::RevertToLegacyShape::AUDIT_ACTION, record_id: old_demo.id).count }.by(1)
+        ApplicationRecord.transaction do
+          ApplicationRecord.connection.select_value(
+            "SELECT revert_demo_company_to_legacy_shape(#{conversion_id}, #{admin.id}, false, NOW())"
+          )
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /requires WriteMaintenance to be enabled/)
 
-      expect(revert_applied).to have_attributes(dry_run: false, reverted_company_ids: [ old_demo.id ], links_reverted: 1)
+      # Revert REFUSES for a nonexistent conversion ID (a never-converted flag demo cannot be reverted).
+      never_converted_flag = create_live_demo_company(organization: organization, name: "Never Converted Flag", fixture_key: "never-converted-flag")
+      expect(DemoShapeConversion.where(company_id: never_converted_flag.id)).to be_empty
+      with_write_maintenance(true) do
+        expect {
+          DemoCompany::RevertToLegacyShape.new(
+            organization: organization, actor: admin, conversion_id: conversion_id + 99_999, dry_run: false
+          ).call
+        }.to raise_error(DemoCompany::RevertToLegacyShape::Refused, /not found/)
+      end
+
+      # Direct tampering with demo_shape_conversions is refused by DB trigger.
+      expect {
+        ApplicationRecord.transaction do
+          ApplicationRecord.connection.execute(
+            "DELETE FROM demo_shape_conversions WHERE id = #{conversion_id}"
+          )
+        end
+      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/)
+
+      # Targeted per-company revert under WriteMaintenance restores exact recorded legacy shape without touching live client.
+      live_updated_at = live.reload.updated_at
+      with_write_maintenance(true) do
+        revert_dry = DemoCompany::RevertToLegacyShape.new(
+          organization: organization, actor: admin, conversion_id: conversion_id, dry_run: true
+        ).call
+        expect(revert_dry).to have_attributes(dry_run: true, conversion_id: conversion_id, company_id: old_demo.id, links_reverted: 1)
+        expect(old_demo.reload[:demo]).to be(true)
+
+        revert_applied = nil
+        expect {
+          revert_applied = DemoCompany::RevertToLegacyShape.new(
+            organization: organization, actor: admin, conversion_id: conversion_id, dry_run: false
+          ).call
+        }.to change { AuditLog.where(action: DemoCompany::RevertToLegacyShape::AUDIT_ACTION, record_id: old_demo.id).count }.by(1)
+
+        expect(revert_applied).to have_attributes(dry_run: false, conversion_id: conversion_id, company_id: old_demo.id, links_reverted: 1)
+
+        # Repeat revert on an already-reverted conversion is refused.
+        expect {
+          DemoCompany::RevertToLegacyShape.new(
+            organization: organization, actor: admin, conversion_id: conversion_id, dry_run: false
+          ).call
+        }.to raise_error(DemoCompany::RevertToLegacyShape::Refused, /already been reverted/)
+      end
+
       old_demo.reload
       expect(old_demo[:demo]).to be(false)
       expect(old_demo.payroll_environment).to eq("migration_rehearsal")
@@ -267,15 +324,33 @@ RSpec.describe DemoCompany::ConvertToFlag do
       expect(old_demo.migration_rehearsal_created_by_id).to eq(admin.id)
       expect(old_demo.migration_rehearsal_created_at).to eq(Time.utc(2026, 11, 20, 10, 0, 0))
       expect(old_demo.migration_rehearsal_completed_at).to eq(Time.utc(2026, 11, 20, 10, 5, 0))
+      expect(old_demo.migration_rehearsal_error).to eq("Original legacy note preserved for exact revert")
       expect(demo_link.reload.payroll_environment).to eq("migration_rehearsal")
       expect(live.reload.updated_at).to eq(live_updated_at)
+      expect(DemoShapeConversion.find(conversion_id)).to be_reverted
+    end
+
+    it "refuses revert when current company shape or manifest differs from what the conversion wrote" do
+      result = described_class.new(organization: organization, actor: admin, company_ids: [ old_demo.id ], dry_run: false).call
+      conversion_id = result.conversion_ids.fetch(old_demo.id)
+
+      # Mutate a non-fixture-key manifest field so current shape differs from recorded after_company_shape.
+      old_demo.reload.update_columns(
+        test_workspace_manifest: old_demo.test_workspace_manifest.merge("post_conversion_note" => "drifted")
+      )
+
+      with_write_maintenance(true) do
+        expect {
+          DemoCompany::RevertToLegacyShape.new(
+            organization: organization, actor: admin, conversion_id: conversion_id, dry_run: false
+          ).call
+        }.to raise_error(DemoCompany::RevertToLegacyShape::Refused, /differs from what the conversion wrote/)
+      end
     end
 
     it "lifts filing/liability/non-employee check triggers after conversion, blocks revert once lifted rows exist, and keeps time_tracking_sources refused" do
-      before_snapshot = DemoCompany::VerifyShapeMigration.capture(
-        organization: organization, actor: admin, company_ids: [ old_demo.id ], tax_year: 2026
-      )
-      described_class.new(organization: organization, actor: admin, company_ids: [ old_demo.id ], dry_run: false).call
+      result = described_class.new(organization: organization, actor: admin, company_ids: [ old_demo.id ], dry_run: false).call
+      conversion_id = result.conversion_ids.fetch(old_demo.id)
       old_demo.reload
 
       period = create_committed_demo_pay_period(company: old_demo, pay_date: Date.new(2026, 3, 6), employee: demo_employee)
@@ -295,11 +370,13 @@ RSpec.describe DemoCompany::ConvertToFlag do
       )).to be_persisted
 
       # Reverting is refused once post-conversion filing/liability/non-employee-check rows exist.
-      expect {
-        DemoCompany::RevertToLegacyShape.new(
-          organization: organization, actor: admin, company_ids: [ old_demo.id ], before_snapshot: before_snapshot, dry_run: false
-        ).call
-      }.to raise_error(DemoCompany::RevertToLegacyShape::Refused, /post-conversion/)
+      with_write_maintenance(true) do
+        expect {
+          DemoCompany::RevertToLegacyShape.new(
+            organization: organization, actor: admin, conversion_id: conversion_id, dry_run: false
+          ).call
+        }.to raise_error(DemoCompany::RevertToLegacyShape::Refused, /post-conversion/)
+      end
 
       # Time tracking sources remain refused in both the model and the database trigger.
       expect(build(:time_tracking_source, company: old_demo)).not_to be_valid
@@ -591,7 +668,7 @@ RSpec.describe DemoCompany::ConvertToFlag do
     end
 
     def run_task(name, env_vars)
-      keys = %w[ORGANIZATION_ID ACTOR_ID COMPANY_IDS APPLY BEFORE MIGRATION_DATABASE_URL]
+      keys = %w[ORGANIZATION_ID ACTOR_ID COMPANY_IDS CONVERSION_ID APPLY WRITE_MAINTENANCE MIGRATION_DATABASE_URL]
       previous = ENV.to_h.slice(*keys)
       keys.each { |k| ENV.delete(k) }
       env_vars.each { |k, v| ENV[k] = v }
@@ -601,11 +678,8 @@ RSpec.describe DemoCompany::ConvertToFlag do
       keys.each { |k| ENV[k] = previous[k] }
     end
 
-    it "runs dry-run without values, converts on APPLY=true, stays idempotent, and reverts from a before snapshot under strict RLS" do
+    it "runs dry-run without values, converts on APPLY=true, stays idempotent, and reverts by CONVERSION_ID under WriteMaintenance and strict RLS" do
       allow(RlsContextGuard).to receive(:mode).and_return("raise")
-      before_snapshot = DemoCompany::VerifyShapeMigration.capture(
-        organization: organization, actor: admin, company_ids: [ old_demo.id ], tax_year: 2026
-      )
 
       expect {
         RlsSpecContext.strict { run_task("demo:convert_to_flag", "ACTOR_ID" => admin.id.to_s, "COMPANY_IDS" => old_demo.id.to_s) }
@@ -613,29 +687,28 @@ RSpec.describe DemoCompany::ConvertToFlag do
         a_string_including(
           "PLAN  company id=#{old_demo.id} company_id=#{old_demo.id} fields=",
           "PLAN  employee_account_link id=#{demo_link.id} company_id=#{old_demo.id} fields=payroll_environment",
-          "OK    demo:convert_to_flag mode=dry_run converted=#{old_demo.id} already_converted=none"
+          "OK    demo:convert_to_flag mode=dry_run converted=#{old_demo.id} already_converted=none conversions=none"
         ).and(satisfy { |out| !out.include?("Harbor Finch") && !out.include?("harbor-finch-kitchen") && !/\bready\b/.match?(out) && !out.include?("66-7654321") })
       ).to_stdout
 
       expect {
         RlsSpecContext.strict { run_task("demo:convert_to_flag", "ACTOR_ID" => admin.id.to_s, "COMPANY_IDS" => old_demo.id.to_s, "APPLY" => "true") }
-      }.to output(/OK    demo:convert_to_flag mode=applied converted=#{old_demo.id} already_converted=none/).to_stdout
+      }.to output(/OK    demo:convert_to_flag mode=applied converted=#{old_demo.id} already_converted=none conversions=#{old_demo.id}:\d+/).to_stdout
+
+      conversion_id = TenantScope.as_system(reason: "Read recorded conversion id") do
+        DemoShapeConversion.active.find_by!(company_id: old_demo.id).id
+      end
 
       expect {
         RlsSpecContext.strict { run_task("demo:convert_to_flag", "ACTOR_ID" => admin.id.to_s, "COMPANY_IDS" => old_demo.id.to_s, "APPLY" => "true") }
-      }.to output(/OK    demo:convert_to_flag mode=applied converted=none already_converted=#{old_demo.id} changes=0/).to_stdout
+      }.to output(/OK    demo:convert_to_flag mode=applied converted=none already_converted=#{old_demo.id} conversions=none changes=0/).to_stdout
 
-      Dir.mktmpdir("demo-revert") do |dir|
-        before_path = File.join(dir, "before.json")
-        File.write(before_path, JSON.pretty_generate(before_snapshot))
-
-        expect {
-          RlsSpecContext.strict do
-            run_task("demo:revert_to_legacy_shape",
-              "ACTOR_ID" => admin.id.to_s, "COMPANY_IDS" => old_demo.id.to_s, "BEFORE" => before_path, "APPLY" => "true")
-          end
-        }.to output(/OK    demo:revert_to_legacy_shape mode=applied reverted=#{old_demo.id} already_legacy=none links_reverted=1/).to_stdout
-      end
+      expect {
+        RlsSpecContext.strict do
+          run_task("demo:revert_to_legacy_shape",
+            "ACTOR_ID" => admin.id.to_s, "CONVERSION_ID" => conversion_id.to_s, "WRITE_MAINTENANCE" => "true", "APPLY" => "true")
+        end
+      }.to output(/OK    demo:revert_to_legacy_shape mode=applied conversion_id=#{conversion_id} company_id=#{old_demo.id} links_reverted=1/).to_stdout
 
       TenantScope.as_system(reason: "Verify reverted company") do
         expect(old_demo.reload).to be_legacy_demo
