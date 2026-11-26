@@ -232,10 +232,12 @@ void_allocation = api.call("post", allocation_path.call(periods.last), 201,
 # Retiring only the check keeps earned payroll and source hours reserved.
 # This isolated one-item run must be financially voided before releasing its
 # undelivered manual reservation; the two issued runs remain untouched.
-voided_period = api.call("post", "/api/v1/admin/pay_periods/#{periods.last}/void", 200,
-  { unpaid_acknowledgement: true, reason: "Synthetic undelivered manual payroll cancelled before any payment" })
-assert.call(voided_period.dig("pay_period", "correction_status") == "voided",
-  "undelivered manual payroll obligation was not reversed")
+# The HTTP actor is the designated accountant. The local fixture runner
+# performs the admin rollback after separately proving the role boundary.
+api.call("post", "/api/v1/admin/pay_periods/#{periods.last}/void", 403,
+  { unpaid_acknowledgement: true, reason: "Synthetic accountant cannot roll back a committed period" })
+voided_period = checkpoint.call("payroll", "rollback_manual_period")
+assert.call(voided_period["correction_status"] == "voided", "undelivered manual payroll obligation was not reversed")
 checkpoint.call("payroll", "sync", "MANUAL_ALLOCATION_ID" => void_allocation.fetch("id").to_s)
 remote_void = checkpoint.call("aire", "remote_state").fetch("allocations").last
 assert.call(remote_void["status"] == "voided" && remote_void["payment_reference"].nil? && remote_void["events"] == %w[committed voided],

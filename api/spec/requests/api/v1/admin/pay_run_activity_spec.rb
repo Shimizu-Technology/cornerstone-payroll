@@ -262,14 +262,30 @@ RSpec.describe "Pay run activity feed", type: :request do
       expect(actions).to include("Dana Admin saved owner pay for Leilani Reyes: $8,807.50", "Dana Admin removed Avery Monroe from this run")
     end
 
+    it "requires a reason before changing final FIT withholding" do
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      item = create(:payroll_item, pay_period: pay_period, employee: avery)
+      path = "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}"
+
+      [ nil, "short" ].each do |reason|
+        patch path, params: { fit_override_reason: reason, payroll_item: { withholding_tax_override: 25 } }, as: :json
+        expect(response).to have_http_status(:unprocessable_entity)
+        expect(item.reload.withholding_tax_override).to be_nil
+      end
+    end
+
     it "keeps the detail of edits to fields outside hours and pay" do
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
       item = create(:payroll_item, pay_period: pay_period, employee: avery, check_memo: nil)
 
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}",
-        params: { payroll_item: { check_memo: "Final check", withholding_tax_override: 25 } }, as: :json
+        params: { fit_override_reason: "Fixture withholding correction", payroll_item: { check_memo: "Final check", withholding_tax_override: 25 } }, as: :json
 
       expect(response).to have_http_status(:ok), response.body
+      override = AuditLog.find_by!(action: "payroll_item#fit_override")
+      expect(override.subject_name).to eq(avery.full_name)
+      expect(override.metadata).to include("reason" => "Fixture withholding correction",
+        "employee_id" => avery.id, "employee_name" => avery.full_name)
       metadata = AuditLog.find_by!(action: "payroll_items#update").metadata
       expect(metadata.fetch("changed_fields")).to include("check_memo", "withholding_tax_override")
       expect(metadata.dig("after_values", "check_memo")).to eq("Final check")

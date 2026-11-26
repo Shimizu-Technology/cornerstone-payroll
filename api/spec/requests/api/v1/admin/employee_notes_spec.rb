@@ -411,6 +411,8 @@ RSpec.describe "Api::V1::Admin::EmployeeNotes", type: :request do
         "employee_note" => { "body" => "Acct 123456789012", "reason" => "Hide reason", "hidden_reason" => "Hidden" },
         "message" => { "body" => "Unrelated portal message" },
         "termination" => { "reason" => "Resigned" },
+        "reason" => "Private rollback reason",
+        "confirmation" => "Synthetic client and period",
         "note[body]" => "123-45-6789",
         "note%5Breason%5D" => "Mistake"
       )
@@ -427,6 +429,8 @@ RSpec.describe "Api::V1::Admin::EmployeeNotes", type: :request do
       )
       expect(filtered.fetch("message")).to eq("body" => "Unrelated portal message")
       expect(filtered.fetch("termination")).to eq("reason" => "Resigned")
+      expect(filtered.fetch("reason")).to eq("[FILTERED]")
+      expect(filtered.fetch("confirmation")).to eq("[FILTERED]")
       expect(filtered["note[body]"]).to eq("[FILTERED]")
       expect(filtered["note%5Breason%5D"]).to eq("[FILTERED]")
     end

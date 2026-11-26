@@ -20,7 +20,7 @@ RSpec.describe "Main311 source and payment preservation" do
       expect(PayrollRevisionPaymentPreflight.new(pay_period: period).call(reopen: true)[:blockers])
         .to include("This payroll has linked time-source processing evidence; use a reviewed source correction")
       expect {
-        PayPeriodCorrectionService.reopen_unpaid!(pay_period: period, actor: actor, reason: "Review retained source ownership first")
+        PayPeriodCorrectionService.reopen_unpaid!(authorization: AdminOverrideService.const_get(:ROLLBACK_AUTHORIZATION), pay_period: period, actor: actor, reason: "Review retained source ownership first")
       }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /linked time-source/)
       expect([ period.reload.attributes, item.reload.attributes, allocation.reload.attributes ]).to eq(original)
       expect(item.check_events).to be_empty

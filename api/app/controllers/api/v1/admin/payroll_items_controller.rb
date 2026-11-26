@@ -80,6 +80,7 @@ module Api
           end
 
           attrs = payroll_item_params
+          fit_reason = fit_override_reason!(attrs)
           wage_rate_hours = attrs.delete(:wage_rate_hours)
           attrs[:employment_type] = employee.payroll_compensation_on(@pay_period.end_date).employment_type
 
@@ -94,6 +95,7 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, employee) if wage_rate_hours.present?
 
           if save_payroll_item_and_clear_exclusion(@payroll_item, employee)
+            audit_fit_override!(fit_reason, nil) if fit_reason
             calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
             invalidate_prior_calculation!("Payroll employee rows changed after calculation.")
             render json: { payroll_item: payroll_item_json(@payroll_item) }, status: :created
@@ -114,6 +116,8 @@ module Api
           @payroll_item_structured_before = structured_audit_values(PayrollItem.find(@payroll_item.id))
 
           attrs = payroll_item_params
+          previous_fit = @payroll_item.withholding_tax_override
+          fit_reason = fit_override_reason!(attrs, previous_fit)
           PayrollCorrectionPayBasisGuard.validate!(@payroll_item, proposed_attributes: attrs)
           saved_hours = @payroll_item.attributes.slice("hours_worked", "overtime_hours", "holiday_hours", "pto_hours")
           saved_allocations = @payroll_item.wage_rate_hours
@@ -146,6 +150,7 @@ module Api
           PayrollBonusInput.manual!(@payroll_item, attrs[:bonus]) if attrs.key?(:bonus)
 
           if @payroll_item.update(attrs)
+            audit_fit_override!(fit_reason, previous_fit) if fit_reason
             sync_client_hours_evidence!(@payroll_item) if refresh_client_hours_evidence
             calculate_with_timekeeping!(@payroll_item) if params[:auto_calculate]
             invalidate_prior_calculation!("Payroll employee rows changed after calculation.")
@@ -302,6 +307,29 @@ module Api
           rescue ArgumentError
             false
           end
+        end
+
+        def fit_override_reason!(attrs, previous = nil)
+          return unless attrs.key?(:withholding_tax_override)
+          return if PayrollItem.type_for_attribute("withholding_tax_override").cast(attrs[:withholding_tax_override]) == previous
+
+          unless @pay_period.status.in?(%w[draft calculated])
+            raise ArgumentError, "Unapprove payroll before changing the Guam income tax override"
+          end
+
+          AdminOverrideService.reason!(params[:fit_override_reason])
+        end
+
+        def audit_fit_override!(reason, previous)
+          previous_domain_audit = Current.domain_audit_recorded
+          AuditLog.record!(user: current_user, company_id: @pay_period.company_id, action: "payroll_item#fit_override",
+            record_type: "PayrollItem", record_id: @payroll_item.id, subject_name: @payroll_item.employee.full_name,
+            metadata: { pay_period_id: @pay_period.id, employee_id: @payroll_item.employee_id,
+              employee_name: @payroll_item.employee.full_name, reason: reason, changed_fields: [ "withholding_tax_override" ],
+              before_values: { withholding_tax_override: previous },
+              after_values: { withholding_tax_override: @payroll_item.withholding_tax_override } })
+        ensure
+          Current.domain_audit_recorded = previous_domain_audit
         end
 
         def with_financial_pay_period_lock

@@ -64,6 +64,14 @@ RSpec.describe TimeTracking::HistoryApproval do
     expect(TimeTrackingEntryAllocation.count).to eq(0)
   end
 
+  it "accepts a prepared history packet after a rollback review flag is set" do
+    page = history_service.prepare!
+    expect(page["history_coverage_verified"]).to be(true)
+    run.update_columns(rollback_review_required: true)
+
+    expect(approve_review(page)["approved_at"]).to be_present
+  end
+
   it "rediscovers bindings from proposed mappings instead of retaining obsolete export candidates" do
     item.payroll_item_earnings.create!(category: "regular", label: "Maintenance", hours: 6.13, rate: 20, amount: 122.6)
     allow_any_instance_of(TimeTracking::VerifiedHistoryRollout).to receive(:capture_review_packet!).and_wrap_original do |original, *args|
