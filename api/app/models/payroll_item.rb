@@ -578,8 +578,12 @@ class PayrollItem < ApplicationRecord
     end
   end
 
+  def payroll_field_entries_for_calculation
+    payroll_item_field_entries.reject { |entry| entry.destroyed? || entry.marked_for_destruction? }
+  end
+
   def active_payroll_field_entries_total(treatment)
-    payroll_item_field_entries.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
+    payroll_field_entries_for_calculation.select { |entry| entry.active? && entry.tax_treatment == treatment }.sum { |entry| entry.amount.to_f }
   end
 
   def self.normalize_custom_deduction_entries(entries, signed: false)

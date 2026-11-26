@@ -194,11 +194,13 @@ export function hasPrivacyOptOutSignal(
 export function shouldEnableAnalytics(options: AnalyticsGateOptions = {}): boolean {
   const env = options.env ?? import.meta.env;
   const staging = options.isStagingEnv ?? (env.VITE_DEPLOYMENT_ENV === 'staging' || isStaging);
+  // A local production copy never reports to PostHog.
+  const local = env.VITE_DEPLOYMENT_ENV === 'local';
   const inSupport = options.hasSupportToken ?? Boolean(supportToken);
   const explicitlyEnabled = env.VITE_PUBLIC_POSTHOG_ENABLED === 'true';
   const key = env.VITE_PUBLIC_POSTHOG_KEY?.trim();
 
-  if (staging || inSupport || !explicitlyEnabled || !key || key === 'YOUR_POSTHOG_KEY') {
+  if (staging || local || inSupport || !explicitlyEnabled || !key || key === 'YOUR_POSTHOG_KEY') {
     return false;
   }
 

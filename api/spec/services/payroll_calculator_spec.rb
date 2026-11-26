@@ -358,6 +358,24 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.payroll_item_earnings.map(&:label)).to include("Taxable Bonus", "Mileage")
     end
 
+    it "ignores destroyed and pending-removal payroll fields in the loaded association" do
+      entries = payroll_item.payroll_item_field_entries.load
+      deduction = entries.create!(label: "Removed deduction", amount: BigDecimal("35.00"),
+        kind: "deduction", tax_treatment: "post_tax_deduction", category: "other", source: "manual",
+        employee_paid: true, metadata: { "uncapped_amount" => "35.00" })
+      bonus = entries.create!(label: "Removed bonus", amount: BigDecimal("25.00"),
+        kind: "addition", tax_treatment: "taxable_addition", category: "other", source: "manual",
+        employee_paid: true)
+      deduction.destroy!
+      bonus.mark_for_destruction
+
+      described_class.for(employee, payroll_item).calculate
+
+      expect(payroll_item.gross_pay).to eq(BigDecimal("1000.00"))
+      expect(payroll_item.payroll_item_earnings.map(&:label)).not_to include("Removed bonus")
+      expect(payroll_item.payroll_item_deductions.map(&:label)).not_to include("Removed deduction")
+    end
+
     it "snapshots assigned payroll fields into the payroll item and applies their tax treatment" do
       taxable_field = PayrollFieldDefinition.create!(
         company: company,
