@@ -146,19 +146,58 @@ RSpec.describe "Payroll intake golden files", type: :request do
     expect_golden("normal", snapshot)
   end
 
-  it "keeps the reported overtime split even with a deliberately inconsistent Revel total" do
-    # The printed total and the row total are deliberately out of balance.
-    # Current intake preserves row evidence and uses the reported regular/OT split.
+  it "keeps the reported overtime split visible while blocking a Revel row with unaccounted hours" do
     data = preview(pdf: pdf_upload(revel_row_for(worker, regular: 80, overtime: 31.75, total_hours: 125), reported_total_hours: 999),
       workbook: workbook_upload("overtime_heavy"))
-    expect_golden("overtime_heavy", mosa_preview(data))
+    snapshot = mosa_preview(data)
+    snapshot["apply_error"] = expect_apply_blocked(data)
+    expect(run.payroll_items).to be_empty
+    expect_golden("overtime_heavy", snapshot)
   end
 
-  it "characterizes the current loss of double-time evidence between PDF parsing and review" do
-    pdf = pdf_upload(revel_row_for(worker, regular: 72, doubletime_hours: 3))
-    expect(PayrollImport::RevelPdfParser.parse_file(pdf).sole.fetch(:doubletime_hours)).to eq(3.0)
+  it "blocks applying a Revel row with double-time hours" do
+    pdf = pdf_upload(revel_row_for(worker, regular: 72, doubletime_hours: BigDecimal("3.00")))
     data = preview(pdf: pdf, workbook: workbook_upload("overtime_heavy"))
-    expect_golden("doubletime", mosa_preview(data))
+    snapshot = mosa_preview(data)
+    snapshot["doubletime_hours"] = data.fetch("preview").fetch("matched").sole.fetch("doubletime_hours")
+    snapshot["apply_error"] = expect_apply_blocked(data)
+    expect(run.payroll_items).to be_empty
+    expect_golden("doubletime", snapshot)
+  end
+
+  it "blocks a PDF row when double-time drifts outside its column and lets staff apply the other row" do
+    set_up_payroll_tax
+    other_worker = create_worker(IntakeGoldenWorkbooks::NEW_HIRE)
+    affected_row = revel_row_for(worker, regular: 40, total_hours: 42.25)
+    path = build_revel_pdf([ affected_row, revel_row_for(other_worker, regular: 39) ],
+      period_start: run.start_date, period_end: run.end_date) do |row|
+      next revel_row(**row) unless row[:name] == affected_row[:name]
+
+      # PDF::Reader places 2.25 after column 159, in the regular pay field.
+      fields = %w[- - - 40.00 0.00 - 2.25 - - 42.25 600.00 -]
+      row.fetch(:name).ljust(40) + fields.map { |value| value.rjust(8).ljust(20) }.join
+    end
+    parsed = PayrollImport::RevelPdfParser.parse(path).find { |row| row[:employee_name] == affected_row[:name] }
+    expect(parsed).to include(regular_hours: 40.0, overtime_hours: 0.0, doubletime_hours: 0.to_d, total_hours: 42.25)
+
+    data = preview(pdf: portal_upload("revel.pdf", File.binread(path), PDF_MIME), workbook: workbook_upload("overtime_heavy"))
+    expect(response).to have_http_status(:ok), response.body
+    review = data.fetch("preview")
+    expect(review.fetch("can_apply")).to be(false)
+    affected = review.fetch("source_rows").find { |row| row["employee_id"] == worker.id }
+    error = affected.fetch("errors").sole
+    expect(error).to include("code" => "hours_do_not_reconcile", "severity" => "error",
+      "message" => include("2.25 more hours", "Exclude this row", "in the worksheet"))
+    expect(expect_apply_blocked(data)).to eq(error.fetch("message"))
+    expect(run.payroll_items).to be_empty
+
+    included = review.fetch("source_rows").find { |row| row["employee_id"] == other_worker.id }
+    apply_import(data, rows: [
+      { id: affected.fetch("id"), disposition: "excluded", disposition_reason: "Enter the hours and pay in the worksheet." },
+      { id: included.fetch("id"), disposition: "included" }
+    ])
+    expect(response).to have_http_status(:ok), response.body
+    expect(run.payroll_items.sole).to have_attributes(employee_id: other_worker.id, hours_worked: BigDecimal("39.00"))
   end
 
   it "matches an employee hired during the period by name in Revel and ID in the workbook" do
@@ -334,25 +373,38 @@ RSpec.describe "Payroll intake golden files", type: :request do
     expect_golden("portal_revision", snapshot)
   end
 
-  it "guards worksheet hours on re-import, then saves the source split after confirmation" do
+  it "guards worksheet hours on re-import, then applies the new hours and removes an omitted reimbursement" do
     set_up_payroll_tax
-    first = preview(pdf: pdf_upload(revel_row_for(worker, regular: 75.25, overtime: 1.5)), workbook: workbook_upload("overtime_heavy"))
+    first = preview(pdf: pdf_upload(revel_row_for(worker, regular: 75.25, overtime: 1.5)), workbook: workbook_upload("normal"))
     apply_import(first)
     expect(response).to have_http_status(:ok), response.body
     item = run.payroll_items.find_by!(employee: worker)
-    expect(item).to have_attributes(hours_worked: 75.25, overtime_hours: 1.5, reported_tips: BigDecimal("11.50"), tips_paid_out: 0.to_d)
+    expect(item).to have_attributes(hours_worked: 75.25, overtime_hours: 1.5,
+      reported_tips: BigDecimal("12.75"), tips_paid_out: BigDecimal("12.75"))
+    reimbursement = item.payroll_item_field_entries.sole
+    expect(reimbursement).to have_attributes(label: "Fixture supplies", amount: BigDecimal("12.34"), source: "import")
+    expect(item.net_pay + item.total_deductions - item.gross_pay).to eq(BigDecimal("12.34"))
     item.update!(hours_worked: 73)
     corrected = preview(pdf: pdf_upload(revel_row_for(worker, regular: 76, overtime: 3.5)),
+      workbook: workbook_upload("overtime_heavy"),
       supersedes_package_id: first.dig("source_package", "package_id"), supersession_reason: "Synthetic corrected hours")
     snapshot = mosa_preview(corrected)
     apply_import(corrected)
     expect(response).to have_http_status(:unprocessable_entity)
     snapshot["apply_error"] = response.parsed_body
     expect(item.reload.hours_worked).to eq(73)
+    expect(item.payroll_item_field_entries.sole).to eq(reimbursement)
 
     apply_import(corrected, confirm_hours_overwrite: true)
     expect(response).to have_http_status(:ok), response.body
-    snapshot["saved_payroll"] = saved_payroll
+    item.reload
+    expect(item.payroll_item_field_entries).to be_empty
+    expect(item.net_pay + item.total_deductions).to eq(item.gross_pay)
+    amounts = %w[gross_pay withholding_tax social_security_tax medicare_tax net_pay]
+    snapshot["saved_payroll"] = saved_payroll(item).merge(
+      decimal_fields(item.attributes.slice(*amounts), *amounts),
+      "non_taxable_earnings" => item.payroll_item_earnings.where(category: "non_taxable").order(:label).pluck(:label)
+    )
     expect_golden("hand_edit_reimport", snapshot)
   end
 
