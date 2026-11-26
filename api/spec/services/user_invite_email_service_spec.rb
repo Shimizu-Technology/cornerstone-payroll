@@ -75,6 +75,23 @@ RSpec.describe UserInviteEmailService do
     expect(user.reload.invite_email_status).to eq("sent")
   end
 
+  it "records a local copy's captured mail as captured, not sent" do
+    allow(StagingMailTransport).to receive(:deliver).and_return({ "id" => "local-synthetic", "local_captured" => true })
+
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url)).to eq(:captured)
+    expect(user.reload.invite_email_status).to eq("captured")
+  end
+
+  it "saves the outcome only while the user still holds the invitation it was for" do
+    user.update_columns(clerk_invitation_id: "inv_current", invite_email_status: "sent")
+    allow(StagingMailTransport).to receive(:deliver).and_raise(StandardError, "synthetic outage")
+
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url, clerk_invitation_id: "inv_stale")).to be(false)
+    expect(user.reload.invite_email_status).to eq("sent")
+    expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: invitation_url, clerk_invitation_id: "inv_current")).to be(false)
+    expect(user.reload.invite_email_status).to eq("failed")
+  end
+
   it "logs the Resend message id returned by Resend::Emails.send" do
     saved_key = Resend.api_key
     Resend.api_key = "re_test_synthetic"

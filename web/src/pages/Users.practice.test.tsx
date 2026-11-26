@@ -224,6 +224,25 @@ describe('Practice login whose copy was archived', () => {
     expect(alert.textContent).toContain('Use Resend');
   });
 
+  it('says when to resend a skipped invite email once, without a second resend instruction', async () => {
+    apiMocks.users.movePracticeCopy.mockResolvedValue({
+      data: { ...practiceLogin, active: true, practice_company_id: 3, practice_company_name: readyB.name, practice_copy_closed_reason: null },
+      moved_from: { id: 2, name: archivedCopyA.name },
+      invitation_delivery_status: 'skipped', invitation_sent: false,
+      invitation_error: "Email delivery isn't set up on this server, so no invitation email was sent",
+    });
+    const user = userEvent.setup();
+    render(<Users />);
+
+    const [moveButton] = await screen.findAllByRole('button', { name: 'Move Practice Login to another practice copy' });
+    await user.click(moveButton);
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Move and activate' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Resend it from the user list once email is set up.');
+    expect(alert.textContent).not.toContain('Use Resend on their row');
+  });
+
   it('keeps the invitation failure when the list refresh after a move also fails', async () => {
     apiMocks.users.list.mockResolvedValueOnce({ data: [practiceLogin] }).mockRejectedValue(new Error('Network down'));
     apiMocks.users.movePracticeCopy.mockResolvedValue({

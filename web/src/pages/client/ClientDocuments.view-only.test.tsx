@@ -58,5 +58,7 @@ it('names every upload field by its label', async () => {
   expect(await screen.findByRole('option', { name: 'Robin Lantern' })).toBeTruthy();
   expect(screen.getByRole('combobox', { name: 'Employee' })).toBeTruthy();
   expect(screen.getByRole('textbox', { name: 'Notes' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'File Drag and drop files here, or click to browse' })).toBeTruthy();
+  const dropZone = screen.getByRole('button', { name: 'File Drag and drop files here, or click to browse' });
+  const note = document.getElementById(dropZone.getAttribute('aria-describedby') ?? '');
+  expect(note?.textContent).toMatch(/^Accepted: PDF.*25 MB each/);
 });

@@ -26,18 +26,23 @@ class UserInviteEmailService
     # invitation, so the email links there: Clerk accepts the ticket and
     # forwards to the app's /login with __clerk_ticket, where the embedded
     # Clerk widget finishes sign-up. Without a usable URL nothing is sent.
-    def send_invite(user:, invited_by:, invitation_url: nil)
+    #
+    # clerk_invitation_id, when given, is the invitation this email is for:
+    # the outcome is saved only while the user still has that invitation, so
+    # a stale send can't overwrite a newer invite's status.
+    def send_invite(user:, invited_by:, invitation_url: nil, clerk_invitation_id: nil)
+      record = ->(outcome) { record_email_status(user, outcome, clerk_invitation_id: clerk_invitation_id) }
       demo_company = DemoOutbound.demo_company_for(user)
       if demo_company && !DemoOutbound.permit?(company: demo_company, email: user.email, channel: "user_invite_email", user: user)
-        return record_email_status(user, :refused)
+        return record.call(:refused)
       end
       unless acceptance_url?(invitation_url)
         Rails.logger.error("[InviteEmail] Not sent user_id=#{user.id}: no invitation acceptance URL")
-        return record_email_status(user, false)
+        return record.call(false)
       end
       unless configured?
         Rails.logger.error("[InviteEmail] Skipped user_id=#{user.id}: email delivery is not configured")
-        return record_email_status(user, :skipped)
+        return record.call(:skipped)
       end
 
       button_link = invitation_url
@@ -53,38 +58,51 @@ class UserInviteEmailService
           }
         )
       end
-      return record_email_status(user, :refused) if response["suppressed"]
+      return record.call(:refused) if response["suppressed"]
 
       if StagingOutboundPolicy.staging? && response["staging_captured"]
         Rails.logger.info("[InviteEmail] STAGING captured invite user_id=#{user.id}; no email was sent")
-        return record_email_status(user, :captured)
+        return record.call(:captured)
+      end
+      if response["local_captured"]
+        Rails.logger.info("[InviteEmail] LOCAL captured invite user_id=#{user.id}; no email was sent")
+        return record.call(:captured)
       end
 
       # Resend's Ruby client returns an HTTParty::Response whose parsed keys are
       # symbols (:id), while internal stubs/captures may use string keys ("id").
       message_id = response[:id].presence || response["id"].presence
       Rails.logger.info("[InviteEmail] Sent invite user_id=#{user.id} to #{LogRedaction.email(user.email)} id=#{message_id}") unless StagingOutboundPolicy.staging?
-      record_email_status(user, true)
+      record.call(true)
     rescue StandardError => e
       if StagingOutboundPolicy.staging?
         Rails.logger.error("[InviteEmail] Failed user_id=#{user.id}: #{e.class}; content redacted")
       else
         Rails.logger.error("[InviteEmail] Failed user_id=#{user.id} to #{LogRedaction.email(user.email)}: #{e.class}")
       end
-      record_email_status(user, false)
+      record.call(false)
     end
 
-    # Saves the outcome on the user and returns it unchanged. A failure to
-    # save is logged; it never turns a sent email into a failed one.
-    def record_email_status(user, outcome)
+    # Saves the outcome on the user and returns it unchanged. With a
+    # clerk_invitation_id, only while the user still holds that invitation.
+    # A failure to save is logged; it never turns a sent email into a failed one.
+    def record_email_status(user, outcome, clerk_invitation_id: nil)
       status = case outcome
       when true then "sent"
       when false then "failed"
       else outcome.to_s
       end
       raise ArgumentError, "unknown invite email status #{status}" unless EMAIL_STATUSES.include?(status)
+      return outcome unless user.persisted?
 
-      user.update_columns(invite_email_status: status, invite_email_status_at: Time.current) if user.persisted?
+      scope = User.where(id: user.id)
+      scope = scope.where(clerk_invitation_id: clerk_invitation_id) if clerk_invitation_id.present?
+      now = Time.current
+      if scope.update_all(invite_email_status: status, invite_email_status_at: now) == 1
+        user.invite_email_status = status
+        user.invite_email_status_at = now
+        user.clear_attribute_changes(%w[invite_email_status invite_email_status_at])
+      end
       outcome
     rescue ActiveRecord::ActiveRecordError => e
       Rails.logger.error("[InviteEmail] Could not record status=#{status} user_id=#{user.id}: #{e.class}")

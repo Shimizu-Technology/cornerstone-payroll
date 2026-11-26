@@ -138,6 +138,103 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
     expect(invitee.reload.invite_email_status).to eq("sent")
   end
 
+  it "pins the job to its invitation: a stale retry after a resend neither sends nor overwrites the newer status" do
+    queued = []
+    allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
+    request_invitation(:resend)
+    first = queued.last
+    expect(first.last).to eq("inv_synthetic")
+    expect(invitee.reload.clerk_invitation_id).to eq("inv_synthetic")
+
+    # A resend replaces the invitation (the old link is revoked) and its email goes out.
+    allow_any_instance_of(ClerkInvitationService).to receive(:invitation_status).and_return("pending")
+    allow_any_instance_of(ClerkInvitationService).to receive(:revoke_invitation).and_return(success: true)
+    allow_any_instance_of(ClerkInvitationService).to receive(:create_invitation)
+      .and_return(success: true, invitation_id: "inv_newer", url: "https://synthetic.clerk.accounts.dev/invite-newer")
+    request_invitation(:resend)
+    sent = []
+    allow(StagingMailTransport).to receive(:deliver) { |payload| sent << payload && { "id" => "synthetic" } }
+    SendUserInviteEmailJob.perform_now(*queued.last)
+    expect(invitee.reload.invite_email_status).to eq("sent")
+
+    expect(SendUserInviteEmailJob.perform_now(*first)).to eq(:stale)
+    expect(sent.size).to eq(1)
+    expect(sent.sole.fetch(:html)).to include("invite-newer")
+    expect(invitee.reload.invite_email_status).to eq("sent")
+  end
+
+  it "sends nothing once the invite is accepted, including for a job queued before the invitation id was passed" do
+    queued = []
+    allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
+    request_invitation(:resend)
+    invitee.update_columns(invitation_status: "accepted")
+    expect(StagingMailTransport).not_to receive(:deliver)
+
+    expect(SendUserInviteEmailJob.perform_now(*queued.sole)).to eq(:stale)
+    expect(SendUserInviteEmailJob.perform_now(*queued.sole.first(3))).to eq(:stale)
+    expect(invitee.reload.invite_email_status).to eq("queued")
+  end
+
+  it "still sends a pending invite for a job queued before the invitation id was passed" do
+    queued = []
+    allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
+    request_invitation(:resend)
+    allow(StagingMailTransport).to receive(:deliver).and_return({ "id" => "synthetic" })
+
+    SendUserInviteEmailJob.perform_now(*queued.sole.first(3))
+    expect(StagingMailTransport).to have_received(:deliver).once
+    expect(invitee.reload.invite_email_status).to eq("sent")
+  end
+
+  context "when Clerk doesn't issue a new invitation" do
+    it "records failed for a Clerk error after any earlier invitation was closed" do
+      allow_any_instance_of(ClerkInvitationService).to receive(:create_invitation).and_return(success: false, error: "Synthetic invitation failure")
+      invitee.update_columns(invite_email_status: "sent")
+      request_invitation(:resend)
+      expect(invitee.reload.invite_email_status).to eq("failed")
+    end
+
+    it "records failed when Clerk isn't configured and no earlier invite email went out" do
+      allow_any_instance_of(ClerkInvitationService).to receive(:configured?).and_return(false)
+      request_invitation(:resend)
+      expect(response.parsed_body).to include("invitation_delivery_status" => "failed")
+      expect(invitee.reload.invite_email_status).to eq("failed")
+    end
+
+    it "keeps an earlier live invite's sent status when the failure left that invitation open" do
+      allow_any_instance_of(ClerkInvitationService).to receive(:configured?).and_return(false)
+      invitee.update_columns(invite_email_status: "sent")
+      request_invitation(:resend)
+      expect(invitee.reload.invite_email_status).to eq("sent")
+
+      allow_any_instance_of(ClerkInvitationService).to receive(:configured?).and_return(true)
+      invitee.update_columns(clerk_invitation_id: "inv_earlier")
+      allow_any_instance_of(ClerkInvitationService).to receive(:invitation_status).with("inv_earlier").and_return("pending")
+      allow_any_instance_of(ClerkInvitationService).to receive(:revoke_invitation).and_return(success: false, error_code: "synthetic")
+      request_invitation(:resend)
+      expect(response.parsed_body.fetch("invitation_error")).to include("previous invitation is closed")
+      expect(invitee.reload.invite_email_status).to eq("sent")
+    end
+
+    it "leaves the status alone when Clerk says the earlier invitation was already accepted" do
+      invitee.update_columns(clerk_invitation_id: "inv_earlier", invite_email_status: "sent")
+      allow_any_instance_of(ClerkInvitationService).to receive(:invitation_status).with("inv_earlier").and_return("accepted")
+      expect_any_instance_of(ClerkInvitationService).not_to receive(:create_invitation)
+      request_invitation(:resend)
+      expect(response.parsed_body.fetch("invitation_error")).to eq(PayrollInvitation::ACCEPTED_MESSAGE)
+      expect(invitee.reload.invite_email_status).to eq("sent")
+    end
+
+    it "records refused when a demo login's address isn't allow-listed" do
+      allow(DemoOutbound).to receive(:demo_company_for).and_return(actor.company)
+      allow(DemoOutbound).to receive(:permit?).and_return(false)
+      expect_any_instance_of(ClerkInvitationService).not_to receive(:create_invitation)
+      request_invitation(:resend)
+      expect(response.parsed_body).to include("invitation_delivery_status" => "failed")
+      expect(invitee.reload.invite_email_status).to eq("refused")
+    end
+  end
+
   it "records a skip in the job, without retrying, when email stops being configured after the enqueue" do
     queued = []
     allow(SendUserInviteEmailJob).to receive(:perform_later) { |*args| queued << args }
@@ -175,6 +272,7 @@ RSpec.describe "Admin invitation delivery outcomes", type: :request do
     request_invitation(:resend)
     expect(response.parsed_body).to include("invitation_delivery_status" => "failed", "invitation_sent" => false)
     expect(response.parsed_body.fetch("invitation_error")).to be_present
+    expect(invitee.reload.invite_email_status).to eq("failed")
   end
 
   it "returns an enqueue exception as a failed outcome without exposing exception content" do

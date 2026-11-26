@@ -156,7 +156,8 @@ describe('EmployeeAppSwitch', () => {
   it.each([
     [403, { clerk_error: { type: 'forbidden', reason: 'reverification-error' } }, "This change needs a fresh sign-in check, and it wasn't completed. Choose the change again and confirm it's you when asked. Nothing was changed."],
     [401, null, 'Your sign-in has ended. Sign in again, then make the change. Nothing was changed.'],
-    [502, null, "Payroll couldn't save the change right now. Nothing was changed. Try again in a minute."],
+    [502, null, "Payroll couldn't confirm whether the change was saved. Choose Check again (or refresh the page) to see the current state before trying again."],
+    [504, { status: 'timeout' }, "Payroll couldn't confirm whether the change was saved. Choose Check again (or refresh the page) to see the current state before trying again."],
   ])('says why a %i refusal with no message of its own failed', async (status, body, message) => {
     mocks.get.mockResolvedValue({ data: state({}, [passed('company', 'This is a live client or a demo company')]) });
     mocks.send.mockResolvedValue(json(status, body));
@@ -170,6 +171,8 @@ describe('EmployeeAppSwitch', () => {
 
     expect(await within(dialog).findByText(message)).toBeTruthy();
     expect(within(dialog).queryByText(/^Could not save the change\.?$/)).toBeNull();
+    // Only refusals made before the write may promise that nothing changed.
+    if (status >= 500) expect(within(dialog).queryByText(/Nothing was changed/)).toBeNull();
   });
 
   it('shows demo early access and the kill switch only for a demo company', async () => {
