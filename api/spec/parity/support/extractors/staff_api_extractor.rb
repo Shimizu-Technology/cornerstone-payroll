@@ -48,14 +48,20 @@ module Parity
         @ctx.response.body
       end
 
+      # Returns raw profile fields as serialized by Admin::EmployeesController,
+      # plus ui_display_name matching EmployeeList.tsx:630 (`${first_name} ${last_name}`).
       def profile(employee_id)
         @ctx.get "/api/v1/admin/employees/#{employee_id}", headers: @headers
         raise "GET /api/v1/admin/employees/#{employee_id} failed: #{@ctx.response.status} #{@ctx.response.body}" unless @ctx.response.successful?
 
         raw = @ctx.response.parsed_body.fetch("data")
         {
-          name: build_name(raw),
+          first_name: raw["first_name"],
+          middle_name: raw["middle_name"],
+          last_name: raw["last_name"],
           name_suffix: raw["name_suffix"],
+          legal_name: raw["legal_name"],
+          ui_display_name: [ raw["first_name"], raw["last_name"] ].compact_blank.join(" "),
           email: raw["email"],
           phone: normalize_phone(raw["phone"]),
           address_line1: raw["address_line1"],
@@ -85,23 +91,43 @@ module Parity
         pto = hours(item["pto_hours"]) || money(0)
 
         deductions = {}
-        if money(item["retirement_payment"]).nonzero?
-          deductions[:retirement_401k] = { label: nil, amount: money(item["retirement_payment"]), ytd: nil }
+        ret = money(item["retirement_payment"])
+        if ret&.nonzero?
+          deductions[:retirement_401k] = { label: nil, amount: ret, ytd: nil }
+        end
+        roth = money(item["roth_retirement_payment"])
+        if roth&.nonzero?
+          deductions[:roth_401k] = { label: nil, amount: roth, ytd: nil }
         end
 
         employer_contributions = {}
-        if money(item["employer_retirement_match"]).nonzero?
+        er_match = money(item["employer_retirement_match"])
+        if er_match&.nonzero?
           employer_contributions[:employer_401k_match] = {
             label: "401(k) Match",
-            amount: money(item["employer_retirement_match"]),
+            amount: er_match,
             ytd: nil
           }
         end
+        er_roth_match = money(item["employer_roth_retirement_match"])
+        if er_roth_match&.nonzero?
+          employer_contributions[:employer_roth_401k_match] = {
+            label: "Roth 401(k) Match",
+            amount: er_roth_match,
+            ytd: nil
+          }
+        end
+
+        non_taxable_total = (
+          (money(item["non_taxable_pay"]) || money(0)) +
+          (money(item.dig("payroll_adjustment_totals", "non_taxable_additions")) || money(0))
+        ).round(2)
 
         {
           employee_name: item["employee_name"],
           gross_pay: money(item["gross_pay"]),
           net_pay: money(item["net_pay"]),
+          non_taxable_pay: non_taxable_total,
           taxes: {
             income_tax: income_tax,
             additional_withholding: addl_wh,
@@ -132,11 +158,12 @@ module Parity
           },
           payment: {
             method: item["effective_payment_delivery_method"],
-            check_number: item["check_number"],
+            check_number: normalize_check_number(item["check_number"]),
             check_status: item["check_status"]
           },
           status: {
             visible: true,
+            payroll_included: item["payroll_included"] != false,
             voided: item["voided"] == true,
             correction: period["run_purpose"] == "correction",
             run_purpose: period["run_purpose"]
@@ -180,7 +207,7 @@ module Parity
           },
           payment: {
             method: row["payment_delivery_method"],
-            check_number: row["check_number"],
+            check_number: normalize_check_number(row["check_number"]),
             status: evidence["status"],
             payment_label: row["payment_method_label"]
           },
@@ -205,6 +232,7 @@ module Parity
             social_security: money(row["social_security_tax"]),
             medicare_total: money(row["medicare_tax"]),
             retirement_401k: money(row["retirement"]),
+            roth_401k: money(row["roth_retirement"]),
             net: money(row["net_pay"])
           },
           hours: {
@@ -221,24 +249,19 @@ module Parity
         return nil if row.nil?
 
         box12_d = Array(row["box12"]).select { |entry| entry["code"] == "D" }.sum(0.to_d) { |entry| money(entry["amount"]) }.round(2)
+        box12_aa = Array(row["box12"]).select { |entry| entry["code"] == "AA" }.sum(0.to_d) { |entry| money(entry["amount"]) }.round(2)
         {
           employee_name: row["employee_name"],
+          employee_name_suffix: row["employee_name_suffix"] || row["name_suffix"],
           box1_wages: money(row["box1_wages_tips_other_comp"]),
           box2_income_tax: money(row["box2_federal_income_tax_withheld"]),
           box3_ss_wages: money(row["box3_social_security_wages"]),
           box4_ss_tax: money(row["box4_social_security_tax_withheld"]),
           box5_medicare_wages: money(row["box5_medicare_wages_tips"]),
           box6_medicare_tax: money(row["box6_medicare_tax_withheld"]),
-          box12_code_d: box12_d
+          box12_code_d: box12_d,
+          box12_code_aa: box12_aa
         }
-      end
-
-      private
-
-      def build_name(raw)
-        suffix = raw["name_suffix"].to_s.strip.upcase.delete(".")
-        formatted_suffix = { "JR" => "Jr.", "SR" => "Sr." }.fetch(suffix, suffix)
-        [ raw["first_name"], raw["middle_name"], raw["last_name"], formatted_suffix ].compact_blank.join(" ")
       end
     end
   end
