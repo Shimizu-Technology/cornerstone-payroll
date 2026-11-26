@@ -92,6 +92,90 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
     end
   end
 
+
+  describe "Cornerstone override decisions" do
+    let(:override_reason) { "Confidential adjustment explanation" }
+    let(:super_admin) { create(:user, company: company, role: "super_admin", email: "supervisor@example.test") }
+    let(:foreign_admin) { create(:user, role: "super_admin", email: "outside@example.test") }
+
+    def record_override(actor, preparer: staff_lead)
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: preparer).approve!
+      package = pay_period.payroll_review_packages.current.first!
+      PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).override!(
+        revision_id: package.id, acknowledgement: PayrollReviewPackage::OVERRIDE_ACKNOWLEDGEMENT,
+        override_reason: override_reason
+      )
+    end
+
+    it "notifies the client manager and account team with role-specific links and safe content" do
+      unlisted_staff
+      super_admin
+      foreign_admin
+      with_portal_email do
+        package = record_override(unlisted_staff)
+        events = PortalNotificationEvent.where(event_type: "payroll_review_decided").order(:id)
+        expect(events.pluck(:dedupe_key)).to eq([
+          "payroll_review_decided:#{package.id}", "payroll_review_decided:#{package.id}:client_managers"
+        ])
+        expect(events.first.deliveries.pluck(:user_id)).to contain_exactly(staff_lead.id, staff_backup.id)
+        expect(events.last.deliveries.pluck(:user_id)).to eq([ client_manager.id ])
+        expect(events.pluck(:metadata).to_json).not_to include(override_reason)
+
+        dispatch_at(3.minutes.from_now)
+        expect(captured_portal_emails.map { |mail| mail[:to] }).to contain_exactly(staff_lead.email, staff_backup.email, client_manager.email)
+        captured_portal_emails.each do |mail|
+          tab = mail[:to] == client_manager.email ? "overview" : "work"
+          link = "https://payroll.example.test/companies/#{company.id}/pay-runs/#{pay_period.id}/#{tab}"
+          expect(mail[:subject]).to include(company.name, "Nov 1 – Nov 14, 2026")
+          expect(mail[:text]).to include(link)
+          expect(mail.to_json).not_to include(override_reason, employee.first_name, employee.last_name, "2,345.67", "1,987.65")
+        end
+      end
+    end
+
+    it "flags self-overrides only to other super admins in the organization and excludes the actor's Gmail alias" do
+      actor = create(:user, company: company, role: "super_admin", email: "synthetic.actor+staff@gmail.com")
+      PortalNotificationRecipient.create!(company: company, user: actor)
+      PortalNotificationRecipient.create!(company: company, email: "syntheticactor+extra@googlemail.com")
+      PortalNotificationRecipient.create!(company: company, email: foreign_admin.email)
+      super_admin
+
+      with_portal_email do
+        package = record_override(actor, preparer: actor)
+        expect(package).to be_self_override
+        service = PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor)
+        expect { service.send(:notify_override!, package) }.not_to change(PortalNotificationEvent, :count)
+        flag = PortalNotificationEvent.find_by!(dedupe_key: "payroll_review_decided:#{package.id}:super_admins")
+        expect(flag.deliveries.pluck(:user_id)).to eq([ super_admin.id ])
+        expect(flag.metadata).to include("decision" => "self_override")
+        expect(flag.metadata.to_json).not_to include(override_reason)
+
+        dispatch_at(3.minutes.from_now)
+        expect(captured_portal_emails.map { |mail| mail[:to] })
+          .to contain_exactly(staff_lead.email, staff_backup.email, client_manager.email, super_admin.email)
+        flag_email = captured_portal_emails.find { |mail| mail[:to] == super_admin.email }
+        expect(flag_email[:subject]).to include("Payroll self-override recorded", company.name, "Nov 1 – Nov 14, 2026")
+        expect(flag_email[:text]).to include("/companies/#{company.id}/pay-runs/#{pay_period.id}/work")
+        expect(flag_email.to_json).not_to include(override_reason, actor.email, employee.first_name, employee.last_name)
+        expect(PortalNotificationDelivery.find_by!(recipient_email: foreign_admin.email).skip_reason).to eq("foreign_account_suppressed")
+      end
+    end
+
+    it "keeps tenant-visible status independent of whether a configured extra address belongs to another organization" do
+      PortalNotificationRecipient.where(company: company).delete_all
+      PortalNotificationRecipient.create!(company: company, email: foreign_admin.email)
+      PortalNotificationRecipient.create!(company: company, email: "unregistered@example.test")
+
+      with_portal_email do
+        package = record_override(unlisted_staff)
+        expect(PayrollReview::PackagePresenter.decision_notification_status(package)).to eq("queued")
+        dispatch_at(3.minutes.from_now)
+        expect(PayrollReview::PackagePresenter.decision_notification_status(package)).to eq("queued")
+        expect(captured_portal_emails.map { |mail| mail[:to] }).to contain_exactly(client_manager.email, "unregistered@example.test")
+      end
+    end
+  end
+
   describe "client review decisions (payroll_review_decided)" do
     before do
       PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!

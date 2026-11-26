@@ -111,6 +111,18 @@ it('shows the published preview without decision controls when access is read-on
   expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
 });
 
+it('identifies an override and displays its reason in the client portal', () => {
+  render(<ClientPayrollReview payPeriod={{ ...period, status: 'committed', payroll_review: {
+    ...period.payroll_review!,
+    status: 'approved',
+    approval_method: 'cornerstone_override',
+    override_reason: 'Client requested staff approval.',
+  } }} companyId={3} onDone={onDone} />);
+  expect(screen.getByRole('status').textContent).toContain('Approved by Cornerstone on your behalf');
+  expect(screen.getByText('Client requested staff approval.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
+});
+
 it('shows honest approval confirmation across queued, sent, and not_sent states', () => {
   const { rerender } = render(
     <ClientPayrollReview

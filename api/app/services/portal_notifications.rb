@@ -180,9 +180,14 @@ module PortalNotifications
       existing = PortalNotificationEvent.find_by(dedupe_key: dedupe_key)
       return existing if existing
 
+      category = EVENT_TYPES.fetch(event_type).fetch(:category)
+      if event_type == "payroll_review_decided" && metadata.stringify_keys.slice("decision", "recipient_scope") ==
+          { "decision" => "cornerstone_override", "recipient_scope" => "client_managers" }
+        category = "payroll_updates"
+      end
       event = PortalNotificationEvent.new(
         organization_id: company.organization_id, company: company, actor: actor,
-        event_type: event_type, category: EVENT_TYPES.fetch(event_type).fetch(:category),
+        event_type: event_type, category: category,
         subject: subject, dedupe_key: dedupe_key, metadata: metadata, occurred_at: occurred_at || Time.current
       )
       targets, event.recipient_status = Recipients.resolve(event)

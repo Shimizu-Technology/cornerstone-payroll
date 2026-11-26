@@ -1,3 +1,6 @@
+import { isReverificationCancelledError } from '@clerk/react/errors';
+import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, useFeedback, ActionFeedback } from '@/components/ui/action-feedback';
 import { Fragment, useState, useEffect, useCallback, useId, useRef, type ReactElement } from 'react';
@@ -184,6 +187,7 @@ export function Clients() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [savedClientApprovalRequired, setSavedClientApprovalRequired] = useState(false);
   const [editableFields, setEditableFields] = useState<string[] | null>(null);
   const [editingCompanyType, setEditingCompanyType] = useState<'client' | 'demo' | null>(null);
   const [editingCanAdminister, setEditingCanAdminister] = useState(false);
@@ -596,6 +600,7 @@ export function Clients() {
         historical_payroll_enabled: c.historical_payroll_enabled === true,
         client_payroll_approval_required: c.client_payroll_approval_required === true,
       });
+      setSavedClientApprovalRequired(c.client_payroll_approval_required === true);
       setEditingId(id);
       setFormError(null);
       setShowForm(true);
@@ -692,7 +697,19 @@ export function Clients() {
     setFormError(null);
   };
 
+  const disablingClientApproval = !!editingId && savedClientApprovalRequired && form.client_payroll_approval_required === false;
+  const sendApprovalSetting = useOptionalStepUpRequest((token: string, id: number, company: Partial<CompanyFormData>) =>
+    sendPayrollApprovalRequest(token, activeCompanyId, `/admin/companies/${id}`, 'PUT', { company }));
+  const canDisableClientApproval = hasCapability('override_client_approval');
+
   const handleSave = async () => {
+    if (disablingClientApproval && canDisableClientApproval) {
+      const length = Array.from(form.client_approval_disable_reason?.trim() || '').length;
+      if (length < 10 || length > 500) {
+        setFormError('Enter a reason of 10–500 characters to turn off client approval.');
+        return;
+      }
+    }
     if (canEditField('name') && !form.name.trim()) {
       setFormError('Client name is required');
       return;
@@ -704,7 +721,15 @@ export function Clients() {
     try {
       if (editingId) {
         const payload = editableFields ? Object.fromEntries(Object.entries(form).filter(([field]) => editableFields.includes(field))) : form;
-        await companiesApi.update(editingId, payload);
+        if (disablingClientApproval) {
+          const response = await sendApprovalSetting(editingId, { ...payload, client_approval_disable_reason: form.client_approval_disable_reason });
+          if (!response.ok) {
+            const result = await response.json().catch(() => null);
+            throw new Error(result?.error || result?.errors?.join(', ') || 'Could not turn off client approval.');
+          }
+        } else {
+          await companiesApi.update(editingId, payload);
+        }
       } else {
         await companiesApi.create(form);
       }
@@ -714,6 +739,7 @@ export function Clients() {
       await load();
       refreshCompanies();
     } catch (err) {
+      if (isReverificationCancelledError(err)) return;
       if (err instanceof ApiError) {
         setFormError(err.message);
       } else {
@@ -1368,12 +1394,18 @@ export function Clients() {
                   />
 
                   <SettingToggle
-                    disabled={!canEditField('client_payroll_approval_required')}
+                    disabled={!canEditField('client_payroll_approval_required') || (!!editingId && savedClientApprovalRequired && !canDisableClientApproval)}
                     checked={form.client_payroll_approval_required === true}
                     label="Require client approval before payroll commit"
-                    description="After staff approve payroll, the client is notified to review the preview. Commit requires an assigned client user to approve that exact revision in the portal or through a retained email attestation. When off, staff can approve and commit without client review or notification."
+                    description="After staff approve payroll, the client is notified to review the preview. Commit requires an assigned client user to approve that exact revision in the portal or through a retained email attestation. Turning this off applies to future calculations. Payroll already calculated still needs approval."
                     onToggle={() => updateField('client_payroll_approval_required', form.client_payroll_approval_required !== true)}
                   />
+
+                  {disablingClientApproval && canDisableClientApproval && <div>
+                    <label htmlFor={`${clientFormId}-approval-disable-reason`} className="block text-sm font-medium">Reason for turning off client approval (10–500 characters)</label>
+                    <textarea id={`${clientFormId}-approval-disable-reason`} className="w-full rounded border p-2" maxLength={500}
+                      value={form.client_approval_disable_reason || ''} onChange={event => updateField('client_approval_disable_reason', event.target.value)} />
+                  </div>}
 
                   {/* Check Settings */}
                   <h4 className="text-sm font-medium text-neutral-700 border-b pb-1 pt-2">Check Settings</h4>
