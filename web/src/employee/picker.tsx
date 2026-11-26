@@ -4,7 +4,7 @@ import type { EmployeeLink } from './api';
 import { today } from './config';
 import { useDocumentTitle } from './hooks';
 import { longDate, shortDate } from './format';
-import { EmpButton } from './ui';
+import { DemoPill, EmpButton } from './ui';
 
 function lastPaidLabel(date: string | null): string | null {
   if (!date) return null;
@@ -42,7 +42,10 @@ export function EmployerPicker({ links, onChoose, onSignOut }: { links: Employee
                   <Building2 className="size-6" />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="emp-row-title block break-words">{link.companyName || 'Your employer'}</span>
+                  <span className="emp-row-title flex flex-wrap items-center gap-1.5">
+                    <span className="min-w-0 [overflow-wrap:anywhere]">{link.companyName || 'Your employer'}</span>
+                    {link.demo && <DemoPill />}
+                  </span>
                   <span className="emp-row-sub">{linkSubtitle(link)}</span>
                 </span>
                 <ChevronRight aria-hidden="true" className="size-5 shrink-0 text-neutral-400" />

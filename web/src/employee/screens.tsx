@@ -6,7 +6,7 @@ import { CantSignIn } from './help';
 import { useDocumentTitle } from './hooks';
 import { clearSigningOut, redirectTarget } from './routing';
 import { forgetInviteToken } from './signupState';
-import { BrandMark, EmpButtonLink } from './ui';
+import { BrandMark, DemoPill, EmpButtonLink } from './ui';
 
 function firstTimeLine(name: string | null): string {
   return `First time here? Your manager${name ? ` at ${name}` : ''} will send you a link to set up your account.`;
@@ -32,6 +32,12 @@ export function WelcomeScreen(): ReactElement {
     <main className="emp-auth">
       <div className="emp-auth-grow">
         <BrandMark size="lg" />
+        {!brand.isFallback && brand.demo && (
+          <p className="flex flex-wrap items-center gap-2 font-display text-[1.06rem] font-bold text-neutral-900">
+            <span className="min-w-0 [overflow-wrap:anywhere]">{brand.name}</span>
+            <DemoPill />
+          </p>
+        )}
         <h1 className="emp-h1">Your pay, on your phone</h1>
         <p className="emp-lead">
           {brand.isFallback ? 'See your pay stubs and tax forms any time.' : `See your pay stubs and tax forms from ${brand.name} any time.`}
@@ -61,7 +67,8 @@ export function SignInScreen(): ReactElement {
         </Link>
         <span className="flex min-w-0 items-center gap-2">
           <BrandMark />
-          <span className="min-w-0 break-words font-display text-[1.06rem] font-bold leading-tight">{brand.name}</span>
+          <span className="min-w-0 [overflow-wrap:anywhere] font-display text-[1.06rem] font-bold leading-tight">{brand.name}</span>
+          {brand.demo && <DemoPill />}
         </span>
       </div>
       <SignInForm redirectTo={redirectTarget(location.state)} />

@@ -31,7 +31,8 @@ module Api
             title: "Final Payroll Record",
             subtitle: "#{payload.dig(:company, :name)} — #{payload.dig(:pay_period, :start_date)} through #{payload.dig(:pay_period, :end_date)}",
             filename: filename("pdf"),
-            sheets: sheets(payload)
+            sheets: sheets(payload),
+            demo: @pay_period.company.demo?
           )
           send_data generator.generate,
                     filename: generator.filename,

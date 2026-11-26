@@ -27,6 +27,7 @@ class NonEmployeeCheckVoucherGenerator
       render_line_items(pdf)
       render_notes(pdf)
       render_footer(pdf)
+      DemoPdfFooter.draw_prawn_footer(pdf, company: company)
       draw_void_watermark(pdf) if check.voided?
     end.render
   end
