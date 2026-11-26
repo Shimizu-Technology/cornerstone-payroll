@@ -78,15 +78,47 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
     expect(AuditLog.where(action: "portal_notification_recipients#update")).to be_empty
   end
 
-  it "rejects an extra address that belongs to an account, so that person's own alert setting applies" do
-    save(emails: [ "RILEY@example.test" ])
-
-    expect(response).to have_http_status(:unprocessable_entity)
-    expect(response.parsed_body.fetch("error")).to include("riley@example.test already has a Cornerstone Payroll account")
+  it "rejects an extra address (including Gmail/Googlemail aliases) that belongs to a same-organization account" do
+    reviewer.update!(email: "riley.staff@gmail.com")
+    [ "RILEY.STAFF@gmail.com", "rileystaff+alerts@gmail.com", "r.i.l.e.y.staff+payroll@googlemail.com" ].each do |variant|
+      save(emails: [ variant ])
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("already has a Cornerstone Payroll account")
+    end
     expect(PortalNotificationRecipient.where(company: company)).to be_empty
 
     save(user_ids: [ reviewer.id ], lead_user_id: reviewer.id, emails: [ "books@example.test" ])
     expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "keeps save response and recipient_count independent of foreign-organization accounts while suppressing delivery internally" do
+    foreign_email = "outside.partner@gmail.com"
+    save(emails: [ foreign_email ])
+    expect(response).to have_http_status(:ok), response.body
+    count_before = response.parsed_body.dig("data", "recipient_count")
+    expect(count_before).to eq(1)
+
+    # A foreign organization later registers that mailbox (even via a Gmail alias).
+    foreign_org = create(:organization)
+    foreign_company = create(:company, organization: foreign_org)
+    create(:user, company: foreign_company, organization: foreign_org, role: "admin", email: "outsidepartner+ops@googlemail.com")
+
+    # Save response and recipient_count remain identical and do not reveal the foreign account.
+    save(emails: [ foreign_email ])
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "recipient_count")).to eq(count_before)
+    get path, headers: headers
+    expect(response.parsed_body.dig("data", "recipient_count")).to eq(count_before)
+
+    # Internally, delivery to the foreign-organization account is suppressed.
+    client_user = create(:user, company: company, organization: company.organization, role: "client")
+    thread = create(:client_portal_thread, company: company, created_by: client_user)
+    message = create(:client_portal_message, company: company, client_portal_thread: thread, author: client_user)
+    with_portal_email do
+      event = PortalNotifications.message_created!(message)
+      expect(event.recipient_status).to eq("no_recipients")
+      expect(event.deliveries.sole).to have_attributes(status: "skipped", skip_reason: "no_recipients")
+    end
   end
 
   it "requires a Lead when staff are assigned and flags existing leadless teams with needs_lead" do

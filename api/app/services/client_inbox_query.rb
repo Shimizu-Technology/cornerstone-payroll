@@ -26,7 +26,7 @@ class ClientInboxQuery
   end
 
   def summary
-    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live'")
+    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current, actionable_reviews_only: true)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live'")
     row.transform_values(&:to_i)
   end
 
@@ -66,7 +66,7 @@ class ClientInboxQuery
 
   # Values are quoted through sanitize_sql_array; company subqueries are
   # compiled by ActiveRecord rather than assembled from request strings.
-  def to_sql(snapshot)
+  def to_sql(snapshot, actionable_reviews_only: false)
     scoped_companies = companies
     scoped_companies = scoped_companies.where(id: @params[:company_id]) if @params[:company_id].present?
     ids = scoped_companies.select(:id).to_sql
@@ -74,6 +74,11 @@ class ClientInboxQuery
       ids
     else
       scoped_companies.where(id: @user.company_assignments.active_access.where(client_management: true).select(:company_id)).select(:id).to_sql
+    end
+    review_actionable_filter = if actionable_reviews_only || @params[:status] == "waiting"
+      "AND prp.superseded_at IS NULL AND pp.status = 'approved'"
+    else
+      ""
     end
     sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, @user.id, @user.created_at, snapshot, snapshot, @user.created_at, snapshot, @user.id, snapshot, @user.created_at, @user.id, snapshot, snapshot)
       SELECT t.id, t.company_id, 'message' AS kind, t.subject AS title,
@@ -145,6 +150,7 @@ class ClientInboxQuery
       LEFT JOIN users decider ON decider.id = COALESCE(prp.approved_by_id, prp.changes_requested_by_id)
       WHERE prp.company_id IN (#{ids})
         AND prp.published_at IS NOT NULL
+        #{review_actionable_filter}
         AND pp.correction_status IS DISTINCT FROM 'voided'
         AND (prp.approved_at IS NOT NULL OR prp.changes_requested_at IS NOT NULL)
         AND COALESCE(prp.approved_at, prp.changes_requested_at) <= ?

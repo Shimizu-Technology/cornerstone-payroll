@@ -449,10 +449,125 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(captured_portal_emails.size).to eq(1)
         mail = captured_portal_emails.sole
         expect(mail[:idempotency_key]).to eq(legacy_key)
-        expect(mail[:subject]).to eq("New activity in Cornerstone Payroll")
-        expect(mail[:text]).to include("You have updates waiting in Cornerstone Payroll.")
-        expect(mail[:text]).not_to include("Pacific Harbor Grill", "Island Bakery LLC", "Dec 1")
+        expected_text = [
+          "You have updates waiting in Cornerstone Payroll.",
+          "Sign in to view it.",
+          "",
+          "Open portal: https://payroll.example.test/pay-periods",
+          "",
+          PortalNotifications::Email::FOOTER_LINE
+        ].join("\n")
+        expected_html = <<~HTML
+          <!doctype html>
+          <html>
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>New activity in Cornerstone Payroll</title></head>
+            <body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f3f4f6;">
+                <tr><td align="center" style="padding:40px 16px;">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:500px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">
+                    <tr><td style="padding:32px 32px 0 32px;font-size:18px;font-weight:700;color:#111827;">Cornerstone Payroll</td></tr>
+                    <tr><td style="padding:16px 32px 0 32px;font-size:15px;line-height:1.6;color:#374151;">You have updates waiting in Cornerstone Payroll.<br>Sign in to view it.</td></tr>
+                    <tr><td style="padding:24px 32px 0 32px;">
+                      <a href="https://payroll.example.test/pay-periods" style="display:inline-block;padding:12px 28px;background-color:#2563eb;border-radius:6px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">Open portal</a>
+                    </td></tr>
+                    <tr><td style="padding:24px 32px 32px 32px;font-size:12px;line-height:1.6;color:#6b7280;">#{PortalNotifications::Email::FOOTER_LINE}</td></tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+          </html>
+        HTML
+        expect(mail.slice(:from, :to, :subject, :text, :html, :reply_to)).to eq(
+          from: "alerts@example.test",
+          to: staff_lead.email,
+          subject: "New activity in Cornerstone Payroll",
+          text: expected_text,
+          html: expected_html
+        )
+        expect(mail[:reply_to]).to be_nil
         expect(rows.map { |r| r.reload.status }.uniq).to eq([ "sent" ])
+      end
+    end
+
+    it "preserves the historical extra-address footer under the original key even if an eligible account registers before retry" do
+      PortalNotificationRecipient.where(company: company).delete_all
+      PortalNotificationRecipient.create!(company: company, email: "legacy.extra@example.test")
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+        row = PortalNotificationDelivery.find_by!(recipient_email: "legacy.extra@example.test")
+        legacy_key = "portal-notification-legacyextra789"
+        row.update_columns(batch_key: legacy_key, attempts: 1, delivery_mode: "immediate", deliver_after: 10.minutes.ago, next_attempt_at: 1.minute.ago)
+
+        # Register an eligible staff account with that email before the legacy retry.
+        registered_staff = create(:user, company: company, organization: organization, role: "admin", email: "legacy.extra@example.test")
+        create(:company_assignment, user: registered_staff, company: company)
+
+        dispatch_at(1.minute.from_now)
+
+        expect(captured_portal_emails.size).to eq(1)
+        mail = captured_portal_emails.sole
+        expect(mail[:idempotency_key]).to eq(legacy_key)
+        expected_text = [
+          "You have a new message or update in the portal.",
+          "Sign in to view it.",
+          "",
+          "Open portal: https://payroll.example.test/pay-periods",
+          "",
+          PortalNotifications::Email::EXTRA_ADDRESS_FOOTER_LINE
+        ].join("\n")
+        expected_html = <<~HTML
+          <!doctype html>
+          <html>
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>New activity in Cornerstone Payroll</title></head>
+            <body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f3f4f6;">
+                <tr><td align="center" style="padding:40px 16px;">
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:500px;background-color:#ffffff;border:1px solid #e5e7eb;border-radius:12px;">
+                    <tr><td style="padding:32px 32px 0 32px;font-size:18px;font-weight:700;color:#111827;">Cornerstone Payroll</td></tr>
+                    <tr><td style="padding:16px 32px 0 32px;font-size:15px;line-height:1.6;color:#374151;">You have a new message or update in the portal.<br>Sign in to view it.</td></tr>
+                    <tr><td style="padding:24px 32px 0 32px;">
+                      <a href="https://payroll.example.test/pay-periods" style="display:inline-block;padding:12px 28px;background-color:#2563eb;border-radius:6px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">Open portal</a>
+                    </td></tr>
+                    <tr><td style="padding:24px 32px 32px 32px;font-size:12px;line-height:1.6;color:#6b7280;">#{PortalNotifications::Email::EXTRA_ADDRESS_FOOTER_LINE}</td></tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+          </html>
+        HTML
+        expect(mail.slice(:from, :to, :subject, :text, :html, :reply_to)).to eq(
+          from: "alerts@example.test",
+          to: "legacy.extra@example.test",
+          subject: "New activity in Cornerstone Payroll",
+          text: expected_text,
+          html: expected_html
+        )
+        expect(mail[:reply_to]).to be_nil
+      end
+    end
+
+    it "does not resend a duplicate when a sibling row in a legacy batch was already accepted (sent) or is still in backoff" do
+      with_portal_email do
+        _legacy_key, rows = seed_legacy_two_client_batch!
+        first_row, second_row = rows
+
+        # Case 1: sibling is still in backoff — wait without splitting or sending.
+        first_row.update_columns(next_attempt_at: 10.minutes.from_now)
+        dispatch_at(1.minute.from_now)
+        expect(captured_portal_emails).to be_empty
+        expect(second_row.reload).to have_attributes(status: "pending", batch_key: first_row.batch_key)
+
+        # Case 2: sibling was already accepted by provider — mark pending sibling sent, send 0 emails.
+        first_row.update_columns(status: "sent", sent_at: 2.minutes.ago, provider_message_id: "resend-accepted-1", completed_at: 2.minutes.ago, next_attempt_at: nil)
+        dispatch_at(1.minute.from_now)
+        expect(captured_portal_emails).to be_empty
+        expect(second_row.reload).to have_attributes(status: "sent", provider_message_id: "resend-accepted-1", batch_key: first_row.batch_key)
       end
     end
 
@@ -603,6 +718,138 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         expect(PortalNotificationDelivery.where(user: staff_lead).pluck(:company_id, :status)).to contain_exactly(
           [ company.id, "sent" ],
           [ second_company.id, "sent" ]
+        )
+      end
+    end
+  end
+
+  describe "mid-dispatch revocation per group" do
+    it "rechecks authorization immediately before rendering the next group and drops a client revoked mid-dispatch" do
+      PortalNotificationRecipient.create!(company: second_company, user: staff_lead, team_role: "lead")
+      PortalNotificationRecipient.where(company: company, user: staff_backup).delete_all
+
+      second_client = create(:user, company: second_company, organization: organization, role: "client", client_access_level: "manager")
+      create(:company_assignment, user: second_client, company: second_company)
+      second_employee = create(:employee, company: second_company)
+      second_period = create(:pay_period, :calculated, company: second_company,
+        start_date: Date.new(2026, 12, 1), end_date: Date.new(2026, 12, 15), pay_date: Date.new(2026, 12, 20))
+      create(:payroll_item, company: second_company, pay_period: second_period, employee: second_employee, gross_pay: 900, net_pay: 800)
+
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+      PayPeriodLifecycleService.new(pay_period: second_period, actor: staff_lead).approve!
+
+      with_portal_email do
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+        PayrollReview::RevisionService.new(pay_period: second_period, actor: second_client).approve!(
+          approver: second_client, recorded_by: second_client, method: "client_portal",
+          revision_id: second_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        # While the first group's email is sending, revoke staff_lead's access to the other company.
+        delivered = []
+        allow(PortalNotifications::Transport).to receive(:deliver).and_wrap_original do |original, payload, **kwargs|
+          delivered << payload
+          if delivered.size == 1
+            other_company_id = payload[:subject].include?("Pacific Harbor Grill") ? second_company.id : company.id
+            CompanyAssignment.where(user: staff_lead, company_id: other_company_id).delete_all
+          end
+          original.call(payload, **kwargs)
+        end
+
+        dispatch_at(3.minutes.from_now)
+
+        expect(captured_portal_emails.size).to eq(1)
+        sent_subject = captured_portal_emails.sole[:subject]
+        revoked_company = sent_subject.include?("Pacific Harbor Grill") ? second_company : company
+        revoked_row = PortalNotificationDelivery.where(user: staff_lead, company_id: revoked_company.id)
+          .joins(:portal_notification_event)
+          .find_by!(portal_notification_events: { event_type: "payroll_review_decided" })
+        expect(revoked_row).to have_attributes(status: "skipped", skip_reason: "access_revoked")
+        expect(sent_subject).not_to include(revoked_company.name)
+      end
+    end
+  end
+
+  describe "Gmail and Googlemail mailbox alias matching" do
+    before do
+      PortalNotificationRecipient.where(company: company).delete_all
+      PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+    end
+
+    it "applies account eligibility to dotted, plus-tagged, and googlemail variants at both enqueue and dispatch without inventing rules for other domains" do
+      PortalNotificationRecipient.create!(company: company, email: "dot.viewer@gmail.com")
+      PortalNotificationRecipient.create!(company: company, email: "plusviewer+alerts@gmail.com")
+      PortalNotificationRecipient.create!(company: company, email: "g.mail.viewer+payroll@googlemail.com")
+      PortalNotificationRecipient.create!(company: company, email: "alex+outside@otherdomain.test")
+
+      with_portal_email do
+        # Enqueue while no account exists yet: all 4 extras queue pending.
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: pay_period.payroll_review_packages.current.first!.id,
+          acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+
+        # Register ineligible client viewers at the canonical Gmail addresses and at alex@otherdomain.test.
+        %w[dotviewer@gmail.com plusviewer@gmail.com gmailviewer@gmail.com alex@otherdomain.test].each do |email|
+          viewer = create(:user, company: company, organization: organization, role: "client", client_access_level: "viewer", email: email)
+          create(:company_assignment, user: viewer, company: company)
+        end
+
+        # Dispatch revokes all 3 Gmail/Googlemail aliases, while keeping the distinct non-Gmail address.
+        dispatch_at(3.minutes.from_now)
+        expect(captured_portal_emails.map { |m| m[:to] }).to eq([ "alex+outside@otherdomain.test" ])
+        %w[dot.viewer@gmail.com plusviewer+alerts@gmail.com g.mail.viewer+payroll@googlemail.com].each do |alias_email|
+          row = PortalNotificationDelivery.find_by!(recipient_email: alias_email)
+          expect(row).to have_attributes(status: "skipped", skip_reason: "access_revoked")
+        end
+
+        # Enqueue path also drops all 3 Gmail/Googlemail aliases.
+        PortalNotifications::Transport.clear_captured!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).unapprove!
+        PayPeriodLifecycleService.new(pay_period: pay_period.reload, actor: staff_lead).approve!
+        new_pkg = pay_period.payroll_review_packages.current.first!
+        PayrollReview::RevisionService.new(pay_period: pay_period.reload, actor: client_manager).approve!(
+          approver: client_manager, recorded_by: client_manager, method: "client_portal",
+          revision_id: new_pkg.id, acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+        )
+        new_event = PortalNotificationEvent.find_by!(dedupe_key: "payroll_review_decided:#{new_pkg.id}")
+        expect(new_event.deliveries.pluck(:recipient_email)).to eq([ "alex+outside@otherdomain.test" ])
+      end
+    end
+  end
+
+  describe "conditional preference retiming under concurrent claim" do
+    it "does not overwrite a delivery that was claimed concurrently during preference retiming" do
+      with_portal_email do
+        travel_to(Time.utc(2026, 12, 1, 20, 30)) do
+          PayPeriodLifecycleService.new(pay_period: pay_period, actor: staff_lead).approve!
+        end
+        delivery = PortalNotificationDelivery.find_by!(user: client_manager)
+        original_deliver_after = delivery.deliver_after
+
+        # Simulate a concurrent dispatcher claim occurring right after the row is read for retiming.
+        allow(PortalNotifications).to receive(:deliver_after_for).and_wrap_original do |original, mode, occurred_at|
+          PortalNotificationDelivery.where(id: delivery.id).update_all(
+            attempts: 1,
+            claimed_at: Time.current,
+            batch_key: "portal-notification-v2-concurrent-claim"
+          )
+          original.call(mode, occurred_at)
+        end
+
+        PortalNotifications::Preferences.update!(client_manager, { "payroll_updates" => "digest" })
+
+        expect(delivery.reload).to have_attributes(
+          delivery_mode: "immediate",
+          deliver_after: original_deliver_after,
+          attempts: 1,
+          batch_key: "portal-notification-v2-concurrent-claim"
         )
       end
     end

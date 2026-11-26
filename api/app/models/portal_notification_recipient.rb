@@ -7,6 +7,7 @@
 class PortalNotificationRecipient < ApplicationRecord
   MAX_EXTRA_EMAILS = 20
   TEAM_ROLES = %w[lead backup].freeze
+  GMAIL_DOMAINS = %w[gmail.com googlemail.com].freeze
 
   belongs_to :company
   belongs_to :user, optional: true
@@ -30,6 +31,59 @@ class PortalNotificationRecipient < ApplicationRecord
 
   def self.normalize_email(value)
     value.to_s.strip.downcase.presence
+  end
+
+  # Provider-aware mailbox identity used at save, enqueue, and dispatch so
+  # Gmail/Googlemail dotted and +tagged aliases match their underlying account.
+  def self.canonical_email(value)
+    normalized = normalize_email(value)
+    return nil if normalized.blank?
+
+    local, domain = normalized.split("@", 2)
+    return normalized if local.blank? || domain.blank?
+
+    if GMAIL_DOMAINS.include?(domain)
+      canonical_local = local.split("+", 2).first.delete(".")
+      "#{canonical_local}@gmail.com"
+    else
+      normalized
+    end
+  end
+
+  def self.matching_users_for_email(email, scope: User.all)
+    matching_users_for_emails([ email ], scope: scope)
+  end
+
+  def self.matching_users_for_emails(emails, scope: User.all)
+    canonicals = Array(emails).filter_map { |email| canonical_email(email) }.uniq
+    return [] if canonicals.empty?
+
+    gmail_locals = []
+    other_emails = []
+    canonicals.each do |canonical|
+      local, domain = canonical.split("@", 2)
+      if domain == "gmail.com"
+        gmail_locals << local
+      else
+        other_emails << canonical
+      end
+    end
+
+    candidates = []
+    if other_emails.any?
+      candidates.concat(scope.where("LOWER(BTRIM(email)) IN (?)", other_emails).order(:id).to_a)
+    end
+    if gmail_locals.any?
+      candidates.concat(
+        scope.where(
+          "LOWER(SPLIT_PART(BTRIM(email), '@', 2)) IN ('gmail.com', 'googlemail.com') AND " \
+          "REPLACE(SPLIT_PART(LOWER(SPLIT_PART(BTRIM(email), '@', 1)), '+', 1), '.', '') IN (?)",
+          gmail_locals
+        ).order(:id).to_a
+      )
+    end
+    canonical_set = canonicals.to_set
+    candidates.uniq(&:id).select { |user| canonical_set.include?(canonical_email(user.email)) }
   end
 
   def self.valid_email?(value)

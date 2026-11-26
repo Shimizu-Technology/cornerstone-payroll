@@ -352,7 +352,7 @@ module PortalNotifications
     end
 
     def legacy_destination_group(event)
-      return :payroll if PAYROLL_REVIEW_EVENTS.include?(event.event_type)
+      return :pay_runs if event.event_type.start_with?("payroll_review_")
 
       self.class.destination_group(event)
     end

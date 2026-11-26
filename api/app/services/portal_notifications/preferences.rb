@@ -59,16 +59,28 @@ module PortalNotifications
       end
 
       # Switching Immediate <-> Digest retimes unattempted queued alerts so the
-      # change takes effect for already-queued notifications too.
+      # change takes effect for already-queued notifications too. The update is
+      # conditional on status/attempts/claimed_at/batch_key so it cannot race
+      # a concurrent dispatcher claim.
       def retime_pending_deliveries!(user, category, mode)
         return unless PortalNotificationDelivery::DELIVERY_MODES.include?(mode)
 
-        normalized_email = PortalNotificationRecipient.normalize_email(user.email)
+        canonical_email = PortalNotificationRecipient.canonical_email(user.email)
         base = PortalNotificationDelivery.pending
           .joins(:portal_notification_event)
           .where(attempts: 0, claimed_at: nil, batch_key: nil, portal_notification_events: { category: category })
-        scope = if normalized_email.present?
-          base.where(user_id: user.id).or(base.where(user_id: nil, recipient_email: normalized_email))
+        scope = if canonical_email.present?
+          local, domain = canonical_email.split("@", 2)
+          email_scope = if domain == "gmail.com"
+            base.where(user_id: nil).where(
+              "LOWER(SPLIT_PART(BTRIM(recipient_email), '@', 2)) IN ('gmail.com', 'googlemail.com') AND " \
+              "REPLACE(SPLIT_PART(LOWER(SPLIT_PART(BTRIM(recipient_email), '@', 1)), '+', 1), '.', '') = ?",
+              local
+            )
+          else
+            base.where(user_id: nil).where("LOWER(BTRIM(recipient_email)) = ?", canonical_email)
+          end
+          base.where(user_id: user.id).or(email_scope)
         else
           base.where(user_id: user.id)
         end
@@ -77,7 +89,13 @@ module PortalNotifications
           deliver_after = PortalNotifications.deliver_after_for(mode, delivery.event.occurred_at)
           next if delivery.delivery_mode == mode && delivery.deliver_after == deliver_after
 
-          delivery.update!(delivery_mode: mode, deliver_after: deliver_after)
+          PortalNotificationDelivery.where(
+            id: delivery.id,
+            status: "pending",
+            attempts: 0,
+            claimed_at: nil,
+            batch_key: nil
+          ).update_all(delivery_mode: mode, deliver_after: deliver_after, updated_at: Time.current)
         end
       end
     end

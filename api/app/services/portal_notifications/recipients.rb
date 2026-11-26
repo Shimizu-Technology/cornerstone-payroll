@@ -64,10 +64,7 @@ module PortalNotifications
       end
 
       def account_users_for_email(email)
-        normalized = PortalNotificationRecipient.normalize_email(email)
-        return [] if normalized.blank?
-
-        User.where("LOWER(email) = ?", normalized).order(:id).to_a
+        PortalNotificationRecipient.matching_users_for_email(email)
       end
 
       def eligible_account_user_for_email(email, event)
@@ -154,12 +151,13 @@ module PortalNotifications
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
         users = User.where(id: listed.users.select(:user_id)).order(:id).to_a.select { |user| eligible_user?(user, event) }
         seen_user_ids = users.map(&:id)
-        taken_emails = users.map { |user| PortalNotificationRecipient.normalize_email(user.email) }.compact
+        taken_canonicals = users.filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }
         extra_emails = []
 
         listed.extra_emails.order(:email).pluck(:email).each do |email|
           normalized = PortalNotificationRecipient.normalize_email(email)
-          next if normalized.blank? || taken_emails.include?(normalized)
+          canonical = PortalNotificationRecipient.canonical_email(normalized)
+          next if normalized.blank? || canonical.blank? || taken_canonicals.include?(canonical)
 
           account_users = account_users_for_email(normalized)
           if account_users.any?
@@ -167,11 +165,11 @@ module PortalNotifications
             if eligible && !seen_user_ids.include?(eligible.id)
               users << eligible
               seen_user_ids << eligible.id
-              taken_emails << normalized
+              taken_canonicals << canonical
             end
           else
             extra_emails << normalized
-            taken_emails << normalized
+            taken_canonicals << canonical
           end
         end
 
@@ -235,8 +233,12 @@ module PortalNotifications
       end
 
       def listed_email?(company_id, email)
-        normalized = PortalNotificationRecipient.normalize_email(email)
-        normalized.present? && PortalNotificationRecipient.exists?(company_id: company_id, email: normalized)
+        canonical = PortalNotificationRecipient.canonical_email(email)
+        return false if canonical.blank?
+
+        PortalNotificationRecipient.where(company_id: company_id).extra_emails.pluck(:email).any? do |listed|
+          PortalNotificationRecipient.canonical_email(listed) == canonical
+        end
       end
     end
   end

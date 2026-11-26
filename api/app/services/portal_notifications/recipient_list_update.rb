@@ -50,8 +50,21 @@ module PortalNotifications
         raise InvalidTeamRole, "Lead and Backup must be selected on the account team"
       end
 
-      account_email = User.where("LOWER(email) IN (?)", emails).pick(:email) if emails.any?
-      raise EmailBelongsToAccount, account_email.downcase if account_email
+      # Check only same-organization accounts on save so the tenant-facing
+      # response never acts as an existence oracle for foreign organizations.
+      # Foreign-organization accounts are still suppressed internally at enqueue
+      # and dispatch by PortalNotifications::Recipients.
+      if emails.any?
+        same_org_matches = PortalNotificationRecipient.matching_users_for_emails(
+          emails, scope: User.where(organization_id: company.organization_id)
+        )
+        if same_org_matches.any?
+          matched_canonicals = same_org_matches.filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
+          matched_email = emails.find { |email| matched_canonicals.include?(PortalNotificationRecipient.canonical_email(email)) } ||
+            same_org_matches.first.email.downcase
+          raise EmailBelongsToAccount, matched_email
+        end
+      end
 
       changes = replace!
       if changes.values.any?(&:present?)

@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PayPeriod, PayrollItem } from '@/types';
 import { PayRunWorkspace } from './PayRunWorkspace';
@@ -129,6 +129,27 @@ describe('PayRunWorkspace rehearsal checks', () => {
     expect(await screen.findByRole('link', { name: 'Payroll' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Reports' })).toBeTruthy();
     expect(await screen.findByTestId('mounted-processing-refresh-token')).toBeTruthy();
+  });
+
+  it('preserves a filtered Client Inbox return_to link across workspace tabs and returns to it on Back', async () => {
+    function InboxEcho() {
+      const location = useLocation();
+      return <output data-testid="returned-inbox">{location.pathname + location.search}</output>;
+    }
+    const inboxUrl = '/app/client-inbox?kind=payroll_review&status=waiting';
+    apiMocks.activeCompany = { id: 7, name: 'Harbor Grill', payroll_environment: 'live', workspace_can_write: false };
+    render(
+      <MemoryRouter initialEntries={[`/companies/7/pay-runs/12/work?return_to=${encodeURIComponent(inboxUrl)}`]}>
+        <Routes>
+          <Route path="/companies/:companyId/pay-runs/:id/:tab" element={<PayRunWorkspace />} />
+          <Route path="/app/client-inbox" element={<InboxEcho />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const reportsTab = await screen.findByRole('link', { name: 'Reports' });
+    expect(reportsTab.getAttribute('href')).toContain(`return_to=${encodeURIComponent(inboxUrl)}`);
+    fireEvent.click(screen.getByRole('link', { name: 'Back' }));
+    expect((await screen.findByTestId('returned-inbox')).textContent).toBe(inboxUrl);
   });
 
 
