@@ -138,7 +138,7 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   # employee_id: one employee's Copy B and C only, for the employee app
   # (M4-5). That path makes final copies only; a draft is refused.
   def initialize(company:, report:, kind:, draft:, practice: false, employee_id: nil)
-    raise ArgumentError, "Unknown W-2GU copy: #{kind}" unless KINDS.include?(kind.to_s)
+    raise ReportValidationError, "Unknown W-2GU copy: #{kind}" unless KINDS.include?(kind.to_s)
 
     @company = company
     @report = report.deep_symbolize_keys
@@ -148,16 +148,16 @@ class W2GuOfficialCopies < OfficialPdfOverlay
     @employee_id = employee_id
     raise TemplateUnavailableError, self.class.unsupported_message(year) unless self.class.supported_tax_year?(year)
     if employee_id
-      raise ArgumentError, "A single employee's W-2GU is only Copies B and C" unless @kind == "employee"
-      raise ArgumentError, "A single employee's W-2GU is made only when the W-2s are final" if @draft
-      raise ArgumentError, "No #{year} W-2 for that employee" if people.empty?
+      raise ReportValidationError, "A single employee's W-2GU is only Copies B and C" unless @kind == "employee"
+      raise ReportValidationError, "A single employee's W-2GU is made only when the W-2s are final" if @draft
+      raise ReportValidationError, "No #{year} W-2 for that employee" if people.empty?
     end
 
     super(template_path: TEMPLATE_PATH, page_sizes: [ PAGE_SIZE ])
   end
 
   def generate
-    raise ArgumentError, "No employees have #{year} W-2 wages" if people.empty?
+    raise ReportValidationError, "No employees have #{year} W-2 wages" if people.empty?
 
     check_fit!
     template = load_template!

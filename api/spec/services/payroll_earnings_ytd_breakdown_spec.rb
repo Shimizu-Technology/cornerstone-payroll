@@ -159,4 +159,18 @@ RSpec.describe PayrollEarningsYtdBreakdown do
 
     expect(described_class.new(payroll_item).call.sole.ytd).to eq(167.70.to_d)
   end
+
+  it "labels an unmatched imported Regular YTD row as Regular (prior payroll) without changing amounts" do
+    apply_historical_balance(employee: employee, gross_pay: 500.00, earnings: { "Regular" => 500.00 })
+    payroll_item.payroll_item_earnings.create!(
+      category: "regular", label: "Regular Pay", hours: 10.70, rate: 11, amount: 117.70
+    )
+
+    rows = described_class.new(payroll_item).call
+
+    expect(rows.map { |r| [ r.label, r.current, r.ytd ] }).to eq([
+      [ "Regular Pay", 117.70.to_d, 117.70.to_d ],
+      [ "Regular (prior payroll)", 0.0.to_d, 500.00.to_d ]
+    ])
+  end
 end

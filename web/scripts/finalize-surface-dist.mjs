@@ -228,7 +228,6 @@ export function staffReportOnlyCsp({ apiOrigin: api, apiWsOrigin, clerkOrigin, p
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-    'upgrade-insecure-requests',
   ].join('; ')
 }
 

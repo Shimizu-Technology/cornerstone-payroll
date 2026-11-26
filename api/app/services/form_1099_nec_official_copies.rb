@@ -111,7 +111,7 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
   # report: unmodified Form1099NecAggregator output for company and its year.
   # practice: a test or practice workspace, whose copies are always drafts.
   def initialize(company:, report:, kind:, draft:, practice: false)
-    raise ArgumentError, "Unknown 1099-NEC copy: #{kind}" unless KINDS.include?(kind.to_s)
+    raise ReportValidationError, "Unknown 1099-NEC copy: #{kind}" unless KINDS.include?(kind.to_s)
 
     @company = company
     @report = report.deep_symbolize_keys
@@ -124,7 +124,7 @@ class Form1099NecOfficialCopies < OfficialPdfOverlay
   end
 
   def generate
-    raise ArgumentError, "No contractor gets a #{year} 1099-NEC" if payees.empty?
+    raise ReportValidationError, "No contractor gets a #{year} 1099-NEC" if payees.empty?
 
     check_fit!
     template = load_template!

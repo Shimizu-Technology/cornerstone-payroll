@@ -62,7 +62,7 @@ export function CompanySwitcher() {
 
   if (!canSwitchCompany || organizationCompanies.length <= 1) {
     return (
-      <div className="border-b border-neutral-200/70 px-4 py-3">
+      <div className="shrink-0 border-b border-neutral-200/70 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-semibold text-neutral-600">Payroll client</p>
         </div>
@@ -77,10 +77,10 @@ export function CompanySwitcher() {
   }
 
   return (
-    <div className="relative border-b border-neutral-200/70 px-4 py-3" ref={dropdownRef}>
+    <div className="relative shrink-0 border-b border-neutral-200/70 px-4 py-3" ref={dropdownRef}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-neutral-600">Payroll client</p>
-        <span className="rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600">
+        <span className="hidden rounded-md border border-neutral-200 bg-white px-1.5 py-0.5 text-xs font-semibold text-neutral-600 lg:inline-flex">
           {platformShortcut('Option K')}
         </span>
       </div>

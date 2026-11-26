@@ -5,6 +5,7 @@ module Api
     module Admin
       class ReportsController < BaseController
         class FilingValidationError < ArgumentError; end
+        DEFAULT_REPORT_ERROR_MESSAGE = "We couldn't prepare this report. Try again or contact support."
 
         EXTERNAL_FILING_OUTCOME_FIELDS = %i[
           filed_at
@@ -505,7 +506,7 @@ module Api
             filing_gate: report_data[:filing_gate]
           }
         rescue OfficialPdfOverlay::TemplateUnavailableError, ArgumentError => e
-          render json: { error: e.message }, status: :unprocessable_entity
+          render_report_argument_error(e)
         end
 
         def quarterly_compliance_packet_official_form_preview
@@ -1271,7 +1272,7 @@ module Api
           render_write_maintenance if WriteMaintenance.enabled?
         end
 
-        def render_report_argument_error(error, fallback: nil)
+        def render_report_argument_error(error, fallback: DEFAULT_REPORT_ERROR_MESSAGE)
           case error
           when PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError
             render_component_history_error(error)
@@ -1279,15 +1280,13 @@ module Api
             render json: { error: error.message, problems: error.problems }, status: :unprocessable_entity
           when FilingValidationError
             render json: { error: error.message, problems: [ error.message ] }, status: :unprocessable_entity
-          when PayrollReportingPeriod::InvalidPeriod, Form941GuAggregator::MissingWageBase, W2GuAggregator::MissingWageBase,
+          when ReportValidationError, PayrollReportingPeriod::InvalidPeriod, Form941GuAggregator::MissingWageBase, W2GuAggregator::MissingWageBase,
             PdfUnicodeFont::UnprintableName, OfficialPdfOverlay::TemplateUnavailableError
             render json: { error: error.message }, status: :unprocessable_entity
           else
-            return render json: { error: error.message }, status: :unprocessable_entity unless fallback
-
             Rails.logger.error("Report #{action_name} for company #{current_company_id}: #{error.class}")
             Rails.error.report(error, handled: true, context: { company_id: current_company_id, report: action_name })
-            render json: { error: fallback }, status: :unprocessable_entity
+            render json: { error: fallback || DEFAULT_REPORT_ERROR_MESSAGE }, status: :unprocessable_entity
           end
         end
 
@@ -1902,13 +1901,13 @@ module Api
             "schedule_b" => { generator: QuarterlyComplianceOfficialForms::ScheduleB, filename_prefix: "federal_form_941_schedule_b_draft" },
             "w1" => { generator: QuarterlyComplianceOfficialForms::W1, filename_prefix: "guam_w1_draft" },
             "swica" => { generator: QuarterlyComplianceOfficialForms::Sw2, filename_prefix: "guam_sw2_draft" }
-          }.fetch(form_type.to_s) { raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica" }
+          }.fetch(form_type.to_s) { raise ReportValidationError, "form_type must be form_941, schedule_b, w1, or swica" }
         end
 
         def quarterly_compliance_official_form_fields(form_type)
           raw_fields = params[:fields]
           return {} if raw_fields.blank?
-          raise ArgumentError, "fields must be an object" unless raw_fields.respond_to?(:permit)
+          raise ReportValidationError, "fields must be an object" unless raw_fields.respond_to?(:permit)
 
           fields = case form_type.to_s
           when "form_941"
@@ -1930,7 +1929,7 @@ module Api
               ]
             ).to_h
           else
-            raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica"
+            raise ReportValidationError, "form_type must be form_941, schedule_b, w1, or swica"
           end
 
           validate_official_form_fields!(fields)
@@ -1945,23 +1944,23 @@ module Api
           when Array
             value.each { |child| validate_official_form_fields!(child) }
           when String
-            raise ArgumentError, "fields contain a value longer than #{OFFICIAL_FORM_STRING_LIMIT} characters" if value.length > OFFICIAL_FORM_STRING_LIMIT
+            raise ReportValidationError, "fields contain a value longer than #{OFFICIAL_FORM_STRING_LIMIT} characters" if value.length > OFFICIAL_FORM_STRING_LIMIT
           when Numeric, NilClass, TrueClass, FalseClass
             true
           else
-            raise ArgumentError, "fields contain an unsupported value type"
+            raise ReportValidationError, "fields contain an unsupported value type"
           end
         end
 
         def validate_official_form_row_limits!(fields)
           daily_count = Array(fields["daily_liabilities"]).length
           if daily_count > OFFICIAL_FORM_DAILY_LIABILITY_LIMIT
-            raise ArgumentError, "daily_liabilities cannot include more than #{OFFICIAL_FORM_DAILY_LIABILITY_LIMIT} rows"
+            raise ReportValidationError, "daily_liabilities cannot include more than #{OFFICIAL_FORM_DAILY_LIABILITY_LIMIT} rows"
           end
 
           employee_count = Array(fields["employees"]).length
           if employee_count > OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT
-            raise ArgumentError, "employees cannot include more than #{OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT} rows"
+            raise ReportValidationError, "employees cannot include more than #{OFFICIAL_FORM_SWICA_EMPLOYEE_LIMIT} rows"
           end
         end
 
@@ -2002,7 +2001,7 @@ module Api
               employees: report.dig(:swica, :employees)
             }
           else
-            raise ArgumentError, "form_type must be form_941, schedule_b, w1, or swica"
+            raise ReportValidationError, "form_type must be form_941, schedule_b, w1, or swica"
           end
         end
 
@@ -2298,7 +2297,7 @@ module Api
               source_bucket_totals: historical_deductions.group_by { |entry| [ entry[:source], entry[:treatment] ] }.map do |(source, treatment), entries|
                 { source: source, treatment: treatment, amount: entries.sum(BigDecimal("0")) { |entry| entry[:amount] } }
               end,
-              classification_note: "QuickBooks deduction labels retain their source tax buckets. Historical loan labels do not establish straight versus installment treatment. A 401(k) After Tax label in a QuickBooks pre-tax bucket is shown separately, not reclassified."
+              classification_note: "Imported deduction labels keep their original tax buckets. Imported loan repayments do not show whether they were one-time or installment loans. Any 401(k) after-tax item imported in a pre-tax bucket is shown separately, not reclassified."
             },
             company_totals: payroll_period_company_totals(
               items, period, historical_paychecks, historical_adjustments, unified: unified
@@ -2349,7 +2348,7 @@ module Api
           return nil unless raw_key
 
           match = raw_key.to_s.match(/\A(native|imported):(\d+)\z/)
-          raise ArgumentError, "pay_run_key must use native:<id> or imported:<id>" unless match
+          raise ReportValidationError, "pay_run_key must use native:<id> or imported:<id>" unless match
 
           record_type = match[1]
           record_id = match[2].to_i
@@ -2362,7 +2361,7 @@ module Api
               .where(historical_import_batches: { company_id: current_company_id, status: "locked" })
               .pick(:pay_date)
           end
-          raise ArgumentError, "Pay run not found" unless pay_date && period.range.cover?(pay_date)
+          raise ReportValidationError, "Pay run not found" unless pay_date && period.range.cover?(pay_date)
 
           { key: raw_key.to_s, record_type: record_type, id: record_id }
         end
@@ -2844,7 +2843,7 @@ module Api
             ActiveModel::Type::Boolean.new.cast(params[:all_time])
 
           limit = Integer(params[:limit].presence || 12, exception: false)
-          raise ArgumentError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
+          raise ReportValidationError, "limit must be between 1 and 120" unless limit&.between?(1, 120)
 
           limit
         end
@@ -4427,8 +4426,8 @@ module Api
             "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
             "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
             "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
-            "Historical Loans (Type Unclassified)", "Health Insurance (Native Fields + Historical Source)",
-            "401(k) After Tax Label in Source Pre-Tax Bucket",
+            "Loan repayments (imported)", "Health Insurance (Native Fields + Historical Source)",
+            "401(k) after-tax (imported as pre-tax)",
             "Employer Social Security", "Employer Medicare", "Other Employer Taxes", "Employer Taxes Total",
             "Employer Traditional 401(k) Match", "Employer Roth 401(k) Match", "Other Employer Contributions",
             "Employer Contributions", "Employer Taxes and Contributions Total", "Employer Payroll Cost", "FIT", "SS Tax", "Medicare Tax",

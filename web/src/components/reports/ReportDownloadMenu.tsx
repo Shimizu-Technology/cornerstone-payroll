@@ -1,6 +1,7 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Braces, ChevronDown, Download, FileCheck2, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 export interface ReportDownloadFormat {
   key: string;
@@ -160,7 +161,7 @@ export function ReportDownloadMenu({
         size="sm"
         onClick={() => void runFormat(format)}
         disabled={disabled || busy}
-        className={className}
+        className={cn('min-h-11 sm:min-h-0 sm:pointer-coarse:min-h-11', className)}
         aria-label={ariaLabel || `${buttonLabel} ${format.label}`}
       >
         {format.loading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
@@ -175,6 +176,7 @@ export function ReportDownloadMenu({
         type="button"
         variant="outline"
         size="sm"
+        className="min-h-11 sm:min-h-0 sm:pointer-coarse:min-h-11"
         ref={triggerRef}
         id={triggerId}
         onClick={() => {

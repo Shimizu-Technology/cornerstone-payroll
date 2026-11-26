@@ -1909,9 +1909,9 @@ export function YtdSummaryPanel() {
                       <TotalBox label="Payroll Field Deductions" value={Number(report.company_totals.payroll_field_pre_tax_deductions_total ?? 0) + Number(report.company_totals.payroll_field_post_tax_deductions_total ?? 0)} />
                       <TotalBox label="Straight Loans" value={report.company_totals.straight_loan_deductions ?? 0} />
                       <TotalBox label="Other native loans (named or recurring)" value={report.company_totals.installment_loan_payments ?? 0} />
-                      <TotalBox label="Historical Loans (type unclassified)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
+                      <TotalBox label="Loan repayments (imported)" value={report.company_totals.historical_loan_deductions_unclassified ?? 0} />
                       <TotalBox label="Health Insurance (payroll fields + historical)" value={report.company_totals.health_insurance_deductions ?? 0} />
-                      <TotalBox label="Source-labeled after-tax 401(k) in pre-tax bucket" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
+                      <TotalBox label="401(k) after-tax (imported as pre-tax)" value={report.company_totals.source_labeled_after_tax_401k_in_pretax_bucket ?? 0} />
                       <TotalBox label="Employer Social Security" value={report.company_totals.employer_social_security_tax ?? 0} />
                       <TotalBox label="Employer Medicare" value={report.company_totals.employer_medicare_tax ?? 0} />
                       <TotalBox label="Other Employer Taxes" value={report.company_totals.other_employer_taxes ?? 0} />
@@ -1973,9 +1973,9 @@ export function YtdSummaryPanel() {
                     <th className="py-2 pr-4 text-right font-medium">Field Ded.</th>
                     <th className="py-2 pr-4 text-right font-medium">Straight Loan</th>
                     <th className="py-2 pr-4 text-right font-medium">Other Native Loans</th>
-                    <th className="py-2 pr-4 text-right font-medium">Historical Loans (unclassified)</th>
+                    <th className="py-2 pr-4 text-right font-medium">Loan repayments (imported)</th>
                     <th className="py-2 pr-4 text-right font-medium">Health Insurance</th>
-                    <th className="py-2 pr-4 text-right font-medium">401(k) After Tax (source pre-tax)</th>
+                    <th className="py-2 pr-4 text-right font-medium">401(k) after-tax (imported as pre-tax)</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer SS</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer Medicare</th>
                     <th className="py-2 pr-4 text-right font-medium">Employer 401(k)</th>

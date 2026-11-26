@@ -35,6 +35,9 @@ RSpec.describe UserInviteEmailService do
     expect(html).to include(%(href="#{CGI.escapeHTML(invitation_url)}"))
     expect(html).to include("ticket=tk_synthetic_123")
     expect(html).not_to match(%r{href="[^"]*/login"})
+    expect(html).to include("opens account setup directly")
+    expect(html).not_to include("Choose")
+    expect(html).not_to include("Sign up")
 
     [ nil, "", "/login", "javascript:alert(1)" ].each do |url|
       expect(described_class.send_invite(user: user, invited_by: nil, invitation_url: url)).to be(false)

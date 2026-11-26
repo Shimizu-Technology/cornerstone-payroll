@@ -74,6 +74,24 @@ it('keeps the review open when the PDF chunk fails and retries the loader in pla
   expect(screen.queryByText('The PDF preview could not load.')).toBeNull();
 });
 
+it('tells the user to reload after a second consecutive PDF preview failure and keeps Download prominent', async () => {
+  mocks.loadPdf
+    .mockImplementationOnce(() => { throw new Error('Could not fetch preview chunk'); })
+    .mockImplementationOnce(() => { throw new Error('Transitive chunk failed'); });
+  render(<ImportSourcePanel payPeriodId={9} importId={30} documents={[pdf]} />, { onCaughtError: () => {} });
+
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'The PDF preview could not load.');
+  expect(screen.queryByText(/Reload the page to try again/)).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry preview' }));
+
+  expect(await screen.findByText('Reload the page to try again.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Retry preview' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Reload page' })).toBeTruthy();
+  const downloadBtn = screen.getByRole('button', { name: 'Download PDF' });
+  expect(downloadBtn.className).toContain('bg-primary-700');
+});
+
 it('hides the Workbook tab when only the PDF was provided', async () => {
   render(<ImportSourcePanel payPeriodId={9} importId={30} documents={[pdf]} />);
 

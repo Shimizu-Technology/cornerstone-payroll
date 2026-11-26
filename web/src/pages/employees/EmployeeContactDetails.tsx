@@ -852,7 +852,7 @@ export function EmployeeContactDetails({
               aria-pressed={needsContactOnly}
               onClick={() => updateFilter('needs_contact_details', needsContactOnly ? '' : 'true')}
               className={cn(
-                'inline-flex min-h-10 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition',
+                'inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm font-semibold transition sm:min-h-10 sm:pointer-coarse:min-h-11',
                 needsContactOnly
                   ? 'border-warning-400 bg-warning-100 text-warning-950 shadow-sm'
                   : 'border-neutral-300 bg-white text-neutral-700 hover:border-warning-300 hover:bg-warning-50',

@@ -16,7 +16,7 @@ class QuarterlyCompliancePacketBuilder
     @company = company
     @year = Integer(year)
     @quarter = Integer(quarter)
-    raise ArgumentError, "quarter must be 1, 2, 3, or 4" unless MONTHS_BY_QUARTER.key?(@quarter)
+    raise ReportValidationError, "quarter must be 1, 2, 3, or 4" unless MONTHS_BY_QUARTER.key?(@quarter)
   end
 
   # The quarter's W-1 Guam withholding total as a decimal, without building the

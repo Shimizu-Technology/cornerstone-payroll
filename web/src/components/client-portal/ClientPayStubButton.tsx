@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { clientPayStubsApi } from '@/services/api';
 
-export function ClientPayStubButton({ itemId }: { itemId: number }) {
+export function ClientPayStubButton({ itemId, compact = false }: { itemId: number; compact?: boolean }) {
   const [artifact, setArtifact] = useState<PdfArtifact | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +30,16 @@ export function ClientPayStubButton({ itemId }: { itemId: number }) {
       setBusy(false);
     }
   };
-  return <div className="flex flex-wrap gap-2">
-    <Button variant="outline" size="sm" className="min-h-11 sm:min-h-11" disabled={busy} onClick={() => void download(true)}>View pay stub</Button>
-    <Button variant="outline" size="sm" className="min-h-11 sm:min-h-11" disabled={busy} onClick={() => void download()}>{busy ? 'Preparing…' : 'Download pay stub'}</Button>
+  const buttonClass = compact
+    ? 'min-h-11 sm:min-h-7 sm:px-2.5 sm:py-0.5 sm:text-xs sm:pointer-coarse:min-h-11'
+    : 'min-h-11 sm:min-h-9 sm:pointer-coarse:min-h-11';
+  return <div className={compact ? 'mt-1 flex flex-wrap gap-1.5' : 'flex flex-wrap gap-2'}>
+    <Button variant="outline" size="sm" className={buttonClass} disabled={busy} aria-label="View pay stub" onClick={() => void download(true)}>
+      {compact ? 'View stub' : 'View pay stub'}
+    </Button>
+    <Button variant="outline" size="sm" className={buttonClass} disabled={busy} aria-label="Download pay stub" onClick={() => void download()}>
+      {busy ? 'Preparing…' : compact ? 'Download' : 'Download pay stub'}
+    </Button>
     <PdfPreview artifact={artifact} onClose={() => setArtifact(null)} />
     {error && <p role="alert" className="w-full text-sm text-red-700">{error}</p>}
   </div>;
