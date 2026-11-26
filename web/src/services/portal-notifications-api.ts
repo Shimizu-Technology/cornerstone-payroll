@@ -46,6 +46,7 @@ export interface PortalAlertRecipients {
   eligible_users: { id: number; name: string; email: string; role: string; selected: boolean; team_role?: AccountTeamRole }[];
   lead_user_id?: number | null;
   backup_user_id?: number | null;
+  needs_lead?: boolean;
   ineligible_listed_users: { id: number; name: string }[];
   extra_emails: string[];
   recipient_count: number;

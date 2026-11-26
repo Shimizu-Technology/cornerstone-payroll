@@ -10,13 +10,21 @@ RSpec.describe PortalNotifications::RecipientListUpdate do
   it "replaces the list and returns the audited change set" do
     PortalNotificationRecipient.create!(company: company, email: "old@example.test")
 
-    changes = described_class.call!(company: company, actor: admin, user_ids: [ staff.id, staff.id ], emails: [ "new@example.test" ])
+    changes = described_class.call!(
+      company: company, actor: admin, user_ids: [ staff.id, staff.id ], emails: [ "new@example.test" ],
+      lead_user_id: staff.id
+    )
 
-    expect(changes).to eq(added_users: [ { id: staff.id, name: "Listed Manager" } ], removed_users: [],
-      added_emails: [ "new@example.test" ], removed_emails: [ "old@example.test" ])
+    expect(changes).to eq(
+      added_users: [ { id: staff.id, name: "Listed Manager" } ],
+      removed_users: [],
+      added_emails: [ "new@example.test" ],
+      removed_emails: [ "old@example.test" ],
+      lead_user: { before: nil, after: { id: staff.id, name: "Listed Manager" } }
+    )
     expect(PortalNotificationRecipient.where(company: company).map { |row| row.user_id || row.email }).to contain_exactly(staff.id, "new@example.test")
     expect(PortalNotificationRecipient.find_by!(user: staff).added_by).to eq(admin)
-    expect(AuditLog.find_by!(action: "portal_notification_recipients#update").metadata).to include("recipient_count" => 2)
+    expect(AuditLog.find_by!(action: "portal_notification_recipients#update").metadata).to include("recipient_count" => 2, "lead_user_id" => staff.id)
   end
 
   it "raises before changing anything when a staff member cannot view the client" do
@@ -24,18 +32,28 @@ RSpec.describe PortalNotifications::RecipientListUpdate do
     outsider = create(:user, role: "admin")
 
     expect do
-      described_class.call!(company: company, actor: admin, user_ids: [ staff.id, outsider.id ], emails: [])
+      described_class.call!(company: company, actor: admin, user_ids: [ staff.id, outsider.id ], emails: [], lead_user_id: staff.id)
     end.to raise_error(described_class::IneligibleRecipient)
     expect(PortalNotificationRecipient.where(company: company).pluck(:email)).to eq([ "kept@example.test" ])
     expect(AuditLog.where(action: "portal_notification_recipients#update")).to be_empty
   end
 
   it "writes no audit record when nothing changed" do
-    PortalNotificationRecipient.create!(company: company, user: staff)
-    expect { described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: []) }.not_to change(AuditLog, :count)
+    PortalNotificationRecipient.create!(company: company, user: staff, team_role: "lead")
+    expect do
+      described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: [], lead_user_id: staff.id)
+    end.not_to change(AuditLog, :count)
   end
 
-  it "audits Lead and Backup changes and rejects conflicting or unselected roles" do
+  it "audits Lead and Backup changes and rejects missing Lead, Backup without Lead, and conflicting or unselected roles" do
+    expect do
+      described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: [])
+    end.to raise_error(described_class::InvalidTeamRole, /Account lead/)
+
+    expect do
+      described_class.call!(company: company, actor: admin, user_ids: [ staff.id ], emails: [], backup_user_id: staff.id)
+    end.to raise_error(described_class::InvalidTeamRole, /Account lead/)
+
     changes = described_class.call!(
       company: company, actor: admin, user_ids: [ admin.id, staff.id ], emails: [],
       lead_user_id: staff.id, backup_user_id: admin.id

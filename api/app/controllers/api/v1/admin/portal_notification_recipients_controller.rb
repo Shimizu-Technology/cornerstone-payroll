@@ -67,9 +67,12 @@ module Api
           listed_ids = listed_roles.keys
           eligible = PortalNotifications::Recipients.eligible_staff_for(current_company)
           eligible_ids = eligible.map(&:id)
+          eligible_emails = eligible.map { |user| PortalNotificationRecipient.normalize_email(user.email) }.compact
           emails = listed.extra_emails.order(:email).pluck(:email)
           active_ids = listed_ids & eligible_ids
-          active_count = active_ids.size + emails.size
+          account_emails = emails.any? ? User.where("LOWER(email) IN (?)", emails).pluck(:email).map { |e| PortalNotificationRecipient.normalize_email(e) } : []
+          active_extra_count = emails.count { |email| !account_emails.include?(email) || eligible_emails.include?(email) }
+          active_count = active_ids.size + active_extra_count
           lead_user_id = active_ids.find { |id| listed_roles[id] == "lead" }
           backup_user_id = active_ids.find { |id| listed_roles[id] == "backup" }
           {
@@ -86,6 +89,7 @@ module Api
             end,
             lead_user_id: lead_user_id,
             backup_user_id: backup_user_id,
+            needs_lead: active_ids.any? && lead_user_id.nil?,
             ineligible_listed_users: User.where(id: listed_ids - eligible_ids).order(:name).map { |user| { id: user.id, name: user.name } },
             extra_emails: emails,
             recipient_count: active_count,

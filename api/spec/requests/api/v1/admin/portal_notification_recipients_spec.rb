@@ -37,7 +37,7 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
   end
 
   it "replaces the list, normalizes and dedupes addresses, and audits who changed it" do
-    save(user_ids: [ reviewer.id, reviewer.id ], emails: [ " Owner@Example.TEST ", "owner@example.test", "books@example.test" ])
+    save(user_ids: [ reviewer.id, reviewer.id ], lead_user_id: reviewer.id, emails: [ " Owner@Example.TEST ", "owner@example.test", "books@example.test" ])
 
     expect(response).to have_http_status(:ok), response.body
     data = response.parsed_body.fetch("data")
@@ -85,8 +85,26 @@ RSpec.describe "Client portal alert recipients", :portal_notifications, type: :r
     expect(response.parsed_body.fetch("error")).to include("riley@example.test already has a Cornerstone Payroll account")
     expect(PortalNotificationRecipient.where(company: company)).to be_empty
 
-    save(user_ids: [ reviewer.id ], emails: [ "books@example.test" ])
+    save(user_ids: [ reviewer.id ], lead_user_id: reviewer.id, emails: [ "books@example.test" ])
     expect(response).to have_http_status(:ok), response.body
+  end
+
+  it "requires a Lead when staff are assigned and flags existing leadless teams with needs_lead" do
+    PortalNotificationRecipient.create!(company: company, user: reviewer)
+    get path, headers: headers
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).to include("needs_lead" => true, "lead_user_id" => nil)
+
+    save(user_ids: [ reviewer.id ])
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to include("Account lead")
+
+    save(user_ids: [ reviewer.id ], backup_user_id: reviewer.id)
+    expect(response).to have_http_status(:unprocessable_entity)
+
+    save(user_ids: [ reviewer.id ], lead_user_id: reviewer.id)
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("data")).to include("needs_lead" => false, "lead_user_id" => reviewer.id)
   end
 
   it "assigns, swaps, validates, and audits Lead and Backup roles on the account team" do

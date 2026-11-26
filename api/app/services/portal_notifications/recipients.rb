@@ -46,16 +46,38 @@ module PortalNotifications
           return employee_target(event)&.email == delivery.recipient_email ? nil : "access_revoked"
         end
         if event.audience == "staff"
-          listed = delivery.user_id ? listed_user?(event.company_id, delivery.user_id) : listed_email?(event.company_id, delivery.recipient_email)
-          return "recipient_removed" unless listed
+          if delivery.user_id
+            listed = listed_user?(event.company_id, delivery.user_id) || listed_email?(event.company_id, delivery.user&.email)
+            return "recipient_removed" unless listed
+          else
+            return "recipient_removed" unless listed_email?(event.company_id, delivery.recipient_email)
+
+            account_users = account_users_for_email(delivery.recipient_email)
+            if account_users.any?
+              return "access_revoked" unless account_users.any? { |user| eligible_user?(user, event) }
+            end
+          end
         end
         return nil unless delivery.user_id
 
         eligible_user?(delivery.user, event) ? nil : "access_revoked"
       end
 
+      def account_users_for_email(email)
+        normalized = PortalNotificationRecipient.normalize_email(email)
+        return [] if normalized.blank?
+
+        User.where("LOWER(email) = ?", normalized).order(:id).to_a
+      end
+
+      def eligible_account_user_for_email(email, event)
+        account_users_for_email(email).find { |user| eligible_user?(user, event) }
+      end
+
       def subject_available?(event)
         subject = event.subject
+        return payroll_review_publication_actionable?(event) if event.event_type == "payroll_review_published"
+
         employee_submission = event.event_type == "employee_change_submitted" && subject.is_a?(EmployeeChangeRequest) &&
           subject.requested_by_link_id.present?
         return false if employee_submission && subject.cancelled?
@@ -88,6 +110,29 @@ module PortalNotifications
 
       private
 
+      def payroll_review_publication_actionable?(event)
+        period = event.subject
+        return false unless period.is_a?(PayPeriod) && period.company_id == event.company_id
+        return false unless period.approved? && period.correction_status != "voided"
+
+        company = Company.find_by(id: event.company_id)
+        return false unless company&.client_payroll_approval_required?
+
+        package = resolve_review_package(event, period)
+        package.present? && package.published_at.present? && package.superseded_at.nil? &&
+          package.pending? && package.changes_requested_at.nil?
+      end
+
+      def resolve_review_package(event, period)
+        package_id = event.metadata["review_package_id"] ||
+          event.dedupe_key.to_s[/\Apayroll_review_published:(\d+)\z/, 1]
+        if package_id.present?
+          PayrollReviewPackage.find_by(id: package_id, company_id: event.company_id, pay_period_id: period.id)
+        elsif event.metadata["revision"].present?
+          PayrollReviewPackage.find_by(company_id: event.company_id, pay_period_id: period.id, revision: event.metadata["revision"])
+        end
+      end
+
       def employee_target(event)
         request = event.subject
         return unless request.is_a?(EmployeeChangeRequest) && request.company_id == event.company_id &&
@@ -108,9 +153,29 @@ module PortalNotifications
       def staff_targets(event)
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
         users = User.where(id: listed.users.select(:user_id)).order(:id).to_a.select { |user| eligible_user?(user, event) }
-        taken = users.map { |user| user.email.to_s.downcase }
-        emails = listed.extra_emails.order(:email).pluck(:email).reject { |email| taken.include?(email) }
-        users.map { |user| Target.new(user, nil) } + emails.map { |email| Target.new(nil, email) }
+        seen_user_ids = users.map(&:id)
+        taken_emails = users.map { |user| PortalNotificationRecipient.normalize_email(user.email) }.compact
+        extra_emails = []
+
+        listed.extra_emails.order(:email).pluck(:email).each do |email|
+          normalized = PortalNotificationRecipient.normalize_email(email)
+          next if normalized.blank? || taken_emails.include?(normalized)
+
+          account_users = account_users_for_email(normalized)
+          if account_users.any?
+            eligible = account_users.find { |user| eligible_user?(user, event) }
+            if eligible && !seen_user_ids.include?(eligible.id)
+              users << eligible
+              seen_user_ids << eligible.id
+              taken_emails << normalized
+            end
+          else
+            extra_emails << normalized
+            taken_emails << normalized
+          end
+        end
+
+        users.map { |user| Target.new(user, nil) } + extra_emails.map { |email| Target.new(nil, email) }
       end
 
       def client_targets(event)
@@ -170,7 +235,8 @@ module PortalNotifications
       end
 
       def listed_email?(company_id, email)
-        email.present? && PortalNotificationRecipient.exists?(company_id: company_id, email: email)
+        normalized = PortalNotificationRecipient.normalize_email(email)
+        normalized.present? && PortalNotificationRecipient.exists?(company_id: company_id, email: normalized)
       end
     end
   end

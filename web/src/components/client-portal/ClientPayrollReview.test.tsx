@@ -123,7 +123,8 @@ it('shows honest approval confirmation based on whether account-team email was q
       onDone={onDone}
     />,
   );
-  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was emailed.');
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team is queued to be emailed.');
+  expect(screen.getByRole('status').textContent).not.toContain('was emailed');
 
   rerender(
     <ClientPayrollReview
@@ -137,7 +138,7 @@ it('shows honest approval confirmation based on whether account-team email was q
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
-  expect(screen.getByRole('status').textContent).not.toContain('account team was emailed');
+  expect(screen.getByRole('status').textContent).not.toContain('queued to be emailed');
 });
 
 it('shows honest change-request confirmation based on whether account-team email was queued', () => {
@@ -158,7 +159,8 @@ it('shows honest change-request confirmation based on whether account-team email
       onDone={onDone}
     />,
   );
-  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team was emailed.');
+  expect(screen.getByRole('status').textContent).toContain('Your Cornerstone account team is queued to be emailed.');
+  expect(screen.getByRole('status').textContent).not.toContain('was emailed');
 
   rerender(
     <ClientPayrollReview
@@ -178,5 +180,5 @@ it('shows honest change-request confirmation based on whether account-team email
     />,
   );
   expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
-  expect(screen.getByRole('status').textContent).not.toContain('account team was emailed');
+  expect(screen.getByRole('status').textContent).not.toContain('queued to be emailed');
 });

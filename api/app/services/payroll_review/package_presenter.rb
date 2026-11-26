@@ -39,12 +39,15 @@ module PayrollReview
     def self.decision_notification_queued?(review_package)
       return nil unless review_package.approved? || review_package.changes_requested_at.present?
 
-      PortalNotificationDelivery.joins(:portal_notification_event)
+      deliveries = PortalNotificationDelivery.joins(:portal_notification_event)
         .where(
           company_id: review_package.company_id,
-          status: %w[pending sent],
           portal_notification_events: { dedupe_key: "payroll_review_decided:#{review_package.id}" }
-        ).exists?
+        )
+      return true if deliveries.where(status: "sent").exists?
+      return false unless PortalNotifications.delivery_enabled? && PortalNotifications::Transport.configured?
+
+      deliveries.where(status: "pending").exists?
     end
   end
 end

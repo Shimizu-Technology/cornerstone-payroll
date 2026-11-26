@@ -4,7 +4,7 @@
 # freezes activity at a signed snapshot and seeks by (activity_at, kind, id),
 # so new messages cannot move a row across pages during a traversal.
 class ClientInboxQuery
-  KINDS = %w[message document employee_change payroll_submission file_request].freeze
+  KINDS = %w[message document employee_change payroll_submission payroll_review file_request].freeze
   STATUSES = %w[all unread waiting handled].freeze
 
   def initialize(user:, params: {})
@@ -26,7 +26,7 @@ class ClientInboxQuery
   end
 
   def summary
-    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind = 'payroll_submission' AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live'")
+    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live'")
     row.transform_values(&:to_i)
   end
 
@@ -47,7 +47,8 @@ class ClientInboxQuery
       verifier.generate({ snapshot: snapshot.iso8601(6), at: last.fetch("activity_at").to_time.iso8601(6), kind: last.fetch("kind"), id: last.fetch("id") }, purpose: cursor_purpose, expires_in: 1.hour)
     end
     requests = PortalFileRequest.where(id: rows.select { |row| row["kind"] == "file_request" }.map { |row| row["id"] }).index_by(&:id)
-    { data: rows.map { |row| serialize(row, requests) }, meta: { next_cursor: next_cursor, per_page: per_page } }
+    review_packages = PayrollReviewPackage.summary.where(id: rows.select { |row| row["kind"] == "payroll_review" }.map { |row| row["id"] }).index_by(&:id)
+    { data: rows.map { |row| serialize(row, requests, review_packages) }, meta: { next_cursor: next_cursor, per_page: per_page } }
   rescue ActiveSupport::MessageVerifier::InvalidSignature, KeyError, ArgumentError => error
     raise ArgumentError, "Invalid inbox cursor" if @params[:cursor].present?
 
@@ -74,7 +75,7 @@ class ClientInboxQuery
     else
       scoped_companies.where(id: @user.company_assignments.active_access.where(client_management: true).select(:company_id)).select(:id).to_sql
     end
-    sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, @user.id, @user.created_at, snapshot, snapshot, @user.created_at, snapshot, @user.id, snapshot, @user.created_at, @user.id, snapshot)
+    sql = sanitize(<<~SQL, @user.id, @user.created_at, @user.id, snapshot, @user.id, @user.created_at, snapshot, snapshot, @user.created_at, snapshot, @user.id, snapshot, @user.created_at, @user.id, snapshot, snapshot)
       SELECT t.id, t.company_id, 'message' AS kind, t.subject AS title,
         COALESCE(MAX(m.created_at), t.created_at) AS activity_at,
         COALESCE((SELECT COALESCE(x.author_name_snapshot, a.name, 'Former portal user') FROM client_portal_messages x LEFT JOIN users a ON a.id = x.author_id WHERE x.client_portal_thread_id = t.id AND x.kind <> 'file_response' AND x.created_at <= #{connection.quote(snapshot)} ORDER BY x.id DESC LIMIT 1), t.created_by_name_snapshot, creator.name, 'Former portal user') AS sender_name,
@@ -128,6 +129,25 @@ class ClientInboxQuery
       LEFT JOIN users requester ON requester.id = f.requested_by_id
       LEFT JOIN portal_thread_read_receipts fr ON fr.client_portal_thread_id = ft.id AND fr.user_id = ?
       WHERE f.company_id IN (#{ids}) AND f.created_at <= ?
+      UNION ALL
+      SELECT prp.id, prp.company_id, 'payroll_review',
+        CASE WHEN prp.approved_at IS NOT NULL THEN 'Payroll approved · ' ELSE 'Payroll changes requested · ' END ||
+        CASE
+          WHEN EXTRACT(YEAR FROM pp.start_date) <> EXTRACT(YEAR FROM pp.end_date) THEN to_char(pp.start_date, 'Mon FMDD, YYYY') || ' – ' || to_char(pp.end_date, 'Mon FMDD, YYYY')
+          WHEN EXTRACT(MONTH FROM pp.start_date) <> EXTRACT(MONTH FROM pp.end_date) THEN to_char(pp.start_date, 'Mon FMDD') || ' – ' || to_char(pp.end_date, 'Mon FMDD, YYYY')
+          ELSE to_char(pp.start_date, 'Mon FMDD') || '–' || to_char(pp.end_date, 'FMDD, YYYY') END,
+        COALESCE(prp.approved_at, prp.changes_requested_at),
+        COALESCE(decider.name, 'Former portal user'),
+        FALSE,
+        (prp.superseded_at IS NULL AND pp.status = 'approved')
+      FROM payroll_review_packages prp
+      JOIN pay_periods pp ON pp.id = prp.pay_period_id
+      LEFT JOIN users decider ON decider.id = COALESCE(prp.approved_by_id, prp.changes_requested_by_id)
+      WHERE prp.company_id IN (#{ids})
+        AND prp.published_at IS NOT NULL
+        AND pp.correction_status IS DISTINCT FROM 'voided'
+        AND (prp.approved_at IS NOT NULL OR prp.changes_requested_at IS NOT NULL)
+        AND COALESCE(prp.approved_at, prp.changes_requested_at) <= ?
     SQL
     conditions = []
     conditions << sanitize("kind = ?", @params[:kind]) if @params[:kind].present?
@@ -139,12 +159,20 @@ class ClientInboxQuery
     "SELECT inbox.*, c.name AS company_name, (c.payroll_environment = 'migration_rehearsal' AND c.test_workspace_purpose IS DISTINCT FROM 'demo') AS practice_copy FROM (#{sql}) inbox JOIN companies c ON c.id = inbox.company_id#{conditions.any? ? " WHERE #{conditions.join(' AND ')}" : ''}"
   end
 
-  def serialize(row, requests = {})
+  def serialize(row, requests = {}, review_packages = {})
     payload = { id: row["id"].to_i, key: "#{row['kind']}:#{row['id']}", company_id: row["company_id"].to_i,
       company_name: row["company_name"], practice_copy: row["practice_copy"], sender_name: row["sender_name"], kind: row["kind"], title: row["title"],
       activity_at: row["activity_at"], unread: row["unread"], waiting: row["waiting"] }
     if (request = requests[row["id"].to_i]) && row["kind"] == "file_request"
       payload.merge!(thread_id: request.client_portal_thread_id, state: request.status, state_label: request.status_label)
+    elsif (package = review_packages[row["id"].to_i]) && row["kind"] == "payroll_review"
+      state = package.approved_at.present? ? "approved" : "changes_requested"
+      state_label = if row["waiting"]
+        state == "approved" ? "Approved — ready to commit" : "Changes requested"
+      else
+        state == "approved" ? "Approved · Handled" : "Changes requested · Handled"
+      end
+      payload.merge!(pay_period_id: package.pay_period_id, state: state, state_label: state_label)
     end
     payload
   end
