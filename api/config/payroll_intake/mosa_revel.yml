@@ -1,21 +1,36 @@
 # Track C characterization of the existing adapter. Verified by the intake golden specs.
 key: mosa_revel
+label: Revel hours + Cornerstone workbook
+source_label: MoSa Revel hours and payroll changes
 parser_version: mosa_revel:v1
 extraction: deterministic
+accepts_pasted_text: false
+employee_match: name_fuzzy
 idempotency: files_period_roster_loans_and_workweek
+tips_default: paid_in_check
+overtime_mode: source_reports
+portal:
+  submittable: true
+  role_map:
+    revel_payroll: revel_hours
+    changes_workbook: supplemental_workbook
 files:
   revel_hours:
+    label: Revel hours PDF
     extensions: [.pdf]
     content_type: application/pdf
     max: 1
     required_by_default: true
     portal_role: revel_payroll
+    provides: [regular_hours, overtime_hours]
   supplemental_workbook:
+    label: Tips & loans workbook
     extensions: [.xlsx, .xls]
     max: 1
     required_by_default: true
     waiver_label: No tips or loans this period
     portal_role: changes_workbook
+    provides: [reported_tips, tips_already_paid, loan_one_time, loan_installment, one_time_earnings, owner_pay]
 revel_hours:
   header_pattern: 'Employee.*Role.*Ext\. ID.*Wage.*Regular h\.'
   columns_zero_based_inclusive:

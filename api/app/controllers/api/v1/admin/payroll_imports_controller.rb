@@ -77,7 +77,8 @@ module Api
 
             # The upload step shows the tip fallback beside the workbook it uploads.
             import_record = persist_preview(package_result, pdf_file, excel_file,
-              tip_choice_offered: excel_file.present? && params.key?(:tips_paid_out_from_tips))
+              tip_choice_offered: excel_file.present? && params.key?(:tips_paid_out_from_tips),
+              portal_submission: selected_source)
             render json: preview_response(import_record, package_result)
           rescue PayrollIntake::PreviewService::ReplacementRequiredError => e
             render json: {
@@ -409,6 +410,11 @@ module Api
               raise ActiveRecord::Rollback if results[:errors].any?
 
               import_record.update!(status: "applied", validation_errors: [],
+                import_origin: PayrollIntake::ImportOrigin.build(
+                  session: source_package,
+                  portal_submission: selection&.payroll_submission,
+                  replaced_hand_edited_hours: hand_edited.any?
+                ),
                 raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || [],
                   "source_waivers" => source_waivers, "replaced_hand_edited_hours" => hand_edited))
               disposition_plan.decisions.each do |decision|
@@ -513,7 +519,7 @@ module Api
           PayrollSubmissions::ImportBridge.new(pay_period: @pay_period, actor: current_user, submission_id: params[:submission_id],
             superseded_reason: params[:superseded_reason], supersedes_package_id: params[:supersedes_package_id],
             supersession_reason: params[:supersession_reason], staff_workbook: params[:staff_workbook]).call do |result, submission, current, reason, files, carried_staff|
-            record = persist_preview(result, files.first, files.second)
+            record = persist_preview(result, files.first, files.second, portal_submission: submission)
             selection = record.submission_imports.find_or_create_by!(payroll_submission: submission, current_submission: current) do |link|
               link.selected_by = current_user
               link.superseded_reason = reason
@@ -544,7 +550,8 @@ module Api
 
         def persist_preview(package_result, pdf_file, excel_file,
                             tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]),
-                            tip_choice_offered: false)
+                            tip_choice_offered: false,
+                            portal_submission: nil)
           source_package = package_result.fetch(:session)
           unless source_package.applyable?
             raise ArgumentError, "This source package was already applied or superseded. Review a corrected current source."
@@ -563,6 +570,7 @@ module Api
             status: "previewed",
             pdf_filename: retained_filename(source_package, "revel_hours") || pdf_file&.original_filename,
             excel_filename: retained_filename(source_package, "supplemental_workbook") || excel_file&.original_filename,
+            import_origin: PayrollIntake::ImportOrigin.build(session: source_package, portal_submission: portal_submission),
             raw_data: {
               pdf_count: preview_data[:pdf_count],
               excel_count: preview_data[:excel_count],

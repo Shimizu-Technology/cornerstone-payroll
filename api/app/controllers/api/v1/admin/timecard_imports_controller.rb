@@ -72,6 +72,7 @@ module Api
               item.hours_worked = mapping[:regular_hours].to_f if mapping[:regular_hours].present?
               item.overtime_hours = mapping[:overtime_hours].to_f if mapping[:overtime_hours].present?
               item.import_source = "timecard_ocr"
+              item.import_origin = "timecard_ocr"
               item.save!
 
               results[:applied] << {
