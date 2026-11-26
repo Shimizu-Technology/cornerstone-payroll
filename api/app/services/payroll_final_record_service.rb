@@ -78,7 +78,7 @@ class PayrollFinalRecordService
       employer_taxes: money(sum_items { |item| employer_taxes(item) }),
       employer_contributions: money(sum_items { |item| employer_contributions(item) }),
       total_payroll_cost: money(sum_items { |item| total_payroll_cost(item) }),
-      client_approval_required: pay_period.company.client_payroll_approval_required?,
+      client_approval_required: pay_period.client_payroll_approval_required?,
       approved_review_revision: review&.revision,
       calculation_checksum: review&.calculation_checksum
     }
@@ -252,7 +252,7 @@ class PayrollFinalRecordService
         approved_at: pay_period.approved_at,
         approved_by_name: User.find_by(id: pay_period.approved_by_id)&.name
       },
-      client_approval_required: pay_period.company.client_payroll_approval_required?,
+      client_approval_required: pay_period.client_payroll_approval_required?,
       review: review && {
         revision: review.revision,
         calculation_checksum: review.calculation_checksum,
@@ -260,7 +260,7 @@ class PayrollFinalRecordService
         approved_by_name: review.approved_by&.name,
         approval_method: review.approval_method,
         approval_evidence_reference: review.approval_evidence_reference
-      },
+      }.tap { |evidence| evidence[:override_reason] = review.override_reason if review.cornerstone_override? },
       source_packages: intake_packages.map do |package|
         {
           id: package["id"],

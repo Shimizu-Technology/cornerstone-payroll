@@ -379,6 +379,73 @@ RSpec.describe "Api::V1::Admin::Companies", type: :request do
     end
   end
 
+  describe "turning off client payroll approval" do
+    let!(:calculated) { create(:pay_period, :calculated, company: client_company) }
+    let(:reason) { "Client requested a change for future payroll." }
+
+    before do
+      client_company.update!(client_payroll_approval_required: true)
+      allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:require_recent_verification!)
+    end
+
+    def disable_approval(reason, headers: {})
+      patch "/api/v1/admin/companies/#{client_company.id}", params: {
+        company: { client_payroll_approval_required: false, client_approval_disable_reason: reason }
+      }, headers: headers
+    end
+
+    context "with signed authentication claims" do
+      include EmployeeLinkHelpers
+
+      it "requires fresh direct sign-in to disable approval" do
+        admin_user.update!(clerk_id: "user_disable_approval_fixture")
+        allow_any_instance_of(Api::V1::Admin::CompaniesController).to receive(:require_recent_verification!).and_call_original
+        disable_approval(reason, headers: bearer(admin_user.clerk_id, fva: [ 45, 45 ], two_factor_enabled: true))
+        expect(response).to have_http_status(:forbidden)
+        expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
+
+        disable_approval(reason, headers: bearer(admin_user.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true,
+          act: { sub: "user_actor_fixture" }))
+        expect(response).to have_http_status(:forbidden)
+        expect(client_company.reload).to be_client_payroll_approval_required
+
+        disable_approval(reason, headers: bearer(admin_user.clerk_id, fva: [ 1, 1 ], two_factor_enabled: true))
+        expect(response).to have_http_status(:ok)
+        expect(client_company.reload).not_to be_client_payroll_approval_required
+      end
+    end
+
+    it "preserves the calculated run's gate and records the reason" do
+      disable_approval(reason)
+      expect(response).to have_http_status(:ok)
+      expect(client_company.reload).not_to be_client_payroll_approval_required
+      expect(calculated.reload).to be_client_payroll_approval_required
+      expect(AuditLog.find_by!(action: "companies#update", record_id: client_company.id).metadata)
+        .to include("client_approval_disable_reason" => reason)
+      expect do
+        PayrollReview::RevisionService.new(pay_period: calculated).verify_required_approval!
+      end.to raise_error(PayrollReview::RevisionService::Error, /current client payroll review/)
+    end
+
+    it "refuses missing reasons and managers" do
+      disable_approval(nil)
+      expect(response).to have_http_status(:unprocessable_entity)
+      admin_user.update!(role: "manager")
+      disable_approval(reason)
+      expect(response).to have_http_status(:forbidden)
+      expect(client_company.reload).to be_client_payroll_approval_required
+      expect(calculated.reload).not_to be_client_approval_retained
+    end
+
+    it "rolls back both the setting and retained flag if auditing fails" do
+      allow(AuditLog).to receive(:record!).and_raise(ActiveRecord::RecordInvalid.new(AuditLog.new))
+      disable_approval(reason)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(client_company.reload).to be_client_payroll_approval_required
+      expect(calculated.reload).not_to be_client_approval_retained
+    end
+  end
+
   describe "assigned manager access" do
     let!(:manager_user) do
       User.create!(

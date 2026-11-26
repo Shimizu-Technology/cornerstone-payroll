@@ -52,7 +52,7 @@ class PayRunActivityPhrase
     employee_loans#create employee_loans#reactivate
     check_print_generations#create check_print_runs#generated check_print_runs#pdf
     checks#check_number_updated checks#update_check_number
-    payroll_review#published payroll_review#withdrawn payroll_review#changes_requested payroll_review#approved
+    payroll_review#published payroll_review#withdrawn payroll_review#changes_requested payroll_review#approved payroll_review#overridden
     client_pay_stubs#download
   ].freeze
 
@@ -120,6 +120,7 @@ class PayRunActivityPhrase
     when "payroll_review#published" then "sent #{revision_label} to the client for approval"
     when "payroll_review#withdrawn" then "withdrew #{revision_label} from client review"
     when "payroll_review#changes_requested" then "asked for changes to #{revision_label}"
+    when "payroll_review#overridden" then "approved #{revision_label} for the client (Cornerstone override)"
     when "payroll_review#approved" then "recorded client approval of #{revision_label}"
     when "client_pay_stubs#download" then "downloaded the pay stub for #{name || 'an employee'} from the client portal"
     end

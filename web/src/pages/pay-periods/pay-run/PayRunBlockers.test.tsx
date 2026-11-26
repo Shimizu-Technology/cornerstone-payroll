@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, expect, it } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import type { ComponentProps } from 'react';
 import { PayRunBlockers } from './PayRunBlockers';
@@ -35,4 +35,40 @@ it('explains disabled review on an open run without offering email approval', ()
   expect(screen.getByText(/Client review revision 1 · Client review disabled/)).toBeTruthy();
   expect(screen.getByText('Client review is disabled. This preview is retained as history; staff can commit without a client decision.')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Record Email Approval' })).toBeNull();
+});
+
+it.each([200, 422])('submits the displayed revision and refreshes the banner after response %i', async (status) => {
+  const reloadClientReview = vi.fn();
+  const stale = { code: 'stale_payroll_review_revision', error: 'This review revision changed.' };
+  const request = vi.fn().mockResolvedValue(new Response(status === 422 ? JSON.stringify(stale) : null, { status }));
+  vi.stubGlobal('fetch', request);
+  try {
+    const payPeriod = { id: 12, company_id: 3, status: 'approved', client_payroll_approval_required: true,
+      payroll_review: { id: 91, revision: 1, status: 'pending', published_at: '2026-11-17' } };
+    const props = { part: 'approval', payPeriod, reloadClientReview } as unknown as ComponentProps<typeof PayRunBlockers>;
+    const renderBanner = (allowed: boolean) => <MemoryRouter><PayRunBlockers {...props}
+      payPeriod={{ ...props.payPeriod, can_override_client_approval: allowed, can_record_client_approval: allowed }} /></MemoryRouter>;
+    const view = render(renderBanner(false));
+    expect(screen.queryByRole('button', { name: 'Approve for client' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Record Email Approval' })).toBeNull();
+    view.rerender(renderBanner(true));
+    fireEvent.click(screen.getByRole('button', { name: 'Approve for client' }));
+    const submit = screen.getByRole<HTMLButtonElement>('button', { name: 'Confirm approval' });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText(/Override reason/), { target: { value: 'short' } });
+    expect(submit.disabled).toBe(true);
+    expect(screen.getByText('5 / 500 characters')).toBeTruthy();
+    expect(screen.getByLabelText(/Override reason/).getAttribute('maxlength')).toBe('500');
+    fireEvent.change(screen.getByLabelText(/Override reason/), { target: { value: 'Client requested staff approval.' } });
+    fireEvent.click(submit);
+    await waitFor(() => expect(reloadClientReview).toHaveBeenCalledOnce());
+    if (status === 422) expect((await screen.findByRole('alert')).textContent).toContain(stale.error);
+    expect(JSON.parse(request.mock.calls[0][1].body)).toMatchObject({
+      revision_id: 91,
+      acknowledgement: 'I am approving this exact payroll revision for the client under Cornerstone authority.',
+      override_reason: 'Client requested staff approval.',
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

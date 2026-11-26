@@ -116,6 +116,7 @@ class PayrollRegisterPdfGenerator
       [ "Work Period End", pp[:end_date].to_s ],
       [ "Pay Date",      pp[:pay_date].to_s ],
       [ "Status",        pp[:status].to_s.capitalize ],
+      [ "Client approval", pp[:approval_marker].to_s ],
       [ "Source",        source[:label].to_s ],
       [ "Description",   meta[:report_description].to_s ],
       [ "Source Handling", source[:statement].to_s ],

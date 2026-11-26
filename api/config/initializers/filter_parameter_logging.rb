@@ -109,6 +109,7 @@ SCOPED_SENSITIVE_AMOUNT_PATH_PATTERN = /(?:\Aamount\z|(?:\A|\.)(?:#{SENSITIVE_AM
 SCOPED_SENSITIVE_AMOUNT_QUERY_PATTERN = /(?:(?:\A(?:#{SENSITIVE_AMOUNT_PARENTS.join('|')})|#{PARAM_BRACKET_OPEN}(?:#{SENSITIVE_AMOUNT_PARENTS.join('|')})#{PARAM_BRACKET_CLOSE})#{PARAM_ARRAY_SEGMENTS}#{PARAM_BRACKET_OPEN}amount#{PARAM_BRACKET_CLOSE})/i
 
 Rails.application.config.filter_parameters += [
+  :override_reason, :client_approval_disable_reason,
   :passw, :email, :secret, :token, :ticket, :_key, :crypt, :salt, :certificate, :otp, :ssn, :cvv, :cvc,
   :invite_nonce, :code, :state, :birth, :upload, /\Afiles?\z/i,
   SENSITIVE_EXACT_PARAM_PATTERN,

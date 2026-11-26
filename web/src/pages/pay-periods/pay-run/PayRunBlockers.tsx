@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert';
 
 import type { PayPeriod } from '@/types';
 import { formatGuam } from '@/lib/payrollSubmissionFormat';
+import { ClientApprovalOverride } from './ClientApprovalOverride';
 import type { PayRunSectionProps } from './usePayRunController';
 
 const CLIENT_FILE_STATUS: Record<string, string> = { waiting: 'Waiting for review', imported: 'Imported', 'set aside': 'Set aside' };
@@ -31,6 +32,7 @@ export function PayRunBlockers({
   handleAdoptConfirmedWorkweek,
   hasPendingCalculationChanges,
   openClientApproval,
+  reloadClientReview,
   payPeriod,
   setImportModalOpen,
   setPayrollIntakeImportOpen
@@ -68,7 +70,12 @@ export function PayRunBlockers({
                     <p>{payPeriod.payroll_review.changes_requested_at && formatGuam(payPeriod.payroll_review.changes_requested_at)}</p>
                     <p className="font-semibold">Unapprove to make changes, recalculate, then approve to publish a new revision.</p>
                   </div>}
-                  {payPeriod.payroll_review.status === 'approved' ? (
+                  {payPeriod.payroll_review.approval_method === 'cornerstone_override' ? (
+                    <div className="mt-1 text-sm text-success-800">
+                      <p>Approved by Cornerstone for the client: {payPeriod.payroll_review.approved_by_name}, {payPeriod.payroll_review.approved_at && formatGuam(payPeriod.payroll_review.approved_at)}</p>
+                      <p className="whitespace-pre-wrap break-words">{payPeriod.payroll_review.override_reason}</p>
+                    </div>
+                  ) : payPeriod.payroll_review.status === 'approved' ? (
                     <p className="mt-1 text-sm text-success-800">
                       Approved by {payPeriod.payroll_review.approved_by_name} via {payPeriod.payroll_review.approval_method === 'client_portal' ? 'client portal' : 'email attestation'}.
                     </p>
@@ -77,7 +84,11 @@ export function PayRunBlockers({
                   )}
                 </div>
               </div>
-              {payPeriod.client_payroll_approval_required !== false && payPeriod.status === 'approved' && payPeriod.payroll_review.status === 'pending' && (
+              {payPeriod.company_id && payPeriod.can_override_client_approval && payPeriod.client_payroll_approval_required && payPeriod.status === 'approved' && payPeriod.payroll_review.status === 'pending' && payPeriod.payroll_review.published_at && (
+                <ClientApprovalOverride key={payPeriod.payroll_review.id} companyId={payPeriod.company_id} periodId={payPeriod.id}
+                  revisionId={payPeriod.payroll_review.id} onDone={reloadClientReview} />
+              )}
+              {payPeriod.can_record_client_approval && payPeriod.client_payroll_approval_required !== false && payPeriod.status === 'approved' && payPeriod.payroll_review.status === 'pending' && (
                 <Button type="button" variant="outline" onClick={() => void openClientApproval()} disabled={clientApprovalLoading} className="shrink-0 bg-white">
                   {clientApprovalLoading ? 'Loading…' : 'Record Email Approval'}
                 </Button>

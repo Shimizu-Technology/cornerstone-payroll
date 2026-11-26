@@ -63,11 +63,11 @@ class PayrollRegisterCsvExporter
 
   def generate
     CSV.generate(headers: true, force_quotes: false) do |csv|
-      csv << headers
+      csv << (headers + [ "Approval" ])
+      approval = ("Override" if report.dig(:pay_period, :approval_marker) == "Override")
+      payroll_rows.each { |emp| csv << (employee_row(emp) + [ approval ]) }
 
-      payroll_rows.each { |emp| csv << employee_row(emp) }
-
-      csv << summary_row
+      csv << (summary_row + [ approval ])
     end
   end
 
