@@ -464,7 +464,7 @@ export function usePayRunController({
   // own list, that list wins. A void or check-print refresh while Checks is
   // still unopened refetches, so the Results warning can't go stale.
   const nonEmployeeChecksPeriodId = loadsNonEmployeeChecks && payPeriod?.status === 'committed'
-    && activeCompany?.payroll_environment !== 'migration_rehearsal' ? payPeriod.id : null;
+    && (Boolean(activeCompany?.demo) || activeCompany?.payroll_environment !== 'migration_rehearsal') ? payPeriod.id : null;
   const nonEmployeeChecksCorrectionStatus = payPeriod?.correction_status ?? null;
   useEffect(() => {
     if (nonEmployeeChecksPeriodId === null) return;

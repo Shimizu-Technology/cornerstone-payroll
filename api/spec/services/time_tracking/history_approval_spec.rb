@@ -643,4 +643,12 @@ RSpec.describe TimeTracking::HistoryApproval do
 
     expect(history_service.prepare!["mappings"].sole).to include("employee_id" => nil, "confirmation_required" => true)
   end
+
+  it "excludes companies.demo from local_fingerprint so existing approval checksums do not change" do
+    service = history_service
+    service.prepare!
+    fingerprint = service.send(:local_fingerprint, [])
+    expected = TimeTracking::CanonicalPayload.checksum(company.reload.attributes.except("demo").as_json)
+    expect(fingerprint.fetch("company")).to eq(expected)
+  end
 end

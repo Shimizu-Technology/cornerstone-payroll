@@ -4193,6 +4193,7 @@ export interface CompanyListItem {
   historical_payroll_enabled: boolean;
   client_payroll_approval_required?: boolean;
   payroll_environment: 'live' | 'migration_rehearsal';
+  demo?: boolean;
   test_workspace?: boolean;
   practice_portal?: boolean;
   /** The employee app switch's company rule: an active live client or demo company. */

@@ -904,4 +904,43 @@ describe('EmployeeContactDetails', () => {
     expect(screen.queryByRole('tab', { name: /Shared & placeholder emails/i })).toBeNull();
     expect(apiMocks.sharedEmails).not.toHaveBeenCalled();
   });
+
+  it('keeps organization-wide placeholder management disabled for a live-shaped demo company', async () => {
+    authState.isClient = false;
+    authState.user = { id: 1, company_id: 7, role: 'admin', name: 'Org Admin', email: 'admin@example.com' };
+    capabilityState.manageClientConfiguration = true;
+    companyState.activeCompany = {
+      ...companyState.activeCompany,
+      payroll_environment: 'live',
+      test_workspace: false,
+      demo: true,
+    };
+
+    apiMocks.adminList.mockResolvedValue({
+      data: [],
+      meta: { current_page: 1, total_pages: 1, total_count: 0, per_page: 50, needs_contact_details_count: 0 },
+    });
+    apiMocks.sharedEmails.mockResolvedValue({
+      summary: { companies_affected: 1, distinct_flagged_emails: 1, total_employee_records: 2, active_employee_records: 2 },
+      can_manage_placeholders: false,
+      can_clear: false,
+      marked_placeholders: [],
+      placeholder_marks: [],
+      companies: [{
+        company_id: 7,
+        company_name: 'Harbor Finch Kitchen',
+        emails: [{
+          email: 'shared@demo.example', classification: 'shared_inbox' as const, reasons: ['shared_across_employees'],
+          total_count: 2, active_count: 2, inactive_count: 0, companies_count: 1, organization_total_count: 2,
+          clearable: false, marked_placeholder: false, unmarkable: false,
+        }],
+      }],
+    });
+
+    renderStaffPage('/companies/7/employees/contact-details?tab=shared-emails');
+
+    expect((await screen.findAllByText('shared@demo.example')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /Mark as placeholder/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Clear to blank/i })).toBeNull();
+  });
 });

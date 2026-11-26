@@ -430,8 +430,8 @@ module Api
         end
 
         def quarterly_compliance_packet_swica_ascii
-          # The ASCII wage file is an electronic filing; a demo never produces one.
-          return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE }, status: :forbidden if current_company&.demo?
+          # The ASCII wage file is an electronic filing; a demo never produces one outside DEPLOYMENT_ENV=local.
+          return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE }, status: :forbidden if current_company&.demo? && !LocalDeployment.local?
 
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response
@@ -2045,8 +2045,8 @@ module Api
           company.with_lock do
             revalidate_current_company_write_access!(company: company, capability: :manage_client_administration)
             raise FilingValidationError, "Not available in a practice copy" if company.practice_copy?
-            # The Pub 1220 file is the GuamTax e-file; a demo never produces one.
-            raise FilingValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
+            # The Pub 1220 file is the GuamTax e-file; a demo never produces one outside DEPLOYMENT_ENV=local.
+            raise FilingValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf && !LocalDeployment.local?
 
             final = params[:mode] == "final"
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "form_1099")
@@ -2059,15 +2059,17 @@ module Api
               return render json: { error: "Mark the 1099s ready first" }, status: :conflict
             end
 
-            # A demo has no e-file, so its 1096 totals come straight from the
-            # signed-off payees rather than from Pub 1220 bytes.
+            # A demo's 1096 totals PDF comes straight from signed-off payees rather
+            # than Pub 1220 bytes. Local demo text downloads run the official Pub
+            # 1220 generator and validator so fictional inputs surface real errors.
+            demo_totals_pdf = company.demo? && pdf
             generate_file = lambda do
               generator = Form1099Pub1220Generator.new(company: company.reload, year: year,
                 submitter: FilingSubmitter.find_by(organization_id: company.organization_id), draft: !final)
-              company.demo? ? generator.payee_totals : generator.generate
+              demo_totals_pdf ? generator.payee_totals : generator.generate
             end
             file = generate_file.call
-            content = if company.demo?
+            content = if demo_totals_pdf
               Form1096TotalsPdfGenerator.new(company: company, totals: file, draft: !final).generate
             elsif pdf
               Form1096TotalsPdfGenerator.new(company: company, file: file, draft: !final).generate
@@ -2104,8 +2106,8 @@ module Api
           company = Company.find(current_company_id)
           company.with_lock do
             revalidate_current_company_write_access!(company: company, capability: pdf ? nil : :manage_client_administration)
-            # The EFW2 file is the SSA/GuamTax e-file; a demo never produces one.
-            raise FilingValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf
+            # The EFW2 file is the SSA/GuamTax e-file; a demo never produces one outside DEPLOYMENT_ENV=local.
+            raise FilingValidationError, Company::DEMO_UNAVAILABLE_MESSAGE if company.demo? && !pdf && !LocalDeployment.local?
             final = params[:mode] == "final"
             gate = PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
             decision = company.payroll_filing_responsibilities.find_by(tax_year: year, quarter: nil, filing_type: "w2_gu")
@@ -2119,9 +2121,10 @@ module Api
 
             submitter = FilingSubmitter.find_by(organization_id: company.organization_id)
             generator = Efw2W2GuGenerator.new(company: company, year: year, submitter: submitter, report: report)
-            # The W-3SS shares the e-file's validation, except at a demo, which
-            # never e-files and whose fictional SSNs the official validator refuses.
-            wage_file = generator.generate unless company.demo?
+            # The W-3SS shares the e-file's validation, except at a demo's PDF
+            # download, where fictional SSNs still produce a records-only W-3SS.
+            # Local demo EFW2 text downloads run the official generator/validator.
+            wage_file = generator.generate unless company.demo? && pdf
             content = pdf ? W3ssPdfGenerator.new(company: company, report: report, draft: !final).generate : wage_file
             current = ActiveRecord::Base.uncached { W2FilingInputsFingerprint.new(company: company.reload, year: year).call }
             raise FilingValidationError, "Filing inputs changed during generation; refresh and try again" unless current == fingerprint

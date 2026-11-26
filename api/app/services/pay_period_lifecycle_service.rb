@@ -413,7 +413,7 @@ class PayPeriodLifecycleService
   end
 
   def create_fit_tax_deposit_check!(items)
-    return if pay_period.company.demo?
+    return if pay_period.company.legacy_demo?
     return if NonEmployeeCheck.exists?(
       pay_period: pay_period,
       company_id: pay_period.company_id,
