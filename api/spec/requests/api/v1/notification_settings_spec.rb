@@ -19,19 +19,38 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     data = response.parsed_body.fetch("data")
     expect(data.fetch("email_delivery_enabled")).to be(false)
     expect(data.fetch("digest_time_label")).to eq("7:00 AM Chamorro Time")
-    expect(data.fetch("categories").map { |category| [ category["key"], category["delivery_mode"] ] }).to eq(
-      [ [ "tax_form_paper_copies", "immediate" ], [ "client_messages", "immediate" ], [ "client_uploads", "immediate" ], [ "employee_changes", "digest" ], [ "payroll_submissions", "immediate" ] ])
+    expect(data.fetch("categories").to_h { |category| category.values_at("key", "delivery_mode") }).to eq(
+      "payroll_corrections_staff" => "immediate", "contact_confirmations" => "digest", "employee_app_follow_ups" => "digest",
+      "w2_posting" => "immediate", "tax_form_paper_copies" => "immediate", "client_messages" => "immediate",
+      "client_uploads" => "immediate", "employee_changes" => "digest", "payroll_submissions" => "immediate"
+    )
     expect(data).not_to have_key("administration")
+    patch path, params: { preferences: { payroll_super_admin: "off" } }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   it "hides profile request categories while the feature is off" do
     act_as(client)
     get path
     expect(response.parsed_body.dig("data", "categories").map { |category| category["key"] }).to eq(
-      %w[portal_replies employee_change_decisions payroll_updates])
+      %w[payroll_finalized payroll_corrections portal_replies employee_change_decisions payroll_updates])
     patch path, params: { preferences: { address_approvals: "off" } }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     expect(PortalNotifications::Preferences.mode_for(client, "address_approvals")).to eq("immediate")
+  end
+
+  it "shows viewers their payroll digest categories and rejects manager-only settings" do
+    viewer = create(:user, :with_client_assignment, company: company, role: "client", client_access_level: "viewer")
+    act_as(viewer)
+    get path
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("data", "categories").to_h { |category| category.values_at("key", "delivery_mode") }).to eq(
+      "payroll_finalized" => "digest", "payroll_viewer_updates" => "digest", "portal_replies" => "immediate",
+      "employee_change_decisions" => "digest", "payroll_updates" => "immediate"
+    )
+
+    patch path, params: { preferences: { address_approvals: "off" } }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
   end
 
   it "shows and saves profile request preferences when an assigned company enables them" do

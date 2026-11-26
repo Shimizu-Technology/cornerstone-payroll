@@ -115,14 +115,20 @@ RSpec.describe "Payroll approval notifications", :portal_notifications do
         package = record_override(unlisted_staff)
         events = PortalNotificationEvent.where(event_type: "payroll_review_decided").order(:id)
         expect(events.pluck(:dedupe_key)).to eq([
-          "payroll_review_decided:#{package.id}", "payroll_review_decided:#{package.id}:client_managers"
+          "payroll_review_decided:#{package.id}", "payroll_review_decided:#{package.id}:client_managers",
+          "payroll_review_decided:#{package.id}:client_viewers", "payroll_review_decided:#{package.id}:super_admins"
         ])
         expect(events.first.deliveries.pluck(:user_id)).to contain_exactly(staff_lead.id, staff_backup.id)
-        expect(events.last.deliveries.pluck(:user_id)).to eq([ client_manager.id ])
+        expect(events.detect(&:client_managers_only?).deliveries.pluck(:user_id)).to eq([ client_manager.id ])
+        expect(events.detect(&:client_viewers_only?).deliveries.sole).to have_attributes(user_id: client_viewer.id, delivery_mode: "digest")
+        expect(events.detect(&:super_admin_alert?).deliveries.pluck(:user_id)).to eq([ super_admin.id ])
         expect(events.pluck(:metadata).to_json).not_to include(override_reason)
+        inbox = ClientInboxQuery.new(user: staff_lead, params: { kind: "payroll_review" }).page.fetch(:data)
+        expect(inbox.sole).to include(pay_period_id: pay_period.id, title: start_with("Cornerstone approved for client"))
+        expect(inbox.to_json).not_to include(override_reason)
 
         dispatch_at(3.minutes.from_now)
-        expect(captured_portal_emails.map { |mail| mail[:to] }).to contain_exactly(staff_lead.email, staff_backup.email, client_manager.email)
+        expect(captured_portal_emails.map { |mail| mail[:to] }).to contain_exactly(staff_lead.email, staff_backup.email, client_manager.email, super_admin.email)
         captured_portal_emails.each do |mail|
           tab = mail[:to] == client_manager.email ? "overview" : "work"
           link = "https://payroll.example.test/companies/#{company.id}/pay-runs/#{pay_period.id}/#{tab}"
