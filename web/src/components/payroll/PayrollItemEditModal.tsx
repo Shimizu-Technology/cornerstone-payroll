@@ -57,6 +57,8 @@ interface PayrollItemEditModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
+  /** The payroll's pay date (YYYY-MM-DD); check dates must share its tax year. */
+  payDate?: string;
   item: PayrollItem | null;
   onSaved: (updated: PayrollItem) => void;
   onRemoved?: (id: number) => void;
@@ -99,6 +101,7 @@ export function PayrollItemEditModal({
   open,
   onOpenChange,
   payPeriodId,
+  payDate,
   item,
   onSaved,
   onRemoved,
@@ -106,6 +109,7 @@ export function PayrollItemEditModal({
   wageRates = EMPTY_WAGE_RATES,
 }: PayrollItemEditModalProps) {
   const inputId = useId();
+  const taxYear = payDate?.slice(0, 4);
   const [fields, setFields] = useState<EditableFields>({
     hours_worked: 0,
     overtime_hours: 0,
@@ -313,6 +317,11 @@ export function PayrollItemEditModal({
       if (customDeductionsDirty) {
         const invalid = fields.custom_deductions.find(deduction => deduction.amount == null || !Number.isFinite(deduction.amount) || deduction.amount <= 0);
         if (invalid) throw new Error(`Enter a positive amount for ${invalid.label}, or remove that deduction.`);
+      }
+      // Mirrors the API rule (PayrollItem.check_date_year_problem): a changed
+      // check date must share the pay date's tax year.
+      if (taxYear && fields.check_date && fields.check_date !== (item.check_date || '') && fields.check_date.slice(0, 4) !== taxYear) {
+        throw new Error(`Check date must be in ${taxYear}, the year of this payroll's pay date. W-2GU and year-to-date totals count this check in that year.`);
       }
       const tipsPaidOut = parseFloat(String(fields.tips_paid_out)) || 0;
       const reportedTips = Math.max(parseFloat(String(fields.reported_tips)) || 0, tipsPaidOut);
@@ -930,11 +939,16 @@ export function PayrollItemEditModal({
                   id={`${inputId}-check_date`}
                   type="date"
                   value={fields.check_date}
+                  min={taxYear ? `${taxYear}-01-01` : undefined}
+                  max={taxYear ? `${taxYear}-12-31` : undefined}
                   onChange={(e) => handleChange('check_date', e.target.value)}
                 />
                 <p className="text-xs text-gray-400 mt-0.5">
                   Overrides the pay date shown on this check
                 </p>
+                {taxYear && (
+                  <p className="text-xs text-gray-400">Must be in {taxYear}, the pay date&apos;s tax year</p>
+                )}
               </div>
               <div>
                 <label htmlFor={`${inputId}-check_memo`} className="block text-xs text-gray-500 mb-1">Check Memo</label>

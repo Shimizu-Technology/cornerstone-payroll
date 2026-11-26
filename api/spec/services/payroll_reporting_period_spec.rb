@@ -3,12 +3,20 @@
 require "rails_helper"
 
 RSpec.describe PayrollReportingPeriod do
+  include ActiveSupport::Testing::TimeHelpers
+
   it "builds a calendar-year pay-date period" do
     period = described_class.from_params({ year: "2026" })
 
     expect(period.range).to eq(Date.new(2026, 1, 1)..Date.new(2026, 12, 31))
     expect(period.custom?).to be(false)
     expect(period.payload[:basis]).to eq("pay_date")
+  end
+
+  it "defaults to the Guam business year, not the UTC one, on New Year's morning in Guam" do
+    travel_to Time.utc(2026, 12, 31, 22, 30) do # Jan 1, 2027, 8:30 AM ChST
+      expect(described_class.from_params({}).year).to eq(2027)
+    end
   end
 
   it "builds an exact custom range" do

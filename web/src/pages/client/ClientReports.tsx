@@ -13,6 +13,7 @@ import { ReportDownloadMenu, type ReportDownloadFormat } from '@/components/repo
 import { PayrollSourceNotice } from '@/components/reports/PayrollSourceNotice';
 import { clientPayPeriodsApi, clientReportsApi, clientEmployeesApi, type PayrollHistoryRecord } from '@/services/api';
 import { comparePayPeriodsByPeriod, formatCurrency } from '@/lib/utils';
+import { guamBusinessDate, guamTaxPeriod } from '@/lib/payrollBusinessDate';
 
 const CLIENT_QUICKBOOKS_SOURCE_STATEMENT =
   'Payroll from before Cornerstone is shown exactly as it was in QuickBooks. Any corrections are listed separately.';
@@ -34,11 +35,12 @@ export function ClientReports() {
   const [employeeError, setEmployeeError] = useState<string | null>(null);
   const [employeesLoading, setEmployeesLoading] = useState(true);
   const [employeeId, setEmployeeId] = useState('');
-  const [reportYear, setReportYear] = useState(new Date().getFullYear());
-  const [quarter, setQuarter] = useState(String(Math.floor(new Date().getMonth() / 3) + 1));
+  const today = guamBusinessDate();
+  const [reportYear, setReportYear] = useState(() => Number(guamTaxPeriod().tax_year));
+  const [quarter, setQuarter] = useState(() => guamTaxPeriod().tax_quarter);
   const [taxScope, setTaxScope] = useState<{ year: number; quarter: string; statement: string | null }>();
   const taxScopeNote = taxScope?.year === reportYear && taxScope.quarter === quarter ? taxScope.statement : null;
-  const currentYear = new Date().getFullYear();
+  const currentYear = Number(today.slice(0, 4));
   const [payPeriods, setPayPeriods] = useState<PayrollHistoryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
@@ -47,7 +49,7 @@ export function ClientReports() {
   const [ytdSummary, setYtdSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.ytdSummary>>['report'] | null>(null);
   const [annualSummary, setAnnualSummary] = useState<Awaited<ReturnType<typeof clientReportsApi.annualPayrollSummary>>['report'] | null>(null);
   const [startDate, setStartDate] = useState(`${currentYear}-01-01`);
-  const [endDate, setEndDate] = useState(new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(today);
   const [includeZeroPay, setIncludeZeroPay] = useState(true);
   const ytdRequestSequence = useRef(0);
   const [exporting, setExporting] = useState<string | null>(null);

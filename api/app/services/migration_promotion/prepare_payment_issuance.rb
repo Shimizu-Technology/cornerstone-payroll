@@ -119,6 +119,8 @@ module MigrationPromotion
     def parse_check_date!
       value = Date.iso8601(check_date.to_s)
       raise ArgumentError, "Check date cannot be before the payroll period ends" if value < pay_period.end_date
+      problem = PayrollItem.check_date_year_problem(value, pay_period)
+      raise ArgumentError, "Check date #{problem}" if problem
 
       value
     rescue Date::Error

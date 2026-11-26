@@ -4,16 +4,24 @@ module EmployeeDocuments
   class QuickbooksHistory
     AMOUNTS = (HistoricalPaycheckAdjustment::MONEY_FIELDS + [ :hours_total ]).freeze
 
+    # Locked QuickBooks checks paid before the first native payday that still
+    # stands, the same locked history staff reports and W-2GU count. A voided
+    # run never paid anyone, so it doesn't move the cutover, but its committed
+    # correction run did pay and its stubs show; with no native run committed
+    # yet, every locked check shows. Record-only promotions can't overlap a
+    # shown check: their pay dates must follow the YTD bridge's last
+    # QuickBooks pay date (PayPeriod#starts_after_historical_ytd_boundary).
     def self.scope(company_id)
-      cutover = PayPeriod.committed.where(company_id: company_id, source_pay_period_id: nil, test_workspace_role: nil, test_workspace_source_pay_period_id: nil)
+      cutover = PayPeriod.reportable_committed
+        .where(company_id: company_id, test_workspace_role: nil, test_workspace_source_pay_period_id: nil)
         .where("promotion_payment_disposition IS DISTINCT FROM 'record_only'").minimum(:pay_date)
-      return HistoricalPaycheck.none unless cutover
 
-      HistoricalPaycheck.joins(:historical_import_batch, :historical_pay_period, :employee)
-        .where(company_id: company_id, pay_date: cutover.beginning_of_year...cutover, reconciliation_status: "matched")
+      checks = HistoricalPaycheck.joins(:historical_import_batch, :historical_pay_period, :employee)
+        .where(company_id: company_id, reconciliation_status: "matched")
         .where(employees: { company_id: company_id })
         .where(historical_import_batches: { company_id: company_id, status: "locked", source_system: "quickbooks_online" })
         .where(historical_pay_periods: { company_id: company_id, period_type: "regular" })
+      cutover ? checks.where(pay_date: ...cutover) : checks
     end
 
     def self.review_warnings(company_id)

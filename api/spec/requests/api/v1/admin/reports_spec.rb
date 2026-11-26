@@ -395,6 +395,16 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(body["monthly_liability"].length).to eq(3)
     end
 
+    it "defaults to and bounds the year by Guam's date, already the new year while UTC is still Dec 31" do
+      travel_to(Time.utc(2025, 12, 31, 14, 30)) do
+        get "/api/v1/admin/reports/form_941_gu", params: { quarter: 1 }
+        expect(response.parsed_body.dig("report", "meta", "year")).to eq(2026)
+
+        get "/api/v1/admin/reports/form_941_gu", params: { year: 2027, quarter: 1 }
+        expect(response.parsed_body["error"]).not_to eq("year must be a valid 4-digit tax year")
+      end
+    end
+
     it "returns 422 when year is non-numeric" do
       get "/api/v1/admin/reports/form_941_gu", params: { year: "abc", quarter: 1 }
       expect(response).to have_http_status(:unprocessable_entity)
@@ -1056,7 +1066,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
     end
 
     it "defaults to current year when year param is omitted" do
-      allow(Date).to receive(:current).and_return(Date.new(2025, 6, 1))
+      travel_to(Time.utc(2025, 6, 1, 12))
 
       get "/api/v1/admin/reports/w2_gu"
 
