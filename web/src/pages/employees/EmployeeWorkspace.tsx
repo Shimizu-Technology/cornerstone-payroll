@@ -349,7 +349,7 @@ export function EmployeeWorkspace(): ReactElement {
         }))}
       />
 
-      <main className="space-y-6 p-4 sm:p-6 lg:p-8">
+      <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         {readOnly && <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">{companyReadOnlyMessage(activeCompany)}</p>}
         {(reviewError || reviewNotice) && <ActionFeedback retryKey={reviewErrorFeedbackAttempt} tone={reviewError ? "error" : "success"} message={reviewError || reviewNotice || ""} />}
         {payHistoryError && (
@@ -425,7 +425,7 @@ export function EmployeeWorkspace(): ReactElement {
         )}
         {activeTab === 'hours-payroll' && <EmployeeHoursPayroll employeeId={employeeId} companyId={companyId} report={payHistory} returnTo={currentPath} />}
         {activeTab === 'activity' && <EmployeeActivity companyId={companyId} employee={employee} returnTo={currentPath} />}
-      </main>
+      </div>
     </div>
   );
 }

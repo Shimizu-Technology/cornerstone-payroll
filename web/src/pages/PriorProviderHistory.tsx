@@ -263,7 +263,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
           </Link>
         }
       />
-      <main className="mx-auto w-full max-w-6xl space-y-5 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto w-full max-w-6xl space-y-5 p-4 sm:p-6 lg:p-8">
         {error && (
           <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-800">
             <span className="min-w-0">{error}</span>
@@ -507,7 +507,7 @@ function HistoryWorkspace({ companyId, userId }: { companyId: number | null; use
             </Dialog>
           </>
         )}
-      </main>
+      </div>
     </>
   );
 }
