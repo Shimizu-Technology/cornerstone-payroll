@@ -17,6 +17,10 @@ module Api
           emails = Array(params[:emails]).map { |email| PortalNotificationRecipient.normalize_email(email) }.compact.uniq
           return render_invalid("Choose staff members from the list") unless user_ids.all?
 
+          lead_user_id = parse_optional_user_id(params[:lead_user_id])
+          backup_user_id = parse_optional_user_id(params[:backup_user_id])
+          return render_invalid("Choose staff members from the list") if lead_user_id == :invalid || backup_user_id == :invalid
+
           invalid = emails.reject { |email| PortalNotificationRecipient.valid_email?(email) }
           return render_invalid("Check these email addresses: #{invalid.join(', ')}") if invalid.any?
           if emails.size > PortalNotificationRecipient::MAX_EXTRA_EMAILS
@@ -26,7 +30,14 @@ module Api
           skip_default_audit_log!
           current_company.with_lock do
             revalidate_current_company_write_access!(capability: :manage_client_administration)
-            PortalNotifications::RecipientListUpdate.call!(company: current_company, actor: current_user, user_ids: user_ids, emails: emails)
+            PortalNotifications::RecipientListUpdate.call!(
+              company: current_company,
+              actor: current_user,
+              user_ids: user_ids,
+              emails: emails,
+              lead_user_id: lead_user_id,
+              backup_user_id: backup_user_id
+            )
           end
 
           render json: { data: payload }
@@ -34,9 +45,17 @@ module Api
           render_invalid("Only active staff who can view this client can receive its alerts")
         rescue PortalNotifications::RecipientListUpdate::EmailBelongsToAccount => e
           render_invalid("#{e.message} already has a Cornerstone Payroll account. Tick that person in the list instead, so their own alert settings apply.")
+        rescue PortalNotifications::RecipientListUpdate::InvalidTeamRole => e
+          render_invalid(e.message)
         end
 
         private
+
+        def parse_optional_user_id(value)
+          return nil if value.nil? || value.to_s.strip.empty?
+
+          Integer(value, exception: false) || :invalid
+        end
 
         def render_invalid(message)
           render json: { error: message }, status: :unprocessable_entity
@@ -44,16 +63,50 @@ module Api
 
         def payload
           listed = PortalNotificationRecipient.where(company_id: current_company.id)
-          listed_ids = listed.users.pluck(:user_id)
+          listed_roles = listed.users.pluck(:user_id, :team_role).to_h
+          listed_ids = listed_roles.keys
           eligible = PortalNotifications::Recipients.eligible_staff_for(current_company)
           eligible_ids = eligible.map(&:id)
+          eligible_canonicals = eligible.filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
           emails = listed.extra_emails.order(:email).pluck(:email)
-          active_count = (listed_ids & eligible_ids).size + emails.size
+          active_ids = listed_ids & eligible_ids
+          active_user_canonicals = eligible.select { |user| active_ids.include?(user.id) }
+            .filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
+          # Scope account matching to this organization so recipient_count stays
+          # independent of foreign-organization registrations, and count distinct
+          # canonical mailbox identities so Gmail aliases never count twice.
+          same_org_canonicals = if emails.any?
+            PortalNotificationRecipient.matching_users_for_emails(
+              emails, scope: User.where(organization_id: current_company.organization_id)
+            ).filter_map { |user| PortalNotificationRecipient.canonical_email(user.email) }.to_set
+          else
+            Set.new
+          end
+          visible_extra_canonicals = emails.filter_map do |email|
+            canonical = PortalNotificationRecipient.canonical_email(email)
+            next if canonical.blank? || active_user_canonicals.include?(canonical)
+            next if same_org_canonicals.include?(canonical) && !eligible_canonicals.include?(canonical)
+
+            canonical
+          end.uniq
+          active_count = active_user_canonicals.size + visible_extra_canonicals.size
+          lead_user_id = active_ids.find { |id| listed_roles[id] == "lead" }
+          backup_user_id = active_ids.find { |id| listed_roles[id] == "backup" }
           {
             company_id: current_company.id,
             eligible_users: eligible.map do |user|
-              { id: user.id, name: user.name, email: user.email, role: user.role, selected: listed_ids.include?(user.id) }
+              {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                selected: listed_roles.key?(user.id),
+                team_role: listed_roles[user.id]
+              }
             end,
+            lead_user_id: lead_user_id,
+            backup_user_id: backup_user_id,
+            needs_lead: active_ids.any? && lead_user_id.nil?,
             ineligible_listed_users: User.where(id: listed_ids - eligible_ids).order(:name).map { |user| { id: user.id, name: user.name } },
             extra_emails: emails,
             recipient_count: active_count,

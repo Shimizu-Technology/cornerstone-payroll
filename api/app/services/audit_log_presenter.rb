@@ -66,7 +66,7 @@ class AuditLogPresenter
     "payroll_submission_drafts#create" => "saved a staff-only draft for",
     "payroll_submission_drafts#post" => "posted a draft for review for",
     "notification_settings#update" => "updated email alert settings for",
-    "portal_notification_recipients#update" => "updated portal alert recipients for",
+    "portal_notification_recipients#update" => "updated the Cornerstone account team for",
     "employees#create" => "added",
     "employees#update" => "updated",
     "employees#confirm_same_person_email" => "confirmed a same-person login email for",

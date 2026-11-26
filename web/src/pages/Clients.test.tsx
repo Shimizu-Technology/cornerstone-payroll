@@ -44,6 +44,11 @@ vi.mock('@/services/api', () => ({
   companiesApi: apiMocks,
   ApiError: class ApiError extends Error {},
 }));
+vi.mock('@/components/client-portal/PortalAlertRecipientsPanel', () => ({
+  PortalAlertRecipientsPanel: ({ companyId }: { companyId: number }) => (
+    <div data-testid="account-team-panel" data-company-id={companyId}>Cornerstone account team</div>
+  ),
+}));
 
 const target = {
   id: 6,
@@ -691,6 +696,30 @@ describe('Client create/edit field labels', () => {
     await waitFor(() => expect(apiMocks.update).toHaveBeenCalledWith(target.id, expect.objectContaining({
       name: savedName, client_payroll_approval_required: true,
     })));
+  });
+
+  it('shows the Cornerstone account team panel when editing a client as admin and hides it on create or non-delegated accountant edit', async () => {
+    const user = userEvent.setup();
+    render(<Clients />);
+
+    // Creating a new client does not render the account team panel yet.
+    await user.click(await screen.findByRole('button', { name: 'Add New Client' }));
+    expect(screen.queryByTestId('account-team-panel')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    // Editing an existing client as admin renders the account team panel for that client.
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    const panel = await screen.findByTestId('account-team-panel');
+    expect(panel.getAttribute('data-company-id')).toBe(String(target.id));
+
+    cleanup();
+    // Non-delegated accountant cannot administer the client, so the account team panel is hidden.
+    apiMocks.auth = { isAdmin: false, isAccountant: true, isManager: false, hasCapability: (capability: string) => capability === 'staff_workspace' };
+    apiMocks.get.mockResolvedValue({ company: { ...target, client_capabilities: [], editable_fields: ['phone'] } });
+    render(<Clients />);
+    await user.click((await screen.findAllByRole('button', { name: 'Edit' }))[0]);
+    await screen.findByRole('heading', { name: 'Edit Client' });
+    expect(screen.queryByTestId('account-team-panel')).toBeNull();
   });
 
 });

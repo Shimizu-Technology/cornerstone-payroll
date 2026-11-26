@@ -353,6 +353,135 @@ RSpec.describe "Published payroll review loop", type: :request do
     expect(response.parsed_body.dig("pay_period", "payroll_review_history")).to eq([])
   end
 
+  it "reports honest notification_status and notification_queued on client approval and change requests" do
+    staff_approve
+    # With email delivery disabled (default in specs), no email is queued.
+    @actor = client
+    post "#{base}/request_changes", params: { revision_id: review.id, note: "Need update" }
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+    get base
+    expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+
+    # Unapprove and publish a fresh revision, then enable email with an account team assigned.
+    @actor = staff
+    post "#{admin}/unapprove"
+    expect(response).to have_http_status(:ok)
+    staff_approve
+    with_portal_email do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => true, "notification_status" => "queued")
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => true, "notification_status" => "queued")
+
+      # Once the dispatcher sends the email, status transitions from queued to sent.
+      PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "sent")
+    end
+
+    # When email is enabled but transport is unconfigured (no sender / API key), notification stays not_sent.
+    @actor = staff
+    post "#{admin}/unapprove"
+    staff_approve
+    with_portal_email(transport: nil, from: nil) do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+    end
+
+    # When no account team is assigned, notification stays not_sent even with email enabled.
+    @actor = staff
+    post "#{admin}/unapprove"
+    staff_approve
+    PortalNotificationRecipient.where(company: company).delete_all
+    with_portal_email do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+    end
+
+    # When both an account-holder recipient and an extra address exist, status derives strictly
+    # from the account-holder row (unaffected by the extra address).
+    @actor = staff
+    post "#{admin}/unapprove"
+    staff_approve
+    PortalNotificationRecipient.create!(company: company, user: staff, team_role: "lead")
+    PortalNotificationRecipient.create!(company: company, email: "ops.extra@example.test")
+    PortalNotificationPreference.create!(user: staff, category: "payroll_submissions", delivery_mode: "off")
+    with_portal_email do
+      client_approve
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+      PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+      get base
+      expect(response.parsed_body.dig("pay_period", "payroll_review")).to include("notification_queued" => false, "notification_status" => "not_sent")
+    end
+  end
+
+  it "keeps extra-address-only decision status neutral and equal for unregistered and foreign-org addresses before and after dispatch" do
+    foreign_org = create(:organization)
+    foreign_company = create(:company, organization: foreign_org)
+    create(:user, company: foreign_company, organization: foreign_org, role: "admin", email: "outside.team+alerts@googlemail.com")
+
+    results = {}
+    [
+      [ :unregistered, "unregistered.extra@example.test" ],
+      [ :foreign_match, "outside.team@gmail.com" ]
+    ].each do |label, extra_email|
+      @actor = staff
+      post "#{admin}/unapprove" if period.reload.approved?
+      staff_approve
+      PortalNotificationRecipient.where(company: company).delete_all
+      PortalNotificationRecipient.create!(company: company, email: extra_email)
+
+      with_portal_email do
+        client_approve
+        expect(response).to have_http_status(:ok), response.body
+        decision_before = response.parsed_body.fetch("payroll_review").slice("notification_status", "notification_queued")
+
+        get base
+        expect(response).to have_http_status(:ok), response.body
+        detail_before = response.parsed_body.dig("pay_period", "payroll_review").slice("notification_status", "notification_queued")
+
+        PortalNotifications::Dispatcher.run!(now: 3.minutes.from_now)
+        expect(captured_portal_emails.size).to eq(label == :unregistered ? 1 : 0)
+
+        get base
+        expect(response).to have_http_status(:ok), response.body
+        detail_after = response.parsed_body.dig("pay_period", "payroll_review").slice("notification_status", "notification_queued")
+
+        results[label] = {
+          decision_before: decision_before,
+          detail_before: detail_before,
+          detail_after: detail_after
+        }
+      end
+    end
+
+    expect(results[:foreign_match]).to eq(results[:unregistered])
+    expected_neutral = { "notification_status" => "queued", "notification_queued" => true }
+    results.each_value do |snapshots|
+      expect(snapshots[:decision_before]).to eq(expected_neutral)
+      expect(snapshots[:detail_before]).to eq(expected_neutral)
+      expect(snapshots[:detail_after]).to eq(expected_neutral)
+    end
+  end
+
+  it "excludes client viewers from payroll_review_published notifications" do
+    viewer = create(:user, company: company, role: "client", client_access_level: "viewer")
+    create(:company_assignment, user: viewer, company: company)
+
+    staff_approve
+
+    event = PortalNotificationEvent.find_by!(event_type: "payroll_review_published")
+    expect(event.deliveries.pluck(:user_id)).to eq([ client.id ])
+    expect(event.deliveries.pluck(:user_id)).not_to include(viewer.id)
+  end
+
   it "codes stale revisions separately from validation errors" do
     staff_approve
     @actor = client
