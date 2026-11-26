@@ -25,7 +25,7 @@ module DemoCompany
     class Refused < StandardError; end
 
     Change = Data.define(:record_type, :record_id, :company_id, :fields)
-    Result = Data.define(:dry_run, :company_ids, :converted_company_ids, :already_converted_company_ids, :changes) do
+    Result = Data.define(:dry_run, :company_ids, :converted_company_ids, :already_converted_company_ids, :conversion_ids, :changes) do
       def counts
         changes.group_by(&:record_type).transform_values(&:size)
       end
@@ -185,6 +185,7 @@ module DemoCompany
           company_ids: companies.map(&:id),
           converted_company_ids: to_convert,
           already_converted_company_ids: already_converted,
+          conversion_ids: {},
           changes: changes
         )
       end
@@ -196,13 +197,15 @@ module DemoCompany
       changes = []
       converted = []
       already_converted = []
+      conversion_ids = {}
 
       ordered_ids.each do |company_id|
-        outcome, company_changes = convert_single_company!(company_id)
+        outcome, company_changes, conversion_id = convert_single_company!(company_id)
         if outcome == :already_converted
           already_converted << company_id
         else
           converted << company_id
+          conversion_ids[company_id] = conversion_id
           changes.concat(company_changes)
           TenantSubdomainRegistry.invalidate!
         end
@@ -213,6 +216,7 @@ module DemoCompany
         company_ids: ordered_ids,
         converted_company_ids: converted,
         already_converted_company_ids: already_converted,
+        conversion_ids: conversion_ids,
         changes: changes
       )
     end
@@ -224,30 +228,32 @@ module DemoCompany
 
         company = Company.where(organization_id: organization.id).lock.find_by(id: company_id)
         raise Refused, "Company ID(s) not found in organization: #{company_id}" unless company
+
         state = classify_company!(company)
         ensure_no_time_tracking_history!(company)
-        next [ :already_converted, [] ] if state == :already_converted
+        next [ :already_converted, [], nil ] if state == :already_converted
 
         links = EmployeeAccountLink.where(company_id: company.id).where.not(payroll_environment: "live").order(:id).lock.to_a
         company_fields = changed_company_fields(company)
         company_changes = build_changes(company, company_fields, links)
 
         now = Time.current
-        links_updated = connection.select_value(
+        conversion_id = connection.select_value(
           ApplicationRecord.sanitize_sql_array([
-            "SELECT convert_demo_company_to_flag(?, ?)",
+            "SELECT convert_demo_company_to_flag(?, ?, ?)",
             company.id,
+            actor.id,
             now
           ])
         ).to_i
 
         company.reload
-        unless converted_flag_demo?(company) && links_updated == links.size
+        unless converted_flag_demo?(company) && conversion_id.positive?
           raise Refused, "Post-conversion shape verification failed for company ##{company.id}"
         end
 
-        record_audit!(company, company_fields, links_updated)
-        [ :converted, company_changes ]
+        record_audit!(company, company_fields, links.size, conversion_id)
+        [ :converted, company_changes, conversion_id ]
       end
     end
 
@@ -283,7 +289,7 @@ module DemoCompany
       changes
     end
 
-    def record_audit!(company, company_fields, links_updated_count)
+    def record_audit!(company, company_fields, links_updated_count, conversion_id)
       AuditLog.record!(
         user: actor,
         organization_id: organization.id,
@@ -293,6 +299,7 @@ module DemoCompany
         record_id: company.id,
         subject_name: company.name,
         metadata: {
+          conversion_id: conversion_id,
           fixture_key: company.test_workspace_manifest["demo_fixture_key"],
           company_fields: company_fields,
           employee_account_links_updated: links_updated_count

@@ -55,17 +55,17 @@ namespace :demo do
 
       converted = result.converted_company_ids.any? ? result.converted_company_ids.join(",") : "none"
       already = result.already_converted_company_ids.any? ? result.already_converted_company_ids.join(",") : "none"
+      conversions = result.conversion_ids.any? ? result.conversion_ids.map { |cid, conv_id| "#{cid}:#{conv_id}" }.join(",") : "none"
       puts "OK    demo:convert_to_flag mode=#{result.dry_run ? 'dry_run' : 'applied'} " \
-           "converted=#{converted} already_converted=#{already} changes=#{result.changes.size}"
+           "converted=#{converted} already_converted=#{already} conversions=#{conversions} changes=#{result.changes.size}"
     end
   rescue DemoCompany::ConvertToFlag::Refused, ActiveRecord::RecordNotFound, KeyError, ArgumentError => e
     abort "FAIL  demo:convert_to_flag #{e.message}"
   end
 
-  desc "Targeted per-company rollback from flag shape back to captured legacy shape (ACTOR_ID, COMPANY_IDS, BEFORE, optional ORGANIZATION_ID, APPLY=true; requires MIGRATION_DATABASE_URL on APPLY=true in production)"
+  desc "Targeted per-company rollback bound to a recorded conversion ID (ACTOR_ID, CONVERSION_ID, optional ORGANIZATION_ID, WRITE_MAINTENANCE=true, APPLY=true; requires MIGRATION_DATABASE_URL on APPLY=true in production)"
   task revert_to_legacy_shape: :environment do
     apply = ENV["APPLY"] == "true"
-    before_snapshot = JSON.parse(File.read(ENV.fetch("BEFORE")))
     with_demo_migration_owner_connection(apply: apply) do
       organization, actor = TenantScope.as_system(reason: "Resolve demo revert actor and organization") do
         found_actor = User.find(ENV.fetch("ACTOR_ID"))
@@ -77,18 +77,15 @@ namespace :demo do
         DemoCompany::RevertToLegacyShape.new(
           organization: organization,
           actor: actor,
-          company_ids: ENV["COMPANY_IDS"],
-          before_snapshot: before_snapshot,
+          conversion_id: ENV.fetch("CONVERSION_ID"),
           dry_run: !apply
         ).call
       end
 
-      reverted = result.reverted_company_ids.any? ? result.reverted_company_ids.join(",") : "none"
-      already = result.already_legacy_company_ids.any? ? result.already_legacy_company_ids.join(",") : "none"
       puts "OK    demo:revert_to_legacy_shape mode=#{result.dry_run ? 'dry_run' : 'applied'} " \
-           "reverted=#{reverted} already_legacy=#{already} links_reverted=#{result.links_reverted}"
+           "conversion_id=#{result.conversion_id} company_id=#{result.company_id} links_reverted=#{result.links_reverted}"
     end
-  rescue DemoCompany::RevertToLegacyShape::Refused, Errno::ENOENT, JSON::ParserError, ActiveRecord::RecordNotFound, KeyError, ArgumentError => e
+  rescue DemoCompany::RevertToLegacyShape::Refused, ActiveRecord::RecordNotFound, KeyError, ArgumentError => e
     abort "FAIL  demo:revert_to_legacy_shape #{e.message}"
   end
 

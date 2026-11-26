@@ -48,6 +48,18 @@ module DemoCompany
       counters ein_uniqueness payroll_checksums
     ].freeze
 
+    SHA256_REGEX = /\A[0-9a-f]{64}\z/
+
+    PAID_CORRECTION_COUNT_KEYS = %w[
+      financial_correction_links
+      correction_dispositions
+      correction_receipts
+      check_events
+      check_reconciliation_events
+      direct_deposit_payment_confirmations
+      non_employee_check_supersessions
+    ].freeze
+
     REQUIRED_SHAPE_COMPANY_KEYS = %w[
       demo
       payroll_environment
@@ -140,8 +152,9 @@ module DemoCompany
         next if missing_before.any? || missing_after.any?
 
         validate_company_transition(cid, b_entry, a_entry, allow_already_converted: allow_already_converted, unexpected: unexpected)
-        validate_time_tracking_history_empty(cid, "before", b_entry, unexpected)
-        validate_time_tracking_history_empty(cid, "after", a_entry, unexpected)
+        org_id = before["organization_id"]
+        validate_company_sections(cid, "before", b_entry, organization_id: org_id, unexpected: unexpected)
+        validate_company_sections(cid, "after", a_entry, organization_id: org_id, unexpected: unexpected)
 
         shape_changes[cid] = collect_diffs(b_entry["shape"], a_entry["shape"], prefix: "companies.#{cid}.shape")
 
@@ -830,22 +843,329 @@ module DemoCompany
         end
       end
 
-      def validate_time_tracking_history_empty(cid, label, entry, unexpected)
-        history = entry.dig("payroll_checksums", "time_tracking_history")
-        unless history.is_a?(Hash)
-          unexpected << { path: "#{label}.companies.#{cid}.payroll_checksums.time_tracking_history", expected: "hash", after: history }
+      def validate_company_sections(cid, label, entry, organization_id:, unexpected:)
+        validate_identity_section(cid, label, entry["identity"], organization_id: organization_id, unexpected: unexpected)
+        validate_logins_section(cid, label, entry["logins"], unexpected: unexpected)
+        validate_links_section(cid, label, entry["employee_account_links"], unexpected: unexpected)
+        validate_subdomain_section(cid, label, entry["subdomain"], unexpected: unexpected)
+        validate_employee_app_section(cid, label, entry["employee_app"], unexpected: unexpected)
+        validate_counters_section(cid, label, entry["counters"], unexpected: unexpected)
+        validate_ein_section(cid, label, entry["ein_uniqueness"], unexpected: unexpected)
+        validate_payroll_checksums_section(cid, label, entry["payroll_checksums"], unexpected: unexpected)
+      end
+
+      def validate_identity_section(cid, label, identity, organization_id:, unexpected:)
+        prefix = "#{label}.companies.#{cid}.identity"
+        unless identity.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: identity }
           return
         end
 
-        %w[sources_count history_reviews_count verified_history_receipts_count].each do |key|
-          next if history[key] == 0
+        expect_eq(prefix, "company_id", identity["company_id"], cid.to_i, unexpected)
+        expect_eq(prefix, "organization_id", identity["organization_id"], organization_id, unexpected) if organization_id.is_a?(Integer)
+        expect_bool(prefix, "active", identity["active"], unexpected)
+        expect_eq(prefix, "demo_predicate", identity["demo_predicate"], true, unexpected)
+        expect_eq(prefix, "live_payroll_predicate", identity["live_payroll_predicate"], false, unexpected)
+        expect_bool(prefix, "operating_predicate", identity["operating_predicate"], unexpected)
+        expect_eq(prefix, "contained_predicate", identity["contained_predicate"], true, unexpected)
+        expect_eq(prefix, "practice_copy_predicate", identity["practice_copy_predicate"], false, unexpected)
+        expect_key(prefix, "demo_fixture_key", identity, unexpected)
+        expect_sha256(prefix, "demo_manifest_sha256", identity["demo_manifest_sha256"], unexpected)
+      end
 
-          unexpected << {
-            path: "#{label}.companies.#{cid}.payroll_checksums.time_tracking_history.#{key}",
-            expected: 0,
-            after: history[key]
-          }
+      def validate_logins_section(cid, label, logins, unexpected:)
+        prefix = "#{label}.companies.#{cid}.logins"
+        unless logins.is_a?(Array) && logins.any?
+          unexpected << { path: prefix, expected: "non-empty array", after: logins }
+          return
         end
+
+        logins.each_with_index do |row, idx|
+          row_prefix = "#{prefix}[#{idx}]"
+          unless row.is_a?(Hash)
+            unexpected << { path: row_prefix, expected: "hash", after: row }
+            next
+          end
+          expect_int(row_prefix, "user_id", row["user_id"], unexpected, min: 1)
+          expect_non_empty_string(row_prefix, "role", row["role"], unexpected)
+          expect_bool(row_prefix, "active", row["active"], unexpected)
+          expect_key(row_prefix, "invitation_status", row, unexpected)
+          expect_key(row_prefix, "company_id", row, unexpected)
+          expect_key(row_prefix, "practice_company_id", row, unexpected)
+          expect_bool(row_prefix, "payroll_access_allowed", row["payroll_access_allowed"], unexpected)
+          expect_bool(row_prefix, "can_access_company", row["can_access_company"], unexpected)
+          unless row["accessible_company_ids"].is_a?(Array) && row["accessible_company_ids"].all?(Integer)
+            unexpected << { path: "#{row_prefix}.accessible_company_ids", expected: "array of integers", after: row["accessible_company_ids"] }
+          end
+          expect_key(row_prefix, "assignment", row, unexpected)
+        end
+      end
+
+      def validate_links_section(cid, label, section, unexpected:)
+        prefix = "#{label}.companies.#{cid}.employee_account_links"
+        unless section.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: section }
+          return
+        end
+
+        expect_bool(prefix, "portal_enabled_for_company", section["portal_enabled_for_company"], unexpected)
+        expect_int(prefix, "count", section["count"], unexpected, min: 0)
+        unless section["status_counts"].is_a?(Hash) && section["status_counts"].values.all? { |v| v.is_a?(Integer) && v >= 0 }
+          unexpected << { path: "#{prefix}.status_counts", expected: "hash of non-negative integers", after: section["status_counts"] }
+        end
+        unless section["links"].is_a?(Array)
+          unexpected << { path: "#{prefix}.links", expected: "array", after: section["links"] }
+          return
+        end
+
+        if section["count"].is_a?(Integer) && section["links"].size != section["count"]
+          unexpected << { path: "#{prefix}.count", expected: section["links"].size, after: section["count"] }
+        end
+        if section["status_counts"].is_a?(Hash) && section["status_counts"].values.all?(Integer) &&
+          section["status_counts"].values.sum != section["links"].size
+          unexpected << { path: "#{prefix}.status_counts", expected: "sum #{section['links'].size}", after: section["status_counts"] }
+        end
+
+        section["links"].each_with_index do |link, idx|
+          link_prefix = "#{prefix}.links[#{idx}]"
+          unless link.is_a?(Hash)
+            unexpected << { path: link_prefix, expected: "hash", after: link }
+            next
+          end
+          expect_int(link_prefix, "id", link["id"], unexpected, min: 1)
+          expect_int(link_prefix, "employee_id", link["employee_id"], unexpected, min: 1)
+          expect_key(link_prefix, "user_id", link, unexpected)
+          expect_non_empty_string(link_prefix, "status", link["status"], unexpected)
+          expect_bool(link_prefix, "portal_eligible", link["portal_eligible"], unexpected)
+          expect_key(link_prefix, "invite_delivery", link, unexpected)
+          expect_int(link_prefix, "invite_generation", link["invite_generation"], unexpected, min: 0)
+          expect_key(link_prefix, "activation_notice_status", link, unexpected)
+          %w[activation_locked sign_up_reset_pending profile_access_open activated_at_present former_at_present revoked_at_present].each do |flag|
+            expect_bool(link_prefix, flag, link[flag], unexpected)
+          end
+        end
+      end
+
+      def validate_subdomain_section(cid, label, section, unexpected:)
+        prefix = "#{label}.companies.#{cid}.subdomain"
+        unless section.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: section }
+          return
+        end
+
+        %w[subdomain_slug tenant_origin enabled_origin_company_id branding_demo branding_sha256].each do |key|
+          expect_key(prefix, key, section, unexpected)
+        end
+        expect_bool(prefix, "branding_resolved", section["branding_resolved"], unexpected)
+        if section["branding_sha256"].present?
+          expect_sha256(prefix, "branding_sha256", section["branding_sha256"], unexpected)
+        end
+      end
+
+      def validate_employee_app_section(cid, label, section, unexpected:)
+        prefix = "#{label}.companies.#{cid}.employee_app"
+        unless section.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: section }
+          return
+        end
+
+        expect_bool(prefix, "eligible_company", section["eligible_company"], unexpected)
+        %w[stored_values switched_on_values effective_values].each do |key|
+          unless section[key].is_a?(Hash) && section[key].any?
+            unexpected << { path: "#{prefix}.#{key}", expected: "non-empty hash", after: section[key] }
+          end
+        end
+        %w[on_anywhere open_activations].each do |key|
+          unless section[key].is_a?(Array)
+            unexpected << { path: "#{prefix}.#{key}", expected: "array", after: section[key] }
+          end
+        end
+
+        readiness = section["readiness"]
+        unless readiness.is_a?(Hash)
+          unexpected << { path: "#{prefix}.readiness", expected: "hash", after: readiness }
+          return
+        end
+        unless readiness["checks"].is_a?(Array) && readiness["checks"].any?
+          unexpected << { path: "#{prefix}.readiness.checks", expected: "non-empty array", after: readiness["checks"] }
+        end
+        %w[counsel_checks switch_checks observed database].each do |key|
+          unless readiness[key].is_a?(Hash)
+            unexpected << { path: "#{prefix}.readiness.#{key}", expected: "hash", after: readiness[key] }
+          end
+        end
+        expect_key("#{prefix}.readiness", "early_access", readiness, unexpected)
+      end
+
+      def validate_counters_section(cid, label, section, unexpected:)
+        prefix = "#{label}.companies.#{cid}.counters"
+        unless section.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: section }
+          return
+        end
+
+        caps = section["client_caps"]
+        if caps.is_a?(Hash)
+          expect_key("#{prefix}.client_caps", "client_limit", caps, unexpected)
+          expect_int("#{prefix}.client_caps", "organization_live_payroll_count", caps["organization_live_payroll_count"], unexpected, min: 0)
+          expect_int("#{prefix}.client_caps", "organization_demo_count", caps["organization_demo_count"], unexpected, min: 1)
+          expect_int("#{prefix}.client_caps", "organization_operating_count", caps["organization_operating_count"], unexpected, min: 0)
+          expect_int("#{prefix}.client_caps", "organization_contained_count", caps["organization_contained_count"], unexpected, min: 1)
+          expect_eq("#{prefix}.client_caps", "in_live_payroll_scope", caps["in_live_payroll_scope"], false, unexpected)
+          expect_eq("#{prefix}.client_caps", "in_demo_scope", caps["in_demo_scope"], true, unexpected)
+          expect_bool("#{prefix}.client_caps", "in_operating_scope", caps["in_operating_scope"], unexpected)
+          expect_eq("#{prefix}.client_caps", "in_contained_scope", caps["in_contained_scope"], true, unexpected)
+        else
+          unexpected << { path: "#{prefix}.client_caps", expected: "hash", after: caps }
+        end
+
+        inbox = section["inbox"]
+        if inbox.is_a?(Hash)
+          unless inbox["organization_summary"].is_a?(Hash) && inbox["organization_summary"].any? && inbox["organization_summary"].values.all?(Integer)
+            unexpected << { path: "#{prefix}.inbox.organization_summary", expected: "non-empty hash of integers", after: inbox["organization_summary"] }
+          end
+          expect_bool("#{prefix}.inbox", "company_visible_in_inbox", inbox["company_visible_in_inbox"], unexpected)
+          expect_int("#{prefix}.inbox", "company_row_count", inbox["company_row_count"], unexpected, min: 0)
+          unless inbox["company_rows_demo_flags"].is_a?(Array)
+            unexpected << { path: "#{prefix}.inbox.company_rows_demo_flags", expected: "array", after: inbox["company_rows_demo_flags"] }
+          end
+        else
+          unexpected << { path: "#{prefix}.inbox", expected: "hash", after: inbox }
+        end
+
+        year_end = section["year_end"]
+        if year_end.is_a?(Hash)
+          unless year_end["organization_counts"].is_a?(Hash) && year_end["organization_counts"].any? && year_end["organization_counts"].values.all?(Integer)
+            unexpected << { path: "#{prefix}.year_end.organization_counts", expected: "non-empty hash of integers", after: year_end["organization_counts"] }
+          end
+          unless year_end["organization_hidden"].is_a?(Hash)
+            unexpected << { path: "#{prefix}.year_end.organization_hidden", expected: "hash", after: year_end["organization_hidden"] }
+          end
+          expect_bool("#{prefix}.year_end", "listed", year_end["listed"], unexpected)
+          expect_key("#{prefix}.year_end", "demo_flag", year_end, unexpected)
+          expect_key("#{prefix}.year_end", "status", year_end, unexpected)
+          unless year_end["issue_codes"].is_a?(Array)
+            unexpected << { path: "#{prefix}.year_end.issue_codes", expected: "array", after: year_end["issue_codes"] }
+          end
+        else
+          unexpected << { path: "#{prefix}.year_end", expected: "hash", after: year_end }
+        end
+
+        revenue = section["invoices_revenue"]
+        if revenue.is_a?(Hash) && revenue["books"].is_a?(Array)
+          revenue["books"].each_with_index do |book, idx|
+            b_prefix = "#{prefix}.invoices_revenue.books[#{idx}]"
+            unless book.is_a?(Hash)
+              unexpected << { path: b_prefix, expected: "hash", after: book }
+              next
+            end
+            expect_int(b_prefix, "finance_book_id", book["finance_book_id"], unexpected, min: 1)
+            unless book["live_client_ids"].is_a?(Array) && book["live_client_ids"].all?(Integer)
+              unexpected << { path: "#{b_prefix}.live_client_ids", expected: "array of integers", after: book["live_client_ids"] }
+            end
+            expect_non_empty_string(b_prefix, "total_amount", book["total_amount"], unexpected)
+            expect_eq(b_prefix, "company_excluded_from_live_revenue", book["company_excluded_from_live_revenue"], true, unexpected)
+          end
+        else
+          unexpected << { path: "#{prefix}.invoices_revenue.books", expected: "array", after: revenue }
+        end
+
+        shared = section["shared_email_report"]
+        if shared.is_a?(Hash)
+          expect_eq("#{prefix}.shared_email_report", "company_excluded", shared["company_excluded"], true, unexpected)
+        else
+          unexpected << { path: "#{prefix}.shared_email_report", expected: "hash", after: shared }
+        end
+      end
+
+      def validate_ein_section(cid, label, section, unexpected:)
+        prefix = "#{label}.companies.#{cid}.ein_uniqueness"
+        unless section.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: section }
+          return
+        end
+
+        expect_bool(prefix, "ein_present", section["ein_present"], unexpected)
+        expect_eq(prefix, "in_live_ein_unique_index", section["in_live_ein_unique_index"], false, unexpected)
+        unless section["live_company_ids_sharing_ein"].is_a?(Array) && section["live_company_ids_sharing_ein"].all?(Integer)
+          unexpected << { path: "#{prefix}.live_company_ids_sharing_ein", expected: "array of integers", after: section["live_company_ids_sharing_ein"] }
+        end
+      end
+
+      def validate_payroll_checksums_section(cid, label, section, unexpected:)
+        prefix = "#{label}.companies.#{cid}.payroll_checksums"
+        unless section.is_a?(Hash)
+          unexpected << { path: prefix, expected: "hash", after: section }
+          return
+        end
+
+        %w[pay_periods_count payroll_items_count posted_documents_count].each do |key|
+          expect_int(prefix, key, section[key], unexpected, min: 0)
+        end
+        %w[
+          pay_periods_sha256 payroll_items_sha256 calculation_snapshots_sha256
+          legacy_disposition_digests_sha256 paid_correction_evidence_sha256
+          ytd_totals_sha256 posted_documents_sha256 posted_stub_fingerprints_sha256
+        ].each do |key|
+          expect_sha256(prefix, key, section[key], unexpected)
+        end
+        expect_eq(prefix, "all_posted_stubs_match_stored_fingerprint", section["all_posted_stubs_match_stored_fingerprint"], true, unexpected)
+
+        paid_counts = section["paid_correction_evidence_counts"]
+        if paid_counts.is_a?(Hash)
+          PAID_CORRECTION_COUNT_KEYS.each do |key|
+            expect_int("#{prefix}.paid_correction_evidence_counts", key, paid_counts[key], unexpected, min: 0)
+          end
+        else
+          unexpected << { path: "#{prefix}.paid_correction_evidence_counts", expected: "hash", after: paid_counts }
+        end
+
+        history = section["time_tracking_history"]
+        unless history.is_a?(Hash)
+          unexpected << { path: "#{prefix}.time_tracking_history", expected: "hash", after: history }
+          return
+        end
+
+        %w[sources_count imports_count history_reviews_count verified_history_receipts_count].each do |key|
+          expect_eq("#{prefix}.time_tracking_history", key, history[key], 0, unexpected)
+        end
+        expect_sha256("#{prefix}.time_tracking_history", "sha256", history["sha256"], unexpected)
+      end
+
+      def expect_key(prefix, key, hash, unexpected)
+        return if hash.key?(key)
+
+        unexpected << { path: "#{prefix}.#{key}", expected: "present", after: :missing }
+      end
+
+      def expect_eq(prefix, key, actual, expected, unexpected)
+        return if actual == expected
+
+        unexpected << { path: "#{prefix}.#{key}", expected: expected, after: actual }
+      end
+
+      def expect_bool(prefix, key, actual, unexpected)
+        return if actual == true || actual == false
+
+        unexpected << { path: "#{prefix}.#{key}", expected: "boolean", after: actual }
+      end
+
+      def expect_int(prefix, key, actual, unexpected, min: nil)
+        return if actual.is_a?(Integer) && (min.nil? || actual >= min)
+
+        unexpected << { path: "#{prefix}.#{key}", expected: min ? "integer >= #{min}" : "integer", after: actual }
+      end
+
+      def expect_non_empty_string(prefix, key, actual, unexpected)
+        return if actual.is_a?(String) && !actual.empty?
+
+        unexpected << { path: "#{prefix}.#{key}", expected: "non-empty string", after: actual }
+      end
+
+      def expect_sha256(prefix, key, actual, unexpected)
+        return if actual.is_a?(String) && SHA256_REGEX.match?(actual)
+
+        unexpected << { path: "#{prefix}.#{key}", expected: "64-hex sha256", after: actual }
       end
     end
   end

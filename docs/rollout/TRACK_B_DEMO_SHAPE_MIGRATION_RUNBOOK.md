@@ -19,8 +19,8 @@ This repo is public. Never commit real client names, person names, email address
 Confirm every item before opening the release window:
 
 1. **Owner approval:** Leon's explicit go-ahead for the release window and target company IDs.
-2. **Code deployed everywhere:** the revision containing `20261127170000_prepare_demo_company_shape_migration.rb`, `DemoCompany::ConvertToFlag`, `DemoCompany::RevertToLegacyShape`, `DemoCompany::VerifyShapeMigration`, and PR #648 (`DemoCompany::RenameFixture`) is deployed to Payroll web, Solid Queue worker, and the Employee API.
-   - Verify the pre-conversion migration applied cleanly via the normal owner-backed deploy path (`bin/rails db:safe_prepare`). This migration is dual-shape safe and makes no data changes on deploy; it makes `fk_employee_account_links_live_company` `DEFERRABLE INITIALLY IMMEDIATE`, installs the owner-only `SECURITY DEFINER` functions `convert_demo_company_to_flag` and `revert_demo_company_to_legacy_shape` (revoked from `PUBLIC` and never granted to `payroll_app`), and hardens `prevent_demo_company_conversion()`.
+2. **Code deployed everywhere:** the revision containing `20261127170000_prepare_demo_company_shape_migration.rb`, `DemoShapeConversion`, `DemoCompany::ConvertToFlag`, `DemoCompany::RevertToLegacyShape`, `DemoCompany::VerifyShapeMigration`, and PR #648 (`DemoCompany::RenameFixture`) is deployed to Payroll web, Solid Queue worker, and the Employee API.
+   - Verify the pre-conversion migration applied cleanly via the normal owner-backed deploy path (`bin/rails db:safe_prepare`). This migration is dual-shape safe and makes no data changes on deploy; it creates the append-only `demo_shape_conversions` table, makes `fk_employee_account_links_live_company` `DEFERRABLE INITIALLY IMMEDIATE`, installs the owner-only `SECURITY DEFINER` functions `convert_demo_company_to_flag` and `revert_demo_company_to_legacy_shape` (revoked from `PUBLIC` and never granted to `payroll_app`), hardens `prevent_demo_company_conversion()`, and adds `FOR KEY SHARE` company-row locking to `prevent_demo_company_external_records()`.
 3. **Owner shell ready for `APPLY=true`:** read-only snapshots (`demo:verify_shape_snapshot`) and dry runs (`demo:convert_to_flag` with `APPLY=false`) run on the normal runtime connection. Applying (`APPLY=true`) or reverting (`demo:revert_to_legacy_shape APPLY=true`) requires the secured owner shell with `RLS_CONTEXT_GUARD_MODE=off` and the direct non-pooler `MIGRATION_DATABASE_URL` (the runtime `payroll_app` role cannot execute the conversion functions or pass the owner check in the trigger).
 4. **No concurrent demo jobs or payroll work on the target demos:** confirm no `demo:seed` or `demo:rename_fixture` run is active.
 5. **Operator actor ready:** identify the active organization-administrator `ACTOR_ID` (and `ORGANIZATION_ID`, optional when it matches the actor's organization).
@@ -31,7 +31,7 @@ Confirm every item before opening the release window:
 
 1. Create a named Neon recovery branch (or point-in-time snapshot) from the production primary right before the window (for example `pre-track-b-demo-migrate-YYYYMMDD-HHMMZ`). Record the branch name, UTC recovery timestamp, and deployed commit SHA in the private rollout record. Keep the branch isolated from live services and outbound integrations.
 2. **Understand rollback scope:**
-   - **Primary rollback (no data loss for real clients):** §8 uses `demo:revert_to_legacy_shape` with each company's captured before snapshot to restore only that company's exact shape columns and `employee_account_links.payroll_environment`, without touching unrelated production writes.
+   - **Primary rollback (no data loss for real clients):** §8a enables **Write Maintenance** briefly and runs `demo:revert_to_legacy_shape` with the recorded `CONVERSION_ID` from `demo_shape_conversions` to restore only that company's exact recorded before-state and `employee_account_links.payroll_environment`, without touching unrelated production writes.
    - **Last-resort whole-DB Neon restore:** restoring a whole-database Neon backup discards any unrelated production writes committed after the recovery point (such as a real client's payroll or posted documents). If you want the option to perform a lossless whole-DB Neon restore, enable **Write Maintenance** ([Payroll write maintenance](../runbooks/WRITE_MAINTENANCE.md) — `WRITE_MAINTENANCE=true` on web + suspend the worker) **before** creating the Neon recovery branch and keep it enabled until the verification gate passes. Otherwise, rely on the targeted per-company rollback in §8 and keep the Neon branch strictly as a disaster-recovery last resort.
 
 ---
@@ -94,7 +94,7 @@ Expect:
 OK    demo:verify_shape_snapshot companies=14 output=/tmp/track-b-before-14.json
 ```
 
-Keep `/tmp/track-b-before-${COMPANY_ID}.json` intact until the entire window succeeds — it also supplies the exact pre-conversion shape metadata for targeted rollback (§8).
+Keep `/tmp/track-b-before-${COMPANY_ID}.json` intact until the entire window succeeds so §3d can diff against it (and §8a can verify any post-revert state against it).
 
 This snapshot captures per company (without PII or raw error text):
 - exact shape columns (`demo`, `payroll_environment`, `test_workspace_purpose`, `migration_rehearsal_status`, `migration_rehearsal_created_by_id`, `migration_rehearsal_created_at`, `migration_rehearsal_completed_at`, presence + digest of `migration_rehearsal_error`, source/lifecycle flags, and `employee_account_links` environments);
@@ -132,15 +132,17 @@ What happens in one atomic transaction for `$COMPANY_ID`:
 - Refuses if an outer transaction is open; acquires the per-organization demo advisory lock and locks the company row and its `employee_account_links`.
 - Verifies the company is an old-shape demo (`test_workspace_purpose = 'demo'`) and refuses real clients as well as non-demo `migration_rehearsal`, `backup_snapshot`, `sandbox`, and `training_replay` workspaces.
 - Verifies the company has zero time-tracking sources or AIRE history approvals.
-- Calls the owner-only `SECURITY DEFINER` function `convert_demo_company_to_flag(...)`, which verifies the table-owner role, defers `fk_employee_account_links_live_company`, sets `demo = true` and `payroll_environment = 'live'`, clears all test-workspace/rehearsal columns while keeping `test_workspace_manifest` byte-identical, updates `employee_account_links.payroll_environment` to `'live'`, and immediately re-validates `fk_employee_account_links_live_company`.
-- Writes an `AuditLog` row (`demo_company#converted_to_flag`) inside the same transaction.
+- Calls the owner-only `SECURITY DEFINER` function `convert_demo_company_to_flag(...)`, which verifies the table-owner role, locks the company row `FOR UPDATE`, records the exact pre-conversion shape and link environments in the append-only `demo_shape_conversions` table, defers `fk_employee_account_links_live_company`, sets `demo = true` and `payroll_environment = 'live'`, clears all test-workspace/rehearsal columns while keeping `test_workspace_manifest` byte-identical, updates `employee_account_links.payroll_environment` to `'live'`, and immediately re-validates `fk_employee_account_links_live_company`.
+- Writes an `AuditLog` row (`demo_company#converted_to_flag` with `conversion_id`) inside the same transaction.
 - Invalidates `TenantSubdomainRegistry` in this process after commit.
 
 Expect:
 
 ```text
-OK    demo:convert_to_flag mode=applied converted=14 already_converted=none changes=...
+OK    demo:convert_to_flag mode=applied converted=14 already_converted=none conversions=14:<conversion-id> changes=...
 ```
+
+Record `<conversion-id>` in the private rollout record — §8a uses `CONVERSION_ID` if a targeted rollback is ever required.
 
 Optional idempotency check (re-running the exact same command writes nothing):
 
@@ -150,7 +152,7 @@ RLS_CONTEXT_GUARD_MODE=off MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" \
   bundle exec rails demo:convert_to_flag
 ```
 
-Expect `converted=none already_converted=14 changes=0`.
+Expect `converted=none already_converted=14 conversions=none changes=0`.
 
 ### 3d. Capture the "after" snapshot and run the strict diff gate
 
@@ -243,31 +245,31 @@ rm -f /tmp/track-b-before-*.json /tmp/track-b-after-*.json
 
 ## 8. Rollback
 
-### 8a. Primary rollback: targeted per-company revert (preserves all unrelated production writes)
+### 8a. Primary rollback: targeted per-company revert (bound to `CONVERSION_ID`, fenced with Write Maintenance)
 
-Use this whenever `demo:verify_shape_diff` reports any unexpected difference or a post-conversion smoke check fails before any post-conversion filing/liability/non-employee-check rows have been created on the company:
+Use this whenever `demo:verify_shape_diff` reports any unexpected difference or a post-conversion smoke check fails before any post-conversion filing/liability/non-employee-check rows have been created on the company. Revert reads the exact before-state strictly from the append-only `demo_shape_conversions` record (never from an external snapshot file) and **refuses to run unless `WRITE_MAINTENANCE=true` is enabled** so no concurrent filing/liability/check insert can race the revert:
 
 1. **Stop the window immediately.** Do not convert further companies and do not run `demo:rename_fixture`.
-2. **Dry-run the targeted revert** for each converted company using its captured before snapshot:
+2. **Enable Write Maintenance** per [Payroll write maintenance](../runbooks/WRITE_MAINTENANCE.md) (`WRITE_MAINTENANCE=true` on web + suspend the worker) and wait for in-flight requests/jobs to drain.
+3. **Dry-run the targeted revert** using the `CONVERSION_ID` printed by §3c:
 
 ```sh
-ACTOR_ID="$ACTOR_ID" COMPANY_IDS="$COMPANY_ID" \
-  BEFORE="/tmp/track-b-before-${COMPANY_ID}.json" APPLY=false \
+WRITE_MAINTENANCE=true ACTOR_ID="$ACTOR_ID" CONVERSION_ID=<conversion-id> APPLY=false \
   bundle exec rails demo:revert_to_legacy_shape
 ```
 
-3. **Apply the targeted revert** via the owner shell (`MIGRATION_DATABASE_URL`, `RLS_CONTEXT_GUARD_MODE=off`):
+4. **Apply the targeted revert** via the owner shell (`MIGRATION_DATABASE_URL`, `RLS_CONTEXT_GUARD_MODE=off`, `WRITE_MAINTENANCE=true`):
 
 ```sh
-RLS_CONTEXT_GUARD_MODE=off MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" \
-  ACTOR_ID="$ACTOR_ID" COMPANY_IDS="$COMPANY_ID" \
-  BEFORE="/tmp/track-b-before-${COMPANY_ID}.json" APPLY=true \
+WRITE_MAINTENANCE=true RLS_CONTEXT_GUARD_MODE=off MIGRATION_DATABASE_URL="$MIGRATION_DATABASE_URL" \
+  ACTOR_ID="$ACTOR_ID" CONVERSION_ID=<conversion-id> APPLY=true \
   bundle exec rails demo:revert_to_legacy_shape
 ```
 
-This atomically restores the exact pre-conversion `companies` shape columns and `employee_account_links.payroll_environment = 'migration_rehearsal'`, records an `AuditLog` (`demo_company#reverted_to_legacy_shape`), and leaves every real client's data untouched.
+This locks the company row `FOR UPDATE`, verifies the recorded conversion has not already been reverted and the company's current shape still matches what conversion wrote, verifies zero post-conversion filing/liability/non-employee-check rows exist, atomically restores the exact recorded pre-conversion `companies` shape columns and `employee_account_links.payroll_environment`, marks the conversion record reverted, records an `AuditLog` (`demo_company#reverted_to_legacy_shape`), and leaves every real client's data untouched.
 
-4. **Wait at least 50 seconds** (past `TenantSubdomainRegistry::CACHE_TTL`) or restart serving web and employee-API instances, then re-capture `demo:verify_shape_snapshot` and verify the restored state matches `/tmp/track-b-before-${COMPANY_ID}.json`.
+5. **Wait at least 50 seconds** (past `TenantSubdomainRegistry::CACHE_TTL`) or restart serving web and employee-API instances, re-capture `demo:verify_shape_snapshot`, and confirm the restored state matches `/tmp/track-b-before-${COMPANY_ID}.json`.
+6. **Disable Write Maintenance** (re-enable web writes and resume the worker per [WRITE_MAINTENANCE.md](../runbooks/WRITE_MAINTENANCE.md)) once verification passes.
 
 ### 8b. Last-resort rollback: Neon recovery branch restore
 
