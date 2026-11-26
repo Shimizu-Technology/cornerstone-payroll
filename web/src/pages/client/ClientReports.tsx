@@ -1,3 +1,4 @@
+import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clientReportCatalog } from './clientReportCatalog';
@@ -55,7 +56,7 @@ export function ClientReports() {
   const [exporting, setExporting] = useState<string | null>(null);
 
   const payPeriodOptions = useMemo(
-    () => payPeriods.map((payPeriod) => ({ value: String(payPeriod.id), label: `${payPeriod.start_date} - ${payPeriod.end_date}` })),
+    () => payPeriods.map((payPeriod) => ({ value: String(payPeriod.id), label: formatDateRange(payPeriod.start_date, payPeriod.end_date) })),
     [payPeriods]
   );
 
@@ -617,7 +618,7 @@ export function ClientReports() {
                             <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(entry.amount)}</p>
                           </div>
                           <div className="mt-3 grid grid-cols-2 gap-3">
-                            <MobileField label="Pay date" value={entry.pay_date || '—'} />
+                            <MobileField label="Pay date" value={formatDate(entry.pay_date) || '—'} />
                             <MobileField label="Payroll field" value={entry.label} />
                             <MobileField label="Treatment" value={entry.tax_treatment.replaceAll('_', ' ')} />
                             <MobileField label="Source" value={entry.source?.replaceAll('_', ' ') || '—'} />
@@ -640,7 +641,7 @@ export function ClientReports() {
                       <TableBody striped>
                         {ytdSummary!.payroll_fields.entries!.map((entry, index) => (
                           <TableRow key={`${entry.payroll_item_id}-${entry.label}-${index}`}>
-                            <TableCell>{entry.pay_date || '—'}</TableCell>
+                            <TableCell>{formatDate(entry.pay_date) || '—'}</TableCell>
                             <TableCell className="font-medium text-gray-900">{entry.employee_name || '—'}</TableCell>
                             <TableCell>{entry.label}</TableCell>
                             <TableCell className="capitalize">{entry.tax_treatment.replaceAll('_', ' ')}</TableCell>

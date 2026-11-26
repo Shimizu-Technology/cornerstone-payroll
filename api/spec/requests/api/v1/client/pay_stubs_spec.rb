@@ -25,7 +25,8 @@ RSpec.describe "Client pay stubs", type: :request do
   it "lists finished history, renders a fresh employee statement and audits each read" do
     get "/api/v1/client/pay_stubs/employee/#{employee.id}", headers: headers
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body["pay_stubs"].map { |row| row["id"] }).to eq([ item.id ])
+    expect(response.parsed_body.fetch("pay_stubs").sole).to include(
+      "id" => item.id, "start_date" => "2026-04-01", "end_date" => "2026-04-14")
     2.times do
       get "/api/v1/client/pay_stubs/#{item.id}/download", headers: headers
       expect(response).to have_http_status(:ok)
@@ -39,6 +40,19 @@ RSpec.describe "Client pay stubs", type: :request do
     text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join
     expect(text).to include(employee.full_name)
     expect(text).not_to match(/accountant.only|review warning|storage.key|transmittal/i)
+  end
+
+  it "logs ambiguous stub history and returns a client-safe download error" do
+    error = PayrollInsuranceComponents::AmbiguousHistoryError.new("Staff-only insurance repair instructions")
+    allow_any_instance_of(PayStubGenerator).to receive(:generate).and_raise(error)
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, action: "download"
+    }).and_call_original
+
+    get "/api/v1/client/pay_stubs/#{item.id}/download", headers: headers
+
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq("error" => "Payroll details are unavailable right now. Contact Cornerstone.")
   end
 
   it "rejects other companies and foreign employee history" do

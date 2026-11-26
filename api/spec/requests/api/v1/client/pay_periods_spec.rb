@@ -265,11 +265,74 @@ RSpec.describe "Api::V1::Client::PayPeriods", type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  it "keeps the period and other pay lines visible when a pay line has ambiguous history" do
+    affected = committed_pay_period.payroll_items.first
+    unaffected = create(:payroll_item, pay_period: committed_pay_period, company: company, gross_pay: 200, net_pay: 175)
+    error = PayrollComponentMirrors::AmbiguousHistoryError.new("Staff-only reconciliation instructions")
+    allow(PayrollComponentMirrors).to receive(:resolution).and_wrap_original do |original, item, **kwargs|
+      raise error if item.id == affected.id
+
+      original.call(item, **kwargs)
+    end
+    expect(Rails.error).to receive(:report).with(error, handled: true, context: {
+      company_id: company.id, payroll_item_id: affected.id
+    }).and_call_original
+
+    get "/api/v1/client/pay_periods/#{committed_pay_period.id}"
+
+    expect(response).to have_http_status(:ok)
+    period = response.parsed_body.fetch("pay_period")
+    expect(period).to include("employee_count" => 2, "total_gross" => "1200.0")
+    rows = period.fetch("payroll_items").index_by { |row| row.fetch("id") }
+    expect(rows.fetch(affected.id)).to include(
+      "details_error" => "Details for this pay line aren't available yet. Contact Cornerstone.",
+      "net_pay" => "810.0", "pay_stub_available" => false
+    )
+    expect(rows.fetch(affected.id).keys).not_to include(
+      "non_taxable_additions_total", "withholding_tax", "additional_withholding", "social_security_tax", "medicare_tax",
+      "additional_medicare_tax", "state_withheld", "retirement_payment", "roth_retirement_payment", "loan_payment", "loan_deduction",
+      "insurance_payment", "other_deductions", "custom_deductions", "payroll_adjustments", "total_deductions"
+    )
+    expect(rows.fetch(unaffected.id)).to include("net_pay" => "175.0", "other_deductions" => "0.0")
+    expect(response.body).not_to include(error.message)
+  end
+
   it "does not allow a client to open a draft pay period detail" do
     get "/api/v1/client/pay_periods/#{draft_pay_period.id}"
 
     expect(response).to have_http_status(:not_found)
     expect(response.parsed_body).to eq("error" => "Pay period not found")
+  end
+
+  it "blocks client approval when the published revision has a pay line the client cannot review" do
+    company.update!(client_payroll_approval_required: true)
+    draft_pay_period.update!(status: "calculated", calculated_at: Time.current)
+    service = PayrollReview::RevisionService.new(pay_period: draft_pay_period)
+    package = service.issue!
+    draft_pay_period.update!(status: "approved")
+    service.publish!
+
+    path = "/api/v1/client/pay_periods/#{draft_pay_period.id}"
+    get path
+    expect(response.parsed_body.dig("pay_period", "can_decide_payroll_review")).to be(true)
+
+    allow(PayrollComponentMirrors).to receive(:resolution).and_raise(
+      PayrollComponentMirrors::AmbiguousHistoryError, "Staff-only component repair"
+    )
+    get path
+    expect(response).to have_http_status(:ok)
+    expect(response.parsed_body.dig("pay_period", "can_decide_payroll_review")).to be(false)
+    expect(response.parsed_body.dig("pay_period", "payroll_items").sole).to include("details_error" => a_string_including("Contact Cornerstone"))
+
+    post "#{path}/approve_review", params: {
+      revision_id: package.id,
+      acknowledgement: PayrollReviewPackage::APPROVAL_ACKNOWLEDGEMENT
+    }
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body).to eq(
+      "error" => "Some pay lines can't be shown yet, so this review can't be approved. Contact Cornerstone."
+    )
+    expect(package.reload.status).to eq("pending")
   end
 
   it "shows an approved review revision and lets the assigned client approve only that revision" do

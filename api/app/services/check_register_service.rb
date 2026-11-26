@@ -65,7 +65,7 @@ class CheckRegisterService
     build_row(
       source: item,
       source_type: "payroll_item",
-      payee: item.employee.full_name,
+      payee: item.employee.legal_name,
       amount: item.net_pay,
       register_date: item.pay_period.pay_date,
       issued_on: issued_event&.effective_on,

@@ -2511,6 +2511,8 @@ export interface DashboardResponse {
       record_type?: 'native' | 'imported';
       run_purpose?: string;
       id: number;
+      start_date?: string;
+      end_date?: string;
       period_description: string;
       pay_date: string;
       employee_count: number;
@@ -3747,6 +3749,8 @@ export const reportsApi = {
 };
 
 export interface ClientPayStub {
+  start_date?: string;
+  end_date?: string;
   id: number;
   pay_period_id: number;
   pay_date: string;

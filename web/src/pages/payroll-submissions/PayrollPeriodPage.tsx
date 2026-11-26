@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useCompany } from '@/contexts/CompanyContext';
 import { FileRow, RevisionCard } from '@/components/payroll-submissions/PeriodParts';
+import { formatDateRange } from '@/lib/display-date';
 import { formatDate, formatGuam, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { SubmissionForm } from '@/components/payroll-submissions/SubmissionForm';
 import { PortalImportAction } from '@/components/payroll-submissions/PortalImportAction';
@@ -120,7 +121,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
       : 'Pay date set by Cornerstone';
   return (
     <div>
-      <Header title={`Payroll ${period.label}`} description={headerDescription} />
+      <Header title={`Payroll ${formatDateRange(period.start_date, period.end_date) || period.label}`} description={headerDescription} />
       <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6 lg:p-8">
         {hasInboxReturn ? <InboxReturnLink /> : <Link to={listPath} className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline">All pay periods</Link>}
         <section aria-labelledby="period-status" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
