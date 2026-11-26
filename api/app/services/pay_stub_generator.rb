@@ -310,7 +310,7 @@ class PayStubGenerator
   # Field mirrors are saved by label alone. Print one only when its row holds
   # exactly that field's own amounts under a single label/treatment/category.
   def payroll_field_rows_attributable?(rows)
-    entries = ytd_source_items.flat_map { |item| item.payroll_item_field_entries.select { |entry| entry.active? && entry.taxable_addition? } }
+    entries = ytd_source_items.flat_map { |item| item.payroll_field_entries_for_calculation.select { |entry| entry.active? && entry.taxable_addition? } }
     entries.group_by(&:label).all? do |label, same_label|
       next false if same_label.map { |entry| [ entry.tax_treatment, entry.category ] }.uniq.many?
 
@@ -756,7 +756,7 @@ class PayStubGenerator
   end
 
   def payroll_field_entries_for(*treatments)
-    payroll_item.payroll_item_field_entries.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }
+    payroll_item.payroll_field_entries_for_calculation.select { |entry| entry.active? && treatments.include?(entry.tax_treatment) }
   end
 
   def ytd_payroll_field_amount(entry)
@@ -795,10 +795,10 @@ class PayStubGenerator
 
   def ytd_payroll_field_totals
     @ytd_payroll_field_totals ||= begin
-      keys = payroll_item.payroll_item_field_entries.select(&:active?)
+      keys = payroll_item.payroll_field_entries_for_calculation.select(&:active?)
         .map { |entry| [ entry.label, entry.tax_treatment, entry.category ] }.uniq
       ytd_source_items.each_with_object(Hash.new(0.to_d)) do |item, totals|
-        item.payroll_item_field_entries.each do |entry|
+        item.payroll_field_entries_for_calculation.each do |entry|
           next unless entry.active?
 
           key = [ entry.label, entry.tax_treatment, entry.category ]

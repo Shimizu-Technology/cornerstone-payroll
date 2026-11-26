@@ -35,7 +35,7 @@ class PayrollComponentMirrors
     result = {}
     independent = independent_type_ids(item)
     rows = item.payroll_item_deductions.to_a
-    item.payroll_item_field_entries.each do |entry|
+    item.payroll_field_entries_for_calculation.each do |entry|
       next unless entry.active? && entry.amount.to_d.nonzero? && TREATMENTS.value?(entry.tax_treatment)
 
       identity = entry.metadata.to_h[IDENTITY_KEY]

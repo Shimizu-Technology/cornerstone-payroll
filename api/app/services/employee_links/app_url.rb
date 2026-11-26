@@ -11,7 +11,7 @@ module EmployeeLinks
     # opens a system scope and so can't run inside a staff company scope.
     def origin_for(company)
       if subdomain_live?(company)
-        return "https://#{company.subdomain_slug}.#{TenantSubdomainRegistry::ROOT_DOMAIN}"
+        return TenantSubdomainRegistry.tenant_origin(company.subdomain_slug)
       end
 
       TenantSubdomainRegistry.https_url(ENV["EMPLOYEE_APP_URL"].to_s.strip.delete_suffix("/")).presence

@@ -76,6 +76,12 @@
     "reported_tips": "11.5",
     "tips_paid_out": "0.0",
     "loan_deduction": "0.0",
-    "bonus": "0.0"
+    "bonus": "0.0",
+    "gross_pay": "1270.88",
+    "withholding_tax": "0.0",
+    "social_security_tax": "78.79",
+    "medicare_tax": "18.43",
+    "net_pay": "1173.66",
+    "non_taxable_earnings": []
   }
 }

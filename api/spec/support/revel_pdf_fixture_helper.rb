@@ -35,7 +35,9 @@ module RevelPdfFixtureHelper
           first_line, name = name.split("\n", 2)
           pdf.text(first_line, size: 4)
         end
-        pdf.text(revel_row(**row.merge(name: name)), size: 4)
+        row = row.merge(name: name)
+        text = block_given? ? yield(row) : revel_row(**row)
+        pdf.text(text, size: 4)
       end
       total_hours = reported_total_hours || rows.sum { |row| row.fetch(:total_hours, row.fetch(:regular_hours)) }
       total_pay = rows.sum { |row| row.fetch(:total_pay, row.fetch(:regular_pay)) }
@@ -47,9 +49,9 @@ module RevelPdfFixtureHelper
   end
 
   def revel_row(name:, regular_hours:, regular_pay:, overtime_hours: 0.0, overtime_pay: 0.0,
-                doubletime_hours: nil, total_hours: nil, total_pay: nil)
-    total_hours ||= regular_hours + overtime_hours + doubletime_hours.to_f
-    total_pay ||= regular_pay + overtime_pay
+                doubletime_hours: nil, doubletime_pay: nil, total_hours: nil, total_pay: nil)
+    total_hours ||= regular_hours + overtime_hours + (doubletime_hours || 0)
+    total_pay ||= regular_pay + overtime_pay + (doubletime_pay || 0)
 
     [
       name.ljust(40),
@@ -58,10 +60,10 @@ module RevelPdfFixtureHelper
       "-".ljust(20),
       decimal_field(regular_hours),
       decimal_field(overtime_hours),
-      doubletime_hours ? decimal_field(doubletime_hours) : "-".ljust(20),
+      doubletime_hours.nil? ? "-".ljust(20) : decimal_field(doubletime_hours),
       decimal_field(regular_pay),
       decimal_field(overtime_pay),
-      "-".ljust(20),
+      doubletime_pay.nil? ? "-".ljust(20) : decimal_field(doubletime_pay),
       decimal_field(total_hours),
       decimal_field(total_pay),
       "-".ljust(20)
