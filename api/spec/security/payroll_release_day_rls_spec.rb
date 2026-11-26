@@ -4,26 +4,40 @@ require "rails_helper"
 require "rake"
 require "stringio"
 
-RSpec.describe "FICA release-day runner with the tenant guard on", :rls do
+RSpec.describe "FICA release-day runner with forced RLS", :rls do
+  include EnforcedRlsHelpers
+
+  self.use_transactional_tests = false
+
   let(:runner) { Rails.root.join("..", "ops", "payroll-release-day", "release_day.rb") }
   let(:connection) { ApplicationRecord.connection }
 
   around do |example|
     previous_rake = Rake.application
     Rake.application = Rake::Application.new
-    example.run
+    connection.transaction(isolation: :repeatable_read) do
+      example.run
+      raise ActiveRecord::Rollback
+    end
   ensure
     Rake.application = previous_rake
   end
 
   before do
     allow(RlsContextGuard).to receive(:mode).and_return("raise")
-    # The runner opens real repeatable-read snapshots in production. The
-    # spec already has a transaction so its synthetic fixtures roll back.
+    # Fixtures and forced policies live in the outer repeatable-read transaction.
+    # Use a real savepoint for each runner snapshot and roll it back to restore write access.
     allow(connection).to receive(:transaction).and_call_original
-    allow(connection).to receive(:transaction).with(isolation: :repeatable_read).and_yield
-    allow(connection).to receive(:execute).and_call_original
-    allow(connection).to receive(:execute).with("SET TRANSACTION READ ONLY").and_return(nil)
+    allow(connection).to receive(:transaction).with(isolation: :repeatable_read).and_wrap_original do |transaction, &snapshot|
+      result = nil
+      transaction.call(requires_new: true) do
+        result = snapshot.call
+        expect(connection.select_value("SHOW transaction_isolation")).to eq("repeatable read")
+        expect(connection.select_value("SHOW transaction_read_only")).to eq("on")
+        raise ActiveRecord::Rollback
+      end
+      result
+    end
 
     TenantScope.as_system(reason: "Build synthetic release-runner fixtures") do
       create(:tax_table)
@@ -33,6 +47,7 @@ RSpec.describe "FICA release-day runner with the tenant guard on", :rls do
       @selected_item = legacy_paycheck(@company)
       legacy_paycheck(@other_company)
     end
+    enforce_as_runtime_role!
   end
 
   def legacy_paycheck(company)
@@ -81,6 +96,10 @@ RSpec.describe "FICA release-day runner with the tenant guard on", :rls do
   end
 
   it "previews both companies and applies only to the selected company" do
+    TenantScope.with_company(@company.id) do
+      expect(PayrollItem.pluck(:id)).to eq([ @selected_item.id ])
+    end
+
     preview = run_release("preview")
     expect(preview.select { |event| event["event"] == "before_inventory" }).to contain_exactly(
       a_hash_including("company_id" => @company.id, "selected" => true, "employee_years" => 1),

@@ -834,7 +834,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     let(:database_state) { shadow_state }
 
     def open_window_for(target, expires_on:)
-      EmployeeAppEarlyAccessWindow.create!(organization: organization, company_ids: [ target.id ], expires_on: expires_on,
+      EmployeeAppEarlyAccessWindow.create!(organization: target.organization, company_ids: [ target.id ], expires_on: expires_on,
         reason: "Owner approved", set_by: owner)
     end
 
@@ -875,12 +875,14 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(EmployeeAppSwitch.effective_values(demo)["employee_portal_enabled"]).to be(true)
     end
 
-    it "rolls back retirement if its organization audit fails and retries without losing a window" do
+    it "retries retirement after an audit failure while retiring the other organization's window" do
       window = open_window_for(demo, expires_on: PayrollBusinessClock.today + 5)
+      other_demo = create_demo_company(organization: create(:organization), subdomain_slug: "other-retirement-demo")
+      other_window = open_window_for(other_demo, expires_on: PayrollBusinessClock.today + 5)
       allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(enforced_state)
       first_attempt = true
       allow(AuditLog).to receive(:record!).and_wrap_original do |record, **attributes|
-        if attributes[:action] == EmployeeAppSwitch::Enforcement::RETIRED_ACTION && first_attempt
+        if attributes[:action] == EmployeeAppSwitch::Enforcement::RETIRED_ACTION && attributes[:record_id] == window.id && first_attempt
           first_attempt = false
           raise ActiveRecord::RecordInvalid
         end
@@ -891,11 +893,14 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       CloseExpiredDemoEarlyAccessJob.perform_now
       expect(window.reload.retired_at).to be_nil
       expect(AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: window.id)).to be_empty
+      expect(other_window.reload.retired_at).to be_present
 
       2.times { CloseExpiredDemoEarlyAccessJob.perform_now }
       expect(window.reload.retired_at).to be_present
       expect(AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: window.id).sole)
         .to have_attributes(organization_id: organization.id, company_id: nil)
+      expect(AuditLog.where(action: EmployeeAppSwitch::Enforcement::RETIRED_ACTION, record_id: other_window.id).sole)
+        .to have_attributes(organization_id: other_demo.organization_id, company_id: nil)
     end
 
     it "closes right away when an admin ends the window, and retires windows once the database enforces RLS" do

@@ -151,18 +151,8 @@ module EmployeeAppSwitch
       actor = AuditActor.system_job(name)
       count = TenantScope.as_system(reason: "Retire verified demo early access and record organization audits") do
         Current.with_isolated_actor(actor) do
-          EmployeeAppEarlyAccessWindow.transaction(requires_new: true) do
-            # Set, end, and emergency stop lock the organization before the window.
-            # Skip a busy organization so a reader holding other locks can return.
-            open_windows = EmployeeAppEarlyAccessWindow.open
-            organization_ids = Organization.where(id: open_windows.select(:organization_id)).order(:id)
-              .lock("FOR KEY SHARE SKIP LOCKED").pluck(:id)
-            windows = open_windows.where(organization_id: organization_ids).order(:id).lock.to_a
-            windows.each do |window|
-              window.update!(retired_at: now, updated_at: now)
-              audit_retired!(window, actor: actor)
-            end
-            windows.size
+          EmployeeAppEarlyAccessWindow.open.distinct.order(:organization_id).pluck(:organization_id).sum do |organization_id|
+            retire_organization_window!(organization_id, now: now, actor: actor)
           end
         end
       end
@@ -172,6 +162,24 @@ module EmployeeAppSwitch
       Rails.logger.warn("[EmployeeAppSwitch::Enforcement] could not retire early access: #{error.class}")
       0
     end
+
+    def retire_organization_window!(organization_id, now:, actor:)
+      EmployeeAppEarlyAccessWindow.transaction(requires_new: true) do
+        # Set, end, and emergency stop lock the organization before the window.
+        next 0 unless Organization.where(id: organization_id).lock("FOR KEY SHARE SKIP LOCKED").pick(:id)
+
+        window = EmployeeAppEarlyAccessWindow.open.lock("FOR UPDATE SKIP LOCKED").find_by(organization_id: organization_id)
+        next 0 unless window
+
+        window.update!(retired_at: now, updated_at: now)
+        audit_retired!(window, actor: actor)
+        1
+      end
+    rescue StandardError => error
+      Rails.logger.warn("[EmployeeAppSwitch::Enforcement] could not retire early access: #{error.class}")
+      0
+    end
+    private_class_method :retire_organization_window!
 
     def audit_retired!(window, actor:)
       AuditLog.record!(
