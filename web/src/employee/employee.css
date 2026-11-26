@@ -1076,7 +1076,7 @@ body {
 
 /* Narrow stubs show YTD totals below the tables. Rows carrying only YTD
    earnings would otherwise read as $0 paid for this check. */
-.emp-ytd, .emp-ytd-only {
+.emp-ytd, .emp-ytd-only, .emp-stub-table-ytd-only {
   display: none;
 }
 
@@ -1087,6 +1087,8 @@ body {
     color: #475569;
   }
   .emp-ytd-only { display: table-row; }
+  .emp-stub-table-ytd-only { display: table; }
+  .emp-no-current-earnings { display: none; }
 }
 
 .emp-security-profile :is(button, [role="button"], a[href]) {

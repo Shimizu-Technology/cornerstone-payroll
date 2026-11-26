@@ -294,6 +294,7 @@ describe('employee site deploy files', () => {
     finalizeEmployeeDist({ distDir: outDir, deployDir, env });
 
     expect(existsSync(path.join(outDir, 'index.html'))).toBe(true);
+    expect(readFileSync(path.join(outDir, 'index.html'), 'utf8')).toContain('<meta name="apple-mobile-web-app-capable" content="yes" />');
     expect(readFileSync(path.join(outDir, 'index.html'), 'utf8')).not.toMatch(/favicon\.svg|manifest\.json/);
     expect(existsSync(path.join(outDir, 'sw.js'))).toBe(false);
     expect(existsSync(path.join(outDir, 'manifest.json'))).toBe(false);

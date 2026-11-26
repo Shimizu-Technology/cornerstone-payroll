@@ -10,6 +10,7 @@ export function employeeIndexHtml(): string {
     <meta name="robots" content="noindex, nofollow" />
     <meta name="referrer" content="no-referrer" />
     <meta name="color-scheme" content="light" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="format-detection" content="telephone=no" />
     <title>Employee app</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -37,10 +37,16 @@ export function useEmployeeInstallMetadata(brand: EmployeeBrand, enabled: boolea
     });
     const favicon = document.createElement('link');
     favicon.rel = 'icon';
+    const faviconUrl = brand.logoUrl ?? icons[0]?.src;
+    if (faviconUrl) favicon.href = faviconUrl;
+
     const touchIcon = document.createElement('link');
     touchIcon.rel = 'apple-touch-icon';
-    const iconUrl = brand.logoUrl ?? icons[0]?.src;
-    if (iconUrl) favicon.href = touchIcon.href = iconUrl;
+    const touchIconUrl = initialIcon(brand, 180);
+    if (touchIconUrl) {
+      touchIcon.href = touchIconUrl;
+      touchIcon.sizes.add('180x180');
+    }
 
     // A blob has no directory for resolving relative URLs. Always launch
     // the employee host's root, including when installed from a deep link.
@@ -54,17 +60,31 @@ export function useEmployeeInstallMetadata(brand: EmployeeBrand, enabled: boolea
       display: 'standalone',
       theme_color: brand.decoration,
       background_color: brand.actionTint,
-      icons: brand.logoUrl ? [{ src: brand.logoUrl }, ...icons] : icons,
+      icons,
     })], { type: 'application/manifest+json' }));
     const manifest = document.createElement('link');
     manifest.rel = 'manifest';
     manifest.href = manifestUrl;
 
     const elements: HTMLElement[] = [theme, appleTitle, manifest];
-    if (iconUrl) elements.push(touchIcon);
-    if (iconUrl && !isStaging) elements.push(favicon);
+    if (touchIconUrl || brand.logoUrl) elements.push(touchIcon);
+    if (faviconUrl && !isStaging) elements.push(favicon);
     document.head.append(...elements);
+
+    // Keep the square initial unless the logo decodes at square dimensions.
+    // Loading the image doesn't need CORS because we only read its dimensions.
+    const logo = brand.logoUrl ? new Image() : null;
+    if (logo && brand.logoUrl) {
+      logo.onload = () => {
+        if (logo.naturalWidth > 0 && logo.naturalWidth === logo.naturalHeight) {
+          touchIcon.href = logo.src;
+          touchIcon.sizes.value = `${logo.naturalWidth}x${logo.naturalHeight}`;
+        }
+      };
+      logo.src = brand.logoUrl;
+    }
     return () => {
+      if (logo) logo.onload = null;
       elements.forEach(element => element.remove());
       URL.revokeObjectURL(manifestUrl);
     };
