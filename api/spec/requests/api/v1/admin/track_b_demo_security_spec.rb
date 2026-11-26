@@ -448,18 +448,67 @@ RSpec.describe "Track B demo company negative security gates", type: :request do
   end
 
   context "with a legacy demo company converted via DemoCompany::ConvertToFlag selected" do
-    let!(:demo) do
-      company = create_demo_company(organization: organization, fixture_key: "converted-security-demo", ein: "66-7654323")
+    before(:context) do
+      @converted_org = FactoryBot.create(:organization, client_limit: 5)
+      @converted_live = FactoryBot.create(
+        :company,
+        organization: @converted_org,
+        name: "Live Client",
+        ein: "66-7654321",
+        address_line1: "123 Marine Corps Dr",
+        city: "Tamuning",
+        state: "GU",
+        zip: "96913",
+        phone: "671-555-0100",
+        email: "payroll@example.com",
+        filing_contact_name: "Ana Cruz",
+        kind_of_employer: "N",
+        employment_code: "R"
+      )
+      @converted_admin = FactoryBot.create(:user, company: @converted_live, organization: @converted_org, role: "super_admin", created_at: 1.year.ago)
+      @converted_demo = FactoryBot.create(
+        :company,
+        organization: @converted_org,
+        name: "Converted Security Demo",
+        payroll_environment: "migration_rehearsal",
+        test_workspace_purpose: "demo",
+        migration_rehearsal_status: "ready",
+        test_workspace_manifest: { "version" => 1, "purpose" => "demo", "demo_fixture_key" => "converted-security-demo" },
+        auto_create_fit_check: false,
+        ein: "66-7654323"
+      )
       DemoCompany::ConvertToFlag.new(
-        organization: organization,
-        actor: super_admin,
-        company_ids: [ company.id ],
+        organization: @converted_org,
+        actor: @converted_admin,
+        company_ids: [ @converted_demo.id ],
         dry_run: false
       ).call
-      company.reload.tap do |converted|
-        raise "Expected converted demo shape" unless converted[:demo] == true && converted.payroll_environment == "live" && !converted.legacy_demo?
+      @converted_demo.reload
+      unless @converted_demo[:demo] == true && @converted_demo.payroll_environment == "live" && !@converted_demo.legacy_demo?
+        raise "Expected converted demo shape"
       end
     end
+
+    after(:context) do
+      conn = ApplicationRecord.connection
+      org_id = @converted_org&.id
+      next unless org_id
+
+      conn.transaction do
+        conn.execute("SET LOCAL session_replication_role = replica")
+        conn.execute("DELETE FROM audit_logs WHERE organization_id = #{org_id}")
+        conn.execute("DELETE FROM invoice_billing_profiles WHERE organization_id = #{org_id}")
+        conn.execute("DELETE FROM finance_books WHERE organization_id = #{org_id}")
+        conn.execute("DELETE FROM users WHERE organization_id = #{org_id}")
+        conn.execute("DELETE FROM companies WHERE organization_id = #{org_id}")
+        conn.execute("DELETE FROM organizations WHERE id = #{org_id}")
+      end
+    end
+
+    let!(:organization) { @converted_org }
+    let!(:live) { @converted_live }
+    let!(:super_admin) { @converted_admin }
+    let!(:demo) { @converted_demo }
 
     include_examples "refuses contained firm and external actions", "converted-shape demo"
   end

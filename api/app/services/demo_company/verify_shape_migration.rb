@@ -6,20 +6,31 @@ require "json"
 module DemoCompany
   # Read-only before/after verification tool for the Track B demo-shape migration.
   #
+  # Always refuses to run inside an existing database transaction and executes
+  # inside its own `SET TRANSACTION READ ONLY` transaction using strictly
+  # read-only model/service predicates (no early-access window retirements, no
+  # practice-account deactivations, no Year-End job enqueues).
+  #
   # Captures a deterministic, PII-free snapshot per named company covering:
-  # - shape columns (the ONLY section allowed to differ between before and after);
+  # - shape columns (the ONLY section allowed to differ between before and after;
+  #   migration_rehearsal_error is emitted only as presence + digest, never raw text);
   # - logins and their access;
   # - employee-app links and their status;
   # - subdomain resolution;
   # - employee app readiness and switch state;
-  # - firm counters (inbox, year-end, invoices/revenue exclusion, shared-email exclusion, client caps);
+  # - firm counters (inbox, year-end, invoices/revenue exclusion, shared-email
+  #   exclusion, client caps);
   # - EIN uniqueness;
-  # - checksums of all payroll figures (pay periods, payroll items, CalculationSnapshot,
-  #   PayrollItemLegacyDispositionService digests, YTD totals, historical paychecks/balances,
-  #   and posted EmployeeDocument records plus PayStubGenerator fingerprint stability).
+  # - checksums of all payroll figures (pay periods, payroll items,
+  #   CalculationSnapshot, PayrollItemLegacyDispositionService, paid-correction
+  #   financial links & payment evidence, time-tracking history inventory, YTD
+  #   totals, historical paychecks/balances, and posted EmployeeDocument records
+  #   plus PayStubGenerator fingerprint stability).
   #
-  # Diffing `before` against `after` fails closed if ANY non-shape field changed
-  # or if the shape transition did not produce a valid new-shape demo company.
+  # Diffing `before` against `after` fails closed on missing/malformed snapshots,
+  # empty company sets, duplicate snapshots (unless allow_already_converted: true
+  # for an already-converted retry), missing fields/link maps, unexpected
+  # time-tracking history rows, or any non-shape difference.
   class VerifyShapeMigration
     class Error < StandardError; end
 
@@ -30,6 +41,30 @@ module DemoCompany
     end
 
     SCHEMA_VERSION = 1
+
+    REQUIRED_SECTIONS = %w[
+      shape identity logins employee_account_links subdomain employee_app
+      counters ein_uniqueness payroll_checksums
+    ].freeze
+
+    REQUIRED_SHAPE_COMPANY_KEYS = %w[
+      demo
+      payroll_environment
+      test_workspace_purpose
+      migration_rehearsal_status
+      migration_rehearsal_created_by_id
+      migration_rehearsal_created_at
+      migration_rehearsal_created_at_present
+      migration_rehearsal_completed_at
+      migration_rehearsal_completed_at_present
+      migration_rehearsal_error_present
+      migration_rehearsal_error_sha256
+      migration_source_company_id
+      migration_source_batch_id
+      test_workspace_expires_at_present
+      test_workspace_archived_at_present
+      test_workspace_sealed_at_present
+    ].freeze
 
     def self.capture(organization:, actor:, company_ids:, tax_year: PayrollBusinessClock.today.year,
                      check_employee_service: false, readiness_database_state: nil, readiness_ping: nil)
@@ -44,38 +79,70 @@ module DemoCompany
       ).capture
     end
 
-    def self.diff(before_snapshot, after_snapshot)
+    def self.diff(before_snapshot, after_snapshot, expected_company_ids: nil, allow_already_converted: false)
       before = stringify_deep(before_snapshot)
       after = stringify_deep(after_snapshot)
 
       unexpected = []
       shape_changes = {}
 
-      if before["schema_version"] != after["schema_version"]
-        unexpected << { path: "schema_version", before: before["schema_version"], after: after["schema_version"] }
-      end
-      if before["organization_id"] != after["organization_id"]
-        unexpected << { path: "organization_id", before: before["organization_id"], after: after["organization_id"] }
-      end
-      if before["tax_year"] != after["tax_year"]
-        unexpected << { path: "tax_year", before: before["tax_year"], after: after["tax_year"] }
+      validate_envelope("before", before, unexpected)
+      validate_envelope("after", after, unexpected)
+
+      if before.is_a?(Hash) && after.is_a?(Hash)
+        %w[schema_version organization_id tax_year].each do |field|
+          next if before[field] == after[field]
+
+          unexpected << { path: field, before: before[field], after: after[field] }
+        end
       end
 
-      before_companies = before.fetch("companies", {})
-      after_companies = after.fetch("companies", {})
-      all_company_ids = (before_companies.keys | after_companies.keys).sort_by(&:to_i)
+      before_companies = before.is_a?(Hash) && before["companies"].is_a?(Hash) ? before["companies"] : {}
+      after_companies = after.is_a?(Hash) && after["companies"].is_a?(Hash) ? after["companies"] : {}
 
-      if before_companies.keys.sort != after_companies.keys.sort
+      if before_companies.empty?
+        unexpected << { path: "before.companies", expected: "non-empty hash", after: before_companies }
+      end
+      if after_companies.empty?
+        unexpected << { path: "after.companies", expected: "non-empty hash", after: after_companies }
+      end
+
+      expected_keys = normalize_expected_ids(expected_company_ids, unexpected)
+      if expected_keys
+        if before_companies.keys.sort != expected_keys
+          unexpected << { path: "before.companies", expected: expected_keys, after: before_companies.keys.sort }
+        end
+        if after_companies.keys.sort != expected_keys
+          unexpected << { path: "after.companies", expected: expected_keys, after: after_companies.keys.sort }
+        end
+      elsif before_companies.keys.sort != after_companies.keys.sort
         unexpected << { path: "companies", before: before_companies.keys.sort, after: after_companies.keys.sort }
       end
 
-      all_company_ids.each do |cid|
+      target_keys = expected_keys || (before_companies.keys | after_companies.keys).sort_by(&:to_i)
+
+      target_keys.each do |cid|
         b_entry = before_companies[cid]
         a_entry = after_companies[cid]
-        next if b_entry.nil? || a_entry.nil?
+        unless b_entry.is_a?(Hash)
+          unexpected << { path: "before.companies.#{cid}", expected: "hash", after: b_entry }
+        end
+        unless a_entry.is_a?(Hash)
+          unexpected << { path: "after.companies.#{cid}", expected: "hash", after: a_entry }
+        end
+        next unless b_entry.is_a?(Hash) && a_entry.is_a?(Hash)
+
+        missing_before = REQUIRED_SECTIONS - b_entry.keys
+        missing_after = REQUIRED_SECTIONS - a_entry.keys
+        unexpected << { path: "before.companies.#{cid}.sections", expected: REQUIRED_SECTIONS, after: b_entry.keys.sort } if missing_before.any?
+        unexpected << { path: "after.companies.#{cid}.sections", expected: REQUIRED_SECTIONS, after: a_entry.keys.sort } if missing_after.any?
+        next if missing_before.any? || missing_after.any?
+
+        validate_company_transition(cid, b_entry, a_entry, allow_already_converted: allow_already_converted, unexpected: unexpected)
+        validate_time_tracking_history_empty(cid, "before", b_entry, unexpected)
+        validate_time_tracking_history_empty(cid, "after", a_entry, unexpected)
 
         shape_changes[cid] = collect_diffs(b_entry["shape"], a_entry["shape"], prefix: "companies.#{cid}.shape")
-        validate_after_shape(cid, a_entry["shape"], unexpected)
 
         b_invariant = b_entry.except("shape")
         a_invariant = a_entry.except("shape")
@@ -84,7 +151,7 @@ module DemoCompany
 
       DiffResult.new(
         passed: unexpected.empty?,
-        company_ids: all_company_ids.map(&:to_i),
+        company_ids: target_keys.map(&:to_i),
         shape_changes: shape_changes,
         unexpected_diffs: unexpected
       )
@@ -102,9 +169,11 @@ module DemoCompany
     end
 
     def capture
+      ensure_no_open_transaction!
       system_scope do
-        authorize!
-        with_read_only_if_top_level do
+        ApplicationRecord.transaction do
+          ApplicationRecord.connection.execute("SET TRANSACTION READ ONLY")
+          authorize!
           TenantSubdomainRegistry.invalidate!
           companies = load_companies!
           org_counters = capture_org_counters(companies)
@@ -126,6 +195,12 @@ module DemoCompany
     attr_reader :organization, :actor, :company_ids, :tax_year, :check_employee_service,
                 :readiness_database_state, :readiness_ping
 
+    def ensure_no_open_transaction!
+      return unless ApplicationRecord.connection.open_transactions.positive?
+
+      raise Error, "Cannot run shape verification inside an existing database transaction"
+    end
+
     def normalize_ids(raw)
       values = Array(raw).flat_map { |entry| entry.to_s.split(",") }.map(&:strip).reject(&:blank?)
       raise Error, "Specify COMPANY_IDS (comma-separated company IDs)" if values.empty?
@@ -136,23 +211,14 @@ module DemoCompany
     end
 
     def authorize!
-      allowed = organization.present? && actor&.organization_admin? && actor.payroll_access_allowed? &&
+      allowed = organization.present? && actor&.organization_admin? &&
+        actor.payroll_access_allowed?(deactivate_closed_practice: false) &&
         actor.organization_id == organization.id && StaffRolePolicy.allowed?(actor, :manage_organization)
       raise Error, "An organization administrator is required" unless allowed
     end
 
     def system_scope(&)
       TenantScope.current ? yield : TenantScope.as_system(reason: "Verify demo company shape migration", &)
-    end
-
-    def with_read_only_if_top_level(&)
-      connection = ApplicationRecord.connection
-      return yield if connection.open_transactions.positive?
-
-      ApplicationRecord.transaction do
-        connection.execute("SET TRANSACTION READ ONLY")
-        yield
-      end
     end
 
     def load_companies!
@@ -211,6 +277,7 @@ module DemoCompany
     def capture_shape(company)
       links_env = EmployeeAccountLink.where(company_id: company.id).order(:id).pluck(:id, :payroll_environment)
         .to_h { |id, env| [ id.to_s, env ] }
+      error_text = company.migration_rehearsal_error
       {
         "company" => {
           "demo" => company[:demo] == true,
@@ -218,9 +285,12 @@ module DemoCompany
           "test_workspace_purpose" => company.test_workspace_purpose,
           "migration_rehearsal_status" => company.migration_rehearsal_status,
           "migration_rehearsal_created_by_id" => company.migration_rehearsal_created_by_id,
+          "migration_rehearsal_created_at" => company.migration_rehearsal_created_at&.utc&.iso8601(6),
           "migration_rehearsal_created_at_present" => company.migration_rehearsal_created_at.present?,
+          "migration_rehearsal_completed_at" => company.migration_rehearsal_completed_at&.utc&.iso8601(6),
           "migration_rehearsal_completed_at_present" => company.migration_rehearsal_completed_at.present?,
-          "migration_rehearsal_error" => company.migration_rehearsal_error,
+          "migration_rehearsal_error_present" => error_text.present?,
+          "migration_rehearsal_error_sha256" => error_text.present? ? Digest::SHA256.hexdigest(error_text.to_s) : nil,
           "migration_source_company_id" => company.migration_source_company_id,
           "migration_source_batch_id" => company.migration_source_batch_id,
           "test_workspace_expires_at_present" => company.test_workspace_expires_at.present?,
@@ -241,7 +311,8 @@ module DemoCompany
         "operating_predicate" => company.operating?,
         "contained_predicate" => company.contained?,
         "practice_copy_predicate" => company.practice_copy?,
-        "demo_fixture_key" => company.test_workspace_manifest.to_h["demo_fixture_key"]
+        "demo_fixture_key" => company.test_workspace_manifest.to_h["demo_fixture_key"],
+        "demo_manifest_sha256" => sha256_canonical(company.test_workspace_manifest.to_h)
       }
     end
 
@@ -261,7 +332,7 @@ module DemoCompany
           "invitation_status" => user.invitation_status,
           "company_id" => user.company_id,
           "practice_company_id" => user.practice_company_id,
-          "payroll_access_allowed" => user.payroll_access_allowed?,
+          "payroll_access_allowed" => user.payroll_access_allowed?(deactivate_closed_practice: false),
           "can_access_company" => user.can_access_company?(company.id),
           "accessible_company_ids" => user.accessible_company_ids.sort,
           "assignment" => assignment ? {
@@ -295,7 +366,7 @@ module DemoCompany
       end
 
       {
-        "portal_enabled_for_company" => EmployeeAccountLink.portal_enabled_for?(company),
+        "portal_enabled_for_company" => EmployeeAccountLink.portal_enabled_for?(company, retire_windows: false),
         "count" => links.size,
         "status_counts" => links.group_by { |row| row["status"] }.transform_values(&:size).sort.to_h,
         "links" => links
@@ -341,7 +412,7 @@ module DemoCompany
         "eligible_company" => EmployeeAppSwitch.eligible_company?(company),
         "stored_values" => stringify_deep(EmployeeAppSwitch.stored_values(company)),
         "switched_on_values" => stringify_deep(EmployeeAppSwitch.switched_on_values(company)),
-        "effective_values" => stringify_deep(EmployeeAppSwitch.effective_values(company)),
+        "effective_values" => stringify_deep(EmployeeAppSwitch.effective_values(company, retire_windows: false)),
         "on_anywhere" => EmployeeAppSwitch.on_anywhere(company).sort,
         "open_activations" => EmployeeAppActivation.open_parts_for(company.id).sort,
         "readiness" => readiness_json
@@ -441,6 +512,32 @@ module DemoCompany
         "historical_paychecks" => HistoricalPaycheck.where(company_id: company.id).order(:id).map { |r| normalize_attributes(r.attributes.except("updated_at")) }
       }
 
+      paid_correction_links = TimeTrackingFinancialCorrectionLink.where(company_id: company.id).order(:id).to_a
+      paid_correction_dispositions = TimeTrackingCorrectionDisposition.where(company_id: company.id).order(:id).to_a
+      paid_correction_receipts = TimeTrackingCorrectionReceipt
+        .joins(:time_tracking_correction_disposition)
+        .where(time_tracking_correction_dispositions: { company_id: company.id })
+        .order(:id).to_a
+      check_events = CheckEvent.where(company_id: company.id).order(:id).to_a
+      check_reconciliations = CheckReconciliationEvent.where(company_id: company.id).order(:id).to_a
+      dd_confirmations = DirectDepositPaymentConfirmation.where(company_id: company.id).order(:id).to_a
+      check_supersessions = NonEmployeeCheckSupersession.where(company_id: company.id).order(:id).to_a
+
+      paid_correction_payload = {
+        "financial_correction_links" => paid_correction_links.map { |r| normalize_attributes(r.attributes.except("updated_at")) },
+        "correction_dispositions" => paid_correction_dispositions.map { |r| normalize_attributes(r.attributes.except("updated_at")) },
+        "correction_receipts" => paid_correction_receipts.map { |r| normalize_attributes(r.attributes.except("updated_at")) },
+        "check_events" => check_events.map { |r| normalize_attributes(r.attributes.except("updated_at")) },
+        "check_reconciliation_events" => check_reconciliations.map { |r| normalize_attributes(r.attributes.except("updated_at")) },
+        "direct_deposit_payment_confirmations" => dd_confirmations.map { |r| normalize_attributes(r.attributes.except("updated_at")) },
+        "non_employee_check_supersessions" => check_supersessions.map { |r| normalize_attributes(r.attributes.except("updated_at")) }
+      }
+
+      tt_sources = TimeTrackingSource.where(company_id: company.id).order(:id).pluck(:id)
+      tt_imports = TimeTrackingImport.where(company_id: company.id).order(:id).pluck(:id)
+      history_reviews = AireHistoryReview.where(company_id: company.id).order(:id).pluck(:id, :digest)
+      history_receipts = AireVerifiedHistoryRolloutReceipt.where(company_id: company.id).order(:id).pluck(:id, :manifest_sha256)
+
       documents = EmployeeDocument.where(company_id: company.id).includes(payroll_item: [ :employee, :pay_period ]).order(:id).to_a
       document_rows = documents.map do |doc|
         {
@@ -477,6 +574,20 @@ module DemoCompany
         "payroll_items_sha256" => sha256_canonical(item_rows),
         "calculation_snapshots_sha256" => sha256_canonical(calculation_snapshots),
         "legacy_disposition_digests_sha256" => sha256_canonical(legacy_disposition_digests),
+        "paid_correction_evidence_counts" => paid_correction_payload.transform_values(&:size),
+        "paid_correction_evidence_sha256" => sha256_canonical(paid_correction_payload),
+        "time_tracking_history" => {
+          "sources_count" => tt_sources.size,
+          "imports_count" => tt_imports.size,
+          "history_reviews_count" => history_reviews.size,
+          "verified_history_receipts_count" => history_receipts.size,
+          "sha256" => sha256_canonical(
+            "sources" => tt_sources,
+            "imports" => tt_imports,
+            "history_reviews" => history_reviews,
+            "verified_history_receipts" => history_receipts
+          )
+        },
         "ytd_totals_sha256" => sha256_canonical(ytd_payload),
         "posted_documents_count" => documents.size,
         "posted_documents_sha256" => sha256_canonical(document_rows),
@@ -532,46 +643,197 @@ module DemoCompany
         end
       end
 
-      def validate_after_shape(cid, shape, unexpected)
-        company = shape.is_a?(Hash) ? shape["company"] : nil
-        unless company.is_a?(Hash)
-          unexpected << { path: "companies.#{cid}.shape.company", before: "present", after: company }
+      def validate_envelope(label, snapshot, unexpected)
+        unless snapshot.is_a?(Hash)
+          unexpected << { path: label, expected: "hash", after: snapshot }
           return
         end
 
-        expected_company_shape = {
+        unless snapshot["schema_version"] == SCHEMA_VERSION
+          unexpected << { path: "#{label}.schema_version", expected: SCHEMA_VERSION, after: snapshot["schema_version"] }
+        end
+        unless snapshot["organization_id"].is_a?(Integer) && snapshot["organization_id"].positive?
+          unexpected << { path: "#{label}.organization_id", expected: "positive integer", after: snapshot["organization_id"] }
+        end
+        unless snapshot["tax_year"].is_a?(Integer) && snapshot["tax_year"] >= 2020
+          unexpected << { path: "#{label}.tax_year", expected: "tax year integer", after: snapshot["tax_year"] }
+        end
+        unless snapshot["companies"].is_a?(Hash)
+          unexpected << { path: "#{label}.companies", expected: "hash", after: snapshot["companies"] }
+        end
+      end
+
+      def normalize_expected_ids(raw, unexpected)
+        return nil if raw.nil?
+
+        values = Array(raw).flat_map { |entry| entry.to_s.split(",") }.map(&:strip).reject(&:blank?)
+        if values.empty?
+          unexpected << { path: "expected_company_ids", expected: "non-empty company IDs", after: raw }
+          return []
+        end
+
+        values.map { |v| Integer(v, 10).to_s }.uniq.sort
+      rescue ArgumentError
+        unexpected << { path: "expected_company_ids", expected: "integer company IDs", after: raw }
+        []
+      end
+
+      def validate_company_transition(cid, before_entry, after_entry, allow_already_converted:, unexpected:)
+        before_shape = before_entry["shape"]
+        after_shape = after_entry["shape"]
+
+        before_ok = validate_shape_structure(cid, "before", before_shape, before_entry["employee_account_links"], unexpected)
+        after_ok = validate_shape_structure(cid, "after", after_shape, after_entry["employee_account_links"], unexpected)
+        return unless before_ok && after_ok
+
+        before_is_legacy = legacy_shape?(before_shape)
+        before_is_flag = flag_shape?(before_shape)
+        after_is_flag = flag_shape?(after_shape)
+
+        unless after_is_flag
+          validate_flag_shape_fields(cid, "after", after_shape, unexpected)
+        end
+
+        if allow_already_converted
+          unless before_is_legacy || before_is_flag
+            unexpected << {
+              path: "before.companies.#{cid}.shape",
+              expected: "legacy-shape demo or already-converted flag-shape demo",
+              after: before_shape["company"]
+            }
+          end
+        elsif !before_is_legacy
+          unexpected << {
+            path: "before.companies.#{cid}.shape",
+            expected: "legacy-shape demo (pass allow_already_converted: true only for an already-converted retry)",
+            after: before_shape["company"]
+          }
+        end
+      end
+
+      def validate_shape_structure(cid, label, shape, links_section, unexpected)
+        unless shape.is_a?(Hash)
+          unexpected << { path: "#{label}.companies.#{cid}.shape", expected: "hash", after: shape }
+          return false
+        end
+
+        company = shape["company"]
+        links_env = shape["employee_account_links_payroll_environments"]
+        ok = true
+
+        unless company.is_a?(Hash)
+          unexpected << { path: "#{label}.companies.#{cid}.shape.company", expected: "hash", after: company }
+          ok = false
+        else
+          missing_keys = REQUIRED_SHAPE_COMPANY_KEYS - company.keys
+          if missing_keys.any?
+            unexpected << { path: "#{label}.companies.#{cid}.shape.company.keys", expected: REQUIRED_SHAPE_COMPANY_KEYS, after: company.keys.sort }
+            ok = false
+          end
+        end
+
+        unless links_env.is_a?(Hash)
+          unexpected << { path: "#{label}.companies.#{cid}.shape.employee_account_links_payroll_environments", expected: "hash", after: links_env }
+          ok = false
+        else
+          expected_link_ids = if links_section.is_a?(Hash) && links_section["links"].is_a?(Array)
+            links_section["links"].map { |row| row.is_a?(Hash) ? row["id"].to_s : nil }.compact.sort
+          else
+            unexpected << { path: "#{label}.companies.#{cid}.employee_account_links.links", expected: "array", after: links_section }
+            ok = false
+            nil
+          end
+          if expected_link_ids && links_env.keys.sort != expected_link_ids
+            unexpected << {
+              path: "#{label}.companies.#{cid}.shape.employee_account_links_payroll_environments",
+              expected: expected_link_ids,
+              after: links_env.keys.sort
+            }
+            ok = false
+          end
+        end
+
+        ok
+      end
+
+      def legacy_shape?(shape)
+        company = shape["company"]
+        links = shape["employee_account_links_payroll_environments"]
+        company["demo"] == false &&
+          company["payroll_environment"] == "migration_rehearsal" &&
+          company["test_workspace_purpose"] == "demo" &&
+          company["migration_rehearsal_status"] == "ready" &&
+          company["migration_source_company_id"].nil? &&
+          company["migration_source_batch_id"].nil? &&
+          company["test_workspace_expires_at_present"] == false &&
+          company["test_workspace_archived_at_present"] == false &&
+          company["test_workspace_sealed_at_present"] == false &&
+          links.values.all? { |env| env == "migration_rehearsal" }
+      end
+
+      def flag_shape?(shape)
+        company = shape["company"]
+        links = shape["employee_account_links_payroll_environments"]
+        expected_flag_company_shape.all? { |field, expected| company[field] == expected } &&
+          links.values.all? { |env| env == "live" }
+      end
+
+      def expected_flag_company_shape
+        {
           "demo" => true,
           "payroll_environment" => "live",
           "test_workspace_purpose" => nil,
           "migration_rehearsal_status" => nil,
           "migration_rehearsal_created_by_id" => nil,
+          "migration_rehearsal_created_at" => nil,
           "migration_rehearsal_created_at_present" => false,
+          "migration_rehearsal_completed_at" => nil,
           "migration_rehearsal_completed_at_present" => false,
-          "migration_rehearsal_error" => nil,
+          "migration_rehearsal_error_present" => false,
+          "migration_rehearsal_error_sha256" => nil,
           "migration_source_company_id" => nil,
           "migration_source_batch_id" => nil,
           "test_workspace_expires_at_present" => false,
           "test_workspace_archived_at_present" => false,
           "test_workspace_sealed_at_present" => false
         }
-        expected_company_shape.each do |field, expected|
+      end
+
+      def validate_flag_shape_fields(cid, label, shape, unexpected)
+        company = shape["company"]
+        expected_flag_company_shape.each do |field, expected|
           actual = company[field]
           next if actual == expected
 
-          unexpected << { path: "companies.#{cid}.shape.company.#{field}", expected: expected, after: actual }
+          unexpected << { path: "#{label}.companies.#{cid}.shape.company.#{field}", expected: expected, after: actual }
         end
 
-        links = shape["employee_account_links_payroll_environments"]
-        if links.is_a?(Hash)
-          links.each do |link_id, env|
-            next if env == "live"
+        shape["employee_account_links_payroll_environments"].each do |link_id, env|
+          next if env == "live"
 
-            unexpected << {
-              path: "companies.#{cid}.shape.employee_account_links_payroll_environments.#{link_id}",
-              expected: "live",
-              after: env
-            }
-          end
+          unexpected << {
+            path: "#{label}.companies.#{cid}.shape.employee_account_links_payroll_environments.#{link_id}",
+            expected: "live",
+            after: env
+          }
+        end
+      end
+
+      def validate_time_tracking_history_empty(cid, label, entry, unexpected)
+        history = entry.dig("payroll_checksums", "time_tracking_history")
+        unless history.is_a?(Hash)
+          unexpected << { path: "#{label}.companies.#{cid}.payroll_checksums.time_tracking_history", expected: "hash", after: history }
+          return
+        end
+
+        %w[sources_count history_reviews_count verified_history_receipts_count].each do |key|
+          next if history[key] == 0
+
+          unexpected << {
+            path: "#{label}.companies.#{cid}.payroll_checksums.time_tracking_history.#{key}",
+            expected: 0,
+            after: history[key]
+          }
         end
       end
     end

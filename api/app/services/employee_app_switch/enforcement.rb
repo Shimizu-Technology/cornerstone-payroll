@@ -123,9 +123,9 @@ module EmployeeAppSwitch
     # Read-time gate for a demo company's employee app: verified
     # enforcement, or the shadow state with an in-effect window naming the
     # company.
-    def demo_open?(company, today: PayrollBusinessClock.today)
+    def demo_open?(company, today: PayrollBusinessClock.today, retire_windows: true)
       if verified?
-        retire_windows!
+        retire_windows! if retire_windows
         return true
       end
 
@@ -137,10 +137,10 @@ module EmployeeAppSwitch
     # service's guard in raise mode as the restricted role with no bypass
     # (demo_reader_allowed?). Without that, a job sees the demo's app as off
     # and does nothing.
-    def demo_app_open?(company, today: PayrollBusinessClock.today)
+    def demo_app_open?(company, today: PayrollBusinessClock.today, retire_windows: true)
       return true unless company&.demo?
 
-      demo_open?(company, today: today) && demo_reader_allowed?(company)
+      demo_open?(company, today: today, retire_windows: retire_windows) && demo_reader_allowed?(company)
     end
 
     # Company and support reads can open the demo as soon as enforcement is
