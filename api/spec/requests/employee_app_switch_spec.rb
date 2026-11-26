@@ -124,6 +124,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         expect(response).to have_http_status(:forbidden)
       end
 
+      turn_on_directly!(company, %w[employee_portal_enabled])
       switch!({ "employee_portal_enabled" => false }, user: owner, recent: false)
       expect(response).to have_http_status(:ok), response.body
 
