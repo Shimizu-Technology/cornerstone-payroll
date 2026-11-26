@@ -551,12 +551,12 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         PayrollCalculator.for(employee, overlap_item).calculate
         overlap_item.save!
         # Commit also refuses a period inside the boundary today; only that
-        # check is lifted, so snapshots and events are the real ones.
+        # check is lifted (until this example ends), so snapshots and events
+        # are the real ones.
         allow_any_instance_of(PayPeriod).to receive(:starts_after_historical_ytd_boundary)
         TenantScope.with_company(fixture.company.id) do
           PayPeriodLifecycleService.new(pay_period: overlap_period, actor: fixture.staff_user).commit!
         end
-        RSpec::Mocks.space.any_instance_recorder_for(PayPeriod).stop_all_observation!
         expect(overlap_period.reload).to be_committed
         expect(overlap_item.reload.check_number).to be_nil
         expect(balance.through_pay_date).to eq(overlap_period.pay_date)
