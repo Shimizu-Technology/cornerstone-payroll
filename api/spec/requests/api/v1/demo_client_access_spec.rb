@@ -321,7 +321,7 @@ RSpec.describe "Demo company staff and client access", type: :request do
       outcomes = invite
       expect(outcomes.map(&:status)).to eq(%w[invited invited])
       expect(outcomes).to all(be_complete)
-      expect(User.where(company: demo).order(:name).pluck(:name, :role)).to eq([ [ "Maren Fable", "client" ], [ "Tessa Vale", "client" ] ])
+      expect(User.where(company: demo).order(:name).pluck(:name, :role)).to eq([ [ "Client Manager", "client" ], [ "Client User", "client" ] ])
       expect(CompanyAssignment.where(company: demo).count).to eq(2)
       # Each email carries its own invitation's acceptance URL (with the ticket).
       %w[tk_1 tk_2].each do |ticket|
@@ -351,13 +351,13 @@ RSpec.describe "Demo company staff and client access", type: :request do
     it "reissues a delivered invitation that expired or was revoked, and leaves an accepted one alone" do
       issue_invitations!
       invite
-      maren = User.find_by!(name: "Maren Fable")
-      tessa = User.find_by!(name: "Tessa Vale")
-      allow(clerk).to receive(:invitation_status).with(maren.clerk_invitation_id).and_return("expired")
-      allow(clerk).to receive(:invitation_status).with(tessa.clerk_invitation_id).and_return("accepted")
+      manager = User.find_by!(name: "Client Manager")
+      client_user = User.find_by!(name: "Client User")
+      allow(clerk).to receive(:invitation_status).with(manager.clerk_invitation_id).and_return("expired")
+      allow(clerk).to receive(:invitation_status).with(client_user.clerk_invitation_id).and_return("accepted")
       expect(invite.map(&:status)).to eq(%w[invited already_accepted])
 
-      allow(clerk).to receive(:invitation_status).with(maren.reload.clerk_invitation_id).and_return("revoked")
+      allow(clerk).to receive(:invitation_status).with(manager.reload.clerk_invitation_id).and_return("revoked")
       expect(invite.map(&:status)).to eq(%w[invited already_accepted])
       expect(invitation).to have_received(:send_invite).exactly(4).times
       expect(UserInviteEmailService).to have_received(:send_invite).with(hash_including(invitation_url: a_string_including("ticket=tk_4")))

@@ -5,7 +5,7 @@ module DemoCompany
   # notices reach the firm-controlled mailbox. Addresses come only from the
   # caller (private configuration), must be allow-listed and are never stored
   # in the repository. They go to the roster's people in order; a person at
-  # both employers (Kit Wren) gets the same address at each.
+  # both employers (Employee 06) gets the same address at each.
   #
   # Everything is checked before anything is written: the organization
   # administrator, each address and every target employee. Each change and its
@@ -54,7 +54,7 @@ module DemoCompany
         entries.map do |person|
           company = companies.fetch(person[:company])
           id = TenantScope.with_company(company.id) do
-            Employee.where(company_id: company.id, first_name: person[:first], last_name: person[:last]).pick(:id)
+            Employee.where(company_id: company.id, ssn_encrypted: Roster.ssn_variants(person)).pick(:id)
           end
           raise Refused, "Seed the demo employers first (rake demo:seed); nothing was changed" unless id
 
