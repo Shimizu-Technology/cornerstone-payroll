@@ -2,7 +2,14 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HIDE_AMOUNTS_KEY, readHideAmounts, writeHideAmounts } from './preferences';
+import {
+  HIDE_AMOUNTS_EXPLAINED_KEY,
+  HIDE_AMOUNTS_KEY,
+  readHideAmounts,
+  readHideAmountsExplained,
+  writeHideAmounts,
+  writeHideAmountsExplained,
+} from './preferences';
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -21,35 +28,53 @@ afterEach(() => {
 });
 
 describe('Hide amounts preference', () => {
-  it('defaults to showing amounts and remembers the choice', () => {
+  it('defaults to hiding amounts and remembers an explicit device choice', () => {
     const storage = memoryStorage();
+    expect(readHideAmounts(() => storage)).toBe(true);
+
+    writeHideAmounts(false, () => storage);
+    expect(storage.getItem(HIDE_AMOUNTS_KEY)).toBe('false');
     expect(readHideAmounts(() => storage)).toBe(false);
+
     writeHideAmounts(true, () => storage);
     expect(storage.getItem(HIDE_AMOUNTS_KEY)).toBe('true');
     expect(readHideAmounts(() => storage)).toBe(true);
-    writeHideAmounts(false, () => storage);
-    expect(storage.length).toBe(0);
+
+    // Unexpected stored values fail closed to hidden.
+    storage.setItem(HIDE_AMOUNTS_KEY, 'unexpected');
+    expect(readHideAmounts(() => storage)).toBe(true);
   });
 
-  it('shows amounts when storage methods throw, and never throws itself', () => {
+  it('falls back to hiding amounts when storage methods throw or storage is missing', () => {
     const blocked = {
       getItem: vi.fn((): never => { throw new DOMException('denied', 'SecurityError'); }),
       setItem: vi.fn((): never => { throw new DOMException('full', 'QuotaExceededError'); }),
       removeItem: vi.fn(),
     };
-    expect(readHideAmounts(() => blocked)).toBe(false);
+    expect(readHideAmounts(() => blocked)).toBe(true);
+    expect(() => writeHideAmounts(false, () => blocked)).not.toThrow();
     expect(() => writeHideAmounts(true, () => blocked)).not.toThrow();
-    expect(readHideAmounts(() => undefined)).toBe(false);
+    expect(readHideAmounts(() => undefined)).toBe(true);
   });
 
-  it('survives a browser where even reading window.localStorage throws', () => {
+  it('survives a browser where even reading window.localStorage throws, failing closed to masked', () => {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
       get(): never { throw new DOMException('The operation is insecure.', 'SecurityError'); },
     });
-    expect(readHideAmounts()).toBe(false);
-    expect(() => writeHideAmounts(true)).not.toThrow();
+    expect(readHideAmounts()).toBe(true);
+    expect(readHideAmountsExplained()).toBe(false);
     expect(() => writeHideAmounts(false)).not.toThrow();
+    expect(() => writeHideAmounts(true)).not.toThrow();
+    expect(() => writeHideAmountsExplained()).not.toThrow();
+  });
+
+  it('remembers that the one-time explainer was shown on this device', () => {
+    const storage = memoryStorage();
+    expect(readHideAmountsExplained(() => storage)).toBe(false);
+    writeHideAmountsExplained(() => storage);
+    expect(storage.getItem(HIDE_AMOUNTS_EXPLAINED_KEY)).toBe('true');
+    expect(readHideAmountsExplained(() => storage)).toBe(true);
   });
 
   it('is the only place the employee app touches localStorage', () => {
