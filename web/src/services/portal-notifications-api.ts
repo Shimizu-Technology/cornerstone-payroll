@@ -39,9 +39,14 @@ export interface NotificationSettings {
   administration?: { clients_without_recipients: ClientWithoutRecipients[] };
 }
 
+export type AccountTeamRole = 'lead' | 'backup' | null;
+
 export interface PortalAlertRecipients {
   company_id: number;
-  eligible_users: { id: number; name: string; email: string; role: string; selected: boolean }[];
+  eligible_users: { id: number; name: string; email: string; role: string; selected: boolean; team_role?: AccountTeamRole }[];
+  lead_user_id?: number | null;
+  backup_user_id?: number | null;
+  needs_lead?: boolean;
   ineligible_listed_users: { id: number; name: string }[];
   extra_emails: string[];
   recipient_count: number;
@@ -59,6 +64,9 @@ export const notificationSettingsApi = {
 export const portalAlertRecipientsApi = {
   get: (companyId: number): Promise<{ data: PortalAlertRecipients }> =>
     apiClient.get<{ data: PortalAlertRecipients }>('/admin/portal_notification_recipients', undefined, { companyId }),
-  update: (companyId: number, payload: { user_ids: number[]; emails: string[] }): Promise<{ data: PortalAlertRecipients }> =>
+  update: (
+    companyId: number,
+    payload: { user_ids: number[]; emails: string[]; lead_user_id?: number | null; backup_user_id?: number | null },
+  ): Promise<{ data: PortalAlertRecipients }> =>
     apiClient.put<{ data: PortalAlertRecipients }>('/admin/portal_notification_recipients', payload, { companyId }),
 };
