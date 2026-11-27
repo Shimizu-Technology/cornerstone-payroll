@@ -9,7 +9,8 @@ module Api
       # and an active employee link.
       # Withdrawal is intentionally one-tap without step-up (owner decision per §8a):
       # it can only move an employee back to paper delivery, and is permitted on
-      # eligible former links as well as active links.
+      # eligible former links as well as active links. "Keep paper" follows the
+      # same rule: it records an explicit answer and never changes delivery.
       class DeliveryConsentsController < BaseController
         include RecentVerification
 
@@ -201,6 +202,59 @@ module Api
               disclosure_digest: consent_record.disclosure_digest,
               change_to_confirm_id: change_entry.id
             })
+          else
+            skip_default_audit_log!
+          end
+          render json: status_payload, status: :ok
+        end
+
+        # POST /api/v1/employee/delivery_consents/keep_paper
+        # Records the employee's explicit "keep paper" answer without creating a
+        # consent. Like withdrawal it needs no step-up: paper continues either way.
+        # Always 200, like withdrawal; repeating it changes nothing. With an active
+        # consent the employee withdraws instead, so the answer can't contradict it.
+        def keep_paper
+          kind = params[:kind].to_s
+          unless DeliveryDisclosure::KINDS.include?(kind)
+            return render json: { error: "Unsupported delivery consent type.", code: "invalid_kind" },
+              status: :unprocessable_entity
+          end
+
+          preference = nil
+          error_response = nil
+
+          Employee.transaction(requires_new: true) do
+            lock_consent_context!
+            unless withdrawable_link?
+              head :not_found
+              next
+            end
+
+            if DeliveryConsent.active.exists?(company_id: current_company_id, employee_id: @employee.id, kind: kind)
+              error_response = { error: "Electronic consent is on. Switch back to paper in My info instead.", code: "consent_active" }
+              next
+            end
+
+            next if DeliveryPreference.exists?(company_id: current_company_id, employee_id: @employee.id, kind: kind)
+
+            preference = DeliveryPreference.create!(
+              company_id: current_company_id,
+              employee: @employee,
+              employee_account_link: @employee_link,
+              user: @current_user,
+              kind: kind,
+              choice: "keep_paper",
+              recorded_at: Time.current,
+              ip_address: request_ip,
+              user_agent: request_user_agent
+            )
+          end
+
+          return if performed?
+          return render json: error_response, status: :unprocessable_entity if error_response
+
+          if preference
+            audit!("keep_paper", record: preference, metadata: { kind: preference.kind, choice: preference.choice })
           else
             skip_default_audit_log!
           end
