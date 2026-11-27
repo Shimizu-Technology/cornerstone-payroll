@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactElement } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Download, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { LabeledTextarea } from '@/components/payroll-submissions/LabeledTextarea';
-import { acceptStringForSlot, DEFAULT_MOSA_DESCRIPTOR } from '@/lib/importSources';
+import { acceptStringForSlot, DEFAULT_MOSA_DESCRIPTOR, templateFormatsForSlot } from '@/lib/importSources';
 import { CHANGE_KINDS, clientPayrollSubmissionsApi, type ChangeKind, type ChangeRow, type PeriodDetail, type PickerEmployee, type SubmissionRevision } from '@/services/payrollSubmissions';
 import type { PayrollIntakeFileSlot } from '@/services/api';
 
@@ -65,6 +65,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const [notes, setNotes] = useState(current?.notes || '');
   const [addKind, setAddKind] = useState<ChangeKind>('extra_hours');
   const [busy, setBusy] = useState(false);
+  const [downloadingFormat, setDownloadingFormat] = useState<'xlsx' | 'csv' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, string[]>>({});
   const retry = useRef<{ identity: string; key: string } | null>(null);
@@ -82,6 +83,25 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
 
   const setSlotFile = (portalRole: string, file: File | null): void => {
     setSlotFiles(currentFiles => ({ ...currentFiles, [portalRole]: file }));
+  };
+  const downloadTemplate = async (format: 'xlsx' | 'csv'): Promise<void> => {
+    try {
+      setDownloadingFormat(format);
+      setError(null);
+      const file = await clientPayrollSubmissionsApi.downloadTemplate(period.ref, format);
+      const url = URL.createObjectURL(file.blob);
+      const anchor = window.document.createElement('a');
+      anchor.href = url;
+      anchor.download = file.filename || `cornerstone-workbook.${format}`;
+      window.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not download the ${format.toUpperCase()} template.`);
+    } finally {
+      setDownloadingFormat(null);
+    }
   };
   const keptDocumentFor = (portalRole: string) => carryable.find(d => d.role === portalRole && keep.includes(d.document!.id));
   const isPortalSlotRequired = (slot: PayrollIntakeFileSlot & { portal_role: string }): boolean => (
@@ -211,6 +231,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
           );
         }
         const required = isPortalSlotRequired(slot);
+        const slotTemplateFormats = templateFormatsForSlot(slot);
         return (
           <fieldset key={slot.portal_role} className="min-w-0 space-y-2">
             <legend className="text-sm font-semibold text-neutral-900">
@@ -219,6 +240,27 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
               {!required && <span className="font-normal text-neutral-600">(optional)</span>}
             </legend>
             {hint && <p className="text-sm text-neutral-600">{hint}</p>}
+            {slotTemplateFormats.length > 0 && (
+              <div className="flex flex-wrap gap-2 py-1">
+                {slotTemplateFormats.map((format) => (
+                  <Button
+                    key={format}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={downloadingFormat !== null}
+                    onClick={() => void downloadTemplate(format)}
+                  >
+                    <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                    {downloadingFormat === format
+                      ? `Downloading ${format.toUpperCase()}…`
+                      : format === 'xlsx'
+                        ? 'Download Excel template (.xlsx)'
+                        : 'Download CSV template (.csv)'}
+                  </Button>
+                ))}
+              </div>
+            )}
             {kept && !chosen && <p className="text-sm text-neutral-700">Keeping {kept.file_name} from revision {current?.revision}. Choose a file to replace it.</p>}
             {chosen && <p className="break-all text-sm text-neutral-700">Selected: {chosen.name}</p>}
             <input aria-label={label} type="file" accept={acceptStringForSlot(slot, true)} onChange={e => setSlotFile(slot.portal_role, e.target.files?.[0] || null)} className="block w-full text-sm file:mr-3 file:min-h-11 file:rounded-md file:border file:border-neutral-300 file:bg-white file:px-3 file:font-medium" />
@@ -245,7 +287,11 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         </label>
         <p className="text-sm text-neutral-600">This choice does not change your payroll entries above.</p>
         {!noChanges && <>
-          <p className="text-sm text-neutral-600">Only list what is different from the Revel report. Cornerstone reviews every change before it reaches payroll.</p>
+          <p className="text-sm text-neutral-600">
+            {descriptor.key === 'mosa_revel'
+              ? 'Only list what is different from the Revel report. Cornerstone reviews every change before it reaches payroll.'
+              : 'Only list anything not already included in the payroll workbook. Cornerstone reviews every change before it reaches payroll.'}
+          </p>
           {employeeState === 'loading' && <p role="status" className="text-sm text-neutral-600">Loading employees…</p>}
           {employeeState === 'error' && <div role="alert" className="flex flex-col gap-2 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800 sm:flex-row sm:items-center sm:justify-between">
             <span>The employee list did not load, so employees cannot be chosen yet.</span>

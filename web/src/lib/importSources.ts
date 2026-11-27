@@ -82,6 +82,61 @@ export const DEFAULT_SPIKE_DESCRIPTOR: PayrollIntakeDescriptor = {
   },
 };
 
+export const DEFAULT_CORNERSTONE_WORKBOOK_DESCRIPTOR: PayrollIntakeDescriptor = {
+  key: 'cornerstone_workbook',
+  label: 'Cornerstone workbook',
+  source_label: 'Cornerstone universal payroll workbook',
+  parser_version: 'cornerstone_workbook:v1',
+  extraction: 'deterministic',
+  accepts_pasted_text: false,
+  tracks_reviewed_hours: false,
+  employee_match: 'employee_id',
+  idempotency: 'files_and_workweek',
+  reports_overtime: false,
+  tips_default: 'paid_in_check',
+  overtime_mode: 'weekly_split',
+  workweek_alignment: 'aligned',
+  required_sources: ['cornerstone_workbook'],
+  files: [
+    {
+      role: 'cornerstone_workbook',
+      label: 'Cornerstone workbook',
+      hint: 'Upload the completed Cornerstone payroll workbook (.xlsx or .csv) pre-filled with active Employee IDs.',
+      accept: ['.xlsx', '.csv'],
+      content_type: null,
+      max: 1,
+      required: true,
+      required_by_default: true,
+      waivable: null,
+      portal_role: 'payroll_workbook',
+      portal_label: 'Cornerstone payroll workbook (.xlsx or .csv)',
+      portal_hint: 'Download this period’s pre-filled Excel or CSV template, enter hours, PTO, holiday, tips, bonuses, one-time items, and loans, then upload it here.',
+      supports_link: false,
+      template_formats: ['xlsx', 'csv'],
+      provides: [
+        'week1_hours',
+        'week2_hours',
+        'regular_hours',
+        'overtime_hours',
+        'pto_hours',
+        'holiday_hours',
+        'reported_tips',
+        'tips_already_paid',
+        'bonus',
+        'one_time_earnings',
+        'one_time_deductions',
+        'loan_deduction',
+      ],
+    },
+  ],
+  portal: {
+    submittable: true,
+    role_map: {
+      payroll_workbook: 'cornerstone_workbook',
+    },
+  },
+};
+
 export function acceptStringForSlot(slot: PayrollIntakeFileSlot, includeContentType = false): string {
   const parts: string[] = [];
   if (includeContentType && slot.content_type) parts.push(slot.content_type);
@@ -134,7 +189,7 @@ export function hasPortalSubmittableAdapter(company?: Pick<CompanyListItem, 'por
   if (company.payroll_intake_adapters?.length) {
     return company.payroll_intake_adapters.some((adapter) => adapter.portal?.submittable);
   }
-  return Boolean(company.payroll_intake_source_types?.includes('mosa_revel'));
+  return Boolean(company.payroll_intake_source_types?.some((key) => key === 'mosa_revel' || key === 'cornerstone_workbook'));
 }
 
 export function intakeAdaptersForPayPeriod(
@@ -145,6 +200,7 @@ export function intakeAdaptersForPayPeriod(
   return (sourceTypes || []).flatMap((key) => {
     if (key === 'mosa_revel') return [DEFAULT_MOSA_DESCRIPTOR];
     if (key === 'spike_email') return [DEFAULT_SPIKE_DESCRIPTOR];
+    if (key === 'cornerstone_workbook') return [DEFAULT_CORNERSTONE_WORKBOOK_DESCRIPTOR];
     return [];
   });
 }
@@ -152,7 +208,12 @@ export function intakeAdaptersForPayPeriod(
 export function intakeMenuLabel(descriptor: PayrollIntakeDescriptor): string {
   if (descriptor.key === 'mosa_revel') return 'Import (MoSa)';
   if (descriptor.key === 'spike_email') return 'Import Spike Email';
+  if (descriptor.key === 'cornerstone_workbook') return 'Import Cornerstone Workbook';
   return `Import (${descriptor.label})`;
+}
+
+export function templateFormatsForSlot(slot?: PayrollIntakeFileSlot | null): Array<'xlsx' | 'csv'> {
+  return (slot?.template_formats || []).filter((format): format is 'xlsx' | 'csv' => format === 'xlsx' || format === 'csv');
 }
 
 // The retained files import review can show beside the review: the Revel
