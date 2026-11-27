@@ -54,11 +54,16 @@ module EmployeeDocuments
       notice = EmployeeDocumentNotice.create_or_find_by!(company_id: document.company_id, employee_document_id: document.id, kind: kind) do |row|
         row.employee_id = document.employee_id || document.payroll_item.employee_id
       end
+      deliver_notice(notice)
+    end
+
+    def deliver_notice(notice)
+      kind = notice.kind
       notice.with_lock do
         next if notice.status.in?(%w[sent skipped])
         next if notice.status == "failed" && notice.attempts >= MAX_ATTEMPTS
 
-        document.reload
+        document = notice.employee_document
         if (reason = skip_reason(document, kind: kind))
           notice.update!(status: "skipped", skip_reason: reason)
           next
@@ -92,7 +97,8 @@ module EmployeeDocuments
       to = document_employee(document).email
       notice.update!(attempts: notice.attempts + 1, recipient_email: to)
       response = DemoOutbound.scoped(document.company, channel: channel_for(kind)) do
-        PortalNotifications::Transport.deliver(payload(document, to, kind: kind), idempotency_key: "#{channel_for(kind).dasherize}-#{document.id}")
+        key = kind == KIND ? "employee-tax-form-notice-#{document.id}" : "employee-pay-stub-notice-#{notice.id}"
+        PortalNotifications::Transport.deliver(payload(document, to, kind: kind), idempotency_key: key)
       end
       if response["suppressed"]
         notice.update!(status: "skipped", skip_reason: "recipient_not_allowed")
@@ -120,14 +126,20 @@ module EmployeeDocuments
       brand = EmployeeEmails::Brand.for(document.company)
       if kind == PAY_STUB_CORRECTED
         origin = EmployeeLinks::AppUrl.origin_for(document.company)
-        return EmployeeEmails::Message.new(brand: brand, subject: "Your pay stub was corrected",
-          heading: "Your pay stub was corrected",
-          paragraphs: [ "Sign in to your employee app to view the updated pay stub." ],
-          action: (origin && { label: "Open the employee app", url: "#{origin}/pay" })).payload(to: to)
+        item = document.payroll_item
+        return pay_stub_message(brand, pay_date: item.check_date || item.pay_period.pay_date, app_url: origin).payload(to: to)
       end
 
       message(brand, tax_year: document.tax_year, employer: document.company.name,
         app_url: EmployeeLinks::AppUrl.origin_for(document.company)).payload(to: to)
+    end
+
+    def pay_stub_message(brand, pay_date:, app_url:)
+      date = pay_date.strftime("%B %-d, %Y")
+      EmployeeEmails::Message.new(brand: brand, subject: "Your pay stub for #{date} was corrected",
+        heading: "Your pay stub was corrected",
+        paragraphs: [ "Sign in to your employee app to view the updated pay stub for #{date}." ],
+        action: (app_url && { label: "Open the employee app", url: "#{app_url}/pay" }))
     end
 
     # The notice's sentences are its approved wording; keep them word for

@@ -22,6 +22,8 @@ class AuditLogPresenter
     "transmittal_log" => "transmittal log"
   }.freeze
   VERBS = {
+    "employee_pay_stubs#notice_bounced" => "recorded a bounced pay stub correction email for",
+    "employee_pay_stubs#notice_complained" => "recorded a spam complaint about the pay stub correction email for",
     "view_as#started" => "viewed as",
     "companies#create" => "created",
     "client_operating_profile.update" => "updated the operating profile for",

@@ -36,19 +36,16 @@ class DispatchEmployeeTaxFormNoticesJob < ApplicationJob
     # A failed send just now is left for a later sweep, not retried in a loop.
     notices = notices.where(status: "pending").or(notices.where(updated_at: ..RETRY_AFTER.ago))
     sent = 0
-    notices.order(:id).limit(BATCH).pluck(:company_id, :employee_document_id, :kind).each do |notice_company_id, document_id, kind|
-      document = EmployeeDocument.find_by(company_id: notice_company_id, id: document_id)
-      next unless document
-
-      if kind == notice::KIND
-        notice.deliver(document)
+    notices.order(:id).limit(BATCH).each do |row|
+      if row.kind == notice::KIND
+        notice.deliver(row.employee_document)
       else
-        notice.deliver(document, kind: kind)
+        notice.deliver_notice(row)
       end
       sent += 1
     rescue StandardError => e
-      Rails.logger.error("[DispatchEmployeeTaxFormNoticesJob] Notice for employee document #{document_id} failed: #{e.class}")
-      Rails.error.report(e, handled: true, context: { employee_document_id: document_id })
+      Rails.logger.error("[DispatchEmployeeTaxFormNoticesJob] Notice for employee document #{row.employee_document_id} failed: #{e.class}")
+      Rails.error.report(e, handled: true, context: { employee_document_id: row.employee_document_id })
     end
     sent
   end

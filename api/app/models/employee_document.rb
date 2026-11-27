@@ -24,7 +24,16 @@ class EmployeeDocument < ApplicationRecord
 
   # Older and structural corrections retain the link-based classification.
   def correction_label?
-    money_changed.nil? ? corrected? : money_changed?
+    correction_label.nil? ? corrected? : correction_label
+  end
+
+  def correction_revision?
+    return corrected? if money_changed.nil?
+    return true if money_changed?
+
+    predecessor = replaces_document
+    predecessor.present? && (predecessor.payroll_item_id != payroll_item_id ||
+      predecessor.withdrawn? || predecessor.withdrawal_reason.present?)
   end
 
   attr_readonly :company_id, :payroll_item_id, :historical_paycheck_id, :employee_id, :tax_year,

@@ -288,9 +288,11 @@ export interface EarlierVersion {
   corrected: boolean;
   postedAt: string | null;
   paymentLine: string | null;
+  ytdChanged: boolean;
 }
 
 export interface StatementDetail extends StatementSummary {
+  ytdChanged: boolean;
   earnings: EarningLine[];
   taxes: TaxLine[];
   deductions: AmountLine[];
@@ -330,6 +332,7 @@ function earlierVersions(value: unknown): EarlierVersion[] {
       postedAt: postedAt && !Number.isNaN(Date.parse(postedAt)) ? postedAt : null,
       paymentLine: text(version.payment_line),
       corrected: bool(version.corrected),
+      ytdChanged: bool(version.ytd_changed),
     }];
   });
 }
@@ -364,6 +367,7 @@ export function parseStatementDetail(data: unknown): StatementDetail | null {
     ytdNote: text(body.ytd_note),
     note: text(body.adjustment_note) ?? text(body.note),
     earlierVersions: earlierVersions(body.earlier_versions),
+    ytdChanged: bool(body.ytd_changed),
   };
 }
 
