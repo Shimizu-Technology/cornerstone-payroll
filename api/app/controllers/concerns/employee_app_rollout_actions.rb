@@ -133,7 +133,22 @@ module EmployeeAppRolloutActions
   def employee_payload(record)
     rollout.employee_status(record, rollout.latest_access(record), include_issuer: current_user.staff_member?).merge(
       enabled: rollout.enabled, can_manage_invites: can_manage_invites?,
-      staff_actions: staff_actions?, can_print_codes: staff_actions?
+      staff_actions: staff_actions?, can_print_codes: staff_actions?,
+      agreements: agreements_payload(record)
+    )
+  end
+
+  # Terms, paperless answers and app use for the profile panel, from the same
+  # read model as the company report (EmployeeAppStatusReport).
+  def agreements_payload(record)
+    report = EmployeeAppStatusReport.new(current_company)
+    row = report.row(record)
+    row.slice(:terms, :pay_statements, :w2gu).merge(
+      account: row[:account].slice(:status, :label, :signed_up, :invite_sent_at, :signed_up_at, :last_opened_at,
+        :earlier_employment_last_opened_at),
+      current_terms_version: EmployeeTermsVersion.current&.version,
+      opens_recorded_since: EmployeeAppStatusReport::APP_OPENS_RECORDED_SINCE.iso8601,
+      delivery_consent_enabled: CompanyFeatures.for(current_company).employee_portal_feature?(:delivery_consent)
     )
   end
 
