@@ -77,14 +77,16 @@ class PayStubGenerator
   end
 
   # The printed statement as data, for readers that must agree with the paper
-  # copy (the AIRE worker app). Every row comes from the same builders the PDF
-  # renders, so labels and amounts match. Employer-only amounts are omitted.
+  # copy (the employee and AIRE worker apps). Every row comes from the same
+  # builders the PDF renders, so labels and amounts match, including the
+  # employer contributions it prints (they never change take-home pay).
   def statement
     {
       earnings: statement_earnings,
       taxes: tax_lines.map { |label, amount, ytd| { label: label, amount: amount.to_d, ytd: ytd } },
-      deductions: statement_ytd_breakdown.deductions.map { |row| { label: pay_stub_deduction_label(row), amount: row.current.to_d, ytd: row.ytd.to_d } },
+      deductions: statement_ytd_breakdown.deductions.map { |row| { label: PayrollLabels.deduction(row), amount: row.current.to_d, ytd: row.ytd.to_d } },
       other_pay: statement_ytd_breakdown.other_pay.map { |row| { label: row.label, amount: row.current.to_d, ytd: row.ytd.to_d } },
+      employer_contributions: statement_ytd_breakdown.employer_contributions.map { |row| { label: row.label, amount: row.current.to_d, ytd: row.ytd.to_d } },
       ytd: { gross: pay_ytd_total, net: statement_ytd_totals[:net] }
     }
   end
@@ -99,16 +101,6 @@ class PayStubGenerator
 
   def matches_employee_payroll_facts?(digest)
     digest.present? && (digest == employee_payroll_facts_sha256 || digest == employee_payroll_fingerprint(legacy: true))
-  end
-
-  def self.employee_payment_line(item)
-    if !item.net_pay.to_d.positive?
-      [ "Earnings statement only - no payment issued", item.check_number.presence ].compact.join(" · ")
-    elsif item.effective_payment_delivery_method == "direct_deposit"
-      "Direct deposit"
-    else
-      "Check ##{item.check_number}"
-    end
   end
 
   private
@@ -133,7 +125,7 @@ class PayStubGenerator
     amounts["additional_medicare_tax"] = payroll_item.additional_medicare_tax.to_d unless legacy || payroll_item.contractor?
     [
       pay_period.start_date, pay_period.end_date, pay_period.pay_date, payroll_item.check_date,
-      self.class.employee_payment_line(payroll_item), amounts, earnings, components
+      PayrollPaymentLabel.statement_line(payroll_item), amounts, earnings, components
     ]
   end
 
@@ -205,11 +197,11 @@ class PayStubGenerator
         [ "Pay Period:", "#{format_date(pay_period.start_date)} - #{format_date(pay_period.end_date)}" ],
         [ "Pay Date:", format_date(payroll_item.check_date || pay_period.pay_date) ],
         if @employee_copy && !@preview
-          [ "Payment:", self.class.employee_payment_line(payroll_item) ]
+          [ "Payment:", PayrollPaymentLabel.statement_line(payroll_item) ]
         elsif !payroll_item.net_pay.to_d.positive?
-          [ "Payment:", @preview ? "Earnings statement only" : "Earnings statement only - no payment issued" ]
+          [ "Payment:", @preview ? "Earnings statement only" : PayrollPaymentLabel::NO_PAYMENT ]
         elsif payroll_item.effective_payment_delivery_method == "direct_deposit"
-          [ "Payment:", @preview ? "Direct deposit" : "Direct deposit (stub only; transfer not confirmed)" ]
+          [ "Payment:", PayrollPaymentLabel::DIRECT_DEPOSIT ]
         else
           [ "Check #:", @preview ? "" : payroll_item.check_number.presence || "No check issued" ]
         end
@@ -496,7 +488,7 @@ class PayStubGenerator
     deductions_data.concat(taxes.drop(1))
 
     statement_ytd_breakdown.deductions.each do |row|
-      deductions_data << [ pay_stub_deduction_label(row), format_currency(row.current), format_currency(row.ytd) ]
+      deductions_data << [ PayrollLabels.deduction(row), format_currency(row.current), format_currency(row.ytd) ]
     end
 
     deductions_data
@@ -731,17 +723,6 @@ class PayStubGenerator
 
   def statement_ytd_breakdown
     @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item, sources: ytd_sources)
-  end
-
-  def pay_stub_deduction_label(row)
-    case row.semantic
-    when PayrollReportingGroups::GROUP_401K_PRE_TAX.to_sym
-      "401(k) Retirement"
-    when :loan
-      row.label == "Loan" ? "Loan Repayment" : row.label
-    else
-      row.label
-    end
   end
 
   # The same earlier and current paychecks as the statement's YTD rows.

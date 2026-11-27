@@ -42,6 +42,20 @@ RSpec.describe "Client pay stubs", type: :request do
     expect(text).not_to match(/accountant.only|review warning|storage.key|transmittal/i)
   end
 
+  it "lists stubs newest first by the date each one prints" do
+    worker = create(:employee, company: company)
+    january = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 1, 12), end_date: Date.new(2026, 1, 25), pay_date: Date.new(2026, 1, 31))
+    february = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 1, 26), end_date: Date.new(2026, 2, 8), pay_date: Date.new(2026, 2, 15))
+    late_check = create(:payroll_item, company: company, employee: worker, pay_period: january, gross_pay: 100, net_pay: 90, check_date: Date.new(2026, 2, 20))
+    on_time = create(:payroll_item, company: company, employee: worker, pay_period: february, gross_pay: 100, net_pay: 90)
+
+    get "/api/v1/client/pay_stubs/employee/#{worker.id}", headers: headers
+
+    expect(response.parsed_body.fetch("pay_stubs").map { |stub| stub.values_at("id", "pay_date", "period_pay_date") }).to eq([
+      [ late_check.id, "2026-02-20", "2026-01-31" ], [ on_time.id, "2026-02-15", "2026-02-15" ]
+    ])
+  end
+
   it "logs ambiguous stub history and returns a client-safe download error" do
     error = PayrollInsuranceComponents::AmbiguousHistoryError.new("Staff-only insurance repair instructions")
     allow_any_instance_of(PayStubGenerator).to receive(:generate).and_raise(error)

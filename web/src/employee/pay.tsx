@@ -775,6 +775,14 @@ function StubDetailView({
             {stub.otherPay.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} />)}
           </StubTable>
         )}
+        {stub.employerContributions.length > 0 && (
+          <>
+            <StubTable caption="Paid by your employer" total={sum(stub.employerContributions)}>
+              {stub.employerContributions.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} />)}
+            </StubTable>
+            <p className="emp-hint">Your employer pays these on top of your pay. They don&apos;t change your take-home pay.</p>
+          </>
+        )}
 
         {(stub.ytdNet || stub.ytdGross) && (
           <section aria-label="This year so far" className="space-y-2">

@@ -39,7 +39,11 @@ class EmployeePayStatements
       )
       return json unless employee_app
 
-      json.merge(ytd_note: (PayrollBridgeOverlap::EMPLOYEE_NOTE if ytd_under_review?))
+      json.merge(
+        # Paid on top of pay, as the PDF prints them (L7).
+        employer_contributions: statement.fetch(:employer_contributions).map { |row| amount_row(row) },
+        ytd_note: (PayrollBridgeOverlap::EMPLOYEE_NOTE if ytd_under_review?)
+      )
     end
 
     private

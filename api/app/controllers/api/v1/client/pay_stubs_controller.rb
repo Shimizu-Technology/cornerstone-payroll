@@ -8,7 +8,7 @@ module Api
 
         def index
           employee = Employee.where(company_id: current_company_id).find(params[:employee_id])
-          items = eligible_items.where(employee_id: employee.id).includes(:pay_period).order("pay_periods.pay_date DESC", id: :desc)
+          items = eligible_items.where(employee_id: employee.id).includes(:pay_period).newest_printed_first
           quickbooks_paychecks = EmployeeDocuments::QuickbooksHistory.for(employee).map do |check|
             {
               id: check[:historical_paycheck_id],
@@ -24,7 +24,9 @@ module Api
           end
           render json: {
             pay_stubs: items.select { |item| EarningsStatementEligibility.printable?(item) }.map { |item|
-              { id: item.id, pay_period_id: item.pay_period_id, pay_date: item.pay_period.pay_date,
+              # pay_date is the date the stub prints (the check's own date, else the run's).
+              { id: item.id, pay_period_id: item.pay_period_id, pay_date: item.check_date || item.pay_period.pay_date,
+                period_pay_date: item.pay_period.pay_date,
                 start_date: item.pay_period.start_date, end_date: item.pay_period.end_date,
                 period_description: item.pay_period.period_description, net_pay: item.net_pay }
             },

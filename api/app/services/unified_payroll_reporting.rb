@@ -92,7 +92,7 @@ class UnifiedPayrollReporting
       payroll_count: row.fetch(:payroll_count, 0).to_i + regular_period_count(paychecks),
       imported_payroll_count: regular_period_count(paychecks),
       imported_opening_summary_count: opening_summary_count(paychecks),
-      total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
+      worked_hours: row.fetch(:worked_hours, 0).to_d + totals[:total_hours],
       combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
       total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
       gross_pay: (row.fetch(:gross_pay, 0).to_d + totals[:gross_pay]).to_f,
@@ -133,7 +133,7 @@ class UnifiedPayrollReporting
   def add_historical_to_company_totals(row, paychecks, adjustments = [], native_employee_ids:)
     totals = historical_totals(paychecks, adjustments)
     row.merge(
-      total_hours: row.fetch(:total_hours, 0).to_d + totals[:total_hours],
+      worked_hours: row.fetch(:worked_hours, 0).to_d + totals[:total_hours],
       combined_hours: row.fetch(:combined_hours, 0).to_d + totals[:combined_hours],
       total_overtime_hours: row.fetch(:total_overtime_hours, 0).to_d + totals[:total_overtime_hours],
       gross_pay: (row.fetch(:gross_pay, 0).to_d + totals[:gross_pay]).to_f,
@@ -216,8 +216,11 @@ class UnifiedPayrollReporting
     end
   end
 
+  # An imported paycheck exactly as imported. Recorded adjustments stay
+  # separate rows, so the row says so rather than reading as the final amount.
   def history_row(paycheck)
     totals = imported_totals([ paycheck ])
+    adjustment_count = paycheck.historical_paycheck_adjustments.size
     {
       key: "imported:#{paycheck.id}",
       record_type: "imported",
@@ -227,7 +230,7 @@ class UnifiedPayrollReporting
       pay_date: paycheck.pay_date,
       period_description: paycheck.historical_pay_period.source_label,
       scheduled_hours: nil,
-      hours_worked: recorded_hours_component(paycheck, REGULAR_HOURS)&.to_f,
+      hours_worked: ImportedPaycheckHours.regular(paycheck).to_f,
       total_hours: paycheck.hours_total.to_f,
       overtime_hours: recorded_hours_component(paycheck, OVERTIME_HOURS)&.to_f,
       holiday_hours: nil,
@@ -250,6 +253,10 @@ class UnifiedPayrollReporting
       net_pay: paycheck.net_pay.to_f,
       check_number: paycheck.check_number,
       payment_method: paycheck.payment_method,
+      payment_method_label: PayrollPaymentLabel.history_row(record_type: "imported", payment_method: paycheck.payment_method,
+        check_number: paycheck.check_number),
+      as_imported: true,
+      basis_label: adjustment_count.positive? ? "As imported, before #{adjustment_count} recorded #{'adjustment'.pluralize(adjustment_count)}" : "As imported",
       payroll_field_entries: [],
       payroll_field_totals: {},
       source: {
@@ -377,7 +384,7 @@ class UnifiedPayrollReporting
   def locked_historical_scope
     HistoricalPaycheck
       .joins(:historical_import_batch)
-      .includes(:historical_import_batch, :historical_pay_period)
+      .includes(:historical_import_batch, :historical_pay_period, :historical_paycheck_adjustments)
       .where(company_id: @company_id)
       .where(historical_import_batches: { company_id: @company_id, status: "locked" })
   end
@@ -426,7 +433,7 @@ class UnifiedPayrollReporting
     employer_contribution_totals = historical_employer_contribution_totals(rows)
     employer_contributions = decimal_sum(rows, :employer_contributions)
     {
-      total_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, REGULAR_HOURS).to_d },
+      total_hours: paychecks.sum(0.to_d) { |paycheck| ImportedPaycheckHours.regular(paycheck) },
       combined_hours: rows.sum(0.to_d) { |row| row.hours_total.to_d },
       total_overtime_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, OVERTIME_HOURS).to_d },
       # Imported gross includes non-taxable reimbursements; like the pay stub,
@@ -567,8 +574,7 @@ class UnifiedPayrollReporting
   end
 
   def recorded_hours_component(paycheck, pattern)
-    amounts = matching_component_amounts(paycheck.hours_breakdown, pattern)
-    amounts.sum(0.to_d) if amounts.any?
+    ImportedPaycheckHours.component(paycheck, pattern)
   end
 
   def matching_component_amounts(components, pattern)

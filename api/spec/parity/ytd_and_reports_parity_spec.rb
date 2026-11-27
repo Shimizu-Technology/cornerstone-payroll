@@ -394,8 +394,6 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         labeled_as_imported = qb_label_text.match?(/as imported|unadjusted|before adjustment|original.*adjust/i) ||
           staff_qb_row["as_imported"] == true ||
           money(staff_qb_row["gross_pay"]) == emp_qb[:gross_pay]
-
-        pending "L15: staff/client pay history shows raw QuickBooks row ($1,910.00) without clearly labeling it as imported / unadjusted relative to its $50.00 adjustment row"
         expect(labeled_as_imported).to eq(true),
           "Expected staff pay history QB row (gross #{staff_qb_row['gross_pay']}) to label its original amount as imported/unadjusted or match adjusted gross (#{emp_qb[:gross_pay]}); got source=#{staff_qb_row['source'].inspect}, period_description=#{staff_qb_row['period_description'].inspect}"
       end
@@ -411,8 +409,6 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
 
         # Period 1 (80 reg + 4 OT + 8 Holiday) + Period 2 (80 reg + 10 OT + 8 PTO + 8 Holiday) = 198 combined.
         expect(staff_ytd.dig(:hours, :combined)).to eq(BigDecimal("198.00"))
-
-        pending "L13: ytd_summary report sets `total_hours` to worked hours only (160.00) while `combined_hours` is 198.00"
         assert_parity!(
           fixture: :hourly_overtime,
           figure: [ :hours, :total_hours_vs_combined ],
@@ -423,39 +419,18 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         )
       end
 
-      it "removes or reconciles unused ReportsController#employee_ytd_summary and #employee_ytd_row" do
+      it "has no separate YTD helpers that could drop W-4 4c or the opening balance (L18)" do
         controller = Api::V1::Admin::ReportsController.new
-        allow(controller).to receive(:current_company_id).and_return(fixture.company.id)
-        employee = fixture.employees.fetch(:additional_withholding_med)
-        year = Parity::FixtureBuilder::TAX_YEAR
-        real_ytd = staff_api.extract_ytd_summary_row(employee_id: employee.id, year: year)
-        expect(real_ytd.dig(:ytd, :total_income_tax)).to be > 0
+        %i[employee_ytd_summary employee_ytd_row employee_ytd_summary_rows ytd_custom_totals_by_employee employee_reportable_ytd_items].each do |helper|
+          expect(controller.respond_to?(helper, true)).to eq(false), "#{helper} should be removed; ytd_summary is the one YTD report"
+        end
 
-        pending "L18: unused ReportsController#employee_ytd_summary / #employee_ytd_row drop W-4 4(c) additional_withholding and historical bridge balances"
-        # Passes automatically when L18 deletes the unused private helpers (per PLAN.md),
-        # or if they are kept and reconciled to match staff_ytd_summary.
-        if controller.respond_to?(:employee_ytd_summary, true)
-          helper_result = controller.send(:employee_ytd_summary, employee, year)
-          assert_parity!(
-            fixture: :additional_withholding_med,
-            figure: [ :ytd, :total_income_tax ],
-            values_by_view: {
-              reports_controller_helper: money(helper_result[:withholding_tax]),
-              staff_ytd_summary: real_ytd.dig(:ytd, :total_income_tax)
-            }
-          )
-        end
-        if controller.respond_to?(:employee_ytd_row, true)
-          row_result = controller.send(:employee_ytd_row, employee, year)
-          assert_parity!(
-            fixture: :additional_withholding_med,
-            figure: [ :ytd, :total_income_tax ],
-            values_by_view: {
-              reports_controller_row_helper: money(row_result[:withholding_tax]),
-              staff_ytd_summary: real_ytd.dig(:ytd, :total_income_tax)
-            }
-          )
-        end
+        employee = fixture.employees.fetch(:additional_withholding_med)
+        real_ytd = staff_api.extract_ytd_summary_row(employee_id: employee.id, year: Parity::FixtureBuilder::TAX_YEAR)
+        item = fixture.items.fetch(:additional_withholding_med_p2)
+        expect(real_ytd.dig(:ytd, :total_income_tax)).to eq(
+          (fixture.items.fetch(:additional_withholding_med_p1).total_income_tax_withheld + item.total_income_tax_withheld).round(2)
+        )
       end
     end
   end

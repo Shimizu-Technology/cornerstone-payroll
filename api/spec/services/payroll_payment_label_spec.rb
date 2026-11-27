@@ -23,6 +23,15 @@ RSpec.describe PayrollPaymentLabel do
     expect(described_class.for(item)).not_to include("400")
   end
 
+  it "says a voided paper check is voided, as the pay run and the employee app do (D-10)" do
+    item = create(:payroll_item, company: company, employee: employee, pay_period: period,
+      payment_delivery_method: "paper_check", check_number: "400", net_pay: 700)
+    item.voided = true
+    expect(described_class.for(item)).to eq(described_class::VOIDED_CHECK)
+    # The stub's own payment line is part of its fingerprint and stays as posted.
+    expect(described_class.statement_line(item)).to eq("Check #400")
+  end
+
   it "distinguishes zero-net earnings from an unassigned positive check" do
     item = create(:payroll_item, company: company, employee: employee, pay_period: period,
       gross_pay: 197.67, net_pay: 0, loan_deduction: 182.54, check_number: nil)

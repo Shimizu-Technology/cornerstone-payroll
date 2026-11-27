@@ -260,8 +260,6 @@ RSpec.describe "Profile, name suffix, voided check, reversal, contractor transit
       doc_p2 = fixture.ensure_stub_posted!(:contractor_transition_p2)
       emp_pdf = pay_stub_pdf_extractor.extract(employee_api(:contractor_transition).statement_pdf_bytes(doc_p2.id))
       chk_pdf = check_stub_pdf_extractor.extract(CheckGenerator.new(item_p2).generate)
-
-      pending "L6: CheckGenerator#tax_rows checks employee.contractor? (current status) instead of payroll_item.contractor?, dropping all taxes on historical W-2 check stubs"
       assert_parity_table!(
         fixture: :contractor_transition_p2,
         views: {

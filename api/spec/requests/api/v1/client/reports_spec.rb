@@ -799,7 +799,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     report = response.parsed_body.fetch("report")
     summary = report.fetch("summary")
     expect(summary.transform_values(&:to_d)).to include(
-      "total_hours" => 70.25.to_d, "total_overtime_hours" => 4.5.to_d,
+      "total_hours" => 74.75.to_d, "worked_hours" => 70.25.to_d, "total_overtime_hours" => 4.5.to_d,
       "total_bonus" => 42.67.to_d, "total_reported_tips" => 20.to_d, "total_tips_paid_out" => 10.to_d,
       "total_straight_loan_deductions" => 10.to_d, "total_installment_loan_payments" => 15.to_d,
       "total_employer_contributions" => 24.to_d, "total_employer_payroll_cost" => 1584.2.to_d
@@ -826,7 +826,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     get "/api/v1/client/reports/payroll_register_csv", params: params
     expect(response).to have_http_status(:ok)
     row = CSV.parse(response.body, headers: true)[-1]
-    expect(row.fetch("Regular Hours").to_d).to eq(summary.fetch("total_hours").to_d)
+    expect(row.fetch("Regular Hours").to_d).to eq(summary.fetch("worked_hours").to_d)
     expect(row.fetch("Total Guam income tax withheld")).to eq("132.34")
     expect(response.body).not_to include("TEST-100")
 
@@ -834,7 +834,7 @@ RSpec.describe "Api::V1::Client::Reports", type: :request do
     expect(response).to have_http_status(:ok)
     workbook = Roo::Excelx.new(StringIO.new(response.body))
     rows = workbook.sheet("Employees").to_a
-    expect(rows.last.fetch(rows.fetch(3).index("Regular Hours")).to_d).to eq(summary.fetch("total_hours").to_d)
+    expect(rows.last.fetch(rows.fetch(3).index("Regular Hours")).to_d).to eq(summary.fetch("worked_hours").to_d)
     expect(rows.last.fetch(rows.fetch(3).index("Total Guam income tax withheld"))).to eq(132.34)
     expect(workbook.sheets.flat_map { |name| workbook.sheet(name).to_a.flatten }).not_to include("TEST-100")
     expect(workbook.sheet("Payroll Adjustments Detail").column(8)).to include("Internal test memo")
