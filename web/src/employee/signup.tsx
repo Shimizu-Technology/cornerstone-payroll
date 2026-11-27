@@ -517,10 +517,11 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
     setWorking(true);
     setFailure(null);
     try {
-      await stepUp(() => (mode === 'claim' ? api.claimLink(checked, termsVersion) : api.reactivate(checked, termsVersion)));
+      const link = await stepUp(() => (mode === 'claim' ? api.claimLink(checked, termsVersion) : api.reactivate(checked, termsVersion)));
       forgetInviteToken();
-      // Asked once on the way in; the step goes straight to Home when there's already an answer.
-      navigate(PAPERLESS_PATH, { replace: true });
+      // Asked once on the way in, for the employer just added; the step goes
+      // straight to Home when there's already an answer.
+      navigate(PAPERLESS_PATH, { replace: true, state: link ? { linkId: link.id } : null });
     } catch (error) {
       const result = failureOf(error);
       if (result === 'terms_updated') {

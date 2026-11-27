@@ -107,7 +107,21 @@ function PaperlessQuestion(): ReactElement {
       reportError(failure);
     } else {
       setError(consentErrorMessage(failure, fallback));
-      if (failure instanceof EmployeeApiError && failure.kind === 'disclosure_outdated') reload();
+      if (failure instanceof EmployeeApiError && failure.kind === 'disclosure_outdated') {
+        // Agreeing covered the old text: clear it and show the new wording.
+        setAgreed(false);
+        setDisclosureOpen(true);
+        void refreshDisclosure();
+      }
+    }
+  };
+
+  // Loads the new wording in place (no loading screen), keeping the message on screen.
+  const refreshDisclosure = async (): Promise<void> => {
+    try {
+      update(await api.deliveryConsents(session.link.id));
+    } catch {
+      reload();
     }
   };
 
@@ -294,6 +308,12 @@ function DeliveryAskCards({ now }: { now?: Date }): ReactElement | null {
   const hide = (kind: DeliveryCardKind): void => {
     hideDeliveryCard(linkId, kind);
     setHidden((current) => ({ ...current, [kind]: true }));
+    // Keep keyboard and screen reader users in place: the other card's link, else the page heading.
+    window.requestAnimationFrame(() => {
+      const next = document.querySelector<HTMLElement>(`[data-ask-card]:not([data-ask-card="${kind}"]) a`)
+        ?? document.querySelector<HTMLElement>('.emp-page h1');
+      next?.focus();
+    });
   };
   const at = now ?? new Date();
   const showPay = unanswered('pay_statements');
@@ -304,6 +324,7 @@ function DeliveryAskCards({ now }: { now?: Date }): ReactElement | null {
     <div className="emp-ask-cards">
       {showPay && (
         <AskCard
+          kind="pay_statements"
           title="Choose how you get pay stubs"
           onHide={() => hide('pay_statements')}
           to={PAPERLESS_PATH}
@@ -315,6 +336,7 @@ function DeliveryAskCards({ now }: { now?: Date }): ReactElement | null {
       )}
       {showW2 && (
         <AskCard
+          kind="w2gu"
           title="Get your W-2GU online?"
           onHide={() => hide('w2gu')}
           to="/taxes"
@@ -327,7 +349,8 @@ function DeliveryAskCards({ now }: { now?: Date }): ReactElement | null {
   );
 }
 
-function AskCard({ title, onHide, to, state, linkLabel, children }: {
+function AskCard({ kind, title, onHide, to, state, linkLabel, children }: {
+  kind: DeliveryCardKind;
   title: string;
   onHide: () => void;
   to: string;
@@ -336,24 +359,26 @@ function AskCard({ title, onHide, to, state, linkLabel, children }: {
   children: ReactNode;
 }): ReactElement {
   return (
-    <Card
-      title={title}
-      className="emp-ask-card"
-      action={(
-        <EmpButton variant="quiet" className="emp-icon-button" aria-label={`Not now: ${title}`} onClick={onHide}>
-          <X aria-hidden="true" className="size-5" />
-        </EmpButton>
-      )}
-    >
-      <div className="emp-ask-card-body">
-        <Mail aria-hidden="true" className="size-6 shrink-0 text-[var(--action)]" />
-        <div className="min-w-0 flex-1 space-y-3">
-          <p className="text-neutral-700">{children}</p>
-          <EmpButtonLink to={to} state={state} variant="secondary" className="emp-btn-small" onClick={focusHeadingOnNextScreen}>
-            {linkLabel}
-          </EmpButtonLink>
+    <div data-ask-card={kind}>
+      <Card
+        title={title}
+        className="emp-ask-card"
+        action={(
+          <EmpButton variant="quiet" className="emp-icon-button" aria-label={`Not now: ${title}`} onClick={onHide}>
+            <X aria-hidden="true" className="size-5" />
+          </EmpButton>
+        )}
+      >
+        <div className="emp-ask-card-body">
+          <Mail aria-hidden="true" className="size-6 shrink-0 text-[var(--action)]" />
+          <div className="min-w-0 flex-1 space-y-3">
+            <p className="text-neutral-700">{children}</p>
+            <EmpButtonLink to={to} state={state} variant="secondary" className="emp-btn-small" onClick={focusHeadingOnNextScreen}>
+              {linkLabel}
+            </EmpButtonLink>
+          </div>
         </div>
-      </div>
-    </Card>
+      </Card>
+    </div>
   );
 }
