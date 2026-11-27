@@ -30,6 +30,23 @@ class HistoricalEmployeeYtdBalance < ApplicationRecord
     end.round(2)
   end
 
+  # Employee#applied_historical_ytd_balance for every employee of a client in
+  # one query: the latest applied balance by through date, then bridge applied
+  # time and id.
+  def self.applied_by_employee(company_id:, tax_year:)
+    joins(:historical_ytd_bridge)
+      .where(company_id: company_id, tax_year: tax_year, historical_ytd_bridges: { status: "applied" })
+      .order(:employee_id, through_pay_date: :desc, "historical_ytd_bridges.applied_at" => :desc,
+        "historical_ytd_bridges.id" => :desc, id: :desc)
+      .to_a.group_by(&:employee_id).transform_values(&:first)
+  end
+
+  # Gross as a pay stub prints it. QuickBooks gross includes non-taxable
+  # reimbursements, which the stub shows as other pay.
+  def statement_gross_pay
+    (gross_pay.to_d - non_taxable_pay.to_d).round(2)
+  end
+
   def ytd_aggregate_totals
     {
       gross_pay: gross_pay,

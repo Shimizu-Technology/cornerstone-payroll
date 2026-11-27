@@ -23,9 +23,10 @@ class EmployeePayStatements
       }
     end
 
-    def detail
+    # employee_app: the employee app's extra fields. AIRE's response stays as it is.
+    def detail(employee_app: false)
       statement = PayStubGenerator.new(item).statement
-      summary.merge(
+      json = summary.merge(
         earnings: statement.fetch(:earnings).map do |row|
           { label: row[:label], hours: hours(row[:hours]), rate: money(row[:rate]), pay_basis: row[:pay_basis],
             amount: money(row[:amount]), ytd: money(row[:ytd]), kind: row[:kind] }
@@ -36,11 +37,19 @@ class EmployeePayStatements
         ytd: { gross: money(statement.dig(:ytd, :gross)), net: money(statement.dig(:ytd, :net)) },
         source_entries: source_entries_json
       )
+      return json unless employee_app
+
+      json.merge(ytd_note: (PayrollBridgeOverlap::EMPLOYEE_NOTE if ytd_under_review?))
     end
 
     private
 
     attr_reader :item
+
+    def ytd_under_review?
+      date = item.pay_period.pay_date
+      PayrollBridgeOverlap.for_employee(employee: item.employee, year: date.year, through: date).any?
+    end
 
     # Status follows the recorded payment evidence, the same rules as the
     # employee pay history and AIRE payment receipts: delivered checks and

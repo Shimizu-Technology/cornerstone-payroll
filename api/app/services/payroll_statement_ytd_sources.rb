@@ -10,6 +10,11 @@ class PayrollStatementYtdSources
     { payroll_item_field_entries: :payroll_field_definition },
     { payroll_item_deductions: :deduction_type }
   ].freeze
+  # Each printed YTD total and the payroll item amount it accumulates.
+  TOTAL_FIELDS = {
+    gross: :gross_pay, withholding_tax: :withholding_tax, social_security_tax: :social_security_tax,
+    medicare_tax: :medicare_tax, additional_withholding: :additional_withholding, net: :net_pay
+  }.freeze
 
   attr_reader :payroll_item
 
@@ -45,6 +50,18 @@ class PayrollStatementYtdSources
     historical_balance&.through_pay_date
   end
 
+  # Every YTD total a statement prints: the dated opening balance plus the
+  # same earlier and current paychecks the YTD rows add up, so the totals and
+  # rows always agree.
+  def totals
+    @totals ||= begin
+      opening = historical_balance&.ytd_aggregate_totals || {}
+      TOTAL_FIELDS.transform_values do |field|
+        (opening.fetch(field, 0).to_d + items.sum(0.to_d) { |item| item.public_send(field).to_d }).round(2)
+      end
+    end
+  end
+
   # Historical opening balances carry only combined Medicare.
   def additional_medicare_ytd
     return if historical_balance
@@ -52,6 +69,10 @@ class PayrollStatementYtdSources
     @additional_medicare_ytd ||= items.sum(0.to_d) { |item| item.additional_medicare_tax.to_d }
   end
 
+  # A native paycheck dated on or before the opening balance's through date
+  # stays out, as the balance is taken to hold it. Whether it really does is
+  # open: PayrollBridgeOverlap flags it, W-2GU filing is blocked and the
+  # statement says its YTD is under review.
   def items
     @items ||= begin
       prior_periods = PayPeriod.reportable_for_company(@company)

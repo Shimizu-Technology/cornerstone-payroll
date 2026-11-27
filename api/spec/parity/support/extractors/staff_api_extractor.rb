@@ -28,7 +28,31 @@ module Parity
       end
 
       def ytd_summary(year:)
-        @ctx.get "/api/v1/admin/reports/ytd_summary", params: { year: year }, headers: @headers
+        ytd_summary_for(year: year)
+      end
+
+      # [status, parsed body] of a staff POST, for endpoints that refuse.
+      def post(path, params = {})
+        @ctx.post path, params: params, headers: @headers, as: :json
+        [ @ctx.response.status, @ctx.response.parsed_body ]
+      end
+
+      # [status, parsed JSON or nil] of a staff GET that may refuse.
+      def get(path, params = {})
+        @ctx.get path, params: params, headers: @headers
+        body = @ctx.response.media_type == "application/json" ? @ctx.response.parsed_body : nil
+        [ @ctx.response.status, body ]
+      end
+
+      def ytd_summary_pdf_text(params)
+        @ctx.get "/api/v1/admin/reports/ytd_summary_pdf", params: params, headers: @headers
+        raise "GET /api/v1/admin/reports/ytd_summary_pdf failed: #{@ctx.response.status}" unless @ctx.response.successful?
+
+        PDF::Reader.new(StringIO.new(@ctx.response.body)).pages.map(&:text).join(" ").squish
+      end
+
+      def ytd_summary_for(params)
+        @ctx.get "/api/v1/admin/reports/ytd_summary", params: params, headers: @headers
         raise "GET /api/v1/admin/reports/ytd_summary failed: #{@ctx.response.status} #{@ctx.response.body}" unless @ctx.response.successful?
 
         @ctx.response.parsed_body.fetch("report")
@@ -158,7 +182,7 @@ module Parity
           },
           payment: {
             method: item["effective_payment_delivery_method"],
-            check_number: normalize_check_number(item["check_number"]),
+            **check_number_fields(item["check_number"]),
             check_status: item["check_status"]
           },
           status: {
@@ -176,7 +200,11 @@ module Parity
         row = report.fetch("history", []).find { |entry| entry["payroll_item_id"].to_i == payroll_item_id.to_i }
         return { status: { visible: false } } if row.nil?
 
-        income_tax_combined = money(row["withholding_tax"])
+        # Pay history splits income tax and W-4 4c as the stub does (L4), and
+        # carries their total; read all three from the view.
+        income_tax = money(row["withholding_tax"])
+        addl_wh = money(row["additional_withholding"])
+        total_income_tax = money(row["total_income_tax_withheld"])
         ss_tax = money(row["social_security_tax"])
         med_total = money(row["medicare_tax"])
         evidence = row.fetch("payment_evidence", {})
@@ -186,12 +214,12 @@ module Parity
           gross_pay: money(row["gross_pay"]),
           net_pay: money(row["net_pay"]),
           taxes: {
-            income_tax: income_tax_combined,
-            additional_withholding: nil,
-            total_income_tax: income_tax_combined,
+            income_tax: income_tax,
+            additional_withholding: addl_wh,
+            total_income_tax: total_income_tax,
             social_security: ss_tax,
             medicare_total: med_total,
-            total_taxes: (income_tax_combined + ss_tax + med_total).round(2)
+            total_taxes: (total_income_tax + ss_tax + med_total).round(2)
           },
           hours: {
             regular: hours(row["hours_worked"]),
@@ -207,7 +235,7 @@ module Parity
           },
           payment: {
             method: row["payment_delivery_method"],
-            check_number: normalize_check_number(row["check_number"]),
+            **check_number_fields(row["check_number"]),
             status: evidence["status"],
             payment_label: row["payment_method_label"]
           },

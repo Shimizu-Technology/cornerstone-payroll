@@ -73,7 +73,7 @@ class EmployeeStatements
     def payroll_detail
       return payroll_summary if @statement.withdrawn?
 
-      shared = EmployeePayStatements::Presenter.new(item).detail.except(:has_source_entries, :source_entries)
+      shared = EmployeePayStatements::Presenter.new(item).detail(employee_app: true).except(:has_source_entries, :source_entries)
       shared.merge(payroll_summary).merge(
         taxes: shared.fetch(:taxes).map { |row| row.merge(tax_kind(row[:label])) },
         earlier_versions: (item.voided? ? [] : @statements.earlier_versions(document)).map do |version|
