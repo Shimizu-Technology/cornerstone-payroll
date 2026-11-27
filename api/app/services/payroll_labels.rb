@@ -14,4 +14,17 @@ module PayrollLabels
     additional_medicare: "Additional Medicare",
     additional_withholding: ADDITIONAL_WITHHOLDING
   }.freeze
+
+  # A statement deduction row's printed label, the same on the earnings
+  # statement, the employee app and the check stub.
+  def self.deduction(row)
+    case row.semantic
+    when PayrollReportingGroups::GROUP_401K_PRE_TAX.to_sym
+      "401(k) Retirement"
+    when :loan
+      row.label == "Loan" ? "Loan Repayment" : row.label
+    else
+      row.label
+    end
+  end
 end
