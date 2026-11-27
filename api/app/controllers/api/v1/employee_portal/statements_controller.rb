@@ -84,7 +84,7 @@ module Api
 
         def pdf_filename(document)
           date = document.payroll_item&.pay_period&.pay_date || document.historical_paycheck&.pay_date
-          "pay-stub-#{date&.iso8601 || document.id}#{'-corrected' if document.corrected}.pdf"
+          "pay-stub-#{date&.iso8601 || document.id}#{'-corrected' if document.correction_label?}.pdf"
         end
 
         def audit!(event, record:, metadata: {})

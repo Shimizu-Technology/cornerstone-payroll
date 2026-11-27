@@ -46,7 +46,7 @@ class EmployeeStatements
         pdf_available: document.posted? && !item.voided?,
         **(item.voided? ? { notice: VOIDED_CHECK_MESSAGE } : {}),
         original_pdf: false,
-        corrected: document.corrected,
+        corrected: document.correction_label?,
         posted_at: document.posted_at.iso8601
       )
     end
@@ -77,8 +77,10 @@ class EmployeeStatements
       shared.merge(payroll_summary).merge(
         taxes: shared.fetch(:taxes).map { |row| row.merge(tax_kind(row[:label])) },
         earlier_versions: (item.voided? ? [] : @statements.earlier_versions(document)).map do |version|
-          { id: version.id.to_s, status: "replaced", posted_at: version.posted_at.iso8601, payment_line: version.payment_line }
+          { id: version.id.to_s, status: "replaced", posted_at: version.posted_at.iso8601,
+            payment_line: version.payment_line, corrected: version.correction_revision?, ytd_changed: version.ytd_changed? }
         end,
+        ytd_changed: document.ytd_changed?,
         note: nil
       )
     end
