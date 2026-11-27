@@ -602,8 +602,9 @@ module Api
             custom_deductions: item.custom_deductions || [],
             payroll_adjustments: item.payroll_adjustments || [],
             payroll_field_entries: item.payroll_item_field_entries.map { |entry| payroll_field_entry_json(entry) },
-            ytd_gross: item.ytd_gross,
-            ytd_net: item.ytd_net,
+            # The YTD the paycheck's statement prints, not the calculation snapshot.
+            ytd_gross: statement_ytd.call(item).gross,
+            ytd_net: statement_ytd.call(item).net,
             wage_rate_hours: item.wage_rate_hours
           }
 
@@ -616,13 +617,17 @@ module Api
               confirmed_at: confirmation.created_at.iso8601
             }
             json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
+            date = item.pay_period.pay_date
+            note = PayrollBridgeOverlap.staff_note(PayrollBridgeOverlap.for_employee(employee: item.employee, year: date.year, through: date))
+            json[:ytd_review] = { required: true, message: note } if note
             # Include full YTD breakdown
             json[:ytd] = {
-              gross: item.ytd_gross,
-              net: item.ytd_net,
-              withholding_tax: item.ytd_withholding_tax,
-              social_security_tax: item.ytd_social_security_tax,
-              medicare_tax: item.ytd_medicare_tax,
+              gross: statement_ytd.call(item).gross,
+              net: statement_ytd.call(item).net,
+              withholding_tax: statement_ytd.call(item).withholding_tax,
+              additional_withholding: statement_ytd.call(item).additional_withholding,
+              social_security_tax: statement_ytd.call(item).social_security_tax,
+              medicare_tax: statement_ytd.call(item).medicare_tax,
               retirement: item.ytd_retirement
             }
           end
@@ -656,6 +661,10 @@ module Api
           end
 
           payroll_item.pay_rate = employee.default_payroll_rate_on(payroll_item.pay_period.end_date)
+        end
+
+        def statement_ytd
+          @statement_ytd ||= StatementYtdFigures.new
         end
       end
     end

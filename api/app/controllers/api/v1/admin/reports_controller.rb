@@ -2296,6 +2296,9 @@ module Api
           employee_rows.each do |row|
             row[:component_values] = period_summary_component_values(component_columns, row[:employee_id])
           end
+          company_totals = payroll_period_company_totals(
+            items, period, historical_paychecks, historical_adjustments, unified: unified
+          )
 
           {
             type: "ytd_summary",
@@ -2317,14 +2320,13 @@ module Api
               end,
               classification_note: "Imported deduction labels keep their original tax buckets. Imported loan repayments do not show whether they were one-time or installment loans. Any 401(k) after-tax item imported in a pre-tax bucket is shown separately, not reclassified."
             },
-            company_totals: payroll_period_company_totals(
-              items, period, historical_paychecks, historical_adjustments, unified: unified
-            ),
+            company_totals: company_totals,
             source_summary: unified.source_summary(
               native_items: items,
               historical_paychecks: historical_paychecks,
               historical_adjustments: historical_adjustments,
-              excluded_unlinked_paychecks: filter_summary_historical_records(unified.unlinked_historical_paychecks, pay_run)
+              excluded_unlinked_paychecks: filter_summary_historical_records(unified.unlinked_historical_paychecks, pay_run),
+              totals_basis: company_totals[:imported_basis]
             ),
             payroll_fields: {
               totals: disclosure.totals,
@@ -2472,7 +2474,7 @@ module Api
             payroll_count: items.map(&:pay_period_id).uniq.length,
             imported_payroll_count: 0,
             imported_opening_summary_count: 0,
-            gross_pay: items.sum { |item| item.gross_pay.to_f },
+            gross_pay: items.sum(0.to_d) { |item| item.gross_pay.to_d },
             non_taxable_additions_total: items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
             total_hours: items.sum(0.to_d) { |item| item.hours_worked.to_d },
             total_overtime_hours: items.sum(0.to_d) { |item| item.overtime_hours.to_d },
@@ -2484,13 +2486,15 @@ module Api
             health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
             withholding_tax: items.sum(0.to_d, &:total_income_tax_withheld),
-            social_security_tax: items.sum { |item| item.social_security_tax.to_f },
-            medicare_tax: items.sum { |item| item.medicare_tax.to_f },
-            retirement: retirement_totals[:retirement].to_f,
-            roth_retirement: retirement_totals[:roth_retirement].to_f,
-            tips: items.sum { |item| item.reported_tips.to_f },
-            tips_paid_out: items.sum { |item| item.tips_paid_out.to_f },
-            bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
+            base_withholding_tax: items.sum(0.to_d) { |item| item.withholding_tax.to_d },
+            additional_withholding: items.sum(0.to_d) { |item| item.additional_withholding.to_d },
+            social_security_tax: items.sum(0.to_d) { |item| item.social_security_tax.to_d },
+            medicare_tax: items.sum(0.to_d) { |item| item.medicare_tax.to_d },
+            retirement: retirement_totals[:retirement].to_d,
+            roth_retirement: retirement_totals[:roth_retirement].to_d,
+            tips: items.sum(0.to_d) { |item| item.reported_tips.to_d },
+            tips_paid_out: items.sum(0.to_d) { |item| item.tips_paid_out.to_d },
+            bonus: items.sum(0.to_d) { |item| payroll_summary_bonus_amount(item).to_d },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
@@ -2498,7 +2502,7 @@ module Api
             **employer_cost_totals,
             total_deductions: custom_totals[:total_deductions],
             custom_deductions_total: custom_totals[:custom_deductions_total],
-            net_pay: items.sum { |item| item.net_pay.to_f },
+            net_pay: items.sum(0.to_d) { |item| item.net_pay.to_d },
             combined_hours: items.sum(0.to_d, &:combined_hours)
           }
           if historical_paychecks.any? || historical_adjustments.any?
@@ -2518,11 +2522,11 @@ module Api
             start_date: period.start_date,
             end_date: period.end_date,
             period_basis: "pay_date",
-            gross_pay: items.sum { |item| item.gross_pay.to_f },
+            gross_pay: items.sum(0.to_d) { |item| item.gross_pay.to_d },
             non_taxable_additions_total: items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
             total_hours: items.sum(0.to_d) { |item| item.hours_worked.to_d },
             total_overtime_hours: items.sum(0.to_d) { |item| item.overtime_hours.to_d },
-            bonus: items.sum { |item| payroll_summary_bonus_amount(item).to_f },
+            bonus: items.sum(0.to_d) { |item| payroll_summary_bonus_amount(item).to_d },
             straight_loan_deductions: money(items.sum(BigDecimal("0")) { |item| straight_loan_amount(item) }),
             installment_loan_payments: money(items.sum(BigDecimal("0")) { |item| installment_loan_amount(item) }),
             historical_loan_deductions_unclassified: 0,
@@ -2536,13 +2540,15 @@ module Api
             health_insurance_deductions: PayrollFieldDisclosure.new(items).rows.select { |entry| entry[:label].to_s.match?(/\AHealth Insurance\z/i) && entry[:employee_paid] }.sum(BigDecimal("0")) { |entry| entry[:amount] },
             payroll_field_employer_contributions_total: treatment_totals["employer_contribution"],
             withholding_tax: items.sum(0.to_d, &:total_income_tax_withheld),
-            social_security_tax: items.sum { |item| item.social_security_tax.to_f },
-            medicare_tax: items.sum { |item| item.medicare_tax.to_f },
-            retirement: retirement_totals[:retirement].to_f,
-            roth_retirement: retirement_totals[:roth_retirement].to_f,
-            total_deductions: items.sum { |item| item.total_deductions.to_f },
+            base_withholding_tax: items.sum(0.to_d) { |item| item.withholding_tax.to_d },
+            additional_withholding: items.sum(0.to_d) { |item| item.additional_withholding.to_d },
+            social_security_tax: items.sum(0.to_d) { |item| item.social_security_tax.to_d },
+            medicare_tax: items.sum(0.to_d) { |item| item.medicare_tax.to_d },
+            retirement: retirement_totals[:retirement].to_d,
+            roth_retirement: retirement_totals[:roth_retirement].to_d,
+            total_deductions: items.sum(0.to_d) { |item| item.total_deductions.to_d },
             custom_deductions_total: items.sum { |item| custom_deductions_total(item) },
-            net_pay: items.sum { |item| item.net_pay.to_f },
+            net_pay: items.sum(0.to_d) { |item| item.net_pay.to_d },
             payroll_count: items.map(&:pay_period_id).uniq.length,
             employee_count: items.map(&:employee_id).uniq.length,
             imported_payroll_count: 0,
@@ -2558,8 +2564,14 @@ module Api
           payroll_period_summary_numbers(row)
         end
 
+        # Sums stay BigDecimal; the response keeps its numeric (Float) fields.
+        SUMMARY_FLOAT_FIELDS = %i[
+          gross_pay social_security_tax medicare_tax retirement roth_retirement tips tips_paid_out bonus net_pay total_deductions
+        ].freeze
+
         def payroll_period_summary_numbers(row)
-          %i[total_hours total_overtime_hours withholding_tax combined_hours].each { |key| row[key] = row.fetch(key).to_f }
+          SUMMARY_FLOAT_FIELDS.each { |key| row[key] = row[key].to_f if row.key?(key) }
+          %i[total_hours total_overtime_hours withholding_tax base_withholding_tax additional_withholding combined_hours].each { |key| row[key] = row.fetch(key).to_f }
           row
         end
 
@@ -2712,7 +2724,11 @@ module Api
             custom_earnings_total: custom_earnings_total(item),
             custom_deductions_total: custom_deductions_total(item),
             gross_pay: item.gross_pay.to_f,
-            withholding_tax: item.total_income_tax_withheld.to_f,
+            # Split as the pay stub prints it: income tax, then W-4 4c. Floats
+            # at the response, as every amount in this row.
+            withholding_tax: item.withholding_tax.to_f,
+            additional_withholding: item.additional_withholding.to_f,
+            total_income_tax_withheld: item.total_income_tax_withheld.to_f,
             social_security_tax: item.social_security_tax.to_f,
             medicare_tax: item.medicare_tax.to_f,
             total_deductions: item.total_deductions.to_f,
@@ -2846,7 +2862,8 @@ module Api
             source_summary: unified.source_summary(
               native_items: selected_items,
               historical_paychecks: selected_historical,
-              historical_adjustments: selected_adjustments
+              historical_adjustments: selected_adjustments,
+              totals_basis: summary[:imported_basis]
             ),
             payroll_fields: {
               totals: disclosure.totals,
@@ -4264,13 +4281,15 @@ module Api
           rows = [ [
             "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
             "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
-            PayrollLabels::INCOME_TAX_WITHHELD, "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
+            PayrollLabels::INCOME_TAX, PayrollLabels::ADDITIONAL_WITHHOLDING, PayrollLabels::INCOME_TAX_WITHHELD,
+            "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
           ] ]
           Array(report[:history]).each do |item|
             rows << [
               item.dig(:source, :label), item[:record_type], item[:pay_date], item[:period_description], item[:hours_worked], item[:overtime_hours],
               item[:holiday_hours], item[:pto_hours], item[:reported_tips], item[:tips_paid_out],
               item[:bonus], item[:custom_earnings_total], item[:custom_deductions_total], item[:gross_pay], item[:withholding_tax],
+              item[:additional_withholding], item[:total_income_tax_withheld],
               item[:social_security_tax], item[:medicare_tax], item[:total_deductions], item[:net_pay],
               item[:check_number], PayrollPaymentLabel.history_row(item), item[:total_hours]
             ]
@@ -4300,7 +4319,9 @@ module Api
             [ "Payroll Field Pre-Tax Deductions", summary[:payroll_field_pre_tax_deductions_total] ],
             [ "Payroll Field Post-Tax Deductions", summary[:payroll_field_post_tax_deductions_total] ],
             [ "Payroll Field Employer Contributions", summary[:payroll_field_employer_contributions_total] ],
-            [ PayrollLabels::INCOME_TAX, summary[:withholding_tax] ],
+            [ PayrollLabels::INCOME_TAX, summary[:base_withholding_tax] ],
+            [ PayrollLabels::ADDITIONAL_WITHHOLDING, summary[:additional_withholding] ],
+            [ PayrollLabels::INCOME_TAX_WITHHELD, summary[:withholding_tax] ],
             [ "SS Tax", summary[:social_security_tax] ],
             [ "Medicare Tax", summary[:medicare_tax] ],
             [ "401(k)", summary[:retirement] ],
@@ -4414,11 +4435,15 @@ module Api
           ytd_summary_sheets(report).map do |sheet|
             next sheet unless sheet[:name] == "Company Totals"
 
-            rows = (report[:company_totals] || {}).map do |key, value|
+            # bridged_fields is a list for the screen; imported_basis names them.
+            rows = (report[:company_totals] || {}).except(:bridged_fields).map do |key, value|
               label = case key.to_sym
               when :source_labeled_after_tax_401k_in_pretax_bucket
                 "401(k) after-tax (imported as pre-tax)"
               when :withholding_tax then PayrollLabels::INCOME_TAX_WITHHELD
+              when :base_withholding_tax then PayrollLabels::INCOME_TAX
+              when :additional_withholding then PayrollLabels::ADDITIONAL_WITHHOLDING
+              when :imported_basis then "Imported figures"
               when :social_security_tax then "Social Security tax"
               when :medicare_tax then "Medicare tax"
               when :retirement then "Traditional 401(k)"
@@ -4427,6 +4452,7 @@ module Api
               end
               display = case key.to_sym
               when :period_basis then value.to_s.humanize
+              when :imported_basis then UnifiedPayrollReporting.basis_label(value)
               when :year, :start_date, :end_date then value
               when :total_hours, :total_overtime_hours, :combined_hours
                 ActiveSupport::NumberHelper.number_to_delimited(format("%.2f", value.to_d))
@@ -4474,7 +4500,7 @@ module Api
           end
           [
             { name: "Payroll Summary", rows: rows },
-            { name: "Company Totals", rows: (report[:company_totals] || {}).map { |key, value| [ key.to_s.humanize, value ] } },
+            { name: "Company Totals", rows: (report[:company_totals] || {}).except(:bridged_fields).map { |key, value| [ key.to_s.humanize, value ] } },
             payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),
@@ -4945,6 +4971,12 @@ module Api
               return render json: {
                 error: "Cornerstone does not file #{year} W-2s for this client, so it has no W-2GU copies to print. Change who files in the #{year} year-end checklist."
               }, status: :unprocessable_entity
+            end
+
+            # Not even a draft while a native paycheck inside the opening
+            # balance may be counted twice or left out (PayrollBridgeOverlap).
+            if PayrollBridgeOverlap.new(company_id: company.id, year: year).w2_blocking.any?
+              return render json: { error: PayrollBridgeOverlap::FILING_BLOCKED }, status: :unprocessable_entity
             end
 
             readiness = snapshot[:readiness]

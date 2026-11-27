@@ -32,7 +32,11 @@ module Parity
           gross_pay: earnings[:gross_current] || summary["Gross Pay"],
           net_pay: summary["NET PAY"],
           non_taxable_pay: non_taxable_current,
-          taxes: deductions_and_taxes[:tax_amounts],
+          # The SUMMARY box's printed Taxes, not a sum of the rows (issue #637).
+          taxes: deductions_and_taxes[:tax_amounts].merge(
+            total_taxes: summary["Taxes"],
+            total_taxes_from_rows: deductions_and_taxes[:tax_amounts][:total_taxes]
+          ),
           tax_labels: deductions_and_taxes[:tax_labels],
           ytd_tax_labels: ytd_summary[:tax_labels],
           deductions: deductions_and_taxes[:deductions],
@@ -62,7 +66,7 @@ module Parity
           },
           payment: {
             method: meta[:payment_method],
-            check_number: normalize_check_number(meta[:check_number]),
+            **check_number_fields(meta[:check_number]),
             payment_label: meta[:payment_label]
           },
           raw_lines: lines

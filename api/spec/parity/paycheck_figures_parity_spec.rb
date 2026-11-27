@@ -184,6 +184,10 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
         ]
         expected_views << :check_stub_pdf if scenario[:has_check_pdf]
         expect(views.keys).to match_array(expected_views)
+        # Each PDF's printed Taxes total is compared below; it must also foot to its own rows.
+        views.slice(:employee_stub_pdf, :client_stub_pdf, :check_stub_pdf).each do |name, view|
+          expect(view.dig(:taxes, :total_taxes)).to eq(view.dig(:taxes, :total_taxes_from_rows)), "#{name} Taxes total does not foot"
+        end
 
         core_figures = [
           :gross_pay,
@@ -245,14 +249,22 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
         if scenario[:has_check_pdf]
           # Separate view set includes check_stub_pdf (excluded from method_views since
           # check PDFs carry a printed check number rather than a payment.method field).
-          check_number_views = views.slice(
-            :employee_api, :employee_stub_pdf, :client_pay_history, :client_stub_pdf,
+          # Every view that prints the full check number compares it in full;
+          # the employee API, which shows the last 4 only, compares those.
+          full_number_views = views.slice(
+            :employee_stub_pdf, :client_pay_history, :client_stub_pdf,
             :staff_pay_period, :staff_pay_history, :check_stub_pdf
           )
           assert_parity!(
             fixture: scenario[:employee_key],
             figure: [ :payment, :check_number ],
-            values_by_view: check_number_views.transform_values { |v| dig_figure(v, [ :payment, :check_number ]) }
+            values_by_view: full_number_views.transform_values { |v| dig_figure(v, [ :payment, :check_number ]) }
+          )
+          expect(full_number_views.values.first.dig(:payment, :check_number).length).to be > 4
+          assert_parity!(
+            fixture: scenario[:employee_key],
+            figure: [ :payment, :check_number_last4 ],
+            values_by_view: views.slice(:employee_api, *full_number_views.keys).transform_values { |v| dig_figure(v, [ :payment, :check_number_last4 ]) }
           )
         end
 
@@ -355,7 +367,6 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
           )
           expect(views.dig(:employee_api, :taxes, :additional_withholding)).to eq(BigDecimal("75.00"))
 
-          pending "L4: employee_pay_history reports combine FIT and W-4 4(c) additional withholding into withholding_tax while stubs and pay-period APIs split them"
           assert_parity!(
             fixture: scenario[:employee_key],
             figure: [ :taxes, :income_tax ],
@@ -438,8 +449,14 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
             [ :dates, :period_end ],
             [ :dates, :pay_date ],
             [ :payment, :method ],
-            [ :payment, :check_number ]
+            [ :payment, :check_number_last4 ]
           ]
+        )
+        assert_parity!(
+          fixture: :"#{entry[:employee_key]}_aire",
+          figure: [ :payment, :check_number ],
+          values_by_view: compared.slice(:employee_stub_pdf, :staff_pay_period).transform_values { |v| dig_figure(v, [ :payment, :check_number ]) },
+          allow_nil: true
         )
 
         # AIRE and Employee API share the same as-of-check YTD totals.

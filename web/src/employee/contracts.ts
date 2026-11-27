@@ -296,6 +296,8 @@ export interface StatementDetail extends StatementSummary {
   otherPay: AmountLine[];
   ytdGross: Money | null;
   ytdNet: Money | null;
+  /** Set while an earlier paycheck's place in the year-to-date is being reviewed. */
+  ytdNote: string | null;
   /** QuickBooks checks with recorded adjustments: "Includes recorded payroll adjustments." */
   note: string | null;
   /** Newest first; empty unless this stub is a corrected revision. */
@@ -354,6 +356,7 @@ export function parseStatementDetail(data: unknown): StatementDetail | null {
     otherPay: amountLines(body.other_pay),
     ytdGross: money(ytd.gross),
     ytdNet: money(ytd.net),
+    ytdNote: text(body.ytd_note),
     note: text(body.adjustment_note) ?? text(body.note),
     earlierVersions: earlierVersions(body.earlier_versions),
   };

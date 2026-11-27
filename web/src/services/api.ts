@@ -2797,12 +2797,18 @@ export interface PayrollSourceSummary {
     gross_pay_delta: number;
     net_pay_delta: number;
   };
-  source_overlap?: { employee_pay_date_count: number };
+  /**
+   * bridge_window_paycheck_count: native paychecks dated inside an applied opening balance;
+   * bridge_window_w2_blocking_count: those that block W-2GU (not contractors). Present only when any.
+   */
+  source_overlap?: { employee_pay_date_count: number; bridge_window_paycheck_count?: number; bridge_window_w2_blocking_count?: number };
   historical_ytd_bridge: {
     applied: boolean;
     tax_years: number[];
     through_pay_date?: string | null;
     through_period_end?: string | null;
+    /** Where the totals' imported figures come from. */
+    totals_basis?: 'historical_ytd_bridge' | 'as_imported' | 'mixed' | null;
   };
 }
 
@@ -2831,7 +2837,12 @@ export interface EmployeePayHistoryRecord {
   bonus: number;
   custom_earnings_total?: number;
   gross_pay: number;
+  /** Imported rows: the non-taxable reimbursements included in gross_pay as imported. */
+  non_taxable_pay?: number;
+  /** Income tax as the pay stub prints it, without W-4 4c. */
   withholding_tax: number;
+  additional_withholding?: number;
+  total_income_tax_withheld?: number;
   social_security_tax: number;
   medicare_tax: number;
   custom_deductions_total?: number;
@@ -2870,7 +2881,10 @@ export interface EmployeePayrollSummary {
   payroll_field_pre_tax_deductions_total: number;
   payroll_field_post_tax_deductions_total: number;
   payroll_field_employer_contributions_total: number;
+  /** Total withheld: income tax plus W-4 4c. */
   withholding_tax: number;
+  base_withholding_tax?: number;
+  additional_withholding?: number;
   social_security_tax: number;
   medicare_tax: number;
   retirement: number;

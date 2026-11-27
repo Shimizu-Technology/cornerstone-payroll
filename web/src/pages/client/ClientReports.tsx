@@ -550,7 +550,7 @@ export function ClientReports() {
                       <MobileField label="Loan repayments (imported)" value={formatCurrency(employee.historical_loan_deductions_unclassified ?? 0)} />
                       <MobileField label="Employer contributions" value={formatCurrency(employee.payroll_field_employer_contributions_total ?? 0)} />
                       <MobileField label="Total deductions" value={formatCurrency(employee.total_deductions ?? 0)} />
-                      <MobileField label="Guam income tax" value={formatCurrency(employee.withholding_tax)} />
+                      <MobileField label="Guam income tax withheld" value={formatCurrency(employee.withholding_tax)} />
                       <MobileField label="Combined hours" value={finiteAmount(employee.combined_hours).toFixed(2)} />
                     </div>
                   </MobileRecordCard>
