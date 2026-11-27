@@ -105,7 +105,7 @@ RSpec.describe UnifiedPayrollReporting do
       )
 
       totals = described_class.new(company_id: 1, period: instance_double(PayrollReportingPeriod))
-        .send(:historical_totals, [ source ], [ adjustment ])
+        .send(:imported_totals, [ source ], [ adjustment ])
 
       expect(totals).to include(
         employer_social_security_tax: 68.20,
@@ -144,7 +144,7 @@ RSpec.describe UnifiedPayrollReporting do
       )
 
       totals = described_class.new(company_id: 1, period: instance_double(PayrollReportingPeriod))
-        .send(:historical_totals, [ source ])
+        .send(:imported_totals, [ source ])
 
       expect(totals).to include(
         employer_social_security_tax: 0.0,
