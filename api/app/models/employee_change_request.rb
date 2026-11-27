@@ -49,6 +49,7 @@ class EmployeeChangeRequest < ApplicationRecord
     state
     zip
     phone
+    payment_delivery_method
     default_custom_earnings
     default_payroll_adjustments
     status
@@ -117,8 +118,13 @@ class EmployeeChangeRequest < ApplicationRecord
   end
 
   def same_person_reviewer?(actor)
-    requested_by_id == actor.id || requested_by_link&.user_id == actor.id ||
+    return true if requested_by_id == actor.id || requested_by_link&.user_id == actor.id
+
+    if company.present? && CompanyFeatures.for(company).client_managed_employee_lifecycle?
+      EmployeeProfileIdentity.own_record_for_client_managed?(employee, actor)
+    else
       EmployeeProfileIdentity.own_record?(employee, actor)
+    end
   end
 
   def sensitive_payload
@@ -150,6 +156,7 @@ class EmployeeChangeRequest < ApplicationRecord
       Company.lock.find(company_id)
       lock!
       ensure_pending!
+      prelock_payment_method_periods! if !profile_address? && proposed_changes.is_a?(Hash) && proposed_changes.key?("payment_delivery_method")
       employee.lock!
       actor = authorized_review_actor!(actor)
       verify_original_values!
@@ -218,18 +225,45 @@ class EmployeeChangeRequest < ApplicationRecord
   end
 
   def validate_profile_address_origin
-    unless profile_address? && original_values.is_a?(Hash) &&
-        proposed_changes.keys.map(&:to_s).all? { |key| original_values.stringify_keys.key?(key) }
-      errors.add(:proposed_changes, "must contain only address fields and their original values")
-    end
     if requested_by_link_id.present?
+      unless profile_address? && original_values.is_a?(Hash) &&
+          proposed_changes.keys.map(&:to_s).all? { |key| original_values.stringify_keys.key?(key) }
+        errors.add(:proposed_changes, "must contain only address fields and their original values")
+      end
       unless requested_by_link && requested_by_link.user_id == requested_by_id &&
           requested_by_link.employee_id == employee_id && requested_by_link.company_id == company_id
         errors.add(:requested_by_link, "must match the requester and employee")
       end
-    elsif !requested_by&.client? || employee.company_id != company_id || !EmployeeProfileIdentity.own_record?(employee, requested_by)
+      return
+    end
+
+    client_managed = company.present? && CompanyFeatures.for(company).client_managed_employee_lifecycle?
+    if !client_managed || profile_address?
+      unless profile_address? && original_values.is_a?(Hash) &&
+          proposed_changes.keys.map(&:to_s).all? { |key| original_values.stringify_keys.key?(key) }
+        errors.add(:proposed_changes, "must contain only address fields and their original values")
+      end
+    elsif !original_values.is_a?(Hash) ||
+        !proposed_changes.keys.map(&:to_s).all? { |key| original_values.stringify_keys.key?(key) }
+      errors.add(:original_values, "must include original values for all proposed changes")
+    end
+
+    own_identity = if client_managed
+      EmployeeProfileIdentity.own_record_for_client_managed?(employee, requested_by)
+    else
+      EmployeeProfileIdentity.own_record?(employee, requested_by)
+    end
+
+    if !requested_by&.client? || employee&.company_id != company_id || !own_identity
       errors.add(:own_record, "must be the client requester’s employee record")
     end
+  end
+
+  def prelock_payment_method_periods!
+    period_ids = PayrollItem.where(company_id: company_id, employee_id: employee_id, payment_delivery_method: nil)
+      .joins(:pay_period).where(pay_periods: { status: %w[draft calculated approved] })
+      .distinct.pluck(:pay_period_id).sort
+    PayPeriod.where(id: period_ids).order(:id).lock.load if period_ids.any?
   end
 
   def apply_profile_address!(reviewer:)
@@ -274,10 +308,19 @@ class EmployeeChangeRequest < ApplicationRecord
 
     election_received = safe_attrs.delete(:w4_election_received)
     w4_attrs = safe_attrs.extract!(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+    payment_delivery_method_requested = safe_attrs.key?(:payment_delivery_method)
+    payment_delivery_method = safe_attrs.delete(:payment_delivery_method)
 
     requested_pay_rate = safe_attrs.key?(:pay_rate) ? safe_attrs.delete(:pay_rate) : EmployeeCompensationChangeService::UNCHANGED
     basis = safe_attrs.extract!(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
     employee.update!(safe_attrs) if safe_attrs.present?
+    if payment_delivery_method_requested
+      EmployeePaymentDefaultService.new(
+        employee: employee,
+        method: payment_delivery_method,
+        actor: actor
+      ).call
+    end
     EmployeeW4ElectionChangeService.new(
       employee: employee,
       attributes: w4_attrs,
