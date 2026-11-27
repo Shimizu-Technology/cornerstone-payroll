@@ -25,7 +25,7 @@ export type EmployeeApiErrorKind =
   | 'not_found' | 'resource_not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
   | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
-  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'terms_updated'
+  | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'consent_active' | 'terms_updated'
   | 'email_mismatch' | 'code_retired';
 
 export class EmployeeApiError extends Error {
@@ -136,6 +136,7 @@ export function errorForStatus(status: number, retryAfterHeader: string | null =
     || code === 'access_proof_invalid'
     || code === 'disclosure_outdated'
     || code === 'no_active_consent'
+    || code === 'consent_active'
   )) {
     return new EmployeeApiError(code, status);
   }
@@ -409,6 +410,10 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
     },
     async withdrawDeliveryConsent(linkId: string, kind: DeliveryConsentKind): Promise<DeliveryConsentsState> {
       return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents/withdraw', { linkId, method: 'POST', body: { kind } }));
+    },
+    /** Records "keep paper" as the answer; delivery doesn't change. */
+    async keepPaperDelivery(linkId: string, kind: DeliveryConsentKind): Promise<DeliveryConsentsState> {
+      return parseDeliveryConsents(await request<unknown>('/employee/delivery_consents/keep_paper', { linkId, method: 'POST', body: { kind } }));
     },
     /**
      * Sign-up, before any session: the invite check and the email in one call.

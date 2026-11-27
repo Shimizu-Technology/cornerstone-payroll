@@ -4,7 +4,8 @@
 // while a disclosure is in draft status. Paper delivery continues during the pilot (D5).
 import { useEffect, useState, type FormEvent, type ReactElement } from 'react';
 import { CheckCircle2, FileText, Mail, Printer, ShieldCheck } from 'lucide-react';
-import { EmployeeApiError, StepUpCancelledError } from './api';
+import { EmployeeApiError } from './api';
+import { consentErrorMessage, KIND_COPY } from './consentCopy';
 import {
   accessDay,
   type DeliveryConsentItem,
@@ -16,19 +17,6 @@ import { useEmployeeAuth, useReadySession } from './contexts';
 import { longDate } from './format';
 import { Card, Chip, EmpButton, Field, FormMessage, LoadProblem, SkeletonRows } from './ui';
 import { isSessionError, useEmployeeData } from './useEmployeeData';
-
-const KIND_COPY: Record<DeliveryConsentKind, { heading: string; shortLabel: string; agreeLabel: string }> = {
-  pay_statements: {
-    heading: 'Electronic pay statements',
-    shortLabel: 'pay statements',
-    agreeLabel: 'I have read this disclosure and agree to electronic delivery of my pay statements.',
-  },
-  w2gu: {
-    heading: 'Electronic Form W-2GU',
-    shortLabel: 'Form W-2GU',
-    agreeLabel: 'I have read this disclosure and agree to electronic delivery of my Form W-2GU.',
-  },
-};
 
 function openBase64Pdf(base64: string, filename: string): boolean {
   try {
@@ -53,28 +41,7 @@ function openBase64Pdf(base64: string, filename: string): boolean {
   }
 }
 
-function consentErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof StepUpCancelledError) return "Not saved. To record your consent, confirm it's you.";
-  if (error instanceof EmployeeApiError) {
-    switch (error.kind) {
-      case 'access_proof_invalid':
-        return 'That code did not match or expired. Open a fresh test PDF and enter the 6-character code shown inside it.';
-      case 'disclosure_outdated':
-        return 'The disclosure text was updated. Reload this page to review the latest wording before giving consent.';
-      case 'no_active_consent':
-        return 'Your electronic consent is already off. Paper delivery is active.';
-      case 'offline':
-        return "You're offline. Connect to Wi-Fi or data, then try again.";
-      case 'rate_limited':
-        return 'Too many tries. Wait a minute, then try again.';
-      default:
-        break;
-    }
-  }
-  return fallback;
-}
-
-function DisclosureBody({ text }: { text: string }): ReactElement {
+export function DisclosureBody({ text }: { text: string }): ReactElement {
   const blocks = text.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean);
   return (
     <div className="emp-disclosure-box">
@@ -106,6 +73,9 @@ function statusChip(item: DeliveryConsentItem): ReactElement {
   if (item.status === 'withdrawn') {
     return <Chip tone="neutral">Paper delivery (withdrawn)</Chip>;
   }
+  if (item.answer === 'keep_paper') {
+    return <Chip tone="neutral">Paper delivery (your choice)</Chip>;
+  }
   return <Chip tone="neutral">Paper delivery</Chip>;
 }
 
@@ -116,7 +86,7 @@ function ConsentCard({
   isPrintTarget,
   onPrint,
   onUpdated,
-  onReload,
+  onRefresh,
 }: {
   item: DeliveryConsentItem;
   canConsent: boolean;
@@ -124,7 +94,8 @@ function ConsentCard({
   isPrintTarget: boolean;
   onPrint: () => void;
   onUpdated: (next: DeliveryConsentsState, message: string) => void;
-  onReload: () => void;
+  /** Loads the latest wording in place, so this card and its message stay on screen. */
+  onRefresh: () => void;
 }): ReactElement {
   const { api, state, reportError } = useReadySession();
   const { stepUp, openAccountSettings } = useEmployeeAuth();
@@ -211,8 +182,32 @@ function ConsentCard({
       } else {
         setError(consentErrorMessage(failure, "Couldn't save your consent. Try again in a minute."));
         if (failure instanceof EmployeeApiError && failure.kind === 'disclosure_outdated') {
-          onReload();
+          // Agreeing (and the W-2GU PDF check) covered the old text: start again on the new wording.
+          setAcknowledged(false);
+          setChallenge(null);
+          setProofCode('');
+          setPdfNotice(null);
+          onRefresh();
         }
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // An explicit "keep paper" answer: nothing about delivery changes, so no step-up.
+  const keepPaper = async (): Promise<void> => {
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await api.keepPaperDelivery(state.link.id, item.kind);
+      setAcknowledged(false);
+      onUpdated(next, `Saved. You'll keep getting paper ${copy.shortLabel}.`);
+    } catch (failure) {
+      if (isSessionError(failure)) {
+        reportError(failure);
+      } else {
+        setError(consentErrorMessage(failure, "Couldn't save your choice. Try again in a minute."));
       }
     } finally {
       setSaving(false);
@@ -396,6 +391,17 @@ function ConsentCard({
             >
               {saving ? 'Recording consent…' : `Consent to electronic ${copy.shortLabel}`}
             </EmpButton>
+            {item.answer === 'not_answered' && (
+              <EmpButton
+                variant="quiet"
+                block
+                className="emp-narrow-button"
+                disabled={saving}
+                onClick={() => { void keepPaper(); }}
+              >
+                Keep paper {copy.shortLabel}
+              </EmpButton>
+            )}
           </form>
         )}
 
@@ -443,7 +449,7 @@ function ConsentCard({
 }
 
 function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[] }): ReactElement | null {
-  const { isFormer, isViewOnly } = useReadySession();
+  const { api, state: session, isFormer, isViewOnly } = useReadySession();
   const { state, reload, update } = useEmployeeData<DeliveryConsentsState>(
     'delivery-consents',
     (api, linkId, signal) => api.deliveryConsents(linkId, signal),
@@ -493,7 +499,9 @@ function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[]
           canWithdraw={canWithdraw}
           isPrintTarget={printingKind === item.kind}
           onPrint={() => setPrintingKind(item.kind)}
-          onReload={reload}
+          onRefresh={() => {
+            void api.deliveryConsents(session.link.id).then(update, reload);
+          }}
           onUpdated={(next, message) => {
             update(next);
             setNotice(message);

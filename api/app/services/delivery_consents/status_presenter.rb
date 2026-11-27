@@ -18,9 +18,12 @@ module DeliveryConsents
         .order(given_at: :desc, id: :desc)
         .to_a
         .group_by(&:kind)
+      preferences = DeliveryPreference
+        .where(company_id: @company.id, employee_id: @employee.id)
+        .index_by(&:kind)
 
       items = DeliveryDisclosure::KINDS.map do |kind|
-        build_item(kind, consents_by_kind.fetch(kind, []))
+        build_item(kind, consents_by_kind.fetch(kind, []), preferences[kind])
       end
 
       {
@@ -35,7 +38,7 @@ module DeliveryConsents
       disclosure.draft? && (@user&.staff_member? == true || Rails.env.development?)
     end
 
-    def build_item(kind, records)
+    def build_item(kind, records, preference)
       disclosure = DeliveryDisclosure.current_for(kind)
       active_consent = records.find(&:active?)
       last_withdrawn = records.find(&:withdrawn?)
@@ -53,6 +56,8 @@ module DeliveryConsents
       {
         kind: kind,
         status: status,
+        answer: Answers.answer(active_consent: active_consent, withdrawn_consent: last_withdrawn, preference: preference),
+        paper_chosen_at: (Answers.paper_chosen_at(withdrawn_consent: last_withdrawn, preference: preference)&.iso8601 unless active_consent),
         active_consent: serialize_active_consent(active_consent, disclosure),
         last_withdrawn_at: last_withdrawn&.withdrawn_at&.iso8601,
         disclosure: serialize_disclosure(disclosure),

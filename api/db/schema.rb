@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_28_010100) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_28_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -960,6 +960,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_010100) do
     t.check_constraint "digest::text ~ '^[0-9a-f]{64}$'::text", name: "delivery_disclosures_digest_check"
     t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying::text, 'w2gu'::character varying::text])", name: "delivery_disclosures_kind_check"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'approved'::character varying::text])", name: "delivery_disclosures_status_check"
+  end
+
+  create_table "delivery_preferences", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.bigint "employee_id", null: false
+    t.bigint "employee_account_link_id", null: false
+    t.bigint "user_id", null: false
+    t.string "kind", null: false
+    t.string "choice", default: "keep_paper", null: false
+    t.datetime "recorded_at", null: false
+    t.string "ip_address", limit: 64
+    t.string "user_agent", limit: 512
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "employee_id", "kind" ], name: "idx_delivery_preferences_employee_kind", unique: true
+    t.index [ "employee_account_link_id" ], name: "index_delivery_preferences_on_employee_account_link_id"
+    t.index [ "user_id" ], name: "index_delivery_preferences_on_user_id"
+    t.check_constraint "choice::text = 'keep_paper'::text", name: "delivery_preferences_choice_check"
+    t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying, 'w2gu'::character varying]::text[])", name: "delivery_preferences_kind_check"
   end
 
   create_table "demo_shape_conversions", force: :cascade do |t|
@@ -5527,6 +5546,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_010100) do
   add_foreign_key "delivery_consents", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_delivery_consents_employee", on_delete: :restrict
   add_foreign_key "delivery_consents", "users", column: "withdrawn_by_user_id", on_delete: :nullify
   add_foreign_key "delivery_consents", "users", on_delete: :restrict
+  add_foreign_key "delivery_preferences", "companies", on_delete: :restrict
+  add_foreign_key "delivery_preferences", "employee_account_links", column: [ "employee_account_link_id", "employee_id", "company_id" ], primary_key: [ "id", "employee_id", "company_id" ], name: "fk_delivery_preferences_link", on_delete: :restrict
+  add_foreign_key "delivery_preferences", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_delivery_preferences_employee", on_delete: :restrict
+  add_foreign_key "delivery_preferences", "users", on_delete: :restrict
   add_foreign_key "demo_shape_conversions", "companies"
   add_foreign_key "demo_shape_conversions", "organizations"
   add_foreign_key "demo_shape_conversions", "users", column: "actor_id"
