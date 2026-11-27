@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { DemoBadge } from '@/components/ui/demo-badge';
 import { Header } from '@/components/layout/Header';
 import { EmployeeAppTurnOnStep } from '@/components/employee-app/EmployeeAppTurnOnStep';
 import { InviteDeliveryField } from '@/components/employee-app/InviteDeliveryField';
@@ -11,7 +12,6 @@ import { Input } from '@/components/ui/input';
 import { useCompany } from '@/contexts/CompanyContext';
 import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppStatusPath, employeeContactDetailsPath, employeePath } from '@/lib/routes';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
-import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
 import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 import {
   employeeAppOff, employeeAppRolloutApi, formatEmployeeAppDate, inviteEmailMessages,
@@ -34,15 +34,14 @@ export function EmployeeAppRollout({ audience }: { audience: 'admin' | 'client' 
   const viewOnly = useClientViewOnly() && audience === 'client';
   if (!activeCompany) return <WorkspaceLoader label="Loading client" />;
   return <CompanyRollout key={`${activeCompany.id}:${audience}`} companyId={activeCompany.id} companyName={activeCompany.name} audience={audience}
-    showSettings={audience === 'client' ? !viewOnly : canManageSettings} viewOnly={viewOnly} />;
+    showSettings={audience === 'client' ? !viewOnly : canManageSettings} />;
 }
 
-function CompanyRollout({ companyId, companyName, audience, showSettings, viewOnly }: {
+function CompanyRollout({ companyId, companyName, audience, showSettings }: {
   companyId: number;
   companyName: string;
   audience: 'admin' | 'client';
   showSettings: boolean;
-  viewOnly: boolean;
 }) {
   const [rollout, setRollout] = useState<Rollout | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -65,7 +64,7 @@ function CompanyRollout({ companyId, companyName, audience, showSettings, viewOn
 
   return (
     <div>
-      <Header title={audience === 'client' ? 'Employee app' : 'Employee app rollout'} mobileSticky={false} actions={(
+      <Header title="Employee app rollout" mobileSticky={false} actions={(
         <div className="flex flex-wrap gap-x-4">
           <Link className={textLink} to={employeeAppStatusPath(companyId)}>Who has signed in</Link>
           {showSettings && <Link className={textLink} to={employeeAppSettingsPath(companyId)}>Branding and Help settings</Link>}
@@ -114,7 +113,6 @@ function CompanyRollout({ companyId, companyName, audience, showSettings, viewOn
               </div>
             </CardContent>
           </Card>
-          {viewOnly && <Card><CardHeader><CardTitle>Invite a group</CardTitle></CardHeader><CardContent><ViewOnlyNotice /></CardContent></Card>}
           {rollout.can_manage_invites && <InviteWave rollout={rollout} companyId={companyId} companyName={companyName} audience={audience}
             recordPath={recordPath} refresh={() => setAttempt((value) => value + 1)} />}
           <Card>
@@ -172,6 +170,7 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
   const canPrintCodes = rollout.can_print_codes === true;
   const [delivery, setDelivery] = useState<InviteDelivery>('email');
   const [query, setQuery] = useState('');
+  const { activeCompany } = useCompany();
   const [selected, setSelected] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<WaveResult[]>([]);
@@ -207,7 +206,7 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Invite a group</CardTitle>
+        <CardTitle className="flex flex-wrap items-center gap-2">Invite a group {audience === 'admin' && activeCompany?.demo && <DemoBadge />}</CardTitle>
         <CardDescription>
           {rollout.enabled
             ? canPrintCodes
@@ -229,6 +228,17 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
               <label htmlFor={searchId} className="text-sm font-semibold">Find employees</label>
               <Input id={searchId} type="search" className="max-w-md text-base" value={query} onChange={(event) => setQuery(event.target.value)} />
             </div>
+            {audience === 'admin' && matches.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm"
+                  disabled={busy || selectedIds.length >= rollout.max_wave_size || matches.every((employee) => selectedIds.includes(employee.id))}
+                  onClick={() => setSelected(Array.from(new Set([...selectedIds, ...matches.map((employee) => employee.id)])).slice(0, rollout.max_wave_size))}>
+                  {matches.filter((employee) => !selectedIds.includes(employee.id)).length > rollout.max_wave_size - selectedIds.length
+                    ? `Select up to ${rollout.max_wave_size}` : 'Select all matches'}
+                </Button>
+                {selectedIds.length > 0 && <Button type="button" variant="ghost" size="sm" onClick={() => setSelected([])} disabled={busy}>Clear selection</Button>}
+              </div>
+            )}
             {matches.length === 0 ? (
               <p className="text-sm text-neutral-600">{query ? 'No matching employees.' : 'No employees ready for this delivery method.'}</p>
             ) : (

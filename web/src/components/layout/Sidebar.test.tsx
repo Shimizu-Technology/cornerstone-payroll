@@ -3,10 +3,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
-const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7, role: 'accountant', mosa: false }));
+const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7, role: 'accountant', access: 'manager', mosa: false }));
 vi.mock('@/hooks/usePortalCounts', () => ({ usePortalCounts: () => null }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({
-  user: { role: actor.role, name: 'Assigned accountant', email: 'accountant@example.test' },
+  user: { role: actor.role, client_access_level: actor.access, name: 'Assigned accountant', email: 'accountant@example.test' },
   isAccountant: true, signOut: vi.fn(),
   hasCapability: (capability: string) => actor.allowed && capability === 'manage_own_aire_account_link',
 }) }));
@@ -15,7 +15,7 @@ vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
 }) }));
 vi.mock('./CompanySwitcher', () => ({ CompanySwitcher: () => null }));
 vi.mock('./OrganizationSwitcher', () => ({ OrganizationSwitcher: () => null }));
-beforeEach(() => { actor.allowed = true; actor.delegated = false; actor.selectedId = 7; actor.role = 'accountant'; actor.mosa = false; });
+beforeEach(() => { actor.allowed = true; actor.delegated = false; actor.selectedId = 7; actor.role = 'accountant'; actor.access = 'manager'; actor.mosa = false; });
 afterEach(cleanup);
 describe('Accountant personal connection navigation', () => {
   it('offers personal connection without source or calendar configuration rights', () => {
@@ -63,7 +63,7 @@ describe('Account menu', () => {
 
 it('highlights only Client Inbox when visiting its route', () => {
   render(<MemoryRouter initialEntries={['/app/client-inbox']}><Sidebar /></MemoryRouter>);
-  expect(screen.getByRole('link', { name: 'Dashboard' }).getAttribute('aria-current')).toBeNull();
+  expect(screen.getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBeNull();
   expect(screen.getByRole('link', { name: 'Client Inbox' }).getAttribute('aria-current')).toBe('page');
 });
 
@@ -91,4 +91,12 @@ it('hides the command shortcut badge on mobile viewports', () => {
   const shortcutBadge = commandButton.querySelector('span.ml-auto');
   expect(shortcutBadge?.className).toContain('hidden');
   expect(shortcutBadge?.className).toContain('lg:inline-flex');
+});
+
+it.each(['manager', 'viewer'])('shows client branding navigation only to a %s', (access) => {
+  actor.role = 'client';
+  actor.access = access;
+  render(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(Boolean(screen.queryByRole('link', { name: 'Employee app branding & help' }))).toBe(access === 'manager');
+  expect(screen.getByText(access === 'manager' ? 'Client manager' : 'Client viewer')).toBeTruthy();
 });

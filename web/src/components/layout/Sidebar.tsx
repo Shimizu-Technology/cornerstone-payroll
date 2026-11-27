@@ -67,7 +67,7 @@ interface SidebarProps {
 }
 
 const clientNavigation: NavItem[] = [
-  { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Home', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Inbox', href: '/app/client-inbox', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app', href: '/employee-app/rollout', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
@@ -84,7 +84,7 @@ const clientNavigation: NavItem[] = [
 const portalNavigation: NavItem[] = [
   { name: 'Dashboard', href: '/app', icon: <LayoutDashboard className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay period files', href: '/payroll-files', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Messages', href: '/messages', icon: <MessagesSquare className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app', href: '/employee-app/rollout', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app status', href: '/employee-app/status', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
@@ -114,7 +114,7 @@ const clientSettingsNavigation: NavItem[] = [
   { name: 'Time tracking account', href: '/app/aire-account-connection', icon: <Link2 className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'How this client runs', href: '/operating-profile', icon: <SlidersHorizontal className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Schedule', href: '/pay-schedule-settings', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Employee app settings', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app branding & help', href: '/employee-app', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app switch', href: '/employee-app/switch', icon: <ToggleRight className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'My Printer & Checks', href: '/check-settings', icon: <Printer className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Payroll Fields', href: '/payroll-fields', icon: <ListPlus className="h-[18px] w-[18px] shrink-0" /> },
@@ -138,7 +138,7 @@ const portalAdminNavigation: NavItem[] = [
   { name: 'Pay Period Files', href: '/settings/payroll-submissions', icon: <FileSpreadsheet className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Messages', href: '/settings/client-messages', icon: <MessagesSquare className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
-  { name: 'Client Changes', href: '/settings/client-change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Change Requests', href: '/settings/client-change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 function FloatingTooltip({ anchorRef, label, visible }: { anchorRef: React.RefObject<HTMLElement | null>; label: string; visible: boolean }) {
@@ -286,7 +286,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/payroll-fields') return hasCapability('manage_payroll_fields');
     if (item.href === '/time-tracking-sources') return isAdmin;
     if (item.href === '/app/aire-history-approval') return (isAdmin || isAccountant) && hasCapability('payroll_operations');
-    if (item.href === '/employee-app') return !!activeCompanyId && canManageClientAdministration;
+    if (item.href === '/employee-app') return !!activeCompanyId && (isClient ? user?.client_access_level !== 'viewer' : canManageClientAdministration);
     if (item.href === '/employee-app/switch') return !!activeCompanyId && hasCapability('manage_employee_app_switch');
     if (!canManageClientConfiguration) return false;
     return true;
@@ -344,9 +344,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
       {/* Logo */}
       <div className="shrink-0 border-b border-neutral-200/70 px-3 py-3.5">
         <NavLink
-          to="/"
+          to="/app"
           onClick={onNavigate}
-          aria-label="Go to public home page"
+          aria-label="Go to payroll home"
           className={cn(
             'flex items-center rounded-2xl transition-colors hover:bg-neutral-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-300 focus-visible:ring-offset-2',
             collapsed ? 'justify-center p-1' : 'gap-3 px-3 py-1'
@@ -560,7 +560,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
               <div className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm font-medium text-neutral-900">{user?.name || 'User'}</p>
                 <p className="truncate text-xs text-neutral-600">
-                  {roleLabel(user?.role)}
+                  {isClient ? (user?.client_access_level === 'viewer' ? 'Client viewer' : 'Client manager') : roleLabel(user?.role)}
                 </p>
               </div>
             )}

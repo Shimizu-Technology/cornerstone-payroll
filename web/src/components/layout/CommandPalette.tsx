@@ -33,7 +33,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { getCompanySwitchRedirect } from '@/lib/company-switching';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeeContactDetailsPath, employeesPath, newEmployeePath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppStatusPath, employeeAppSwitchPath, employeeContactDetailsPath, employeesPath, newEmployeePath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 import { cn } from '@/lib/utils';
 
 type CommandPaletteMode = 'all' | 'companies';
@@ -82,6 +82,7 @@ function scoreCommand(command: CommandItem, query: string) {
 export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange }: CommandPaletteProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const canManageClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
   const { isAdmin, isSuperAdmin, isAccountant, isClient, hasCapability } = useAuth();
   const { companies, activeCompany, canSwitchCompany, switchCompany } = useCompany();
@@ -97,7 +98,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
 
     add({
       id: 'go-dashboard',
-      label: 'Dashboard',
+      label: isClient ? 'Dashboard' : 'Home',
       description: 'Open the main workspace overview.',
       group: 'Sidebar',
       keywords: ['home', 'overview', 'app'],
@@ -151,6 +152,27 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     });
 
     if (!isClient) {
+      const staffShortcuts = [
+        ['Client Inbox', '/app/client-inbox'],
+        ['Year-End Filing', '/year-end'],
+      ];
+      if (activeCompanyId) {
+        staffShortcuts.push(
+          ['Employee app rollout', employeeAppRolloutPath(activeCompanyId)],
+          ['Employee app status', employeeAppStatusPath(activeCompanyId)],
+        );
+        if (canManageClientAdministration) {
+          staffShortcuts.push(['Employee app branding & help', employeeAppSettingsPath(activeCompanyId)]);
+        }
+        if (hasCapability('manage_employee_app_switch')) {
+          staffShortcuts.push(['Employee app switch', employeeAppSwitchPath(activeCompanyId)]);
+        }
+      }
+      for (const [label, href] of staffShortcuts) {
+        add({ id: href, label, href, group: 'Sidebar', kind: 'navigation',
+          description: '', keywords: [], icon: <ClipboardList className="h-4 w-4" /> });
+      }
+
       add({
         id: 'go-checks-payments',
         label: 'Checks & Payments',
@@ -425,7 +447,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         keywords: ['quarterly', 'form 500', 'w1', 'swica', '941', 'schedule b'],
         icon: <ClipboardCheck className="h-4 w-4" />,
         kind: 'navigation',
-        href: '/reports?report=quarterly_compliance_packet',
+        href: '/reports?report=quarterly-compliance-packet',
       });
 
       add({
@@ -447,7 +469,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
         keywords: ['tax', 'withholding', 'fica'],
         icon: <Calculator className="h-4 w-4" />,
         kind: 'navigation',
-        href: '/reports?report=tax_summary',
+        href: '/reports?report=tax-withholding-summary',
       });
     }
 
@@ -467,7 +489,7 @@ export function CommandPalette({ open, onOpenChange, mode = 'all', onModeChange 
     }
 
     return items;
-  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, canManageClientConfiguration, isSuperAdmin]);
+  }, [activeCompany, activeCompanyId, canSwitchCompany, companies, hasCapability, isAccountant, isAdmin, isClient, canManageClientAdministration, canManageClientConfiguration, isSuperAdmin]);
 
   const visibleCommands = useMemo(
     () => mode === 'companies' ? commands.filter((command) => command.kind === 'company') : commands,

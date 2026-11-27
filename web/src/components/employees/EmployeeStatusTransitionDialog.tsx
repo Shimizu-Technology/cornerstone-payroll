@@ -127,7 +127,7 @@ export function EmployeeStatusTransitionDialog({ employee, mode, open, onOpenCha
             <DialogTitle className="text-xl text-white">
               {mode === 'deactivate' ? `Mark ${employee.first_name} inactive` : isTermination ? `Terminate ${employee.first_name}` : `Reactivate ${employee.first_name}`}
             </DialogTitle>
-            <DialogDescription className="text-neutral-200">
+            <DialogDescription className="!text-rose-100">
               {mode === 'deactivate' ? `Inactive: not paid until reactivated. ${canTerminate ? 'Use Terminate when employment has ended.' : 'A manager or admin can terminate a worker whose employment has ended.'}` : isTermination
                 ? 'Record when the termination actually took effect. The worker and every prior paycheck remain available for reports and audit history.'
                 : employee.status === 'inactive'

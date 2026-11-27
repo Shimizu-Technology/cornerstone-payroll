@@ -12,7 +12,6 @@ import { InboxReturnLink } from './InboxReturnLink';
 import { ResourceActivity, type ResourceActivityApi } from './ResourceActivity';
 import { useDisplayedMessages } from './useDisplayedMessages';
 import { MessageComposer, type ComposerSend } from './MessageComposer';
-import { ViewOnlyNotice } from './ViewOnlyNotice';
 import { MessageAttachments } from './MessageAttachments';
 import { FileRequestCard } from './FileRequestCard';
 import { stepLabel, type PortalDocumentsApi } from './portalFiles';
@@ -648,7 +647,7 @@ function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDoc
         </div>}
         <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
           <div className={`${mobileConversationOpen ? 'hidden lg:block' : 'block'} min-w-0 space-y-4`}>
-            {viewOnly ? <ViewOnlyNotice className="rounded-lg border border-neutral-200 bg-neutral-50 p-4" /> : <>
+            {!viewOnly && <>
             <div className="flex flex-wrap gap-2 lg:hidden">
               <Button type="button" variant={newFormOpen ? 'outline' : 'primary'} aria-expanded={newFormOpen} aria-controls="portal-new-conversation" onClick={() => setNewFormOpen(open => !open)}>
                 <Plus className="mr-2 h-4 w-4" aria-hidden />{newFormOpen ? 'Hide new conversation' : 'New conversation'}
@@ -783,7 +782,7 @@ function PortalMessagesContent({ api, periodApi, documents, documentsApi = noDoc
 
                 <ResourceActivity key={selectedThread.id} id={selectedThread.id} api={api} revision={selectedThread.updated_at} />
                 <div className="border-t border-neutral-200 p-4">
-                  {viewOnly ? <ViewOnlyNotice /> : (
+                  {!viewOnly && (
                     <MessageComposer key={selectedThread.id} draftKey={`${draftScope}:thread:${selectedThread.id}`} documentsApi={documentsApi}
                       label={`Reply ${audienceLabel}`} placeholder={`Reply ${audienceLabel}`} submitLabel="Send" disabled={unavailable}
                       onSend={payload => sendReply(selectedThread, payload)} />

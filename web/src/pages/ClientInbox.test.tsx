@@ -72,7 +72,7 @@ it('refreshes live work without duplicate rows and drops newly inaccessible comp
   expect(screen.getAllByText('message item 1')).toHaveLength(1);
   mocks.list.mockResolvedValueOnce({ data: [], meta: { next_cursor: null } });
   await act(async () => { window.dispatchEvent(new Event('portal-work-changed')); });
-  await screen.findByText('No portal work matches these filters.');
+  await screen.findByText('All caught up. Nothing is waiting on staff.');
   expect(screen.queryByText('message item 1')).toBeNull();
 });
 

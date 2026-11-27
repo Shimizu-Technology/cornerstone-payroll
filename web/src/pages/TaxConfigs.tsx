@@ -388,7 +388,7 @@ export default function TaxConfigs() {
                       <button
                         onClick={() => activateConfig(config.id)}
                         className="text-success-800 hover:text-green-900"
-                        title="Activate"
+                        aria-label="Activate" title="Activate"
                         disabled={activatingId === config.id}
                       >
                         {activatingId === config.id ? (
@@ -401,7 +401,7 @@ export default function TaxConfigs() {
                     <button
                       onClick={() => fetchAuditLogs(config.id)}
                       className="text-neutral-600 hover:text-neutral-900"
-                      title="View History"
+                      aria-label="View History" title="View History"
                     >
                       <History className="h-5 w-5" />
                     </button>
@@ -409,7 +409,7 @@ export default function TaxConfigs() {
                       <button
                         onClick={() => deleteConfig(config.id, config.tax_year)}
                         className="text-red-600 hover:text-red-900"
-                        title="Delete"
+                        aria-label="Delete" title="Delete"
                         disabled={deletingId === config.id}
                       >
                         {deletingId === config.id ? (

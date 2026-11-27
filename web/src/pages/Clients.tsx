@@ -764,22 +764,10 @@ export function Clients() {
   return (
     <>
       <Header
+        organizationWide
         title={canManageClients ? 'Client Management' : 'Client Info'}
         subtitle={canManageClients ? 'Manage payroll clients' : 'View and update your assigned clients'}
-      />
-
-      <div className="space-y-6 p-4 sm:p-6">
-        {/* Error */}
-        {error && (
-          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
-        )}
-        {promotionNotice && (
-          <ActionFeedback tone="success" message={promotionNotice}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
-            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button></ActionFeedback>
-        )}
-
-        {/* Primary actions */}
-        {canManageClients && !showForm && (
+        actions={canManageClients && !showForm && (
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <div className="flex flex-col items-stretch gap-2 sm:items-end">
               <Button variant="outline" onClick={handleOpenWorkspaceBuilder} aria-expanded={workspaceBuilderOpen} disabled={productionCompanies.length === 0}>
@@ -793,6 +781,17 @@ export function Clients() {
               Add New Client
             </Button>
           </div>
+        )}
+      />
+
+      <div className="space-y-6 p-4 sm:p-6">
+        {/* Error */}
+        {error && (
+          <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />
+        )}
+        {promotionNotice && (
+          <ActionFeedback tone="success" message={promotionNotice}><div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><span>{promotionNotice}</span></div>
+            <button type="button" onClick={() => setPromotionNotice(null)} aria-label="Dismiss promotion confirmation" className="text-success-700 hover:text-success-800"><X className="h-4 w-4" /></button></ActionFeedback>
         )}
 
         {workspaceBuilderOpen && (
@@ -1535,7 +1534,7 @@ export function Clients() {
                       </div>
                       <div className="mt-4 grid grid-cols-2 gap-3">
                         <MobileField label="Pay frequency" value={<span className="capitalize">{c.pay_frequency}</span>} />
-                        <MobileField label="Employees" value={`${c.active_employees} / ${c.total_employees}`} />
+                        <MobileField label="Employees" value={`${c.active_employees} active / ${c.total_employees} total`} />
                       </div>
                       {canEditAssignedClients && (
                         <MobileCardActions>
@@ -1601,7 +1600,6 @@ export function Clients() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Client Name</TableHead>
-                  <TableHead>EIN</TableHead>
                   <TableHead>Pay Frequency</TableHead>
                   <TableHead className="text-center">Employees</TableHead>
                   <TableHead className="text-center">Status</TableHead>
@@ -1611,7 +1609,7 @@ export function Clients() {
               <TableBody>
                 {orderedCompanies.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="text-center py-8 text-neutral-500">
+                    <TableCell colSpan={canEditAssignedClients ? 5 : 4} className="text-center py-8 text-neutral-500">
                       {canManageClients ? 'No clients found. Click "Add New Client" to get started.' : 'No assigned clients found.'}
                     </TableCell>
                   </TableRow>
@@ -1620,7 +1618,7 @@ export function Clients() {
                     <Fragment key={c.id}>
                     {groupStartLabels.has(c.id) && (
                       <TableRow className="bg-neutral-50/80 hover:bg-neutral-50/80">
-                        <TableCell colSpan={canEditAssignedClients ? 6 : 5} className="py-2 text-xs font-bold text-neutral-600">
+                        <TableCell colSpan={canEditAssignedClients ? 5 : 4} className="py-2 text-xs font-bold text-neutral-600">
                           {groupStartLabels.get(c.id)}
                         </TableCell>
                       </TableRow>
@@ -1647,11 +1645,10 @@ export function Clients() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-neutral-600 font-mono text-sm">—</TableCell>
                       <TableCell className="text-neutral-600 capitalize">{c.pay_frequency}</TableCell>
                       <TableCell className="text-center">
-                        <span className="text-neutral-900 font-medium">{c.active_employees}</span>
-                        <span className="text-neutral-600 text-xs ml-1">/ {c.total_employees}</span>
+                        <span className="text-neutral-900 font-medium">{c.active_employees} active</span>
+                        <span className="text-neutral-600 text-xs ml-1">/ {c.total_employees} total</span>
                       </TableCell>
                       <TableCell className="text-center">
                         {c.test_workspace_archived_at ? (

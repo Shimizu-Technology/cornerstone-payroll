@@ -332,7 +332,7 @@ export function CorrectivePaycheckModal({
             <strong>{originalPayPeriod.period_description ?? `${originalPayPeriod.start_date} – ${originalPayPeriod.end_date}`}</strong>.
             The original committed period will not be touched — a separate
             supplemental period carrying the delta will be created and committed.
-            YTD totals, tax sync, FIT auto-deposit, and reports will all reflect
+            YTD totals, tax sync, Guam income tax deposit, and reports will all reflect
             the corrected amounts.
           </DialogDescription>
         </DialogHeader>

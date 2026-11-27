@@ -64,7 +64,7 @@ describe('EmployeeList payment delivery', () => {
     expect(await screen.findByText('Employee overview route')).toBeTruthy();
   });
 
-  it('scopes sentence-case Pay rate and sortable header styling to clients while keeping staff unchanged', async () => {
+  it('uses sentence case in both employee lists', async () => {
     apiMocks.listDepartments.mockResolvedValue({ data: [] });
     apiMocks.listEmployees.mockResolvedValue({
       data: [{ id: 2, first_name: 'Dina', last_name: 'Deposit', employment_type: 'hourly', pay_rate: 20, status: 'active', payment_delivery_method: 'direct_deposit' }],
@@ -79,8 +79,8 @@ describe('EmployeeList payment delivery', () => {
 
     authMock.isClient = false;
     render(<MemoryRouter initialEntries={['/companies/1/employees']}><Routes><Route path="/companies/:companyId/employees" element={<EmployeeList />} /></Routes></MemoryRouter>);
-    const staffRateButton = await screen.findByRole('button', { name: 'Pay Rate' });
-    expect(staffRateButton.className.split(/\s+/)).toContain('uppercase');
-    expect(screen.getByRole('button', { name: 'Employee' }).className.split(/\s+/)).toContain('uppercase');
+    const staffRateButton = await screen.findByRole('button', { name: 'Pay rate' });
+    expect(staffRateButton.className.split(/\s+/)).not.toContain('uppercase');
+    expect(screen.getByRole('button', { name: 'Employee' }).className.split(/\s+/)).not.toContain('uppercase');
   });
 });

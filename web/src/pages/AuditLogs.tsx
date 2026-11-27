@@ -413,7 +413,7 @@ function CompanyActivityHistory(): ReactElement {
                     >
                       <TableCell>{formatGuamDateTime(group.primary.created_at)}</TableCell>
                       <TableCell>{group.primary.user_name || 'System'}</TableCell>
-                      <TableCell className="font-medium text-neutral-900">{displayAuditGroupAction(group)}</TableCell>
+                      <TableCell className="whitespace-normal! break-words font-medium text-neutral-900">{displayAuditGroupAction(group)}</TableCell>
                       <TableCell>{group.primary.display_subject || group.primary.subject_name || humanizeKey(group.primary.record_type || 'General')}</TableCell>
                       <TableCell>{group.primary.company_name || 'Organization-wide'}</TableCell>
                     </TableRow>
