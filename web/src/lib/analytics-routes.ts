@@ -46,6 +46,7 @@ export const STAFF_ROUTE_OBJECTS: RouteObject[] = [
       { path: 'operating-profile' },
       { path: 'employee-app' },
       { path: 'employee-app/rollout' },
+      { path: 'employee-app/status' },
       { path: 'employee-app/switch' },
       { path: 'messages' },
       { path: 'documents' },

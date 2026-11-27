@@ -22,26 +22,48 @@ module DeliveryConsents
       [ preference&.recorded_at, withdrawn_consent&.withdrawn_at ].compact.max
     end
 
+    # Per employee and kind, { answer:, answered_at: } for employees of one company.
+    # Each source is reduced to one row per employee and kind in SQL: the active
+    # consent (unique), the latest withdrawal, and the keep-paper answer (unique).
+    def self.by_employee(company_id, employee_ids)
+      ids = employee_ids.to_a
+      key = ->(employee_id, kind) { [ employee_id, kind ] }
+      active = DeliveryConsent.active.where(company_id: company_id, employee_id: ids)
+        .pluck(:employee_id, :kind, :given_at).to_h { |employee_id, kind, at| [ key.(employee_id, kind), at ] }
+      withdrawn = DeliveryConsent.withdrawn.where(company_id: company_id, employee_id: ids)
+        .select("DISTINCT ON (employee_id, kind) employee_id, kind, withdrawn_at")
+        .reorder(:employee_id, :kind, withdrawn_at: :desc, id: :desc)
+        .to_h { |consent| [ key.(consent.employee_id, consent.kind), consent.withdrawn_at ] }
+      preferences = DeliveryPreference.where(company_id: company_id, employee_id: ids)
+        .pluck(:employee_id, :kind, :recorded_at).to_h { |employee_id, kind, at| [ key.(employee_id, kind), at ] }
+
+      ids.index_with do |employee_id|
+        DeliveryDisclosure::KINDS.index_with do |kind|
+          given_at = active[key.(employee_id, kind)]
+          withdrawn_at = withdrawn[key.(employee_id, kind)]
+          recorded_at = preferences[key.(employee_id, kind)]
+          {
+            answer: answer(active_consent: given_at, withdrawn_consent: withdrawn_at, preference: recorded_at),
+            answered_at: given_at || [ withdrawn_at, recorded_at ].compact.max
+          }
+        end
+      end
+    end
+
     # Per kind, how the company's active employees answered. The employees are
     # read once, so every kind counts the same people; 1099 contractors don't
     # get a W-2GU and are left out of its counts.
     def self.company_counts(company_id)
       employees = Employee.active.where(company_id: company_id).pluck(:id, :employment_type)
-      ids = employees.map(&:first)
-      consents = DeliveryConsent.where(company_id: company_id, employee_id: ids).pluck(:kind, :employee_id, :withdrawn_at)
-      preferences = DeliveryPreference.where(company_id: company_id, employee_id: ids).pluck(:kind, :employee_id)
+      answers = by_employee(company_id, employees.map(&:first))
 
       DeliveryDisclosure::KINDS.index_with do |kind|
-        counted = employees.reject { |_id, type| kind == "w2gu" && type == "contractor" }.to_set(&:first)
-        of_kind = consents.select { |row| row[0] == kind && counted.include?(row[1]) }
-        paperless = of_kind.select { |row| row[2].nil? }.to_set { |row| row[1] }
-        paper = (of_kind.reject { |row| row[2].nil? }.map { |row| row[1] } +
-          preferences.select { |row| row[0] == kind && counted.include?(row[1]) }.map { |row| row[1] }).to_set - paperless
-
+        counted = employees.reject { |_id, type| kind == "w2gu" && type == "contractor" }.map(&:first)
+        tally = counted.map { |id| answers.dig(id, kind, :answer) }.tally
         {
-          paperless: paperless.size,
-          keep_paper: paper.size,
-          not_answered: counted.size - paperless.size - paper.size,
+          paperless: tally.fetch(PAPERLESS, 0),
+          keep_paper: tally.fetch(KEEP_PAPER, 0),
+          not_answered: tally.fetch(NOT_ANSWERED, 0),
           total: counted.size
         }
       end
