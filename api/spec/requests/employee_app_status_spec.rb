@@ -65,10 +65,21 @@ RSpec.describe "Employee app status report", type: :request do
     link!(signed_up, status: "active", user: employee_login("user_status_ana"), activated_at: Time.iso8601("2026-11-05T00:00:00Z"))
   end
 
+  # Everyone here was hired well before the app opens below.
+  def hired_long_ago!(*employees)
+    Employee.where(id: employees.map(&:id)).update_all(created_at: Time.iso8601("2026-01-05T00:00:00Z"))
+  end
+
+  def rehire!(employee, on:)
+    EmployeeStatusEvent.create!(company: company, employee: employee, actor: staff, event_type: "reactivated",
+      previous_status: "terminated", resulting_status: "active", effective_date: on)
+  end
+
   before do
     enable_employee_app!(company)
     travel_to(now)
     disclosure_seeds
+    hired_long_ago!(signed_up, expired, uninvited, deactivated, former)
 
     # Ana: signed up with the current terms, opened the app, paperless stubs, paper W-2GU.
     EmployeeLinks.audit!(ana_link, "claimed", user: ana_link.user, metadata: { terms_version: terms.version })
@@ -162,7 +173,7 @@ RSpec.describe "Employee app status report", type: :request do
     rows = CSV.parse(response.body)
     expect(rows.first).to eq(EmployeeAppStatusReport::HEADERS)
     expect(rows.first).to eq([
-      "Employee", "Department", "Role", "App account", "Invite sent", "Invite expires", "Signed up", "Last recorded app open",
+      "Employee", "Department", "Role", "App account", "Invite sent", "Invite expires", "Signed up", "Last recorded app open (since Nov 25, 2026)",
       "Terms version", "Terms accepted", "Pay stubs", "Pay stubs answered", "W-2GU", "W-2GU answered"
     ])
     expect(rows.drop(1)).to eq([ [
@@ -241,25 +252,54 @@ RSpec.describe "Employee app status report", type: :request do
     reset = create(:employee, company: company, first_name: "Gil", last_name: "Resetcase", department: nil)
     reset_link = link!(reset, status: "invited", invite_expires_at: 3.days.from_now)
     EmployeeLinks.audit!(reset_link, "sign_up_reset", user: staff)
-    # Hal was rehired: his old login opened the app, and his new invite is open.
+    # Hal was rehired on Nov 26 and signed up with a new login, which hasn't opened the app.
+    # His old login's open belongs to his earlier employment and never counts.
     rehired = create(:employee, company: company, first_name: "Hal", last_name: "Rehire", department: nil)
-    old_link = link!(rehired, status: "former", user: employee_login("user_status_hal"),
+    old_link = link!(rehired, status: "former", user: employee_login("user_status_hal_old"),
       activated_at: Time.iso8601("2026-06-01T00:00:00Z"), former_at: 1.month.ago, former_access_until: 1.week.ago)
     record_open!(old_link, Time.iso8601("2026-11-25T05:00:00Z"))
-    link!(rehired, status: "invited", invite_expires_at: 3.days.from_now)
+    link!(rehired, status: "active", user: employee_login("user_status_hal_new"), activated_at: Time.iso8601("2026-11-26T01:00:00Z"))
+    # Jo was rehired on Nov 26 and reactivated the same login: only the open after the rehire counts.
+    reused = create(:employee, company: company, first_name: "Jo", last_name: "Sameogin", department: nil)
+    jo_login = employee_login("user_status_jo")
+    jo_old = link!(reused, status: "former", user: jo_login, activated_at: Time.iso8601("2026-06-01T00:00:00Z"),
+      former_at: 1.month.ago, former_access_until: 1.week.ago)
+    record_open!(jo_old, Time.iso8601("2026-11-25T04:00:00Z"))
+    jo_new = link!(reused, status: "active", user: jo_login, activated_at: Time.iso8601("2026-11-26T02:00:00Z"))
+    record_open!(jo_new, Time.iso8601("2026-11-26T06:00:00Z"))
+    # Lou was rehired and has a new invite open: re-invited.
+    reinvited = create(:employee, company: company, first_name: "Lou", last_name: "Returning", department: nil)
+    link!(reinvited, status: "former", user: employee_login("user_status_lou"), activated_at: Time.iso8601("2026-06-01T00:00:00Z"),
+      former_at: 1.month.ago, former_access_until: 1.week.ago)
+    link!(reinvited, status: "invited", invite_expires_at: 3.days.from_now)
     # Ivy signed up and hasn't opened the app since recording began.
     quiet = create(:employee, company: company, first_name: "Ivy", last_name: "Quiet", department: nil)
     link!(quiet, status: "active", user: employee_login("user_status_ivy"), activated_at: Time.iso8601("2026-11-10T00:00:00Z"))
+    hired_long_ago!(reset, rehired, reused, reinvited, quiet)
+    rehire!(rehired, on: Date.new(2026, 11, 26))
+    rehire!(reused, on: Date.new(2026, 11, 26))
+    rehire!(reinvited, on: Date.new(2026, 11, 26))
 
     get path(staff), headers: headers(staff)
     expect(row_for(reset)["account"]).to include("status" => "reinvited", "label" => "Re-invited", "signed_up" => false)
-    expect(row_for(rehired)["account"]).to include("status" => "reinvited", "signed_up" => false, "signed_up_at" => nil,
-      "last_opened_at" => "2026-11-25T05:00:00Z")
+    expect(row_for(reinvited)["account"]).to include("status" => "reinvited", "signed_up" => false, "last_opened_at" => nil)
+    expect(row_for(rehired)["account"]).to include("status" => "active", "signed_up" => true, "last_opened_at" => nil)
+    expect(row_for(rehired)["account"]).not_to have_key("earlier_employment_last_opened_at")
+    expect(row_for(reused)["account"]).to include("signed_up" => true, "last_opened_at" => "2026-11-26T06:00:00Z")
     expect(row_for(quiet)["account"]).to include("status" => "active", "signed_up" => true, "last_opened_at" => nil)
-    expect(data["summary"]).to include("total" => 7, "signed_up" => 2, "opened" => 2, "not_signed_up" => 5, "signed_up_no_opens" => 1)
+    # Signed up: Ana, Hal, Jo, Ivy. Opened during the current employment: Ana and Jo.
+    expect(data["summary"]).to include("total" => 9, "signed_up" => 4, "opened" => 2, "not_signed_up" => 5, "signed_up_no_opens" => 2)
 
     get path(staff), headers: headers(staff), params: { filter: "signed_up_no_opens" }
-    expect(data["employees"].map { |row| row["id"] }).to eq([ quiet.id ])
+    expect(data["employees"].map { |row| row["id"] }).to eq([ quiet.id, rehired.id ])
+
+    # The profile panel mentions the earlier employment's open as a note only.
+    get "/api/v1/admin/employees/#{rehired.id}/employee_app", headers: headers(staff)
+    expect(data.dig("agreements", "account")).to include("last_opened_at" => nil,
+      "earlier_employment_last_opened_at" => "2026-11-25T05:00:00Z")
+    get "/api/v1/admin/employees/#{reused.id}/employee_app", headers: headers(staff)
+    expect(data.dig("agreements", "account")).to include("last_opened_at" => "2026-11-26T06:00:00Z",
+      "earlier_employment_last_opened_at" => "2026-11-25T04:00:00Z")
 
     # Turning a login off moves the person out of signed up, in the report and the panel alike.
     quiet.employee_account_links.sole.user.update!(active: false)
@@ -277,6 +317,7 @@ RSpec.describe "Employee app status report", type: :request do
       person = create(:employee, company: company, first_name: "Load#{index}", last_name: "Fixture", department: nil)
       link!(person, status: "active", user: employee_login("user_status_load_#{index}"), activated_at: 1.month.ago)
     end
+    hired_long_ago!(*logins.map(&:employee))
     base = Time.iso8601("2026-11-25T00:00:00Z")
     rows = logins.flat_map do |link|
       Array.new(400) do |step|

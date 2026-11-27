@@ -60,7 +60,10 @@ export interface AppStatusReport {
 
 /** The per-employee facts on the profile panel (EmployeeAppRolloutActions#agreements_payload). */
 export interface EmployeeAgreements {
-  account: Pick<AppAccount, 'status' | 'label' | 'signed_up' | 'invite_sent_at' | 'signed_up_at' | 'last_opened_at'>;
+  account: Pick<AppAccount, 'status' | 'label' | 'signed_up' | 'invite_sent_at' | 'signed_up_at' | 'last_opened_at'> & {
+    /** A rehire's last recorded open from an earlier employment: a note only, never counted. */
+    earlier_employment_last_opened_at?: string | null;
+  };
   terms: TermsAcceptance;
   pay_statements: AnswerFact;
   w2gu: AnswerFact;

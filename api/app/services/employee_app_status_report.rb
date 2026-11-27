@@ -11,8 +11,11 @@
 # Two separate measures:
 # - Signed up: a link is active and its login is turned on, now. A sign-up
 #   reset, a rehire's new invite or a turned-off login is not signed up.
-# - Opened the app: a recorded app open by any of the employee's logins here,
-#   recorded since APP_OPENS_RECORDED_SINCE.
+# - Opened the app: a recorded app open by any of the employee's logins here
+#   during their current employment (since the record was created or last
+#   reactivated, as for a rehire), recorded since APP_OPENS_RECORDED_SINCE.
+#   An open from an earlier employment never counts; the profile panel
+#   mentions it separately.
 class EmployeeAppStatusReport
   FILTERS = %w[not_signed_up signed_up_no_opens invite_expired terms_not_accepted no_paperless_answer kept_paper].freeze
   TERMS_ACTIONS = %w[employee_links#sign_up_started employee_links#claimed employee_links#reactivated].freeze
@@ -28,7 +31,8 @@ class EmployeeAppStatusReport
     DeliveryConsents::Answers::NOT_ANSWERED => "Not answered"
   }.freeze
   HEADERS = [
-    "Employee", "Department", "Role", "App account", "Invite sent", "Invite expires", "Signed up", "Last recorded app open",
+    "Employee", "Department", "Role", "App account", "Invite sent", "Invite expires", "Signed up",
+    "Last recorded app open (since #{APP_OPENS_RECORDED_SINCE.strftime('%b %-d, %Y')})",
     "Terms version", "Terms accepted", "Pay stubs", "Pay stubs answered", "W-2GU", "W-2GU answered"
   ].freeze
 
@@ -62,7 +66,7 @@ class EmployeeAppStatusReport
 
   # The same facts for one employee, active or not (the employee profile panel).
   def row(employee)
-    rows_for([ employee ]).first
+    rows_for([ employee ], earlier_opens: true).first
   end
 
   def sheet(rows)
@@ -100,21 +104,24 @@ class EmployeeAppStatusReport
     scope
   end
 
-  def rows_for(employees)
+  def rows_for(employees, earlier_opens: false)
     ids = employees.map(&:id)
     links = EmployeeAccountLink.where(company_id: @company.id, employee_id: ids).order(:id).to_a
     links_by_employee = links.group_by(&:employee_id)
     users = User.where(id: links.filter_map(&:user_id)).index_by(&:id)
     reinvited = @rollout.reinvited_link_ids(links)
     terms = latest_terms(ids)
-    opens = latest_opens(users.keys)
+    starts = employment_starts(employees)
+    logins = links.filter_map { |link| [ link.employee_id, link.user_id ] if link.user_id }.uniq
+    opens = latest_opens(logins, starts)
+    earlier = earlier_opens ? latest_opens(logins, starts, before: true) : {}
     answers = DeliveryConsents::Answers.by_employee(@company.id, ids)
 
     employees.map do |employee|
       employee_links = links_by_employee.fetch(employee.id, [])
       access = employee_links.last
       signed_up_link = employee_links.reverse.find { |link| link.active? && users[link.user_id]&.active? }
-      opened_at = employee_links.filter_map { |link| opens[link.user_id] }.max
+      opened_at = opens[employee.id]
       accepted = terms[employee.id]
       status = @rollout.display_status(access, user: users[access&.user_id], reinvited: reinvited.include?(access&.id))
       {
@@ -131,7 +138,9 @@ class EmployeeAppStatusReport
           invite_expired: access&.invited? && access.invite_expires_at.present? && access.invite_expires_at <= @now || false,
           signed_up_at: signed_up_link&.activated_at&.iso8601,
           last_opened_at: opened_at&.iso8601,
-          locked_until: (access.activation_locked_until&.iso8601 if status == :locked)
+          locked_until: (access.activation_locked_until&.iso8601 if status == :locked),
+          # The profile panel only: a note, never part of the measures.
+          **(earlier_opens ? { earlier_employment_last_opened_at: earlier[employee.id]&.iso8601 } : {})
         },
         terms: {
           version: accepted&.terms_version,
@@ -165,23 +174,44 @@ class EmployeeAppStatusReport
       .index_by(&:employee_id)
   end
 
-  # Each login's latest recorded app open: one step per login down
-  # idx_audit_logs_employee_app_opens (the action is inlined so the partial
-  # index matches under prepared statements).
-  def latest_opens(user_ids)
-    return {} if user_ids.empty?
+  # When each employee's current employment began: the record's creation, or
+  # its latest reactivation (a rehire), from the start of that Guam day.
+  def employment_starts(employees)
+    reactivated = EmployeeStatusEvent.where(company_id: @company.id, employee_id: employees.map(&:id), event_type: "reactivated")
+      .group(:employee_id).maximum(:effective_date)
+    employees.to_h do |employee|
+      rehired = reactivated[employee.id]&.in_time_zone(PayrollBusinessClock::TIME_ZONE)
+      [ employee.id, [ employee.created_at, rehired ].compact.max ]
+    end
+  end
+
+  # Each employee's latest recorded app open by any of their logins, during the
+  # current employment (or, with before:, an earlier one): one step per login
+  # down idx_audit_logs_employee_app_opens. The action is inlined so the
+  # partial index matches under prepared statements.
+  def latest_opens(logins, starts, before: false)
+    return {} if logins.empty?
 
     action = AuditLog.connection.quote(APP_OPEN_ACTION)
-    AuditLog.find_by_sql([ <<~SQL.squish, { company_id: @company.id, ids: user_ids } ])
-      SELECT logins.user_id AS user_id, latest.created_at AS created_at
-      FROM unnest(ARRAY[:ids]::bigint[]) AS logins(user_id)
+    bound = before ? "audit_logs.created_at < logins.since" : "audit_logs.created_at >= logins.since"
+    binds = {
+      company_id: @company.id,
+      employee_ids: logins.map(&:first),
+      user_ids: logins.map(&:last),
+      since: logins.map { |employee_id, _| starts.fetch(employee_id).utc.strftime("%Y-%m-%d %H:%M:%S.%6N") }
+    }
+    AuditLog.find_by_sql([ <<~SQL.squish, binds ])
+      SELECT logins.employee_id AS employee_id, MAX(latest.created_at) AS created_at
+      FROM unnest(ARRAY[:employee_ids]::bigint[], ARRAY[:user_ids]::bigint[], ARRAY[:since]::timestamp[]) AS logins(employee_id, user_id, since)
       CROSS JOIN LATERAL (
         SELECT audit_logs.created_at FROM audit_logs
         WHERE audit_logs.company_id = :company_id AND audit_logs.user_id = logins.user_id AND audit_logs.action = #{action}
+          AND #{bound}
         ORDER BY audit_logs.created_at DESC LIMIT 1
       ) latest
+      GROUP BY logins.employee_id
     SQL
-      .to_h { |open| [ open.user_id, open.created_at ] }
+      .to_h { |open| [ open.employee_id, open.created_at ] }
   end
 
   def summary(rows)
