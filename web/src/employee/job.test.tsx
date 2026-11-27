@@ -106,9 +106,11 @@ describe('My job', () => {
   });
 
   it('leaves out rows with nothing set instead of saying "None", and names the employer when there are no Help contacts', async () => {
-    show('/my-info', { ...JOB, role: null, department: null, start_date: null, payment_method: null, contact_name: null }, { next_payday: null });
+    // With no method set, the API answers paper check, as payroll pays.
+    show('/my-info', { ...JOB, role: null, department: null, start_date: null, payment_method: 'paper_check', contact_name: null }, { next_payday: null });
     const card = await jobCard();
-    expect(rows(card)).toEqual(['Employer', 'Pay', 'Paid', 'Employment type', 'Employee ID']);
+    expect(rows(card)).toEqual(['Employer', 'Pay', 'Paid', "How you're paid", 'Employment type', 'Employee ID']);
+    expect(card.textContent).toContain('Paper check');
     expect(card.textContent).not.toMatch(/None|Not added/);
     expect(within(card).getByRole('link', { name: 'Contact Harbor Finch Kitchen' })).toBeTruthy();
   });
@@ -133,6 +135,35 @@ describe('My job', () => {
     card = await jobCard();
     expect(card.textContent).toContain('Set each pay period');
     expect(within(card).queryByRole('button', { name: /Show amounts|Hide amounts/ })).toBeNull();
+  });
+
+  it('notes a rate change that reaches the next paycheck, per job, masked like the rate', async () => {
+    show('/my-info', { ...JOB, pay: { type: 'hourly', rates: [
+      { label: 'Server', rate: '15.00', change: { rate: '17.00', effective_on: '2026-12-01' } },
+      { label: 'Bartender', rate: '18.25', change: null },
+    ] } });
+    const card = await jobCard();
+    expect(card.textContent).toContain('Changes to $•••Amount hidden an hour on Dec 1');
+    expect(card.textContent).not.toContain('17.00');
+    await userEvent.click(within(card).getByRole('button', { name: 'Show amounts' }));
+    const items = within(card).getAllByRole('listitem').map((item) => item.textContent);
+    expect(items).toEqual(['Server$15.00 an hourChanges to $17.00 an hour on Dec 1', 'Bartender$18.25 an hour']);
+    cleanup();
+
+    show('/my-info', { ...JOB, pay: { type: 'hourly', rates: [{ label: null, rate: '15.00', change: { rate: '17.00', effective_on: '2026-12-01' } }] } });
+    expect((await jobCard()).textContent).toContain('$15.00 an hourChanges to $17.00 an hour on Dec 1');
+  });
+
+  it('notes a salary change per payday, and shows the original hire date after a rehire', async () => {
+    localStorage.setItem(HIDE_AMOUNTS_KEY, 'false');
+    show('/my-info', {
+      ...JOB, start_date: '2026-11-02', first_hired_on: '2026-03-09',
+      pay: { type: 'salary', per_period: '2000.00', annual: '52000.00', change: { per_period: '2200.00', annual: '57200.00', effective_on: '2026-12-01' } },
+    });
+    const card = await jobCard();
+    expect(card.textContent).toContain('Changes to $2,200.00 each payday ($57,200.00 a year) on Dec 1');
+    expect(card.textContent).toContain('Nov 2, 2026');
+    expect(card.textContent).toContain('Originally hired Mar 9, 2026');
   });
 
   it('puts the job title and department under the Home greeting', async () => {
@@ -165,7 +196,7 @@ describe('parseJob', () => {
     expect(parseJob({ job: null })).toBeNull();
     expect(parseJob({})).toBeNull();
     const job = parseJob({ job: { ...JOB, pay: { type: 'hourly', rates: [{ label: 'Server', rate: 'n/a' }, { label: ' ', rate: '12.5' }] }, worker_type: 'other' } });
-    expect(job?.pay).toEqual({ type: 'hourly', rates: [{ label: null, rate: '12.5' }] });
+    expect(job?.pay).toEqual({ type: 'hourly', rates: [{ label: null, rate: '12.5', change: null }] });
     expect(job?.workerType).toBe('w2');
   });
 });

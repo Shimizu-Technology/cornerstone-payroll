@@ -1,13 +1,14 @@
 // My job (read only): the employee's employer, job title, department, pay
 // and pay setup as of today, from GET /employee/job. Rows with nothing set
 // are left out, and a former job shows nothing. Pay follows the Show
-// amounts setting like every other amount.
+// amounts setting like every other amount. A change scheduled to reach the
+// next paycheck shows under today's pay ("Changes to $17.00 an hour on Dec 1").
 import type { ReactElement, ReactNode } from 'react';
 import { Link } from 'react-router';
-import type { EmployeeJob, JobPay, PayFrequency } from './contracts';
+import type { EmployeeJob, JobPay, PayFrequency, PeriodPayChange } from './contracts';
 import { useBrand, useReadySession } from './contexts';
 import { focusHeadingOnNextScreen } from './focus';
-import { formatMoney, longDate, weekdayDate } from './format';
+import { formatMoney, longDate, shortDate, weekdayDate } from './format';
 import { Amount, HideAmountsToggle } from './HideAmounts';
 import { Card, LoadProblem, SkeletonRows } from './ui';
 import { useEmployeeData, type DataState } from './useEmployeeData';
@@ -34,26 +35,51 @@ function hasAmounts(pay: JobPay | null): boolean {
   return pay.type === 'hourly' || pay.perPeriod !== null;
 }
 
+/** "Changes to $17.00 an hour on Dec 1": the amount the next paycheck will use. */
+function ChangeNote({ children, effectiveOn }: { children: ReactNode; effectiveOn: string }): ReactElement {
+  return <span className="emp-job-change">Changes to {children} on {shortDate(effectiveOn)}</span>;
+}
+
+function PeriodChange({ change }: { change: PeriodPayChange | null }): ReactElement | null {
+  if (!change) return null;
+  return (
+    <ChangeNote effectiveOn={change.effectiveOn}>
+      <Money value={change.perPeriod} /> each payday{change.annual && <> (<Money value={change.annual} /> a year)</>}
+    </ChangeNote>
+  );
+}
+
 function PayValue({ pay }: { pay: JobPay }): ReactElement {
   if (pay.type === 'hourly') {
-    if (pay.rates.length === 1) return <><Money value={pay.rates[0].rate} /> an hour</>;
+    if (pay.rates.length === 1) {
+      const [only] = pay.rates;
+      return (
+        <span className="flex flex-col">
+          <span><Money value={only.rate} /> an hour</span>
+          {only.change && <ChangeNote effectiveOn={only.change.effectiveOn}><Money value={only.change.rate} /> an hour</ChangeNote>}
+        </span>
+      );
+    }
     return (
       <ul className="emp-job-rates">
         {pay.rates.map((rate, index) => (
           <li key={`${index}-${rate.label ?? ''}`}>
-            <span className="min-w-0 break-words font-normal">{rate.label ?? 'Hourly'}</span>
-            <span className="shrink-0"><Money value={rate.rate} /> an hour</span>
+            <span className="emp-job-rate">
+              <span className="min-w-0 break-words font-normal">{rate.label ?? 'Hourly'}</span>
+              <span className="shrink-0"><Money value={rate.rate} /> an hour</span>
+            </span>
+            {rate.change && <ChangeNote effectiveOn={rate.change.effectiveOn}><Money value={rate.change.rate} /> an hour</ChangeNote>}
           </li>
         ))}
       </ul>
     );
   }
   if (pay.perPeriod === null) return <>Set each pay period</>;
-  if (pay.type === 'flat_fee') return <><Money value={pay.perPeriod} /> each payday</>;
   return (
     <span className="flex flex-col">
       <span><Money value={pay.perPeriod} /> each payday</span>
-      {pay.annual && <span className="font-normal text-neutral-700"><Money value={pay.annual} /> a year</span>}
+      {pay.type === 'salary' && pay.annual && <span className="font-normal text-neutral-700"><Money value={pay.annual} /> a year</span>}
+      <PeriodChange change={pay.change} />
     </span>
   );
 }
@@ -84,7 +110,14 @@ function JobDetails({ job }: { job: EmployeeJob }): ReactElement {
         {nextPayday && <Row label="Next payday">{weekdayDate(nextPayday)}</Row>}
         {job.paymentMethod && <Row label="How you're paid">{job.paymentMethod === 'direct_deposit' ? 'Direct deposit' : 'Paper check'}</Row>}
         <Row label="Employment type">{job.workerType === '1099' ? 'Contractor (1099)' : 'Employee (W-2)'}</Row>
-        {job.startDate && <Row label="Start date">{longDate(job.startDate)}</Row>}
+        {job.startDate && (
+          <Row label="Start date">
+            <span className="flex flex-col">
+              <span>{longDate(job.startDate)}</span>
+              {job.firstHiredOn && <span className="font-normal text-neutral-700">Originally hired {longDate(job.firstHiredOn)}</span>}
+            </span>
+          </Row>
+        )}
         {job.employeeId && <Row label="Employee ID">{job.employeeId}</Row>}
       </dl>
       <p className="emp-hint mt-4">

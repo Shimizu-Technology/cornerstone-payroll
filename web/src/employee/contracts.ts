@@ -399,10 +399,12 @@ export function parseTaxForms(data: unknown): TaxForm[] {
 // ---------- GET /employee/job ----------
 // Served (JobController, EmployeeProfiles::Job): { job: { employer_name,
 // department, role, employee_id, worker_type: "w2" | "1099", pay_frequency,
-// pay: { type: "hourly", rates: [{ label, rate }] } | { type: "salary",
-// per_period, annual } | { type: "flat_fee", per_period }, start_date,
-// payment_method, contact_name } | null }. Null for a former job. Pay is as
-// of today; no SSN or bank numbers.
+// pay: { type: "hourly", rates: [{ label, rate, change }] } | { type: "salary",
+// per_period, annual, change } | { type: "flat_fee", per_period, change },
+// start_date, first_hired_on, payment_method, contact_name } | null }. Null
+// for a former job. Pay is as of today; `change` is a change scheduled to
+// reach the next paycheck ({ rate | per_period, annual, effective_on }), or
+// null. first_hired_on is set only after a rehire. No SSN or bank numbers.
 
 export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 
@@ -410,13 +412,22 @@ export interface JobRate {
   /** The job's name on the wage rate ("Server"), or null for a single profile rate. */
   label: string | null;
   rate: Money;
+  /** The rate the next paycheck will use, when a change starts before its period ends. */
+  change: { rate: Money; effectiveOn: string } | null;
+}
+
+/** A salary or fee the next paycheck will use, when a change starts before its period ends. */
+export interface PeriodPayChange {
+  perPeriod: Money;
+  annual: Money | null;
+  effectiveOn: string;
 }
 
 export type JobPay =
   | { type: 'hourly'; rates: JobRate[] }
   /** Both null for a salary set each pay period. */
-  | { type: 'salary'; perPeriod: Money | null; annual: Money | null }
-  | { type: 'flat_fee'; perPeriod: Money | null };
+  | { type: 'salary'; perPeriod: Money | null; annual: Money | null; change: PeriodPayChange | null }
+  | { type: 'flat_fee'; perPeriod: Money | null; change: PeriodPayChange | null };
 
 export interface EmployeeJob {
   employerName: string | null;
@@ -427,10 +438,27 @@ export interface EmployeeJob {
   workerType: 'w2' | '1099';
   payFrequency: PayFrequency | null;
   pay: JobPay | null;
+  /** The current stint's start (a rehire date after a rehire). */
   startDate: string | null;
+  /** The first hire date, only when a rehire started a later stint. */
+  firstHiredOn: string | null;
   paymentMethod: 'direct_deposit' | 'paper_check' | null;
   /** The first Help contact's name, for "Something wrong? Contact ...". */
   contactName: string | null;
+}
+
+function rateChange(value: unknown): JobRate['change'] {
+  const change = record(value);
+  const rate = money(change?.rate);
+  const effectiveOn = isoDate(change?.effective_on);
+  return rate && effectiveOn ? { rate, effectiveOn } : null;
+}
+
+function periodPayChange(value: unknown): PeriodPayChange | null {
+  const change = record(value);
+  const perPeriod = money(change?.per_period);
+  const effectiveOn = isoDate(change?.effective_on);
+  return perPeriod && effectiveOn ? { perPeriod, annual: money(change?.annual), effectiveOn } : null;
 }
 
 function jobPay(value: unknown): JobPay | null {
@@ -439,12 +467,14 @@ function jobPay(value: unknown): JobPay | null {
     const rates = list(pay, 'rates').flatMap((item) => {
       const row = record(item);
       const rate = money(row?.rate);
-      return rate ? [{ label: text(row?.label), rate }] : [];
+      return rate ? [{ label: text(row?.label), rate, change: rateChange(row?.change) }] : [];
     });
     return rates.length > 0 ? { type: 'hourly', rates } : null;
   }
-  if (pay?.type === 'salary') return { type: 'salary', perPeriod: money(pay.per_period), annual: money(pay.annual) };
-  if (pay?.type === 'flat_fee') return { type: 'flat_fee', perPeriod: money(pay.per_period) };
+  if (pay?.type === 'salary') {
+    return { type: 'salary', perPeriod: money(pay.per_period), annual: money(pay.annual), change: periodPayChange(pay.change) };
+  }
+  if (pay?.type === 'flat_fee') return { type: 'flat_fee', perPeriod: money(pay.per_period), change: periodPayChange(pay.change) };
   return null;
 }
 
@@ -460,6 +490,7 @@ export function parseJob(data: unknown): EmployeeJob | null {
     payFrequency: oneOf(job.pay_frequency, ['weekly', 'biweekly', 'semimonthly', 'monthly'] as const),
     pay: jobPay(job.pay),
     startDate: isoDate(job.start_date),
+    firstHiredOn: isoDate(job.first_hired_on),
     paymentMethod: oneOf(job.payment_method, ['direct_deposit', 'paper_check'] as const),
     contactName: text(job.contact_name),
   };
