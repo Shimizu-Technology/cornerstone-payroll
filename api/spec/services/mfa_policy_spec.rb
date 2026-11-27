@@ -90,6 +90,27 @@ RSpec.describe MfaPolicy do
       expect(described_class.factor_age_minutes(claims([ 3, -1 ], iat: now.to_i + 10, nbf: now.to_i), 0, now: now)).to eq(3)
     end
 
+    it "accepts clock skew only up to MAX_CLOCK_SKEW_SECONDS, for both factor checks" do
+      enrolled = { two_factor_enabled: true }
+      skewed = ->(ahead, ages) { claims(ages, iat: now.to_i + ahead, nbf: now.to_i - 8, **enrolled) }
+      [ 3, 10 ].each do |ahead|
+        expect(described_class.recently_verified_first_factor?(skewed.call(ahead, [ 0, -1 ]), now: now)).to be(true), "first +#{ahead}"
+        expect(described_class.recently_verified_second_factor?(skewed.call(ahead, [ 5, 0 ]), now: now)).to be(true), "second +#{ahead}"
+      end
+      [ 11, 60, 3600 ].each do |ahead|
+        expect(described_class.recently_verified_first_factor?(skewed.call(ahead, [ 0, -1 ]), now: now)).to be(false), "first +#{ahead}"
+        expect(described_class.recently_verified_second_factor?(skewed.call(ahead, [ 5, 0 ]), now: now)).to be(false), "second +#{ahead}"
+      end
+    end
+
+    it "still rejects a stale factor or a missing iat even with a passed nbf" do
+      enrolled = { two_factor_enabled: true }
+      expect(described_class.recently_verified_first_factor?(claims([ 10, -1 ], iat: now.to_i + 3, nbf: now.to_i - 7), now: now)).to be(false)
+      expect(described_class.recently_verified_second_factor?(claims([ 5, 10 ], iat: now.to_i + 3, nbf: now.to_i - 7, **enrolled), now: now)).to be(false)
+      expect(described_class.recently_verified_first_factor?({ "fva" => [ 0, -1 ], "nbf" => now.to_i - 8 }, now: now)).to be(false)
+      expect(described_class.recently_verified_second_factor?({ "fva" => [ 5, 0 ], "nbf" => now.to_i - 8, "two_factor_enabled" => true }, now: now)).to be(false)
+    end
+
     it "still can't date a future iat whose nbf hasn't passed or isn't before it" do
       [ now.to_i + 1, now.to_i + 2, nil, "#{now.to_i - 8}" ].each do |nbf|
         expect(described_class.factor_age_minutes(claims([ 0, -1 ], iat: now.to_i + 2, nbf: nbf), 0, now: now)).to be_nil, nbf.inspect

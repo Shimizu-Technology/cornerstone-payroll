@@ -313,10 +313,9 @@ export function CorrectivePaycheckModal({
   const corrected = preview?.corrected;
   const recorded = preview?.recorded ?? preview?.original;
   const willGenerateCheck = preview?.meta.will_generate_check ?? false;
-  // The supplemental pays the way the employee is paid today (the service
-  // copies the employee's delivery method), so a direct-deposit employee gets
-  // a direct-deposit stub, not a paper check.
-  const paidByDirectDeposit = (originalItem.employee_payment_delivery_method ?? originalItem.effective_payment_delivery_method) === 'direct_deposit';
+  // The supplemental pays the way the employee is paid today: the service
+  // copies the employee's delivery method, or paper_check when it is unset.
+  const paidByDirectDeposit = (originalItem.employee_payment_delivery_method || 'paper_check') === 'direct_deposit';
   const employeeName = originalItem.employee_name ?? 'this employee';
   const handleDialogOpenChange = (nextOpen: boolean): void => {
     if (!nextOpen && issuing) return;
@@ -504,7 +503,7 @@ export function CorrectivePaycheckModal({
                     </>
                   ) : (
                     <>
-                      <p className="font-medium">No check will be cut (net delta is {formatCurrency(deltas.net_pay)}).</p>
+                      <p className="font-medium">No payment will be issued (net delta is {formatCurrency(deltas.net_pay)}).</p>
                       <p>The supplemental will be recorded as an accounting
                       adjustment so YTDs/W-2s correct themselves, but you'll
                       need to recover any overpayment (e.g. via a deduction

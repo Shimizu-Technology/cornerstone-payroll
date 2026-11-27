@@ -10,7 +10,7 @@ import { DevPreviewAuthProvider } from './employee/DevPreviewAuth';
 import { HideAmountsProvider } from './employee/HideAmounts';
 import { useSignOut } from './employee/hooks';
 import { useEmployeeInstallMetadata } from './employee/install';
-import { isSigningOut, redirectTarget } from './employee/routing';
+import { isSigningOut } from './employee/routing';
 import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
 import { SignOutProvider } from './employee/SignOut';
@@ -23,6 +23,7 @@ import { HomeTab, PayTab } from './employee/pay';
 import { EmployerPicker } from './employee/picker';
 import { SignInScreen, WelcomeScreen } from './employee/screens';
 import { ActivateScreen, FinishSignUpScreen, LinkCheckScreen, SignedInInvite, SignInFirst, SignUpAccountScreen } from './employee/signup';
+import { arrivedAt, signInReturn } from './employee/signupState';
 import { SECURITY_PATH, SecurityScreen } from './employee/security';
 import { TaxesTab } from './employee/taxes';
 import type { ViewOnlyGrant } from './employee/ViewOnlyBanner';
@@ -136,7 +137,8 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
     // A deep link (for example from a "pay stub ready" email) signs in first, then opens.
     return <Navigate to="/sign-in" replace state={{ from: `${location.pathname}${location.search}` }} />;
   }
-  if (path === '/sign-in') return <Navigate to={redirectTarget(location.state)} replace />;
+  if (path === '/sign-in') return <Navigate to={signInReturn(location.state)} replace />;
+  arrivedAt(path);
   // A view-only "Sign in as" never signs anyone up or adds access to a login.
   if (viewAs && SIGN_UP_PATHS.has(path)) return <Navigate to="/" replace />;
   // Before the employee session, which the API refuses until two-step sign-in

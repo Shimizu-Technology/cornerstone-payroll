@@ -6,8 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { brandFrom } from './brand';
 import { BrandContext, EmployeeAuthContext, type EmployeeAuthValue } from './contexts';
 import { SignInScreen } from './screens';
+import { forgetInviteToken } from './signupState';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); sessionStorage.clear(); });
 
 const auth: EmployeeAuthValue = {
   isSignedIn: false,
@@ -46,5 +47,29 @@ describe('SignInScreen', () => {
     // The new-device code step (#/client-trust) replaces the entry with no state.
     act(() => { navigate('/sign-in#/client-trust', { replace: true }); });
     expect(screen.getByTestId('sign-in-form').textContent).toBe('/claim');
+  });
+
+  it('still returns to the invite after the tab reloads at #/client-trust', () => {
+    const brand = brandFrom({ name: 'Sunset Grill', logo_url: null, primary_color: null, accent_color: null, demo: false });
+    const screenAt = (entry: { pathname: string; hash?: string; state?: unknown }) => (
+      <MemoryRouter initialEntries={[entry]}>
+        <BrandContext.Provider value={brand}>
+          <EmployeeAuthContext.Provider value={auth}>
+            <Routes><Route path="/sign-in" element={<SignInScreen />} /></Routes>
+          </EmployeeAuthContext.Provider>
+        </BrandContext.Provider>
+      </MemoryRouter>
+    );
+    render(screenAt({ pathname: '/sign-in', state: { from: '/claim' } }));
+    cleanup();
+    // The reload: a fresh page with no router state.
+    render(screenAt({ pathname: '/sign-in', hash: '#/client-trust' }));
+    expect(screen.getByTestId('sign-in-form').textContent).toBe('/claim');
+
+    // Back to Welcome (or sign-out, or using the invite) forgets it.
+    cleanup();
+    forgetInviteToken();
+    render(screenAt({ pathname: '/sign-in' }));
+    expect(screen.getByTestId('sign-in-form').textContent).toBe('/');
   });
 });

@@ -360,8 +360,11 @@ start_rails() {
   if [[ "$name" == worker ]]; then
     # dev-lifecycle ties a claim to the exact command line, and Solid Queue
     # renames its process once it boots; claim the final name.
+    local worker_pid
     for _ in {1..60}; do
-      [[ "$(ps -ww -p "$(service_pid worker)" -o command= 2>/dev/null)" == solid-queue* ]] && break
+      worker_pid="$(service_pid worker)"
+      [[ -n "$worker_pid" ]] || die "worker exited while starting (see $LOGS/worker.log)"
+      [[ "$(ps -ww -p "$worker_pid" -o command= 2>/dev/null)" == solid-queue* ]] && break
       sleep 1
     done
   fi
