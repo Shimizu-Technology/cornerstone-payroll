@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "rake"
 
 RSpec.describe PostEmployeePayStubsJob do
   include ActiveSupport::Testing::TimeHelpers
@@ -10,9 +11,11 @@ RSpec.describe PostEmployeePayStubsJob do
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:employee) { create(:employee, company: company, updated_at: Time.utc(2026, 8, 1)) }
   let(:item) { create(:payroll_item, pay_period: period, employee: employee, gross_pay: 1_200, net_pay: 960, payment_delivery_method: "direct_deposit") }
-  let(:storage) { instance_double(R2StorageService, upload: true, delete: true) }
+  let(:storage) { instance_double(R2StorageService, upload: true, delete: true, download: nil) }
   let(:cutoff) { Time.utc(2026, 8, 19, 20) }
   let(:documents) { EmployeeDocument.where(payroll_item: item).order(:revision) }
+
+  RSpec::Matchers.define_negated_matcher :not_change, :change
 
   before do
     features = instance_double(CompanyFeatures, employee_portal_feature?: true, employee_stubs_enabled_since: period.pay_date)
@@ -76,15 +79,129 @@ RSpec.describe PostEmployeePayStubsJob do
 
     travel_to(cutoff + 1.minute) { employee.update!(name_suffix: "III") }
     expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocument, :count).by(1)
+      .and not_change(EmployeeDocumentNotice, :count)
 
     replacement = documents.reload.last
     expect(original.reload).to be_replaced
-    expect(replacement).to have_attributes(revision: 2, status: "posted", replaces_document: original)
+    expect(replacement).to have_attributes(revision: 2, status: "posted", money_changed: false, replaces_document: original)
     expect(replacement.payroll_facts_sha256).not_to eq(original.payroll_facts_sha256)
     expect(storage).to have_received(:upload).with(replacement.storage_key, satisfy do |bytes|
       PDF::Reader.new(StringIO.new(bytes)).pages.map(&:text).join.include?(employee.legal_name)
     end, content_type: "application/pdf").once
     expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocument, :count)
+  end
+
+  it "posts a corrected revision and queues one notice when withholding increases by one dollar" do
+    item
+    run_at(cutoff)
+    item.update_columns(withholding_tax: item.withholding_tax.to_d + 1, updated_at: cutoff + 1.minute)
+
+    expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocumentNotice, :count).by(1)
+    expect(documents.last).to have_attributes(money_changed: true, correction_label?: true)
+    expect(EmployeeDocumentNotice.last).to have_attributes(kind: "pay_stub_corrected", status: "pending",
+      employee_document: documents.last, employee: employee)
+    expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocumentNotice, :count)
+  end
+
+  it "dispatches a correction notice once to the verified employee address" do
+    employee.update!(email: "worker@example.test", email_verified_at: cutoff - 1.day)
+    user = create(:user, company: company, role: :portal_employee)
+    EmployeeAccountLink.create!(user: user, company: company, employee: employee, status: "active", activated_at: cutoff - 1.day)
+    allow(PortalNotifications).to receive(:delivery_enabled?).and_return(true)
+    allow(PortalNotifications::Transport).to receive(:configured?).and_return(true)
+    allow(PortalNotifications::Transport).to receive(:deliver).and_return({ "id" => "synthetic-correction-notice" })
+
+    item
+    run_at(cutoff)
+    item.update_columns(withholding_tax: item.withholding_tax.to_d + 1, updated_at: cutoff + 1.minute)
+    run_at(cutoff + 5.minutes)
+    notice = EmployeeDocumentNotice.sole
+    travel_to(cutoff + 6.minutes) { employee.update!(name_suffix: "III") }
+    expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocumentNotice, :count)
+    expect(documents.reload.last).to have_attributes(money_changed: false, correction_label?: true)
+    expect(notice.reload.employee_document).to eq(documents.last)
+    2.times { DispatchEmployeeTaxFormNoticesJob.perform_now }
+
+    expect(PortalNotifications::Transport).to have_received(:deliver).with(
+      hash_including(to: "worker@example.test", subject: "Your pay stub for August 20, 2026 was corrected",
+        text: include("August 20, 2026")),
+      idempotency_key: "employee-pay-stub-notice-#{EmployeeDocumentNotice.sole.id}").once
+    expect(EmployeeDocumentNotice.sole.status).to eq("sent")
+  end
+
+  it "moves a retryable correction notice across a details update and preserves attempts" do
+    item
+    run_at(cutoff)
+    item.update_columns(withholding_tax: 1, updated_at: cutoff + 1.minute)
+    run_at(cutoff + 5.minutes)
+    notice = EmployeeDocumentNotice.sole
+    notice.update!(status: "failed", attempts: 2)
+    retry_at = notice.updated_at
+
+    travel_to(cutoff + 6.minutes) { employee.update!(name_suffix: "III") }
+    expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocumentNotice, :count)
+    expect(notice.reload).to have_attributes(employee_document: documents.last, status: "failed", attempts: 2, updated_at: retry_at)
+  end
+
+  it "posts with a correction notice when the legacy predecessor PDF is missing" do
+    item
+    run_at(cutoff)
+    documents.update_all(printed_figures_sha256: nil, current_figures_sha256: nil)
+    travel_to(cutoff + 1.minute) { employee.update!(name_suffix: "III") }
+
+    expect { run_at(cutoff + 5.minutes) }.to change(EmployeeDocumentNotice, :count).by(1)
+    expect(documents.last).to have_attributes(money_changed: nil, correction_label?: true, revision: 2)
+  end
+
+  it "retries an unavailable predecessor download on the next sweep" do
+    item
+    run_at(cutoff)
+    documents.update_all(printed_figures_sha256: nil, current_figures_sha256: nil)
+    travel_to(cutoff + 1.minute) { employee.update!(name_suffix: "III") }
+    allow(storage).to receive(:download).and_raise(R2StorageService::DownloadError)
+
+    expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
+    allow(storage).to receive(:download).and_return(nil)
+    expect { run_at(cutoff + 10.minutes) }.to change(EmployeeDocument, :count).by(1)
+  end
+
+  it "backfills legacy labels from frozen PDFs and writes only when requested" do
+    item
+    frozen = {}
+    allow(storage).to receive(:upload) { |key, bytes, **| frozen[key] = bytes }
+    allow(storage).to receive(:download) { |key| frozen.fetch(key) }
+    run_at(cutoff)
+    travel_to(cutoff + 1.minute) { employee.update!(name_suffix: "III") }
+    run_at(cutoff + 5.minutes)
+    item.update_columns(withholding_tax: item.withholding_tax.to_d + 1, updated_at: cutoff + 6.minutes)
+    run_at(cutoff + 10.minutes)
+    travel_to(cutoff + 11.minutes) { employee.update!(name_suffix: "IV") }
+    run_at(cutoff + 15.minutes)
+    documents.update_all(printed_figures_sha256: nil, current_figures_sha256: nil, money_changed: nil, correction_label: nil)
+    before = documents.pluck(:sha256, :updated_at)
+
+    Rake.with_application do |app|
+      app.rake_require("tasks/pay_stub_revisions", [ Rails.root.join("lib").to_s ])
+      app.define_task(Rake::Task, :environment)
+      task = app["employee_documents:classify_pay_stub_revisions"]
+      expect { task.execute }.to output(/money_changed=1\nsame_figures=2\nytd_changed=0\nlabel_changes=1/).to_stdout
+      expect(documents.reload.pluck(:money_changed)).to eq([ nil, nil, nil, nil ])
+
+      previous_apply = ENV["APPLY"]
+      begin
+        ENV["APPLY"] = "1"
+        expect { task.execute }.to output(/label_changes=1/).to_stdout
+      ensure
+        ENV["APPLY"] = previous_apply
+      end
+    end
+
+    expect(documents.reload.pluck(:money_changed)).to eq([ false, false, true, false ])
+    expect(documents.map(&:correction_label?)).to eq([ false, false, true, true ])
+    expect(documents.first.current_figures_sha256).to be_present
+    expect(documents.first.printed_figures_sha256).to be_present
+    expect(documents.pluck(:sha256, :updated_at)).to eq(before)
+    expect(EmployeeDocumentNotice.count).to eq(1)
   end
 
   it "waits for committed payroll and for assignment of the paper check number" do
@@ -137,6 +254,29 @@ RSpec.describe PostEmployeePayStubsJob do
     expect(documents.reload.pluck(:status)).to eq(%w[replaced replaced posted])
     expect(documents.pluck(:payment_line)).to eq([ "Direct deposit", "Check #4012", "Check #4013" ])
     expect(documents.last).to have_attributes(corrected: true, replaces_document_id: original_check.id)
+    expect(EmployeeDocumentNotice.count).to eq(0)
+
+    travel_to(cutoff + 26.minutes) { employee.update!(name_suffix: "III") }
+    run_at(cutoff + 30.minutes)
+    expect(documents.reload.last).to have_attributes(money_changed: false, correction_label?: true)
+    expect(EmployeeDocumentNotice.count).to eq(0)
+  end
+
+  it "notifies when a reinstated check changes amounts and preserves the correction through a details update" do
+    item.update_columns(payment_delivery_method: "paper_check", check_number: "4012")
+    run_at(cutoff)
+    item.update_columns(voided: true, updated_at: cutoff + 1.minute)
+    run_at(cutoff + 5.minutes)
+    item.update_columns(voided: false, check_number: "4013", withholding_tax: 1, net_pay: 959, updated_at: cutoff + 6.minutes)
+
+    expect { run_at(cutoff + 10.minutes) }.to change(EmployeeDocumentNotice, :count).by(1)
+    expect(documents.reload.last).to have_attributes(money_changed: true, correction_label?: true)
+    notice = EmployeeDocumentNotice.sole
+
+    travel_to(cutoff + 11.minutes) { employee.update!(name_suffix: "III") }
+    expect { run_at(cutoff + 15.minutes) }.not_to change(EmployeeDocumentNotice, :count)
+    expect(notice.reload.employee_document).to eq(documents.reload.last)
+    expect(documents.last).to have_attributes(money_changed: false, correction_label?: true)
   end
 
   it "revises the frozen PDF when staff corrects the pay date" do
@@ -149,7 +289,7 @@ RSpec.describe PostEmployeePayStubsJob do
     end
     run_at(cutoff + 1.day)
     corrected = documents.reload.last
-    expect(corrected).to have_attributes(corrected: true, replaces_document_id: original.id)
+    expect(corrected).to have_attributes(money_changed: false, replaces_document_id: original.id)
     expect(corrected.payroll_facts_sha256).not_to eq(original.payroll_facts_sha256)
     expect(storage).to have_received(:upload).with(corrected.storage_key, satisfy { |bytes|
       PDF::Reader.new(StringIO.new(bytes)).page(1).text.include?("08/21/2026")
@@ -216,7 +356,9 @@ RSpec.describe PostEmployeePayStubsJob do
       gross_pay: 900, net_pay: 700, payment_delivery_method: "direct_deposit", financial_correction_origin_item: item)
     run_at(cutoff + 10.minutes)
     expect(original.reload).to be_replaced
-    expect(EmployeeDocument.find_by!(payroll_item: corrective_item)).to have_attributes(
+    correction = EmployeeDocument.find_by!(payroll_item: corrective_item)
+    expect(EmployeeDocumentNotice.sole.employee_document).to eq(correction)
+    expect(correction).to have_attributes(
       status: "posted", revision: 1, corrected: true, replaces_document_id: original.id
     )
   end
@@ -286,6 +428,7 @@ RSpec.describe PostEmployeePayStubsJob do
       original = documents.first
       expect(original).to be_posted
       expect(delta_documents.first).to have_attributes(status: "posted", revision: 1, corrected: true, replaces_document: original)
+      expect(EmployeeDocumentNotice.sole.employee_document).to eq(delta_documents.first)
     end
 
     it "repairs an unlinked legacy copy with an unchanged, already checked fingerprint" do
@@ -332,6 +475,8 @@ RSpec.describe PostEmployeePayStubsJob do
       expect(documents.reload.pluck(:revision)).to eq([ 1, 2 ])
       expect(original.reload).to be_replaced
       expect(posted_text(documents.last)).to include("Gross Earnings $2,300.00", "Net Pay $1,840.00")
+      expect(documents.last).to have_attributes(money_changed: false, correction_label?: false, ytd_changed: true)
+      expect(EmployeeDocumentNotice.where(employee_document_id: documents.select(:id))).to be_empty
       item.update_columns(updated_at: cutoff + 6.minutes)
       expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocument, :count)
     end

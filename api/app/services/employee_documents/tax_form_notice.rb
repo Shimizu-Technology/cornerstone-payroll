@@ -18,6 +18,7 @@ module EmployeeDocuments
   module TaxFormNotice
     SUBJECT = "IMPORTANT TAX RETURN DOCUMENT AVAILABLE"
     KIND = "w2gu_available"
+    PAY_STUB_CORRECTED = "pay_stub_corrected"
     CHANNEL = "employee_tax_form_notice"
     # A failed send is tried this many times in all, then left for staff.
     MAX_ATTEMPTS = 5
@@ -43,22 +44,27 @@ module EmployeeDocuments
     end
 
     # Notices the dispatcher should try: pending, or failed with tries left.
-    def unsent(scope = EmployeeDocumentNotice.all)
-      scope.where(kind: KIND).where(status: "pending").or(scope.where(kind: KIND, status: "failed").where(attempts: ...MAX_ATTEMPTS))
+    def unsent(scope = EmployeeDocumentNotice.all, kind: KIND)
+      scope.where(kind: kind).where(status: "pending").or(scope.where(kind: kind, status: "failed").where(attempts: ...MAX_ATTEMPTS))
     end
 
     # Returns the notice row. A sent or skipped notice is never sent again;
     # a failed one is retried by the dispatcher.
-    def deliver(document)
-      notice = EmployeeDocumentNotice.create_or_find_by!(company_id: document.company_id, employee_document_id: document.id, kind: KIND) do |row|
-        row.employee_id = document.employee_id
+    def deliver(document, kind: KIND)
+      notice = EmployeeDocumentNotice.create_or_find_by!(company_id: document.company_id, employee_document_id: document.id, kind: kind) do |row|
+        row.employee_id = document.employee_id || document.payroll_item.employee_id
       end
+      deliver_notice(notice)
+    end
+
+    def deliver_notice(notice)
+      kind = notice.kind
       notice.with_lock do
         next if notice.status.in?(%w[sent skipped])
         next if notice.status == "failed" && notice.attempts >= MAX_ATTEMPTS
 
-        document.reload
-        if (reason = skip_reason(document))
+        document = notice.employee_document
+        if (reason = skip_reason(document, kind: kind))
           notice.update!(status: "skipped", skip_reason: reason)
           next
         end
@@ -70,25 +76,29 @@ module EmployeeDocuments
       notice
     end
 
-    def skip_reason(document)
+    def skip_reason(document, kind: KIND)
       company = document.company
-      employee = document.employee
-      return "document_unavailable" unless document.tax_form? && document.posted? && employee
-      return "feature_off" unless CompanyFeatures.for(company).employee_portal_feature?(:tax_forms)
+      employee = document_employee(document)
+      eligible = kind == KIND ? document.tax_form? : document.payroll_item && document.correction_label?
+      return "document_unavailable" unless eligible && document.posted? && employee&.company_id == company.id
+      feature = kind == KIND ? :tax_forms : :stubs
+      return "feature_off" unless CompanyFeatures.for(company).employee_portal_feature?(feature)
       return "no_app_access" unless EmployeeAccountLink.portal_eligible.where(company_id: company.id, employee_id: employee.id).exists?
       return "email_not_verified" if employee.email.blank? || employee.email_verified_at.nil?
       return "email_delivery_disabled" unless PortalNotifications.delivery_enabled?
       return "email_not_configured" unless PortalNotifications::Transport.configured?
-      return "recipient_not_allowed" unless DemoOutbound.permit?(company: company, email: employee.email, channel: CHANNEL)
+      return "recipient_not_allowed" unless DemoOutbound.permit?(company: company, email: employee.email, channel: channel_for(kind))
 
       nil
     end
 
     def send!(notice, document)
-      to = document.employee.email
+      kind = notice.kind
+      to = document_employee(document).email
       notice.update!(attempts: notice.attempts + 1, recipient_email: to)
-      response = DemoOutbound.scoped(document.company, channel: CHANNEL) do
-        PortalNotifications::Transport.deliver(payload(document, to), idempotency_key: "employee-tax-form-notice-#{document.id}")
+      response = DemoOutbound.scoped(document.company, channel: channel_for(kind)) do
+        key = kind == KIND ? "employee-tax-form-notice-#{document.id}" : "employee-pay-stub-notice-#{notice.id}"
+        PortalNotifications::Transport.deliver(payload(document, to, kind: kind), idempotency_key: key)
       end
       if response["suppressed"]
         notice.update!(status: "skipped", skip_reason: "recipient_not_allowed")
@@ -104,10 +114,32 @@ module EmployeeDocuments
       notice.update!(status: "failed")
     end
 
-    def payload(document, to)
+    def document_employee(document)
+      document.employee || document.payroll_item&.employee
+    end
+
+    def channel_for(kind)
+      kind == KIND ? CHANNEL : "employee_pay_stub_notice"
+    end
+
+    def payload(document, to, kind: KIND)
       brand = EmployeeEmails::Brand.for(document.company)
+      if kind == PAY_STUB_CORRECTED
+        origin = EmployeeLinks::AppUrl.origin_for(document.company)
+        item = document.payroll_item
+        return pay_stub_message(brand, pay_date: item.check_date || item.pay_period.pay_date, app_url: origin).payload(to: to)
+      end
+
       message(brand, tax_year: document.tax_year, employer: document.company.name,
         app_url: EmployeeLinks::AppUrl.origin_for(document.company)).payload(to: to)
+    end
+
+    def pay_stub_message(brand, pay_date:, app_url:)
+      date = pay_date.strftime("%B %-d, %Y")
+      EmployeeEmails::Message.new(brand: brand, subject: "Your pay stub for #{date} was corrected",
+        heading: "Your pay stub was corrected",
+        paragraphs: [ "Sign in to your employee app to view the updated pay stub for #{date}." ],
+        action: (app_url && { label: "Open the employee app", url: "#{app_url}/pay" }))
     end
 
     # The notice's sentences are its approved wording; keep them word for

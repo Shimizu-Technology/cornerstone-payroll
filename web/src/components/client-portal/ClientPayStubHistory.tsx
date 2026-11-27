@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { clientPayStubsApi, type ClientPayStub, type ClientQuickbooksPaycheck } from '@/services/api';
+import { Badge } from '@/components/ui/badge';
 import { ClientPayStubButton } from './ClientPayStubButton';
 import { formatCurrency } from '@/lib/utils';
 import { formatDate, formatDateRange } from '@/lib/display-date';
@@ -50,6 +51,7 @@ export function ClientPayStubHistory({ employeeId }: { employeeId: number }) {
                 <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4">
                   <div className="min-w-0">
                     <p className="font-medium">{formatDateRange(row.start_date, row.end_date) || row.period_description}</p>
+                    {row.corrected && <Badge variant="warning">Corrected</Badge>}
                     <p className="text-sm">Pay date {formatDate(row.pay_date)} · Net {formatCurrency(Number(row.net_pay))}</p>
                   </div>
                   <ClientPayStubButton itemId={row.id} />
