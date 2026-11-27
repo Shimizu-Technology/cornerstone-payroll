@@ -8,7 +8,8 @@ module Api
 
         def index
           employee = Employee.where(company_id: current_company_id).find(params[:employee_id])
-          items = eligible_items.where(employee_id: employee.id).includes(:pay_period).newest_printed_first
+          items = eligible_items.where(employee_id: employee.id).includes(:pay_period).newest_printed_first.to_a
+          documents = EmployeeDocument.posted_by_payroll_item(employee.company_id, items.map(&:id))
           quickbooks_paychecks = EmployeeDocuments::QuickbooksHistory.for(employee).map do |check|
             {
               id: check[:historical_paycheck_id],
@@ -28,7 +29,8 @@ module Api
               { id: item.id, pay_period_id: item.pay_period_id, pay_date: item.check_date || item.pay_period.pay_date,
                 period_pay_date: item.pay_period.pay_date,
                 start_date: item.pay_period.start_date, end_date: item.pay_period.end_date,
-                period_description: item.pay_period.period_description, net_pay: item.net_pay }
+                period_description: item.pay_period.period_description, net_pay: item.net_pay,
+                corrected: documents[item.id]&.correction_label? || false }
             },
             quickbooks_paychecks: quickbooks_paychecks
           }
