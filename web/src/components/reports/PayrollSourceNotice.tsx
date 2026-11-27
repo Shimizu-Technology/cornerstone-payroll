@@ -27,6 +27,7 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
           <p className="mt-1 leading-6 text-amber-800">
             This view includes {includedLabels.join(' and ') || 'locked QuickBooks balance history'}. {summary.source_statement}
           </p>
+          {totalsBasisNote(summary) && <p className="mt-1 leading-6 text-amber-800">{totalsBasisNote(summary)}</p>}
           {quickbooks.opening_summary_count > 0 && (
             <p className="mt-1 leading-6 text-amber-800">
               It includes {quickbooks.opening_summary_count} QuickBooks opening {quickbooks.opening_summary_count === 1 ? 'summary' : 'summaries'} that preserve earlier totals without representing individual paychecks.
@@ -36,6 +37,11 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
           {(summary.source_overlap?.employee_pay_date_count ?? 0) > 0 && (
             <p role="alert" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 font-medium text-red-900">
               Both sources contain {summary.source_overlap?.employee_pay_date_count} matching employee/pay-date {summary.source_overlap?.employee_pay_date_count === 1 ? 'pair' : 'pairs'}. Both are included in the totals; reconcile these records before relying on the report.
+            </p>
+          )}
+          {(summary.source_overlap?.bridge_window_paycheck_count ?? 0) > 0 && (
+            <p role="alert" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 font-medium text-red-900">
+              {bridgeWindowMessage(summary.source_overlap?.bridge_window_paycheck_count ?? 0, summary.source_overlap?.bridge_window_w2_blocking_count ?? 0)}
             </p>
           )}
           {adjustments.count > 0 && (
@@ -55,6 +61,25 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
       )}
     </div>
   );
+}
+
+const BRIDGED_FIELDS = 'Gross, non-taxable pay, Guam income tax, Social Security, Medicare, deductions and net pay';
+
+// Full-year totals use the applied opening balance, as pay stubs and W-2GU do.
+// A range that starts after January 1 can't, so its imported rows show as imported.
+function totalsBasisNote(summary: PayrollSourceSummary): string | null {
+  const basis = summary.historical_ytd_bridge?.totals_basis;
+  if (basis === 'historical_ytd_bridge') return `${BRIDGED_FIELDS} for imported history come from the applied opening year-to-date balance, the same figures as pay stubs and W-2GU. Hours, 401(k), employer costs and other categories are shown as imported.`;
+  if (basis === 'mixed') return `For some employees, ${BRIDGED_FIELDS.toLowerCase()} for imported history come from the applied opening year-to-date balance; everything else is shown as imported.`;
+  if (basis === 'as_imported' && summary.historical_ytd_bridge.applied) return 'Imported figures are shown as imported. The opening year-to-date balance covers the year from January 1, so it applies only to ranges that include its whole period.';
+  return null;
+}
+
+// Contractor paychecks aren't on a W-2GU, so only the others block it.
+function bridgeWindowMessage(count: number, blocking: number): string {
+  const paychecks = count === 1 ? '1 Cornerstone paycheck is' : `${count} Cornerstone paychecks are`;
+  const warning = `${paychecks} dated inside the imported opening year-to-date balance and may already be in it. These totals count both.`;
+  return blocking > 0 ? `${warning} W-2GU filing is blocked until it is resolved.` : warning;
 }
 
 function formatMoney(value: number): string {

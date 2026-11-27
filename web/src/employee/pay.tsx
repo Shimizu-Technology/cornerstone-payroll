@@ -783,6 +783,7 @@ function StubDetailView({
               {stub.ytdNet && <div><dt>Take-home pay</dt><dd><Money value={stub.ytdNet} /></dd></div>}
               {stub.ytdGross && <div><dt>Pay before taxes <span className="emp-term">(gross)</span></dt><dd><Money value={stub.ytdGross} /></dd></div>}
             </dl>
+            {stub.ytdNote && <p role="status" className="emp-hint">{stub.ytdNote}</p>}
           </section>
         )}
 

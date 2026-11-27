@@ -89,6 +89,8 @@ class W2GuOfficialCopies < OfficialPdfOverlay
   # a W-2 filing decision that still allows filing-ready output.
   def self.final?(company:, year:, readiness:, fingerprint:)
     return false unless readiness&.current?(fingerprint)
+    # The fingerprint already changes with one; this holds for any caller.
+    return false if PayrollBridgeOverlap.new(company_id: company.id, year: year).w2_blocking.any?
 
     PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:capabilities, :all_filing_ready_exports_allowed) == true
   end
