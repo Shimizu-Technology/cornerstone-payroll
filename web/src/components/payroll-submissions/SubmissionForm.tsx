@@ -134,7 +134,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       const doc = carryable.find(d => d.document?.id === id);
       if (!doc) return false;
       if (linkableSlot && doc.role === linkableRole && (workbook || workbookChoice !== 'attach')) return false;
-      if (doc.role !== linkableRole && slotFiles[doc.role]) return false;
+      if (doc.role !== linkableSlot?.portal_role && slotFiles[doc.role]) return false;
       return true;
     });
     const changes = rows.filter(row => (!noChanges || row.standing_change_id) && (!row.standing_change_id || row.required || row.skipped || row.amount || row.hours)).map(rowFields);

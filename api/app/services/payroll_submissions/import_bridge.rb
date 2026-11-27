@@ -43,7 +43,8 @@ module PayrollSubmissions
         descriptor = portal_descriptor
         documents = source_documents!(submission, descriptor)
         files = documents.map { |link| upload_for!(link, descriptor) }
-        linkable_portal_role = descriptor.files.find(&:supports_link)&.portal_role || "changes_workbook"
+        linkable_slot = descriptor.files.find(&:supports_link)
+        linkable_portal_role = (linkable_slot && descriptor.portal_role_for(linkable_slot.role)) || "changes_workbook"
         link_only = submission.changes_link_url.present? && documents.none? { |link| link.role == linkable_portal_role }
         carried_staff = nil
         if @options[:staff_workbook].present?

@@ -486,6 +486,28 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
       expect(daily_row[:warnings].pluck(:code)).to include("single_week_exceeds_40_hours")
       expect(OperatingProfileCatalog.find("overtime.mode").effect).to include("total_as_regular_warn_over_80 cannot detect weekly overtime")
     end
+
+    it "warns when explicit zero overtime accompanies above-threshold hours, while keeping positive overtime splits clear" do
+      adapter = PayrollIntake::Adapters::SpikeEmail.new(pay_period: pay_period, company: company)
+
+      zero_ot_row = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, total_hours: 90, regular_hours: 90, overtime_hours: 0, total_tips: 40 }
+        ]
+      ).fetch(:rows).sole
+      expect(zero_ot_row[:warnings].pluck(:code)).to include("hours_exceed_period_threshold")
+      expect(zero_ot_row[:status]).to eq("needs_review")
+
+      positive_ot_row = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, total_hours: 90, regular_hours: 80, overtime_hours: 10, total_tips: 40 }
+        ]
+      ).fetch(:rows).sole
+      expect(positive_ot_row[:warnings].pluck(:code)).not_to include("hours_exceed_period_threshold")
+      expect(positive_ot_row).to include(regular_hours: 80.0, overtime_hours: 10.0, status: "ready")
+    end
   end
 
   describe "overtime.mode = source_reports on semimonthly schedule" do
@@ -516,6 +538,15 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
         ]
       ).fetch(:rows).sole
       expect(excessive[:validation_errors].pluck(:code)).to include("overtime_exceeds_total")
+
+      weekly_only = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, week1_hours: 45, week2_hours: 35, total_tips: 20 }
+        ]
+      ).fetch(:rows).sole
+      expect(weekly_only[:validation_errors].pluck(:code)).to include("incomplete_source_overtime_split")
+      expect(weekly_only[:status]).to eq("needs_review")
     end
 
     it "previews and applies semimonthly pay periods with source-reported overtime cleanly" do

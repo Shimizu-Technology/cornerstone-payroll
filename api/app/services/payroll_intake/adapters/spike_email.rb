@@ -158,6 +158,7 @@ module PayrollIntake
                 "week2_tips": number or null,
                 "total_tips": number or null,
                 "loan_deduction": number or null,
+                "daily_hours": [{ "date": "YYYY-MM-DD", "hours": number }] or omitted when no dated daily records are visible,
                 "confidence": number between 0 and 1
               }
             ],
@@ -312,7 +313,10 @@ module PayrollIntake
             overtime_hours: overtime_hours,
             total_present: total_present,
             explicit_regular: explicit_regular,
-            explicit_overtime: explicit_overtime
+            explicit_overtime: explicit_overtime,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            daily_hours: daily_hours
           )
         when "total_as_regular_warn_over_80"
           hours_for_total_as_regular_warn_over_threshold(
@@ -496,7 +500,7 @@ module PayrollIntake
         combined = (resolved_regular + resolved_overtime).round(2)
         threshold = period_regular_hours_threshold
 
-        if !explicit_overtime && combined > threshold
+        if !resolved_overtime.positive? && combined > threshold
           warnings << warning(
             "hours_exceed_period_threshold",
             "Total hours (#{format('%.2f', combined)}) exceed #{format('%.2f', threshold)} for this period without a weekly breakdown. Confirm whether any overtime applies before applying.",
@@ -507,7 +511,7 @@ module PayrollIntake
         [ resolved_regular, resolved_overtime, errors, warnings ]
       end
 
-      def hours_for_source_reports(total_hours:, regular_hours:, overtime_hours:, total_present:, explicit_regular:, explicit_overtime:)
+      def hours_for_source_reports(total_hours:, regular_hours:, overtime_hours:, total_present:, explicit_regular:, explicit_overtime:, week1_present: false, week2_present: false, daily_hours: nil)
         errors = []
         if explicit_regular && explicit_overtime
           if total_present && !reconciles?(regular_hours + overtime_hours, total_hours)
@@ -542,6 +546,14 @@ module PayrollIntake
 
           errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
           return [ regular_hours, 0.to_d, errors, [] ]
+        end
+
+        if !total_present && (week1_present || week2_present || Array(daily_hours).any?)
+          errors << error(
+            "incomplete_source_overtime_split",
+            "Source-reported regular and overtime hours (or total hours) are required when overtime mode is source_reports."
+          )
+          return [ 0.to_d, 0.to_d, errors, [] ]
         end
 
         [ total_present ? total_hours : 0.to_d, 0.to_d, errors, [] ]

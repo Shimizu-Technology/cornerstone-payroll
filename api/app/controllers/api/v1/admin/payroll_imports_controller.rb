@@ -49,11 +49,17 @@ module Api
             return render json: { error: "Choose the Revel hours PDF, the tips & loans workbook, or both." }, status: :unprocessable_entity
           end
 
+          source_type = params[:source_type].presence&.to_s || "mosa_revel"
+          descriptor = PayrollIntake::Registry.find(source_type)
+          unless descriptor&.tracks_reviewed_hours? && @pay_period.company.payroll_intake_source_enabled?(descriptor.key)
+            return render json: { error: "Unsupported or disabled reviewed-hours intake source: #{source_type}" }, status: :unprocessable_entity
+          end
+
           begin
             selected_source = pay_run_selection.source! if params[:use_submission_id].present?
             package_result = PayrollIntake::PreviewService.new(
               pay_period: @pay_period,
-              source_type: "mosa_revel",
+              source_type: descriptor.key,
               files: [ pdf_file, excel_file ].compact,
               actor: current_user,
               portal_submission: selected_source,

@@ -1736,6 +1736,7 @@ export const payPeriodsApi = {
     tipsPaidOutFromTips?: boolean,
     replacement?: { supersedesPackageId: string; reason: string },
     submissionId?: number,
+    sourceType?: string,
   ): Promise<ImportPreviewResponse> => {
     const formData = new FormData();
     if (pdfFile) formData.append('pdf_file', pdfFile);
@@ -1744,6 +1745,7 @@ export const payPeriodsApi = {
     if (tipsPaidOutFromTips !== undefined) formData.append('tips_paid_out_from_tips', String(tipsPaidOutFromTips));
     if (replacement?.supersedesPackageId) formData.append('supersedes_package_id', replacement.supersedesPackageId);
     if (replacement?.reason) formData.append('supersession_reason', replacement.reason);
+    if (sourceType) formData.append('source_type', sourceType);
     return api.postForm<ImportPreviewResponse>(`/admin/pay_periods/${id}/preview_import`, formData);
   },
   previewPortalSubmission: (id: number, submissionId: number, options: { superseded_reason?: string; supersedes_package_id?: string; supersession_reason?: string; tips_paid_out_from_tips?: boolean; staff_workbook?: File } = {}): Promise<ImportPreviewResponse> => {

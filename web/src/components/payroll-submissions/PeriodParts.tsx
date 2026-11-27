@@ -94,9 +94,11 @@ export function FileRow({ label, document, fallbackName, api, audience }: { labe
 
 export function RevisionCard({ revision, api, companyId, audience, descriptor }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null; audience?: Audience; descriptor?: PayrollIntakeDescriptor | null }): ReactElement {
   const hasLinkableSlot = !descriptor || descriptor.files.some(slot => slot.supports_link);
+  const linkableRole = descriptor?.files.find(slot => slot.supports_link)?.portal_role;
+  const hasAttachedWorkbook = revision.documents.some(d => d.role === 'changes_workbook' || (linkableRole != null && d.role === linkableRole));
   const workbookSummary = revision.workbook_choice === 'none'
     ? 'Client chose: No tips or loans this period.'
-    : revision.documents.some(d => d.role === 'changes_workbook')
+    : hasAttachedWorkbook
       ? 'Tips & loans workbook attached.'
       : revision.changes_link_url
         ? 'Tips & loans workbook link sent.'
@@ -123,7 +125,7 @@ export function RevisionCard({ revision, api, companyId, audience, descriptor }:
         <h4 className="text-sm font-semibold text-neutral-900">Changes this period</h4>
         {revision.no_changes && <p className="text-sm text-neutral-700">No changes this period.</p>}
         {revision.changes.length ? <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-neutral-800">{revision.changes.map((row, index) => <li key={index} className="break-words"><span className="font-medium">{row.label}:</span> {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
-          : !revision.no_changes && <p className="text-sm text-neutral-600">No changes listed{revision.documents.some(d => d.role === 'changes_workbook') || revision.changes_link_url ? '; see the workbook or link.' : '.'}</p>}
+          : !revision.no_changes && <p className="text-sm text-neutral-600">No changes listed{hasAttachedWorkbook || revision.changes_link_url ? '; see the workbook or link.' : '.'}</p>}
         {revision.changes_link_url && <p className="mt-1 break-words text-sm"><a className="font-medium text-primary-800 underline" href={revision.changes_link_url} target="_blank" rel="noreferrer noopener">Payroll template link</a></p>}
       </div>
       {revision.notes && <div><h4 className="text-sm font-semibold text-neutral-900">Notes</h4><p className="whitespace-pre-wrap break-words text-sm text-neutral-800">{revision.notes}</p></div>}

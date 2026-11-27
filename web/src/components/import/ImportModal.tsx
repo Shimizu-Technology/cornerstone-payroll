@@ -336,6 +336,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           ? { supersedesPackageId: currentPackage.package_id, reason: replacementReason.trim() }
           : undefined,
         submissionId,
+        activeSourceType,
       );
       openPreview(data);
       setUsePendingRevision(!!submissionId);
@@ -477,6 +478,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         // No tip fallback is offered here: a workbook added from the review gets
         // its own choice, and one already saved for the same workbook is kept.
         undefined,
+        undefined,
+        undefined,
+        activeSourceType,
       );
       openPreview(data, previousRows, pendingSubmissionId);
       onSourcePreviewed?.();
