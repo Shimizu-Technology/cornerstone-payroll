@@ -254,7 +254,7 @@ body {
 .emp-brand-name-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   min-width: 0;
 }
@@ -276,11 +276,14 @@ body {
 }
 
 .emp-brand-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: "Plus Jakarta Sans", "Source Sans 3", system-ui, sans-serif;
   font-size: 1.06rem;
   font-weight: 800;
   line-height: 1.2;
-  overflow-wrap: anywhere;
 }
 
 .emp-brand-sub,
@@ -372,6 +375,16 @@ body {
   gap: 16px;
   align-items: start;
   min-width: 0;
+}
+
+@media (max-width: 1023px) {
+  .emp-home-grid > .emp-column:not(.emp-wide-only) {
+    display: contents;
+  }
+
+  .emp-home-latest { order: 1; }
+  .emp-home-ytd { order: 2; }
+  .emp-home-recent { order: 3; }
 }
 
 /* Secondary columns that only earn their space on a wide screen. */
@@ -545,6 +558,16 @@ body {
   .emp-home-grid {
     grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
     gap: 24px;
+  }
+
+  .emp-home-grid > .emp-column {
+    display: grid;
+  }
+
+  .emp-home-latest,
+  .emp-home-ytd,
+  .emp-home-recent {
+    order: 0;
   }
 
   .emp-pay-grid {
@@ -1331,6 +1354,23 @@ select.emp-input {
   margin-block-start: 12px;
   padding-top: 12px;
   border-top: 1px solid #eef2f6;
+}
+
+.emp-detail-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.emp-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
 }
 
 .emp-detail {

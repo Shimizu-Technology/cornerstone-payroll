@@ -56,7 +56,13 @@ test.describe('employee app on a phone', () => {
     await expect(latest).toContainText('$36.45 less than Nov 6. You worked 3.5 fewer hours.');
     await expect(page.getByText('Next payday')).toBeVisible();
     await expect(page.getByText('In 9 days')).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Recent pay' }).getByRole('listitem')).toHaveCount(3);
+    const year = page.getByRole('region', { name: 'This year so far' });
+    const recent = page.getByRole('region', { name: 'Recent pay' });
+    await expect(year).toContainText('$23,230.00');
+    await expect(recent.getByRole('listitem')).toHaveCount(3);
+    const [latestBox, yearBox, recentBox] = [(await latest.boundingBox())!, (await year.boundingBox())!, (await recent.boundingBox())!];
+    expect(yearBox.y).toBeGreaterThan(latestBox.y);
+    expect(recentBox.y).toBeGreaterThan(yearBox.y);
     await expectPhoneBasics(page);
     await snap(page, '01-home');
 

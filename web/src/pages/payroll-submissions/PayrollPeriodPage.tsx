@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useCompany } from '@/contexts/CompanyContext';
+import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 import { FileRow, RevisionCard } from '@/components/payroll-submissions/PeriodParts';
 import { formatDateRange } from '@/lib/display-date';
 import { hasPortalSubmittableAdapter } from '@/lib/importSources';
@@ -68,6 +69,8 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const inbox = searchParams.get('inbox');
   const hasInboxReturn = Boolean(inbox && /^\/app\/client-inbox(?:\?|$)/.test(inbox));
   const { activeCompanyId, activeCompany } = useCompany();
+  const clientViewOnly = useClientViewOnly();
+  const viewOnly = audience === 'client' && clientViewOnly;
   const api = audience === 'client' ? clientPayrollSubmissionsApi : adminPayrollSubmissionsApi;
   const [period, setPeriod] = useState<PeriodDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -117,12 +120,12 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const currentDraft = period.drafts.find(d => d.current);
   const otherDrafts = period.drafts.filter(d => d !== currentDraft);
   const canSendFiles = period.accepts_files ?? hasPortalSubmittableAdapter(activeCompany);
-  const canSubmit = canSendFiles && period.allowed_actions.includes('submit');
+  const canSubmit = !viewOnly && canSendFiles && period.allowed_actions.includes('submit');
   const reviewCompanyId = companyId ? Number(companyId) : activeCompanyId;
   const headerDescription = audience === 'client'
     ? period.pay_date
-      ? `Send and review files for this pay period · Pay date ${formatDate(period.pay_date)}`
-      : 'Send and review files for this pay period · Pay date set by Cornerstone'
+      ? `${viewOnly ? 'Review' : 'Send and review'} files for this pay period · Pay date ${formatDate(period.pay_date)}`
+      : `${viewOnly ? 'Review' : 'Send and review'} files for this pay period · Pay date set by Cornerstone`
     : period.pay_date
       ? `Pay date ${formatDate(period.pay_date)}`
       : 'Pay date set by Cornerstone';
@@ -190,7 +193,19 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
           <SubmissionForm period={period} current={current} onCancel={current ? () => setEditing(false) : undefined}
             onSent={(detail, outcome) => { setEditing(false); setNotice(outcome === 'duplicate' ? 'Nothing changed, so no new revision was made.' : submissionReceipt(detail)); accept(detail); }} />
         </section>}
-        {audience === 'client' && canSendFiles && !canSubmit && !current && <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">{period.status === 'paid' ? 'This period is paid.' : `This period opens for files on ${formatDate(period.opens_on)}.`}</p>}
+        {audience === 'client' && canSendFiles && !canSubmit && !current && (
+          <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">
+            {period.status === 'paid'
+              ? 'This period is paid.'
+              : viewOnly
+                ? period.open_for_files
+                  ? 'Only client managers can send payroll files.'
+                  : `Opens for files on ${formatDate(period.opens_on)}. Only client managers can send payroll files.`
+                : !period.open_for_files
+                  ? `This period opens for files on ${formatDate(period.opens_on)}.`
+                  : "This period isn't taking files right now."}
+          </p>
+        )}
 
         {audience === 'staff' ? (
           <PeriodConversation api={api} periodRef={period.id ? String(period.id) : period.ref} threadId={period.thread_id} onThreadCreated={() => void load()} />

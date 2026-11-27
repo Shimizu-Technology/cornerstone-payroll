@@ -124,9 +124,9 @@ describe('employee API client', () => {
     await expect(api.links()).rejects.toMatchObject({ kind: 'offline' });
   });
 
-  it('treats a network failure while online as a server problem', async () => {
+  it('treats a fetch TypeError while online as a network error instead of a server problem', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => { throw new TypeError('Failed to fetch'); });
-    await expect(client(fetchImpl).links()).rejects.toMatchObject({ kind: 'server' });
+    await expect(client(fetchImpl).links()).rejects.toMatchObject({ kind: 'network' });
   });
 });
 
@@ -174,6 +174,7 @@ describe('problemFor', () => {
     expect(problemFor(new EmployeeApiError('unauthorized', 401), { opened: true })).toBe('signed_out');
     expect(problemFor(new EmployeeApiError('rate_limited', 429), { opened: false })).toBe('rate_limited');
     expect(problemFor(new EmployeeApiError('offline'), { opened: false })).toBe('offline');
+    expect(problemFor(new EmployeeApiError('network'), { opened: false })).toBe('network');
     expect(problemFor(new EmployeeApiError('server', 500), { opened: false })).toBe('error');
     expect(problemFor(new Error('boom'), { opened: false })).toBe('error');
   });

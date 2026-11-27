@@ -791,6 +791,107 @@ describe('employee app shell', () => {
     expect(await screen.findByText(message)).toBeTruthy();
     expect(screen.queryByText("We couldn't match those details")).toBeNull();
   });
+
+  it('keeps the invite token when going Back from Step 2 to Step 1 and clears it on Cancel setup (A-02)', async () => {
+    window.history.pushState({}, '', '/activate#token=invite-token-1234567890');
+    vi.stubGlobal('fetch', respond({
+      '/public/employee_terms': () => Response.json({ version: '2026-11-25-draft-1', title: 'Employee App Terms', terms_url: '/terms', privacy_url: '/privacy' }),
+    }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText('Your invite link is ready. Enter two details to continue.')).toBeTruthy();
+    await userEvent.selectOptions(screen.getByLabelText('Month'), '4');
+    await userEvent.type(screen.getByLabelText('Day'), '7');
+    await userEvent.type(screen.getByLabelText('Year'), '1990');
+    await userEvent.type(screen.getByLabelText('Last 4 of your Social Security number'), '1234');
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Your email' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Set up your account' })).toBeTruthy();
+    expect(screen.getByText('Your invite link is ready. Enter two details to continue.')).toBeTruthy();
+    expect(sessionStorage.getItem('employee-invite-token')).toBe('invite-token-1234567890');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await userEvent.click(await screen.findByRole('link', { name: 'Cancel setup' }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Your pay, on your phone' })).toBeTruthy();
+    expect(sessionStorage.getItem('employee-invite-token')).toBeNull();
+  });
+
+  it('reports a fetch TypeError while online as a network error instead of a server problem (A-15)', async () => {
+    signedIn();
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => { throw new TypeError('Failed to fetch'); }));
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('heading', { level: 1, name: "We couldn't reach the server" })).toBeTruthy();
+    expect(screen.getByText(/Check your Wi-Fi or signal/)).toBeTruthy();
+    expect(screen.queryByText(/problem on our end/)).toBeNull();
+  });
+
+  it('renders This year so far outside wide-only on Home so phones see YTD totals (A-16)', async () => {
+    signedIn();
+    const statement = {
+      id: 906,
+      pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20', run_purpose: 'regular' },
+      check_date: '2026-11-20', gross_pay: '612.50', net_pay: '534.18', total_hours: '38.50',
+      payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-20', check_number_last4: null },
+      pdf_available: true,
+    };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [statement], years: [2026], next_page: null }),
+      '/employee/statements/906': () => Response.json({ ...statement, earnings: [], taxes: [], deductions: [], other_pay: [], ytd: { gross: '12000.00', net: '10000.00' } }),
+    }));
+    render(<EmployeeApp />);
+
+    const toggleBtn = await screen.findByRole('button', { name: 'Show amounts' });
+    const ytdCard = screen.getByRole('region', { name: 'This year so far' });
+    expect(ytdCard.closest('.emp-wide-only')).toBeNull();
+    expect(ytdCard.className).toContain('emp-home-ytd');
+    await within(ytdCard).findByText('2026 through Nov 20');
+    expect(within(ytdCard).getAllByText('Amount hidden')).toHaveLength(2);
+    expect(ytdCard.textContent).not.toContain('10,000.00');
+    expect(ytdCard.textContent).not.toContain('12,000.00');
+    await userEvent.click(toggleBtn);
+    expect(await within(ytdCard).findByText('$10,000.00')).toBeTruthy();
+    expect(within(ytdCard).getByText('$12,000.00')).toBeTruthy();
+  });
+
+  it('hides the company main line on Help when contacts exist and shows it when none are set (A-25)', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/help');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen' }]),
+      '/employee/context': () => new Response(null, { status: 204 }),
+      '/employee/help': () => Response.json({ help_contacts: [{ name: 'Client Manager', role: 'Manager', phone: '6715550111', text_ok: false, email: null }] }),
+    }));
+    render(<EmployeeApp />);
+    expect(await screen.findByText('Client Manager')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /main line/i })).toBeNull();
+  });
+
+  it('auto-uppercases and requires a 2-letter state code in AddressForm (A-30)', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/my-info');
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3, company_name: 'Harbor Finch Kitchen' }]),
+      '/employee/context': () => Response.json({ features: { profile_requests: true } }),
+      '/employee/profile': () => Response.json({ legal_name: 'Example Worker', address: null }),
+    }));
+    render(<EmployeeApp />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Request a change' }));
+    await userEvent.type(screen.getByLabelText('Street address'), '123 Marine Corps Dr');
+    await userEvent.type(screen.getByLabelText('Village or city'), 'Tamuning');
+    const stateInput = screen.getByLabelText('State') as HTMLInputElement;
+    await userEvent.clear(stateInput);
+    await userEvent.type(stateInput, 'g');
+    expect(stateInput.value).toBe('G');
+    await userEvent.type(screen.getByLabelText('ZIP code'), '96913');
+    await userEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    expect(await screen.findByText('Enter a 2-letter state or territory (for example, GU).')).toBeTruthy();
+  });
 });
 
 describe('ViewOnlyBanner', () => {

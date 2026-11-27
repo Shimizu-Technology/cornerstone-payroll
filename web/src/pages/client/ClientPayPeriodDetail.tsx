@@ -134,11 +134,13 @@ export function ClientPayPeriodDetail(): ReactElement {
       />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-        {resolvedError && <ActionFeedback tone="error" message={resolvedError} />}
+        {resolvedError && resolvedPayPeriod && <ActionFeedback tone="error" message={resolvedError} />}
 
         {loading || resolvedRouteKey !== routeKey ? (
           <div className="py-12 text-center text-sm text-gray-500">Loading pay period...</div>
-        ) : resolvedPayPeriod ? (
+        ) : resolvedPayPeriod ? (() => {
+          const showReviewAboveTable = resolvedPayPeriod.status === 'approved' && Boolean(resolvedPayPeriod.payroll_review?.published_at);
+          return (
           <>
             <div className="grid grid-cols-2 gap-3 sm:gap-6 xl:grid-cols-4">
               <SummaryCard label="Employees" value={String(resolvedPayPeriod.employee_count ?? resolvedPayPeriod.payroll_items?.length ?? 0)} />
@@ -147,6 +149,9 @@ export function ClientPayPeriodDetail(): ReactElement {
               <SummaryCard label="Status" value={clientPayRunStatus({ ...resolvedPayPeriod, client_review_status: resolvedPayPeriod.payroll_review?.status })} />
             </div>
 
+            {showReviewAboveTable && (
+              <ClientPayrollReview key={routeKey} payPeriod={resolvedPayPeriod} companyId={companyId} onDone={() => load(true)} />
+            )}
 
             <Card>
               <CardHeader>
@@ -156,13 +161,13 @@ export function ClientPayPeriodDetail(): ReactElement {
                     <p className="mt-1 text-sm text-gray-500">Hours, earnings, taxes, deductions, and net pay for this exact payroll revision.</p>
                   </div>
                   <div className="flex flex-col gap-3 md:flex-row">
-                    <Select value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} className="w-full md:w-44">
+                    <Select aria-label="Filter by employment type" value={employmentType} onChange={(e) => setEmploymentType(e.target.value)} className="w-full md:w-44">
                       <option value="">All types</option>
                       <option value="salary">Salary</option>
                       <option value="hourly">Hourly</option>
                       <option value="contractor">Contractor</option>
                     </Select>
-                    <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="w-full md:w-72" />
+                    <Input aria-label="Search employees" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search employees..." className="w-full md:w-72" />
                   </div>
                 </div>
               </CardHeader>
@@ -201,9 +206,27 @@ export function ClientPayPeriodDetail(): ReactElement {
               </CardContent>
             </Card>
 
-            <ClientPayrollReview key={routeKey} payPeriod={resolvedPayPeriod} companyId={companyId} onDone={() => load(true)} />
+            {!showReviewAboveTable && (
+              <ClientPayrollReview key={routeKey} payPeriod={resolvedPayPeriod} companyId={companyId} onDone={() => load(true)} />
+            )}
           </>
-        ) : null}
+          );
+        })() : (
+          <Card className="mx-auto max-w-lg">
+            <CardContent className="space-y-4 py-10 text-center">
+              <div className="space-y-1.5">
+                <h2 className="text-lg font-semibold text-neutral-950">This pay period isn&apos;t available yet</h2>
+                <p role="alert" className="text-sm text-neutral-600">
+                  {resolvedError || 'It may still be in draft with Cornerstone, or the link may be out of date.'}
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-3">
+                <Button variant="outline" onClick={() => navigate(returnTo)}>Back to pay periods</Button>
+                <Button variant="ghost" onClick={() => void load()}>Try again</Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

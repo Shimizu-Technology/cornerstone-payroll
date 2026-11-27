@@ -21,6 +21,7 @@ import { isSessionError, useEmployeeData } from './useEmployeeData';
 
 const PHONE_DIGITS = /^\+?[\d\s().-]+$/;
 const EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+const STATE_CODE = /^[A-Z]{2}$/;
 const ZIP = /^\d{5}(?:-\d{4})?$/;
 
 function phoneProblem(phone: string): string | null {
@@ -46,6 +47,7 @@ function changeMessage(error: unknown, what: string): string {
       case 'address_on_file_changed': return 'Your address on file was updated after you sent this request. Cancel this request, then send a new one if your address still needs to change.';
       case 'conflict': return 'A change is already being reviewed. Try again after it is decided.';
       case 'offline': return "You're offline. Connect to Wi-Fi or data, then try again.";
+      case 'network': return "We couldn't reach the server. Check your Wi-Fi or signal, then try again.";
       case 'rate_limited': return 'Too many tries. Wait a minute, then try again.';
       default: break;
     }
@@ -141,13 +143,13 @@ function SavedNotice({ notice }: { notice: string | null }): ReactElement | null
 
 function DetailRow({ label, value, badge, action }: { label: string; value: string | null; badge?: ReactNode; action?: ReactNode }): ReactElement {
   return (
-    <div className="emp-detail">
-      <div className="min-w-0 flex-1">
+    <div className="emp-detail-stack">
+      <div className="emp-detail-head">
         <p className="emp-label-quiet">{label}</p>
-        <p className="emp-detail-value">{value ?? <span className="text-neutral-500">Not added yet</span>}</p>
-        {badge}
+        {action}
       </div>
-      {action}
+      <p className="emp-detail-value">{value ?? <span className="text-neutral-500">Not added yet</span>}</p>
+      {badge}
     </div>
   );
 }
@@ -298,14 +300,15 @@ function AddressForm({ initial, requestId, onSaved, onClose }: { initial: Addres
   const set = (field: keyof Address) => (event: { target: { value: string } }): void => setAddress((a) => ({ ...a, [field]: event.target.value }));
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
+    const normalizedState = address.state.trim().toUpperCase();
     const next: Partial<Record<keyof Address, string>> = {};
     if (!address.line1.trim()) next.line1 = 'Enter the street address.';
     if (!address.city.trim()) next.city = 'Enter the village or city.';
-    if (!address.state.trim()) next.state = 'Enter the state or territory.';
+    if (!STATE_CODE.test(normalizedState)) next.state = 'Enter a 2-letter state or territory (for example, GU).';
     if (!ZIP.test(address.zip.trim())) next.zip = 'Enter a 5-digit ZIP code.';
     setProblems(next);
     if (Object.keys(next).length > 0) return;
-    const saved = await change.run('address', () => api.requestAddressChange(state.link.id, address, requestId));
+    const saved = await change.run('address', () => api.requestAddressChange(state.link.id, { ...address, state: normalizedState }, requestId));
     if (saved) {
       onSaved(saved, requestId ? 'Request updated.' : `Request sent to ${brand.isFallback ? 'your employer' : brand.name}.`);
       onClose();
@@ -317,7 +320,16 @@ function AddressForm({ initial, requestId, onSaved, onClose }: { initial: Addres
       <Field label="Apartment, unit or PO box (optional)" autoComplete="address-line2" value={address.line2} onChange={set('line2')} />
       <div className="emp-field-row">
         <Field label="Village or city" autoComplete="address-level2" value={address.city} onChange={set('city')} error={problems.city} className="flex-[2]" />
-        <Field label="State" autoComplete="address-level1" value={address.state} onChange={set('state')} error={problems.state} className="flex-1" maxLength={2} autoCapitalize="characters" />
+        <Field
+          label="State"
+          autoComplete="address-level1"
+          value={address.state}
+          onChange={(event) => setAddress((a) => ({ ...a, state: event.target.value.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 2) }))}
+          error={problems.state}
+          className="flex-1"
+          maxLength={2}
+          autoCapitalize="characters"
+        />
       </div>
       <Field label="ZIP code" autoComplete="postal-code" inputMode="numeric" value={address.zip} onChange={set('zip')} error={problems.zip} className="emp-field-short" />
       <p className="emp-hint">{brand.isFallback ? 'Your employer' : brand.name} checks the new address before it's used.</p>

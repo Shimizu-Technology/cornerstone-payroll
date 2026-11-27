@@ -65,6 +65,7 @@ function PaperlessQuestion(): ReactElement {
   const answered = useRef(false);
   const yesHeading = useRef<HTMLHeadingElement>(null);
   const yesButton = useRef<HTMLButtonElement>(null);
+  const agreeCheckbox = useRef<HTMLInputElement>(null);
 
   const finish = (notice?: string): void => {
     answered.current = true;
@@ -129,6 +130,7 @@ function PaperlessQuestion(): ReactElement {
     event.preventDefault();
     if (!agreed) {
       setError('To go paperless, check the box to agree.');
+      agreeCheckbox.current?.focus();
       return;
     }
     setSaving('yes');
@@ -216,11 +218,16 @@ function PaperlessQuestion(): ReactElement {
               </div>
               <label className="emp-checkbox-row" htmlFor="emp-paperless-agree">
                 <input
+                  ref={agreeCheckbox}
                   id="emp-paperless-agree"
                   type="checkbox"
                   className="emp-checkbox"
                   checked={agreed}
-                  onChange={(event) => setAgreed(event.target.checked)}
+                  aria-invalid={error && !agreed ? true : undefined}
+                  onChange={(event) => {
+                    setAgreed(event.target.checked);
+                    if (event.target.checked && error === 'To go paperless, check the box to agree.') setError(null);
+                  }}
                   disabled={busy}
                 />
                 <span>{KIND_COPY.pay_statements.agreeLabel}</span>
@@ -230,7 +237,7 @@ function PaperlessQuestion(): ReactElement {
                 To keep your account safe, we'll ask you to confirm it's you.
               </p>
               <div className="emp-paperless-actions">
-                <EmpButton type="submit" block disabled={busy || !agreed} aria-busy={saving === 'yes'}>
+                <EmpButton type="submit" block disabled={busy} aria-busy={saving === 'yes'}>
                   {saving === 'yes' ? 'Saving…' : 'Go paperless'}
                 </EmpButton>
                 <EmpButton

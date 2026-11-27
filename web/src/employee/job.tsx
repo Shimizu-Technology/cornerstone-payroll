@@ -127,7 +127,7 @@ function JobDetails({ job }: { job: EmployeeJob }): ReactElement {
       </dl>
       <p className="emp-hint mt-4">
         Something wrong?{' '}
-        <Link to="/help" className="emp-link-inline" onClick={focusHeadingOnNextScreen}>
+        <Link to="/help" className="emp-link-inline inline-flex min-h-11 items-center" onClick={focusHeadingOnNextScreen}>
           Contact {job.contactName ?? employer ?? 'your employer'}
         </Link>
       </p>

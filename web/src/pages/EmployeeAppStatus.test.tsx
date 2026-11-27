@@ -186,4 +186,12 @@ describe('Employee app status report', () => {
     expect(await screen.findByText('No employees match these filters.')).toBeTruthy();
     expect(screen.getByText(/Employees aren’t asked about paperless pay stubs or W-2GU yet/)).toBeTruthy();
   });
+
+  it('adds icon-text spacing on export buttons and 44px touch height on mobile employee links', async () => {
+    openPage();
+    const list = await screen.findByRole('list', { name: 'Employees' });
+    expect(screen.getByRole('button', { name: 'CSV' }).className).toContain('gap-2');
+    expect(screen.getByRole('button', { name: 'Excel' }).className).toContain('gap-2');
+    expect(within(list).getByRole('link', { name: 'Ana Sample' }).className).toContain('min-h-11');
+  });
 });

@@ -15,8 +15,8 @@ export function isSessionError(error: unknown): error is EmployeeApiError {
 export type DataState<T> =
   | { status: 'loading' }
   | { status: 'ready'; data: T }
-  /** A failure this screen can recover from on its own: offline, too many tries, a server error. */
-  | { status: 'error'; kind: 'offline' | 'rate_limited' | 'server' };
+  /** A failure this screen can recover from on its own: offline, network unreachable, too many tries, a server error. */
+  | { status: 'error'; kind: 'offline' | 'network' | 'rate_limited' | 'server' };
 
 /**
  * Loads one thing for the open link and keeps it in session memory, so going
@@ -46,7 +46,7 @@ export function useEmployeeData<T>(
       setLoaded({ key: cacheKey, state: { status: 'ready', data } });
     }, (error: unknown) => {
       if (controller.signal.aborted) return;
-      if (error instanceof EmployeeApiError && (error.kind === 'offline' || error.kind === 'rate_limited')) {
+      if (error instanceof EmployeeApiError && (error.kind === 'offline' || error.kind === 'network' || error.kind === 'rate_limited')) {
         setLoaded({ key: cacheKey, state: { status: 'error', kind: error.kind } });
       } else if (isSessionError(error)) {
         reportError(error);

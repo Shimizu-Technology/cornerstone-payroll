@@ -80,7 +80,7 @@ const QUESTIONS: ReadonlyArray<{ q: string; a: (company: string) => string }> = 
   { q: 'Something on my pay stub looks wrong', a: (company) => `Ask your manager at ${company}. They can check it with payroll.` },
 ];
 
-type ContactsState = { status: 'loading' } | { status: 'ready'; contacts: HelpContact[] } | { status: 'error'; kind: 'offline' | 'rate_limited' | 'server' };
+type ContactsState = { status: 'loading' } | { status: 'ready'; contacts: HelpContact[] } | { status: 'error'; kind: 'offline' | 'network' | 'rate_limited' | 'server' };
 
 /**
  * Help contacts are optional on the API until M4-9 serves them, so only a 404
@@ -100,7 +100,7 @@ function useHelpContacts(): { state: ContactsState; reload: () => void } {
       if (error instanceof EmployeeApiError && error.kind === 'not_found') setContacts({ status: 'ready', contacts: [] });
       else if (isSessionError(error)) reportError(error);
       else {
-        const kind = error instanceof EmployeeApiError && (error.kind === 'offline' || error.kind === 'rate_limited') ? error.kind : 'server';
+        const kind = error instanceof EmployeeApiError && (error.kind === 'offline' || error.kind === 'network' || error.kind === 'rate_limited') ? error.kind : 'server';
         setContacts({ status: 'error', kind });
       }
     });
@@ -124,7 +124,6 @@ export function HelpTab(): ReactElement {
               <div className="space-y-4">
                 <p className="text-neutral-700">Questions about your pay or this app? These people can help.</p>
                 <ul className="space-y-2">{state.contacts.map((contact, index) => <ContactCard key={`${index}-${contact.name}`} contact={contact} />)}</ul>
-                <CallCompany variant="secondary" />
               </div>
             ) : (
               <div className="space-y-4">

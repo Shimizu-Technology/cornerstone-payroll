@@ -374,7 +374,10 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 
         const home = nav.getByRole('link', { name: 'Home' });
         await home.hover();
         expect(await home.evaluate((node) => getComputedStyle(node).color)).toBe('rgb(19, 122, 167)');
-        await expect(year).toBeHidden();
+        await expect(year).toBeVisible();
+        const [latestBox, yearBox] = [(await latest.boundingBox())!, (await year.boundingBox())!];
+        expect(yearBox.y).toBeGreaterThan(latestBox.y + latestBox.height);
+        await expect(page.getByRole('region', { name: 'Questions about your pay?' })).toBeHidden();
         await expect(signOut).toBeHidden();
         await expect(account).toBeVisible();
         await account.click();

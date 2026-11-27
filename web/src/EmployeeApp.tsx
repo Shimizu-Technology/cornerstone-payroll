@@ -15,7 +15,7 @@ import { EmployeeSessionProvider } from './employee/SessionProvider';
 import { EmployeeShell } from './employee/Shell';
 import { SignOutProvider } from './employee/SignOut';
 import {
-  AccessEndedScreen, BootScreen, ErrorState, LoadingState, OfflineState, RateLimitedState, TenantConnectionErrorScreen, TenantUnavailableScreen, TwoStepScreen, UnavailableScreen,
+  AccessEndedScreen, BootScreen, ErrorState, LoadingState, NetworkErrorState, OfflineState, RateLimitedState, TenantConnectionErrorScreen, TenantUnavailableScreen, TwoStepScreen, UnavailableScreen,
 } from './employee/StateScreens';
 import { HelpTab } from './employee/help';
 import { MyInfoTab } from './employee/myinfo';
@@ -93,8 +93,9 @@ function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactEl
   if (state.status === 'problem') {
     const actions = { onRetry: retry, onSignOut: signOut };
     const content = state.problem === 'offline' ? <OfflineState {...actions} />
-      : state.problem === 'rate_limited' ? <RateLimitedState {...actions} />
-        : <ErrorState {...actions} />;
+      : state.problem === 'network' ? <NetworkErrorState {...actions} />
+        : state.problem === 'rate_limited' ? <RateLimitedState {...actions} />
+          : <ErrorState {...actions} />;
     // No tabs here: they would change the address without changing the screen.
     return <EmployeeShell viewAs={viewAs} showNav={false}>{content}</EmployeeShell>;
   }

@@ -15,7 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
-import { accentColorCheck, brandColorCheck, brandRoles, isHexColor } from '@/lib/tenant-brand-colors';
+import { accentColorCheck, accentPair, brandColorCheck, brandRoles, isHexColor } from '@/lib/tenant-brand-colors';
 import { cn } from '@/lib/utils';
 import { ApiError } from '@/services/api';
 import { employeeAppSettingsApi, type BrandingUpdate, type EmployeeAppSettings } from '@/services/employee-app-settings-api';
@@ -166,13 +166,25 @@ function ColorResult({ primary, accent }: { primary: string; accent: string }): 
   );
 }
 
-function HomeScreenIcon({ logoUrl, label, fallbackLetter }: { logoUrl: string | null; label: string; fallbackLetter: string }): ReactElement {
+function HomeScreenIcon({ logoUrl, label, fallbackLetter, primaryColor, isSquareLogo }: {
+  logoUrl: string | null;
+  label: string;
+  fallbackLetter: string;
+  primaryColor: string | null;
+  isSquareLogo: boolean;
+}): ReactElement {
+  const roles = brandRoles(primaryColor, null);
+  const { accent, ink } = accentPair(roles.decoration);
+  const showLogo = Boolean(logoUrl && isSquareLogo);
   return (
     <div className="flex w-20 flex-col items-center gap-1.5" aria-label={`Home Screen icon labeled ${label}`} role="img">
-      <span className="grid size-16 place-items-center overflow-hidden rounded-[18px] border border-neutral-200 bg-white shadow-sm">
-        {logoUrl
-          ? <img src={logoUrl} alt="" className="size-[80%] object-contain" />
-          : <span className="text-2xl font-bold text-neutral-700">{fallbackLetter}</span>}
+      <span
+        className="grid size-16 place-items-center overflow-hidden rounded-[18px] border border-neutral-200 shadow-sm"
+        style={showLogo ? { background: '#ffffff' } : { background: accent, color: ink }}
+      >
+        {showLogo && logoUrl
+          ? <img src={logoUrl} alt="" className="size-full object-cover" />
+          : <span className="text-2xl font-bold">{fallbackLetter}</span>}
       </span>
       <span className="w-full truncate text-center text-xs text-neutral-800">{label}</span>
     </div>
@@ -274,11 +286,12 @@ export function EmployeeAppSettings(): ReactElement {
   // edits made after Save was clicked.
   const brandingLocked = !canEdit || savingBranding;
   const hasLogo = !!(settings?.branding.logo || settings?.branding.external_logo_url);
+  const isSquareLogo = !logoSize || logoSize.width === logoSize.height;
   const logoWarning = logoSize && hasLogo
-    ? (Math.min(logoSize.width, logoSize.height) < SMALL_EDGE
-      ? `This logo is ${logoSize.width}×${logoSize.height} pixels, so it may look blurry as a Home Screen icon. Use one at least ${RECOMMENDED_EDGE}×${RECOMMENDED_EDGE} if you can.`
-      : Math.abs(logoSize.width - logoSize.height) / Math.max(logoSize.width, logoSize.height) > 0.1
-        ? `This logo isn't square (${logoSize.width}×${logoSize.height}), so it will be shrunk to fit the square Home Screen icon.`
+    ? (logoSize.width !== logoSize.height
+      ? `This logo isn't square (${logoSize.width}×${logoSize.height}). It still appears inside the app, while the Home Screen icon uses your initial instead. Upload a square logo to use it on the Home Screen.`
+      : Math.min(logoSize.width, logoSize.height) < SMALL_EDGE
+        ? `This logo is ${logoSize.width}×${logoSize.height} pixels, so it may look blurry as a Home Screen icon. Use one at least ${RECOMMENDED_EDGE}×${RECOMMENDED_EDGE} if you can.`
         : null)
     : null;
 
@@ -434,7 +447,13 @@ export function EmployeeAppSettings(): ReactElement {
                       </div>
                     </div>
                     <div className="flex flex-wrap items-end gap-6">
-                      <HomeScreenIcon logoUrl={logoUrl} label={homeScreenName} fallbackLetter={displayName.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? 'C'} />
+                      <HomeScreenIcon
+                        logoUrl={logoUrl}
+                        label={homeScreenName}
+                        fallbackLetter={displayName.match(/[\p{L}\p{N}]/u)?.[0]?.toUpperCase() ?? 'C'}
+                        primaryColor={isHexColor(form.primary_color) ? form.primary_color : null}
+                        isSquareLogo={isSquareLogo}
+                      />
                       <p className="max-w-sm text-sm text-neutral-600">How the app icon and its name look on a phone’s Home Screen.</p>
                     </div>
 
