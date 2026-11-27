@@ -618,9 +618,8 @@ module Api
             }
             json[:component_disclosure] = PayrollItemDisclosure.new(item).as_json
             date = item.pay_period.pay_date
-            if PayrollBridgeOverlap.for_employee(employee: item.employee, year: date.year, through: date).any?
-              json[:ytd_review] = { required: true, message: PayrollBridgeOverlap::STAFF_NOTE }
-            end
+            note = PayrollBridgeOverlap.staff_note(PayrollBridgeOverlap.for_employee(employee: item.employee, year: date.year, through: date))
+            json[:ytd_review] = { required: true, message: note } if note
             # Include full YTD breakdown
             json[:ytd] = {
               gross: statement_ytd.call(item).gross,

@@ -20,6 +20,9 @@ class PayrollBridgeOverlap
     # Contractors are never on a W-2GU, so they don't block it.
     def blocks_w2? = payroll_item.employment_type != "contractor"
 
+    # The date the detector compared: the check date or the run's pay date, whichever is earlier.
+    def paid_on = [ payroll_item.check_date, payroll_item.pay_period.pay_date ].compact.min
+
     def evidence_digest
       Digest::SHA256.hexdigest(JSON.generate(evidence))
     end
@@ -29,6 +32,17 @@ class PayrollBridgeOverlap
     "If a total changes, a corrected stub will follow."
   STAFF_NOTE = "A native paycheck is dated inside the imported opening balance, so year-to-date may leave it out or W-2GU may " \
     "count it twice. W-2GU filing is blocked until it is resolved."
+  CONTRACTOR_STAFF_NOTE = "A contractor paycheck is dated inside the imported opening balance, so year-to-date may leave it " \
+    "out. Contractors aren't on a W-2GU, so W-2GU filing isn't blocked by it."
+  # The 422 final W-2GU files give while any overlap blocks filing.
+  FILING_BLOCKED = "Mark W-2s ready on the current inputs before downloading a final file"
+
+  # The staff warning for these overlaps, or nil when there are none.
+  def self.staff_note(overlaps)
+    return if overlaps.empty?
+
+    overlaps.any?(&:blocks_w2?) ? STAFF_NOTE : CONTRACTOR_STAFF_NOTE
+  end
 
   def initialize(company_id:, year:, employee_ids: nil)
     @company_id = Integer(company_id)

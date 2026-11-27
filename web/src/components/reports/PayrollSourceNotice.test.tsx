@@ -54,6 +54,11 @@ it('says when imported totals come from the opening balance and when they are sh
   expect(screen.getByText(/Imported figures are shown as imported/)).toBeTruthy();
 });
 
+it('warns when Cornerstone paychecks are dated inside the opening balance', () => {
+  render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 0, bridge_window_paycheck_count: 1 } }} />);
+  expect(screen.getByRole('alert').textContent).toContain('1 Cornerstone paycheck is dated inside the imported opening year-to-date balance');
+});
+
 it('says nothing about the basis when no opening balance applies', () => {
   render(<PayrollSourceNotice summary={{ ...summary, historical_ytd_bridge: { applied: false, tax_years: [], totals_basis: 'as_imported' } }} />);
   expect(screen.queryByText(/as imported/)).toBeNull();
