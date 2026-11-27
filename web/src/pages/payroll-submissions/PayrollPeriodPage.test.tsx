@@ -8,8 +8,9 @@ import type { ClientDocument } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(), submit: vi.fn(), decide: vi.fn(), acknowledge: vi.fn(), createDraft: vi.fn(), seen: vi.fn(), employees: vi.fn(),
-  threadGet: vi.fn(), message: vi.fn(), mosa: true,
+  threadGet: vi.fn(), message: vi.fn(), mosa: true, viewOnly: false,
 }));
+vi.mock('@/hooks/useClientViewOnly', () => ({ useClientViewOnly: () => mocks.viewOnly }));
 vi.mock('@/services/payrollSubmissions', async original => {
   const actual = await original<typeof import('@/services/payrollSubmissions')>();
   const threads = { get: mocks.threadGet, markRead: vi.fn() };
@@ -44,6 +45,7 @@ const renderAt = (audience: 'client' | 'staff', path = audience === 'client' ? '
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.mosa = true;
+  mocks.viewOnly = false;
   mocks.employees.mockResolvedValue([{ id: 5, name: 'Sam Worker' }]);
   mocks.seen.mockResolvedValue(undefined);
   mocks.get.mockResolvedValue({ data: period() });
@@ -218,4 +220,40 @@ it('warns staff, and only staff, when the linked pay run is voided or ambiguous'
   renderAt('client');
   await screen.findByRole('heading', { name: 'Payroll Nov 2 – 15, 2026' });
   expect(screen.queryByText(warning)).toBeNull();
+});
+
+it('tells a client viewer that only managers can send files on an open period instead of showing a past opens-on date', async () => {
+  mocks.viewOnly = true;
+  mocks.get.mockResolvedValue({
+    data: period({
+      status: 'waiting_for_files',
+      status_label: 'Waiting for files',
+      open_for_files: true,
+      opens_on: '2026-11-15',
+      current_revision: null,
+      submissions: [],
+      allowed_actions: ['message'],
+    }),
+  });
+  renderAt('client');
+  expect(await screen.findByText('Only client managers can send payroll files.')).toBeTruthy();
+  expect(screen.queryByText(/This period opens for files/)).toBeNull();
+  expect(screen.queryByRole('button', { name: /Send/ })).toBeNull();
+});
+
+it('shows the true future opens-on date plus the manager note for a viewer on an unopened period', async () => {
+  mocks.viewOnly = true;
+  mocks.get.mockResolvedValue({
+    data: period({
+      status: 'waiting_for_files',
+      status_label: 'Waiting for files',
+      open_for_files: false,
+      opens_on: '2026-12-05',
+      current_revision: null,
+      submissions: [],
+      allowed_actions: ['message'],
+    }),
+  });
+  renderAt('client');
+  expect(await screen.findByText('Opens for files on Dec 5, 2026. Only client managers can send payroll files.')).toBeTruthy();
 });

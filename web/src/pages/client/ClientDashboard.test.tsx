@@ -109,3 +109,30 @@ it('formats the pay period and payday in Recent payrolls', async () => {
 
   expect(await screen.findByRole('button', { name: /Oct 26 – Nov 8, 2026.*Nov 11, 2026/ })).toBeTruthy();
 });
+
+it('clarifies the recent payroll count against YTD total and uses a 3-column grid for quick links', async () => {
+  vi.mocked(clientPayPeriodsApi.list).mockResolvedValueOnce(emptyPayroll);
+  vi.mocked(clientReportsApi.dashboard).mockResolvedValueOnce({
+    stats: {
+      active_employees: 10,
+      total_employees: 10,
+      ytd_totals: { net_pay: 50000, payroll_count: 22 },
+      recent_payrolls: Array.from({ length: 5 }, (_, index) => ({
+        id: index + 1,
+        start_date: '2026-10-26',
+        end_date: '2026-11-08',
+        pay_date: '2026-11-11',
+        period_description: 'Oct 26 – Nov 8, 2026',
+        employee_count: 10,
+        total_net: 1200,
+      })),
+    },
+  } as Awaited<ReturnType<typeof clientReportsApi.dashboard>>);
+
+  render(<MemoryRouter><ClientDashboard /></MemoryRouter>);
+
+  expect(await screen.findByText('Shown below · 22 this year')).toBeTruthy();
+  const quickLinksGrid = screen.getByRole('button', { name: /Employees/ }).closest('.grid');
+  expect(quickLinksGrid?.className).toContain('lg:grid-cols-3');
+  expect(quickLinksGrid?.className).not.toContain('xl:grid-cols-4');
+});

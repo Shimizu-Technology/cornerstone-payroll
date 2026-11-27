@@ -9,7 +9,9 @@ import type { PayrollItem } from '@/types';
 const apiMocks = vi.hoisted(() => ({ getPayPeriod: vi.fn(), getSubmission: vi.fn() }));
 
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title, description }: { title: string; description?: string }) => <header><h1>{title}</h1><p>{description}</p></header> }));
-vi.mock('@/components/client-portal/ClientPayrollReview', () => ({ ClientPayrollReview: () => null }));
+vi.mock('@/components/client-portal/ClientPayrollReview', () => ({
+  ClientPayrollReview: () => <section data-testid="payroll-review-card">Review preview</section>,
+}));
 vi.mock('@/components/client-portal/ClientPayStubButton', () => ({ ClientPayStubButton: () => null }));
 vi.mock('@/services/payrollSubmissions', () => ({ clientPayrollSubmissionsApi: { get: apiMocks.getSubmission } }));
 vi.mock('@/services/api', () => ({
@@ -323,4 +325,41 @@ it('hides all five optional columns when every row in the period is zero and sho
   expect(screen.getAllByRole('columnheader').map((th) => th.textContent?.trim())).toEqual([
     'Employee', 'Hours', 'Rate', 'Gross', 'Taxes', 'Total deductions', 'Net pay',
   ]);
+});
+
+it('renders the approval review card above the employee table when a review is active, and isolates the table scroll container', async () => {
+  apiMocks.getPayPeriod.mockResolvedValue({
+    pay_period: {
+      id: 9,
+      company_id: 2,
+      start_date: '2026-11-08',
+      end_date: '2026-11-21',
+      pay_date: '2026-11-27',
+      status: 'approved',
+      employee_count: 1,
+      total_gross: 1000,
+      total_net: 850,
+      payroll_review: { id: 1, revision: 1, status: 'pending', published_at: '2026-11-25T00:00:00Z' },
+      payroll_items: [{ id: 101, employee_name: 'Casey First', net_pay: 850 }],
+    },
+  });
+
+  renderDetail();
+
+  const review = await screen.findByTestId('payroll-review-card');
+  const tableHeading = screen.getByRole('heading', { name: 'Employee payroll' });
+  expect(Boolean(review.compareDocumentPosition(tableHeading) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  const tableScroll = screen.getByRole('table').parentElement;
+  expect(tableScroll?.className).toContain('isolate');
+});
+
+it('shows an inline recovery card when a pay period cannot be loaded', async () => {
+  apiMocks.getPayPeriod.mockRejectedValue(new Error('Pay period not found'));
+
+  renderDetail();
+
+  expect(await screen.findByRole('heading', { name: "This pay period isn't available yet" })).toBeTruthy();
+  expect(screen.getByRole('alert').textContent).toContain('Pay period not found');
+  expect(screen.getByRole('button', { name: 'Back to pay periods' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
 });

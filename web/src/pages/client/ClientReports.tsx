@@ -330,11 +330,36 @@ export function ClientReports() {
           <>
             <section aria-label="Report catalog" className="space-y-4">
               <h2 className="text-xl font-semibold">Report catalog</h2>
-              <p className="text-sm text-gray-600">Reports include finished payroll only. Select a pay period below for payroll reports, or a year and quarter for tax reports.</p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <label>Tax year<NumericInput aria-label="Tax year" inputMode="numeric" min={1} value={reportYear} restoreOnEmpty onValueChange={year => setReportYear(year ?? reportYear)} /></label>
-                <label>Quarter<select aria-label="Quarter" value={quarter} onChange={e => setQuarter(e.target.value)} className="block h-11 w-full rounded border px-3">{[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}</select></label>
-                <label>Employee<select disabled={employeesLoading || !!employeeError} aria-label="Report employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)} className="block h-11 w-full rounded border px-3"><option value="">{employeesLoading ? 'Loading employees...' : 'Choose employee'}</option>{employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}</select></label>
+              <p className="text-sm text-gray-600">Reports include finished payroll only. Select a pay period for payroll reports, or a year and quarter for tax reports.</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="space-y-1 text-sm font-medium text-neutral-700">
+                  <span>Pay period</span>
+                  <Select aria-label="Pay period" className="w-full" value={selectedPayPeriodId} onChange={(e) => setSelectedPayPeriodId(e.target.value)}>
+                    <option value="">Select a pay period</option>
+                    {payPeriodOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="space-y-1 text-sm font-medium text-neutral-700">
+                  <span>Tax year</span>
+                  <NumericInput aria-label="Tax year" inputMode="numeric" min={1} value={reportYear} restoreOnEmpty onValueChange={year => setReportYear(year ?? reportYear)} />
+                </label>
+                <label className="space-y-1 text-sm font-medium text-neutral-700">
+                  <span>Quarter</span>
+                  <Select aria-label="Quarter" value={quarter} onChange={e => setQuarter(e.target.value)}>
+                    {[1, 2, 3, 4].map(q => <option key={q} value={q}>Q{q}</option>)}
+                  </Select>
+                </label>
+                <label className="space-y-1 text-sm font-medium text-neutral-700">
+                  <span>Employee</span>
+                  <Select disabled={employeesLoading || !!employeeError} aria-label="Report employee" value={employeeId} onChange={e => setEmployeeId(e.target.value)}>
+                    <option value="">{employeesLoading ? 'Loading employees...' : 'Choose employee'}</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}
+                  </Select>
+                </label>
               </div>
               {employeeError && <div role="alert" className="text-sm text-red-700">
                 <p>Employee reports are unavailable: {employeeError}</p>
@@ -370,14 +395,11 @@ export function ClientReports() {
               <CardTitle>Payroll register</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <Select className="w-full" value={selectedPayPeriodId} onChange={(e) => setSelectedPayPeriodId(e.target.value)}>
-                <option value="">Select a pay period</option>
-                {payPeriodOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+              <p className="text-sm font-medium text-neutral-800">
+                {selectedPayPeriodId
+                  ? `Selected pay period: ${payPeriodOptions.find((option) => option.value === selectedPayPeriodId)?.label ?? ''}`
+                  : 'Select a pay period at the top of the page to view or export the payroll register.'}
+              </p>
               <p className="text-sm leading-6 text-gray-500">The payroll register is available for Cornerstone payrolls. Open an imported payroll from Pay periods to review its locked QuickBooks records.</p>
               <div className="flex flex-wrap gap-3">
                 <Button variant="outline" disabled={!selectedPayPeriodId} onClick={() => void loadPayrollRegister()}>

@@ -456,3 +456,51 @@ it('keeps the Revel PDF labeled and enforced as required even when required_sour
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Attach the Revel payroll PDF');
   expect(mocks.submit).not.toHaveBeenCalled();
 });
+
+it('formats extra-hours rates with two decimals, uses intake-driven hints, and hides the above-entries note when no standing entries exist', async () => {
+  mocks.employees.mockResolvedValue([{ id: 173, name: 'Jordan Worker', wage_rates: [{ id: 7, label: 'Cook', rate: '17.5' }] }]);
+  const workbookPeriod: PeriodDetail = {
+    ...period,
+    intake_descriptor: {
+      key: 'cornerstone_workbook',
+      label: 'Cornerstone workbook',
+      source_label: 'Cornerstone universal workbook',
+      extraction: 'deterministic',
+      accepts_pasted_text: false,
+      tracks_reviewed_hours: false,
+      employee_match: 'employee_id',
+      reports_overtime: false,
+      tips_default: 'paid_in_check',
+      overtime_mode: 'weekly_split',
+      workweek_alignment: 'aligned',
+      required_sources: ['cornerstone_workbook'],
+      files: [{
+        role: 'cornerstone_workbook',
+        label: 'Cornerstone workbook',
+        hint: 'Upload workbook.',
+        accept: ['.xlsx', '.csv'],
+        content_type: null,
+        max: 1,
+        required: true,
+        required_by_default: true,
+        waivable: null,
+        portal_role: 'payroll_workbook',
+        portal_label: 'Cornerstone payroll workbook (.xlsx or .csv)',
+        portal_hint: 'Upload workbook.',
+        supports_link: false,
+        provides: ['regular_hours'],
+      }],
+      portal: { submittable: true, role_map: { payroll_workbook: 'cornerstone_workbook' } },
+    },
+  };
+
+  render(<SubmissionForm period={workbookPeriod} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  expect(screen.queryByText('This choice does not change your payroll entries above.')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  expect(screen.getByText('Hours not in the uploaded workbook')).toBeTruthy();
+  expect(screen.queryByText(/Revel/)).toBeNull();
+  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
+  expect(screen.getByRole('option', { name: 'Cook · $17.50/hr' })).toBeTruthy();
+});

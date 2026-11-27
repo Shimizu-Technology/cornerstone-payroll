@@ -158,10 +158,10 @@ export function EmployeeShell({ viewAs, showNav = true, children }: EmployeeShel
             <BrandMark />
             <span className="emp-brand-text">
               <span className="emp-brand-name-row">
-                <span className="emp-brand-name">{brand.name}</span>
+                <span className="emp-brand-name">{brand.appName ?? brand.name}</span>
                 {brand.demo && <DemoPill />}
               </span>
-              <span className="emp-brand-sub">{brand.appName ?? 'Employee pay'}</span>
+              <span className="emp-brand-sub">{brand.appName ? brand.name : 'Employee pay'}</span>
             </span>
           </span>
           {showNav && <MainNav />}

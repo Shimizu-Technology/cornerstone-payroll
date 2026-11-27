@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { LabeledTextarea } from '@/components/payroll-submissions/LabeledTextarea';
 import { acceptStringForSlot, DEFAULT_MOSA_DESCRIPTOR, templateFormatsForSlot } from '@/lib/importSources';
+import { formatCurrency } from '@/lib/utils';
 import { parseDecimalHundredths } from '@/lib/extraHoursPreview';
 import { CHANGE_KINDS, clientPayrollSubmissionsApi, type ChangeKind, type ChangeRow, type ExtraHoursConfig, type PeriodDetail, type PickerEmployee, type SubmissionRevision } from '@/services/payrollSubmissions';
 import type { PayrollIntakeDescriptor, PayrollIntakeFileSlot } from '@/services/api';
@@ -406,7 +407,9 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
           <input type="checkbox" className="h-5 w-5" checked={noChanges} onChange={e => setNoChanges(e.target.checked)} />
           No changes this period
         </label>
-        <p className="text-sm text-neutral-600">This choice does not change your payroll entries above.</p>
+        {rows.some(row => row.standing_change_id) && (
+          <p className="text-sm text-neutral-600">This choice does not change your payroll entries above.</p>
+        )}
         {!noChanges && <>
           <p className="text-sm text-neutral-600">
             {descriptor.key === 'mosa_revel'
@@ -421,18 +424,29 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
           <ul className="space-y-3">
             {rows.filter(row => !row.standing_change_id).map((row, index) => {
               const meta = CHANGE_KINDS.find(k => k.kind === row.kind)!;
+              const hint = row.kind === 'extra_hours'
+                ? descriptor.key === 'mosa_revel'
+                  ? 'Hours not in the Revel report'
+                  : descriptor.key === 'cornerstone_workbook'
+                    ? 'Hours not in the uploaded workbook'
+                    : `Hours not in ${descriptor.label || 'your payroll file'}`
+                : meta.hint;
               return <li key={row.key} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <div className="mb-2 flex items-start justify-between gap-2"><p className="font-semibold text-neutral-900">{index + 1}. {meta.label}</p>
                   {!row.standing_change_id && <Button type="button" size="sm" variant="ghost" onClick={() => setRows(list => list.filter(r => r.key !== row.key))} aria-label={`Remove change ${index + 1}, ${meta.label}`}><Trash2 className="h-4 w-4" aria-hidden /></Button>}</div>
                 {row.standing_change_id && <div className="mb-3"><p className="text-xs font-semibold text-neutral-700">Every period · {row.employee_name}</p><label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={!!row.skipped} onChange={e => update(row.key, { skipped: e.target.checked })} />Not this period</label></div>}
                 {row.availability_error && !row.skipped && <p role="alert" className="mb-2 text-sm text-danger-700">{row.availability_error}</p>}
-                <p className="mb-2 text-xs text-neutral-600">{meta.hint}</p>
+                <p className="mb-2 text-xs text-neutral-600">{hint}</p>
                 <fieldset disabled={row.skipped} className="grid min-w-0 gap-3 sm:grid-cols-2">
                   {['owner_pay', 'extra_hours', 'paid_leave', 'wage_change', 'deduction', 'direct_deposit_addition'].includes(row.kind) && employeeSelect(row, 'Employee')}
                   {row.kind === 'paid_leave' && <Input label="Hours" inputMode="decimal" value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />}
                   {row.kind === 'extra_hours' && <Select label="Saved job and rate" value={row.employee_wage_rate_id || ''} disabled={!!row.standing_change_id} onChange={e => update(row.key, { employee_wage_rate_id: Number(e.target.value) || undefined })}>
                     <option value="">Choose saved job</option>
-                    {employees.find(employee => employee.id === row.employee_id)?.wage_rates?.map(rate => <option key={rate.id} value={rate.id}>{rate.label} · ${rate.rate}/hr</option>)}
+                    {employees.find(employee => employee.id === row.employee_id)?.wage_rates?.map(rate => {
+                      const numericRate = rate.rate == null ? NaN : Number(rate.rate);
+                      const formattedRate = Number.isFinite(numericRate) ? `${formatCurrency(numericRate)}/hr` : rate.rate != null ? `$${rate.rate}/hr` : null;
+                      return <option key={rate.id} value={rate.id}>{formattedRate ? `${rate.label} · ${formattedRate}` : rate.label}</option>;
+                    })}
                   </Select>}
                   {row.kind === 'extra_hours' && (() => {
                     const extraMode = extraHoursModeForRow(row);

@@ -95,6 +95,14 @@ export function OfflineState(actions: StateActions): ReactElement {
   );
 }
 
+export function NetworkErrorState(actions: StateActions): ReactElement {
+  return (
+    <InlineState icon={WifiOff} title="We couldn't reach the server" {...actions}>
+      <p>We couldn't reach the server. Check your Wi-Fi or signal, then try again.</p>
+    </InlineState>
+  );
+}
+
 export function ErrorState(actions: StateActions): ReactElement {
   return (
     <InlineState icon={CircleAlert} tone="bad" title="Something went wrong" {...actions}>

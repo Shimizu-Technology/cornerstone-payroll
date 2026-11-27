@@ -28,7 +28,12 @@ beforeEach(() => {
 afterEach(cleanup);
 it('lists every client report in three groups and guards missing selections', async () => {
   render(<ClientReports />);
-  expect(await screen.findByRole('region', { name: 'Report catalog' })).toBeTruthy();
+  const catalog = await screen.findByRole('region', { name: 'Report catalog' });
+  expect(catalog).toBeTruthy();
+  const payPeriodSelect = screen.getByRole('combobox', { name: 'Pay period' });
+  expect(catalog.contains(payPeriodSelect)).toBe(true);
+  const firstReport = screen.getByText(clientReportCatalog[0].title);
+  expect(Boolean(payPeriodSelect.compareDocumentPosition(firstReport) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   for (const report of clientReportCatalog) expect(screen.getByText(report.title)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Export Employee Pay History' }).hasAttribute('disabled')).toBe(true);
   expect(screen.queryByText('Full Print Package')).toBeNull();

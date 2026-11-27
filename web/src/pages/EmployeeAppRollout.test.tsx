@@ -185,4 +185,19 @@ describe('Employee app rollout', () => {
     expect(summary?.className.split(/\s+/)).not.toContain('flex');
     expect(label.className).toContain('inline-flex');
   });
+
+  it('supports Select all ready and Clear selection in Invite a group up to max_wave_size', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, max_wave_size: 2 } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
+
+    const selectAll = await screen.findByRole('button', { name: 'Select all ready (2)' });
+    await user.click(selectAll);
+    expect(screen.getByText('2 selected')).toBeTruthy();
+    expect((screen.getByRole('checkbox', { name: /Sample One/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /Sample Two/ }) as HTMLInputElement).checked).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+    expect(screen.getByText('0 selected')).toBeTruthy();
+  });
 });
