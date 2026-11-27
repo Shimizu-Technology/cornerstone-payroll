@@ -9,15 +9,15 @@ RSpec.describe PayrollImport::NameMatcher do
 
   let(:employees) do
     [
-      StubEmployee.new(1, "Vincent",   "Belleza",   "Vincent Belleza"),
-      StubEmployee.new(2, "Zachary",   "Camacho",   "Zachary Camacho"),
-      StubEmployee.new(3, "Juile",     "Arthur",    "Juile Arthur"),
-      StubEmployee.new(4, "Kyle",      "Richard",   "Kyle Richard"),
-      StubEmployee.new(5, "Jayden",    "Suanson",   "Jayden Suanson"),
-      StubEmployee.new(6, "Maria",     "Robert",    "Maria Robert"),
-      StubEmployee.new(7, "Natalie",   "Thomas",    "Natalie Thomas"),
-      StubEmployee.new(8, "George",    "Setik",     "George Setik"),
-      StubEmployee.new(9, "Rosie",     "Petirus",   "Rosie Petirus")
+      StubEmployee.new(1, "Victor",    "Caldera",   "Victor Caldera"),
+      StubEmployee.new(2, "Zachary",   "Bennett",   "Zachary Bennett"),
+      StubEmployee.new(3, "Calra",     "Benson",    "Calra Benson"),
+      StubEmployee.new(4, "Kevin",     "Mercer",    "Kevin Mercer"),
+      StubEmployee.new(5, "Jordan",    "Solberg",   "Jordan Solberg"),
+      StubEmployee.new(6, "Maya",      "Morales",   "Maya Morales"),
+      StubEmployee.new(7, "Naomi",     "Alvarez",   "Naomi Alvarez"),
+      StubEmployee.new(8, "Graham",    "Novak",     "Graham Novak"),
+      StubEmployee.new(9, "Riley",     "Marlowe",   "Riley Marlowe")
     ]
   end
 
@@ -27,20 +27,20 @@ RSpec.describe PayrollImport::NameMatcher do
 
   describe "#match_pdf_name (exact)" do
     it "matches a standard 'Last, First' PDF name" do
-      result = matcher.match_pdf_name("Belleza, Vincent")
+      result = matcher.match_pdf_name("Caldera, Victor")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(1)
       expect(result[:confidence]).to eq(1.0)
     end
 
-    it "matches a PDF name with middle initial: 'Arthur, Juile R.'" do
-      result = matcher.match_pdf_name("Arthur, Juile R.")
+    it "matches a PDF name with middle initial: 'Benson, Calra R.'" do
+      result = matcher.match_pdf_name("Benson, Calra R.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(3)
     end
 
     it "is case-insensitive" do
-      result = matcher.match_pdf_name("belleza, vincent")
+      result = matcher.match_pdf_name("caldera, victor")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(1)
     end
@@ -59,26 +59,26 @@ RSpec.describe PayrollImport::NameMatcher do
   # ── First-name alias matching ──────────────────────────────────────────────
 
   describe "FIRST_NAME_ALIASES" do
-    it "matches 'Kyle A.' alias → Kyle Richard (employee)" do
-      result = matcher.match_pdf_name("Richard, Kyle A.")
+    it "matches 'Kevin A.' alias → Kevin Mercer (employee)" do
+      result = matcher.match_pdf_name("Mercer, Kevin A.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(4)
     end
 
-    it "matches 'Kyle Richard' multi-word alias → Kyle Richard" do
-      result = matcher.match_pdf_name("Richard, Kyle Richard")
+    it "matches 'Kevin Mercer' multi-word alias → Kevin Mercer" do
+      result = matcher.match_pdf_name("Mercer, Kevin Mercer")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(4)
     end
 
-    it "matches 'Jayden M.' alias → Jayden Suanson" do
-      result = matcher.match_pdf_name("Suanson, Jayden M.")
+    it "matches 'Jordan M.' alias → Jordan Solberg" do
+      result = matcher.match_pdf_name("Solberg, Jordan M.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(5)
     end
 
-    it "matches 'Maria Carmella' alias → Maria Robert" do
-      result = matcher.match_pdf_name("Robert, Maria Carmella")
+    it "matches 'Maya Cristina' alias → Maya Morales" do
+      result = matcher.match_pdf_name("Morales, Maya Cristina")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(6)
     end
@@ -87,27 +87,27 @@ RSpec.describe PayrollImport::NameMatcher do
   # ── Fuzzy matching ─────────────────────────────────────────────────────────
 
   describe "#match_pdf_name (fuzzy)" do
-    it "matches minor typo 'Beleeza, Vincent' → Vincent Belleza" do
-      result = matcher.match_pdf_name("Beleeza, Vincent")
+    it "matches minor typo 'Caldeera, Victor' → Victor Caldera" do
+      result = matcher.match_pdf_name("Caldeera, Victor")
       # Fuzzy match may or may not find it depending on edit distance — just ensure no crash
       expect([ nil, Hash ]).to include(result.class)
     end
 
-    it "matches transposed first name 'Arthur, Juile R.' → Julie Arthur" do
-      julie_employees = [ StubEmployee.new(10, "Julie", "Arthur", "Julie Arthur") ]
-      transposition_matcher = described_class.new(julie_employees)
-      result = transposition_matcher.match_pdf_name("Arthur, Juile R.")
+    it "matches transposed first name 'Benson, Calra R.' → Clara Benson" do
+      clara_employees = [ StubEmployee.new(10, "Clara", "Benson", "Clara Benson") ]
+      transposition_matcher = described_class.new(clara_employees)
+      result = transposition_matcher.match_pdf_name("Benson, Calra R.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(10)
       expect(result[:confidence]).to be >= 0.7
     end
 
     it "matches a transposed last-name typo without weakening the first-name safeguard" do
-      result = matcher.match_pdf_name("Petrius, Rosie")
+      result = matcher.match_pdf_name("Malrowe, Riley")
 
-      expect(result).to include(employee_id: 9, matched_name: "Rosie Petirus")
+      expect(result).to include(employee_id: 9, matched_name: "Riley Marlowe")
       expect(result[:confidence]).to be_between(0.9, 0.99)
-      expect(matcher.match_pdf_name("Petrius, Different")).to be_nil
+      expect(matcher.match_pdf_name("Malrowe, Different")).to be_nil
     end
 
     it "returns nil for name with confidence below threshold" do
@@ -121,13 +121,13 @@ RSpec.describe PayrollImport::NameMatcher do
 
   describe "#match_excel_name" do
     it "matches separate last/first name" do
-      result = matcher.match_excel_name("Camacho", "Zachary")
+      result = matcher.match_excel_name("Bennett", "Zachary")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(2)
     end
 
     it "handles extra whitespace" do
-      result = matcher.match_excel_name("  Setik  ", "  George  ")
+      result = matcher.match_excel_name("  Novak  ", "  Graham  ")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(8)
     end
@@ -150,19 +150,19 @@ RSpec.describe PayrollImport::NameMatcher do
     end
 
     it "is not case-sensitive on last name" do
-      result = matcher.match_pdf_name("THOMAS, Natalie")
+      result = matcher.match_pdf_name("ALVAREZ, Naomi")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(7)
     end
 
     it "matches name with trailing comma in PDF" do
-      # Some PDFs produce names like "Camacho," split over two lines (merged)
-      result = matcher.match_pdf_name("Camacho, Zachary")
+      # Some PDFs produce names like "Bennett," split over two lines (merged)
+      result = matcher.match_pdf_name("Bennett, Zachary")
       expect(result).not_to be_nil
     end
 
     it "handles punctuation in name" do
-      result = matcher.match_pdf_name("Arthur, Juile R.")
+      result = matcher.match_pdf_name("Benson, Calra R.")
       expect(result).not_to be_nil
     end
   end
@@ -179,7 +179,7 @@ RSpec.describe PayrollImport::NameMatcher do
     end
 
     it "returns correct distance for typical name typo" do
-      d = matcher.send(:ld, "belleza", "beleeza")
+      d = matcher.send(:ld, "caldera", "caldeera")
       expect(d).to be <= 2
     end
   end
@@ -190,7 +190,7 @@ RSpec.describe PayrollImport::NameMatcher do
     end
 
     it "counts a transposition as 1 edit" do
-      expect(matcher.send(:dld, "juile", "julie")).to eq(1)
+      expect(matcher.send(:dld, "calra", "clara")).to eq(1)
     end
 
     it "returns 1 for single substitution" do

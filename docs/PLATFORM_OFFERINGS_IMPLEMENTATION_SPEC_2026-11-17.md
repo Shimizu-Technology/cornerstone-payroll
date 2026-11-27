@@ -189,7 +189,7 @@ descriptor(
 - **Starting point:** generalize `MosaSupplementalTemplate` (schema `cornerstone-mosa-supplemental/v2`) into `UniversalWorkbook::Template`.
 - **Contents:** a roster prefilled by Employee ID, an HOURS sheet (regular, OT, PTO and holiday, optionally by week), tips, loans and one-time items. Sheets a client doesn't use are hidden.
 - **Parsing:** with the generated-template branch of `LoanTipExcelParser`, matching on `employee_id`.
-- **MoSa's Addison case:** the workbook supplies hours for an employee missing from the Revel PDF. When two sources give hours for the same person, that's a conflict warning, not a silent pick. The sheet is rejected today (`loan_tip_excel_parser.rb:404-411`).
+- **Non-POS workbook-hours case:** the workbook supplies hours for an employee missing from the Revel PDF. When two sources give hours for the same person, that's a conflict warning, not a silent pick. The sheet is rejected today (`loan_tip_excel_parser.rb:404-411`).
 
 ### Tips and overtime as settings
 

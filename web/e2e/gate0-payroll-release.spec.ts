@@ -1297,11 +1297,11 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await safeDialog.getByRole('button', { name: 'Preview Import' }).click();
 
     await expect(safeDialog.getByText(/Review 2 suggested name matches/)).toBeVisible();
-    await expect(safeDialog.getByText(/Petrius, Rosie.*Rosie Petirus/)).toBeVisible();
+    await expect(safeDialog.getByText(/Malrowe, Riley.*Riley Marlowe/)).toBeVisible();
     await expect(safeDialog.getByText(/Tips were already paid daily and will offset employee checks/)).toBeVisible();
     await expect(safeDialog.getByText('$19.25', { exact: true }).filter({ visible: true })).toBeVisible();
     await expect(safeDialog.getByText('$123.50', { exact: true }).filter({ visible: true })).toBeVisible();
-    await expect(safeDialog.getByText('Matched to Rosie recurring repayment').filter({ visible: true })).toBeVisible();
+    await expect(safeDialog.getByText('Matched to Riley recurring repayment').filter({ visible: true })).toBeVisible();
     await expect(safeDialog.getByText('$8,888.88')).toHaveCount(0);
     let applySafeImport = safeDialog.getByRole('button', { name: /Apply Import/ });
     await expect(applySafeImport).toBeDisabled();

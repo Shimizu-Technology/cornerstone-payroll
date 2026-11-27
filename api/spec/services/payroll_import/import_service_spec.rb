@@ -52,9 +52,9 @@ RSpec.describe PayrollImport::ImportService do
     end
 
     it "keeps a single row when the owner already appears in the workbook" do
-      preview = service.preview(pdf_records: [], excel_records: [ { employee_id: owner.id, period_pay: 8421.13 } ])
+      preview = service.preview(pdf_records: [], excel_records: [ { employee_id: owner.id, period_pay: 4500.00 } ])
       expect(preview[:matched].length).to eq(1)
-      expect(preview[:matched].first).to include(employee_id: owner.id, period_pay: 8421.13)
+      expect(preview[:matched].first).to include(employee_id: owner.id, period_pay: 4500.00)
       expect(preview[:matched].first[:payroll_setup_only]).to be_nil
     end
   end
@@ -229,11 +229,11 @@ RSpec.describe PayrollImport::ImportService do
       employee = create(
         :employee,
         company: company,
-        first_name: "Sara",
-        last_name: "Doctor",
+        first_name: "Sloane",
+        last_name: "Ellis",
         employment_type: "salary",
         salary_type: "variable",
-        pay_rate: 225_062.76,
+        pay_rate: 120_000.00,
         default_payroll_adjustments: [
           { "label" => "Test taxable bonus", "amount" => 100.0, "treatment" => "taxable_addition", "active" => true },
           { "label" => "Test reimbursement", "amount" => 25.0, "treatment" => "non_taxable_addition", "active" => true },
@@ -897,11 +897,11 @@ RSpec.describe PayrollImport::ImportService do
     end
 
     it "flags suggested typo matches for explicit review while keeping every source row" do
-      employee = create(:employee, company: company, first_name: "Rosie", last_name: "Petirus")
+      employee = create(:employee, company: company, first_name: "Riley", last_name: "Marlowe")
 
       result = service.preview(
-        pdf_records: [ { employee_name: "Petrius, Rosie", regular_hours: 37.5 } ],
-        excel_records: [ { first_name: "Rosie", last_name: "Petrius", total_tips: 117.50 } ]
+        pdf_records: [ { employee_name: "Malrowe, Riley", regular_hours: 37.5 } ],
+        excel_records: [ { first_name: "Riley", last_name: "Malrowe", total_tips: 117.50 } ]
       )
 
       expect(result).to include(
@@ -911,8 +911,8 @@ RSpec.describe PayrollImport::ImportService do
       )
       expect(result[:matched]).to contain_exactly(include(employee_id: employee.id, total_tips: 117.50))
       expect(result[:low_confidence_matches]).to contain_exactly(
-        include(source: "Tips/loans workbook", source_name: "Rosie Petrius", employee_id: employee.id),
-        include(source: "Revel hours", source_name: "Petrius, Rosie", employee_id: employee.id)
+        include(source: "Tips/loans workbook", source_name: "Riley Malrowe", employee_id: employee.id),
+        include(source: "Revel hours", source_name: "Malrowe, Riley", employee_id: employee.id)
       )
     end
 

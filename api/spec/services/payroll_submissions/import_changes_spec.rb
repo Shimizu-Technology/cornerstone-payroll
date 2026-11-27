@@ -14,35 +14,35 @@ RSpec.describe PayrollSubmissions::ImportChanges do
       content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32), change_rows: changes)
   end
   let(:changes) do
-    [ { kind: "owner_pay", employee_id: owner.id, amount: "8421.13" },
+    [ { kind: "owner_pay", employee_id: owner.id, amount: "4500.00" },
       { kind: "extra_hours", employee_id: worker.id, employee_wage_rate_id: rate.id, wage_rate: "35.0", hours: "68" } ]
   end
   let(:service) { described_class.new(submission: submission, pay_period: period) }
-  let(:reviewed) { [ { change_index: 0, amount: "8421.13" }, { change_index: 1, hours: "68" } ] }
-  let(:rows) { [ { employee_id: owner.id, workbook_only: true }, { employee_id: worker.id, workbook_only: true, loan_deduction: 219.70, total_tips: 3 } ] }
+  let(:reviewed) { [ { change_index: 0, amount: "4500.00" }, { change_index: 1, hours: "68" } ] }
+  let(:rows) { [ { employee_id: owner.id, workbook_only: true }, { employee_id: worker.id, workbook_only: true, loan_deduction: 200.00, total_tips: 3 } ] }
 
   it "does not write on preview and requires explicit complete confirmation" do
     expect { service.proposals }.not_to change(PayrollItem, :count)
-    expect(service.proposals.first).to include(amount: "8421.13", employee_id: owner.id)
+    expect(service.proposals.first).to include(amount: "4500.00", employee_id: owner.id)
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: false) }.to raise_error(ArgumentError, /Confirm/)
     expect { service.apply_to(rows, reviewed: reviewed.first(1), confirmed: true) }.to raise_error(ArgumentError, /every/)
-    expect { service.apply_to(rows, reviewed: reviewed.map { |row| row.merge(amount: "8421.131", hours: "1e3") }, confirmed: true) }.to raise_error(ArgumentError, /valid/)
+    expect { service.apply_to(rows, reviewed: reviewed.map { |row| row.merge(amount: "4500.001", hours: "1e3") }, confirmed: true) }.to raise_error(ArgumentError, /valid/)
   end
 
   it "uses exact per-person amounts and additive saved-job hours, preserving workbook money" do
     create(:payroll_item, company: company, employee: worker, pay_period: period, hours_worked: 2, overtime_hours: 1)
     result = service.apply_to(rows, reviewed: reviewed, confirmed: true)
-    expect(result.first[:period_pay]).to eq("8421.13")
+    expect(result.first[:period_pay]).to eq("4500.00")
     expect(result.first[:period_pay_evidence]).to include(source_type: "client_submission", submission_id: submission.id)
-    expect(result.last).to include(loan_deduction: 219.70, total_tips: 3,
+    expect(result.last).to include(loan_deduction: 200.00, total_tips: 3,
       client_extra_hours: { hours: "68", employee_wage_rate_id: rate.id, rate: "35.0" })
     expect(PayrollItem.where(employee: owner)).to be_empty
   end
 
   it "lets staff edit values and adds extra hours to Revel instead of the worksheet" do
     rows.last.merge!(workbook_only: false, regular_hours: 5, overtime_hours: 2)
-    result = service.apply_to(rows, reviewed: [ { change_index: 0, amount: "8421.12", reason: "Confirmed correction" }, { change_index: 1, hours: "3.5", reason: "Confirmed hours" } ], confirmed: true)
-    expect(result.first[:period_pay]).to eq("8421.12")
+    result = service.apply_to(rows, reviewed: [ { change_index: 0, amount: "4495.00", reason: "Confirmed correction" }, { change_index: 1, hours: "3.5", reason: "Confirmed hours" } ], confirmed: true)
+    expect(result.first[:period_pay]).to eq("4495.00")
     expect(result.last).to include(regular_hours: 5, overtime_hours: 2, client_extra_hours: { hours: "3.5", employee_wage_rate_id: rate.id, rate: "35.0" })
   end
 
@@ -84,7 +84,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
   end
 
   it "takes a corrected workbook's owner pay instead of requiring a new decision when the client drops owner pay" do
-    create(:payroll_item, company: company, employee: owner, pay_period: period, salary_override: 8421.13,
+    create(:payroll_item, company: company, employee: owner, pay_period: period, salary_override: 4500.00,
       custom_columns_data: { client_change_evidence: { kind: "owner_pay", submission_id: submission.id + 1 },
         period_pay_evidence: { source_type: "client_submission" } })
     submission.update_columns(change_rows: [])
@@ -115,14 +115,14 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect { service.apply_to(rows, reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
     input.first[:reason] = "Verified alternative pay"
     expect(service.apply_to(rows, reviewed: input, confirmed: true).first).to include(period_pay: "4000", period_pay_evidence: { source: "Workbook" })
-    expect(service.review_decisions.first).to include(pay_choice: "workbook", applied_value: "4000", reviewed_value: "8421.13")
+    expect(service.review_decisions.first).to include(pay_choice: "workbook", applied_value: "4000", reviewed_value: "4500.00")
   end
 
   it "lets staff decline an invalid row with a required reason" do
     worker.update!(status: "inactive")
     input = reviewed.deep_dup
     input.last.merge!(decision: "decline", reason: "Not working this period")
-    expect(service.apply_to(rows.first(1), reviewed: input, confirmed: true).sole[:period_pay]).to eq("8421.13")
+    expect(service.apply_to(rows.first(1), reviewed: input, confirmed: true).sole[:period_pay]).to eq("4500.00")
     expect(service.review_decisions.last).to include(decision: "decline", reason: "Not working this period", employee_id: worker.id)
     input.last[:reason] = " "
     expect { service.apply_to(rows.first(1), reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
@@ -166,7 +166,7 @@ RSpec.describe 'Configured entry import provenance' do
 
   [ :deactivated, :none_disabled, :employee_inactive, :job_inactive ].each do |state|
     it "records and skips stale none when #{state}" do
-      row = { 'skipped' => true, 'label' => "Addison's hours" }
+      row = { 'skipped' => true, 'label' => "Jordan's hours" }
       if state == :job_inactive
         worker = create(:employee, company: company)
         rate = create(:employee_wage_rate, employee: worker)
@@ -181,7 +181,7 @@ RSpec.describe 'Configured entry import provenance' do
       when :job_inactive then change_wage_rate!(field.employee_wage_rate, active: false)
       end
       service = PayrollSubmissions::ImportChanges.new(submission: answer, pay_period: period)
-      expect(service.manual_review_warnings.join).to include("Addison's hours", 'Enter the value or ask the client')
+      expect(service.manual_review_warnings.join).to include("Jordan's hours", 'Enter the value or ask the client')
       service.apply_to([], reviewed: [], confirmed: true)
       expect { service.apply_period_decisions!(actor: nil) }.not_to change(PayrollEntryResolution, :count)
       expect(service.review_decisions).to include(include(decision: 'stale_none', standing_change_id: field.id, revision: 1, reason: /not applied/))

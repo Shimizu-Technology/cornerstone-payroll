@@ -18,7 +18,7 @@ RSpec.describe "Spreadsheet and import source previews", type: :request do
   let(:workbook_bytes) do
     preview_workbook({
       "TIPS" => %(<row r="1">#{preview_text_cell('A1', 'Employee')}#{preview_text_cell('B1', 'Tips')}</row>) +
-        %(<row r="2">#{preview_text_cell('A2', 'Ava Cruz')}<c r="B2"><f>40+2.5</f><v>42.5</v></c></row>),
+        %(<row r="2">#{preview_text_cell('A2', 'Avery Sample')}<c r="B2"><f>40+2.5</f><v>42.5</v></c></row>),
       "LOANS" => %(<row r="1">#{preview_text_cell('A1', 'Loan')}</row>)
     })
   end
@@ -59,7 +59,7 @@ RSpec.describe "Spreadsheet and import source previews", type: :request do
       expect(response.headers["Cache-Control"]).to include("no-store")
       preview = response.parsed_body.fetch("sheet_preview")
       expect(preview.fetch("sheets").map { |sheet| sheet.fetch("name") }).to eq(%w[TIPS LOANS])
-      expect(preview.dig("sheets", 0, "rows", 1, "cells")).to eq([ "Ava Cruz", "42.5" ])
+      expect(preview.dig("sheets", 0, "rows", 1, "cells")).to eq([ "Avery Sample", "42.5" ])
       expect(AuditLog.where(action: "portal_documents#preview", record_type: "client_documents", record_id: workbook.id)).to exist
 
       get "/api/v1/admin/client_documents", headers: headers

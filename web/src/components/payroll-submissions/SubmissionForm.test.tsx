@@ -133,17 +133,17 @@ it('requires a change row or No changes independently of the workbook answer', a
 });
 
 it('starts with every-period rows, blank amounts and a last-period hint; sends a filled row and explicit skip', async () => {
-  mocks.employees.mockResolvedValue([{ id: 122, name: 'Monique Owner' }, { id: 135, name: 'Sara Owner' }]);
+  mocks.employees.mockResolvedValue([{ id: 122, name: 'Morgan Owner' }, { id: 135, name: 'Sloane Owner' }]);
   const defaults: PeriodDetail = { ...period, standing_changes: [
-    { kind: 'owner_pay', standing_change_id: 1, employee_id: 122, employee_name: 'Monique Owner', last_period_amount: '8421.13' },
-    { kind: 'owner_pay', standing_change_id: 2, employee_id: 135, employee_name: 'Sara Owner' },
+    { kind: 'owner_pay', standing_change_id: 1, employee_id: 122, employee_name: 'Morgan Owner', last_period_amount: '4500.00' },
+    { kind: 'owner_pay', standing_change_id: 2, employee_id: 135, employee_name: 'Sloane Owner' },
   ] };
   render(<SubmissionForm period={defaults} onSent={vi.fn()} />);
-  await screen.findByText('Monique Owner (optional)');
+  await screen.findByText('Morgan Owner (optional)');
 
-  expect((screen.getByLabelText('Amount ($): Monique Owner') as HTMLInputElement).value).toBe('');
-  fireEvent.change(screen.getByLabelText('Amount ($): Monique Owner'), { target: { value: '8000.12' } });
-  fireEvent.click(screen.getByLabelText('None this period: Sara Owner'));
+  expect((screen.getByLabelText('Amount ($): Morgan Owner') as HTMLInputElement).value).toBe('');
+  fireEvent.change(screen.getByLabelText('Amount ($): Morgan Owner'), { target: { value: '8000.12' } });
+  fireEvent.click(screen.getByLabelText('None this period: Sloane Owner'));
   uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
   const rows = JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string);
@@ -153,20 +153,20 @@ it('starts with every-period rows, blank amounts and a last-period hint; sends a
 });
 
 it('requires configured answers even when No changes is checked', async () => {
-  const defaults: PeriodDetail = { ...period, standing_changes: [{ kind: 'owner_pay', standing_change_id: 1, employee_id: 122, employee_name: 'Monique Owner', required: true }] };
+  const defaults: PeriodDetail = { ...period, standing_changes: [{ kind: 'owner_pay', standing_change_id: 1, employee_id: 122, employee_name: 'Morgan Owner', required: true }] };
   render(<SubmissionForm period={defaults} onSent={vi.fn()} />);
   uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
   expect(mocks.submit).not.toHaveBeenCalled();
   expect(screen.getAllByRole('alert')[0].textContent).toContain('Complete each required');
   fireEvent.click(screen.getByLabelText('No changes this period')); send();
   expect(mocks.submit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByLabelText('None this period: Monique Owner')); send();
+  fireEvent.click(screen.getByLabelText('None this period: Morgan Owner')); send();
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
   expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([expect.objectContaining({ standing_change_id: 1, skipped: true })]);
 });
 
 it('adds per-person owner pay and extra hours on an explicitly selected saved job', async () => {
-  mocks.employees.mockResolvedValue([{ id: 173, name: 'Addison Worker', wage_rates: [{ id: 7, label: 'Maintenance', rate: '35.0' }] }]);
+  mocks.employees.mockResolvedValue([{ id: 173, name: 'Jordan Worker', wage_rates: [{ id: 7, label: 'Maintenance', rate: '35.0' }] }]);
   render(<SubmissionForm period={period} onSent={vi.fn()} />);
   await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
@@ -179,8 +179,8 @@ it('adds per-person owner pay and extra hours on an explicitly selected saved jo
 });
 
 it('hides unavailable fields from the client', () => {
-  render(<SubmissionForm period={{ ...period, standing_changes: [{ kind: 'extra_hours', standing_change_id: 1, employee_id: 173, employee_name: 'Addison Worker', availability_error: 'Saved job and rate are missing or inactive.' }] }} onSent={vi.fn()} />);
-  expect(screen.queryByText(/Addison Worker/)).toBeNull();
+  render(<SubmissionForm period={{ ...period, standing_changes: [{ kind: 'extra_hours', standing_change_id: 1, employee_id: 173, employee_name: 'Jordan Worker', availability_error: 'Saved job and rate are missing or inactive.' }] }} onSent={vi.fn()} />);
+  expect(screen.queryByText(/Jordan Worker/)).toBeNull();
   expect(screen.queryByLabelText('Saved job and rate')).toBeNull();
 });
 

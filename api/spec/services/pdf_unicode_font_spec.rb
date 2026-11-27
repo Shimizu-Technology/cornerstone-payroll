@@ -35,7 +35,7 @@ RSpec.describe PdfUnicodeFont do
       expect(pdf.font.ascender).to eq(helvetica.font.ascender)
       expect(pdf.font.descender).to eq(helvetica.font.descender)
 
-      sample = "Payroll Register 03/19/2026 Net Pay $1,216.35 SANTOS, JOHN"
+      sample = "Payroll Register 03/19/2026 Net Pay $1,500.00 SANTOS, JOHN"
       expect(pdf.width_of(sample, size: 9)).to be_within(0.5).of(helvetica.width_of(sample, size: 9))
     end
   end

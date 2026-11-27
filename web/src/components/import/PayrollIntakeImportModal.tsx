@@ -590,7 +590,7 @@ export function PayrollIntakeImportModal({
                         label="What changed?"
                         value={replacementReason}
                         onChange={(event) => setReplacementReason(event.target.value)}
-                        placeholder="Example: Client corrected Rosie’s Week 2 hours."
+                        placeholder="Example: Client corrected Riley’s Week 2 hours."
                         className="mt-3 bg-white"
                       />
                     )}

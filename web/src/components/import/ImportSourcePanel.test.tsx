@@ -19,7 +19,7 @@ vi.mock('@/components/documents/PdfPreview', () => ({
 const pdf: ImportSourceDocument = { id: 11, source_role: 'revel_hours', filename: 'revel-hours.pdf', content_type: 'application/pdf', byte_size: 8 };
 const workbook: ImportSourceDocument = { id: 12, source_role: 'supplemental_workbook', filename: 'changes.xlsx', content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', byte_size: 20 };
 const sheetJson = { sheet_preview: { sheet_count: 1, truncated_sheets: false, limits: { sheets: 10, rows: 500, columns: 50 },
-  sheets: [{ name: 'TIPS', columns: 2, truncated_rows: false, truncated_columns: false, rows: [{ number: 1, cells: ['Ava Cruz', '42.5'] }] }] } };
+  sheets: [{ name: 'TIPS', columns: 2, truncated_rows: false, truncated_columns: false, rows: [{ number: 1, cells: ['Avery Sample', '42.5'] }] }] } };
 
 function setWideScreen(wide: boolean) {
   Object.defineProperty(window, 'matchMedia', { configurable: true, writable: true, value: vi.fn().mockReturnValue({ matches: wide }) });
@@ -42,7 +42,7 @@ it('shows the Revel PDF and workbook tabs and loads each file when chosen', asyn
   expect(mocks.previewSource).toHaveBeenCalledWith(9, 30, 11);
 
   fireEvent.click(screen.getByRole('tab', { name: 'Workbook' }));
-  expect(await screen.findByRole('cell', { name: 'Ava Cruz' })).toBeTruthy();
+  expect(await screen.findByRole('cell', { name: 'Avery Sample' })).toBeTruthy();
   expect(screen.getByText('changes.xlsx')).toBeTruthy();
   expect(mocks.previewSource).toHaveBeenCalledWith(9, 30, 12);
 
@@ -132,7 +132,7 @@ it('explains a file that cannot be shown and retries', async () => {
 
   expect((await screen.findByRole('alert')).textContent).toBe('This spreadsheet could not be read.');
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  await waitFor(() => expect(screen.getByRole('cell', { name: 'Ava Cruz' })).toBeTruthy());
+  await waitFor(() => expect(screen.getByRole('cell', { name: 'Avery Sample' })).toBeTruthy());
   expect(mocks.previewSource).toHaveBeenCalledTimes(2);
 });
 
