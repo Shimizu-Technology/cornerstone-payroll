@@ -10,7 +10,8 @@ vi.mock('@/services/api', () => ({ apiClient: { get, patch } }));
 
 it('keeps a bulk selection across pages and applies the chosen role in the client workspace', async () => {
   get.mockResolvedValue({ roles: [{ id: 8, name: 'Server', active: true }], departments: [], codes: {} });
-  patch.mockResolvedValue({ count: 2 });
+  let releaseSave!: (value: { count: number }) => void;
+  patch.mockReturnValue(new Promise((resolve) => { releaseSave = resolve; }));
   const onSaved = vi.fn();
   const first = { id: 1, first_name: 'Sample', last_name: 'One' } as Employee;
   const second = { id: 2, first_name: 'Sample', last_name: 'Two' } as Employee;
@@ -25,7 +26,11 @@ it('keeps a bulk selection across pages and applies the chosen role in the clien
 
   fireEvent.change(screen.getByLabelText('Role'), { target: { value: '8' } });
   fireEvent.click(screen.getByRole('button', { name: 'Apply to 2 selected' }));
-  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  const currentRefresh = vi.fn();
+  rerender(<EmployeeOrganizationPanel {...props} employees={[second]} onSaved={currentRefresh} />);
+  releaseSave({ count: 2 });
+  await waitFor(() => expect(currentRefresh).toHaveBeenCalledOnce());
+  expect(onSaved).not.toHaveBeenCalled();
   expect(patch).toHaveBeenCalledWith('/client/employee_organization', {
     employee_ids: [1, 2], company_job_role_id: 8,
   }, { companyId: 7 });

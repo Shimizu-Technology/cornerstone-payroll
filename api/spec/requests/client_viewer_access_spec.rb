@@ -158,6 +158,25 @@ RSpec.describe "Client viewer access", type: :request do
     expect(employee.employee_tipped_occupations).to be_empty
   end
 
+  it "returns JSON validation errors for invalid assignment values and a missing role body" do
+    path = "/api/v1/client/employee_organization"
+    patch path, headers: headers(manager), params: { employee_ids: [ employee.id ], department_id: false }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to be_present
+
+    post "#{path}/save_role", headers: headers(manager), params: {}, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Provide role details.")
+  end
+
+  it "denies a manager write when the locked workspace is read-only" do
+    allow_any_instance_of(Company).to receive(:test_workspace_read_only?).and_return(true)
+    patch "/api/v1/client/employee_organization", headers: headers(manager),
+      params: { employee_ids: [ employee.id ], department_id: nil }, as: :json
+    expect(response).to have_http_status(:forbidden)
+    expect(employee.reload.department_id).to eq(department.id)
+  end
+
   it "tells the web app which level the login has" do
     get "/api/v1/auth/me", headers: headers(viewer)
     expect(response.parsed_body.dig("user", "client_access_level")).to eq("viewer")

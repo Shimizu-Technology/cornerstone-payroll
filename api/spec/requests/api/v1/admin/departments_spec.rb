@@ -126,6 +126,27 @@ RSpec.describe "Api::V1::Admin::Departments", type: :request do
         expect(department.reload.name).to eq("Updated")
       end
 
+      it "reloads under the company lock and audits the last persisted name" do
+        employee = create(:employee, company: company, department: department)
+        allow(Department).to receive(:find_by).and_wrap_original do |lookup, **attributes|
+          record = lookup.call(**attributes)
+          if attributes[:id].to_s == department.id.to_s
+            Department.where(id: department.id).update_all(name: "Intervening name")
+          end
+          record
+        end
+
+        patch "/api/v1/admin/departments/#{department.id}", params: { department: { name: "Original" } }
+
+        expect(response).to have_http_status(:ok)
+        expect(department.reload.name).to eq("Original")
+        audit = AuditLog.find_by!(company_id: company.id, user_id: admin_user.id, action: "departments#update", record_id: department.id)
+        expect(audit.metadata.dig("before_values", "name")).to eq("Intervening name")
+        activity = AuditLog.find_by!(company_id: company.id, record_type: "Employee", record_id: employee.id,
+          action: "employee_organization#update")
+        expect(activity.metadata.dig("after_values", "department_name")).to eq("Original")
+      end
+
       it "can deactivate a department" do
         patch "/api/v1/admin/departments/#{department.id}", params: {
           department: { active: false }

@@ -15,7 +15,9 @@ namespace :employee_organization do
     begin
       TenantScope.with_company(company_id) do
         apply = ENV["APPLY"] == "true"
-        counts = WageRateDepartmentAssignment.new(company: Company.find(company_id), label_map: entries.to_h).call(apply: apply)
+        counts = WageRateDepartmentAssignment.new(company: Company.find(company_id), label_map: entries.to_h).call(
+          apply: apply, overwrite: ENV["OVERWRITE"] == "true"
+        )
         puts counts.merge(applied: apply ? 1 : 0).to_json
       end
     rescue ActiveRecord::ActiveRecordError

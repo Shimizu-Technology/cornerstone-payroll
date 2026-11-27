@@ -57,6 +57,7 @@ class Company < ApplicationRecord
            inverse_of: :migration_source_company,
            dependent: :restrict_with_error
 
+  has_many :company_job_roles
   has_many :departments, dependent: :destroy
   has_many :company_assignments, dependent: :destroy
   before_destroy :purge_test_workspace_compensation_history, if: :contained?, prepend: true
