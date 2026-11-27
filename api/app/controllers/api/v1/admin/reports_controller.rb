@@ -1681,7 +1681,10 @@ module Api
           {
             employee_count: w2_items.size,
             contractor_count: contractor_items.size,
-            total_hours: w2_items.sum(0.to_d) { |item| item.hours_worked.to_d }.to_f,
+            # As in ytd_summary: total_hours is combined hours, worked_hours regular hours.
+            total_hours: w2_items.sum(0.to_d, &:combined_hours).to_f,
+            worked_hours: w2_items.sum(0.to_d) { |item| item.hours_worked.to_d }.to_f,
+            combined_hours: w2_items.sum(0.to_d, &:combined_hours).to_f,
             total_overtime_hours: w2_items.sum(0.to_d) { |item| item.overtime_hours.to_d }.to_f,
             total_gross: w2_items.sum { |item| item.gross_pay.to_d },
             total_non_taxable_additions: w2_items.sum(0.to_d) { |item| non_taxable_additions_total(item) },
@@ -2764,7 +2767,8 @@ module Api
           historical_paychecks = unified.historical_paychecks(employee_id: employee.id)
           historical_adjustments = unified.historical_adjustments(employee_id: employee.id)
           entries = item_rows.map do |item|
-            { type: :native, record: item, pay_date: item.pay_period.pay_date, id: item.id }
+            # Sorted by the date the row shows: the check's own date, else the run's.
+            { type: :native, record: item, pay_date: item.check_date || item.pay_period.pay_date, id: item.id }
           end + historical_paychecks.map do |paycheck|
             { type: :imported, record: paycheck, pay_date: paycheck.pay_date, id: paycheck.id }
           end + historical_adjustments.map do |adjustment|
@@ -4202,7 +4206,7 @@ module Api
             "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
             "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
             PayrollLabels::INCOME_TAX, PayrollLabels::ADDITIONAL_WITHHOLDING, PayrollLabels::INCOME_TAX_WITHHELD,
-            "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
+            "SS Tax", "Medicare Tax", "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours", "Basis"
           ] ]
           Array(report[:history]).each do |item|
             rows << [
@@ -4211,7 +4215,7 @@ module Api
               item[:bonus], item[:custom_earnings_total], item[:custom_deductions_total], item[:gross_pay], item[:withholding_tax],
               item[:additional_withholding], item[:total_income_tax_withheld],
               item[:social_security_tax], item[:medicare_tax], item[:total_deductions], item[:net_pay],
-              item[:check_number], PayrollPaymentLabel.history_row(item), item[:total_hours]
+              item[:check_number], PayrollPaymentLabel.history_row(item), item[:total_hours], item[:basis_label]
             ]
           end
           [
@@ -4324,13 +4328,18 @@ module Api
           year.presence || "report"
         end
 
+        # bridged_fields is a list for the screen (imported_basis names them),
+        # and total_hours repeats combined_hours, which is shown instead.
+        def company_totals_rows(report)
+          (report[:company_totals] || {}).except(:bridged_fields, :total_hours)
+        end
+
         # Presentation only: spreadsheet exports retain their numeric cells.
         def ytd_summary_pdf_sheets(report)
           ytd_summary_sheets(report).map do |sheet|
             next sheet unless sheet[:name] == "Company Totals"
 
-            # bridged_fields is a list for the screen; imported_basis names them.
-            rows = (report[:company_totals] || {}).except(:bridged_fields).map do |key, value|
+            rows = company_totals_rows(report).map do |key, value|
               label = case key.to_sym
               when :source_labeled_after_tax_401k_in_pretax_bucket
                 "401(k) after-tax (imported as pre-tax)"
@@ -4395,7 +4404,7 @@ module Api
           end
           [
             { name: "Payroll Summary", rows: rows },
-            { name: "Company Totals", rows: (report[:company_totals] || {}).except(:bridged_fields).map { |key, value| [ key.to_s.humanize, value ] } },
+            { name: "Company Totals", rows: company_totals_rows(report).map { |key, value| [ key == :worked_hours ? "Regular hours" : key.to_s.humanize, value ] } },
             payroll_source_summary_sheet(report),
             payroll_field_totals_for_report_sheet(report),
             payroll_field_activity_for_report_sheet(report),

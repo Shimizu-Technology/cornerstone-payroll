@@ -386,3 +386,16 @@ it("refuses a changed check date outside the pay date's tax year, which W-2GU an
   await waitFor(() => expect(onSaved).toHaveBeenCalled());
   expect(mocks.update.mock.calls[0][2]).toMatchObject({ check_date: '2026-12-30' });
 });
+
+it('keeps an unset check date unset when only hours change, though the pay run shows the printed date', async () => {
+  const user = userEvent.setup();
+  // As the pay run serializes it: no override, the run's pay date as the printed date.
+  const item = { ...savedItem, custom_deductions: [], check_date: null, effective_check_date: '2026-12-31' } as unknown as PayrollItem;
+  mountSaved(item);
+  const hours = (await screen.findByRole('dialog')).querySelector('input') as HTMLInputElement;
+  await user.clear(hours);
+  await user.type(hours, '5');
+  await user.click(screen.getByRole('button', { name: 'Save & Recalculate' }));
+  await waitFor(() => expect(mocks.update).toHaveBeenCalled());
+  expect(mocks.update.mock.calls[0][2]).toMatchObject({ hours_worked: 5, check_date: null });
+});

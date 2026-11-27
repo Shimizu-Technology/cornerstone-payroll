@@ -327,6 +327,10 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
             figure: [ :dates, :pay_date ],
             values_by_view: views.transform_values { |v| dig_figure(v, [ :dates, :pay_date ]) }
           )
+          # The client's pay stub list shows the same date the stub prints.
+          item = fixture.items.fetch(scenario[:item_key])
+          listed = client_api.pay_stubs_index(item.employee_id).fetch("pay_stubs").find { |row| row["id"] == item.id }
+          expect(listed.values_at("pay_date", "period_pay_date")).to eq([ item.check_date.iso8601, period.pay_date.iso8601 ])
         end
       end
 

@@ -528,14 +528,14 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
           source: { label: 'Cornerstone' } },
         { key: 'imported:4', record_type: 'imported', pay_date: '2026-08-27', period_description: 'August',
           gross_pay: 500, non_taxable_pay: 150, net_pay: 400, total_deductions: 100,
-          check_number: null, payment_method_label: 'Not recorded', source: { label: 'QuickBooks' } },
+          check_number: null, payment_method_label: 'Not recorded', basis_label: 'As imported, before 1 recorded adjustment', source: { label: 'QuickBooks' } },
       ],
     } });
     renderReportPanel(<EmployeePayHistoryPanel />);
     await screen.findByRole('combobox', { name: 'Employee' });
     fireEvent.click(screen.getByRole('button', { name: 'View Report' }));
     expect(await screen.findByRole('columnheader', { name: 'Payment' })).toBeTruthy();
-    expect((screen.getByRole('columnheader', { name: 'Hours' }) as HTMLTableCellElement).cellIndex).toBe(3);
+    expect((screen.getByRole('columnheader', { name: 'Regular Hours' }) as HTMLTableCellElement).cellIndex).toBe(3);
     expect(screen.getAllByRole('columnheader').at(-1)?.textContent).toBe('Combined Hours');
     expect(screen.getAllByText('30.11')).toHaveLength(2);
     expect(screen.getAllByText('Direct deposit')).toHaveLength(2);
@@ -546,6 +546,7 @@ describe('EmployeePayHistoryPanel payment presentation', () => {
     expect(screen.getAllByText('Check #1007')).toHaveLength(2);
     expect(screen.getAllByText('Not recorded')).toHaveLength(2);
     expect(screen.getAllByText('incl. $150.00 non-taxable')).toHaveLength(2);
+    expect(screen.getAllByText('As imported, before 1 recorded adjustment')).toHaveLength(2);
     expect(screen.queryByRole('columnheader', { name: 'Additional Guam income tax (W-4 4c)' })).toBeNull();
   });
 

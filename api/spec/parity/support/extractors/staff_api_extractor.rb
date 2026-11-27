@@ -178,7 +178,7 @@ module Parity
           dates: {
             period_start: iso_date(period["start_date"]),
             period_end: iso_date(period["end_date"]),
-            pay_date: iso_date(item["check_date"] || period["pay_date"])
+            pay_date: iso_date(item["effective_check_date"] || period["pay_date"])
           },
           payment: {
             method: item["effective_payment_delivery_method"],
