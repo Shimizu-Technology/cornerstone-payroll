@@ -756,10 +756,10 @@ RSpec.describe PayrollImport::ImportService do
     end
 
     it "deducts a legacy one-time loan amount directly when no named ledger exists" do
-      employee = create(:employee, company: company, first_name: "Sarah", last_name: "Owner")
+      employee = create(:employee, company: company, first_name: "Sloane", last_name: "Owner")
 
       result = service.preview(
-        pdf_records: [ { employee_name: "Owner, Sloaneh", regular_hours: 0 } ],
+        pdf_records: [ { employee_name: "Owner, Sloane", regular_hours: 0 } ],
         excel_records: [ { employee_id: employee.id, loan_deduction: 50, recurring_loan_deduction: 50 } ]
       )
 
@@ -771,7 +771,7 @@ RSpec.describe PayrollImport::ImportService do
       employee = create(
         :employee,
         company: company,
-        first_name: "Sara",
+        first_name: "Sloan",
         last_name: "Owner",
         employment_type: "salary",
         salary_type: "variable",
@@ -779,7 +779,7 @@ RSpec.describe PayrollImport::ImportService do
       )
 
       result = service.preview(
-        pdf_records: [ { employee_name: "Owner, Sloane", regular_hours: 0 } ],
+        pdf_records: [ { employee_name: "Owner, Sloan", regular_hours: 0 } ],
         excel_records: [ { employee_id: employee.id, period_pay: 8_500, period_pay_evidence: { source: "Owner instruction" } } ]
       )
 
