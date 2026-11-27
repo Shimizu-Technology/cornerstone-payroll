@@ -88,6 +88,20 @@ class CompanyFeatures
   end
   alias_method :client_portal_enabled?, :client_portal?
 
+  def employee_lifecycle_mode
+    return "approval_first" unless client_portal_enabled?
+    return "approval_first" if LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+    return "approval_first" unless option("client_portal.employee_lifecycle_mode") == "client_managed"
+    return "approval_first" unless profile.persisted? && profile.lifecycle_mode_activated_at.present?
+
+    "client_managed"
+  end
+
+  def client_managed_employee_lifecycle?
+    employee_lifecycle_mode == "client_managed"
+  end
+
+  # Deprecated: superseded by client_portal.employee_lifecycle_mode once unlocked.
   def review_first?(field_group)
     group = field_group.to_s
     return true if OperatingProfileCatalog::ALWAYS_REVIEWED_GROUPS.include?(group)

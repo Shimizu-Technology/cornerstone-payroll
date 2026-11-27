@@ -20,6 +20,9 @@ const catalog: CatalogEntry[] = [
     type: 'nullable_enum', default: null, allowed: ['mosa_revel'] },
   { ...baseEntry, requires: ['hours_source=intake_adapter'], id: 'intake.required_sources', label: 'Required intake sources',
     section: 'intake', storage: 'option', type: 'nullable_string_array', default: null, allowed: null },
+  { ...baseEntry, requires: ['client_portal_enabled'], id: 'client_portal.employee_lifecycle_mode',
+    label: 'Employee lifecycle mode', section: 'client_portal', storage: 'option', type: 'enum',
+    default: 'approval_first', allowed: ['approval_first', 'client_managed'], locked_until_milestone: 4 },
   { ...baseEntry, requires: ['client_portal_enabled'], id: 'client_portal.uploaders', label: 'Allowed client portal uploaders',
     section: 'client_portal', storage: 'option', type: 'uploaders', default: 'all_client_users', allowed: null },
   { ...baseEntry, requires: [], id: 'employee_portal_enabled', label: 'Employee portal enabled', section: 'employee_portal', type: 'boolean', default: false, allowed: [true, false], locked_until_milestone: 4 },
@@ -36,7 +39,7 @@ const version = {
 };
 const fixture: OperatingProfileResponse = {
   client_name: 'Fictional Test Client', as_of: '2026-11-23', lock_version: 0, effective: version, history: [version],
-  catalog, editable_keys: catalog.map((field) => field.id), locked_keys: ['employee_portal_enabled', 'employee_portal.former_access_years'],
+  catalog, editable_keys: catalog.map((field) => field.id), locked_keys: ['client_portal.employee_lifecycle_mode', 'employee_portal_enabled', 'employee_portal.former_access_years'],
   available_effective_dates: ['2026-11-16', '2026-11-30'],
   offering_presets: { workforce_suite: { hours_source: 'connected_app' } }, connected_source_active: false,
 };
@@ -92,6 +95,9 @@ describe('Client operating profile editor', () => {
     expect((screen.getByRole('combobox', { name: 'Hours source' }) as HTMLSelectElement).value).toBe('connected_app');
     expect(screen.getByText('This client has no active connected time source.')).toBeTruthy();
     expect(screen.getByText('Off · Available in Milestone 4')).toBeTruthy();
+    expect(screen.getByText('Cornerstone approves first · Available in Milestone 4')).toBeTruthy();
+    expect(screen.queryByText(/Available in Milestone undefined/)).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Employee lifecycle mode' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Employee portal enabled' })).toBeNull();
     expect(screen.queryByRole('spinbutton', { name: /Former employee/ })).toBeNull();
     expect(screen.getByText('6 · Available in Milestone 4')).toBeTruthy();

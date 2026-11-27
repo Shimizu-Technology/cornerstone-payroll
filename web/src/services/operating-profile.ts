@@ -15,6 +15,7 @@ export interface CatalogEntry {
   example: string;
   effect: string;
   requires: string[];
+  deprecated?: boolean;
   locked_until_milestone?: number | null;
 }
 
