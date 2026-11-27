@@ -212,8 +212,8 @@ class EmployeeAccountLink < ApplicationRecord
     self.class.portal_enabled_for?(company)
   end
 
-  def self.portal_enabled_for?(company)
-    company.active? && company.organization.active? && CompanyFeatures.for(company).employee_portal_enabled?
+  def self.portal_enabled_for?(company, retire_windows: true)
+    company.active? && company.organization.active? && CompanyFeatures.for(company, retire_windows: retire_windows).employee_portal_enabled?
   end
 
   private
