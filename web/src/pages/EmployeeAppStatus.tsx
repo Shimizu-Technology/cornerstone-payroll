@@ -15,11 +15,12 @@ import { employeeAppRolloutPath, employeeAppStatusPath, employeePath } from '@/l
 import { saveBlob } from '@/lib/save-blob';
 import { employeeAppOff } from '@/services/employee-app-rollout-api';
 import {
-  employeeAppStatusApi, type AppStatusFilter, type AppStatusQuery, type AppStatusReport, type AppStatusRow,
+  employeeAppStatusApi, opensCoverageNote, type AppStatusFilter, type AppStatusQuery, type AppStatusReport, type AppStatusRow,
 } from '@/services/employee-app-status-api';
 
 const STATUS_FILTERS: [AppStatusFilter, string][] = [
-  ['never_signed_in', 'Never signed in'],
+  ['not_signed_up', 'Not signed up'],
+  ['signed_up_no_opens', 'Signed up, no recorded opens'],
   ['invite_expired', 'Invite expired'],
   ['terms_not_accepted', 'Hasn’t accepted terms'],
   ['no_paperless_answer', 'No paperless answer'],
@@ -46,7 +47,9 @@ function useDebounced<T>(value: T, delay = 250): T {
 
 function CompanyAppStatus({ companyId, audience }: { companyId: number; audience: 'admin' | 'client' }) {
   const api = useMemo(() => employeeAppStatusApi(companyId, audience), [companyId, audience]);
-  const [report, setReport] = useState<AppStatusReport | null>(null);
+  // The result on screen and the exact params it was loaded with: exports use these.
+  const [loaded, setLoaded] = useState<{ report: AppStatusReport; params: AppStatusQuery } | null>(null);
+  const report = loaded?.report ?? null;
   const [loadError, setLoadError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState<AppStatusFilter | null>(null);
@@ -67,7 +70,7 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
   useEffect(() => {
     let current = true;
     void api.get(params).then(({ data }) => {
-      if (current) { setReport(data); setLoadError(''); }
+      if (current) { setLoaded({ report: data, params }); setLoadError(''); }
     }).catch(() => {
       if (current) setLoadError('Could not load the employee app status. Try again.');
     });
@@ -81,11 +84,16 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
     key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc',
   }));
 
+  // Until the result for the current filters arrives, the screen shows the
+  // previous one; exporting then would not match it, so Download waits.
+  const stale = !loaded || loaded.params !== params;
+
   async function download(format: 'csv' | 'xlsx') {
+    if (!loaded || stale) return;
     setDownloading(format);
     setDownloadError('');
     try {
-      const { blob, filename } = await api.download(format, params);
+      const { blob, filename } = await api.download(format, loaded.params);
       saveBlob(blob, filename || `employee-app-status.${format}`);
     } catch {
       setDownloadError('Could not download the report. Try again.');
@@ -107,7 +115,12 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
           {!report.enabled && <p role="status" className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-800">{employeeAppOff}</p>}
           <section aria-label="Summary" className="space-y-3">
             <p className="text-2xl font-semibold text-neutral-950">
-              <span className="tabular-nums">{summary.signed_up}</span> of <span className="tabular-nums">{summary.total}</span> signed in
+              <span className="tabular-nums">{summary.signed_up}</span> of <span className="tabular-nums">{summary.total}</span> signed up
+              <span className="text-neutral-500"> · </span>
+              <span className="tabular-nums">{summary.opened}</span> {summary.opened === 1 ? 'has' : 'have'} opened the app
+            </p>
+            <p className="text-sm text-neutral-700">
+              Signed up means their app account works now. {opensCoverageNote(report.opens_recorded_since)}
             </p>
             {!report.delivery_consent_enabled && (
               <p className="text-sm text-neutral-700">Employees aren’t asked about paperless pay stubs or W-2GU yet. Paper copies continue for everyone.</p>
@@ -138,13 +151,13 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p role="status" aria-live="polite" className="text-sm text-neutral-700">
-                Showing {rows.length} {rows.length === 1 ? 'employee' : 'employees'}
+                {stale ? 'Updating…' : `Showing ${rows.length} ${rows.length === 1 ? 'employee' : 'employees'}`}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" loading={downloading === 'csv'} disabled={downloading !== null} onClick={() => void download('csv')}>
+                <Button type="button" variant="outline" loading={downloading === 'csv'} disabled={downloading !== null || stale} onClick={() => void download('csv')}>
                   <Download aria-hidden="true" className="size-4" /> CSV
                 </Button>
-                <Button type="button" variant="outline" loading={downloading === 'xlsx'} disabled={downloading !== null} onClick={() => void download('xlsx')}>
+                <Button type="button" variant="outline" loading={downloading === 'xlsx'} disabled={downloading !== null || stale} onClick={() => void download('xlsx')}>
                   <Download aria-hidden="true" className="size-4" /> Excel
                 </Button>
               </div>
@@ -155,6 +168,19 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
           {rows.length === 0 ? (
             <p className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">No employees match these filters.</p>
           ) : <>
+            <div className="sm:hidden">
+              <Select label="Sort by" value={`${sort.key}:${sort.direction}`}
+                onChange={(event) => {
+                  const [key, direction] = event.target.value.split(':') as [SortKey, 'asc' | 'desc'];
+                  setSort({ key, direction });
+                }}
+                options={[
+                  { value: 'name:asc', label: 'Name, A to Z' },
+                  { value: 'name:desc', label: 'Name, Z to A' },
+                  { value: 'account:asc', label: 'App account, needs attention first' },
+                  { value: 'account:desc', label: 'App account, signed up first' },
+                ]} />
+            </div>
             <ul className="space-y-3 sm:hidden" aria-label="Employees">
               {rows.map((row) => (
                 <li key={row.id}>
@@ -238,7 +264,7 @@ function SortHead({ label, column, sort, onToggle }: {
   );
 }
 
-const ACCOUNT_ORDER = ['not_invited', 'invite_expired', 'locked', 'invited', 'revoked', 'deactivated', 'former', 'active'];
+const ACCOUNT_ORDER = ['not_invited', 'invite_expired', 'locked', 'reinvited', 'invited', 'revoked', 'deactivated', 'former', 'active'];
 
 function sortRows(rows: AppStatusRow[], key: SortKey, direction: 'asc' | 'desc'): AppStatusRow[] {
   const value = (row: AppStatusRow): string | number => {

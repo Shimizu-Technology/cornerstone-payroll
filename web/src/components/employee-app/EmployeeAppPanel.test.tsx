@@ -230,16 +230,17 @@ describe('Employee app panel', () => {
     openPanel({
       ...employee, status: 'active',
       agreements: {
-        account: { status: 'active', label: 'Signed up', invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: '2026-11-05T00:00:00Z', last_opened_at: '2026-11-26T03:00:00Z' },
+        account: { status: 'active', label: 'Signed up', signed_up: true, invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: '2026-11-05T00:00:00Z', last_opened_at: '2026-11-26T03:00:00Z' },
         terms: { version: 'terms-2026-10', accepted_at: '2026-10-05T00:00:00Z', current: false },
         pay_statements: { answer: 'paperless', answered_at: '2026-11-06T00:00:00Z' },
         w2gu: { answer: 'not_answered', answered_at: null },
-        current_terms_version: 'terms-2026-11', delivery_consent_enabled: true,
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: true,
       },
     });
     const facts = await screen.findByLabelText('Agreements');
-    expect(facts.textContent).toContain('Last opened the app');
-    expect(facts.textContent).toMatch(/Nov 26, 2026/);
+    expect(facts.textContent).toContain('Opened the app');
+    expect(facts.textContent).toMatch(/Last opened Nov 26, 2026/);
+    expect(facts.textContent).toContain('App opens are recorded since Nov 25, 2026.');
     expect(facts.textContent).toContain('Older version');
     expect(facts.textContent).toContain('terms-2026-10 · Oct 5, 2026');
     expect(facts.textContent).toContain('Paperless');
@@ -252,19 +253,36 @@ describe('Employee app panel', () => {
     openPanel({
       ...employee, can_manage_invites: false,
       agreements: {
-        account: { status: 'invited', label: 'Invited', invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: null, last_opened_at: null },
+        account: { status: 'invited', label: 'Invited', signed_up: false, invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: null, last_opened_at: null },
         terms: { version: null, accepted_at: null, current: false },
         pay_statements: { answer: 'not_answered', answered_at: null },
         w2gu: { answer: 'not_answered', answered_at: null },
-        current_terms_version: 'terms-2026-11', delivery_consent_enabled: false,
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: false,
       },
     });
     const facts = await screen.findByLabelText('Agreements');
-    expect(facts.textContent).toContain('Never');
+    expect(facts.textContent).toContain('No recorded opens');
+    expect(facts.textContent).not.toContain('Never');
     expect(facts.textContent).toContain('Not accepted');
     expect(facts.textContent).toContain('Employees aren’t asked about paperless yet.');
     expect(screen.queryByRole('button', { name: 'Resend invite' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Invite' })).toBeNull();
+  });
+
+  it('labels a turned-off login "Deactivated" like the report, while revoke still follows the active link', async () => {
+    openPanel({
+      ...employee, status: 'active', staff_actions: true, activated_at: '2026-11-05T00:00:00Z',
+      agreements: {
+        account: { status: 'deactivated', label: 'Deactivated', signed_up: false, invite_sent_at: null, signed_up_at: null, last_opened_at: null },
+        terms: { version: null, accepted_at: null, current: false },
+        pay_statements: { answer: 'not_answered', answered_at: null },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: true,
+      },
+    }, 'admin');
+    expect(await screen.findByText('Deactivated')).toBeTruthy();
+    expect(screen.queryByText('Active')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Revoke access' })).toBeTruthy();
   });
 
   it('sends the explicit company and employee IDs in its read and wave requests', async () => {

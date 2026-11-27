@@ -23,22 +23,28 @@ module DeliveryConsents
     end
 
     # Per employee and kind, { answer:, answered_at: } for employees of one company.
+    # Each source is reduced to one row per employee and kind in SQL: the active
+    # consent (unique), the latest withdrawal, and the keep-paper answer (unique).
     def self.by_employee(company_id, employee_ids)
       ids = employee_ids.to_a
-      consents = DeliveryConsent.where(company_id: company_id, employee_id: ids)
-        .order(given_at: :desc, id: :desc).to_a.group_by { |consent| [ consent.employee_id, consent.kind ] }
+      key = ->(employee_id, kind) { [ employee_id, kind ] }
+      active = DeliveryConsent.active.where(company_id: company_id, employee_id: ids)
+        .pluck(:employee_id, :kind, :given_at).to_h { |employee_id, kind, at| [ key.(employee_id, kind), at ] }
+      withdrawn = DeliveryConsent.withdrawn.where(company_id: company_id, employee_id: ids)
+        .select("DISTINCT ON (employee_id, kind) employee_id, kind, withdrawn_at")
+        .reorder(:employee_id, :kind, withdrawn_at: :desc, id: :desc)
+        .to_h { |consent| [ key.(consent.employee_id, consent.kind), consent.withdrawn_at ] }
       preferences = DeliveryPreference.where(company_id: company_id, employee_id: ids)
-        .index_by { |preference| [ preference.employee_id, preference.kind ] }
+        .pluck(:employee_id, :kind, :recorded_at).to_h { |employee_id, kind, at| [ key.(employee_id, kind), at ] }
 
       ids.index_with do |employee_id|
         DeliveryDisclosure::KINDS.index_with do |kind|
-          records = consents.fetch([ employee_id, kind ], [])
-          active = records.find(&:active?)
-          withdrawn = records.find(&:withdrawn?)
-          preference = preferences[[ employee_id, kind ]]
+          given_at = active[key.(employee_id, kind)]
+          withdrawn_at = withdrawn[key.(employee_id, kind)]
+          recorded_at = preferences[key.(employee_id, kind)]
           {
-            answer: answer(active_consent: active, withdrawn_consent: withdrawn, preference: preference),
-            answered_at: active ? active.given_at : paper_chosen_at(withdrawn_consent: withdrawn, preference: preference)
+            answer: answer(active_consent: given_at, withdrawn_consent: withdrawn_at, preference: recorded_at),
+            answered_at: given_at || [ withdrawn_at, recorded_at ].compact.max
           }
         end
       end

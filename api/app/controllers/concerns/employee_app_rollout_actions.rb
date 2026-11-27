@@ -144,8 +144,9 @@ module EmployeeAppRolloutActions
     report = EmployeeAppStatusReport.new(current_company)
     row = report.row(record)
     row.slice(:terms, :pay_statements, :w2gu).merge(
-      account: row[:account].slice(:status, :label, :invite_sent_at, :signed_up_at, :last_opened_at),
+      account: row[:account].slice(:status, :label, :signed_up, :invite_sent_at, :signed_up_at, :last_opened_at),
       current_terms_version: EmployeeTermsVersion.current&.version,
+      opens_recorded_since: EmployeeAppStatusReport::APP_OPENS_RECORDED_SINCE.iso8601,
       delivery_consent_enabled: CompanyFeatures.for(current_company).employee_portal_feature?(:delivery_consent)
     )
   end

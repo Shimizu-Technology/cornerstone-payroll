@@ -11,6 +11,7 @@ import {
   employeeAppOff, employeeAppRolloutApi, formatEmployeeAppDate, inviteEmailMessages,
   type EmployeeAppAccess, type EmployeeAppOperation, type EmployeeAppStatus, type InviteDelivery, type PrintedInvite,
 } from '@/services/employee-app-rollout-api';
+import { accountTone } from '@/services/employee-app-status-api';
 import { AgreementFacts } from './AppStatusFacts';
 import { InviteDeliveryField } from './InviteDeliveryField';
 import { PrintedInvites } from './PrintedInvites';
@@ -94,7 +95,10 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience,
         {!access && !accessReadFailed && <p role="status" className="text-sm text-neutral-600">Loading app status…</p>}
         {access && (
           <>
-            <Badge variant={access.status === 'active' ? 'success' : access.status === 'locked' ? 'warning' : 'default'}>{labels[access.status]}</Badge>
+            {/* The shared display rule (EmployeeAppRollout#display_status); actions below still follow access.status. */}
+            {access.agreements
+              ? <Badge variant={accountTone(access.agreements.account.status)}>{access.agreements.account.label}</Badge>
+              : <Badge variant={access.status === 'active' ? 'success' : access.status === 'locked' ? 'warning' : 'default'}>{labels[access.status]}</Badge>}
             {access.status === 'active' && (access.activated_at || (access.staff_actions && access.invite_delivery === 'code' && access.invited_by_name)) && (
               <p className="text-sm text-neutral-700">
                 {access.activated_at ? `Activated ${formatEmployeeAppDate(access.activated_at)}` : 'Activated'}
