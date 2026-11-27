@@ -386,10 +386,13 @@ module PayrollIntake
       end
 
       def line_gross_delta(line_base_reg:, line_base_ot:, delta_reg:, delta_ot:, rate:)
-        old_reg = PayrollEarningsRounding.line_amount(line_base_reg * rate)
-        new_reg = PayrollEarningsRounding.line_amount((line_base_reg + delta_reg) * rate)
-        old_ot = PayrollEarningsRounding.line_amount(line_base_ot * rate * OVERTIME_MULTIPLIER)
-        new_ot = PayrollEarningsRounding.line_amount((line_base_ot + delta_ot) * rate * OVERTIME_MULTIPLIER)
+        # Matches PayrollItem#wage_rate_hours= (round_currency_value -> BigDecimal.round(2))
+        # so preview, evidence, and saved gross agree to the cent without altering save math.
+        effective_rate = BigDecimal(rate.to_s).round(2)
+        old_reg = PayrollEarningsRounding.line_amount(line_base_reg * effective_rate)
+        new_reg = PayrollEarningsRounding.line_amount((line_base_reg + delta_reg) * effective_rate)
+        old_ot = PayrollEarningsRounding.line_amount(line_base_ot * effective_rate * OVERTIME_MULTIPLIER)
+        new_ot = PayrollEarningsRounding.line_amount((line_base_ot + delta_ot) * effective_rate * OVERTIME_MULTIPLIER)
         ((new_reg - old_reg) + (new_ot - old_ot)).round(2)
       end
 
@@ -415,7 +418,11 @@ module PayrollIntake
           Array(existing_item&.wage_rate_hours)
         end
         if allocations.any?
-          entry = allocations.find { |allocation| allocation["employee_wage_rate_id"].to_s == rate.id.to_s && allocation["rate"].to_d == rate.rate }
+          rounded_rate = rate.rate.round(2)
+          entry = allocations.find do |allocation|
+            allocation["employee_wage_rate_id"].to_s == rate.id.to_s &&
+              (allocation["rate"].to_d == rate.rate || allocation["rate"].to_d == rounded_rate)
+          end
           return {
             regular_hours: decimal_or_zero(entry&.dig("regular_hours")),
             overtime_hours: decimal_or_zero(entry&.dig("overtime_hours"))

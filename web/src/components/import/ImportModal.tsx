@@ -599,6 +599,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               ...(row.baseline_overtime_hours !== undefined || row.saved_overtime_hours !== undefined
                 ? { baseline_overtime_hours: row.baseline_overtime_hours ?? row.saved_overtime_hours }
                 : {}),
+              ...(row.preview_token ? { preview_token: row.preview_token } : {}),
             };
             if (state.mode === 'split') {
               const regText = state.regularDraft.trim() || '0';

@@ -167,7 +167,7 @@ describe('computeExtraHoursPreview', () => {
     expect(separateJob.grossPayDelta).toBe(0.53);
   });
 
-  it('parses hourly rates with up to 6 decimal places ($20.125/hr, 2 OT -> +$60.38)', () => {
+  it('parses hourly rates with up to 6 decimal places using the same currency-cent rate rounding as save ($20.125/hr -> $20.13, 2 OT -> +$60.39)', () => {
     const result = computeExtraHoursPreview({
       mode: 'split',
       rate: '20.125',
@@ -183,7 +183,7 @@ describe('computeExtraHoursPreview', () => {
       deltaOvertimeHours: 2,
       resultingRegularHours: 40,
       resultingOvertimeHours: 2,
-      grossPayDelta: 60.38,
+      grossPayDelta: 60.39,
     });
 
     const sixDecimals = computeExtraHoursPreview({
@@ -193,7 +193,8 @@ describe('computeExtraHoursPreview', () => {
       baselineOvertimeHours: '0',
       hours: '10',
     });
-    expect(sixDecimals.grossPayDelta).toBe(201.23);
+    // $20.123456 rounds half-up to $20.12 on PayrollItem#wage_rate_hours=, so 10h -> $201.20
+    expect(sixDecimals.grossPayDelta).toBe(201.2);
   });
 
   it('rejects workweek previews when weekly baselines do not reconcile with aggregate baselines', () => {

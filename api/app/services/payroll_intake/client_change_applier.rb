@@ -103,7 +103,11 @@ module PayrollIntake
 
       inputs.each_with_index do |input, idx|
         rate = resolved_rates[idx]
-        entry = allocations.find { |allocation| allocation["employee_wage_rate_id"].to_s == rate.id.to_s && allocation["rate"].to_d == rate.rate }
+        rounded_rate = rate.rate.round(2)
+        entry = allocations.find do |allocation|
+          allocation["employee_wage_rate_id"].to_s == rate.id.to_s &&
+            (allocation["rate"].to_d == rate.rate || allocation["rate"].to_d == rounded_rate)
+        end
         unless entry
           entry = {
             "employee_wage_rate_id" => rate.id,

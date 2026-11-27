@@ -44,7 +44,8 @@ export function parseRateDecimal(value: string | number | undefined | null): Dec
   if (!text || !RATE_DECIMAL_RE.test(text)) return null;
   try {
     const parsed = new Decimal(text);
-    return parsed.isFinite() && parsed.gte(0) ? parsed : null;
+    // Matches PayrollItem#wage_rate_hours= (round_currency_value -> BigDecimal.round(2))
+    return parsed.isFinite() && parsed.gte(0) ? parsed.toDecimalPlaces(2, Decimal.ROUND_HALF_UP) : null;
   } catch {
     return null;
   }

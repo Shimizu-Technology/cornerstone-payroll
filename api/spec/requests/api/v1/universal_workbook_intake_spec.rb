@@ -298,7 +298,7 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
              portal_source_id: portal_source_id,
              confirm_client_changes: true,
              reviewed_changes: [
-               { change_index: 0, hours: "6.50", workweek: 2, decision: "apply" }
+               { change_index: 0, hours: "6.50", workweek: 2, preview_token: prefill_rows.sole.fetch("preview_token"), decision: "apply" }
              ]
            },
            as: :json
@@ -341,12 +341,13 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: rev1_id }, as: :json
       expect(response).to have_http_status(:ok), response.body
       rev1_package_id = response.parsed_body.dig("source_package", "package_id")
+      rev1_token = response.parsed_body.dig("client_change_prefill", "rows", 0, "preview_token")
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
            params: {
              import_id: response.parsed_body.fetch("import_id"),
              portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
              confirm_client_changes: true,
-             reviewed_changes: [ { change_index: 0, hours: "3.25", workweek: 2, decision: "apply" } ]
+             reviewed_changes: [ { change_index: 0, hours: "3.25", workweek: 2, preview_token: rev1_token, decision: "apply" } ]
            },
            as: :json
       expect(response).to have_http_status(:ok), response.body
