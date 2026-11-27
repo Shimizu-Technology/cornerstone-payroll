@@ -1384,7 +1384,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_020100) do
     t.index [ "company_id", "employee_id" ], name: "idx_employee_document_notices_employee"
     t.index [ "provider_message_id" ], name: "idx_employee_document_notices_provider_message", unique: true, where: "(provider_message_id IS NOT NULL)"
     t.check_constraint "delivery_status::text = ANY (ARRAY['unknown'::character varying, 'delivered'::character varying, 'delayed'::character varying, 'bounced'::character varying, 'complained'::character varying]::text[])", name: "employee_document_notices_delivery_status"
-    t.check_constraint "kind::text = 'w2gu_available'::text", name: "employee_document_notices_kind"
+    t.check_constraint "kind::text = ANY (ARRAY['w2gu_available'::character varying, 'pay_stub_corrected'::character varying]::text[])", name: "employee_document_notices_kind"
     t.check_constraint "status::text = ANY (ARRAY['pending'::character varying, 'sent'::character varying, 'skipped'::character varying, 'failed'::character varying]::text[])", name: "employee_document_notices_status"
   end
 
@@ -1410,6 +1410,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_020100) do
     t.datetime "withdrawn_at"
     t.bigint "withdrawn_by_id"
     t.text "withdrawal_note"
+    t.string "printed_figures_sha256"
+    t.boolean "money_changed"
+    t.string "current_figures_sha256"
+    t.boolean "correction_label"
+    t.boolean "ytd_changed"
     t.index [ "company_id" ], name: "index_employee_documents_on_company_id"
     t.index [ "employee_id", "tax_year", "revision" ], name: "idx_on_employee_id_tax_year_revision_dbe51f3d5c", unique: true, where: "(tax_year IS NOT NULL)"
     t.index [ "historical_paycheck_id", "revision" ], name: "idx_on_historical_paycheck_id_revision_42100f7406", unique: true, where: "(historical_paycheck_id IS NOT NULL)"

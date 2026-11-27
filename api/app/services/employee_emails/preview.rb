@@ -33,6 +33,8 @@ module EmployeeEmails
         "activation_notice" => EmployeeLinks::ActivationNoticeEmail.message(brands[:light],
           activated_at: expires_at, app_url: "https://pelicanrow.example.test"),
         "email_change_notice" => EmployeeLinks::EmailChange.message(brands[:badge]),
+        "pay_stub_corrected" => EmployeeDocuments::TaxFormNotice.pay_stub_message(brands[:badge], pay_date: Date.new(2026, 12, 4),
+          app_url: "https://harborfinch.example.test"),
         "tax_form_notice" => EmployeeDocuments::TaxFormNotice.message(brands[:badge], tax_year: 2026,
           employer: "Harbor Finch Kitchen", app_url: "https://harborfinch.example.test")
       }

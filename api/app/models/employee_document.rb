@@ -14,8 +14,26 @@ class EmployeeDocument < ApplicationRecord
   # A W-2GU copy (Copy B and C) posted for one employee and tax year (M4-5).
   scope :tax_forms, -> { where.not(tax_year: nil) }
 
+  def self.posted_by_payroll_item(company_id, item_ids)
+    posted.where(company_id: company_id, payroll_item_id: item_ids).order(revision: :asc).index_by(&:payroll_item_id)
+  end
+
   def tax_form?
     tax_year.present?
+  end
+
+  # Older and structural corrections retain the link-based classification.
+  def correction_label?
+    correction_label.nil? ? corrected? : correction_label
+  end
+
+  def correction_revision?
+    return corrected? if money_changed.nil?
+    return true if money_changed?
+
+    predecessor = replaces_document
+    predecessor.present? && (predecessor.payroll_item_id != payroll_item_id ||
+      predecessor.withdrawn? || predecessor.withdrawal_reason.present?)
   end
 
   attr_readonly :company_id, :payroll_item_id, :historical_paycheck_id, :employee_id, :tax_year,
