@@ -26,10 +26,10 @@ RSpec.describe StatementYtdFigures, type: :request do
     end
   end
 
-  context "with an opening balance and a native paycheck recorded distinct inside it" do
+  context "with an opening balance and a native paycheck inside it" do
     let(:fixture_scenarios) { [ :prior_provider_ytd ] }
 
-    it "counts the recorded paycheck exactly as the statement does" do
+    it "leaves the paycheck out exactly as the statement does" do
       employee = fixture.employees.fetch(:prior_provider_ytd)
       period = PayPeriod.new(company: fixture.company, status: "committed", start_date: Date.new(2025, 12, 25),
         end_date: Date.new(2026, 1, 7), pay_date: Date.new(2026, 1, 9), committed_at: Time.zone.parse("2026-01-08 09:00"))
@@ -41,10 +41,8 @@ RSpec.describe StatementYtdFigures, type: :request do
       later = fixture.items.fetch(:prior_provider_ytd_p2).reload
 
       expect(described_class.new.call(later).to_h).to eq(statement_figures(later))
-      PayrollBridgeOverlapDispositionService.record_evident!(company_id: fixture.company.id, year: 2026, actor: fixture.staff_user)
-      expect(described_class.new.call(later).to_h).to eq(statement_figures(later.reload))
       expect(described_class.new.call(later).gross).to eq(
-        (fixture.qb_records.fetch(:ytd_balance).statement_gross_pay + inside.gross_pay.to_d + later.gross_pay.to_d).round(2)
+        (fixture.qb_records.fetch(:ytd_balance).statement_gross_pay + later.gross_pay.to_d).round(2)
       )
     end
   end

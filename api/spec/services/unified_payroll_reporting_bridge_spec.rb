@@ -49,6 +49,44 @@ RSpec.describe UnifiedPayrollReporting, "bridge coverage" do
     expect(rows.first[:bridged_fields]).to eq(UnifiedPayrollReporting::BRIDGE_FIGURES.keys.map(&:to_s))
   end
 
+  # A further locked import with its own applied bridge and one bridged employee.
+  def another_import
+    other = create(:historical_import_batch, company: company, status: "locked")
+    HistoricalYtdBridge.create!(
+      company: company, historical_import_batch: other,
+      historical_client_bootstrap: create(:historical_client_bootstrap, company: company, historical_import_batch: other, status: "applied"),
+      status: "applied", plan_digest: SecureRandom.hex(16), applied_at: Time.current, applied_by: create(:user, company: company),
+      apply_acknowledgement: QuickbooksHistory::YtdBridgeApplyService::ACKNOWLEDGEMENT,
+      preview_summary: { "through_period_end" => "2026-01-14", "through_pay_date" => "2026-01-20",
+                         "adjustment_digest" => HistoricalPayroll::Ledger.new(batch: other).adjustment_digest }
+    )
+    other
+  end
+
+  def coverage_queries
+    reporting = described_class.new(company_id: company.id, period: period)
+    queries = 0
+    counter = ->(*, payload) { queries += 1 unless payload[:name].in?([ "SCHEMA", "TRANSACTION" ]) || payload[:cached] }
+    ActiveSupport::Notifications.subscribed(counter, "sql.active_record") { reporting.send(:range_balances) }
+    queries
+  end
+
+  it "checks every locked import's adjustments in a fixed number of queries" do
+    bridged_employee
+    one = coverage_queries
+    3.times { another_import }
+    expect(coverage_queries).to eq(one)
+
+    _employee, paycheck = bridged_employee
+    HistoricalPaycheckAdjustment.create!(company: company, historical_paycheck: paycheck, created_by: create(:user, company: company),
+      kind: "correction", effective_pay_date: paycheck.pay_date, filing_year: 2026, filing_quarter: 1,
+      reason: "Spec adjustment", idempotency_key: "bridge-spec-#{paycheck.id}", gross_pay: 10, net_pay: 8)
+    batches = HistoricalImportBatch.where(company_id: company.id).to_a
+    expect(batches.size).to eq(4)
+    expect(HistoricalPayroll::Ledger.adjustment_digests(batches))
+      .to eq(batches.to_h { |batch| [ batch.id, HistoricalPayroll::Ledger.new(batch: batch).adjustment_digest ] })
+  end
+
   it "loads balance coverage in the same number of queries for two or eight bridged employees" do
     _, two = rows_and_queries(2)
     _, eight = rows_and_queries(8)

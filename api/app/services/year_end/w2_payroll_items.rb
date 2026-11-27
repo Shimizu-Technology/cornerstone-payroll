@@ -9,16 +9,14 @@ module YearEnd
     MISSING_TAX_BASE = TAX_BASE_FIELDS.map { |field| "payroll_items.#{field} IS NULL" }.join(" OR ").freeze
 
     # Native committed rows before the QuickBooks cutover still qualify if
-    # reportable. An explicit legacy disposition excludes a row, and so does a
-    # recorded finding that it repeats a payment the import already holds
-    # (PayrollBridgeOverlap); the import cutoff date alone does not.
+    # reportable. An explicit legacy disposition excludes a row; the import
+    # cutoff date alone does not.
     def self.scope(company_ids, year)
       range = Date.new(year, 1, 1)..Date.new(year, 12, 31)
       PayrollItem
         .joins(:pay_period)
         .where(company_id: company_ids)
         .financially_reportable.reportable
-        .where.not(id: PayrollBridgeOverlap.duplicate_item_ids(company_ids))
         .where.not(employment_type: "contractor")
         .where(pay_periods: { id: PayPeriod.reportable_committed.where(company_id: company_ids, pay_date: range).select(:id) })
     end

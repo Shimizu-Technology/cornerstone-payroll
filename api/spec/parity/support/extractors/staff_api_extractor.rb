@@ -31,6 +31,12 @@ module Parity
         ytd_summary_for(year: year)
       end
 
+      # [status, parsed body] of a staff POST, for endpoints that refuse.
+      def post(path, params = {})
+        @ctx.post path, params: params, headers: @headers, as: :json
+        [ @ctx.response.status, @ctx.response.parsed_body ]
+      end
+
       def ytd_summary_pdf_text(params)
         @ctx.get "/api/v1/admin/reports/ytd_summary_pdf", params: params, headers: @headers
         raise "GET /api/v1/admin/reports/ytd_summary_pdf failed: #{@ctx.response.status}" unless @ctx.response.successful?

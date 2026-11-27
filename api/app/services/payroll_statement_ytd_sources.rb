@@ -46,11 +46,8 @@ class PayrollStatementYtdSources
       .first
   end
 
-  # Historical opening balances carry only combined Medicare.
-  def additional_medicare_ytd
-    return if historical_balance
-
-    @additional_medicare_ytd ||= items.sum(0.to_d) { |item| item.additional_medicare_tax.to_d }
+  def historical_cutoff
+    historical_balance&.through_pay_date
   end
 
   # Every YTD total a statement prints: the dated opening balance plus the
@@ -65,26 +62,32 @@ class PayrollStatementYtdSources
     end
   end
 
+  # Historical opening balances carry only combined Medicare.
+  def additional_medicare_ytd
+    return if historical_balance
+
+    @additional_medicare_ytd ||= items.sum(0.to_d) { |item| item.additional_medicare_tax.to_d }
+  end
+
   # A native paycheck dated on or before the opening balance's through date
-  # counts only once it is recorded as a payment distinct from the imported
-  # ones (PayrollBridgeOverlap); a duplicate, or one still awaiting review,
-  # stays out, as the balance is taken to hold it.
+  # stays out, as the balance is taken to hold it. Whether it really does is
+  # open: PayrollBridgeOverlap flags it, W-2GU filing is blocked and the
+  # statement says its YTD is under review.
   def items
     @items ||= begin
       prior_periods = PayPeriod.reportable_for_company(@company)
         .where(pay_date: Date.new(pay_date.year, 1, 1)..pay_date)
         .where("pay_date < :pay_date OR (pay_date = :pay_date AND id < :period_id)", pay_date: pay_date, period_id: @pay_period.id)
+      prior_periods = prior_periods.where("pay_date > ?", historical_cutoff) if historical_cutoff
       items = @employee.payroll_items.financially_reportable.reportable
         .where(company_id: @company.id, pay_period_id: prior_periods.select(:id))
-      if historical_cutoff
-        items = items.where("pay_periods.pay_date > ? OR payroll_items.id IN (?)", historical_cutoff, distinct_overlap_ids)
-      end
-      items = items.eager_load(:pay_period).order("pay_periods.pay_date", "pay_periods.id", :id).to_a
+        .eager_load(:pay_period).order("pay_periods.pay_date", "pay_periods.id", :id).to_a
       # Every period here is this company's.
       items.each { |item| item.pay_period.association(:company).target = @company }
 
-      if payroll_item.payroll_included? && @pay_period.correction_status.in?([ nil, "correction" ]) &&
-          (historical_cutoff.nil? || pay_date > historical_cutoff || distinct_overlap_ids.exists?(payroll_item_id: payroll_item.id))
+      if payroll_item.payroll_included? &&
+          @pay_period.correction_status.in?([ nil, "correction" ]) &&
+          (historical_cutoff.nil? || pay_date > historical_cutoff)
         items << payroll_item
       end
       preload_components(items.reject { |item| item.equal?(payroll_item) })
@@ -92,15 +95,7 @@ class PayrollStatementYtdSources
     end
   end
 
-  def historical_cutoff
-    historical_balance&.through_pay_date
-  end
-
   private
-
-  def distinct_overlap_ids
-    PayrollBridgeOverlap.distinct_item_ids(company_id: @company.id, batch_id: historical_balance.historical_ytd_bridge.historical_import_batch_id)
-  end
 
   # The saved paycheck's own components load in the same batch queries. A
   # draft or preview may hold unsaved components in memory; those stay as built.

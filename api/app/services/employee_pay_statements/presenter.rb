@@ -48,7 +48,7 @@ class EmployeePayStatements
 
     def ytd_under_review?
       date = item.pay_period.pay_date
-      PayrollBridgeOverlap.pending_for(employee: item.employee, year: date.year, through: date).any?
+      PayrollBridgeOverlap.for_employee(employee: item.employee, year: date.year, through: date).any?
     end
 
     # Status follows the recorded payment evidence, the same rules as the
