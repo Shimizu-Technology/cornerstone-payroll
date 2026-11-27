@@ -127,18 +127,24 @@ module Api
           apply_wage_rate_hours(@payroll_item, wage_rate_hours, @payroll_item.employee) if wage_rate_hours.present?
           sync_pay_rate_from_employee(@payroll_item, @payroll_item.employee) unless wage_rate_hours.present?
           changed_hours = saved_hours.keys.select { |field| attrs.key?(field.to_sym) && attrs[field.to_sym].to_d != saved_hours[field].to_d }
-          # Compare regular totals per job bucket; a bucket holding only overtime,
-          # holiday or PTO leaves the client's regular-hours baseline intact.
-          regular_by_bucket = lambda do |entries|
+          # Compare regular (and overtime when the client supplied overtime) per job bucket;
+          # when the client supplied only regular hours, an overtime/holiday/PTO edit
+          # leaves the client's regular-hours baseline intact.
+          existing_evidence = @payroll_item.custom_columns_data.to_h["client_change_evidence"].to_h
+          client_owns_overtime = existing_evidence["kind"] == "extra_hours" && existing_evidence["delta_overtime_hours"].to_d.positive?
+          client_owned_by_bucket = lambda do |entries|
+            fields = client_owns_overtime ? %w[regular_hours overtime_hours] : %w[regular_hours]
             entries.to_a.map(&:to_h).group_by { |entry| entry.values_at("employee_wage_rate_id", "source_bucket_key").map(&:to_s) + [ entry["rate"].to_d ] }
-              .transform_values { |list| list.sum { |entry| entry["regular_hours"].to_d } }.reject { |_bucket, total| total.zero? }
+              .transform_values { |list| fields.map { |field| list.sum { |entry| entry[field].to_d } } }
+              .reject { |_bucket, totals| totals.all?(&:zero?) }
           end
-          regular_changed = changed_hours.include?("hours_worked") ||
-            regular_by_bucket.call(saved_allocations) != regular_by_bucket.call(@payroll_item.wage_rate_hours)
-          # New regular hours become the baseline a corrected revision adds to.
-          @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if regular_changed
-          # Overtime, holiday or PTO can also arrive only through the job allocations.
-          refresh_client_hours_evidence = !regular_changed && (changed_hours.any? || saved_allocations != @payroll_item.wage_rate_hours)
+          client_hours_changed = changed_hours.include?("hours_worked") ||
+            (client_owns_overtime && changed_hours.include?("overtime_hours")) ||
+            client_owned_by_bucket.call(saved_allocations) != client_owned_by_bucket.call(@payroll_item.wage_rate_hours)
+          # New client-owned hours become the baseline a corrected revision adds to.
+          @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if client_hours_changed
+          # Non-client hours can also arrive only through the job allocations.
+          refresh_client_hours_evidence = !client_hours_changed && (changed_hours.any? || saved_allocations != @payroll_item.wage_rate_hours)
           @payroll_item.mark_payroll_adjustments_overridden! if attrs.key?(:payroll_adjustments)
           # Pay saved from the import review is entered by hand even when it equals
           # the amount an earlier workbook import wrote.
@@ -384,7 +390,8 @@ module Api
           evidence = item.custom_columns_data.to_h["client_change_evidence"]
           return unless evidence.is_a?(Hash) && evidence["kind"] == "extra_hours" && evidence["applied_hours"].is_a?(Hash)
 
-          other = %w[overtime_hours holiday_hours pto_hours]
+          client_owns_overtime = evidence["delta_overtime_hours"].to_d.positive?
+          other = client_owns_overtime ? %w[holiday_hours pto_hours] : %w[overtime_hours holiday_hours pto_hours]
           current = item.wage_rate_hours.map(&:to_h)
           # Rows without a saved job or bucket are told apart by their rate.
           bucket = lambda do |entry|
@@ -393,19 +400,24 @@ module Api
           end
           by_bucket = current.index_by(&bucket)
           baseline = Array(evidence["baseline_allocations"]).map(&:to_h)
-          # Staff own every non-regular hour, so a bucket dropped from the
-          # allocations keeps none of its earlier overtime, holiday or PTO.
+          # Staff own every non-client hour, so a bucket dropped from the
+          # allocations keeps none of its earlier staff-owned hours.
           cleared = other.index_with { 0.0 }
           baseline = baseline.map { |entry| entry.merge(cleared, by_bucket.fetch(bucket.call(entry), {}).slice(*other)) }
           current.each do |entry|
             next if baseline.any? { |row| bucket.call(row) == bucket.call(entry) }
             next if other.all? { |field| entry[field].to_d.zero? }
 
-            baseline << entry.merge("regular_hours" => 0.0)
+            zeroed = client_owns_overtime ? { "regular_hours" => 0.0, "overtime_hours" => 0.0 } : { "regular_hours" => 0.0 }
+            baseline << entry.merge(zeroed)
           end
           applied_hours = evidence["applied_hours"].merge(other.to_h { |field| [ field, item.public_send(field).to_d.to_s("F") ] })
-          item.update_columns(custom_columns_data: item.custom_columns_data.to_h.merge("client_change_evidence" =>
-            evidence.merge("applied_hours" => applied_hours, "applied_allocations" => current, "baseline_allocations" => baseline)))
+          updated_evidence = evidence.merge("applied_hours" => applied_hours, "applied_allocations" => current, "baseline_allocations" => baseline)
+          unless client_owns_overtime
+            updated_evidence["baseline_overtime_hours"] = item.overtime_hours.to_d.to_s("F") if evidence.key?("baseline_overtime_hours")
+            updated_evidence["applied_overtime_hours"] = item.overtime_hours.to_d.to_s("F") if evidence.key?("applied_overtime_hours")
+          end
+          item.update_columns(custom_columns_data: item.custom_columns_data.to_h.merge("client_change_evidence" => updated_evidence))
         end
 
         def payroll_item_params

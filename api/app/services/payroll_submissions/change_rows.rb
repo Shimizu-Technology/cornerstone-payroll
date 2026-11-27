@@ -8,7 +8,7 @@ module PayrollSubmissions
     MAX_ROWS = 100
     MAX_TEXT = 500
     KINDS = {
-      "extra_hours" => { employee: :required, fields: { "hours" => :hours } },
+      "extra_hours" => { employee: :required, fields: {} },
       "owner_pay" => { employee: :required, fields: { "amount" => :money } },
       "paid_leave" => { employee: :required, fields: { "hours" => :hours } },
       "new_hire" => { employee: :none, fields: { "name" => :name, "starting_wage" => :money, "wage_unit" => :wage_unit, "start_date" => :optional_date } },
@@ -40,14 +40,16 @@ module PayrollSubmissions
 
     # rates_on: the submission period's end date; extra hours are checked
     # against the job rates in effect on it (M3-4).
-    def self.normalize!(rows, company_id:, rates_on: nil)
-      new(rows, company_id: company_id, rates_on: rates_on).normalize!
+    # extra_hours_config: { mode: "split" | "workweek", workweeks: [...] }
+    def self.normalize!(rows, company_id:, rates_on: nil, extra_hours_config: nil)
+      new(rows, company_id: company_id, rates_on: rates_on, extra_hours_config: extra_hours_config).normalize!
     end
 
-    def initialize(rows, company_id:, rates_on: nil)
+    def initialize(rows, company_id:, rates_on: nil, extra_hours_config: nil)
       @rows = rows
       @company_id = company_id
       @rates_on = rates_on || PayrollBusinessClock.today
+      @extra_hours_config = extra_hours_config
       @errors = Hash.new { |hash, key| hash[key] = [] }
     end
 
@@ -139,11 +141,13 @@ module PayrollSubmissions
         @errors[key] << "Choose an active employee with variable salary for owner pay."
       end
       if kind == "extra_hours" && employee
-        rate = employee.wage_rates_on(@rates_on).find { |rate| rate.id == integer(row["employee_wage_rate_id"]) }
-        unless employee.active? && employee.payroll_compensation_on(@rates_on).hourly_pay_basis? && rate && !rate.rate.nil?
+        compensation = employee.payroll_compensation_on(@rates_on)
+        rate = employee.wage_rates_on(@rates_on).find { |candidate| candidate.id == integer(row["employee_wage_rate_id"]) }
+        unless employee.active? && compensation.hourly_pay_basis? && rate && !rate.rate.nil?
           @errors[key] << "Choose an active employee and their saved job and rate for extra hours."
         else
           result.merge!("employee_wage_rate_id" => rate.id, "wage_rate_label" => rate.label, "wage_rate" => rate.rate.to_s("F"))
+          normalize_extra_hours!(row, result, compensation, key)
         end
       end
       spec[:fields].each do |field, type|
@@ -158,6 +162,115 @@ module PayrollSubmissions
       @errors[key] << "#{LABELS[kind]}: keep the note under #{MAX_TEXT} characters" if note.length > MAX_TEXT
       result["note"] = note if note.present?
       result
+    end
+
+    def normalize_extra_hours!(row, result, compensation, key)
+      label = LABELS["extra_hours"]
+      if compensation.employment_type == "contractor"
+        ot_text = row["overtime_hours"].to_s.strip
+        if ot_text.present? && BigDecimal(ot_text, exception: false)&.positive?
+          @errors[key] << "#{label}: 1099 contractors do not receive overtime hours"
+          return
+        end
+        raw_hours = row["hours"].to_s.strip.presence || row["regular_hours"].to_s.strip
+        hours = decimal(raw_hours, max: 1000, required: true, money: false)
+        if hours == :invalid
+          @errors[key] << "#{label}: enter hours greater than zero"
+        else
+          result.merge!("hours" => hours, "hours_mode" => "straight_time")
+        end
+        return
+      end
+
+      mode, workweeks = resolve_extra_hours_mode(row)
+      case mode
+      when "split"
+        reg_text = row["regular_hours"].to_s.strip
+        ot_text = row["overtime_hours"].to_s.strip
+        if reg_text.empty? && ot_text.empty?
+          @errors[key] << "#{label}: enter regular hours and/or overtime hours (at least one greater than zero)"
+          return
+        end
+        reg = reg_text.empty? ? "0" : nonnegative_hours(reg_text)
+        ot = ot_text.empty? ? "0" : nonnegative_hours(ot_text)
+        if reg == :invalid || ot == :invalid
+          @errors[key] << "#{label}: enter valid non-negative regular and overtime hours"
+          return
+        end
+        total = (BigDecimal(reg) + BigDecimal(ot)).round(2)
+        if !total.positive? || total > 1000
+          @errors[key] << "#{label}: enter regular hours and/or overtime hours greater than zero (up to 1000 total)"
+          return
+        end
+        result.merge!(
+          "hours" => PayrollIntake::ExtraHoursPolicy.format_hours(total),
+          "regular_hours" => reg,
+          "overtime_hours" => ot,
+          "hours_mode" => "split"
+        )
+      when "workweek"
+        hours = decimal(row["hours"].to_s.strip, max: 1000, required: true, money: false)
+        if hours == :invalid
+          @errors[key] << "#{label}: enter hours greater than zero"
+        elsif BigDecimal(hours) > 168
+          @errors[key] << "#{label}: hours in a single workweek cannot exceed 168"
+        end
+        chosen_week = if workweeks.size == 1
+          raw_wk = integer(row["workweek"])
+          if row["workweek"].present? && raw_wk != 1
+            @errors[key] << "#{label}: choose a valid workweek for this period"
+            nil
+          else
+            1
+          end
+        else
+          max_week = workweeks.any? ? workweeks.size : 2
+          raw_wk = integer(row["workweek"])
+          if raw_wk && raw_wk.between?(1, max_week)
+            raw_wk
+          else
+            @errors[key] << "#{label}: choose which workweek the hours were worked"
+            nil
+          end
+        end
+        return if hours == :invalid || BigDecimal(hours) > 168 || chosen_week.nil?
+
+        week_meta = workweeks.find { |candidate| candidate[:index] == chosen_week }
+        result.merge!(
+          "hours" => hours,
+          "workweek" => chosen_week,
+          "workweek_start_date" => week_meta&.dig(:start_date),
+          "workweek_end_date" => week_meta&.dig(:end_date),
+          "hours_mode" => "workweek"
+        ).compact!
+      else
+        hours = decimal(row["hours"].to_s.strip, max: 1000, required: true, money: false)
+        if hours == :invalid
+          @errors[key] << "#{label}: enter hours greater than zero"
+        else
+          result["hours"] = hours
+        end
+      end
+    end
+
+    def resolve_extra_hours_mode(row)
+      if @extra_hours_config.present?
+        return [ @extra_hours_config[:mode].to_s, Array(@extra_hours_config[:workweeks]) ]
+      end
+
+      return [ "split", [] ] if row.key?("regular_hours") || row.key?("overtime_hours")
+      return [ "workweek", [] ] if row["workweek"].present?
+
+      [ "legacy_untyped", [] ]
+    end
+
+    def nonnegative_hours(text)
+      return :invalid unless text.match?(/\A\d{1,9}(\.\d{1,2})?\z/)
+
+      number = BigDecimal(text)
+      return :invalid unless number >= 0 && number <= 1000
+
+      number.to_s("F").delete_suffix(".0")
     end
 
     def coerce(type, value)

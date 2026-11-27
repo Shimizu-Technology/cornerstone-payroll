@@ -5,16 +5,52 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { LabeledTextarea } from '@/components/payroll-submissions/LabeledTextarea';
 import { acceptStringForSlot, DEFAULT_MOSA_DESCRIPTOR, templateFormatsForSlot } from '@/lib/importSources';
-import { CHANGE_KINDS, clientPayrollSubmissionsApi, type ChangeKind, type ChangeRow, type PeriodDetail, type PickerEmployee, type SubmissionRevision } from '@/services/payrollSubmissions';
-import type { PayrollIntakeFileSlot } from '@/services/api';
+import { parseDecimalHundredths } from '@/lib/extraHoursPreview';
+import { CHANGE_KINDS, clientPayrollSubmissionsApi, type ChangeKind, type ChangeRow, type ExtraHoursConfig, type PeriodDetail, type PickerEmployee, type SubmissionRevision } from '@/services/payrollSubmissions';
+import type { PayrollIntakeDescriptor, PayrollIntakeFileSlot } from '@/services/api';
 
 type DraftRow = ChangeRow & { key: string };
 const blankRow = (kind: ChangeKind): DraftRow => ({ key: crypto.randomUUID(), kind, ...(kind === 'new_hire' || kind === 'wage_change' ? { wage_unit: 'hourly' } : {}) });
 
-function rowFields(row: ChangeRow): ChangeRow {
-  const { kind, employee_id, employee_ids, standing_change_id, skipped, employee_wage_rate_id, hours, amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date, deduction_action, description, note } = row;
-  return Object.fromEntries(Object.entries({ kind, employee_id, employee_ids, standing_change_id, skipped, employee_wage_rate_id, hours, amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date, deduction_action, description, note })
-    .filter(([, value]) => value !== undefined && value !== '')) as unknown as ChangeRow;
+function resolveExtraHoursConfig(period: PeriodDetail, descriptor: PayrollIntakeDescriptor): ExtraHoursConfig {
+  if (period.extra_hours_config) return period.extra_hours_config;
+  return {
+    mode: 'split',
+    overtime_mode: descriptor.overtime_mode || 'source_reports',
+    workweeks: [],
+  };
+}
+
+function rowFields(row: ChangeRow, extraMode?: 'split' | 'workweek' | 'straight_time', singleWorkweek?: boolean): ChangeRow {
+  const {
+    kind, employee_id, employee_ids, standing_change_id, skipped, employee_wage_rate_id,
+    hours, regular_hours, overtime_hours, workweek,
+    amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date,
+    deduction_action, description, note,
+  } = row;
+  const payload: Record<string, unknown> = {
+    kind, employee_id, employee_ids, standing_change_id, skipped, employee_wage_rate_id,
+    amount, basis, name, starting_wage, new_wage, wage_unit, start_date, effective_date,
+    deduction_action, description, note,
+  };
+  if (kind === 'extra_hours' && !skipped) {
+    if (extraMode === 'split') {
+      const reg = (regular_hours ?? '').trim();
+      const ot = (overtime_hours ?? '').trim();
+      if (reg !== '' || ot !== '') {
+        payload.regular_hours = reg || '0';
+        payload.overtime_hours = ot || '0';
+      }
+    } else if (extraMode === 'workweek') {
+      payload.hours = hours;
+      payload.workweek = singleWorkweek ? 1 : workweek;
+    } else {
+      payload.hours = hours;
+    }
+  } else {
+    payload.hours = hours;
+  }
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== '')) as unknown as ChangeRow;
 }
 
 async function fileIdentity(file: File | null): Promise<unknown> {
@@ -38,6 +74,8 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   period: PeriodDetail; current?: SubmissionRevision; onSent: (detail: PeriodDetail, outcome: string) => void; onCancel?: () => void;
 }): ReactElement {
   const descriptor = period.intake_descriptor ?? DEFAULT_MOSA_DESCRIPTOR;
+  const extraHoursConfig = resolveExtraHoursConfig(period, descriptor);
+  const singleWorkweek = extraHoursConfig.mode === 'workweek' && extraHoursConfig.workweeks.length === 1;
   const portalSlots = descriptor.files.filter((slot): slot is PayrollIntakeFileSlot & { portal_role: string } => Boolean(slot.portal_role));
   const linkableSlot = portalSlots.find(slot => slot.supports_link) || null;
   const linkableRole = linkableSlot?.portal_role || 'changes_workbook';
@@ -111,6 +149,12 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const hasNewWorkbook = Boolean(linkableSlot && workbookChoice === 'attach' && workbook);
   const keptWorkbook = linkableSlot ? keptDocumentFor(linkableRole) : undefined;
   const update = (key: string, patch: Partial<ChangeRow>): void => setRows(list => list.map(row => row.key === key ? { ...row, ...patch } : row));
+  const extraHoursModeForRow = (row: ChangeRow): 'split' | 'workweek' | 'straight_time' => {
+    const selectedEmployee = employees.find(employee => employee.id === row.employee_id);
+    if (row.contractor || selectedEmployee?.contractor) return 'straight_time';
+    if (extraHoursConfig.mode === 'workweek' && extraHoursConfig.workweeks.length > 0) return 'workweek';
+    return 'split';
+  };
   const employeeSelect = (row: DraftRow, label: string): ReactElement => (
     <Select label={label} value={row.employee_id ? String(row.employee_id) : ''} disabled={!!row.standing_change_id} onChange={e => update(row.key, { employee_id: e.target.value ? Number(e.target.value) : undefined, employee_wage_rate_id: undefined })}>
       <option value="">Choose employee</option>
@@ -157,10 +201,47 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       if (doc.role !== linkableSlot?.portal_role && slotFiles[doc.role]) return false;
       return true;
     });
-    const changes = rows.filter(row => (!noChanges || row.standing_change_id) && (!row.standing_change_id || row.required || row.skipped || row.amount || row.hours)).map(rowFields);
-    if (rows.some(row => row.standing_change_id && ((row.skipped && row.allow_none === false) || (row.required && !row.skipped && !row.amount && !row.hours)))) { setDetails({ changes: ['Complete each required payroll entry or choose None this period where allowed.'] }); return; }
-    const invalid = changes.find(row => !row.skipped && ((row.kind === 'owner_pay' && (!row.employee_id || !/^\d+(\.\d{1,2})?$/.test(row.amount || '') || Number(row.amount) <= 0 || Number(row.amount) > 10_000_000)) || (row.kind === 'extra_hours' && (!row.employee_id || !row.employee_wage_rate_id || !/^\d+(\.\d{1,2})?$/.test(row.hours || '') || Number(row.hours) <= 0 || Number(row.hours) > 1000))));
-    if (invalid) { setDetails({ changes: ['Choose an employee and enter a positive amount or hours, with a saved job for extra hours. Skip any every-period row you do not need.'] }); return; }
+    const hasExtraHoursInput = (row: ChangeRow): boolean => Boolean(row.hours || row.regular_hours || row.overtime_hours);
+    const activeRows = rows.filter(row => (!noChanges || row.standing_change_id) && (!row.standing_change_id || row.required || row.skipped || row.amount || hasExtraHoursInput(row)));
+    if (rows.some(row => row.standing_change_id && ((row.skipped && row.allow_none === false) || (row.required && !row.skipped && !row.amount && !hasExtraHoursInput(row))))) { setDetails({ changes: ['Complete each required payroll entry or choose None this period where allowed.'] }); return; }
+    const changes = activeRows.map(row => rowFields(row, row.kind === 'extra_hours' ? extraHoursModeForRow(row) : undefined, singleWorkweek));
+    const invalidRow = activeRows.find((row) => {
+      if (row.skipped) return false;
+      if (row.kind === 'owner_pay') {
+        return !row.employee_id || !/^\d+(\.\d{1,2})?$/.test(row.amount || '') || Number(row.amount) <= 0 || Number(row.amount) > 10_000_000;
+      }
+      if (row.kind === 'extra_hours') {
+        if (!row.employee_id || !row.employee_wage_rate_id) return true;
+        const mode = extraHoursModeForRow(row);
+        if (mode === 'split') {
+          const regText = (row.regular_hours ?? '').trim();
+          const otText = (row.overtime_hours ?? '').trim();
+          if (!regText && !otText) return true;
+          const reg = regText ? parseDecimalHundredths(regText) : 0;
+          const ot = otText ? parseDecimalHundredths(otText) : 0;
+          if (reg === null || ot === null) return true;
+          const total = reg + ot;
+          return total <= 0 || total > 100000;
+        }
+        if (mode === 'workweek') {
+          const hrs = parseDecimalHundredths(row.hours);
+          const wk = singleWorkweek ? 1 : row.workweek;
+          return hrs === null || hrs <= 0 || hrs > 16800 || !wk;
+        }
+        const hrs = parseDecimalHundredths(row.hours);
+        return hrs === null || hrs <= 0 || hrs > 100000;
+      }
+      return false;
+    });
+    if (invalidRow) {
+      const message = invalidRow.kind === 'extra_hours' && extraHoursModeForRow(invalidRow) === 'split'
+        ? 'Choose an employee, saved job, and enter regular hours and/or overtime hours (at least one greater than zero).'
+        : invalidRow.kind === 'extra_hours' && extraHoursModeForRow(invalidRow) === 'workweek'
+          ? 'Choose an employee, saved job, workweek, and enter extra hours greater than zero (up to 168 per week).'
+          : 'Choose an employee and enter a positive amount or hours, with a saved job for extra hours. Skip any every-period row you do not need.';
+      setDetails({ changes: [message] });
+      return;
+    }
     setBusy(true);
     try {
       const slotIdentities = await Promise.all(portalSlots.map(async (slot) => [
@@ -272,12 +353,52 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
       {rows.some(row => row.standing_change_id) && <fieldset className="min-w-0 space-y-3">
         <legend className="text-sm font-semibold text-neutral-900">Payroll entries this period</legend>
         <p className="text-sm text-neutral-600">Enter this period’s pay and hours. Cornerstone reviews these before payroll.</p>
-        {rows.filter(row => row.standing_change_id).map(row => <div key={row.key} className="min-w-0 space-y-2 rounded-lg border border-neutral-200 p-3">
-          <p className="break-words font-semibold">{row.label || row.employee_name}{row.required ? ' (required)' : ' (optional)'}</p>
-          {row.help_text && <p className="break-words text-sm text-neutral-600">{row.help_text}</p>}
-          <Input label={(row.kind === 'owner_pay' ? 'Amount ($): ' : 'Hours: ') + (row.label || row.employee_name)} inputMode="decimal" aria-required={row.required} disabled={row.skipped} value={(row.kind === 'owner_pay' ? row.amount : row.hours) || ''} onChange={e => update(row.key, row.kind === 'owner_pay' ? { amount: e.target.value } : { hours: e.target.value })} />
-          {row.allow_none !== false && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={!!row.skipped} onChange={e => update(row.key, { skipped: e.target.checked })} />None this period: {row.label || row.employee_name}</label>}
-        </div>)}
+        {rows.filter(row => row.standing_change_id).map(row => {
+          const rowLabel = row.label || row.employee_name || '';
+          const extraMode = row.kind === 'extra_hours' ? extraHoursModeForRow(row) : null;
+          return <div key={row.key} className="min-w-0 space-y-2 rounded-lg border border-neutral-200 p-3">
+            <p className="break-words font-semibold">{rowLabel}{row.required ? ' (required)' : ' (optional)'}</p>
+            {row.help_text && <p className="break-words text-sm text-neutral-600">{row.help_text}</p>}
+            {row.kind === 'owner_pay' && (
+              <Input label={`Amount ($): ${rowLabel}`} inputMode="decimal" aria-required={row.required} disabled={row.skipped} value={row.amount || ''} onChange={e => update(row.key, { amount: e.target.value })} />
+            )}
+            {row.kind === 'extra_hours' && extraMode === 'split' && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {row.hours && row.regular_hours === undefined && row.overtime_hours === undefined && (
+                  <p className="text-xs text-warning-800 sm:col-span-2">Previous revision had {row.hours} hours without a regular/overtime split. Enter regular and/or overtime hours.</p>
+                )}
+                <Input label={`Regular hours: ${rowLabel}`} inputMode="decimal" aria-required={row.required} disabled={row.skipped} value={row.regular_hours || ''} onChange={e => update(row.key, { regular_hours: e.target.value })} />
+                <Input label={`Overtime hours: ${rowLabel}`} inputMode="decimal" disabled={row.skipped} value={row.overtime_hours || ''} onChange={e => update(row.key, { overtime_hours: e.target.value })} />
+              </div>
+            )}
+            {row.kind === 'extra_hours' && extraMode === 'workweek' && (
+              <div className="space-y-2">
+                <Input label={`Hours: ${rowLabel}`} inputMode="decimal" aria-required={row.required} disabled={row.skipped} value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />
+                {extraHoursConfig.workweeks.length > 1 ? (
+                  <fieldset disabled={row.skipped} className="space-y-1">
+                    <legend className="text-xs font-medium text-neutral-700">Workweek: {rowLabel}</legend>
+                    <div className="flex flex-wrap gap-2">
+                      {extraHoursConfig.workweeks.map(week => (
+                        <Button key={week.index} type="button" size="sm" variant={row.workweek === week.index ? 'primary' : 'outline'} aria-pressed={row.workweek === week.index} disabled={row.skipped} onClick={() => update(row.key, { workweek: week.index })}>
+                          Week {week.index} ({week.label})
+                        </Button>
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : extraHoursConfig.workweeks.length === 1 ? (
+                  <p className="text-xs text-neutral-600">Workweek: Week 1 ({extraHoursConfig.workweeks[0].label})</p>
+                ) : null}
+              </div>
+            )}
+            {row.kind === 'extra_hours' && extraMode === 'straight_time' && (
+              <div className="space-y-1">
+                <Input label={`Hours: ${rowLabel}`} inputMode="decimal" aria-required={row.required} disabled={row.skipped} value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />
+                <p className="text-xs text-neutral-600">1099 contractor · straight time only (no overtime).</p>
+              </div>
+            )}
+            {row.allow_none !== false && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={!!row.skipped} onChange={e => update(row.key, { skipped: e.target.checked })} />None this period: {rowLabel}</label>}
+          </div>;
+        })}
       </fieldset>}
       <fieldset className="min-w-0 space-y-3">
         <legend className="text-sm font-semibold text-neutral-900">Other changes this period</legend>
@@ -308,11 +429,46 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
                 <p className="mb-2 text-xs text-neutral-600">{meta.hint}</p>
                 <fieldset disabled={row.skipped} className="grid min-w-0 gap-3 sm:grid-cols-2">
                   {['owner_pay', 'extra_hours', 'paid_leave', 'wage_change', 'deduction', 'direct_deposit_addition'].includes(row.kind) && employeeSelect(row, 'Employee')}
-                  {(row.kind === 'extra_hours' || row.kind === 'paid_leave') && <Input label="Hours" inputMode="decimal" value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />}
+                  {row.kind === 'paid_leave' && <Input label="Hours" inputMode="decimal" value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />}
                   {row.kind === 'extra_hours' && <Select label="Saved job and rate" value={row.employee_wage_rate_id || ''} disabled={!!row.standing_change_id} onChange={e => update(row.key, { employee_wage_rate_id: Number(e.target.value) || undefined })}>
                     <option value="">Choose saved job</option>
                     {employees.find(employee => employee.id === row.employee_id)?.wage_rates?.map(rate => <option key={rate.id} value={rate.id}>{rate.label} · ${rate.rate}/hr</option>)}
                   </Select>}
+                  {row.kind === 'extra_hours' && (() => {
+                    const extraMode = extraHoursModeForRow(row);
+                    if (extraMode === 'split') {
+                      return <>
+                        {row.hours && row.regular_hours === undefined && row.overtime_hours === undefined && (
+                          <p className="text-xs text-warning-800 sm:col-span-2">Previous revision had {row.hours} hours without a regular/overtime split. Enter regular and/or overtime hours.</p>
+                        )}
+                        <Input label="Regular hours" inputMode="decimal" value={row.regular_hours || ''} onChange={e => update(row.key, { regular_hours: e.target.value })} />
+                        <Input label="Overtime hours" inputMode="decimal" value={row.overtime_hours || ''} onChange={e => update(row.key, { overtime_hours: e.target.value })} />
+                      </>;
+                    }
+                    if (extraMode === 'workweek') {
+                      return <>
+                        <Input label="Hours" inputMode="decimal" value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />
+                        {extraHoursConfig.workweeks.length > 1 ? (
+                          <fieldset className="space-y-1">
+                            <legend className="text-xs font-medium text-neutral-700">Which workweek?</legend>
+                            <div className="flex flex-wrap gap-2">
+                              {extraHoursConfig.workweeks.map(week => (
+                                <Button key={week.index} type="button" size="sm" variant={row.workweek === week.index ? 'primary' : 'outline'} aria-pressed={row.workweek === week.index} onClick={() => update(row.key, { workweek: week.index })}>
+                                  Week {week.index} ({week.label})
+                                </Button>
+                              ))}
+                            </div>
+                          </fieldset>
+                        ) : extraHoursConfig.workweeks.length === 1 ? (
+                          <p className="self-end py-3 text-xs text-neutral-600">Workweek: Week 1 ({extraHoursConfig.workweeks[0].label})</p>
+                        ) : null}
+                      </>;
+                    }
+                    return <>
+                      <Input label="Hours" inputMode="decimal" value={row.hours || ''} onChange={e => update(row.key, { hours: e.target.value })} />
+                      <p className="self-end py-3 text-xs text-neutral-600">1099 contractor · straight time only (no overtime).</p>
+                    </>;
+                  })()}
                   {row.kind === 'owner_pay' && <>
                     <Input label="Amount ($)" inputMode="decimal" value={row.amount || ''} onChange={e => update(row.key, { amount: e.target.value })} />
                     {row.last_period_amount && <p className="self-end py-3 text-sm text-neutral-600">Last period: {Number(row.last_period_amount).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}</p>}

@@ -117,7 +117,7 @@ RSpec.describe "Pay-period submissions", type: :request do
   describe "sending a package" do
     it "saves a complete package as revision 1 without touching payroll or employee records" do
       changes = [
-        { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: create(:employee_wage_rate, employee: employee).id, hours: "6.5", note: "Not in Revel" },
+        { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: create(:employee_wage_rate, employee: employee).id, regular_hours: "6.5", overtime_hours: "0", note: "Not in Revel" },
         { kind: "owner_pay", employee_id: create(:employee, :salary, company: company, salary_type: "variable").id, amount: "1200" },
         { kind: "paid_leave", employee_id: employee.id, hours: "35" },
         { kind: "new_hire", name: "Synthetic New Hire", starting_wage: "12.50", wage_unit: "hourly", start_date: "2026-11-10" },

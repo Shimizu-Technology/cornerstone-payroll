@@ -6,13 +6,15 @@ module PayrollSubmissions
   class ImportChanges
     attr_reader :review_decisions
 
-    def initialize(submission:, pay_period:)
+    def initialize(submission:, pay_period:, session: nil)
       @submission = submission
       @period = pay_period
+      @session = session
       @review_decisions = []
     end
 
     def proposals(source_rows: [])
+      period_config = extra_hours_period_config
       submitted = @submission.change_rows.each_with_index.filter_map do |row, index|
         next unless %w[owner_pay extra_hours].include?(row["kind"]) && !row["skipped"]
         next if legacy_manual_row?(row)
@@ -23,13 +25,27 @@ module PayrollSubmissions
         previous = existing&.custom_columns_data.to_h.fetch("client_change_evidence", {}).to_h
         source = source_rows.find { |item| item[:employee_id].to_s == row["employee_id"].to_s }
         pay = pay_state(existing, source)
+        extra_context = if row["kind"] == "extra_hours"
+          PayrollIntake::ExtraHoursPolicy.proposal_context(
+            employee: employee,
+            pay_period: @period,
+            period_config: period_config,
+            source_row: source,
+            existing_item: existing,
+            change_row: row,
+            rate: rate
+          )
+        else
+          {}
+        end
         { change_index: index, kind: row["kind"], employee_id: row["employee_id"], employee_name: employee&.full_name,
           standing_change_id: row["standing_change_id"], revision: @submission.revision,
           previous_value: previous["reviewed_value"], amount: row["amount"], hours: row["hours"], employee_wage_rate_id: row["employee_wage_rate_id"],
           wage_rate_label: rate&.label, wage_rate: rate&.rate&.to_s("F"), error: availability_error(row, employee),
           overwrite_required: existing.present? && !existing.tracks_reviewed_hours?,
           saved_regular_hours: previous["kind"] == "extra_hours" ? previous["baseline_regular_hours"] : existing&.hours_worked&.to_s("F"),
-          saved_overtime_hours: existing&.overtime_hours&.to_s("F"),
+          saved_overtime_hours: (previous["kind"] == "extra_hours" && previous.key?("baseline_overtime_hours")) ? previous["baseline_overtime_hours"] : existing&.overtime_hours&.to_s("F"),
+          **extra_context,
           **(row["kind"] == "owner_pay" ? pay.merge(pay_conflict: pay.values.compact.any? { |amount| amount.to_d != row["amount"].to_d }) : {}) }.compact
       end
       submitted + missing_owner_pay(submitted, source_rows)
@@ -92,32 +108,26 @@ module PayrollSubmissions
         raise ArgumentError, "#{change[:employee_name]} must have exactly one included import row. Resolve the client change before applying." unless matches.one?
 
         row = matches.sole
-        field = change[:kind] == "owner_pay" ? :amount : :hours
-        value = input[field].to_s
-        unless value.match?(/\A\d{1,9}(\.\d{1,2})?\z/) && value.to_d.positive? && value.to_d <= (field == :hours ? 1000 : 10_000_000)
-          raise ArgumentError, "Enter a valid #{field} greater than zero for #{change[:employee_name]}."
-        end
-        if !change[:requires_pay_decision] && value.to_d != change[field].to_d
-          reason = input[:reason].to_s.strip
-          raise ArgumentError, "Enter a reason (up to 1000 characters) for changing #{change[:employee_name]}'s client entry." unless reason.present? && reason.length <= 1000
-        end
-        if field == :amount
-          apply_owner_pay!(row, change, input, value)
-        else
-          row[:client_extra_hours] = { hours: value, employee_wage_rate_id: change[:employee_wage_rate_id], rate: change[:wage_rate] }
-          row[:missing_revel_hours_with_deductions] = false
-          # An employee absent from both files has no review job picker; the client
-          # already named the saved job for these hours. Hours of their own still
-          # need a staff choice, so only preselect when they have none. The
-          # client's job also replaces the primary-job fallback for equal rates.
-          if row[:payroll_setup_only] && own_hours(change[:employee_id]).zero? && (row[:selected_wage_rate_id].blank? || row[:wage_rate_needs_review])
-            row[:selected_wage_rate_id] = change[:employee_wage_rate_id]
-            row[:wage_rate_needs_review] = false
+        if change[:kind] == "owner_pay"
+          value = input[:amount].to_s
+          unless value.match?(/\A\d{1,9}(\.\d{1,2})?\z/) && value.to_d.positive? && value.to_d <= 10_000_000
+            raise ArgumentError, "Enter a valid amount greater than zero for #{change[:employee_name]}."
           end
+          if !change[:requires_pay_decision] && value.to_d != change[:amount].to_d
+            reason = input[:reason].to_s.strip
+            raise ArgumentError, "Enter a reason (up to 1000 characters) for changing #{change[:employee_name]}'s client entry." unless reason.present? && reason.length <= 1000
+          end
+          apply_owner_pay!(row, change, input, value)
+          row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value) if row.dig(:period_pay_evidence, :source_type) == "client_submission"
+          applied_value = row[:period_pay].presence || change[:saved_period_pay] || value
+          @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: applied_value, pay_choice: input[:pay_choice], reason: input[:reason])
+        else
+          extra_outcome = apply_extra_hours!(row, change, input)
+          value = extra_outcome.fetch(:reviewed_value)
+          evidence_details = extra_outcome.fetch(:evidence)
+          row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value, **evidence_details)
+          @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: value, reason: input[:reason], **evidence_details)
         end
-        row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value) if field == :hours || row.dig(:period_pay_evidence, :source_type) == "client_submission"
-        applied_value = field == :hours ? value : (row[:period_pay].presence || change[:saved_period_pay] || value)
-        @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: applied_value, pay_choice: input[:pay_choice], reason: input[:reason])
       end
       # Also process employees absent from BOTH source files and this revision.
       # These cleanup rows restore only client hours; workbook money is retained.
@@ -258,7 +268,153 @@ module PayrollSubmissions
 
       evidence = item.custom_columns_data.to_h["client_change_evidence"].to_h
       regular = evidence["kind"] == "extra_hours" ? evidence["baseline_regular_hours"].to_d : item.hours_worked.to_d
-      regular + item.overtime_hours.to_d + item.holiday_hours.to_d + item.pto_hours.to_d
+      overtime = (evidence["kind"] == "extra_hours" && evidence.key?("baseline_overtime_hours")) ? evidence["baseline_overtime_hours"].to_d : item.overtime_hours.to_d
+      regular + overtime + item.holiday_hours.to_d + item.pto_hours.to_d
+    end
+
+    def extra_hours_period_config
+      PayrollIntake::ExtraHoursPolicy.period_config(
+        company: @period.company,
+        start_date: @period.start_date,
+        end_date: @period.end_date,
+        pay_period: @period,
+        session: @session
+      )
+    end
+
+    def apply_extra_hours!(row, change, input)
+      mode = change[:extra_hours_mode].to_s
+      rate = change[:wage_rate]
+      base_reg = change[:baseline_regular_hours] || "0"
+      base_ot = change[:baseline_overtime_hours] || "0"
+      reason = input[:reason].to_s.strip
+
+      resolved = case mode
+      when "straight_time"
+        hours_input = input[:hours].presence || input[:regular_hours]
+        outcome = PayrollIntake::ExtraHoursPolicy.resolve_deltas!(
+          mode: "straight_time",
+          baseline_regular: base_reg,
+          baseline_overtime: base_ot,
+          rate: rate,
+          hours: hours_input,
+          overtime_hours: input[:overtime_hours]
+        )
+        if outcome[:hours] != change[:hours].to_d
+          require_adjustment_reason!(change[:employee_name], reason)
+        end
+        row[:client_extra_hours] = {
+          hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:hours]),
+          regular_hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:delta_regular_hours]),
+          overtime_hours: "0",
+          hours_mode: "straight_time",
+          employee_wage_rate_id: change[:employee_wage_rate_id],
+          rate: rate
+        }
+        outcome
+      when "split"
+        if input[:regular_hours].to_s.strip.empty? && input[:overtime_hours].to_s.strip.empty?
+          raise ArgumentError, "Split #{change[:employee_name]}'s extra hours into regular and overtime before applying."
+        end
+
+        outcome = PayrollIntake::ExtraHoursPolicy.resolve_deltas!(
+          mode: "split",
+          baseline_regular: base_reg,
+          baseline_overtime: base_ot,
+          rate: rate,
+          regular_hours: input[:regular_hours],
+          overtime_hours: input[:overtime_hours]
+        )
+        changed = if change[:needs_classification]
+          outcome[:hours] != change[:hours].to_d
+        else
+          outcome[:delta_regular_hours] != change[:regular_hours].to_d ||
+            outcome[:delta_overtime_hours] != change[:overtime_hours].to_d
+        end
+        require_adjustment_reason!(change[:employee_name], reason) if changed
+
+        row[:client_extra_hours] = {
+          hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:hours]),
+          regular_hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:delta_regular_hours]),
+          overtime_hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:delta_overtime_hours]),
+          hours_mode: "split",
+          employee_wage_rate_id: change[:employee_wage_rate_id],
+          rate: rate
+        }
+        outcome
+      when "workweek"
+        workweeks = Array(change[:workweeks])
+        chosen_week = if workweeks.size == 1 && input[:workweek].blank?
+          1
+        else
+          input[:workweek]
+        end
+        if chosen_week.blank?
+          raise ArgumentError, "Choose which workweek #{change[:employee_name]}'s extra hours belong to before applying."
+        end
+
+        outcome = PayrollIntake::ExtraHoursPolicy.resolve_deltas!(
+          mode: "workweek",
+          baseline_regular: base_reg,
+          baseline_overtime: base_ot,
+          rate: rate,
+          hours: input[:hours],
+          workweek: chosen_week,
+          workweeks: workweeks,
+          baseline_week1: change[:baseline_week1_hours],
+          baseline_week2: change[:baseline_week2_hours]
+        )
+        changed = outcome[:hours] != change[:hours].to_d ||
+          (change[:workweek].present? && outcome[:workweek] != change[:workweek].to_i)
+        require_adjustment_reason!(change[:employee_name], reason) if changed
+
+        row[:client_extra_hours] = {
+          hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:hours]),
+          workweek: outcome[:workweek],
+          workweek_start_date: outcome[:workweek_start_date],
+          workweek_end_date: outcome[:workweek_end_date],
+          baseline_week1_hours: change[:baseline_week1_hours],
+          baseline_week2_hours: change[:baseline_week2_hours],
+          hours_mode: "workweek",
+          employee_wage_rate_id: change[:employee_wage_rate_id],
+          rate: rate
+        }
+        outcome
+      else
+        raise ArgumentError, "Choose regular/overtime hours or a workweek for #{change[:employee_name]} before applying."
+      end
+
+      row[:missing_revel_hours_with_deductions] = false
+      # An employee absent from both files has no review job picker; the client
+      # already named the saved job for these hours. Hours of their own still
+      # need a staff choice, so only preselect when they have none. The
+      # client's job also replaces the primary-job fallback for equal rates.
+      if row[:payroll_setup_only] && own_hours(change[:employee_id]).zero? && (row[:selected_wage_rate_id].blank? || row[:wage_rate_needs_review])
+        row[:selected_wage_rate_id] = change[:employee_wage_rate_id]
+        row[:wage_rate_needs_review] = false
+      end
+
+      reviewed_value = PayrollIntake::ExtraHoursPolicy.format_hours(resolved[:hours])
+      evidence = {
+        hours_mode: resolved[:hours_mode],
+        workweek: resolved[:workweek],
+        workweek_start_date: resolved[:workweek_start_date],
+        workweek_end_date: resolved[:workweek_end_date],
+        regular_hours: PayrollIntake::ExtraHoursPolicy.format_hours(resolved[:delta_regular_hours]),
+        overtime_hours: PayrollIntake::ExtraHoursPolicy.format_hours(resolved[:delta_overtime_hours]),
+        delta_regular_hours: resolved[:delta_regular_hours].to_s("F"),
+        delta_overtime_hours: resolved[:delta_overtime_hours].to_s("F"),
+        resulting_regular_hours: resolved[:resulting_regular_hours].to_s("F"),
+        resulting_overtime_hours: resolved[:resulting_overtime_hours].to_s("F"),
+        gross_pay_delta: format("%.2f", resolved[:gross_pay_delta])
+      }.compact
+      { reviewed_value: reviewed_value, evidence: evidence }
+    end
+
+    def require_adjustment_reason!(employee_name, reason)
+      return if reason.present? && reason.length <= 1000
+
+      raise ArgumentError, "Enter a reason (up to 1000 characters) for changing #{employee_name}'s client entry."
     end
 
     def prior_items
