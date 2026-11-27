@@ -108,6 +108,15 @@ it('renders the stale-calculation banner with Recalculate action and the unverif
   expect(screen.getByText('Changed since last payroll, not verified (1)')).toBeTruthy();
   expect(screen.getByText(/Pending verification/)).toBeTruthy();
 
+  const staleAlert = document.getElementById('payroll-stale-calculation');
+  const unverifiedAlert = document.getElementById('payroll-unverified-changes');
+  expect(staleAlert?.getAttribute('tabindex')).toBe('-1');
+  expect(unverifiedAlert?.getAttribute('tabindex')).toBe('-1');
+  staleAlert?.focus();
+  expect(document.activeElement).toBe(staleAlert);
+  unverifiedAlert?.focus();
+  expect(document.activeElement).toBe(unverifiedAlert);
+
   fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
   expect(handleRunPayroll).toHaveBeenCalledOnce();
 });

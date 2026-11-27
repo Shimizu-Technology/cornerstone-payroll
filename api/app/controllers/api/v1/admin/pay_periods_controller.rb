@@ -447,11 +447,11 @@ module Api
                 pay_period: @pay_period,
                 client_managed: client_managed_lifecycle
               )
-              if scoped && (payroll_item.new_record? || !payroll_item.payment_delivery_method_overridden_in_snapshot?)
-                payroll_item.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
-              else
-                payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
-              end
+              payroll_item.sync_payment_delivery_method_for_calculation!(
+                pay_period: @pay_period,
+                employee: employee,
+                client_managed: client_managed_lifecycle
+              )
 
               preserve_correction_rate = if @pay_period.correction_run?
                 if scoped

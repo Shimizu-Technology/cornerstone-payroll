@@ -201,6 +201,7 @@ module TimeTracking
         end
 
         if results[:errors].any?
+          results[:applied] = []
           raise ActiveRecord::Rollback
         end
 

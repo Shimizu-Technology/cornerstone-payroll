@@ -55,11 +55,13 @@ class PayrollPaymentMethodService
         if @retire_existing_check && (!period.committed? || old_method != "paper_check" || method != "direct_deposit")
           raise Error, "Check retirement is only available when changing a committed paper check to direct deposit"
         end
+        uncommitted_changed = false
         unless old_method == method && item.payment_delivery_method == method
           if period.committed?
             change_committed!(company, old_method)
           else
             change_uncommitted!(period)
+            uncommitted_changed = true
           end
         end
 
@@ -69,7 +71,13 @@ class PayrollPaymentMethodService
           @reapproval_pay_period_ids |= default_service.reapproval_pay_period_ids
         end
 
-        sync_scoped_payment_delivery_snapshot!(period) unless period.committed?
+        unless period.committed?
+          snapshot_changed = sync_scoped_payment_delivery_snapshot!(period)
+          if (uncommitted_changed || snapshot_changed) && (period.calculated? || period.approved?)
+            @reapproval_pay_period_ids |= [ period.id ] if period.approved?
+            self.class.refresh_review!(period: period, actor: actor)
+          end
+        end
 
         AuditLog.record!(
           user: actor,
@@ -101,23 +109,17 @@ class PayrollPaymentMethodService
 
   attr_reader :item, :method, :actor, :reason, :confirm_not_paid, :ip_address
 
-  def change_uncommitted!(period)
+  def change_uncommitted!(_period)
     if method == "direct_deposit" && item.check_number.present?
       raise Error, "Remove the draft check number before choosing direct deposit"
     end
 
     item.update!(payment_delivery_method: method)
-    return unless period.calculated? || period.approved?
-
-    @reapproval_pay_period_ids << period.id if period.approved?
-    self.class.refresh_review!(period: period, actor: actor)
   end
 
-  def sync_scoped_payment_delivery_snapshot!(period)
+  def sync_scoped_payment_delivery_snapshot!(_period)
     snapshot = item.calculation_context_snapshot.to_h
-    return unless snapshot.key?("paycheck_input_fingerprint") ||
-      PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: item.employee, pay_period: period)
-    return unless snapshot.key?("paycheck_input_fingerprint")
+    return false unless snapshot.key?("paycheck_input_fingerprint")
 
     current_default = item.employee.reload.payment_delivery_method.presence || "paper_check"
     resolved_item_method = item.effective_payment_delivery_method
@@ -126,7 +128,10 @@ class PayrollPaymentMethodService
       "employee_payment_default_at_calculation" => current_default,
       "payment_delivery_method_overridden" => (resolved_item_method != current_default)
     )
-    item.update!(calculation_context_snapshot: updated_snapshot) if updated_snapshot != snapshot
+    return false if updated_snapshot == snapshot
+
+    item.update!(calculation_context_snapshot: updated_snapshot)
+    true
   end
 
   def self.refresh_review!(period:, actor:)

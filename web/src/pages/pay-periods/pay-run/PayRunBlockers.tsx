@@ -53,7 +53,7 @@ export function PayRunBlockers({
   const showApproval = part === 'all' || part === 'approval';
   return (<>
 {showLifecycle && staleEmployees.length > 0 && (payPeriod.status === 'calculated' || payPeriod.status === 'approved') && (
-  <Alert id="payroll-stale-calculation" tone="error">
+  <Alert id="payroll-stale-calculation" tone="error" tabIndex={-1}>
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger-700" aria-hidden="true" />
@@ -88,7 +88,7 @@ export function PayRunBlockers({
   </Alert>
 )}
 {showLifecycle && unverifiedChanges.length > 0 && payPeriod.status !== 'committed' && payPeriod.correction_status !== 'voided' && (
-  <Alert id="payroll-unverified-changes" tone="warning" className="border-warning-200 bg-warning-50/70">
+  <Alert id="payroll-unverified-changes" tone="warning" tabIndex={-1} className="border-warning-200 bg-warning-50/70">
     <div>
       <p className="font-semibold text-warning-950">
         Changed since last payroll, not verified ({unverifiedChanges.length})

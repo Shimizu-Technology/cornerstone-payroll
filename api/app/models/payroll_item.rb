@@ -112,6 +112,19 @@ class PayrollItem < ApplicationRecord
     recorded_item.present? && recorded_default.present? && recorded_item != recorded_default
   end
 
+  def sync_payment_delivery_method_for_calculation!(pay_period: self.pay_period, employee: self.employee, client_managed: nil)
+    scoped = PayrollReadinessPolicy.fingerprint_scoped?(
+      employee: employee,
+      pay_period: pay_period,
+      client_managed: client_managed
+    )
+    if scoped && pay_period.status.in?(%w[draft calculated]) && (new_record? || !payment_delivery_method_overridden_in_snapshot?)
+      self.payment_delivery_method = employee&.payment_delivery_method.presence || "paper_check"
+    else
+      self.payment_delivery_method ||= effective_payment_delivery_method
+    end
+  end
+
   # True when this row was created by IssueCorrectivePaycheckService and
   # represents a delta against another payroll item (rather than an
   # absolute period entry).
@@ -809,13 +822,7 @@ class PayrollItem < ApplicationRecord
         raise ActiveRecord::RecordInvalid, calculation_period
       end
       self.pay_period = calculation_period
-      if PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: employee, pay_period: calculation_period) &&
-          calculation_period.status.in?(%w[draft calculated]) &&
-          !payment_delivery_method_overridden_in_snapshot?
-        self.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
-      else
-        self.payment_delivery_method ||= effective_payment_delivery_method
-      end
+      sync_payment_delivery_method_for_calculation!(pay_period: calculation_period, employee: employee)
 
       if variable_salary_missing?
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."

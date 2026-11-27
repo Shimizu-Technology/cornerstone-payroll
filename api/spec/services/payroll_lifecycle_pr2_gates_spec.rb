@@ -754,7 +754,9 @@ RSpec.describe "Lifecycle PR 2 pay-run readiness, stale-input fingerprint & comm
       new_hire = create_ready_enforced_employee(first_name: "Jordan", last_name: "ClientHire", document_readiness_required: false)
       EmployeeDocumentReadiness.seed_new_hire!(employee: new_hire, actor: admin_user)
       expect(new_hire.reload.document_readiness_required?).to be(false)
-      expect(new_hire.employee_document_requirements.pluck(:required_for_payroll)).to all(be(false))
+      seeded_requirements = new_hire.employee_document_requirements.order(:requirement_type)
+      expect(seeded_requirements.pluck(:requirement_type)).to match_array(EmployeeDocumentReadiness::DEFAULT_REQUIREMENTS.fetch("w2"))
+      expect(seeded_requirements.pluck(:required_for_payroll)).to all(be(false))
 
       # 2. Explicit staff opt-in to document_readiness_required: true on a readiness_gate_enforced hire STILL blocks payroll
       opt_in_hire = create_ready_enforced_employee(first_name: "Sloane", last_name: "OptIn", document_readiness_required: true)
@@ -1376,6 +1378,499 @@ RSpec.describe "Lifecycle PR 2 pay-run readiness, stale-input fingerprint & comm
       expect(period.reload.status).to eq("calculated")
     end
   end
+
+  describe "CodeRabbit PR #685 review fixes and regression coverage" do
+    it "carries a future-effective off-roster new_hire item past the prior commit cutoff until acknowledged, while preserving on_run behavior" do
+      active_worker = create_ready_enforced_employee(first_name: "Taylor", last_name: "Active")
+      future_hire = create_incomplete_enforced_employee(
+        first_name: "Casey",
+        last_name: "FutureHire",
+        hire_date: Date.new(2026, 12, 1)
+      )
+
+      new_hire_item = EmployeeVerificationItem.create!(
+        company: company,
+        employee: future_hire,
+        event_kind: "new_hire",
+        status: "pending_verification",
+        affects_pay: true,
+        effective_on: Date.new(2026, 12, 1),
+        created_at: Time.zone.local(2026, 11, 20, 10, 0, 0),
+        updated_at: Time.zone.local(2026, 11, 20, 10, 0, 0)
+      )
+
+      # Run 1 (Nov 16 - Nov 30): Dec 1 new_hire is future-effective, so excluded and not acknowledged
+      nov_period, _ = build_calculated_period(
+        employee: active_worker,
+        start_date: Date.new(2026, 11, 16),
+        end_date: Date.new(2026, 11, 30),
+        pay_date: Date.new(2026, 12, 4)
+      )
+      expect(PayPeriodUnverifiedChanges.new(nov_period).relation.pluck(:id)).to eq([])
+      PayPeriodLifecycleService.new(pay_period: nov_period, actor: admin_user).approve!
+      PayPeriodLifecycleService.new(pay_period: nov_period, actor: admin_user).commit!
+      expect(nov_period.reload.status).to eq("committed")
+
+      # Run 2 (Dec 1 - Dec 15): future_hire is STILL off-roster, effective_on <= Dec 15,
+      # created_at < nov_period.committed_at, and never acknowledged -> MUST surface and block commit!
+      dec_period, _ = build_calculated_period(
+        employee: active_worker,
+        start_date: Date.new(2026, 12, 1),
+        end_date: Date.new(2026, 12, 15),
+        pay_date: Date.new(2026, 12, 18)
+      )
+      expect(PayPeriodUnverifiedChanges.new(dec_period).relation.pluck(:id)).to eq([ new_hire_item.id ])
+      PayPeriodLifecycleService.new(pay_period: dec_period, actor: admin_user).approve!
+
+      expect {
+        PayPeriodLifecycleService.new(pay_period: dec_period, actor: admin_user).commit!
+      }.to raise_error(PayPeriodLifecycleService::CommitConflict) { |err|
+        expect(err.code).to eq("unverified_changes_changed")
+      }
+
+      PayPeriodLifecycleService.new(pay_period: dec_period, actor: admin_user).commit!(
+        acknowledged_verification_items: [
+          { id: new_hire_item.id, updated_at: new_hire_item.updated_at.utc.iso8601(6) }
+        ]
+      )
+      expect(dec_period.reload.status).to eq("committed")
+
+      # Run 3 (Dec 16 - Dec 31): once acknowledged on a committed run, an unchanged off-roster
+      # lifecycle item is no longer surfaced in lifecycle_scope...
+      late_dec_period, _ = build_calculated_period(
+        employee: active_worker,
+        start_date: Date.new(2026, 12, 16),
+        end_date: Date.new(2026, 12, 31),
+        pay_date: Date.new(2026, 12, 31)
+      )
+      expect(PayPeriodUnverifiedChanges.new(late_dec_period).relation.pluck(:id)).to eq([])
+
+      # ...but if the employee IS on the run (on_run), the open item STILL surfaces!
+      late_dec_period.payroll_items.create!(
+        company: company,
+        employee: future_hire,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 10,
+        payment_delivery_method: "paper_check"
+      )
+      expect(PayPeriodUnverifiedChanges.new(late_dec_period).relation.pluck(:id)).to eq([ new_hire_item.id ])
+    end
+
+    it "binds paycheck_input_fingerprint to the W-4 election used for withholding even when a newer W-4 commits before snapshot capture" do
+      employee = create_ready_enforced_employee(first_name: "Morgan", last_name: "ConcurrentW4")
+      original_w4 = employee.w4_election_on(Date.new(2026, 11, 20))
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 25.00,
+        hours_worked: 80,
+        payment_delivery_method: "paper_check"
+      )
+
+      newer_w4 = nil
+      allow(PayrollCalculationContext).to receive(:capture).and_wrap_original do |original, **kwargs|
+        newer_w4 = EmployeeW4Election.create!(
+          EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+            company: company,
+            employee: employee,
+            filing_status: "married",
+            effective_on: Date.new(2026, 11, 10),
+            w4_signed_on: Date.new(2026, 11, 10),
+            w4_form_version: 2020,
+            source: "client_direct",
+            reason: "Concurrent W-4 change during calculation"
+          )
+        )
+        employee.association(:employee_w4_elections).reset
+        original.call(**kwargs)
+      end
+
+      item.calculate!
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      expect(item.reload.tax_rule_snapshot.dig("w4", "election_id")).to eq(original_w4.id)
+      expected_old_fp = PayrollCalculationContext.paycheck_input_fingerprint(
+        employee: employee,
+        pay_period: period,
+        w4_election: original_w4,
+        w4_profile: original_w4.profile_attributes
+      )
+      live_new_fp = PayrollCalculationContext.paycheck_input_fingerprint(employee: employee, pay_period: period)
+
+      expect(item.calculation_context_snapshot["paycheck_input_fingerprint"]).to eq(expected_old_fp)
+      expect(live_new_fp).not_to eq(expected_old_fp)
+      expect(newer_w4).to be_present
+
+      expect {
+        PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+      }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate payroll.*Morgan ConcurrentW4/)
+    end
+
+    it "scoping retirement inputs to the paycheck pay_date/tax_year ignores future elections and unrelated tax years while detecting applicable changes" do
+      AnnualRetirementLimit.find_or_create_by!(tax_year: 2026) do |limit|
+        limit.elective_deferral_limit = 23_500
+        limit.catch_up_limit = 7_500
+        limit.enhanced_catch_up_limit = 11_250
+        limit.roth_catch_up_wage_threshold = 145_000
+        limit.annual_additions_limit = 70_000
+        limit.compensation_limit = 350_000
+        limit.source_name = "IRS Notice"
+        limit.source_url = "https://www.irs.gov"
+      end
+
+      employee = create_ready_enforced_employee(first_name: "Avery", last_name: "Retirement")
+      EmployeeRetirementElection.create!(
+        company: company,
+        employee: employee,
+        effective_on: Date.new(2026, 1, 1),
+        plan_name: "401k Plan",
+        eligible: true,
+        participating: true,
+        traditional_contribution_type: "percentage",
+        traditional_rate: 0.04,
+        roth_contribution_type: "percentage",
+        roth_rate: 0,
+        source: "staff",
+        reason: "Initial election"
+      )
+      period, item = build_calculated_period(employee: employee)
+      PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+      original_fp = item.reload.calculation_context_snapshot.fetch("paycheck_input_fingerprint")
+
+      # Adding a future-effective retirement election (after pay_date) and a 2027 year input must NOT invalidate the approved 2026 run
+      EmployeeRetirementElection.create!(
+        company: company,
+        employee: employee,
+        effective_on: period.pay_date + 10.days,
+        plan_name: "401k Plan",
+        eligible: true,
+        participating: true,
+        traditional_contribution_type: "percentage",
+        traditional_rate: 0.06,
+        roth_contribution_type: "percentage",
+        roth_rate: 0,
+        source: "staff",
+        reason: "Next month rate increase"
+      )
+      EmployeeRetirementYearInput.create!(
+        company: company,
+        employee: employee,
+        tax_year: 2027,
+        prior_year_wage_status: "unknown",
+        source_reference: "2027-admin-note",
+        reason: "Next year setup"
+      )
+
+      expect(PayrollCalculationContext.paycheck_input_fingerprint(employee: employee.reload, pay_period: period)).to eq(original_fp)
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period, stage: :commit)).to eq([])
+
+      # Adding an election effective on or before pay_date DOES invalidate the run
+      EmployeeRetirementElection.create!(
+        company: company,
+        employee: employee,
+        effective_on: period.pay_date,
+        plan_name: "401k Plan",
+        eligible: true,
+        participating: true,
+        traditional_contribution_type: "percentage",
+        traditional_rate: 0.05,
+        roth_contribution_type: "percentage",
+        roth_rate: 0,
+        source: "staff",
+        reason: "Same-day election update"
+      )
+      expect(PayrollCalculationContext.paycheck_input_fingerprint(employee: employee.reload, pay_period: period)).not_to eq(original_fp)
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period, stage: :commit).map { |e| e[:employee_id] }).to eq([ employee.id ])
+    end
+
+    it "reuses preloaded associations and caches the tax-ID HMAC key during staleness scans" do
+      emp1 = create_ready_enforced_employee(first_name: "Preload", last_name: "One")
+      emp2 = create_ready_enforced_employee(first_name: "Preload", last_name: "Two")
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      [ emp1, emp2 ].each do |emp|
+        item = period.payroll_items.create!(
+          company: company,
+          employee: emp,
+          employment_type: "hourly",
+          pay_rate: 20.00,
+          hours_worked: 40,
+          payment_delivery_method: "paper_check"
+        )
+        item.calculate!
+      end
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # Warm key cache once, then confirm repeated scans do not re-derive PBKDF2 keys or re-query preloaded associations
+      PayrollCalculationContext.paycheck_input_fingerprint(employee: emp1, pay_period: period)
+      expect(ActiveSupport::KeyGenerator).not_to receive(:new)
+
+      queries = []
+      callback = lambda do |_name, _start, _finish, _id, payload|
+        next if payload[:name] == "SCHEMA" || payload[:cached]
+
+        queries << payload[:sql]
+      end
+
+      result = ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+        PayrollReadinessPolicy.stale_calculation_employees_for(period, stage: :approve)
+      end
+
+      expect(result).to eq([])
+      deduction_queries = queries.select { |sql| sql.include?('FROM "employee_deductions"') }
+      field_queries = queries.select { |sql| sql.include?('FROM "employee_payroll_fields"') }
+      retirement_queries = queries.select { |sql| sql.include?('FROM "employee_retirement_elections"') || sql.include?('FROM "employee_retirement_year_inputs"') }
+      expect(deduction_queries.size).to be <= 1
+      expect(field_queries.size).to be <= 1
+      expect(retirement_queries.size).to be <= 2
+    end
+
+    it "issues the replacement client review AFTER syncing calculation_context_snapshot in PayrollPaymentMethodService" do
+      company.update!(client_payroll_approval_required: true)
+      employee = create_ready_enforced_employee(first_name: "Quinn", last_name: "ReviewSync", payment_delivery_method: "paper_check")
+      period, item = build_calculated_period(employee: employee)
+      PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+      initial_package = period.payroll_review_packages.current.first!
+
+      # 1. Change item method with update_employee_default: true on an approved fingerprinted run
+      PayrollPaymentMethodService.new(
+        payroll_item: item,
+        method: "direct_deposit",
+        actor: admin_user,
+        update_employee_default: true
+      ).call
+
+      item.reload
+      period.reload
+      expect(period.status).to eq("calculated")
+      expect(item.payment_delivery_method).to eq("direct_deposit")
+      expect(employee.reload.payment_delivery_method).to eq("direct_deposit")
+      expect(item.calculation_context_snapshot["item_payment_delivery_method"]).to eq("direct_deposit")
+      expect(item.calculation_context_snapshot["employee_payment_default_at_calculation"]).to eq("direct_deposit")
+      expect(item.calculation_context_snapshot["payment_delivery_method_overridden"]).to be(false)
+
+      replacement_package = period.payroll_review_packages.current.order(revision: :desc).first!
+      expect(replacement_package.id).not_to eq(initial_package.id)
+      expect {
+        PayrollReview::RevisionService.new(pay_period: period, actor: admin_user).verify_current_checksum!(replacement_package)
+      }.not_to raise_error
+
+      # Approving and publishing must succeed without StaleRevisionError
+      PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+      expect(period.reload.status).to eq("approved")
+
+      # 2. Change item method back to paper_check WITHOUT changing employee default (per-item override)
+      PayrollPaymentMethodService.new(
+        payroll_item: item.reload,
+        method: "paper_check",
+        actor: admin_user,
+        update_employee_default: false
+      ).call
+
+      override_package = period.reload.payroll_review_packages.current.order(revision: :desc).first!
+      expect(item.reload.calculation_context_snapshot["payment_delivery_method_overridden"]).to be(true)
+      expect {
+        PayrollReview::RevisionService.new(pay_period: period, actor: admin_user).verify_current_checksum!(override_package)
+      }.not_to raise_error
+    end
+
+    it "blocks approval when a label-only wage_rate_hours entry no longer resolves to any dated employee wage rate" do
+      employee = create_ready_enforced_employee(first_name: "Jamie", last_name: "LabelOnly")
+      primary_rate = employee.employee_wage_rates.create!(label: "Regular", rate: 20.00, is_primary: true, active: true)
+      secondary_rate = employee.employee_wage_rates.create!(label: "Old Shift", rate: 28.00, is_primary: false, active: true)
+
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40,
+        payment_delivery_method: "paper_check"
+      )
+      item.wage_rate_hours = [
+        { employee_wage_rate_id: primary_rate.id, label: "Regular", rate: 20.00, regular_hours: 30, overtime_hours: 0, is_primary: true, active: true },
+        { employee_wage_rate_id: nil, label: "Old Shift", rate: 28.00, regular_hours: 10, overtime_hours: 0, is_primary: false, active: true }
+      ]
+      item.calculate!
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # While "Old Shift" resolves at $28.00, item is NOT stale
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period, stage: :approve)).to eq([])
+
+      # Rename the secondary rate (or remove the label) and recalculate standalone WITHOUT repricing the label-only entry
+      secondary_rate.update_columns(label: "New Shift", rate: 32.00)
+      EmployeeWageRateVersion.where(employee_wage_rate_id: secondary_rate.id).update_all(label: "New Shift", rate: 32.00)
+      item.reload.calculate!
+
+      # Approval MUST fail closed even after standalone calculate! because "Old Shift" no longer resolves to any dated rate
+      stale = PayrollReadinessPolicy.stale_calculation_employees_for(period, stage: :approve)
+      expect(stale.map { |entry| entry[:employee_id] }).to eq([ employee.id ])
+      expect {
+        PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+      }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate payroll.*Jamie LabelOnly/)
+    end
+
+    it "clears results[:applied] when TimeTracking::ApplyImportService rolls back due to an error" do
+      ready = create_ready_enforced_employee(first_name: "Ready", last_name: "Rollback")
+      incomplete = create_incomplete_enforced_employee(first_name: "Blocked", last_name: "Rollback")
+      workweek = CompanyWorkweek.create!(
+        company: company,
+        starts_on_weekday: 0,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        effective_on: Date.new(2026, 1, 1),
+        confirmed_by: admin_user,
+        confirmed_at: Time.current,
+        notes: "Confirmed workweek"
+      )
+      tt_period = create(
+        :pay_period,
+        company: company,
+        company_workweek: workweek,
+        start_date: Date.new(2026, 11, 15),
+        end_date: Date.new(2026, 11, 28),
+        pay_date: Date.new(2026, 12, 4),
+        status: "draft"
+      )
+      source = create(:time_tracking_source, company: company)
+      # Row 1 applies cleanly, Row 2 errors (unmapped employee) -> whole batch rolls back and applied MUST be empty
+      payload = {
+        "schema_version" => "1.0",
+        "validation_version" => "time_summary_v1",
+        "start_date" => tt_period.start_date.iso8601,
+        "end_date" => tt_period.end_date.iso8601,
+        "legal_workweek" => {
+          "company_workweek_id" => workweek.id,
+          "starts_on_weekday" => workweek.starts_on_weekday,
+          "starts_at_minutes" => workweek.starts_at_minutes,
+          "timezone" => workweek.timezone
+        },
+        "rows" => [
+          {
+            "source_user_id" => "u-ready",
+            "source_email" => "ready@example.com",
+            "source_display_name" => ready.full_name,
+            "employee_id" => ready.id,
+            "regular_hours" => 40.0,
+            "overtime_hours" => 0.0,
+            "categories" => [ { "source_category_id" => "reg", "name" => "Regular", "regular_hours" => 40.0, "overtime_hours" => 0.0, "total_hours" => 40.0 } ],
+            "warnings" => []
+          },
+          {
+            "source_user_id" => "u-missing",
+            "source_email" => "missing@example.com",
+            "source_display_name" => incomplete.full_name,
+            "employee_id" => nil,
+            "regular_hours" => 16.0,
+            "overtime_hours" => 0.0,
+            "categories" => [ { "source_category_id" => "reg", "name" => "Regular", "regular_hours" => 16.0, "overtime_hours" => 0.0, "total_hours" => 16.0 } ],
+            "warnings" => []
+          }
+        ]
+      }
+      tt_import = TimeTrackingImport.create!(
+        pay_period: tt_period,
+        time_tracking_source: source,
+        start_date: tt_period.start_date,
+        end_date: tt_period.end_date,
+        fetch_start_date: tt_period.start_date,
+        fetch_end_date: tt_period.end_date,
+        source_payload_hash: Digest::SHA256.hexdigest("tt-rollback-clear-applied"),
+        processed_payload: payload
+      )
+
+      result = TimeTracking::ApplyImportService.new(import: tt_import, mappings: [], applied_by: admin_user).call
+      expect(result[:errors]).not_to be_empty
+      expect(result[:applied]).to eq([])
+      expect(tt_period.payroll_items.count).to eq(0)
+      expect(tt_import.reload.status).to eq("previewed")
+    end
+
+    it "keeps approval_first companies unchanged across calculation, payment-method service, and stale-rate checks" do
+      legacy_employee = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Legacy",
+        last_name: "ApprovalFirst",
+        date_of_birth: Date.new(1990, 1, 1),
+        hire_date: Date.new(2026, 1, 1),
+        pay_rate: 20.00,
+        pay_frequency: "biweekly",
+        payment_delivery_method: "paper_check",
+        readiness_gate_enforced: false
+      )
+      add_w4!(legacy_employee)
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: legacy_employee,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40,
+        payment_delivery_method: "direct_deposit"
+      )
+      item.wage_rate_hours = [
+        { employee_wage_rate_id: nil, label: "Unmatched Legacy Label", rate: 20.00, regular_hours: 40, overtime_hours: 0, is_primary: true, active: true }
+      ]
+      item.calculate!
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # Explicit payment method preserved (shared rule does not overwrite approval_first item), and no scoped snapshot keys written
+      expect(item.reload.payment_delivery_method).to eq("direct_deposit")
+      expect(item.calculation_context_snapshot.keys).not_to include(
+        "paycheck_input_fingerprint",
+        "item_payment_delivery_method",
+        "employee_payment_default_at_calculation",
+        "payment_delivery_method_overridden"
+      )
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period, stage: :approve)).to eq([])
+
+      PayrollPaymentMethodService.new(
+        payroll_item: item,
+        method: "paper_check",
+        actor: admin_user,
+        update_employee_default: false
+      ).call
+      expect(item.reload.calculation_context_snapshot.keys).not_to include("paycheck_input_fingerprint", "item_payment_delivery_method")
+
+      PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+      expect(period.reload.status).to eq("approved")
+    end
+  end
 end
 
 RSpec.describe "Concurrent commit verification acknowledgements (L8)" do
@@ -1442,48 +1937,89 @@ RSpec.describe "Concurrent commit verification acknowledgements (L8)" do
     PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
 
     ack_payload = [ { id: verification_item.id, updated_at: verification_item.updated_at.utc.iso8601(6) } ]
-    barrier = Queue.new
-    outcomes = Queue.new
+    first_lock_acquired = Queue.new
+    second_attempting = Queue.new
+    release_first = Queue.new
+    outcomes = {}
+    outcomes_mutex = Mutex.new
 
-    threads = 2.times.map do
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier.pop
-          begin
-            PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(admin_user.id))
-              .commit!(acknowledged_verification_items: ack_payload)
-            outcomes << :committed
-          rescue PayPeriodLifecycleService::InvalidTransitionError => e
-            outcomes << [ :invalid_transition, e.message ]
-          rescue StandardError => e
-            outcomes << [ :unexpected, e.class.name, e.message ]
-          end
+    first_thread = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do
+        service = PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(admin_user.id))
+        service.define_singleton_method(:validate_verification_acknowledgements!) do |acknowledged_items|
+          first_lock_acquired << true
+          release_first.pop(timeout: 5)
+          super(acknowledged_items)
+        end
+        begin
+          service.commit!(acknowledged_verification_items: ack_payload)
+          outcomes_mutex.synchronize { outcomes[:first] = :committed }
+        rescue PayPeriodLifecycleService::InvalidTransitionError => e
+          outcomes_mutex.synchronize { outcomes[:first] = [ :invalid_transition, e.message ] }
+        rescue StandardError => e
+          outcomes_mutex.synchronize { outcomes[:first] = [ :unexpected, e.class.name, e.message ] }
+        ensure
+          first_lock_acquired << false if first_lock_acquired.empty?
         end
       end
     end
 
-    2.times { barrier << :go }
-    threads.each(&:join)
+    expect(first_lock_acquired.pop(timeout: 5)).to be(true)
 
-    results = 2.times.map { outcomes.pop }
-    expect(results.count(:committed)).to eq(1)
-    expect(results.select { |r| r.is_a?(Array) && r.first == :invalid_transition }.size).to eq(1)
+    second_thread = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        second_attempting << conn.select_value("SELECT pg_backend_pid()").to_i
+        begin
+          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(admin_user.id))
+            .commit!(acknowledged_verification_items: ack_payload)
+          outcomes_mutex.synchronize { outcomes[:second] = :committed }
+        rescue PayPeriodLifecycleService::InvalidTransitionError => e
+          outcomes_mutex.synchronize { outcomes[:second] = [ :invalid_transition, e.message ] }
+        rescue StandardError => e
+          outcomes_mutex.synchronize { outcomes[:second] = [ :unexpected, e.class.name, e.message ] }
+        end
+      end
+    end
+
+    second_pid = second_attempting.pop(timeout: 5)
+    expect(second_pid).to be_a(Integer)
+
+    contended = false
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5.0
+    ActiveRecord::Base.connection_pool.with_connection do |conn|
+      while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+        wait_event_type = conn.select_value(
+          "SELECT wait_event_type FROM pg_stat_activity WHERE pid = #{second_pid.to_i}"
+        )
+        if wait_event_type == "Lock"
+          contended = true
+          break
+        end
+        sleep 0.02
+      end
+    end
+
+    release_first << true
+    first_thread.join(10)
+    second_thread.join(10)
+
+    expect(contended).to be(true)
+    expect(outcomes[:first]).to eq(:committed)
+    expect(outcomes[:second]).to eq([ :invalid_transition, "Can only commit an approved pay period" ])
     expect(period.reload.status).to eq("committed")
     expect(PayPeriodVerificationAcknowledgement.where(pay_period_id: period.id, employee_verification_item_id: verification_item.id).count).to eq(1)
   ensure
     # Keep non-transactional test DB clean without requiring superuser session_replication_role.
     if defined?(company) && company&.persisted?
       ActiveRecord::Base.connection_pool.with_connection do |conn|
-        begin
+        conn.transaction(requires_new: true) do
           conn.execute("ALTER TABLE pay_period_verification_acknowledgements DISABLE TRIGGER pay_period_verification_acknowledgements_append_only")
           PayPeriodVerificationAcknowledgement.where(company_id: company.id).delete_all
-        ensure
           conn.execute("ALTER TABLE pay_period_verification_acknowledgements ENABLE TRIGGER pay_period_verification_acknowledgements_append_only")
         end
-        begin
+        conn.transaction(requires_new: true) do
           conn.execute("ALTER TABLE check_events DISABLE TRIGGER check_events_append_only")
           CheckEvent.where(company_id: company.id).delete_all
-        ensure
           conn.execute("ALTER TABLE check_events ENABLE TRIGGER check_events_append_only")
         end
 

@@ -37,9 +37,20 @@ class PayPeriodUnverifiedChanges
     lifecycle_scope = base
       .where(event_kind: LIFECYCLE_EVENT_KINDS)
       .where("effective_on IS NULL OR effective_on <= ?", @pay_period.end_date)
-
-    cutoff = last_committed_regular_cutoff
-    lifecycle_scope = lifecycle_scope.where("created_at > ?", cutoff) if cutoff.present?
+      .where(
+        <<~SQL.squish
+          NOT EXISTS (
+            SELECT 1
+            FROM pay_period_verification_acknowledgements ppva
+            INNER JOIN pay_periods pp ON pp.id = ppva.pay_period_id
+            WHERE ppva.company_id = employee_verification_items.company_id
+              AND ppva.employee_verification_item_id = employee_verification_items.id
+              AND ppva.item_updated_at_snapshot = employee_verification_items.updated_at
+              AND pp.status = 'committed'
+              AND (pp.correction_status IS NULL OR pp.correction_status <> 'voided')
+          )
+        SQL
+      )
 
     on_run.or(lifecycle_scope).order(:employee_id, :id)
   end
@@ -67,17 +78,6 @@ class PayPeriodUnverifiedChanges
 
   def applicable_period?
     @pay_period.status.in?(%w[draft calculated approved]) && !@pay_period.voided?
-  end
-
-  def last_committed_regular_cutoff
-    last_committed = PayPeriod.reportable_committed
-      .where(company_id: @pay_period.company_id, cycle: "regular", run_purpose: "regular")
-      .where.not(id: @pay_period.id)
-      .where("end_date < ? OR (end_date = ? AND id < ?)", @pay_period.end_date, @pay_period.end_date, @pay_period.id)
-      .order(committed_at: :desc, end_date: :desc, id: :desc)
-      .first
-
-    last_committed&.committed_at
   end
 
   def summary_for(item)

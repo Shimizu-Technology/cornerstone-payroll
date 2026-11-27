@@ -71,11 +71,15 @@ class CreateClientOperatingProfiles < ActiveRecord::Migration[8.1]
                              name: "client_operating_profiles_no_overlapping_dates"
     end
 
+    connection.schema_cache.clear_data_source_cache!("client_operating_profiles")
+    MigrationClientOperatingProfile.reset_column_information
     backfill_existing_companies!
   end
 
   def down
     drop_table :client_operating_profiles
+    connection.schema_cache.clear_data_source_cache!("client_operating_profiles")
+    MigrationClientOperatingProfile.reset_column_information
   end
 
   private

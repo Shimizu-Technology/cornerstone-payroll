@@ -266,17 +266,23 @@ class PayrollReadinessPolicy
       if compensation.hourly_pay_basis? && item.wage_rate_hours.present?
         dated_rates = employee.wage_rates_on(pay_period.end_date, include_inactive: true)
         rates_by_id = dated_rates.index_by { |rate| rate.id.to_i }
-        rates_by_label = dated_rates.index_by { |rate| rate.label.to_s.strip.downcase }
+        rates_by_label = dated_rates.group_by { |rate| rate.label.to_s.strip.downcase }
 
         item.wage_rate_hours.each do |entry|
           rate_id = entry["employee_wage_rate_id"].presence&.to_i
           dated_rate = if rate_id
             rates_by_id[rate_id]
           else
-            rates_by_label[entry["label"].to_s.strip.downcase]
+            matches = rates_by_label[entry["label"].to_s.strip.downcase] || []
+            if matches.one?
+              matches.first
+            else
+              active_matches = matches.select(&:active?)
+              active_matches.one? ? active_matches.first : nil
+            end
           end
-          return true if rate_id && dated_rate.nil?
-          return true if dated_rate && entry["rate"].to_d != dated_rate.rate.to_d
+          return true if dated_rate.nil? || dated_rate.rate.nil?
+          return true if entry["rate"].to_d != dated_rate.rate.to_d
         end
 
         primary_entry = item.wage_rate_hours.find { |entry| entry["is_primary"] } || item.wage_rate_hours.first

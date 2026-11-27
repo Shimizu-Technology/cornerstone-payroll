@@ -1036,6 +1036,7 @@ class PayrollCalculator
       rates_on: pay_period.end_date,
       employee_basis: EmployeeCompensationChangeService::BASIS_ATTRIBUTES.index_with { |field| employee_value(field) }
         .merge("pay_rate" => payroll_item.pay_rate),
+      w4_election: w4_election_for_calculation,
       w4_profile: w4_profile_for_calculation,
       retirement_election: retirement_election_for_calculation,
       pay_period: pay_period,

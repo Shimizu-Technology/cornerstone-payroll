@@ -106,7 +106,13 @@ it('renders the collapsible Not included — incomplete setup panel with reasons
   );
 
   expect(screen.getByText('Removed from this run (1)')).toBeTruthy();
-  expect(screen.getByText('Not included — incomplete setup (1)')).toBeTruthy();
-  expect(screen.getByText('Morgan Example')).toBeTruthy();
-  expect(screen.getByText(/Can't be paid yet: W-4 missing and payment method not chosen\./)).toBeTruthy();
+  const summary = screen.getByText('Not included — incomplete setup (1)');
+  const details = summary.closest('details');
+  expect(details).not.toBeNull();
+  expect(details?.open).toBe(false);
+
+  fireEvent.click(summary);
+  expect(details?.open).toBe(true);
+  expect(within(details as HTMLElement).getByText('Morgan Example')).toBeTruthy();
+  expect(within(details as HTMLElement).getByText(/Can't be paid yet: W-4 missing and payment method not chosen\./)).toBeTruthy();
 });
