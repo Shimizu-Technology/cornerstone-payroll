@@ -214,7 +214,9 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
         "employee_id" => employee_01.id,
         "regular_hours" => 75.0,
         "overtime_hours" => 5.0,
-        "bonus" => 25.0
+        "bonus" => 25.0,
+        "confidence" => 1.0,
+        "pay_rate" => 20.0
       )
 
       import_id = response.parsed_body.fetch("import_id")

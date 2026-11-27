@@ -27,12 +27,12 @@ function submissionReceipt(detail: PeriodDetail): string {
   if (descriptor && descriptor.key !== 'mosa_revel') {
     const fileLabel = descriptor.label || 'Payroll files';
     const hasFiles = Boolean(sent?.documents.some(doc => doc.role !== 'attachment'));
-    return `Sent. Revision ${detail.current_revision} is with Cornerstone. ${fileLabel} ${hasFiles ? '✓' : 'not included'} · ${changed} changes${skipped ? ` · ${skipped} not this period` : ''}`;
+    return `Sent. Revision ${detail.current_revision} is with Cornerstone. ${fileLabel} ${hasFiles ? '✓' : 'not included'} · ${changed} ${changed === 1 ? 'change' : 'changes'}${skipped ? ` · ${skipped} not this period` : ''}`;
   }
   const workbook = sent?.workbook_choice === 'none' ? 'No tips or loans'
     : sent?.changes_link_url ? 'Link sent'
     : sent?.documents.some(doc => doc.role === 'changes_workbook') ? 'Workbook ✓' : 'Workbook not included';
-  return `Sent. Revision ${detail.current_revision} is with Cornerstone. Revel PDF ✓ · ${workbook} · ${changed} changes${skipped ? ` · ${skipped} not this period` : ''}`;
+  return `Sent. Revision ${detail.current_revision} is with Cornerstone. Revel PDF ✓ · ${workbook} · ${changed} ${changed === 1 ? 'change' : 'changes'}${skipped ? ` · ${skipped} not this period` : ''}`;
 }
 
 function DraftFiles({ draft, api, audience }: { draft: SubmissionDraft; api: typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi; audience: Audience }) {
