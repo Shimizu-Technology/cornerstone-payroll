@@ -58,6 +58,13 @@ class W2FilingInputsFingerprint
         .order(:id).map { |item| item.attributes.slice(*ITEM_FIELDS).merge("pay_date" => item.pay_period.pay_date.iso8601) },
       responsibility: PayrollFilingResponsibilityGate.annual(company: company, tax_year: year).dig(:filings, "w2_gu")
     }
+    # Native paychecks inside an opening balance block filing, so a year
+    # marked ready before one was detected is stale while it exists. Only
+    # added when one exists, so other clients' fingerprints don't move.
+    overlaps = PayrollBridgeOverlap.new(company_id: company.id, year: year).w2_blocking
+    if overlaps.any?
+      snapshot[:bridge_window_overlaps] = overlaps.map { |overlap| [ overlap.payroll_item.id, overlap.batch_id, overlap.evidence_digest ] }.sort
+    end
     Digest::SHA256.hexdigest(JSON.generate(QuickbooksHistory::CanonicalJson.normalize(snapshot)))
   end
 

@@ -47,7 +47,11 @@ module Parity
           gross_pay: left[:gross_current] || right[:summary_current]["Total Pay"],
           net_pay: right[:net_pay],
           non_taxable_pay: right[:summary_current]["Non-Taxable Pay"] || money(0),
-          taxes: right[:tax_amounts],
+          # The SUMMARY box's printed Taxes, not a sum of the rows (issue #637).
+          taxes: right[:tax_amounts].merge(
+            total_taxes: right[:summary_current]["Taxes"],
+            total_taxes_from_rows: right[:tax_amounts][:total_taxes]
+          ),
           tax_labels: right[:tax_labels],
           deductions: right[:deductions],
           employer_contributions: left[:employer_contributions],
@@ -74,7 +78,7 @@ module Parity
             pay_date: left[:pay_date]
           },
           payment: {
-            check_number: normalize_check_number(check_number)
+            **check_number_fields(check_number)
           },
           status: {
             voided: void_watermark

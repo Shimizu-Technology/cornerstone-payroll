@@ -40,13 +40,22 @@ module Parity
     end
 
     # Employee API exposes check_number_last4; client/staff APIs and PDFs carry
-    # the full check number. Normalizing to the last 4 characters compares
-    # consistently even on 5+ digit check numbers.
+    # the full check number. Views that print the full number compare it in
+    # full; only the comparison against the employee-facing last 4 uses this.
     def normalize_check_number(value)
       text = value.to_s.strip
       return nil if text.empty?
 
       text.last(4)
+    end
+
+    def full_check_number(value)
+      value.to_s.strip.presence
+    end
+
+    # Full number and last 4 for a view that prints the full check number.
+    def check_number_fields(value)
+      { check_number: full_check_number(value), check_number_last4: normalize_check_number(value) }
     end
 
     # Shared deduction-key normalization reused across API and PDF extractors so
