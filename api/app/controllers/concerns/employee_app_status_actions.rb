@@ -17,13 +17,13 @@ module EmployeeAppStatusActions
 
   def csv
     report = EmployeeAppStatusReport.new(current_company)
-    exporter = TabularReportCsvExporter.new(filename: report.filename(:csv), sheet: report.sheet(report_data(report).fetch(:employees)))
+    exporter = TabularReportCsvExporter.new(filename: report.filename(:csv), sheet: report.sheet(report.export_rows(**report_params)))
     send_data exporter.generate, filename: exporter.filename, type: "text/csv; charset=utf-8", disposition: "attachment"
   end
 
   def xlsx
     report = EmployeeAppStatusReport.new(current_company)
-    exporter = SpreadsheetReportExporter.new(filename: report.filename(:xlsx), sheets: [ report.sheet(report_data(report).fetch(:employees)) ])
+    exporter = SpreadsheetReportExporter.new(filename: report.filename(:xlsx), sheets: [ report.sheet(report.export_rows(**report_params)) ])
     send_data exporter.generate, filename: exporter.filename, type: SpreadsheetReportExporter::CONTENT_TYPE, disposition: "attachment"
   end
 
@@ -39,13 +39,14 @@ module EmployeeAppStatusActions
     render json: { error: "Company not found." }, status: :not_found
   end
 
-  def report_data(report = EmployeeAppStatusReport.new(current_company))
-    report.call(
-      filter: string_param(:filter),
-      department_id: string_param(:department_id),
-      role: string_param(:role),
-      query: string_param(:q)
-    )
+  def report_data
+    EmployeeAppStatusReport.new(current_company).call(**report_params)
+  end
+
+  # The page and both exports read the same params, so an export matches the
+  # result it was asked for.
+  def report_params
+    { filter: string_param(:filter), department_id: string_param(:department_id), role: string_param(:role), query: string_param(:q) }
   end
 
   def string_param(key)

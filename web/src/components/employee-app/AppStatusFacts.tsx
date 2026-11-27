@@ -3,18 +3,18 @@
 import { Badge } from '@/components/ui/badge';
 import { formatEmployeeAppDate } from '@/services/employee-app-rollout-api';
 import {
-  answerLabels, type AnswerFact, type AppAccount, type EmployeeAgreements, type TermsAcceptance,
+  accountTone, answerLabels, lastOpenedText, opensCoverageNote,
+  type AnswerFact, type AppAccount, type EmployeeAgreements, type TermsAcceptance,
 } from '@/services/employee-app-status-api';
 
 export function AccountCell({ account, showLastOpened = false }: {
   account: Pick<AppAccount, 'status' | 'label' | 'invite_sent_at' | 'signed_up_at'> & Partial<AppAccount>;
   showLastOpened?: boolean;
 }) {
-  const tone = account.status === 'active' ? 'success'
-    : account.status === 'invite_expired' || account.status === 'locked' || account.status === 'deactivated' ? 'warning' : 'default';
+  const tone = accountTone(account.status);
   let detail: string | null = null;
   if (account.status === 'active' && account.signed_up_at) detail = `Signed up ${formatEmployeeAppDate(account.signed_up_at)}`;
-  else if ((account.status === 'invited' || account.status === 'invite_expired') && account.invite_sent_at) {
+  else if ((account.status === 'invited' || account.status === 'reinvited' || account.status === 'invite_expired') && account.invite_sent_at) {
     detail = `Sent ${formatEmployeeAppDate(account.invite_sent_at)}`
       + (account.invite_expires_at ? ` · ${account.invite_expired ? 'expired' : 'expires'} ${formatEmployeeAppDate(account.invite_expires_at)}` : '');
   } else if (account.status === 'locked' && account.locked_until) detail = `Locked until ${formatEmployeeAppDate(account.locked_until, true)}`;
@@ -22,8 +22,8 @@ export function AccountCell({ account, showLastOpened = false }: {
     <div className="space-y-1">
       <Badge variant={tone}>{account.label}</Badge>
       {detail && <p className="text-xs text-neutral-600">{detail}</p>}
-      {showLastOpened && account.signed_up_at && (
-        <p className="text-xs text-neutral-600">{account.last_opened_at ? `Last opened ${formatEmployeeAppDate(account.last_opened_at)}` : 'Hasn’t opened the app'}</p>
+      {showLastOpened && (account.signed_up || account.last_opened_at) && (
+        <p className="text-xs text-neutral-600">{lastOpenedText(account.last_opened_at ?? null)}</p>
       )}
     </div>
   );
@@ -55,8 +55,9 @@ export function AgreementFacts({ agreements }: { agreements: EmployeeAgreements 
   const { account } = agreements;
   return (
     <dl aria-label="Agreements" className="grid gap-3 rounded-xl border border-neutral-200 p-3 sm:grid-cols-2">
-      <Fact label="Last opened the app">
-        <p className="text-sm text-neutral-900">{account.last_opened_at ? formatEmployeeAppDate(account.last_opened_at, true) : 'Never'}</p>
+      <Fact label="Opened the app">
+        <p className="text-sm text-neutral-900">{lastOpenedText(account.last_opened_at, true)}</p>
+        <p className="text-xs text-neutral-600">{opensCoverageNote(agreements.opens_recorded_since)}</p>
       </Fact>
       <Fact label="Employee App Terms and Privacy"><TermsFact terms={agreements.terms} /></Fact>
       <Fact label="Pay stubs"><AnswerCell fact={agreements.pay_statements} /></Fact>

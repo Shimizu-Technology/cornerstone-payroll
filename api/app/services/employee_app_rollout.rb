@@ -3,6 +3,10 @@
 # Company-scoped read model. Credentials and login records are never serialized.
 class EmployeeAppRollout
   EXPIRING_WITHIN = 3.days
+  DISPLAY_LABELS = {
+    not_invited: "Not invited", invited: "Invited", reinvited: "Re-invited", invite_expired: "Invite expired",
+    locked: "Locked", active: "Signed up", deactivated: "Deactivated", former: "Former", revoked: "Revoked"
+  }.freeze
 
   attr_reader :enabled
 
@@ -100,6 +104,33 @@ class EmployeeAppRollout
   end
 
   public
+
+  # The status people see, shared by the company report (EmployeeAppStatusReport)
+  # and the employee panel. Invite actions keep using status_of. A signed-up link
+  # whose login was turned off reads "Deactivated"; an open invite that follows
+  # an earlier sign-up (a rehire's new link, or a sign-up reset) reads "Re-invited".
+  def display_status(access, user:, reinvited:)
+    status = status_of(access)
+    return (user && !user.active? ? :deactivated : :active) if status == :active
+    return status unless status == :invited
+    return :invite_expired if access.invite_expires_at && access.invite_expires_at <= @now
+
+    reinvited ? :reinvited : :invited
+  end
+
+  # Open invites, among these links, that follow an earlier link for the same
+  # employee or a sign-up reset (finished or pending).
+  def reinvited_link_ids(links)
+    open = links.select(&:invited?)
+    return Set.new if open.empty?
+
+    reset = AuditLog.where(company_id: @company.id, record_type: EmployeeLinks::AUDIT_RECORD_TYPE, record_id: open.map(&:id),
+      action: "employee_links#sign_up_reset").distinct.pluck(:record_id).to_set
+    by_employee = links.group_by(&:employee_id)
+    open.select do |link|
+      reset.include?(link.id) || link.sign_up_reset_pending? || by_employee[link.employee_id].any? { |other| other.id < link.id }
+    end.to_set(&:id)
+  end
 
   def status_of(access)
     return :not_invited unless access

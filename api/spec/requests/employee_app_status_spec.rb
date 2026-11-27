@@ -101,11 +101,12 @@ RSpec.describe "Employee app status report", type: :request do
     expect(response.headers["Cache-Control"]).to include("no-store")
 
     expect(data.fetch("employees").map { |row| row["name"] }).to eq([ "Ben Example", "Cy Placeholder", "Ana Sample", "Di Testcase" ])
+    # Di signed up once, but her login is turned off: not signed up now.
     expect(data["summary"]).to eq(
-      "total" => 4, "signed_up" => 2, "never_signed_in" => 2, "invite_expired" => 1,
-      "terms_not_accepted" => 3, "no_paperless_answer" => 3, "kept_paper" => 1
+      "total" => 4, "signed_up" => 1, "opened" => 1, "not_signed_up" => 3, "signed_up_no_opens" => 0,
+      "invite_expired" => 1, "terms_not_accepted" => 3, "no_paperless_answer" => 3, "kept_paper" => 1
     )
-    expect(data).to include("enabled" => true, "current_terms_version" => "terms-2026-11")
+    expect(data).to include("enabled" => true, "current_terms_version" => "terms-2026-11", "opens_recorded_since" => "2026-11-25")
     expect(data["departments"]).to eq([ { "id" => kitchen.id, "name" => "Kitchen" } ])
     expect(data["roles"]).to eq(%w[Cook Server])
 
@@ -115,12 +116,13 @@ RSpec.describe "Employee app status report", type: :request do
       "pay_statements" => { "answer" => "paperless", "answered_at" => "2026-11-06T00:00:00Z" },
       "w2gu" => { "answer" => "keep_paper", "answered_at" => "2026-11-07T00:00:00Z" }
     )
-    expect(row_for(signed_up)["account"]).to include("status" => "active", "label" => "Signed up",
+    expect(row_for(signed_up)["account"]).to include("status" => "active", "label" => "Signed up", "signed_up" => true,
       "signed_up_at" => "2026-11-05T00:00:00Z", "last_opened_at" => "2026-11-26T03:00:00Z")
     expect(row_for(expired)["account"]).to include("status" => "invite_expired", "label" => "Invite expired",
       "invite_sent_at" => "2026-11-01T00:00:00Z", "invite_expired" => true, "signed_up_at" => nil)
     expect(row_for(uninvited)["account"]).to include("status" => "not_invited", "invite_sent_at" => nil)
-    expect(row_for(deactivated)["account"]).to include("status" => "deactivated", "label" => "Deactivated")
+    expect(row_for(deactivated)["account"]).to include("status" => "deactivated", "label" => "Deactivated",
+      "signed_up" => false, "signed_up_at" => nil)
     expect(row_for(deactivated)["terms"]).to include("version" => "terms-2026-10", "current" => false)
     expect(row_for(uninvited)["terms"]).to eq("version" => nil, "accepted_at" => nil, "current" => false)
 
@@ -130,7 +132,8 @@ RSpec.describe "Employee app status report", type: :request do
 
   it "narrows rows by each filter chip, department, role and name, while counts stay company-wide" do
     {
-      "never_signed_in" => [ expired, uninvited ],
+      "not_signed_up" => [ expired, uninvited, deactivated ],
+      "signed_up_no_opens" => [],
       "invite_expired" => [ expired ],
       "terms_not_accepted" => [ expired, uninvited, deactivated ],
       "no_paperless_answer" => [ expired, uninvited, deactivated ],
@@ -143,7 +146,7 @@ RSpec.describe "Employee app status report", type: :request do
 
     get path(staff), headers: headers(staff), params: { department_id: kitchen.id.to_s }
     expect(data["employees"].map { |row| row["id"] }).to eq([ signed_up.id ])
-    get path(staff), headers: headers(staff), params: { role: "Server", filter: "never_signed_in" }
+    get path(staff), headers: headers(staff), params: { role: "Server", filter: "not_signed_up" }
     expect(data["employees"].map { |row| row["id"] }).to eq([ expired.id, uninvited.id ])
     get path(staff), headers: headers(staff), params: { q: "  placeHOLDER " }
     expect(data["employees"].map { |row| row["id"] }).to eq([ uninvited.id ])
@@ -159,7 +162,7 @@ RSpec.describe "Employee app status report", type: :request do
     rows = CSV.parse(response.body)
     expect(rows.first).to eq(EmployeeAppStatusReport::HEADERS)
     expect(rows.first).to eq([
-      "Employee", "Department", "Role", "App account", "Invite sent", "Invite expires", "Signed up", "Last opened app",
+      "Employee", "Department", "Role", "App account", "Invite sent", "Invite expires", "Signed up", "Last recorded app open",
       "Terms version", "Terms accepted", "Pay stubs", "Pay stubs answered", "W-2GU", "W-2GU answered"
     ])
     expect(rows.drop(1)).to eq([ [
@@ -176,7 +179,7 @@ RSpec.describe "Employee app status report", type: :request do
 
   it "neutralizes formula-like names in the CSV export" do
     uninvited.update!(first_name: "=HYPERLINK(\"x\")", last_name: "Sample")
-    get path(staff, "/csv"), headers: headers(staff), params: { filter: "never_signed_in" }
+    get path(staff, "/csv"), headers: headers(staff), params: { filter: "not_signed_up" }
     expect(CSV.parse(response.body).drop(1).map(&:first)).to include("'=HYPERLINK(\"x\") Sample")
   end
 
@@ -224,5 +227,101 @@ RSpec.describe "Employee app status report", type: :request do
       params: { access_id: expired.employee_account_links.last.id, delivery: "email" }, as: :json
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body["code"]).to eq("client_view_only")
+  end
+
+  def record_open!(link, at)
+    AuditLog.record!(user: link.user, organization_id: company.organization_id, company_id: company.id,
+      action: "employee_portal/context#show", record_type: "employee_account_links", record_id: link.id)
+    latest = AuditLog.where(action: "employee_portal/context#show", user_id: link.user_id).maximum(:id)
+    AuditLog.where(id: latest).update_all(created_at: at)
+  end
+
+  it "keeps signed up and opened the app separate through resets, rehires and turned-off logins" do
+    # Gil's sign-up was reset and a fresh invite went out: re-invited, not signed up.
+    reset = create(:employee, company: company, first_name: "Gil", last_name: "Resetcase", department: nil)
+    reset_link = link!(reset, status: "invited", invite_expires_at: 3.days.from_now)
+    EmployeeLinks.audit!(reset_link, "sign_up_reset", user: staff)
+    # Hal was rehired: his old login opened the app, and his new invite is open.
+    rehired = create(:employee, company: company, first_name: "Hal", last_name: "Rehire", department: nil)
+    old_link = link!(rehired, status: "former", user: employee_login("user_status_hal"),
+      activated_at: Time.iso8601("2026-06-01T00:00:00Z"), former_at: 1.month.ago, former_access_until: 1.week.ago)
+    record_open!(old_link, Time.iso8601("2026-11-25T05:00:00Z"))
+    link!(rehired, status: "invited", invite_expires_at: 3.days.from_now)
+    # Ivy signed up and hasn't opened the app since recording began.
+    quiet = create(:employee, company: company, first_name: "Ivy", last_name: "Quiet", department: nil)
+    link!(quiet, status: "active", user: employee_login("user_status_ivy"), activated_at: Time.iso8601("2026-11-10T00:00:00Z"))
+
+    get path(staff), headers: headers(staff)
+    expect(row_for(reset)["account"]).to include("status" => "reinvited", "label" => "Re-invited", "signed_up" => false)
+    expect(row_for(rehired)["account"]).to include("status" => "reinvited", "signed_up" => false, "signed_up_at" => nil,
+      "last_opened_at" => "2026-11-25T05:00:00Z")
+    expect(row_for(quiet)["account"]).to include("status" => "active", "signed_up" => true, "last_opened_at" => nil)
+    expect(data["summary"]).to include("total" => 7, "signed_up" => 2, "opened" => 2, "not_signed_up" => 5, "signed_up_no_opens" => 1)
+
+    get path(staff), headers: headers(staff), params: { filter: "signed_up_no_opens" }
+    expect(data["employees"].map { |row| row["id"] }).to eq([ quiet.id ])
+
+    # Turning a login off moves the person out of signed up, in the report and the panel alike.
+    quiet.employee_account_links.sole.user.update!(active: false)
+    get path(staff), headers: headers(staff), params: { filter: "not_signed_up" }
+    expect(data["employees"].map { |row| row["id"] }).to include(quiet.id)
+    get "/api/v1/admin/employees/#{quiet.id}/employee_app", headers: headers(staff)
+    # The panel's invite actions still follow the link (active); what people see is the shared label.
+    expect(data).to include("status" => "active")
+    expect(data.dig("agreements", "account")).to include("status" => "deactivated", "label" => "Deactivated", "signed_up" => false)
+    expect(data.dig("agreements", "opens_recorded_since")).to eq("2026-11-25")
+  end
+
+  it "reads each latest fact in a fixed number of queries, using the app-open index, on a history-heavy company" do
+    logins = Array.new(12) do |index|
+      person = create(:employee, company: company, first_name: "Load#{index}", last_name: "Fixture", department: nil)
+      link!(person, status: "active", user: employee_login("user_status_load_#{index}"), activated_at: 1.month.ago)
+    end
+    base = Time.iso8601("2026-11-25T00:00:00Z")
+    rows = logins.flat_map do |link|
+      Array.new(400) do |step|
+        { company_id: company.id, organization_id: company.organization_id, user_id: link.user_id, action: "employee_portal/context#show",
+          record_type: "employee_account_links", record_id: link.id, actor_type: "employee", actor_id: link.employee_id.to_s,
+          actor_name: "Fixture", event_category: "employee_portal", metadata: {}, created_at: base + step.minutes }
+      end
+    end
+    AuditLog.insert_all!(rows)
+    AuditLog.connection.execute("ANALYZE audit_logs")
+
+    count_queries = lambda do |&block|
+      statements = []
+      callback = ->(*, payload) { statements << payload[:sql] unless payload[:name] == "SCHEMA" || payload[:sql].match?(/\A\s*(BEGIN|COMMIT|SAVEPOINT|RELEASE|SET|SELECT set_config)/i) }
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record", &block)
+      statements
+    end
+    report = EmployeeAppStatusReport.new(company)
+    full = count_queries.call { EmployeeAppStatusReport.new(company).call }
+    10.times do |index|
+      person = create(:employee, company: company, first_name: "More#{index}", last_name: "Fixture", department: nil)
+      link!(person, status: "active", user: employee_login("user_status_more_#{index}"), activated_at: 1.month.ago)
+    end
+    # Ten more employees, the same statements: nothing runs per employee.
+    more = count_queries.call { EmployeeAppStatusReport.new(company).call }
+    expect(more.size).to eq(full.size), (more - full).join("\n")
+
+    report.call.fetch(:employees).find { |row| row[:name] == "Load0 Fixture" }.then do |row|
+      expect(row.dig(:account, :last_opened_at)).to eq((base + 399.minutes).iso8601)
+    end
+
+    opens_sql = full.find { |sql| sql.include?("CROSS JOIN LATERAL") }
+    expect(opens_sql).to be_present
+    plan = AuditLog.connection.select_values("EXPLAIN #{opens_sql}").join("\n")
+    expect(plan).to include("idx_audit_logs_employee_app_opens")
+  end
+
+  it "computes an export only for the employees its department, role and name filters leave" do
+    queried_ids = []
+    allow(DeliveryConsents::Answers).to receive(:by_employee).and_wrap_original do |original, company_id, ids|
+      queried_ids << ids.to_a
+      original.call(company_id, ids)
+    end
+    get path(staff, "/csv"), headers: headers(staff), params: { q: "sample" }
+    expect(CSV.parse(response.body).drop(1).map(&:first)).to eq([ "Ana Sample" ])
+    expect(queried_ids).to eq([ [ signed_up.id ] ])
   end
 end
