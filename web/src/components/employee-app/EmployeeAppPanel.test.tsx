@@ -248,6 +248,25 @@ describe('Employee app panel', () => {
     expect(screen.getByRole('link', { name: 'Company report' }).getAttribute('href')).toBe('/companies/1/employee-app/status');
   });
 
+  it('notes a rehire’s earlier-employment app open without counting it', async () => {
+    openPanel({
+      ...employee, status: 'active',
+      agreements: {
+        account: {
+          status: 'active', label: 'Signed up', signed_up: true, invite_sent_at: null, signed_up_at: '2026-11-26T01:00:00Z',
+          last_opened_at: null, earlier_employment_last_opened_at: '2026-11-25T05:00:00Z',
+        },
+        terms: { version: null, accepted_at: null, current: false },
+        pay_statements: { answer: 'not_answered', answered_at: null },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: true,
+      },
+    });
+    const facts = await screen.findByLabelText('Agreements');
+    expect(facts.textContent).toContain('No recorded opens');
+    expect(facts.textContent).toContain('During an earlier employment, last opened Nov 25, 2026. Not counted now.');
+  });
+
   it('gives a client viewer the same facts and still no actions', async () => {
     auth.isClientViewer = true;
     openPanel({

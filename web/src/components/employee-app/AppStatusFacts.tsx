@@ -58,6 +58,11 @@ export function AgreementFacts({ agreements }: { agreements: EmployeeAgreements 
       <Fact label="Opened the app">
         <p className="text-sm text-neutral-900">{lastOpenedText(account.last_opened_at, true)}</p>
         <p className="text-xs text-neutral-600">{opensCoverageNote(agreements.opens_recorded_since)}</p>
+        {account.earlier_employment_last_opened_at && (
+          <p className="text-xs text-neutral-600">
+            During an earlier employment, last opened {formatEmployeeAppDate(account.earlier_employment_last_opened_at)}. Not counted now.
+          </p>
+        )}
       </Fact>
       <Fact label="Employee App Terms and Privacy"><TermsFact terms={agreements.terms} /></Fact>
       <Fact label="Pay stubs"><AnswerCell fact={agreements.pay_statements} /></Fact>
