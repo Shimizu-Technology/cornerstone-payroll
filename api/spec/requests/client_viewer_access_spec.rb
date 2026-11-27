@@ -132,6 +132,53 @@ RSpec.describe "Client viewer access", type: :request do
     expect(response).to have_http_status(:created)
   end
 
+  it "assigns and renames managed roles with employee activity and rejects foreign departments" do
+    path = "/api/v1/client/employee_organization"
+    second = create(:employee, company: company)
+    post "#{path}/save_role", headers: headers(manager), params: { role: { name: "Server", occupation_code: "102" } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    role_id = response.parsed_body.fetch("roles").sole.fetch("id")
+
+    foreign_department = create(:department)
+    patch path, headers: headers(manager), params: { employee_ids: [ employee.id, second.id ], department_id: foreign_department.id,
+      company_job_role_id: role_id }, as: :json
+    expect(response).to have_http_status(:not_found)
+    expect(employee.reload.company_job_role_id).to be_nil
+
+    patch path, headers: headers(manager), params: { employee_ids: [ employee.id, second.id ], department_id: department.id,
+      company_job_role_id: role_id }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect([ employee.reload.job_title, second.reload.job_title ]).to eq(%w[Server Server])
+    expect(second.department_id).to eq(department.id)
+
+    post "#{path}/save_role", headers: headers(manager), params: { id: role_id, role: { name: "Lead Server" } }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(employee.reload.job_title).to eq("Lead Server")
+    activity = AuditLog.where(company_id: company.id, record_type: "Employee", record_id: employee.id,
+      action: "employee_organization#update").order(:id).last
+    expect(activity.metadata.dig("after_values", "job_title")).to eq("Lead Server")
+    expect(employee.employee_tipped_occupations).to be_empty
+  end
+
+  it "returns JSON validation errors for invalid assignment values and a missing role body" do
+    path = "/api/v1/client/employee_organization"
+    patch path, headers: headers(manager), params: { employee_ids: [ employee.id ], department_id: false }, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to be_present
+
+    post "#{path}/save_role", headers: headers(manager), params: {}, as: :json
+    expect(response).to have_http_status(:unprocessable_entity)
+    expect(response.parsed_body.fetch("error")).to eq("Provide role details.")
+  end
+
+  it "denies a manager write when the locked workspace is read-only" do
+    allow_any_instance_of(Company).to receive(:test_workspace_read_only?).and_return(true)
+    patch "/api/v1/client/employee_organization", headers: headers(manager),
+      params: { employee_ids: [ employee.id ], department_id: nil }, as: :json
+    expect(response).to have_http_status(:forbidden)
+    expect(employee.reload.department_id).to eq(department.id)
+  end
+
   it "tells the web app which level the login has" do
     get "/api/v1/auth/me", headers: headers(viewer)
     expect(response.parsed_body.dig("user", "client_access_level")).to eq("viewer")

@@ -91,7 +91,7 @@ class PayrollCalculationContext
     # Preserve the pre-history fingerprint payload when only backfilled setup
     # applies. Later versions affect evidence only on the proof's own date.
     def dated_employee_attributes(employee, date)
-      employee.attributes.merge(EmployeeCompensationChangeService.snapshot(employee, date))
+      employee.attributes.except("company_job_role_id", "legacy_stub_regular_wage_label").merge(EmployeeCompensationChangeService.snapshot(employee, date))
     end
 
     def dated_wage_rate_attributes(employee, date)

@@ -14,6 +14,7 @@ module TestWorkspace
       validate!
 
       department_map = copy_collection(source_company.departments, Department, company: target_company)
+      role_map = copy_collection(source_company.company_job_roles, CompanyJobRole, company: target_company)
       deduction_type_map = copy_collection(source_company.deduction_types, DeductionType, company: target_company)
       pay_schedule_map = copy_collection(
         source_company.company_pay_schedules,
@@ -28,7 +29,7 @@ module TestWorkspace
       operating_profile_map = copy_operating_profiles!
       copy_collection(source_company.pay_component_tax_rules, PayComponentTaxRule, company: target_company)
 
-      employee_map = copy_employees!(department_map)
+      employee_map = copy_employees!(department_map, role_map)
       field_definition_map = copy_payroll_field_definitions!(employee_map)
       copy_employee_setup!(employee_map, deduction_type_map)
       loan_map = copy_loans!(employee_map, deduction_type_map)
@@ -58,7 +59,7 @@ module TestWorkspace
       raise ArgumentError, "Actor no longer belongs to this organization" unless actor.organization_id == target_company.organization_id
     end
 
-    def copy_employees!(department_map)
+    def copy_employees!(department_map, role_map)
       employee_map = {}
       flagged_emails = target_company.backup_snapshot? ? nil : EmployeeContactValidator.marked_placeholder_emails(organization_id: target_company.organization_id)
       source_company.employees.order(:id).each do |source|
@@ -72,6 +73,7 @@ module TestWorkspace
           source,
           company: target_company,
           department: source.department_id && department_map.fetch(source.department_id),
+          company_job_role: source.company_job_role_id && role_map.fetch(source.company_job_role_id),
           previous_employee_id: nil,
           portal_pending_approval: false,
           test_workspace_source_employee: employee_lineage ? source : nil,
