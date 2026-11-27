@@ -1044,21 +1044,75 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127150000_harden_demo_flag_db_guards.rb)
+-- 20261125160000_add_demo_test_workspace_purpose.rb (updated by 20261127170000_prepare_demo_company_shape_migration.rb)
 CREATE OR REPLACE FUNCTION prevent_demo_company_conversion() RETURNS trigger AS $$
 DECLARE
-  old_is_demo boolean := OLD.demo OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
+  old_is_demo boolean := COALESCE(OLD.demo, false) OR COALESCE(OLD.test_workspace_purpose, '') = 'demo';
+  old_is_legacy_demo boolean := NOT COALESCE(OLD.demo, false)
+    AND OLD.payroll_environment = 'migration_rehearsal'
+    AND COALESCE(OLD.test_workspace_purpose, '') = 'demo'
+    AND OLD.migration_source_company_id IS NULL
+    AND OLD.migration_source_batch_id IS NULL
+    AND OLD.test_workspace_expires_at IS NULL
+    AND OLD.test_workspace_archived_at IS NULL
+    AND OLD.test_workspace_sealed_at IS NULL;
+  new_is_flag_demo boolean := NEW.demo IS TRUE
+    AND NEW.payroll_environment = 'live'
+    AND NEW.test_workspace_purpose IS NULL
+    AND NEW.migration_rehearsal_status IS NULL
+    AND NEW.migration_source_company_id IS NULL
+    AND NEW.migration_source_batch_id IS NULL
+    AND NEW.migration_rehearsal_created_by_id IS NULL
+    AND NEW.migration_rehearsal_created_at IS NULL
+    AND NEW.migration_rehearsal_completed_at IS NULL
+    AND NEW.migration_rehearsal_error IS NULL
+    AND NEW.test_workspace_expires_at IS NULL
+    AND NEW.test_workspace_archived_at IS NULL
+    AND NEW.test_workspace_sealed_at IS NULL;
+  old_is_flag_demo boolean := OLD.demo IS TRUE
+    AND OLD.payroll_environment = 'live'
+    AND OLD.test_workspace_purpose IS NULL;
+  new_is_legacy_demo boolean := NEW.demo IS FALSE
+    AND NEW.payroll_environment = 'migration_rehearsal'
+    AND COALESCE(NEW.test_workspace_purpose, '') = 'demo'
+    AND NEW.migration_rehearsal_status = 'ready'
+    AND NEW.migration_source_company_id IS NULL
+    AND NEW.migration_source_batch_id IS NULL
+    AND NEW.test_workspace_expires_at IS NULL
+    AND NEW.test_workspace_archived_at IS NULL
+    AND NEW.test_workspace_sealed_at IS NULL;
+  caller_is_owner boolean := COALESCE(
+    pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'USAGE')
+    AND pg_has_role(session_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'USAGE'),
+    false
+  );
+  migration_op text := COALESCE(current_setting('app.demo_shape_migration_op', true), '');
+  manifest_unchanged boolean := OLD.test_workspace_manifest IS NOT DISTINCT FROM NEW.test_workspace_manifest;
+  converting_legacy_demo boolean := COALESCE(
+    caller_is_owner AND migration_op = 'convert' AND old_is_legacy_demo AND new_is_flag_demo AND manifest_unchanged,
+    false
+  );
+  reverting_flag_demo boolean := COALESCE(
+    caller_is_owner AND migration_op = 'revert' AND old_is_flag_demo AND new_is_legacy_demo AND manifest_unchanged,
+    false
+  );
 BEGIN
-  IF OLD.demo IS DISTINCT FROM NEW.demo
+  IF NOT (converting_legacy_demo OR reverting_flag_demo) AND (
+    OLD.demo IS DISTINCT FROM NEW.demo
     OR (COALESCE(OLD.test_workspace_purpose, '') = 'demo') <> (COALESCE(NEW.test_workspace_purpose, '') = 'demo')
-    OR (old_is_demo AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment) THEN
+    OR (old_is_demo AND OLD.payroll_environment IS DISTINCT FROM NEW.payroll_environment)
+  ) THEN
     RAISE EXCEPTION 'demo companies cannot be converted to or from another company type'
       USING ERRCODE = 'check_violation';
   END IF;
   IF old_is_demo
-    AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS NOT NULL
     AND (OLD.test_workspace_manifest ->> 'demo_fixture_key') IS DISTINCT FROM (NEW.test_workspace_manifest ->> 'demo_fixture_key') THEN
     RAISE EXCEPTION 'demo fixture keys are immutable'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  IF (converting_legacy_demo OR reverting_flag_demo)
+    AND OLD.test_workspace_manifest IS DISTINCT FROM NEW.test_workspace_manifest THEN
+    RAISE EXCEPTION 'demo manifest cannot change during shape migration'
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
@@ -1071,16 +1125,70 @@ BEFORE UPDATE OF demo, payroll_environment, test_workspace_purpose, test_workspa
 FOR EACH ROW
 EXECUTE FUNCTION prevent_demo_company_conversion();
 
--- 20261125180000_refuse_demo_company_external_records.rb
+-- 20261127170000_prepare_demo_company_shape_migration.rb
 CREATE OR REPLACE FUNCTION prevent_demo_company_external_records() RETURNS trigger AS $$
+DECLARE
+  v_purpose text;
 BEGIN
-  IF EXISTS (SELECT 1 FROM companies WHERE id = NEW.company_id AND COALESCE(test_workspace_purpose, '') = 'demo') THEN
+  SELECT test_workspace_purpose INTO v_purpose
+  FROM companies
+  WHERE id = NEW.company_id
+  FOR KEY SHARE;
+  IF COALESCE(v_purpose, '') = 'demo' THEN
     RAISE EXCEPTION '% cannot belong to a demo company', TG_TABLE_NAME
       USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION prevent_demo_shape_conversion_tampering() RETURNS trigger AS $$
+DECLARE
+  caller_is_owner boolean := COALESCE(
+    pg_has_role(current_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'USAGE')
+    AND pg_has_role(session_user, (SELECT relowner FROM pg_class WHERE oid = TG_RELID), 'USAGE'),
+    false
+  );
+  migration_op text := COALESCE(current_setting('app.demo_shape_migration_op', true), '');
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NOT (caller_is_owner AND migration_op = 'convert' AND NEW.reverted_at IS NULL AND NEW.reverted_by_id IS NULL) THEN
+      RAISE EXCEPTION 'demo_shape_conversions can only be written by demo shape conversion'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  ELSIF TG_OP = 'UPDATE' THEN
+    IF NOT (
+      caller_is_owner
+      AND migration_op = 'revert'
+      AND OLD.reverted_at IS NULL
+      AND NEW.reverted_at IS NOT NULL
+      AND OLD.id IS NOT DISTINCT FROM NEW.id
+      AND OLD.organization_id IS NOT DISTINCT FROM NEW.organization_id
+      AND OLD.company_id IS NOT DISTINCT FROM NEW.company_id
+      AND OLD.actor_id IS NOT DISTINCT FROM NEW.actor_id
+      AND OLD.before_company_shape IS NOT DISTINCT FROM NEW.before_company_shape
+      AND OLD.before_link_environments IS NOT DISTINCT FROM NEW.before_link_environments
+      AND OLD.after_company_shape IS NOT DISTINCT FROM NEW.after_company_shape
+      AND OLD.converted_at IS NOT DISTINCT FROM NEW.converted_at
+      AND OLD.created_at IS NOT DISTINCT FROM NEW.created_at
+    ) THEN
+      RAISE EXCEPTION 'demo_shape_conversions rows are append-only'
+        USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  ELSE
+    RAISE EXCEPTION 'demo_shape_conversions rows are append-only'
+      USING ERRCODE = 'check_violation';
+  END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS demo_shape_conversions_append_only ON demo_shape_conversions;
+CREATE TRIGGER demo_shape_conversions_append_only
+BEFORE INSERT OR UPDATE OR DELETE ON demo_shape_conversions
+FOR EACH ROW
+EXECUTE FUNCTION prevent_demo_shape_conversion_tampering();
 
 DROP TRIGGER IF EXISTS payroll_filing_records_refuse_demo_company ON payroll_filing_records;
 CREATE TRIGGER payroll_filing_records_refuse_demo_company
