@@ -19,6 +19,7 @@ import {
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
 import { JobLine } from './job';
+import { DeliveryHomeCards } from './paperless';
 import { Card, Chip, EmpButton, EmpButtonLink, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
 import { isSessionError, useEmployeeData, type DataState } from './useEmployeeData';
 import { useMediaQuery } from './useMediaQuery';
@@ -305,6 +306,7 @@ export function HomeTab(): ReactElement {
       <JobLine />
       <FormerNotice />
       <NextPayday />
+      <DeliveryHomeCards />
       {stubsOn ? <HomeWithPay /> : (
         <div className="emp-home-grid">
           <div className="emp-column">

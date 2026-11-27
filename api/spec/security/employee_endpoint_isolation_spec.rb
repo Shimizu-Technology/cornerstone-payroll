@@ -54,6 +54,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       { kind: :link, access: :write, feature: :delivery_consent, former_writable: true },
     [ "POST",   "/api/v1/employee/delivery_consents/w2gu_access_proof/pdf" ] =>
       { kind: :link, access: :write, feature: :delivery_consent },
+    [ "POST",   "/api/v1/employee/delivery_consents/keep_paper" ] =>
+      { kind: :link, access: :write, feature: :delivery_consent, former_writable: true },
     [ "GET",    "/api/v1/employee/statements" ] =>
       { kind: :link, access: :read, feature: :stubs },
     [ "GET",    "/api/v1/employee/statements/:id" ] =>
@@ -253,6 +255,9 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       { kind: "pay_statements", acknowledged: true, disclosure_version: disclosure.version, disclosure_digest: disclosure.digest }
     when "/api/v1/employee/delivery_consents/withdraw"
       { kind: "pay_statements" }
+    when "/api/v1/employee/delivery_consents/keep_paper"
+      # W-2GU: the matrix gives pay statement consent, which keep paper refuses.
+      { kind: "w2gu" }
     when "/api/v1/employee/delivery_consents/w2gu_access_proof/pdf"
       {}
     else
@@ -303,6 +308,7 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       emergency_contacts: EmployeeEmergencyContact.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") },
       change_requests: EmployeeChangeRequest.where(employee_id: employee.id).order(:id).map { |r| r.attributes.except("updated_at") },
       delivery_consents: DeliveryConsent.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") },
+      delivery_preferences: DeliveryPreference.where(employee_id: employee.id).order(:id).map { |p| p.attributes.except("updated_at") },
       changes_to_confirm: EmployeeContactChangeToConfirm.where(employee_id: employee.id).order(:id).map { |c| c.attributes.except("updated_at") }
     }
   end
@@ -598,6 +604,9 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       [ "POST", "/api/v1/employee/address_requests" ] => lambda {
         expect(EmployeeChangeRequest.where(employee_id: emp_a.id, status: :pending).sole.proposed_changes)
           .to include("address_line1" => "450 Updated Ln")
+      },
+      [ "POST", "/api/v1/employee/delivery_consents/keep_paper" ] => lambda {
+        expect(DeliveryPreference.where(employee_id: emp_a.id, kind: "w2gu").sole.employee_account_link_id).to eq(link_a.id)
       },
       [ "POST", "/api/v1/employee/delivery_consents" ] => lambda {
         expect(DeliveryConsent.active.where(employee_id: emp_a.id, kind: "pay_statements").count).to eq(1)
