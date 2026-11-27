@@ -150,9 +150,7 @@ module PayrollIntake
         max_formula_row = formula_cells.keys.map(&:first).max.to_i
         last_row = [ sheet.last_row.to_i, max_formula_row ].max
         raise ArgumentError, "Workbook #{sheet_name} sheet is empty." if last_row < 1
-        if last_row > MAX_SHEET_ROWS
-          raise ArgumentError, "Workbook #{sheet_name} sheet exceeds the maximum supported #{MAX_SHEET_ROWS} rows."
-        end
+        ensure_sheet_row_bounds!(sheet_name, last_row)
 
         headers = (1..sheet.last_column.to_i).map { |col| sheet.cell(1, col) }
         column_map = resolve_headers!(headers)
@@ -214,11 +212,17 @@ module PayrollIntake
           zip.each do |entry|
             next unless entry.name.end_with?(".xml", ".rels")
 
-            if entry.size.to_i > MAX_UNCOMPRESSED_SHEET_XML_BYTES
-              raise ArgumentError, "Workbook XML entry #{entry.name} exceeds the maximum supported uncompressed size."
-            end
+            # Stream-validate every XML/rels entry (including START HERE and Payroll)
+            # before Roo or Nokogiri parses it so spoofed headers cannot bypass the cap.
+            read_bounded_zip_entry(entry)
           end
         end
+      end
+
+      def ensure_sheet_row_bounds!(sheet_name, last_row)
+        return if last_row.to_i <= MAX_SHEET_ROWS
+
+        raise ArgumentError, "Workbook #{sheet_name} sheet exceeds the maximum supported #{MAX_SHEET_ROWS} rows."
       end
 
       def read_bounded_zip_entry(entry)
@@ -329,7 +333,9 @@ module PayrollIntake
         return {} unless start_name
 
         sheet = xlsx.sheet(start_name)
-        values = (1..sheet.last_row.to_i).each_with_object({}) do |row_num, acc|
+        last_row = sheet.last_row.to_i
+        ensure_sheet_row_bounds!(start_name, last_row)
+        values = (1..last_row).each_with_object({}) do |row_num, acc|
           label = normalize_header(sheet.cell(row_num, 1))
           acc[label] = sheet.cell(row_num, 2) if label.present?
         end
