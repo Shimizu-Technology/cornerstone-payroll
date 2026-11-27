@@ -37,18 +37,18 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
     @company = create(:company, organization: @organization)
     @other_company = create(:company, organization: @organization)
 
-    @emma_login = create(:user, company: @company, organization: @organization, role: "client",
-      name: "Emma Pleadwell", email: "emma.pleadwell@example.com").tap do |user|
+    @elena_login = create(:user, company: @company, organization: @organization, role: "client",
+      name: "Elena Mercer", email: "elena.mercer@example.com").tap do |user|
       CompanyAssignment.create!(user: user, company: @company)
     end
     @staff = create(:user, company: @company, organization: @organization, role: "admin",
-      name: "Dafne Shimizu", email: "dafne.staff@example.com")
-    @emma = create(:employee, company: @company, first_name: "Emma", last_name: "Pleadwell", email: nil)
-    @dafne = create(:employee, company: @company, first_name: "Dafne", last_name: "Shimizu", email: nil)
+      name: "Staff Admin", email: "staff.admin@example.com")
+    @elena = create(:employee, company: @company, first_name: "Elena", last_name: "Mercer", email: nil)
+    @staff_employee = create(:employee, company: @company, first_name: "Staff", last_name: "Admin", email: nil)
     # A login whose only link is to an employee at another client.
     @linked_elsewhere = create(:user, company: @company, organization: @organization, role: "client",
-      name: "Emma Pleadwell", email: "emma.elsewhere@example.com").tap do |user|
-      elsewhere = create(:employee, company: @other_company, first_name: "Emma", last_name: "Pleadwell")
+      name: "Elena Mercer", email: "elena.elsewhere@example.com").tap do |user|
+      elsewhere = create(:employee, company: @other_company, first_name: "Elena", last_name: "Mercer")
       EmployeeAccountLink.create!(company: @other_company, employee: elsewhere, user: user, status: "active")
       CompanyAssignment.create!(user: user, company: @company)
     end
@@ -93,56 +93,56 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
     expect(RlsContextGuard.mode).to eq("raise")
   end
 
-  it "saves Emma's own email and its audit when she confirms it is hers" do
-    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@emma_login)
+  it "saves the client user's own email and its audit when she confirms it is hers" do
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@elena_login)
     enforce_rls_like_production!
 
-    save_email("/api/v1/client/employees", @emma, @emma_login.email)
+    save_email("/api/v1/client/employees", @elena, @elena_login.email)
     expect(response).to have_http_status(:ok), response.body
 
     as_owner do
-      expect(@emma.reload.email).to eq(@emma_login.email)
-      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: @emma.id).sole.metadata)
-        .to include("email" => @emma_login.email, "confirmation_basis" => "self_confirmed")
+      expect(@elena.reload.email).to eq(@elena_login.email)
+      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: @elena.id).sole.metadata)
+        .to include("email" => @elena_login.email, "confirmation_basis" => "self_confirmed")
     end
   end
 
-  it "refuses the same request when Emma's login is linked only to an employee at another client" do
-    elsewhere = create(:employee, company: @other_company, first_name: "Emma", last_name: "Pleadwell")
-    EmployeeAccountLink.create!(company: @other_company, employee: elsewhere, user: @emma_login, status: "active")
-    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@emma_login)
+  it "refuses the same request when the login is linked only to an employee at another client" do
+    elsewhere = create(:employee, company: @other_company, first_name: "Elena", last_name: "Mercer")
+    EmployeeAccountLink.create!(company: @other_company, employee: elsewhere, user: @elena_login, status: "active")
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@elena_login)
     enforce_rls_like_production!
 
-    save_email("/api/v1/client/employees", @emma, @emma_login.email)
+    save_email("/api/v1/client/employees", @elena, @elena_login.email)
     expect(response).to have_http_status(:unprocessable_entity), response.body
     expect(response.parsed_body.dig("details", "email")).to eq([ EmployeeContactValidator::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
 
     as_owner do
-      expect(@emma.reload.email).to be_nil
-      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: @emma.id)).to be_empty
+      expect(@elena.reload.email).to be_nil
+      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: @elena.id)).to be_empty
       expect(AuditLog.where(action: "employees#login_email_rejected").sole.metadata).to include("rejection_reason" => "linked_to_other_employee")
     end
   end
 
-  it "lets Emma confirm her own email in one step, and refuses a login linked at another client, on the client endpoint" do
-    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@emma_login)
+  it "lets the client user confirm her own email in one step, and refuses a login linked at another client, on the client endpoint" do
+    allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@elena_login)
     enforce_rls_like_production!
     TenantScope.with_company(@company.id) do
       expect(EmployeeAccountLink.where(company_id: @other_company.id).exists?).to be(false)
     end
 
-    save_email("/api/v1/client/employees", @emma, @emma_login.email)
+    save_email("/api/v1/client/employees", @elena, @elena_login.email)
     expect(response).to have_http_status(:ok), response.body
 
     # Signed in as the other login, which is linked to an employee elsewhere.
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@linked_elsewhere)
-    save_email("/api/v1/client/employees", @emma, @linked_elsewhere.email)
+    save_email("/api/v1/client/employees", @elena, @linked_elsewhere.email)
     expect(response).to have_http_status(:unprocessable_entity), response.body
     expect(response.parsed_body.dig("details", "email")).to eq([ EmployeeContactValidator::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
 
     as_owner do
-      expect(@emma.reload.email).to eq(@emma_login.email)
-      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: @emma.id).count).to eq(1)
+      expect(@elena.reload.email).to eq(@elena_login.email)
+      expect(AuditLog.where(action: "employees#confirm_same_person_email", record_id: @elena.id).count).to eq(1)
     end
   end
 
@@ -150,16 +150,16 @@ RSpec.describe "Contact details under enforced RLS", type: :request do
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(@staff)
     enforce_rls_like_production!
 
-    save_email("/api/v1/admin/employees", @dafne, @staff.email)
+    save_email("/api/v1/admin/employees", @staff_employee, @staff.email)
     expect(response).to have_http_status(:ok), response.body
 
-    save_email("/api/v1/admin/employees", @emma, @linked_elsewhere.email)
+    save_email("/api/v1/admin/employees", @elena, @linked_elsewhere.email)
     expect(response).to have_http_status(:unprocessable_entity), response.body
     expect(response.parsed_body.dig("details", "email").first).to match(/already linked to another employee/i)
 
     as_owner do
-      expect(@dafne.reload.email).to eq(@staff.email)
-      expect(@emma.reload.email).to be_nil
+      expect(@staff_employee.reload.email).to eq(@staff.email)
+      expect(@elena.reload.email).to be_nil
     end
   end
 end

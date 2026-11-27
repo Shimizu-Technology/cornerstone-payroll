@@ -1,202 +1,6 @@
-# Historical MoSa import and Form 941 notes
-
-> **Historical record — do not use the MoSa commands below for a current payroll.** The script-based mailbox download, skeleton-employee backfill, and direct database apply tools were retired because they bypass the retained source-package, readiness, approval, and correction controls now built into Cornerstone. For a current MoSa payroll, follow the [MoSa biweekly payroll cycle](runbooks/MOSA_PAYROLL_CYCLE.md) step-by-step staff guide. Parallel-run and cutover evidence rules are in the [MoSa rollout cycle runbook](rollout/02-MOSA-CYCLE-RUNBOOK.md). Never delete payroll rows as a rollback.
-
-## Overview
+# Form 941, Check Printing, and Operations Reference
 
 Production releases are governed by [PRODUCTION_READINESS_CHECKLIST.md](PRODUCTION_READINESS_CHECKLIST.md). Run its automated configuration gate and complete the manual evidence checklist before any payroll or filing workload is released.
-
-The MoSa sections below describe the original 2025 migration tooling and are retained only as historical context. The Federal Form 941 reference later in this file remains a separate supporting note.
-
-| Item | Value |
-|------|-------|
-| Company | MoSa's Joint (id=475) |
-| Data location | `data/mosa-2025/raw/` |
-| Validation report | `data/mosa-2025/validation_report.md` |
-| Manifest | `data/mosa-2025/manifest.json` |
-| Entrypoint | `scripts/mosa_run.sh` |
-
----
-
-## Quick Start
-
-```bash
-cd ~/work/cornerstone-payroll
-
-# Run full validation (safe, read-only)
-scripts/mosa_run.sh validate
-
-# Download new Gmail attachments + validate
-scripts/mosa_run.sh download
-scripts/mosa_run.sh validate
-
-# See all commands
-scripts/mosa_run.sh help
-```
-
----
-
-## Pipeline Steps
-
-### Step 1 — Download Attachments (when new period arrives)
-
-```bash
-scripts/mosa_run.sh download
-```
-
-What it does:
-- Reads `scripts/download_mosa_attachments.py`
-- Fetches all known message IDs from Gmail (jerry.shimizutechnology@gmail.com)
-- Saves PDFs and Excel files to `data/mosa-2025/raw/`
-- Updates `data/mosa-2025/manifest.json`
-
-**When to run:** When MoSa's accountant sends a new payroll period email.
-
-### Step 2 — Add New Period (for each new pay period)
-
-1. Get the new message ID from Gmail:
-   ```bash
-   gog gmail search "payroll mosa" --account "$GOG_ACCOUNT" --no-input
-   ```
-
-2. Add the message ID to `scripts/download_mosa_attachments.py` MESSAGES list.
-
-3. Add a new entry to `PAY_PERIODS` in `api/scripts/mosa_full_year_validation.rb`:
-   ```ruby
-   {
-     label: "PP26",
-     pdf: "payroll_2026-01-XX_00-00_to_2026-01-XX_23-59.pdf",
-     excel: "pp26_2026-01-XX_to_2026-01-XX_loan_tip.xlsx",
-     start_date: "2026-01-XX",
-     end_date: "2026-01-XX"
-   }
-   ```
-
-4. Rename the downloaded Excel attachment to match the `pp26_...` convention.
-
-5. Re-run validation:
-   ```bash
-   scripts/mosa_run.sh validate
-   ```
-
-### Step 3 — Backfill Employees (when new names appear)
-
-```bash
-scripts/mosa_run.sh backfill
-```
-
-This runs `api/scripts/mosa_backfill_employees.rb` which:
-- Scans all PDFs for employee names not in the DB
-- Creates skeleton employee records (safe defaults, pay_rate=0)
-- Reports count of new records created
-
-**After backfill:** HR should update pay rates and personal details for new employees.
-
-### Step 4 — Validate
-
-```bash
-scripts/mosa_run.sh validate
-```
-
-Reads all 26 (or more) pay period PDFs + Excel files, runs them through the import engine, and writes `data/mosa-2025/validation_report.md`.
-
-**Healthy output:**
-```
-Periods OK: 26/26
-Total unmatched names: 0
-Discrepancies: 14 period(s)  # hours-only diffs, gross_diff=0 for all — NORMAL
-```
-
-**Hours discrepancies are expected** for certain periods. They result from multi-period employees or employees excluded from the Excel import. The key metric is `gross_diff=0.0` for all periods — that confirms financial accuracy.
-
----
-
-## Interpreting the Validation Report
-
-| Field | Good value | Needs attention |
-|-------|-----------|-----------------|
-| Periods OK | 26/26 | Any period with "error" or "skip" |
-| Total unmatched names | 0 | Any > 0 → run backfill |
-| Parser outlier rows | 0 | Any > 0 → check PDF layout |
-| gross_diff | 0.0 | Any non-zero → investigate |
-| hours_diff | 0–80h for early periods | >200h in any period → parser issue |
-
-**Hours diffs explained:**  
-PP00–PP03 show 57–70h diffs because these early periods had employees with names slightly different from DB records (pre-backfill). After hardening, all 35 were matched but the comparison uses DB-computed hours vs PDF-reported hours which can diverge for multi-role employees. Financial totals (gross_diff=0) confirm correctness.
-
----
-
-## Common Issues
-
-### "File not found" for a PDF
-
-The PDF wasn't downloaded or was renamed.
-```bash
-ls data/mosa-2025/raw/payroll_*.pdf | sort
-```
-Check the filename exactly matches what's in the `PAY_PERIODS` config.
-
-### "Company not found: MoSa's Joint"
-
-The Rails environment doesn't have MoSa's Joint in the Company table.
-```bash
-cd api && rails runner "puts Company.pluck(:name)"
-```
-Make sure you're running against the correct environment (staging/production).
-
-### New employee shows as "unmatched"
-
-Run: `scripts/mosa_run.sh backfill`  
-Then update the new employee's pay rate and personal info in the admin UI.
-
-### Parser warning: "implausible hours"
-
-A PDF layout has drifted from the column spec. The fallback flexible parser should handle it. Check:
-```bash
-cd api && rails runner "puts PayrollImport::RevelPdfParser.parse('../data/mosa-2025/raw/YOUR_FILE.pdf').inspect"
-```
-
-If the flexible parser also fails, check the PDF format — Revel may have changed their export template.
-
----
-
-## File Naming Convention
-
-| File type | Pattern | Example |
-|-----------|---------|---------|
-| Payroll PDF | `payroll_YYYY-MM-DD_00-00_to_YYYY-MM-DD_23-59.pdf` | `payroll_2025-10-06_00-00_to_2025-10-19_23-59.pdf` |
-| Loan/Tip Excel | `ppXX_YYYY-MM-DD_to_YYYY-MM-DD_loan_tip.xlsx` | `pp20_2025-10-06_to_2025-10-19_loan_tip.xlsx` |
-
-Periods are numbered sequentially PP00–PP25 for 2025 (26 total).
-
----
-
-## Environment Setup
-
-```bash
-# Ruby (managed by rbenv)
-export PATH="$HOME/.rbenv/shims:$PATH"
-ruby --version  # Should be 3.3.x
-
-# Install deps
-cd ~/work/cornerstone-payroll/api && bundle install
-
-# Historical Gmail access used an explicitly selected OAuth account.
-# Do not place a keyring password in a command, script, or documentation.
-gog gmail search "test" --account "$GOG_ACCOUNT" --no-input
-```
-
----
-
-## Contacts
-
-| Role | Name | Notes |
-|------|------|-------|
-| Cornerstone CEO | Dafne Mansapit Shimizu (dmshimizucpa@gmail.com) | Forwards MoSa payroll emails |
-| MoSa accountant | — | Sends original payroll to Cornerstone |
-| Developer | Leon / Shimizu Technology | System owner |
-
----
 
 ---
 
@@ -304,13 +108,9 @@ api/app/services/form_941_gu_aggregator.rb
 ### Tests
 
 ```bash
-cd ~/work/cornerstone-payroll/api
+cd api
 bundle exec rspec spec/services/form_941_gu_aggregator_spec.rb spec/requests/api/v1/admin/reports_spec.rb
 ```
-
----
-
-*Last updated: 2026-03-10*
 
 ---
 
@@ -323,8 +123,6 @@ Cornerstone Payroll generates 3-part check PDFs for pre-printed check stock (let
 - **Top-check** layout: reversed.
 
 Check numbers are assigned automatically when a pay period is committed.
-
----
 
 ### Operator Workflow
 
@@ -376,13 +174,11 @@ Use when a physical check was damaged, lost, or misprinted.
 
 **Safety:** The reprint uses the same net pay amount. The next sequential company check number is reserved.
 
----
-
 ### Configuration (Rails console)
 
 ```ruby
 # View current settings for a company
-company = Company.find_by(name: "MoSa's Restaurant")
+company = Company.find_by(name: "Example Company")
 puts company.next_check_number    # e.g., 1042
 puts company.check_stock_type     # "bottom_check" or "top_check"
 puts company.check_offset_x       # e.g., 0.05 (inches)
@@ -395,10 +191,7 @@ company.update!(next_check_number: 2000)
 item = PayrollItem.includes(:employee, :pay_period).find(123)
 gen = CheckGenerator.new(item)
 File.write('/tmp/preview_check.pdf', gen.generate)
-# scp /tmp/preview_check.pdf to your machine and open
 ```
-
----
 
 ### Audit Trail
 
@@ -423,21 +216,17 @@ PayrollItem
   end
 ```
 
----
+### Check Stock Notes
 
-### Check Stock Notes (MoSa Production)
-
-- **Stock brand:** TBD — confirm with MoSa before first print run
-- **Starting check number:** TBD — set via Settings → Check Settings or Rails console
-- **Bank info:** Set via Settings → Check Settings (displayed on check face)
-- **MICR line:** Pre-printed on stock — Cornerstone does NOT generate MICR
-
----
+- **Stock brand:** Confirm with the client before the first print run.
+- **Starting check number:** Set via Settings → Check Settings or Rails console.
+- **Bank info:** Set via Settings → Check Settings (displayed on check face).
+- **MICR line:** Pre-printed on stock — Cornerstone does NOT generate MICR.
 
 ### Tests
 
 ```bash
-cd ~/work/cornerstone-payroll/api
+cd api
 bundle exec rspec spec/lib/number_to_words_spec.rb \
                   spec/services/check_generator_spec.rb \
                   spec/models/payroll_item_check_spec.rb \
@@ -445,17 +234,11 @@ bundle exec rspec spec/lib/number_to_words_spec.rb \
                   spec/requests/api/v1/admin/checks_spec.rb
 ```
 
-Expected: **105 examples, 0 failures**
-
----
-
-*Check Printing section added: CPR-66 (2026-03-10)*
-
 ---
 
 ## Office Document Preview Deployment Note
 
-Client document previews support two different paths today:
+Client document previews support two different paths:
 
 - **PDF and image files** preview directly in the app and are expected to work in production as-is.
 - **Office-style files** such as `.doc`, `.docx`, `.xls`, `.xlsx`, `.csv`, and `.txt` rely on backend preview generation that converts the source file into a PDF before the in-app preview is shown.
@@ -476,12 +259,6 @@ The current production deployment uses:
 Netlify does **not** need any special setup for this feature.
 
 The backend is the limiting factor. Render's native Ruby service is fine for the app overall, but office preview generation may not work in production unless the backend runtime has LibreOffice installed and available on `PATH` (or provided through `LIBREOFFICE_BIN`).
-
-### What This Means Right Now
-
-- Shipping this PR is still safe.
-- PDF/image previews should continue to work normally.
-- Word/Excel/CSV "real preview" generation may fail in production until the backend preview toolchain is installed in the runtime that executes `GenerateClientDocumentPreviewJob`.
 
 ### Recommended Future Production Setup
 
@@ -510,4 +287,4 @@ The separate worker approach is preferred because it avoids changing the existin
 
 ### OCR Model Default
 
-Timecard OCR now defaults to `google/gemini-3.1-pro-preview` through OpenRouter unless `OPENROUTER_MODEL` is explicitly set in the environment. This keeps the current OCR flow pointed at the strongest verified multimodal model we could confirm for the existing image-based extraction pipeline without changing the surrounding OpenRouter integration.
+Timecard OCR defaults to `google/gemini-3.1-pro-preview` through OpenRouter unless `OPENROUTER_MODEL` is explicitly set in the environment. This keeps the current OCR flow pointed at the strongest verified multimodal model for the existing image-based extraction pipeline without changing the surrounding OpenRouter integration.

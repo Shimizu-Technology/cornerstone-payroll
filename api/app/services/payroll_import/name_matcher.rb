@@ -3,7 +3,7 @@
 module PayrollImport
   # Matches employee names from PDF/Excel to database Employee records.
   #
-  # PDF format: "Last, First M." (e.g., "Arthur, Juile R.")
+  # PDF format: "Last, First M." (e.g., "Benson, Calra R.")
   # Excel format: separate last_name / first_name columns
   #
   # Matching strategy (scored independently on last name + first name):
@@ -198,7 +198,7 @@ module PayrollImport
       emp_base = strip_name_suffix(employee)
       return 1.0 if input_base == emp_base
 
-      # Prefix match for multi-word last names ("tubiera" matches "tubiera dunn")
+      # Prefix match for multi-word last names ("delgado" matches "delgado ruiz")
       emp_words = emp_base.split(/\s+/)
       if emp_words.length > 1 && emp_words.first == input_base
         return 0.95
@@ -206,7 +206,7 @@ module PayrollImport
 
       # Fuzzy match on base last names
       # A transposed pair is a common payroll-file typo (for example,
-      # "Petrius" versus "Petirus"). Treat it as one edit while retaining
+      # "Malrowe" versus "Marlowe"). Treat it as one edit while retaining
       # the existing minimum score and first-name safeguards.
       dist = dld(input_base, emp_base)
       max_len = [ input_base.length, emp_base.length ].max
@@ -228,7 +228,7 @@ module PayrollImport
       # Exact full match
       return 1.0 if input == employee
 
-      # Exact first-token match (handles "Aaron" = "Aaron-Michael" via "aaron" = "aaron michael".first)
+      # Exact first-token match (handles "Alex" = "Alex-Jordan" via "alex" = "alex jordan".first)
       return 1.0 if input_first == emp_first
 
       # First token of input matches first token of employee

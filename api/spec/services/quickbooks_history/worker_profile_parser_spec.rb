@@ -292,7 +292,7 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
     parsed = described_class.new(
       worker: worker(
         source_name: "Owner, Example Middle",
-        pay_info: "Pay type: Commission Only Pay method: Check Deductions: 401(k) Pre-Tax: $927.91 Contributions: 401(k) Pre-Tax: 4.00% Time off: None",
+        pay_info: "Pay type: Commission Only Pay method: Check Deductions: 401(k) Pre-Tax: $500.00 Contributions: 401(k) Pre-Tax: 4.00% Time off: None",
         tax_info: "SSN: 000-00-0001 Fed: Single Withholding allowances: 2"
       ),
       pay_frequency: "biweekly"
@@ -310,7 +310,7 @@ RSpec.describe QuickbooksHistory::WorkerProfileParser do
       employer_retirement_match_rate: 0.04.to_d
     )
     expect(parsed.payroll_fields).to contain_exactly(
-      hash_including(name: "401(k) Pre-Tax", tax_treatment: "pre_tax_deduction", amount: 927.91.to_d)
+      hash_including(name: "401(k) Pre-Tax", tax_treatment: "pre_tax_deduction", amount: 500.00.to_d)
     )
     expect(parsed.review_items.pluck("code")).to include("commission_only_variable_pay", "legacy_w4_allowances")
   end

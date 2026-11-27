@@ -217,7 +217,7 @@ RSpec.describe PayrollCalculator do
         department: department,
         employment_type: "salary",
         salary_type: "variable",
-        pay_rate: 225_062.76,
+        pay_rate: 120_000.00,
         pay_frequency: "biweekly"
       )
       variable_item = create(
@@ -885,10 +885,10 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.loan_payment).to eq(BigDecimal("275"))
     end
 
-    it "charges Madela's separate $250 loan field in addition to a $428.36 direct loan" do
+    it "charges a separate $250 loan field in addition to a $300.00 direct loan" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
-        name: "Loan - Madela Severin",
+        name: "Loan - Devon Holbrook",
         kind: "deduction",
         tax_treatment: "post_tax_deduction",
         category: "loan",
@@ -900,16 +900,16 @@ RSpec.describe PayrollCalculator do
       described_class.for(employee, payroll_item).calculate
       without_direct_loan = payroll_item.net_pay.to_d
 
-      payroll_item.loan_deduction = BigDecimal("428.36")
+      payroll_item.loan_deduction = BigDecimal("300.00")
       described_class.for(employee, payroll_item).calculate
 
-      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Loan - Madela Severin" }).to be_active
-      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.label == "Loan - Madela Severin" }.amount).to eq(BigDecimal("250"))
-      expect(payroll_item.loan_payment).to eq(BigDecimal("678.36"))
-      expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("428.36"))
+      expect(payroll_item.payroll_item_field_entries.find { |entry| entry.label == "Loan - Devon Holbrook" }).to be_active
+      expect(payroll_item.payroll_item_deductions.find { |deduction| deduction.label == "Loan - Devon Holbrook" }.amount).to eq(BigDecimal("250"))
+      expect(payroll_item.loan_payment).to eq(BigDecimal("550.00"))
+      expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("300.00"))
     end
 
-    it "keeps Emma's legacy $250 installment separate from a direct loan deduction" do
+    it "keeps a legacy $250 installment separate from a direct loan deduction" do
       payroll_item.payroll_adjustments = [
         { "label" => "Loan - Installment", "amount" => BigDecimal("250"),
           "treatment" => "post_tax_deduction", "active" => true }
@@ -918,12 +918,12 @@ RSpec.describe PayrollCalculator do
       described_class.for(employee, payroll_item).calculate
       without_direct_loan = payroll_item.net_pay.to_d
 
-      payroll_item.loan_deduction = BigDecimal("428.36")
+      payroll_item.loan_deduction = BigDecimal("300.00")
       described_class.for(employee, payroll_item).calculate
 
       expect(payroll_item.post_tax_payroll_adjustments_total).to eq(BigDecimal("250"))
-      expect(payroll_item.loan_payment).to eq(BigDecimal("428.36"))
-      expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("428.36"))
+      expect(payroll_item.loan_payment).to eq(BigDecimal("300.00"))
+      expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("300.00"))
     end
 
     it "keeps the direct and named loan totals consistent when deductions are capped by available pay" do

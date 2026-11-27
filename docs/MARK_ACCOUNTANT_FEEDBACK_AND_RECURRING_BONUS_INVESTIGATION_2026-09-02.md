@@ -435,7 +435,6 @@ Key code and authority documents reviewed:
 - `docs/ROLE_PERMISSION_MATRIX_2026-05-14.md`
 - `docs/PRODUCTION_FOLLOWUP_ROADMAP_2026-03-29.md`
 - `docs/PAYROLL_FIELDS_AND_REPORTING_PLAN_2026-05-25.md`
-- `docs/MOSA_LOANS_AND_IMPORT_WORKFLOW_PLAN_2026-05-20.md`
 - `api/app/models/payroll_item.rb`
 - `api/app/controllers/api/v1/admin/pay_periods_controller.rb`
 - `api/app/controllers/api/v1/admin/payroll_items_controller.rb`

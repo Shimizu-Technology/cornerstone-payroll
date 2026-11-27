@@ -22,10 +22,10 @@ it('shows removed names and reasons, then offers Enter pay in the unpaid roster'
   fireEvent.click(screen.getByRole('button', { name: 'Add back Manual Worker' }));
   await waitFor(() => expect(data.handleRestoreEmployee).toHaveBeenCalledWith(7, 'roster'));
   // The controller keeps the result, so it survives the Hours step remounting as the run returns to draft.
-  const result = { employee_id: 7, employee_name: 'Manual Worker', restored: [{ kind: 'loan' as const, label: 'Loan', amount: '159.1' }], not_restored: [] };
+  const result = { employee_id: 7, employee_name: 'Manual Worker', restored: [{ kind: 'loan' as const, label: 'Loan', amount: '150.0' }], not_restored: [] };
   const notice = { source: 'roster' as const, result, hoursEntered: false };
   view.rerender(<PayRunRoster {...data} isCalculated={false} isDraft addBackNotice={notice} payPeriod={{ ...data.payPeriod, status: 'draft', excluded_employee_ids: [], excluded_employees: [] }} />);
-  const message = "Manual Worker is back. Restored from the import: Loan $159.10. Hours aren't brought back. Enter hours, then calculate.";
+  const message = "Manual Worker is back. Restored from the import: Loan $150.00. Hours aren't brought back. Enter hours, then calculate.";
   expect(screen.getAllByText(message)).toHaveLength(2);
   expect(screen.getByTestId('add-back-announcement').textContent).toBe(message);
   view.rerender(<PayRunRoster {...data} addBackNotice={notice} payPeriod={{ ...data.payPeriod, excluded_employee_ids: [], excluded_employees: [] }} />);
@@ -68,14 +68,14 @@ it('announces the selected add-back action while preventing repeated writes', ()
 });
 it('keeps an empty live region mounted, leaves a saved add-back to Expected entries, and says when hours are in', () => {
   const data = props();
-  const result = { employee_id: 7, employee_name: 'Manual Worker', restored: [{ kind: 'loan' as const, label: 'Loan', amount: '159.1' }], not_restored: [] };
+  const result = { employee_id: 7, employee_name: 'Manual Worker', restored: [{ kind: 'loan' as const, label: 'Loan', amount: '150.0' }], not_restored: [] };
   const view = render(<PayRunRoster {...data} />);
   expect(screen.getByTestId('add-back-announcement').textContent).toBe('');
   const listed = { ...data.payPeriod, expected_entries: { fields: [], missing_regulars: [], outstanding: [], added_back: [{ ...result, hours_entered: false }] } };
   view.rerender(<PayRunRoster {...data} payPeriod={listed} addBackNotice={{ source: 'roster', result, hoursEntered: false }} />);
   // Expected entries shows it; the roster still announces the add-back it made.
   expect(screen.queryAllByText(/Manual Worker is back/).filter(element => element.dataset.testid !== 'add-back-announcement')).toHaveLength(0);
-  expect(screen.getByTestId('add-back-announcement').textContent).toBe("Manual Worker is back. Restored from the import: Loan $159.10. Hours aren't brought back. Enter hours, then calculate.");
+  expect(screen.getByTestId('add-back-announcement').textContent).toBe("Manual Worker is back. Restored from the import: Loan $150.00. Hours aren't brought back. Enter hours, then calculate.");
   view.rerender(<PayRunRoster {...data} addBackNotice={{ source: 'roster', result, hoursEntered: true }} />);
-  expect(screen.getByTestId('add-back-announcement').textContent).toBe('Manual Worker is back. Restored from the import: Loan $159.10. Hours are entered.');
+  expect(screen.getByTestId('add-back-announcement').textContent).toBe('Manual Worker is back. Restored from the import: Loan $150.00. Hours are entered.');
 });

@@ -45,14 +45,14 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
       sheet.add_row([ "PAY PERIOD ENDING", nil, Date.new(2026, 10, 31) ])
       sheet.add_row([ "PAY DAY", nil, Date.new(2026, 11, 5) ])
       sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "ENTER LOAN AMOUNTS HERE" ])
-      sheet.add_row([ 1, nil, "Moyer", "Addison", "Hourly Maintenance", 219.70 ])
+      sheet.add_row([ 1, nil, "Parker", "Jordan", "Hourly Maintenance", 200.00 ])
     end
     package.serialize(tempfile.path)
 
     result = described_class.parse_with_metadata(tempfile.path)
 
     expect(result[:metadata]).to include(period_end: Date.new(2026, 10, 31), pay_date: Date.new(2026, 11, 5))
-    expect(result[:rows]).to contain_exactly(include(last_name: "Moyer", recurring_loan_deduction: 219.70))
+    expect(result[:rows]).to contain_exactly(include(last_name: "Parker", recurring_loan_deduction: 200.00))
   ensure
     tempfile&.unlink
   end
@@ -65,7 +65,7 @@ RSpec.describe PayrollImport::LoanTipExcelParser do
       sheet.add_row([ "PAY PERIOD ENDING", nil, c2, nil, nil, f2 ])
       sheet.add_row([ "PAY DAY", nil, c3, nil, nil, f3 ])
       sheet.add_row([ nil, "Nickname", "Last Name", "First Name", "Dept", "Amount" ])
-      sheet.add_row([ 1, nil, "Moyer", "Addison", "Hourly Maintenance", 20.00 ])
+      sheet.add_row([ 1, nil, "Parker", "Jordan", "Hourly Maintenance", 20.00 ])
     end
     package.serialize(tempfile.path)
     tempfile

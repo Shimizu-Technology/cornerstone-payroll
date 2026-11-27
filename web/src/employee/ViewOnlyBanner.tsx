@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { Eye } from 'lucide-react';
 
 export interface ViewOnlyGrant {
-  /** The person being viewed, e.g. "Emma Pleadwell". */
+  /** The person being viewed, e.g. "Elena Mercer". */
   name: string;
   minutesLeft?: number | null;
   onEnd: () => void;
