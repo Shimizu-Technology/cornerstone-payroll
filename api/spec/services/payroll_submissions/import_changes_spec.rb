@@ -39,12 +39,17 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     expect(service.proposals.first).to include(amount: "4500.00", employee_id: owner.id)
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: false) }.to raise_error(ArgumentError, /Confirm/)
     expect { service.apply_to(rows, reviewed: reviewed.first(1), confirmed: true) }.to raise_error(ArgumentError, /every/)
-    expect { service.apply_to(rows, reviewed: reviewed.map { |row| row.merge(amount: "4500.001", regular_hours: "1e3") }, confirmed: true) }.to raise_error(ArgumentError, /valid/)
+    bad_owner = [ reviewed.first.merge(amount: "4500.001"), reviewed.last ]
+    expect { service.apply_to(rows, reviewed: bad_owner, confirmed: true, previewed_baselines: previewed_baselines_for) }.to raise_error(ArgumentError, /valid/)
+    bad_hours = [ reviewed.first, reviewed.last.merge(regular_hours: "1e3") ]
+    expect { service.apply_to(rows, reviewed: bad_hours, confirmed: true, previewed_baselines: previewed_baselines_for) }.to raise_error(ArgumentError, /valid/)
   end
 
   it "fails closed when stored preview baseline or preview token is missing or mismatched" do
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /Preview again/)
     baselines = previewed_baselines_for
+    omitted_token_reviewed = [ reviewed.first, reviewed.last.except(:preview_token) ]
+    expect { service.apply_to(rows, reviewed: omitted_token_reviewed, confirmed: true, previewed_baselines: baselines) }.to raise_error(ArgumentError, /Preview again/)
     stale_reviewed = [ reviewed.first, reviewed.last.merge(preview_token: "stale-token") ]
     expect { service.apply_to(rows, reviewed: stale_reviewed, confirmed: true, previewed_baselines: baselines) }.to raise_error(ArgumentError, /Preview again/)
   end

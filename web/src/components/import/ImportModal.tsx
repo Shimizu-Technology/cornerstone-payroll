@@ -966,6 +966,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         <select
           aria-label={`Job and rate for ${row.employee_name}`}
           className="mt-1 block min-h-11 w-full min-w-0 max-w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-base"
+          disabled={loading}
           value={rateChoices[row.employee_id] ?? row.selected_wage_rate_id ?? ''}
           onChange={(event) => { setRateChoices((current) => ({ ...current, [row.employee_id]: Number(event.target.value) })); setReviewedClientChanges(false); }}
         >

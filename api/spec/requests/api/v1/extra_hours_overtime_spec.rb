@@ -1080,13 +1080,35 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       selection_id = response.parsed_body.dig("portal_source", "selection_id")
       tab_a_token = prefill.fetch("preview_token")
 
+      # Opening the same unchanged import in another reviewer's tab reuses the token without invalidating Tab A
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/current_import"
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("client_change_prefill", "rows").sole.fetch("preview_token")).to eq(tab_a_token)
+
       # Worksheet changes from 30 -> 31 regular between preview and apply
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}",
             params: { payroll_item: { hours_worked: 31 } }, as: :json
       expect(response).to have_http_status(:ok), response.body
 
-      # Stale apply is rejected (both when echoing preview baseline and via stored preview baseline)
+      # Before current_import rotates the token, sending tab_a_token WITHOUT echoed baseline fields
+      # is still rejected against the stored preview baseline
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: import_id,
+             portal_source_id: selection_id,
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, regular_hours: "4", overtime_hours: "0", preview_token: tab_a_token, decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Worksheet hours changed", "Preview again")
+      expect(item.reload.hours_worked).to eq(BigDecimal("31.00"))
+
+      # Stale apply echoing the old preview baseline is also rejected
       post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
            params: {
              import_id: import_id,
@@ -1164,12 +1186,14 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       expect(response).to have_http_status(:ok), response.body
       import_id = response.parsed_body.fetch("import_id")
       selection_id = response.parsed_body.dig("portal_source", "selection_id")
+      issued_token = preview_token_for
 
       # Simulate a pre-deploy preview record without stored previewed_extra_hours_baselines
       import_record = PayrollImportRecord.find(import_id)
       import_record.update_columns(raw_data: import_record.raw_data.except("previewed_extra_hours_baselines"))
 
-      # Worksheet changes 30 -> 31 and caller omits baseline fields + preview_token
+      # Worksheet changes 30 -> 31 and caller sends the issued preview_token so the
+      # missing stored baseline path itself is exercised
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
       patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}",
             params: { payroll_item: { hours_worked: 31 } }, as: :json
@@ -1182,13 +1206,181 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
              force_overwrite: true,
              confirm_client_changes: true,
              reviewed_changes: [
-               { change_index: 0, regular_hours: "4", overtime_hours: "0", decision: "apply" }
+               { change_index: 0, regular_hours: "4", overtime_hours: "0", preview_token: issued_token, decision: "apply" }
              ]
            },
            as: :json
       expect(response).to have_http_status(:unprocessable_entity)
-      expect(response.parsed_body["error"]).to include("Preview again")
+      expect(response.parsed_body["error"]).to include("Preview baseline is missing", "Preview again")
       expect(item.reload.hours_worked).to eq(BigDecimal("31.00"))
+    end
+
+    it "does not clobber a concurrently saved confirmed tip treatment when current_import persists preview baselines" do
+      manual_worker = create(:employee, company: company, first_name: "Tip", last_name: "Race", pay_rate: 20.00)
+      manual_job = create(:employee_wage_rate, employee: manual_worker, label: "Maintenance", rate: 20.00, is_primary: true)
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: manual_worker,
+                    pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil)
+
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             revel_payroll: revel_pdf_upload(regular: 40, overtime: 0),
+             workbook_choice: "none",
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: manual_worker.id, employee_wage_rate_id: manual_job.id, regular_hours: "4", overtime_hours: "0" }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: submission_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      import_id = response.parsed_body.fetch("import_id")
+
+      # Seed confirmed "tips not already paid" in raw_data, then change worksheet 30 -> 31
+      # so current_import must persist a refreshed baseline & token.
+      record = PayrollImportRecord.find(import_id)
+      record.update_columns(raw_data: record.raw_data.merge(
+        "tips_paid_out_from_tips" => false,
+        "tip_treatment_confirmed" => { "source" => "review", "user_id" => staff.id, "at" => 5.minutes.ago.iso8601 }
+      ))
+      item.update_columns(hours_worked: BigDecimal("31.00"))
+
+      # Interleave: current_import loads a stale import_record copy (tips_paid_out_from_tips: false),
+      # then another request confirms tips_paid_out_from_tips: true before current_import persists baselines.
+      stale_record = PayrollImportRecord.find(import_id)
+      confirmed_at = Time.current.iso8601
+      allow(PayrollImport::CurrentReview).to receive(:import_record_for).and_wrap_original do |_orig, *_args|
+        PayrollImportRecord.where(id: import_id).update_all(
+          raw_data: stale_record.raw_data.merge(
+            "tips_paid_out_from_tips" => true,
+            "tip_treatment_confirmed" => { "source" => "review", "user_id" => staff.id, "at" => confirmed_at }
+          )
+        )
+        stale_record
+      end
+
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/current_import"
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("preview", "tips_paid_out_from_tips")).to be(true)
+      expect(response.parsed_body.dig("preview", "tip_treatment_confirmed")).to be(true)
+
+      persisted = PayrollImportRecord.find(import_id).raw_data
+      expect(persisted["tips_paid_out_from_tips"]).to be(true)
+      expect(persisted.dig("tip_treatment_confirmed", "at")).to eq(confirmed_at)
+      expect(persisted.dig("previewed_extra_hours_baselines", "#{submission_id}:0", "baseline_regular_hours")).to eq("31.0")
+    end
+
+    it "preserves client regular-hours evidence when staff edit only overtime, so a later revision removes regular hours without losing the staff OT edit" do
+      alloc_worker = create(:employee, company: company, first_name: "Alloc", last_name: "OnlyOT", pay_rate: 20.00)
+      alloc_job = create(:employee_wage_rate, employee: alloc_worker, label: "Maintenance", rate: 20.00, is_primary: true)
+      alloc_item = create(:payroll_item, company: company, pay_period: pay_period, employee: alloc_worker,
+                          pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil)
+
+      flat_worker = create(:employee, company: company, first_name: "Flat", last_name: "OnlyOT", pay_rate: 20.00)
+      flat_job = create(:employee_wage_rate, employee: flat_worker, label: "Maintenance", rate: 20.00, is_primary: true)
+      flat_item = create(:payroll_item, company: company, pay_period: pay_period, employee: flat_worker,
+                         pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil)
+
+      pdf_bytes = File.binread(build_revel_pdf(
+        [ { name: "Example, Avery", regular_hours: 40, overtime_hours: 0, regular_pay: 800 } ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      ))
+
+      # Revision 1: client adds +4 regular + 2 OT on top of each worksheet-only worker's 30 regular hours
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             revel_payroll: portal_upload("revel.pdf", pdf_bytes, pdf_mime),
+             workbook_choice: "none",
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: alloc_worker.id, employee_wage_rate_id: alloc_job.id, regular_hours: "4", overtime_hours: "2" },
+               { kind: "extra_hours", employee_id: flat_worker.id, employee_wage_rate_id: flat_job.id, regular_hours: "4", overtime_hours: "2" }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev1_id = response.parsed_body.dig("data", "submissions", 0, "id")
+      rev1_doc_id = response.parsed_body.dig("data", "submissions", 0, "documents", 0, "document", "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: rev1_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, regular_hours: "4", overtime_hours: "2", preview_token: preview_token_for(response.parsed_body, 0), decision: "apply" },
+               { change_index: 1, regular_hours: "4", overtime_hours: "2", preview_token: preview_token_for(response.parsed_body, 1), decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      expect(alloc_item.reload).to have_attributes(hours_worked: BigDecimal("34.00"), overtime_hours: BigDecimal("2.00"))
+      expect(flat_item.reload).to have_attributes(hours_worked: BigDecimal("34.00"), overtime_hours: BigDecimal("2.00"))
+
+      # Staff edits ONLY overtime to 3.0 (via job allocations on alloc_worker, and via flat field on flat_worker)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      edited_allocations = alloc_item.wage_rate_hours.map { |entry| entry.merge("overtime_hours" => 3.0) }
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{alloc_item.id}",
+            params: { payroll_item: { wage_rate_hours: edited_allocations } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{flat_item.id}",
+            params: { payroll_item: { overtime_hours: 3.0 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      [ alloc_item.reload, flat_item.reload ].each do |updated|
+        evidence = updated.custom_columns_data["client_change_evidence"]
+        expect(evidence).to include(
+          "kind" => "extra_hours",
+          "baseline_regular_hours" => "30.0",
+          "applied_regular_hours" => "34.0",
+          "baseline_overtime_hours" => "3.0",
+          "applied_overtime_hours" => "3.0",
+          "delta_regular_hours" => "4.0",
+          "delta_overtime_hours" => "0.0",
+          "reviewed_value" => "4"
+        )
+      end
+
+      # Revision 2 drops both extra-hours entries (keeping byte-identical PDF)
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             based_on_revision: 1,
+             keep_document_ids: [ rev1_doc_id ],
+             workbook_choice: "none",
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev2_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: rev2_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: []
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      # Client's 4 regular hours are removed (restoring 30.00 regular), while staff's 3.00 OT edit is preserved ($690.00 gross)
+      [ alloc_item.reload, flat_item.reload ].each do |restored|
+        expect(restored.hours_worked).to eq(BigDecimal("30.00"))
+        expect(restored.overtime_hours).to eq(BigDecimal("3.00"))
+        expect(restored.gross_pay).to eq(BigDecimal("690.00"))
+        expect(restored.custom_columns_data["client_change_evidence"]).to be_nil
+      end
+      expect(alloc_item.wage_rate_hours.sole).to include("regular_hours" => 30.0, "overtime_hours" => 3.0)
+      expect(flat_item.wage_rate_hours).to eq([])
     end
 
     it "applies two approved split extra-hours rows for the same employee cumulatively across jobs" do
