@@ -3,6 +3,7 @@
 require_relative "../db/migrate/support/m3_7_child_companies"
 require_relative "../db/migrate/support/login_link_decision_function"
 require_relative "../db/migrate/support/login_eligible_link_function"
+require_relative "../db/migrate/support/demo_shape_migration_functions"
 
 # Ruby schema dumps cannot represent PostgreSQL functions and triggers. This
 # versioned snapshot restores the current migration-defined guards without
@@ -67,7 +68,7 @@ module DatabaseIntegrity
   def self.snapshot_sql(connection = ActiveRecord::Base.connection)
     schema = connection.select_value("SELECT current_schema()")
     File.read(PATH) + M3_7ChildCompanies.schema_sql + LoginLinkDecisionFunction.schema_sql(schema) +
-      LoginEligibleLinkFunction.schema_sql(schema)
+      LoginEligibleLinkFunction.schema_sql(schema) + DemoShapeMigrationFunctions.schema_sql(schema)
   end
 
   def self.normalize_trigger(definition, namespace)

@@ -16,9 +16,10 @@ module YearEnd
   # else shows known issues first, or "Check needed" when none are known.
   # Missing employee checks are queued without aggregating on the request.
   class ClientsOverview
-    def initialize(user:, year:)
+    def initialize(user:, year:, enqueue_missing_checks: true)
       @user = user
       @year = Integer(year)
+      @enqueue_missing_checks = enqueue_missing_checks
     end
 
     def call
@@ -112,7 +113,7 @@ module YearEnd
           # The sign-off flag also depends on the ready mark, which the input
           # revision does not cover.
           sign_off_current = efile_current && stored[:readiness] == EfileCheck.readiness_stamp(readinesses[company.id])
-          EfileCheck.enqueue(company.id, year, input_revisions[company.id]) unless sign_off_current
+          EfileCheck.enqueue(company.id, year, input_revisions[company.id]) if @enqueue_missing_checks && !sign_off_current
           if efile_current
             stored_issues = stored[:issues].reject { |entry| Checklist::DEMO_EXPECTED_CODES.include?(entry[:code]) }
             issues.concat(stored_issues.map { |entry| { code: entry[:code], label: entry[:message] } })
