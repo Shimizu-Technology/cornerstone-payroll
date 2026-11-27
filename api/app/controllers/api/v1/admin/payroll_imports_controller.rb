@@ -887,6 +887,10 @@ module Api
             "match_status" => "matched",
             "match_method" => row.match_method || "employee_id",
             "match_confidence" => row.match_confidence&.to_f || 1.0,
+            # The staff import review reads `confidence` and `pay_rate`, as on
+            # every other preview row.
+            "confidence" => row.match_confidence&.to_f || 1.0,
+            "pay_rate" => row.employee&.payroll_rate_on(@pay_period.end_date)&.to_f,
             "week1_hours" => format_preview_decimal(row.week1_hours.to_d, serialize_numbers: serialize_numbers),
             "week2_hours" => format_preview_decimal(row.week2_hours.to_d, serialize_numbers: serialize_numbers),
             "regular_hours" => format_preview_decimal(row.regular_hours.to_d, serialize_numbers: serialize_numbers),

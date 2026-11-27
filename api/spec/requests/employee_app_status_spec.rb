@@ -76,8 +76,10 @@ RSpec.describe "Employee app status report", type: :request do
   end
 
   before do
-    enable_employee_app!(company)
+    # Turn the app on as of the fixed date, not the real one: on a later real
+    # date the app wouldn't be on yet at `now`.
     travel_to(now)
+    enable_employee_app!(company)
     disclosure_seeds
     hired_long_ago!(signed_up, expired, uninvited, deactivated, former)
 

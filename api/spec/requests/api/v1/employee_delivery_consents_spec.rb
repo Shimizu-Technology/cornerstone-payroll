@@ -488,14 +488,16 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       get base, headers: employee_headers
       expect(pay_item).to include("answer" => "not_answered", "paper_chosen_at" => nil)
 
-      travel_to(Time.zone.parse("2026-11-27 09:30:00")) do
+      # Later than setup: delivery consent is on from the real date the test runs.
+      chosen_at = 1.hour.from_now.utc.change(usec: 0)
+      travel_to(chosen_at) do
         # Stale verification is fine: keeping paper changes nothing about delivery.
         post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, 25 ]), as: :json
       end
       expect(response).to have_http_status(:ok)
       expect(response.headers.fetch("Cache-Control")).to include("no-store")
       expect(pay_item).to include("status" => "not_consented", "answer" => "keep_paper", "paper_continues" => true,
-        "paper_chosen_at" => "2026-11-27T09:30:00Z")
+        "paper_chosen_at" => chosen_at.iso8601)
       expect(response.parsed_body.fetch("consents").find { |c| c["kind"] == "w2gu" }["answer"]).to eq("not_answered")
       expect(DeliveryConsent.count).to eq(0)
 
