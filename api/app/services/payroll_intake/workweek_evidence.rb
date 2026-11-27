@@ -3,15 +3,23 @@
 module PayrollIntake
   class WorkweekEvidence
     PERIOD_DAYS = 14
+    WEEKLY_PERIOD_DAYS = 7
+    SEMIMONTHLY_DAYS_RANGE = (13..16).freeze
+    MONTHLY_DAYS_RANGE = (28..31).freeze
     # Previews saved before these were recorded still apply if the rest matches.
     LATER_KEYS = %w[aligned_with_pay_period legal_week_starts].freeze
 
-    # allow_misaligned: the source reports overtime itself (Revel), so a pay
-    # period that starts on a different weekday than the saved workweek is
-    # recorded and warned about instead of refused.
-    def initialize(pay_period:, allow_misaligned: false)
+    # allow_misaligned: the source reports overtime itself (Revel), or the
+    # company's workweek alignment policy is warn_if_offset, so a pay period
+    # that starts on a different weekday than the saved workweek is recorded
+    # and warned about instead of refused.
+    def initialize(pay_period:, allow_misaligned: false, overtime_mode: nil, workweek_alignment: nil)
       @pay_period = pay_period
-      @allow_misaligned = allow_misaligned
+      @overtime_mode = overtime_mode.presence&.to_s
+      @workweek_alignment = workweek_alignment.presence&.to_s
+      @allow_misaligned = allow_misaligned ||
+        @overtime_mode == "source_reports" ||
+        @workweek_alignment == "warn_if_offset"
     end
 
     def capture!
@@ -20,9 +28,9 @@ module PayrollIntake
       if workweek.starts_at_minutes.to_i != 0
         raise ArgumentError, "Payroll intake requires a legal workweek that starts at midnight"
       end
-      unless (pay_period.end_date - pay_period.start_date).to_i == PERIOD_DAYS - 1
-        raise ArgumentError, "Payroll intake requires a 14-day pay period containing two complete legal workweeks"
-      end
+
+      validate_period_length!
+
       aligned = pay_period.start_date.wday == workweek.starts_on_weekday
       unless aligned || allow_misaligned
         raise ArgumentError, "Payroll intake requires the pay period to begin on the confirmed legal workweek start day"
@@ -61,6 +69,47 @@ module PayrollIntake
 
     private
 
-    attr_reader :pay_period, :allow_misaligned
+    attr_reader :pay_period, :allow_misaligned, :overtime_mode, :workweek_alignment
+
+    def pay_frequency
+      pay_period.company&.pay_frequency.to_s.presence || "biweekly"
+    end
+
+    def source_reports_overtime?
+      overtime_mode == "source_reports" || (overtime_mode.nil? && allow_misaligned)
+    end
+
+    def validate_period_length!
+      span_days = (pay_period.end_date - pay_period.start_date).to_i + 1
+
+      case pay_frequency
+      when "weekly"
+        return if span_days == WEEKLY_PERIOD_DAYS
+
+        raise ArgumentError, "Payroll intake requires a 7-day pay period containing one complete legal workweek"
+      when "semimonthly"
+        unless source_reports_overtime?
+          raise ArgumentError,
+                "Payroll calculates overtime only from complete 7-day workweeks (weekly or biweekly pay periods per 29 CFR 778.104). " \
+                "Use source-reported overtime for semimonthly pay periods."
+        end
+        return if SEMIMONTHLY_DAYS_RANGE.cover?(span_days)
+
+        raise ArgumentError, "Payroll intake requires a valid semimonthly pay period (#{SEMIMONTHLY_DAYS_RANGE.min}–#{SEMIMONTHLY_DAYS_RANGE.max} days)"
+      when "monthly"
+        unless source_reports_overtime?
+          raise ArgumentError,
+                "Payroll calculates overtime only from complete 7-day workweeks (weekly or biweekly pay periods per 29 CFR 778.104). " \
+                "Use source-reported overtime for monthly pay periods."
+        end
+        return if MONTHLY_DAYS_RANGE.cover?(span_days)
+
+        raise ArgumentError, "Payroll intake requires a valid monthly pay period (#{MONTHLY_DAYS_RANGE.min}–#{MONTHLY_DAYS_RANGE.max} days)"
+      else
+        return if span_days == PERIOD_DAYS
+
+        raise ArgumentError, "Payroll intake requires a 14-day pay period containing two complete legal workweeks"
+      end
+    end
   end
 end

@@ -250,3 +250,64 @@ it('offers no Remove for a client portal revision', () => {
   openReview(portal);
   expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull();
 });
+
+it('renders upload file pickers and accept attributes from the supplied adapter descriptor', () => {
+  render(
+    <MemoryRouter>
+      <ImportModal
+        open
+        payPeriodId={9}
+        companyId={7}
+        descriptor={{
+          key: 'mosa_revel',
+          label: 'Custom descriptor label',
+          source_label: 'Custom source',
+          parser_version: 'mosa_revel:v1',
+          extraction: 'deterministic',
+          accepts_pasted_text: false,
+          tracks_reviewed_hours: true,
+          employee_match: 'name_fuzzy',
+          idempotency: 'files_period_roster_loans_and_workweek',
+          reports_overtime: true,
+          tips_default: 'already_paid_out',
+          overtime_mode: 'source_reports',
+          workweek_alignment: 'warn_if_offset',
+          required_sources: ['revel_hours', 'supplemental_workbook'],
+          files: [
+            {
+              role: 'revel_hours',
+              label: 'Custom Hours Report',
+              hint: 'Upload the custom hours report.',
+              accept: ['.pdf'],
+              max: 1,
+              required: true,
+              required_by_default: true,
+              portal_role: 'revel_payroll',
+              provides: ['regular_hours'],
+            },
+            {
+              role: 'supplemental_workbook',
+              label: 'Custom Adjustments Sheet',
+              hint: 'Upload the custom adjustments sheet.',
+              accept: ['.xlsx', '.csv'],
+              max: 1,
+              required: false,
+              required_by_default: true,
+              waivable: 'No adjustments this period',
+              portal_role: 'changes_workbook',
+              provides: ['reported_tips'],
+            },
+          ],
+          portal: { submittable: true, role_map: { revel_payroll: 'revel_hours', changes_workbook: 'supplemental_workbook' } },
+        }}
+        onOpenChange={vi.fn()}
+        onImportComplete={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+
+  expect((screen.getByLabelText('Custom Hours Report') as HTMLInputElement).accept).toBe('.pdf');
+  expect((screen.getByLabelText('Custom Adjustments Sheet') as HTMLInputElement).accept).toBe('.xlsx,.csv');
+  expect(screen.getByText('Upload the custom hours report.')).toBeTruthy();
+  expect((screen.getByRole('checkbox', { name: /Legacy workbook fallback/ }) as HTMLInputElement).checked).toBe(true);
+});

@@ -35,6 +35,7 @@ module PayrollIntake
         {
           role: role,
           label: definition.fetch(:label),
+          accept: Array(definition[:accept]),
           required: required_roles.include?(role),
           present: document.present?,
           filename: document&.filename,
@@ -70,7 +71,11 @@ module PayrollIntake
     end
 
     def required_roles
-      @required_roles ||= company.payroll_intake_required_sources(session.source_type)
+      @required_roles ||= PayrollIntake::EffectiveSettings.for(
+        company: company,
+        pay_period: session.pay_period,
+        source_type: session.source_type
+      ).required_sources
     end
   end
 end

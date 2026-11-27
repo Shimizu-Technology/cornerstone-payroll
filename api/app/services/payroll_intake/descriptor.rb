@@ -13,12 +13,16 @@ module PayrollIntake
     FileSlot = Data.define(
       :role,
       :label,
+      :hint,
       :accept,
       :content_type,
       :max,
       :required_by_default,
       :waivable,
       :portal_role,
+      :portal_label,
+      :portal_hint,
+      :supports_link,
       :provides
     ) do
       def matches?(filename:, content_type: nil)
@@ -29,7 +33,7 @@ module PayrollIntake
       end
 
       def to_source_role_definition
-        definition = { label: label }
+        definition = { label: label, accept: accept }
         definition[:waiver_label] = waivable if waivable.present?
         definition.freeze
       end
@@ -38,6 +42,7 @@ module PayrollIntake
         {
           "role" => role,
           "label" => label,
+          "hint" => hint,
           "accept" => accept,
           "content_type" => content_type,
           "max" => max,
@@ -45,6 +50,9 @@ module PayrollIntake
           "required_by_default" => required_by_default,
           "waivable" => waivable,
           "portal_role" => portal_role,
+          "portal_label" => portal_label || label,
+          "portal_hint" => portal_hint || hint,
+          "supports_link" => supports_link == true,
           "provides" => provides
         }
       end
@@ -52,7 +60,8 @@ module PayrollIntake
 
     attr_reader :key, :label, :source_label, :parser_version, :adapter_class,
                 :extraction, :employee_match, :idempotency, :files, :portal,
-                :tips_default, :overtime_mode, :config_path, :raw_config
+                :tips_default, :overtime_mode, :workweek_alignment,
+                :config_path, :raw_config
 
     def self.from_yaml(path, adapter_class:)
       resolved_path = Pathname.new(path)
@@ -64,12 +73,16 @@ module PayrollIntake
         FileSlot.new(
           role: role.to_s.freeze,
           label: definition.fetch("label", role.to_s.humanize).to_s.freeze,
+          hint: definition["hint"]&.to_s&.freeze,
           accept: Array(definition["extensions"]).map { |ext| ext.to_s.downcase.freeze }.freeze,
           content_type: definition["content_type"]&.to_s&.freeze,
           max: definition["max"]&.to_i,
           required_by_default: definition.fetch("required_by_default", false) == true,
           waivable: definition["waiver_label"]&.to_s&.freeze,
           portal_role: definition["portal_role"]&.to_s&.freeze,
+          portal_label: definition["portal_label"]&.to_s&.freeze,
+          portal_hint: definition["portal_hint"]&.to_s&.freeze,
+          supports_link: definition.fetch("supports_link", false) == true,
           provides: Array(definition["provides"]).map { |field| field.to_s.freeze }.freeze
         )
       end
@@ -82,6 +95,7 @@ module PayrollIntake
         end
       end
 
+      reports_ot = raw.dig("pay_period", "source_reports_overtime") == true
       new(
         key: raw.fetch("key"),
         label: raw.fetch("label", raw.fetch("key").to_s.humanize),
@@ -90,11 +104,13 @@ module PayrollIntake
         adapter_class: adapter_class,
         extraction: raw.fetch("extraction"),
         accepts_pasted_text: raw.fetch("accepts_pasted_text", false) == true,
+        tracks_reviewed_hours: raw.fetch("tracks_reviewed_hours", false) == true,
         employee_match: raw["employee_match"] || raw.dig("revel_hours", "employee_match") || "name_fuzzy",
         idempotency: raw.fetch("idempotency"),
-        reports_overtime: raw.dig("pay_period", "source_reports_overtime") == true,
+        reports_overtime: reports_ot,
         tips_default: raw["tips_default"] || "paid_in_check",
-        overtime_mode: raw["overtime_mode"] || (raw.dig("pay_period", "source_reports_overtime") ? "source_reports" : "weekly_split"),
+        overtime_mode: raw["overtime_mode"] || (reports_ot ? "source_reports" : "weekly_split"),
+        workweek_alignment: raw["workweek_alignment"] || (reports_ot ? "warn_if_offset" : "aligned"),
         files: files,
         portal: {
           "submittable" => portal_raw.fetch("submittable", role_map.any?) == true,
@@ -106,9 +122,10 @@ module PayrollIntake
     end
 
     def initialize(key:, label:, parser_version:, adapter_class:, extraction:, idempotency:,
-                   source_label: label, accepts_pasted_text: false, employee_match: "name_fuzzy",
-                   reports_overtime: false, tips_default: "paid_in_check", overtime_mode: "weekly_split",
-                   files: [], portal: {}, config_path: nil, raw_config: nil)
+                   source_label: label, accepts_pasted_text: false, tracks_reviewed_hours: false,
+                   employee_match: "name_fuzzy", reports_overtime: false,
+                   tips_default: "paid_in_check", overtime_mode: "weekly_split",
+                   workweek_alignment: nil, files: [], portal: {}, config_path: nil, raw_config: nil)
       @key = key.to_s.freeze
       @label = label.to_s.freeze
       @source_label = source_label.to_s.freeze
@@ -116,14 +133,20 @@ module PayrollIntake
       @adapter_class = adapter_class
       @extraction = extraction.to_s.freeze
       @accepts_pasted_text = accepts_pasted_text == true
+      @tracks_reviewed_hours = tracks_reviewed_hours == true
       @employee_match = employee_match.to_s.freeze
       @idempotency = idempotency.to_s.freeze
       @reports_overtime = reports_overtime == true
       @tips_default = tips_default.to_s.freeze
       @overtime_mode = overtime_mode.to_s.freeze
+      @workweek_alignment = (workweek_alignment.presence || (@reports_overtime ? "warn_if_offset" : "aligned")).to_s.freeze
       @files = Array(files).map { |slot| coerce_file_slot(slot) }.freeze
       portal_hash = portal.to_h.stringify_keys
       role_map = portal_hash.fetch("role_map", {}).to_h.transform_keys(&:to_s).transform_values(&:to_s).freeze
+      if role_map.empty?
+        derived = @files.each_with_object({}) { |slot, acc| acc[slot.portal_role] = slot.role if slot.portal_role.present? }
+        role_map = derived.freeze
+      end
       @portal = {
         "submittable" => portal_hash.fetch("submittable", false) == true,
         "role_map" => role_map
@@ -143,6 +166,25 @@ module PayrollIntake
       @default_required_source_roles
     end
 
+    def file_slot(role)
+      files.find { |slot| slot.role == role.to_s }
+    end
+
+    def file_slot_for_portal_role(portal_role)
+      source_role = portal_role_map[portal_role.to_s]
+      return file_slot(source_role) if source_role.present?
+
+      files.find { |slot| slot.portal_role == portal_role.to_s }
+    end
+
+    def portal_role_for(source_role)
+      portal_role_map.key(source_role.to_s) || file_slot(source_role)&.portal_role
+    end
+
+    def portal_roles
+      portal_role_map.keys
+    end
+
     def source_role_for(filename:, content_type: nil)
       slot = files.find { |candidate| candidate.matches?(filename: filename, content_type: content_type) }
       slot ? slot.role : "supporting_document"
@@ -160,6 +202,10 @@ module PayrollIntake
       @accepts_pasted_text
     end
 
+    def tracks_reviewed_hours?
+      @tracks_reviewed_hours
+    end
+
     def portal_submittable?
       portal.fetch("submittable")
     end
@@ -168,7 +214,7 @@ module PayrollIntake
       portal.fetch("role_map")
     end
 
-    def serialize(required_sources: nil)
+    def serialize(required_sources: nil, tips_default: nil, overtime_mode: nil, workweek_alignment: nil)
       effective_required = required_sources.nil? ? default_required_source_roles : Array(required_sources).map(&:to_s)
       {
         "key" => key,
@@ -177,11 +223,13 @@ module PayrollIntake
         "parser_version" => parser_version,
         "extraction" => extraction,
         "accepts_pasted_text" => accepts_pasted_text?,
+        "tracks_reviewed_hours" => tracks_reviewed_hours?,
         "employee_match" => employee_match,
         "idempotency" => idempotency,
         "reports_overtime" => reports_overtime?,
-        "tips_default" => tips_default,
-        "overtime_mode" => overtime_mode,
+        "tips_default" => (tips_default || self.tips_default).to_s,
+        "overtime_mode" => (overtime_mode || self.overtime_mode).to_s,
+        "workweek_alignment" => (workweek_alignment || self.workweek_alignment).to_s,
         "required_sources" => effective_required,
         "files" => files.map { |slot| slot.serialize(required: effective_required.include?(slot.role)) },
         "portal" => {
@@ -200,12 +248,16 @@ module PayrollIntake
       FileSlot.new(
         role: hash.fetch(:role).to_s.freeze,
         label: hash.fetch(:label, hash.fetch(:role).to_s.humanize).to_s.freeze,
+        hint: hash[:hint]&.to_s&.freeze,
         accept: Array(hash[:accept] || hash[:extensions]).map { |ext| ext.to_s.downcase.freeze }.freeze,
         content_type: hash[:content_type]&.to_s&.freeze,
         max: hash[:max]&.to_i,
         required_by_default: hash.fetch(:required_by_default, false) == true,
         waivable: (hash[:waivable] || hash[:waiver_label])&.to_s&.freeze,
         portal_role: hash[:portal_role]&.to_s&.freeze,
+        portal_label: hash[:portal_label]&.to_s&.freeze,
+        portal_hint: hash[:portal_hint]&.to_s&.freeze,
+        supports_link: hash.fetch(:supports_link, false) == true,
         provides: Array(hash[:provides]).map { |field| field.to_s.freeze }.freeze
       )
     end

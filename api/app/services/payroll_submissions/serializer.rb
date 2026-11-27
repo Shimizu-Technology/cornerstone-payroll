@@ -30,8 +30,8 @@ module PayrollSubmissions
         ref: entry.ref, id: record&.id, start_date: entry.start_date, end_date: entry.end_date,
         label: PeriodLabel.call(entry.start_date, entry.end_date), pay_date: @catalog.pay_date_for(entry),
         status: record&.status || "waiting_for_files",
-        status_label: !@catalog.company.payroll_intake_source_enabled?("mosa_revel") && (!record || record.status == "waiting_for_files") ? "Messages and drafts" : PayrollSubmissionPeriod::STATUS_LABELS.fetch(record&.status || "waiting_for_files"),
-        accepts_files: @catalog.company.payroll_intake_source_enabled?("mosa_revel"),
+        status_label: !@catalog.company.portal_payroll_files_enabled? && (!record || record.status == "waiting_for_files") ? "Messages and drafts" : PayrollSubmissionPeriod::STATUS_LABELS.fetch(record&.status || "waiting_for_files"),
+        accepts_files: @catalog.company.portal_payroll_files_enabled?,
         open_for_files: @catalog.open_for_files?(entry), opens_on: entry.end_date,
         current_revision: current&.revision, last_submitted_at: current&.submitted_at,
         status_changed_at: record&.status_changed_at
@@ -96,6 +96,7 @@ module PayrollSubmissions
       record = entry.record
       payload = summary(entry).merge(
         schedule_note: schedule_note,
+        intake_descriptor: serialized_portal_descriptor(entry),
         standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry), rates_on: entry.end_date).rows.reject { |row| !@staff && row[:availability_error].present? },
         thread_id: record&.client_portal_thread_id,
         file_requests: record ? file_requests(record) : [],
@@ -140,7 +141,7 @@ module PayrollSubmissions
         actions
       else
         actions = []
-        actions << "submit" if @catalog.company.payroll_intake_source_enabled?("mosa_revel") && !finished && @catalog.open_for_files?(entry)
+        actions << "submit" if @catalog.company.portal_payroll_files_enabled? && !finished && @catalog.open_for_files?(entry)
         actions << "message"
         actions
       end
@@ -195,11 +196,28 @@ module PayrollSubmissions
     def history(event)
       {
         id: event.id, event: event.event, from_status: event.from_status, to_status: event.to_status,
-        to_status_label: event.to_status == "waiting_for_files" && !@catalog.company.payroll_intake_source_enabled?("mosa_revel") ? "Messages and drafts" : PayrollSubmissionPeriod::STATUS_LABELS.fetch(event.to_status),
+        to_status_label: event.to_status == "waiting_for_files" && !@catalog.company.portal_payroll_files_enabled? ? "Messages and drafts" : PayrollSubmissionPeriod::STATUS_LABELS.fetch(event.to_status),
         actor_name: event.actor&.name || event.actor_name_snapshot || "Former portal user", actor_audience: event.actor_audience,
         note: event.note, submission_id: event.payroll_submission_id, draft_id: event.payroll_submission_draft_id,
         created_at: event.created_at
       }
+    end
+
+    def serialized_portal_descriptor(entry)
+      descriptor = @catalog.company.portal_submittable_intake_descriptor
+      return nil unless descriptor
+
+      effective = PayrollIntake::EffectiveSettings.for(
+        company: @catalog.company,
+        source_type: descriptor.key,
+        on: entry.end_date
+      )
+      descriptor.serialize(
+        required_sources: effective.required_sources,
+        tips_default: effective.tips_default,
+        overtime_mode: effective.overtime_mode,
+        workweek_alignment: effective.workweek_alignment
+      )
     end
 
     def schedule_note

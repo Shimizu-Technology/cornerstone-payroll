@@ -29,9 +29,11 @@ export function PayRunBlockers({
   canImportMosa,
   canImportSpikeIntake,
   clientApprovalLoading,
+  enabledIntakeAdapters = [],
   handleAdoptConfirmedWorkweek,
   hasPendingCalculationChanges,
   openClientApproval,
+  openIntakeAdapter,
   reloadClientReview,
   payPeriod,
   setImportModalOpen,
@@ -115,12 +117,17 @@ export function PayRunBlockers({
                   <p className="mt-1 text-sm text-danger-800">Review and apply the current source package. Payroll cannot be approved or committed until that revision is applied.</p>
                 </div>
               </div>
-              {(canImportMosa || canImportSpikeIntake) && (
+              {(enabledIntakeAdapters.length > 0 || canImportMosa || canImportSpikeIntake) && (
                 <Button
                   type="button"
                   variant="outline"
                   className="shrink-0 border-danger-300 bg-white text-danger-900 hover:bg-danger-100"
-                  onClick={() => canImportMosa ? setImportModalOpen(true) : setPayrollIntakeImportOpen(true)}
+                  onClick={() => {
+                    const preferred = enabledIntakeAdapters.find((adapter) => adapter.tracks_reviewed_hours) || enabledIntakeAdapters[0];
+                    if (preferred) openIntakeAdapter(preferred.key);
+                    else if (canImportMosa) setImportModalOpen(true);
+                    else setPayrollIntakeImportOpen(true);
+                  }}
                 >
                   Review current source
                 </Button>

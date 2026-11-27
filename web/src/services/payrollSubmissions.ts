@@ -1,5 +1,5 @@
 import api, { adminClientDocumentsApi, adminPortalThreadsApi, clientDocumentsApi, clientEmployeesApi, clientPortalThreadsApi, employeesApi } from './api';
-import type { ClientDocument, ClientPortalMessage, PortalFileRequest } from './api';
+import type { ClientDocument, ClientPortalMessage, PayrollIntakeDescriptor, PayrollIntakeProfile, PortalFileRequest } from './api';
 import type { PaginationMeta } from '@/types';
 
 export type SubmissionStatus = 'waiting_for_files' | 'submitted' | 'received' | 'in_review' | 'draft_ready' | 'approved' | 'changes_requested' | 'paid';
@@ -34,7 +34,7 @@ export type ChangeRow = {
   description?: string;
   note?: string;
 };
-export type SubmissionDocumentRole = 'revel_payroll' | 'changes_workbook' | 'attachment';
+export type SubmissionDocumentRole = 'revel_payroll' | 'changes_workbook' | 'attachment' | (string & {});
 export type SubmissionDocument = { role: SubmissionDocumentRole; file_name: string; file_size: number; sha256?: string; document?: ClientDocument | null };
 export type SubmissionRevision = {
   id: number; revision: number; current: boolean; superseded: boolean;
@@ -67,6 +67,7 @@ export type PeriodSummary = {
 export type PeriodAction = 'submit' | 'approve' | 'request_changes' | 'message' | 'acknowledge' | 'start_review' | 'post_draft' | 'save_draft' | 'mark_paid';
 export type PeriodDetail = PeriodSummary & {
   schedule_note: string; thread_id: number | null; allowed_actions: PeriodAction[]; file_requests?: PortalFileRequest[];
+  intake_descriptor?: PayrollIntakeDescriptor | null;
   standing_changes?: ChangeRow[];
   submissions: SubmissionRevision[]; drafts: SubmissionDraft[]; history: SubmissionHistoryEvent[];
 };
@@ -111,6 +112,10 @@ function sharedApi(base: '/client' | '/admin'): SharedPeriodApi {
 
 export const clientPayrollSubmissionsApi = {
   ...sharedApi('/client'),
+  intakeProfile: (on?: string) => {
+    const query = on ? `?on=${encodeURIComponent(on)}` : '';
+    return api.get<PayrollIntakeProfile>(`/client/intake_profile${query}`);
+  },
   submit: (ref: string, form: FormData) => api.postForm<Detail & { outcome: 'created' | 'replayed' | 'duplicate' }>(`/client/payroll_submission_periods/${encode(ref)}/submissions`, form),
   decide: (ref: string, data: { decision: 'approve' | 'request_changes'; draft_id: number; note?: string }) =>
     api.post<Detail>(`/client/payroll_submission_periods/${encode(ref)}/decision`, data),

@@ -4,7 +4,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { DocumentPreviewModal } from '@/components/documents/DocumentPreviewModal';
 import { prepareDocumentPreview, type DocumentPreviewPayload } from '@/lib/documentPreview';
-import type { ClientDocument } from '@/services/api';
+import type { ClientDocument, PayrollIntakeDescriptor } from '@/services/api';
+import { portalRoleLabel } from '@/lib/importSources';
 import { changeSummary, formatGuam } from '@/lib/payrollSubmissionFormat';
 import { STATUS_STEPS, type PayrollSubmissionsApi, type SubmissionRevision, type SubmissionStatus } from '@/services/payrollSubmissions';
 
@@ -30,8 +31,6 @@ export function StatusLine({ status }: { status: SubmissionStatus }): ReactEleme
     </ol>
   );
 }
-
-const ROLE_LABELS = { revel_payroll: 'Revel payroll PDF', changes_workbook: 'Changes workbook', attachment: 'Attachment' } as const;
 
 type Audience = 'client' | 'staff';
 
@@ -93,14 +92,15 @@ export function FileRow({ label, document, fallbackName, api, audience }: { labe
 }
 
 
-export function RevisionCard({ revision, api, companyId, audience }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null; audience?: Audience }): ReactElement {
+export function RevisionCard({ revision, api, companyId, audience, descriptor }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null; audience?: Audience; descriptor?: PayrollIntakeDescriptor | null }): ReactElement {
+  const hasLinkableSlot = !descriptor || descriptor.files.some(slot => slot.supports_link);
   const body = (
     <div className="space-y-3">
       <p className="text-sm text-neutral-700">
         Sent by {revision.submitted_by_name || 'Former portal user'} · {formatGuam(revision.submitted_at)}
         {revision.acknowledged_at ? <> · Received by {revision.acknowledged_by_name} · {formatGuam(revision.acknowledged_at)}</> : revision.current ? <> · Not yet confirmed by Cornerstone</> : null}
       </p>
-      <p className="text-sm text-neutral-700">{revision.workbook_choice === 'none' ? 'Client chose: No tips or loans this period.' : revision.documents.some(d => d.role === 'changes_workbook') ? 'Tips & loans workbook attached.' : revision.changes_link_url ? 'Tips & loans workbook link sent.' : 'Legacy revision: no tips & loans workbook or declaration was included.'}</p>
+      {hasLinkableSlot && <p className="text-sm text-neutral-700">{revision.workbook_choice === 'none' ? 'Client chose: No tips or loans this period.' : revision.documents.some(d => d.role === 'changes_workbook') ? 'Tips & loans workbook attached.' : revision.changes_link_url ? 'Tips & loans workbook link sent.' : 'Legacy revision: no tips & loans workbook or declaration was included.'}</p>}
       {revision.imported_at && <p className="text-sm font-semibold text-success-800">Imported · {formatGuam(revision.imported_at)}</p>}
       {revision.imports?.map(record => <div key={record.id} className="space-y-1 text-sm">
         <a className="text-primary-800 underline" href={companyId ? `/companies/${companyId}/pay-runs/${record.pay_period_id}` : `/pay-periods/${record.pay_period_id}`}>Import #{record.id} · {record.status}</a>
@@ -108,7 +108,7 @@ export function RevisionCard({ revision, api, companyId, audience }: { revision:
         {record.staff_workbook && <p className="break-all text-neutral-700">Staff workbook: {record.staff_workbook.filename} · attached by {record.staff_workbook.attached_by_name} · {formatGuam(record.staff_workbook.attached_at)} · SHA-256 {record.staff_workbook.sha256}</p>}
       </div>)}
       <ul className="divide-y divide-neutral-100">
-        {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={ROLE_LABELS[file.role]} document={file.document} fallbackName={file.file_name} api={api} audience={audience} />)}
+        {revision.documents.map(file => <FileRow key={`${file.role}-${file.document?.id || file.file_name}`} label={portalRoleLabel(file.role, descriptor)} document={file.document} fallbackName={file.file_name} api={api} audience={audience} />)}
       </ul>
       <div>
         <h4 className="text-sm font-semibold text-neutral-900">Changes this period</h4>
