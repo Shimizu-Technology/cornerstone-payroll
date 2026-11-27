@@ -71,6 +71,10 @@ Direct financial filters were also updated in `PayrollHistoryQuery` (SQL join), 
 
 `TimeTracking::ManualAllocationService` only releases a committed source allocation after financial payroll reversal; instrument retirement and repeated cancellation sync keep its reserved hours. Historical reconciliation uses the public cancellation predicate and requires the original exact receipt before replay.
 
+## When employees and clients see a check (Track L, L10)
+
+An employee sees a check once its stub posts: at 6:00 a.m. Guam time on the pay date, after the run commits, and for a paper check once it has a number. A client sees the run as soon as it is finished (committed, or a practice copy's baseline run), so they can review it. The difference is deliberate: no one sees pay before it is paid, and clients can still review a finished run straight away. `EmployeeDocuments::PostPayStub#cutoff` and `PayPeriod.client_finished` are the two rules. How a voided check and withdrawn pay appear to employees follows D-10.
+
 ## Existing data and release
 
 The migration adds nullable reversal fields and an actor foreign key. It does not rewrite existing voids. Deploy the migration with the API/web change.

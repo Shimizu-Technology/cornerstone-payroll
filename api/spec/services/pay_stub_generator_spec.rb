@@ -184,7 +184,7 @@ RSpec.describe PayStubGenerator do
     expect(text).to include("$310.00")
   end
 
-  it "prints plain direct deposit wording only on the employee copy" do
+  it "prints the same direct deposit wording on the employee and staff copies" do
     payroll_item.update!(payment_delivery_method: "direct_deposit")
     employee_pdf = described_class.new(payroll_item, employee_copy: true).generate
     staff_pdf = described_class.new(payroll_item).generate
@@ -193,7 +193,8 @@ RSpec.describe PayStubGenerator do
 
     expect(employee_text).to include("Payment: Direct deposit")
     expect(employee_text).not_to include("transfer not confirmed")
-    expect(staff_text).to include("Payment: Direct deposit (stub only; transfer not confirmed)")
+    expect(staff_text).to include("Payment: Direct deposit")
+    expect(staff_text).not_to include("transfer not confirmed")
   end
 
   it "prints the assigned check number on the employee copy" do

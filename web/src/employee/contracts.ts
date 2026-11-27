@@ -294,6 +294,8 @@ export interface StatementDetail extends StatementSummary {
   taxes: TaxLine[];
   deductions: AmountLine[];
   otherPay: AmountLine[];
+  /** Paid by the employer on top of pay, as the PDF prints them; never part of take-home pay. */
+  employerContributions: AmountLine[];
   ytdGross: Money | null;
   ytdNet: Money | null;
   /** Set while an earlier paycheck's place in the year-to-date is being reviewed. */
@@ -354,6 +356,7 @@ export function parseStatementDetail(data: unknown): StatementDetail | null {
     taxes: taxLines(body.taxes),
     deductions: amountLines(body.deductions),
     otherPay: amountLines(body.other_pay),
+    employerContributions: amountLines(body.employer_contributions),
     ytdGross: money(ytd.gross),
     ytdNet: money(ytd.net),
     ytdNote: text(body.ytd_note),

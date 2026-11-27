@@ -221,6 +221,30 @@ describe('employee app shell', () => {
     expect(await screen.findByText(note)).toBeTruthy();
   });
 
+  it('shows employer contributions apart from take-home pay (L7)', async () => {
+    signedIn();
+    localStorage.setItem('employee-app:hide-amounts', 'false');
+    const statement = {
+      id: 907,
+      pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20', run_purpose: 'regular' },
+      check_date: '2026-11-20', gross_pay: '612.50', net_pay: '534.18', total_hours: '38.50',
+      payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-20', check_number_last4: null },
+      pdf_available: true,
+    };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [statement], years: [2026], next_page: null }),
+      '/employee/statements/907': () => Response.json({ ...statement, earnings: [], taxes: [], deductions: [], other_pay: [],
+        employer_contributions: [{ label: '401(k) Match', amount: '18.38', ytd: '90.00' }], ytd: { gross: '1225.00', net: '1068.36' } }),
+    }));
+    window.history.pushState({}, '', '/pay/907');
+    render(<EmployeeApp />);
+
+    expect(await screen.findByRole('table', { name: /Paid by your employer/ })).toBeTruthy();
+    expect(screen.getByText(/They don.t change your take-home pay/)).toBeTruthy();
+  });
+
   it('points Help to the manager, never to Cornerstone', async () => {
     signedIn();
     window.history.pushState({}, '', '/help');

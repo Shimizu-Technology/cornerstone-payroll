@@ -103,7 +103,7 @@ module EmployeeDocuments
       end
 
       Posting.new(latest: latest, original: original, predecessor: repairing_link ? original : (latest || original),
-        fingerprint: fingerprint, payment_line: PayStubGenerator.employee_payment_line(@item))
+        fingerprint: fingerprint, payment_line: PayrollPaymentLabel.statement_line(@item))
     end
 
     def record_posting(staged, posting, period, checked_at)

@@ -542,8 +542,10 @@ class CheckGenerator
     earnings_ytd_breakdown.pay_ytd_total(ytd[:gross])
   end
 
+  # A contractor paycheck has no employee taxes or deductions. The paycheck's
+  # saved type decides, not the worker's current one, as on the statement.
   def tax_rows
-    return [] if employee.contractor?
+    return [] if payroll_item.contractor?
     rows = []
 
     # Build FIT label with W-4 context
@@ -602,9 +604,9 @@ class CheckGenerator
   end
 
   def deduction_rows
-    return [] if employee.contractor?
+    return [] if payroll_item.contractor?
     rows = statement_deduction_rows.map do |row|
-      [ stub_label(row.label), fn(row.current), fn(row.ytd) ]
+      [ stub_label(PayrollLabels.deduction(row)), fn(row.current), fn(row.ytd) ]
     end
 
     if rows.any?
@@ -622,7 +624,7 @@ class CheckGenerator
   end
 
   def statement_deduction_rows
-    return [] if employee.contractor?
+    return [] if payroll_item.contractor?
 
     statement_ytd_breakdown.deductions
   end

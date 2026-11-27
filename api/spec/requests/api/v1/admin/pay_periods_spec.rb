@@ -435,6 +435,17 @@ RSpec.describe "Api::V1::Admin::PayPeriods", type: :request do
       expect(json["pay_period"]).to have_key("payroll_items")
     end
 
+    it "returns the item's own check-date override apart from the printed date, so an edit can't save the run's date as an override" do
+      unset = create(:payroll_item, company: company, pay_period: pay_period, employee: employee, check_date: nil)
+      overridden = create(:payroll_item, company: company, pay_period: pay_period, employee: create(:employee, company: company),
+        check_date: pay_period.pay_date - 1)
+      get "/api/v1/admin/pay_periods/#{pay_period.id}"
+      rows = response.parsed_body.dig("pay_period", "payroll_items").index_by { |row| row["id"] }
+      expect(rows.fetch(unset.id).values_at("check_date", "effective_check_date")).to eq([ nil, pay_period.pay_date.iso8601 ])
+      expect(rows.fetch(overridden.id).values_at("check_date", "effective_check_date"))
+        .to eq([ (pay_period.pay_date - 1).iso8601, (pay_period.pay_date - 1).iso8601 ])
+    end
+
     it "exposes earning provenance for draft estimates without changing saved components" do
       item = create(:payroll_item, company: company, pay_period: pay_period, employee: employee,
         custom_earnings: [ { "label" => "One-time work", "amount" => 55 } ],

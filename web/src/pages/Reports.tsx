@@ -1420,12 +1420,12 @@ export function EmployeePayHistoryPanel(): ReactNode {
             <CardContent className="space-y-3 sm:hidden">
               {report.history.map((history) => (
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
-                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{formatDate(history.pay_date)}</p><p className="mt-1 break-words text-xs text-neutral-600">{formatDateRange(history.period_start, history.period_end) || history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{formatDate(history.pay_date)}</p><p className="mt-1 break-words text-xs text-neutral-600">{formatDateRange(history.period_start, history.period_end) || history.period_description}</p></div><div className="text-right"><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge>{history.basis_label && <p className="mt-1 text-xs text-neutral-600">{history.basis_label}</p>}</div></div>
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}{Number(history.non_taxable_pay ?? 0) !== 0 && <span className="block text-xs font-normal text-neutral-600">incl. {fmt(history.non_taxable_pay ?? 0)} non-taxable</span>}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm">
                     <summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary>
                     <dl className="mt-3 grid grid-cols-2 gap-3">
-                      <div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div>
+                      <div><dt>Regular hours</dt><dd>{history.hours_worked ?? '—'}</dd></div>
                       <div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div>
                       <div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div>
                       <div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div>
@@ -1445,7 +1445,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     <th className="pb-2 pr-4 font-medium">Pay Date</th>
                     <th className="pb-2 pr-4 font-medium">Period</th>
                     <th className="pb-2 pr-4 font-medium">Source</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Regular Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">OT Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
@@ -1463,7 +1463,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     <tr key={h.key} className="border-b last:border-0 hover:bg-neutral-50">
                       <td className="py-2 pr-4">{formatDate(h.pay_date)}</td>
                       <td className="py-2 pr-4 text-neutral-500">{formatDateRange(h.period_start, h.period_end) || h.period_description}</td>
-                      <td className="py-2 pr-4"><Badge variant={h.record_type === 'imported' ? 'warning' : 'default'}>{h.source.label}</Badge></td>
+                      <td className="py-2 pr-4"><Badge variant={h.record_type === 'imported' ? 'warning' : 'default'}>{h.source.label}</Badge>{h.basis_label && <span className="mt-1 block text-xs text-neutral-600">{h.basis_label}</span>}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_earnings_total ?? 0)}</td>
@@ -1904,7 +1904,7 @@ export function YtdSummaryPanel() {
                   <details className="rounded-xl border border-neutral-200 px-4 py-3">
                     <summary className="cursor-pointer font-medium text-neutral-800">More payroll categories and field reconciliation</summary>
                     <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-                      <TotalBox label="Total Hours" value={report.company_totals.total_hours ?? 0} format="number" />
+                      <TotalBox label="Total Regular Hours" value={report.company_totals.worked_hours ?? 0} format="number" />
                       <TotalBox label="Total OT Hours" value={report.company_totals.total_overtime_hours ?? 0} format="number" />
                       <TotalBox label="Other Earnings" value={report.company_totals.custom_earnings_total ?? 0} />
                       <TotalBox label="Payroll Field Additions" value={Number(report.company_totals.payroll_field_taxable_additions_total ?? 0) + Number(report.company_totals.payroll_field_non_taxable_additions_total ?? 0)} />
@@ -1962,7 +1962,7 @@ export function YtdSummaryPanel() {
                     <SortableTh label="Employee" activeLabel={sortLabel('name')} onClick={() => updateSort('name')} />
                     <SortableTh label="Type" activeLabel={sortLabel('employment_type')} onClick={() => updateSort('employment_type')} />
                     <SortableTh label="Status" activeLabel={sortLabel('status')} onClick={() => updateSort('status')} />
-                    <th className="py-2 pr-4 text-right font-medium">Hours</th>
+                    <th className="py-2 pr-4 text-right font-medium">Regular Hours</th>
                     <th className="py-2 pr-4 text-right font-medium">OT Hours</th>
                     <SortableTh label="Gross Pay" activeLabel={sortLabel('gross_pay')} align="right" onClick={() => updateSort('gross_pay')} />
                     <th className="py-2 pr-4 text-right font-medium">Non-Taxable Additions</th>
@@ -2012,7 +2012,7 @@ export function YtdSummaryPanel() {
                           {emp.status}
                         </Badge>
                       </td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_hours ?? 0).toFixed(2)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{(emp.worked_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{(emp.total_overtime_hours ?? 0).toFixed(2)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.gross_pay)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(emp.non_taxable_additions_total ?? 0)}</td>

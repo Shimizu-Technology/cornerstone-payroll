@@ -158,6 +158,11 @@ class PayrollItem < ApplicationRecord
   scope :voided_checks,      -> { where(voided: true) }
   scope :reportable,         -> { where.not(id: PayrollItemLegacyDisposition.select(:payroll_item_id)) }
   scope :printed,            -> { where.not(check_printed_at: nil) }
+  # Newest first by the date the stub prints: the check's own date, else the
+  # run's pay date.
+  scope :newest_printed_first, -> {
+    joins(:pay_period).order(Arel.sql("COALESCE(payroll_items.check_date, pay_periods.pay_date) DESC"), id: :desc)
+  }
   scope :unprinted,          -> { where(check_printed_at: nil, voided: false) }
 
   def payroll_included?

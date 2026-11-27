@@ -191,7 +191,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
         pay_date: '2026-09-19', period_description: 'September payroll',
         source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
         gross_pay: 900, total_deductions: 100, net_pay: 800,
-        payment_delivery_method: 'direct_deposit', check_number: null,
+        payment_delivery_method: 'direct_deposit', payment_method_label: 'Direct deposit', check_number: null,
       }],
     } });
     render(
@@ -246,7 +246,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
         pay_date: '2026-10-08', period_description: 'October payroll',
         source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
         hours_worked: 21.37, gross_pay: 197.67, total_deductions: 197.67, net_pay: 0,
-        payment_delivery_method: 'paper_check', check_number: null,
+        payment_delivery_method: 'paper_check', payment_method_label: '$0 net · earnings statement only', check_number: null,
       }],
     } });
     render(
@@ -274,7 +274,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
         pay_date: '2025-09-19', period_description: 'Prior native payroll' },
       { ...native, key: 'imported:9', record_type: 'imported', payroll_item_id: null,
         pay_period_id: null, historical_pay_period_id: 9, pay_date: '2025-08-19',
-        period_description: 'Prior imported payroll',
+        period_description: 'Prior imported payroll', basis_label: 'As imported',
         source: { system: 'quickbooks_online', label: 'QuickBooks', locked: true } },
     ] } });
     const returnTo = '/companies/1/pay-runs/5/work';
@@ -294,6 +294,8 @@ describe('EmployeeWorkspace imported setup certification', () => {
     fireEvent.change(source, { target: { value: 'quickbooks' } });
     expect(screen.getByRole('group', { name: 'Pay history for Aug 19, 2025' })).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Pay history for Sep 19, 2025' })).toBeNull();
+    // The imported row says it is as imported, on phone and desktop.
+    expect(screen.getAllByText('As imported')).toHaveLength(2);
     expect(year).toHaveProperty('value', '2025');
     const href = screen.getByRole('link', { name: 'Overview' }).getAttribute('href')!;
     const destination = new URL(href, 'https://payroll.example');

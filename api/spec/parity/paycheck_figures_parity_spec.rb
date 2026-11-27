@@ -322,13 +322,15 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
             figure: [ :dates, :pay_date_period_date_group ],
             values_by_view: period_date_group.transform_values { |v| dig_figure(v, [ :dates, :pay_date ]) }
           )
-
-          pending "L11: employee API and PDFs show per-item check_date while client/staff pay periods and pay history show pay_period.pay_date"
           assert_parity!(
             fixture: scenario[:employee_key],
             figure: [ :dates, :pay_date ],
             values_by_view: views.transform_values { |v| dig_figure(v, [ :dates, :pay_date ]) }
           )
+          # The client's pay stub list shows the same date the stub prints.
+          item = fixture.items.fetch(scenario[:item_key])
+          listed = client_api.pay_stubs_index(item.employee_id).fetch("pay_stubs").find { |row| row["id"] == item.id }
+          expect(listed.values_at("pay_date", "period_pay_date")).to eq([ item.check_date.iso8601, period.pay_date.iso8601 ])
         end
       end
 
@@ -342,8 +344,6 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
             values_by_view: agreeing_er_views.transform_values { |v| dig_figure(v, [ :employer_contributions, :employer_401k_match, :amount ]) }
           )
           expect(views.dig(:staff_pay_period, :employer_contributions, :employer_401k_match, :amount)).to eq(BigDecimal("90.00"))
-
-          pending "L7: employer contributions appear on pay stub PDFs and staff pay run but are omitted from employee statements API"
           er_views = views.slice(:employee_api, :employee_stub_pdf, :client_stub_pdf, :staff_pay_period)
           assert_parity!(
             fixture: scenario[:employee_key],
@@ -514,8 +514,6 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
           check_stub_pdf: chk_pdf.dig(:deductions, :retirement_401k, :amount)
         }
       )
-
-      pending "L14: pre-tax 401(k) label is '401(k) Retirement' on pay stub PDF / employee API vs '401(k) Pre-Tax' on check stub PDF"
       assert_parity!(
         fixture: :salaried_401k,
         figure: [ :deductions, :retirement_401k, :label ],
@@ -546,8 +544,6 @@ RSpec.describe "Paycheck figures parity across employee, client, staff, and PDF 
           staff_pay_history: dd_views.dig(:staff_pay_history, :payment, :payment_label)
         }
       )
-
-      pending "L12: direct deposit wording differs between employee PDF / pay history ('Direct deposit') and client PDF ('Direct deposit (stub only; transfer not confirmed)')"
       assert_parity!(
         fixture: :salaried_401k,
         figure: [ :payment, :payment_label ],

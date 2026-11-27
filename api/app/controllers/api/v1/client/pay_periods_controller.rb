@@ -210,7 +210,9 @@ module Api
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             gross_pay: item.gross_pay,
-            net_pay: item.net_pay
+            net_pay: item.net_pay,
+            # The date the check and its stub print; the run's pay date unless this check has its own.
+            effective_check_date: (item.check_date || pay_period.pay_date)&.iso8601
           }
           summary.merge(pay_item_breakdown(item))
         rescue PayrollComponentMirrors::AmbiguousHistoryError, PayrollInsuranceComponents::AmbiguousHistoryError => error

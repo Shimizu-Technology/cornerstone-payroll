@@ -787,7 +787,7 @@ function PayHistory({ companyId, report, returnTo, readOnly }: PayHistoryProps):
                     <p className="font-semibold text-neutral-950">{formatDate(item.pay_date)}</p>
                     <Link className="mt-1 block text-sm font-medium text-primary-700" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link>
                   </div>
-                  <Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge>
+                  <div className="text-right"><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge>{item.basis_label && <p className="mt-1 text-xs text-neutral-600">{item.basis_label}</p>}</div>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div><p className="text-xs text-neutral-500">Gross</p><p className="font-medium tabular-nums">{formatCurrency(item.gross_pay)}</p></div>
@@ -823,7 +823,7 @@ function PayHistory({ companyId, report, returnTo, readOnly }: PayHistoryProps):
                     )}
                   </TableCell>
                   <TableCell><Link className="font-semibold text-primary-700 hover:text-primary-900" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link></TableCell>
-                  <TableCell><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge></TableCell>
+                  <TableCell><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge>{item.basis_label && <span className="mt-1 block text-xs text-neutral-600">{item.basis_label}</span>}</TableCell>
                   <TableCell><SavedHours item={item} /></TableCell>
                   <TableCell>{formatCurrency(item.gross_pay)}</TableCell>
                   <TableCell>{formatCurrency(item.total_deductions)}</TableCell>
