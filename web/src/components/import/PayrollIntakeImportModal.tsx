@@ -20,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { employeesApi, payrollIntakeImportsApi } from '@/services/api';
 import type {
   PayrollIntakeApplyRowPayload,
+  PayrollIntakeDescriptor,
   PayrollIntakeDispositionTarget,
   PayrollIntakeImportData,
   PayrollIntakeRowData,
@@ -32,6 +33,7 @@ interface PayrollIntakeImportModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
+  descriptor?: PayrollIntakeDescriptor | null;
   employees: Employee[];
   onEmployeeCreated?: (employee: Employee) => void;
   onSourcePreviewed?: () => void;
@@ -105,11 +107,17 @@ export function PayrollIntakeImportModal({
   open,
   onOpenChange,
   payPeriodId,
+  descriptor,
   employees,
   onEmployeeCreated,
   onSourcePreviewed,
   onImportComplete,
 }: PayrollIntakeImportModalProps) {
+  const sourceType = descriptor?.key || 'spike_email';
+  const modalTitle = sourceType === 'spike_email' ? 'Spike Payroll Intake' : `${descriptor?.label || 'Payroll'} Intake`;
+  const modalDescription = sourceType === 'spike_email'
+    ? 'Paste the Spike payroll email or upload screenshots. Review every extracted row before applying taxable paid-out tips.'
+    : `Upload or paste source payroll data for ${descriptor?.source_label || descriptor?.label || sourceType} and review every row before applying.`;
   const [step, setStep] = useState<Step>('upload');
   const [pastedText, setPastedText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
@@ -141,13 +149,13 @@ export function PayrollIntakeImportModal({
     let active = true;
     payrollIntakeImportsApi.list(payPeriodId).then((response) => {
       if (!active) return;
-      setCurrentPackage(response.imports.find((entry) => entry.source_type === 'spike_email' && entry.current) || null);
+      setCurrentPackage(response.imports.find((entry) => entry.source_type === sourceType && entry.current) || null);
       setDispositionTargets(response.disposition_targets || []);
     }).catch((err) => {
       if (active) setError(err instanceof Error ? err.message : 'Could not load retained source history');
     });
     return () => { active = false; };
-  }, [open, payPeriodId, setError]);
+  }, [open, payPeriodId, sourceType, setError]);
 
   const employeeOptions = useMemo(() => (
     [...localEmployees]
@@ -242,7 +250,7 @@ export function PayrollIntakeImportModal({
       setLoading(true);
       setError(null);
       const response = await payrollIntakeImportsApi.preview(payPeriodId, {
-        source_type: 'spike_email',
+        source_type: sourceType,
         pasted_text: pastedText,
         files,
         supersedes_package_id: currentPackage && replacementConfirmed ? currentPackage.package_id : undefined,
@@ -485,9 +493,9 @@ export function PayrollIntakeImportModal({
       >
       <DialogContent className="dialog-top dialog-wide max-w-7xl max-h-[calc(100vh-5rem)] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Spike Payroll Intake</DialogTitle>
+          <DialogTitle>{modalTitle}</DialogTitle>
           <DialogDescription>
-            Paste the Spike payroll email or upload screenshots. Review every extracted row before applying taxable paid-out tips.
+            {modalDescription}
           </DialogDescription>
         </DialogHeader>
 

@@ -6,13 +6,14 @@ import { Header } from '@/components/layout/Header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { clientPayrollStatus } from '@/lib/clientPayrollStatus';
+import { hasPortalSubmittableAdapter } from '@/lib/importSources';
 import { formatDate, formatGuam, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { adminPayrollSubmissionsApi, clientPayrollSubmissionsApi, type PeriodSummary } from '@/services/payrollSubmissions';
 
 export function PayrollPeriodsList({ audience }: { audience: 'client' | 'staff' }): ReactElement {
   const { companyId } = useParams();
   const { activeCompany } = useCompany();
-  const canSend = activeCompany?.payroll_intake_source_types?.includes('mosa_revel');
+  const canSend = hasPortalSubmittableAdapter(activeCompany);
   const api = audience === 'client' ? clientPayrollSubmissionsApi : adminPayrollSubmissionsApi;
   const base = audience === 'client' ? '/payroll-files' : companyId ? `/companies/${companyId}/payroll-submissions` : '/settings/payroll-submissions';
   const [rows, setRows] = useState<PeriodSummary[] | null>(null);

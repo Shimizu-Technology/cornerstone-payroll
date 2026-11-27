@@ -118,6 +118,16 @@ class PayrollItem < ApplicationRecord
     key.present? && import_source == key.to_s
   end
 
+  def intake_descriptor
+    return nil unless intake_imported?
+
+    PayrollIntake::Registry.find(import_source)
+  end
+
+  def tracks_reviewed_hours?
+    intake_descriptor&.tracks_reviewed_hours? == true
+  end
+
   # Prefer the legacy mosa_* keys while both keys are dual-written so a code
   # rollback + import + roll-forward never reads a stale new key; fall back to
   # the neutral keys for rows written without mosa_*.
@@ -747,9 +757,10 @@ class PayrollItem < ApplicationRecord
 
   # Scalar worksheet/API edits must update the reviewed job bucket as well.
   # Otherwise a saved zero-hour bucket would overwrite emailed hours.
-  # Scoped to mosa_revel until B4 makes reviewed-hour tracking descriptor-driven.
+  # Driven by the adapter descriptor's tracks_reviewed_hours flag (true for
+  # MoSa Revel, false for Spike email).
   def synchronize_mosa_reviewed_hours!
-    return unless imported_by?("mosa_revel")
+    return unless tracks_reviewed_hours?
 
     changed_hours = { hours_worked: "regular_hours", overtime_hours: "overtime_hours",
       holiday_hours: "holiday_hours", pto_hours: "pto_hours" }.select { |field, _key| will_save_change_to_attribute?(field) }

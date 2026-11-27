@@ -10,6 +10,7 @@ import { InboxReturnLink } from '@/components/client-portal/InboxReturnLink';
 import { useCompany } from '@/contexts/CompanyContext';
 import { FileRow, RevisionCard } from '@/components/payroll-submissions/PeriodParts';
 import { formatDateRange } from '@/lib/display-date';
+import { hasPortalSubmittableAdapter } from '@/lib/importSources';
 import { formatDate, formatGuam, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { SubmissionForm } from '@/components/payroll-submissions/SubmissionForm';
 import { PortalImportAction } from '@/components/payroll-submissions/PortalImportAction';
@@ -109,7 +110,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
   const current = period.submissions.find(s => s.current);
   const currentDraft = period.drafts.find(d => d.current);
   const otherDrafts = period.drafts.filter(d => d !== currentDraft);
-  const canSendFiles = period.accepts_files ?? activeCompany?.payroll_intake_source_types?.includes('mosa_revel');
+  const canSendFiles = period.accepts_files ?? hasPortalSubmittableAdapter(activeCompany);
   const canSubmit = canSendFiles && period.allowed_actions.includes('submit');
   const reviewCompanyId = companyId ? Number(companyId) : activeCompanyId;
   const headerDescription = audience === 'client'
@@ -145,7 +146,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
             <h2 id="revisions" className="text-base font-semibold text-neutral-950">{audience === 'client' ? 'What you sent' : 'What the client sent'}</h2>
             {audience === 'client' && canSubmit && current && !editing && <Button type="button" variant="outline" onClick={() => setEditing(true)}>Send an update or replace a file</Button>}
           </div>
-          {period.submissions.length ? period.submissions.filter(revision => revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)
+          {period.submissions.length ? period.submissions.filter(revision => revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} descriptor={period.intake_descriptor} />)
             : <p className="text-sm text-neutral-600">{canSendFiles ? 'No files for this period yet.' : audience === 'staff' ? 'Use this period for source files and messages. Review payroll in the preview section.' : 'Review files and payroll previews for this period.'}</p>}
         </section>
 
@@ -204,7 +205,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
 
         {(period.history.length > 0 || period.submissions.length > 1) && <section aria-labelledby="history" className="space-y-3 rounded-xl border border-neutral-200 bg-white p-4">
           <h2 id="history" className="text-base font-semibold text-neutral-950">History</h2>
-          {period.submissions.filter(revision => !revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} />)}
+          {period.submissions.filter(revision => !revision.current).map(revision => <RevisionCard key={revision.id} revision={revision} api={api} audience={audience} companyId={companyId ? Number(companyId) : activeCompanyId} descriptor={period.intake_descriptor} />)}
           <ol className="mt-2 space-y-2">{[...period.history].reverse().map(event => <li key={event.id} className="text-sm text-neutral-800">
             <span className="font-medium">{event.to_status_label}</span> · {event.actor_name} ({event.actor_audience === 'staff' ? 'Cornerstone' : 'client'}) · <time dateTime={event.created_at}>{formatGuam(event.created_at)}</time>
             {event.note && <span className="block whitespace-pre-wrap break-words text-neutral-700">{event.note}</span>}

@@ -1514,6 +1514,7 @@ export interface PayPeriod {
   notes?: string;
   period_description?: string;
   payroll_intake_source_types?: string[];
+  payroll_intake_adapters?: import('@/services/api').PayrollIntakeDescriptor[];
   intake_stale_at?: string | null;
   intake_stale_reason?: string | null;
   intake_stale_session_id?: number | null;

@@ -101,7 +101,7 @@ it('offers an explicit pending-revision retry after refusing duplicate files', a
   expect(screen.queryByRole('alert')).toBeNull();
   expect(screen.getByText('These files were already applied. Review them with the changes from the pending client revision.')).toBeTruthy();
   fireEvent.click(retry);
-  await waitFor(() => expect(mocks.upload).toHaveBeenLastCalledWith(9, file, undefined, false, undefined, 20));
+  await waitFor(() => expect(mocks.upload).toHaveBeenLastCalledWith(9, file, undefined, false, undefined, 20, 'mosa_revel'));
   expect(await screen.findByLabelText('Use this import for the client’s revision 2')).toHaveProperty('checked', true);
 });
 

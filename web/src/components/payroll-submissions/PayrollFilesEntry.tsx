@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { clientPayrollStatus } from '@/lib/clientPayrollStatus';
+import { hasPortalSubmittableAdapter } from '@/lib/importSources';
 import { currentSubmissionPeriod, formatDate, statusVariant } from '@/lib/payrollSubmissionFormat';
 import { clientPayrollSubmissionsApi, type PeriodSummary } from '@/services/payrollSubmissions';
 
@@ -28,7 +29,7 @@ function detailLine(period: PeriodSummary): string {
 /** The client Home entry to Pay Period Files: the current period, its status, and how it differs from Pay Periods. */
 export function PayrollFilesEntry(): ReactElement | null {
   const { activeCompany } = useCompany();
-  return activeCompany?.payroll_intake_source_types?.includes('mosa_revel') ? <EnabledPayrollFilesEntry key={activeCompany.id} /> : null;
+  return hasPortalSubmittableAdapter(activeCompany) && activeCompany ? <EnabledPayrollFilesEntry key={activeCompany.id} /> : null;
 }
 
 function EnabledPayrollFilesEntry(): ReactElement {

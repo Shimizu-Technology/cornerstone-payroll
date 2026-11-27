@@ -30,9 +30,10 @@ module PayrollSubmissions
     attr_reader :prepared, :uploaded_keys
 
     # files: [[role, uploaded_file], ...]
-    def initialize(company_id:, files:)
+    def initialize(company_id:, files:, descriptor: nil)
       @company_id = company_id
       @files = files
+      @descriptor = descriptor
       @uploaded_keys = []
       @prepared = []
     end
@@ -104,13 +105,37 @@ module PayrollSubmissions
     private
 
     def role_error(role, content_type, file)
+      return "must be a PDF" if %w[paycheck direct_deposit].include?(role) && content_type != "application/pdf"
+
+      slot = @descriptor&.file_slot_for_portal_role(role)
+      if slot
+        error = slot_role_error(slot, content_type, file)
+        return error if error
+        return "must be 8 MB or smaller" if file.size.to_i > SOURCE_FILE_LIMIT
+
+        return nil
+      end
+
       case role
-      when "revel_payroll", "paycheck", "direct_deposit"
+      when "revel_payroll"
         return "must be a PDF" unless content_type == "application/pdf"
       when "changes_workbook"
         return "must be an Excel workbook (.xls or .xlsx)" unless WORKBOOK_TYPES.include?(content_type) && File.extname(file.original_filename).downcase.in?(%w[.xls .xlsx])
       end
       return "must be 8 MB or smaller" if %w[revel_payroll changes_workbook].include?(role) && file.size.to_i > SOURCE_FILE_LIMIT
+
+      nil
+    end
+
+    def slot_role_error(slot, content_type, file)
+      accept = Array(slot.accept)
+      if slot.content_type == "application/pdf" || accept == [ ".pdf" ]
+        return "must be a PDF" unless content_type == "application/pdf"
+      elsif accept.any? && (accept - %w[.xls .xlsx]).empty?
+        return "must be an Excel workbook (.xls or .xlsx)" unless WORKBOOK_TYPES.include?(content_type) && File.extname(file.original_filename).downcase.in?(accept)
+      elsif accept.any? && !slot.matches?(filename: file.original_filename, content_type: content_type)
+        return "must match accepted file types (#{accept.join(', ')})"
+      end
 
       nil
     end

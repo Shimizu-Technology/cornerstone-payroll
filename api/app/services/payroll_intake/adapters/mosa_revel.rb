@@ -36,6 +36,11 @@ module PayrollIntake
       def initialize(pay_period:, company:)
         @pay_period = pay_period
         @company = company
+        @effective_settings = PayrollIntake::EffectiveSettings.for(
+          company: company,
+          pay_period: pay_period,
+          source_type: SOURCE_TYPE
+        )
       end
 
       def extract(files:, pasted_text: nil)
@@ -104,7 +109,7 @@ module PayrollIntake
 
       private
 
-      attr_reader :pay_period, :company
+      attr_reader :pay_period, :company, :effective_settings
 
       def pdf?(file)
         content_type(file) == "application/pdf" || extension(file) == ".pdf"
@@ -247,7 +252,8 @@ module PayrollIntake
         regular_hours = round(raw_row[:regular_hours])
         overtime_hours = round(raw_row[:overtime_hours])
         total_tips = money(raw_row[:total_tips])
-        tips_paid_out = raw_row[:tips_already_paid] == true ? total_tips : 0.0
+        row_tips_already_paid = raw_row[:tips_already_paid].nil? ? effective_settings.tips_already_paid_default? : (raw_row[:tips_already_paid] == true)
+        tips_paid_out = row_tips_already_paid ? total_tips : 0.0
 
         {
           position: index,

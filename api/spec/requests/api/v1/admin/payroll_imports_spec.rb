@@ -601,4 +601,164 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       expect(import.payroll_intake_session.reload.status).to eq("previewed")
     end
   end
+
+  describe "preserving tips.default = already_paid_out across rematch and remove_source" do
+    let(:storage) do
+      Class.new do
+        def initialize
+          @objects = {}
+        end
+
+        def upload(key, data, content_type:)
+          @objects[key] = { data: data, content_type: content_type }
+        end
+
+        def download_with_limit(key, max_bytes:)
+          @objects.fetch(key).fetch(:data).byteslice(0, max_bytes)
+        end
+
+        def delete(key)
+          @objects.delete(key)
+        end
+      end.new
+    end
+
+    def build_tips_workbook(rows:)
+      layout = YAML.safe_load_file(Rails.root.join("config/payroll_intake/mosa_revel.yml")).dig("workbook", "generated")
+      package = Axlsx::Package.new
+      package.workbook.add_worksheet(name: "START HERE") do |sheet|
+        sheet.add_row([ "Cornerstone payroll change-only workbook" ])
+        sheet.add_row([ "Synthetic intake fixture" ])
+        sheet.add_row([])
+        layout.fetch("merged_ranges").each { |range| sheet.merge_cells(range) }
+        values = [
+          "cornerstone-mosa-supplemental/v2", company.id, company.name, pay_period.start_date, pay_period.end_date, pay_period.pay_date,
+          1, nil, nil, nil, nil, "NO", "I confirm these payroll changes are complete and accurate."
+        ]
+        layout.fetch("metadata_labels").zip(values).each { |row| sheet.add_row(row) }
+      end
+      layout.fetch("sheets").each do |name, definition|
+        package.workbook.add_worksheet(name: name) do |sheet|
+          sheet.add_row(definition.fetch("columns"))
+          if name == "EMPLOYEE CHANGES"
+            rows.each { |entry| sheet.add_row(entry) }
+          end
+        end
+      end
+      file = Tempfile.new([ "mosa-already-paid-tips", ".xlsx" ])
+      file.binmode
+      package.serialize(file.path)
+      file
+    end
+
+    it "keeps tips_paid_out_from_tips true across rematch, remove_source, and apply while honoring explicit row elections" do
+      company.update!(payroll_intake_settings: {
+        "mosa_revel" => { "tips_default" => "already_paid_out", "required_sources" => [ "supplemental_workbook" ] }
+      })
+      config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: pay_period.pay_date.year)
+      create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+      CompanyWorkweek.create!(
+        company: company,
+        starts_on_weekday: pay_period.start_date.wday,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        effective_on: pay_period.start_date - 7,
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: admin_user,
+        confirmed_at: Time.current,
+        notes: "Confirmed"
+      )
+      allow(R2StorageService).to receive(:new).and_return(storage)
+
+      pdf_path = build_revel_pdf(
+        [
+          { name: "Example, Avery", regular_hours: 40, overtime_hours: 0, regular_pay: 600 },
+          { name: "Fixture, Casey", regular_hours: 40, overtime_hours: 0, regular_pay: 600 }
+        ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      )
+      workbook_file = build_tips_workbook(rows: [
+        [ included_employee.id, included_employee.full_name, "Kitchen", 30.00, 15.00, nil, "Tips report", nil ],
+        [ excluded_employee.id, excluded_employee.full_name, "Front", 20.00, 10.00, "NO", "Tips report", nil ]
+      ])
+
+      # Initial upload omits tips_paid_out_from_tips so it inherits company default (already_paid_out -> true).
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: {
+             pdf_file: Rack::Test::UploadedFile.new(pdf_path, "application/pdf", true, original_filename: "revel.pdf"),
+             excel_file: Rack::Test::UploadedFile.new(workbook_file.path, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", true, original_filename: "changes.xlsx")
+           }
+      expect(response).to have_http_status(:ok), response.body
+      initial_record = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
+      expect(initial_record.raw_data["tips_paid_out_from_tips"]).to be(true)
+
+      # Trigger a rematch that creates a new version (after updating the roster so rematch supersedes).
+      create(:employee, company: company, first_name: "Jordan", last_name: "Added")
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/rematch_import",
+           params: { reason: "Updated employee roster" },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      rematched_record = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
+      expect(rematched_record.id).not_to eq(initial_record.id)
+      expect(rematched_record.raw_data["tips_paid_out_from_tips"]).to be(true)
+
+      # Remove revel_hours so a third version is created keeping the workbook.
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/remove_import_source",
+           params: { source_role: "revel_hours", reason: "Wrong PDF uploaded" },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      removed_record = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
+      expect(removed_record.id).not_to eq(rematched_record.id)
+      expect(removed_record.raw_data["tips_paid_out_from_tips"]).to be(true)
+
+      # Seed existing mosa_revel payroll items with 40 regular hours so applying the
+      # workbook-only review after removing revel_hours has cash wages to cover tip taxes.
+      [ included_employee, excluded_employee ].each do |emp|
+        create(
+          :payroll_item,
+          pay_period: pay_period,
+          employee: emp,
+          employment_type: emp.employment_type,
+          pay_rate: emp.pay_rate,
+          hours_worked: 40,
+          import_source: "mosa_revel"
+        )
+      end
+
+      # Apply the new version after remove_source: row without election stays already paid; explicit NO stays paid in check.
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: removed_record.id },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      default_item = pay_period.payroll_items.find_by!(employee: included_employee)
+      explicit_no_item = pay_period.payroll_items.find_by!(employee: excluded_employee)
+      expect(default_item.reported_tips).to eq(BigDecimal("45.00"))
+      expect(default_item.tips_paid_out).to eq(BigDecimal("45.00"))
+      expect(explicit_no_item.reported_tips).to eq(BigDecimal("30.00"))
+      expect(explicit_no_item.tips_paid_out).to eq(BigDecimal("0.00"))
+    ensure
+      workbook_file&.close!
+    end
+
+    it "rejects unknown or non-reviewed-hours source_type parameters with 422 on preview_import" do
+      company.update!(payroll_intake_source_types: %w[mosa_revel spike_email])
+      pdf_path = build_revel_pdf(
+        [ { name: "Example, Avery", regular_hours: 40, overtime_hours: 0, regular_pay: 600 } ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      )
+
+      %w[unknown_source spike_email].each do |invalid_source|
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+             params: {
+               source_type: invalid_source,
+               pdf_file: Rack::Test::UploadedFile.new(pdf_path, "application/pdf", true, original_filename: "revel.pdf")
+             }
+        expect(response).to have_http_status(:unprocessable_entity), response.body
+        expect(response.parsed_body.fetch("error")).to include(invalid_source)
+      end
+    end
+  end
 end
