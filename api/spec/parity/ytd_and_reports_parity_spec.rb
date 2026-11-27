@@ -654,7 +654,8 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
           .find { |row| row[:code] == "BRIDGE_OVERLAP_NEEDS_DISPOSITION" }
         expect(finding[:message]).to include("paid 01/15/2026")
         # Combined reports flag it with the same detector, though its run pays after the bridge.
-        expect(staff_api.ytd_summary(year: year).dig("source_summary", "source_overlap", "bridge_window_paycheck_count")).to eq(1)
+        expect(staff_api.ytd_summary(year: year).dig("source_summary", "source_overlap"))
+          .to include("bridge_window_paycheck_count" => 1, "bridge_window_w2_blocking_count" => 1)
         expect(staff_api.get("/api/v1/admin/pay_periods/#{by_check_date.pay_period_id}/payroll_items/#{by_check_date.id}").last.dig("payroll_item", "ytd_review", "message"))
           .to eq(PayrollBridgeOverlap::STAFF_NOTE)
 
@@ -663,6 +664,9 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         expect(preflight_codes).not_to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
         expect(staff_api.get("/api/v1/admin/pay_periods/#{by_check_date.pay_period_id}/payroll_items/#{by_check_date.id}").last.dig("payroll_item", "ytd_review", "message"))
           .to eq(PayrollBridgeOverlap::CONTRACTOR_STAFF_NOTE)
+        # The report still warns about it, without claiming W-2GU is blocked.
+        expect(staff_api.ytd_summary(year: year).dig("source_summary", "source_overlap"))
+          .to include("bridge_window_paycheck_count" => 1, "bridge_window_w2_blocking_count" => 0)
         # Its statement note still shows: contractor YTD leaves the run out too.
         expect(PayrollBridgeOverlap.for_employee(employee: employee, year: year, through: later_item.pay_period.pay_date)).to be_present
       end

@@ -343,15 +343,21 @@ class UnifiedPayrollReporting
 
   # Native paychecks in this view dated inside an applied opening balance:
   # the W-2GU block's detector (PayrollBridgeOverlap), so a check dated
-  # before its run's pay date is caught too. Only present when there is one.
+  # before its run's pay date is caught too. The blocking count leaves out
+  # contractors, who aren't on a W-2GU. Only present when there is one.
   def bridge_window_count(native_items)
     return {} if native_items.empty?
 
     ids = native_items.map(&:id).to_set
-    count = native_items.map { |item| item.pay_period.pay_date.year }.uniq.sum do |year|
-      PayrollBridgeOverlap.new(company_id: @company_id, year: year).call.map { |overlap| overlap.payroll_item.id }.uniq.count { |id| ids.include?(id) }
+    overlaps = native_items.map { |item| item.pay_period.pay_date.year }.uniq.flat_map do |year|
+      PayrollBridgeOverlap.new(company_id: @company_id, year: year).call.select { |overlap| ids.include?(overlap.payroll_item.id) }
     end
-    count.positive? ? { bridge_window_paycheck_count: count } : {}
+    return {} if overlaps.empty?
+
+    {
+      bridge_window_paycheck_count: overlaps.map { |overlap| overlap.payroll_item.id }.uniq.size,
+      bridge_window_w2_blocking_count: overlaps.select(&:blocks_w2?).map { |overlap| overlap.payroll_item.id }.uniq.size
+    }
   end
 
   def historical_source_counts(rows, excluded)

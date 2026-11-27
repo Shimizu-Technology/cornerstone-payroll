@@ -2797,8 +2797,11 @@ export interface PayrollSourceSummary {
     gross_pay_delta: number;
     net_pay_delta: number;
   };
-  /** bridge_window_paycheck_count: native paychecks dated inside an applied opening balance (present only when any). */
-  source_overlap?: { employee_pay_date_count: number; bridge_window_paycheck_count?: number };
+  /**
+   * bridge_window_paycheck_count: native paychecks dated inside an applied opening balance;
+   * bridge_window_w2_blocking_count: those that block W-2GU (not contractors). Present only when any.
+   */
+  source_overlap?: { employee_pay_date_count: number; bridge_window_paycheck_count?: number; bridge_window_w2_blocking_count?: number };
   historical_ytd_bridge: {
     applied: boolean;
     tax_years: number[];

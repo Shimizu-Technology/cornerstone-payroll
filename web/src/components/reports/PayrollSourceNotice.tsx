@@ -41,7 +41,7 @@ export function PayrollSourceNotice({ summary, mentionFieldScope = false }: Payr
           )}
           {(summary.source_overlap?.bridge_window_paycheck_count ?? 0) > 0 && (
             <p role="alert" className="mt-2 rounded-lg border border-red-300 bg-red-50 px-4 py-2 font-medium text-red-900">
-              {bridgeWindowMessage(summary.source_overlap?.bridge_window_paycheck_count ?? 0)}
+              {bridgeWindowMessage(summary.source_overlap?.bridge_window_paycheck_count ?? 0, summary.source_overlap?.bridge_window_w2_blocking_count ?? 0)}
             </p>
           )}
           {adjustments.count > 0 && (
@@ -75,9 +75,11 @@ function totalsBasisNote(summary: PayrollSourceSummary): string | null {
   return null;
 }
 
-function bridgeWindowMessage(count: number): string {
+// Contractor paychecks aren't on a W-2GU, so only the others block it.
+function bridgeWindowMessage(count: number, blocking: number): string {
   const paychecks = count === 1 ? '1 Cornerstone paycheck is' : `${count} Cornerstone paychecks are`;
-  return `${paychecks} dated inside the imported opening year-to-date balance and may already be in it. These totals count both; W-2GU filing is blocked until it is resolved.`;
+  const warning = `${paychecks} dated inside the imported opening year-to-date balance and may already be in it. These totals count both.`;
+  return blocking > 0 ? `${warning} W-2GU filing is blocked until it is resolved.` : warning;
 }
 
 function formatMoney(value: number): string {

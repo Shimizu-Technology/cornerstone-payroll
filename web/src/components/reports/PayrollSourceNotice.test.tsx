@@ -54,9 +54,18 @@ it('says when imported totals come from the opening balance and when they are sh
   expect(screen.getByText(/Imported figures are shown as imported/)).toBeTruthy();
 });
 
-it('warns when Cornerstone paychecks are dated inside the opening balance', () => {
-  render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 0, bridge_window_paycheck_count: 1 } }} />);
-  expect(screen.getByRole('alert').textContent).toContain('1 Cornerstone paycheck is dated inside the imported opening year-to-date balance');
+it('warns when Cornerstone paychecks are dated inside the opening balance and says W-2GU filing is blocked', () => {
+  render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 0, bridge_window_paycheck_count: 2, bridge_window_w2_blocking_count: 1 } }} />);
+  const alert = screen.getByRole('alert').textContent;
+  expect(alert).toContain('2 Cornerstone paychecks are dated inside the imported opening year-to-date balance');
+  expect(alert).toContain('W-2GU filing is blocked until it is resolved.');
+});
+
+it('warns about contractor-only overlaps without claiming W-2GU is blocked', () => {
+  render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 0, bridge_window_paycheck_count: 1, bridge_window_w2_blocking_count: 0 } }} />);
+  const alert = screen.getByRole('alert').textContent;
+  expect(alert).toContain('1 Cornerstone paycheck is dated inside the imported opening year-to-date balance');
+  expect(alert).not.toContain('W-2GU');
 });
 
 it('says nothing about the basis when no opening balance applies', () => {
