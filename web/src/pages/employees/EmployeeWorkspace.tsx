@@ -1,3 +1,4 @@
+import { EmployeeTippedOccupations } from '@/components/employees/EmployeeTippedOccupations';
 import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
 import { EmployeeContactCard } from '@/components/employees/EmployeeContactCard';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -400,6 +401,9 @@ export function EmployeeWorkspace(): ReactElement {
                 readOnly={readOnly}
                 canRevealHidden={canRevealHiddenNotes}
               />
+            )}
+            {employee.company_id === companyId && employee.id === employeeId && employee.employment_type !== 'contractor' && (
+              <EmployeeTippedOccupations key={`tipped-occupations:${companyId}:${employee.id}`} employeeId={employee.id} companyId={companyId} readOnly={readOnly} />
             )}
           </>
         )}
