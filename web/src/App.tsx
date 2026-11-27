@@ -22,6 +22,7 @@ import { isMfaRequiredCode } from '@/services/api';
 
 const ClientOperatingProfile = lazy(() => import('@/pages/ClientOperatingProfile').then(module => ({ default: module.ClientOperatingProfile })));
 const EmployeeAppRollout = lazy(() => import('@/pages/EmployeeAppRollout').then(module => ({ default: module.EmployeeAppRollout })));
+const EmployeeAppStatus = lazy(() => import('@/pages/EmployeeAppStatus').then(module => ({ default: module.EmployeeAppStatus })));
 const EmployeeAppSettings = lazy(() => import('@/pages/EmployeeAppSettings').then(module => ({ default: module.EmployeeAppSettings })));
 const EmployeeAppSwitch = lazy(() => import('@/pages/EmployeeAppSwitch').then(module => ({ default: module.EmployeeAppSwitch })));
 const ClientInbox = lazy(() => import('@/pages/ClientInbox').then(module => ({ default: module.ClientInbox })));
@@ -410,6 +411,7 @@ function AppRoutes() {
           <Route path="operating-profile" element={<StaffOnlyRoute><ClientOperatingProfile /></StaffOnlyRoute>} />
           <Route path="employee-app" element={<EmployeeAppSettings />} />
           <Route path="employee-app/rollout" element={<EmployeeAppRollout audience={isClient ? 'client' : 'admin'} />} />
+          <Route path="employee-app/status" element={<EmployeeAppStatus audience={isClient ? 'client' : 'admin'} />} />
           <Route path="employee-app/switch" element={<StaffOnlyRoute><CapabilityRoute capability="manage_employee_app_switch"><EmployeeAppSwitch /></CapabilityRoute></StaffOnlyRoute>} />
           <Route path="messages" element={<ClientOnlyRoute><ClientMessages /></ClientOnlyRoute>} />
           <Route path="documents" element={<ClientOnlyRoute><ClientDocuments /></ClientOnlyRoute>} />

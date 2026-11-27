@@ -87,6 +87,10 @@ export function employeeAppRolloutPath(companyId: number): string {
   return `${companyPath(companyId)}/employee-app/rollout`;
 }
 
+export function employeeAppStatusPath(companyId: number): string {
+  return `${companyPath(companyId)}/employee-app/status`;
+}
+
 export function employeeAppSettingsPath(companyId: number): string {
   return `${companyPath(companyId)}/employee-app`;
 }

@@ -226,6 +226,84 @@ describe('Employee app panel', () => {
     expect(await screen.findByText(/Printed code issued by Pat Issuer/)).toBeTruthy();
   });
 
+  it('shows when they last opened the app, the terms version and both paperless answers, with dates', async () => {
+    openPanel({
+      ...employee, status: 'active',
+      agreements: {
+        account: { status: 'active', label: 'Signed up', signed_up: true, invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: '2026-11-05T00:00:00Z', last_opened_at: '2026-11-26T03:00:00Z' },
+        terms: { version: 'terms-2026-10', accepted_at: '2026-10-05T00:00:00Z', current: false },
+        pay_statements: { answer: 'paperless', answered_at: '2026-11-06T00:00:00Z' },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: true,
+      },
+    });
+    const facts = await screen.findByLabelText('Agreements');
+    expect(facts.textContent).toContain('Opened the app');
+    expect(facts.textContent).toMatch(/Last opened Nov 26, 2026/);
+    expect(facts.textContent).toContain('App opens are recorded since Nov 25, 2026.');
+    expect(facts.textContent).toContain('Older version');
+    expect(facts.textContent).toContain('terms-2026-10 · Oct 5, 2026');
+    expect(facts.textContent).toContain('Paperless');
+    expect(facts.textContent).toContain('Not answered');
+    expect(screen.getByRole('link', { name: 'Company report' }).getAttribute('href')).toBe('/companies/1/employee-app/status');
+  });
+
+  it('notes a rehire’s earlier-employment app open without counting it', async () => {
+    openPanel({
+      ...employee, status: 'active',
+      agreements: {
+        account: {
+          status: 'active', label: 'Signed up', signed_up: true, invite_sent_at: null, signed_up_at: '2026-11-26T01:00:00Z',
+          last_opened_at: null, earlier_employment_last_opened_at: '2026-11-25T05:00:00Z',
+        },
+        terms: { version: null, accepted_at: null, current: false },
+        pay_statements: { answer: 'not_answered', answered_at: null },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: true,
+      },
+    });
+    const facts = await screen.findByLabelText('Agreements');
+    expect(facts.textContent).toContain('No recorded opens');
+    expect(facts.textContent).toContain('During an earlier employment, last opened Nov 25, 2026. Not counted now.');
+  });
+
+  it('gives a client viewer the same facts and still no actions', async () => {
+    auth.isClientViewer = true;
+    openPanel({
+      ...employee, can_manage_invites: false,
+      agreements: {
+        account: { status: 'invited', label: 'Invited', signed_up: false, invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: null, last_opened_at: null },
+        terms: { version: null, accepted_at: null, current: false },
+        pay_statements: { answer: 'not_answered', answered_at: null },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: false,
+      },
+    });
+    const facts = await screen.findByLabelText('Agreements');
+    expect(facts.textContent).toContain('No recorded opens');
+    expect(facts.textContent).not.toContain('Never');
+    expect(facts.textContent).toContain('Not accepted');
+    expect(facts.textContent).toContain('Employees aren’t asked about paperless yet.');
+    expect(screen.queryByRole('button', { name: 'Resend invite' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Invite' })).toBeNull();
+  });
+
+  it('labels a turned-off login "Deactivated" like the report, while revoke still follows the active link', async () => {
+    openPanel({
+      ...employee, status: 'active', staff_actions: true, activated_at: '2026-11-05T00:00:00Z',
+      agreements: {
+        account: { status: 'deactivated', label: 'Deactivated', signed_up: false, invite_sent_at: null, signed_up_at: null, last_opened_at: null },
+        terms: { version: null, accepted_at: null, current: false },
+        pay_statements: { answer: 'not_answered', answered_at: null },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', opens_recorded_since: '2026-11-25', delivery_consent_enabled: true,
+      },
+    }, 'admin');
+    expect(await screen.findByText('Deactivated')).toBeTruthy();
+    expect(screen.queryByText('Active')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Revoke access' })).toBeTruthy();
+  });
+
   it('sends the explicit company and employee IDs in its read and wave requests', async () => {
     const api = employeeAppRolloutApi(7, 'client');
     await api.get();

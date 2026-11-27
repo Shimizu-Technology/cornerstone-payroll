@@ -1,4 +1,5 @@
 import { apiClient } from '@/services/api';
+import type { EmployeeAgreements } from '@/services/employee-app-status-api';
 
 export type EmployeeAppStatus = 'not_invited' | 'invited' | 'active' | 'locked' | 'former' | 'revoked';
 export type InviteDelivery = 'email' | 'code';
@@ -27,6 +28,8 @@ export interface EmployeeAppAccess extends EmployeeName {
   locked_until: string | null;
   reset_pending: boolean;
   can_invite: boolean;
+  /** Terms, paperless answers and app use; older API responses may omit it. */
+  agreements?: EmployeeAgreements;
 }
 
 export interface PrintedInvite {
