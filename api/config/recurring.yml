@@ -38,7 +38,7 @@ production:
     queue: default
     schedule: every minute
 
-  # Sends W-2GU notices still pending (or failed) and matches stored email
+  # Sends pending or failed employee document notices and matches stored email
   # provider events to their notices (M4-5).
   dispatch_employee_tax_form_notices:
     class: DispatchEmployeeTaxFormNoticesJob
