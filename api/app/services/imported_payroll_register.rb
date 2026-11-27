@@ -89,10 +89,10 @@ class ImportedPayrollRegister
       worker_classification: employee&.employment_type&.humanize || "Imported worker",
       pay_rate: nil,
       scheduled_hours: nil,
-      hours_worked: regular_hours(paycheck),
+      hours_worked: money(ImportedPaycheckHours.regular(paycheck)),
       overtime_hours: component_amount(paycheck.hours_breakdown, UnifiedPayrollReporting::OVERTIME_HOURS),
-      holiday_hours: component_amount(paycheck.hours_breakdown, /holiday/i),
-      pto_hours: component_amount(paycheck.hours_breakdown, /pto|paid time/i),
+      holiday_hours: component_amount(paycheck.hours_breakdown, ImportedPaycheckHours::HOLIDAY),
+      pto_hours: component_amount(paycheck.hours_breakdown, ImportedPaycheckHours::PTO),
       combined_hours: money(paycheck.hours_total),
       reported_tips: paycheck.source_metadata.to_h.dig("verified_amounts", "reported_tips")&.to_d || component_amount(paycheck.earnings_breakdown, /tip/i),
       tips_paid_out: paycheck.source_metadata.to_h.dig("verified_amounts", "tips_paid_out").to_d,
@@ -204,17 +204,6 @@ class ImportedPayrollRegister
 
   def roth_amount(paycheck)
     verified_amount(paycheck, "roth_retirement") || component_amount(paycheck.after_tax_deduction_breakdown, /roth/i)
-  end
-
-  # Hours on a regular line, as UnifiedPayrollReporting counts them. A source
-  # with no regular line keeps the hours it doesn't record as another kind,
-  # so a row's hours still add up to the imported total.
-  def regular_hours(paycheck)
-    regular = normalized_lines(paycheck.hours_breakdown).select { |line| line[:label].squish.match?(UnifiedPayrollReporting::REGULAR_HOURS) }
-    return money(regular.sum(0.to_d) { |line| line[:amount].to_d }) if regular.any?
-
-    other = [ UnifiedPayrollReporting::OVERTIME_HOURS, /holiday/i, /pto|paid time/i ].sum(0.to_d) { |pattern| component_amount(paycheck.hours_breakdown, pattern).to_d }
-    money([ paycheck.hours_total.to_d - other, 0.to_d ].max)
   end
 
   def component_amount(lines, pattern)

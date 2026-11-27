@@ -230,7 +230,7 @@ class UnifiedPayrollReporting
       pay_date: paycheck.pay_date,
       period_description: paycheck.historical_pay_period.source_label,
       scheduled_hours: nil,
-      hours_worked: recorded_hours_component(paycheck, REGULAR_HOURS)&.to_f,
+      hours_worked: ImportedPaycheckHours.regular(paycheck).to_f,
       total_hours: paycheck.hours_total.to_f,
       overtime_hours: recorded_hours_component(paycheck, OVERTIME_HOURS)&.to_f,
       holiday_hours: nil,
@@ -433,7 +433,7 @@ class UnifiedPayrollReporting
     employer_contribution_totals = historical_employer_contribution_totals(rows)
     employer_contributions = decimal_sum(rows, :employer_contributions)
     {
-      total_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, REGULAR_HOURS).to_d },
+      total_hours: paychecks.sum(0.to_d) { |paycheck| ImportedPaycheckHours.regular(paycheck) },
       combined_hours: rows.sum(0.to_d) { |row| row.hours_total.to_d },
       total_overtime_hours: paychecks.sum(0.to_d) { |paycheck| recorded_hours_component(paycheck, OVERTIME_HOURS).to_d },
       # Imported gross includes non-taxable reimbursements; like the pay stub,
@@ -574,8 +574,7 @@ class UnifiedPayrollReporting
   end
 
   def recorded_hours_component(paycheck, pattern)
-    amounts = matching_component_amounts(paycheck.hours_breakdown, pattern)
-    amounts.sum(0.to_d) if amounts.any?
+    ImportedPaycheckHours.component(paycheck, pattern)
   end
 
   def matching_component_amounts(components, pattern)
