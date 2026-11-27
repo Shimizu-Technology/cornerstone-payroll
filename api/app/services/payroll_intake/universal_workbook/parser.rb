@@ -2,8 +2,10 @@
 
 require "bigdecimal"
 require "csv"
+require "nokogiri"
 require "roo"
 require "tempfile"
+require "zip"
 
 module PayrollIntake
   module UniversalWorkbook
@@ -11,12 +13,37 @@ module PayrollIntake
     #
     # Design guarantees:
     # - BigDecimal end-to-end for all hours and money (never silent Float coercion).
+    # - Rejects spreadsheet formula cells in both XLSX and CSV with row-level errors.
     # - Strict YES/NO/blank parsing for Tips Already Paid (no truthy-string booleans).
-    # - Negative hours and negative amounts are rejected with clear row-level errors.
+    # - Negative hours/amounts and values beyond column precision (numeric(8,2) for
+    #   hours, numeric(10,2) for money) are rejected at parse time with row errors.
     # - Malformed cells produce actionable row-level errors rather than crashing.
     class Parser
+      FormulaCell = Data.define(:expression)
+      NumericXmlValue = Data.define(:raw)
+
       STRICT_NUMBER_PATTERN = /\A[+-]?(?:\d+(?:\.\d+)?|\.\d+)\z/
       GROUPED_MONEY_PATTERN = /\A[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?\z/
+      MAX_HOURS_VALUE = BigDecimal("999999.99")
+      MAX_MONEY_VALUE = BigDecimal("99999999.99")
+      COLUMN_LABELS = {
+        employee_id: "Employee ID",
+        employee_name: "Employee",
+        week1_hours: "Week 1 Hours",
+        week2_hours: "Week 2 Hours",
+        regular_hours: "Regular Hours",
+        overtime_hours: "Overtime Hours",
+        pto_hours: "PTO Hours",
+        holiday_hours: "Holiday Hours",
+        tips: "Tips",
+        tips_already_paid: "Tips Already Paid (YES/NO)",
+        bonus: "Bonus",
+        one_time_item_type: "One-Time Item Type",
+        one_time_item_label: "One-Time Item Label",
+        one_time_item_amount: "One-Time Item Amount",
+        loan_deduction: "Loan Deduction",
+        notes: "Notes"
+      }.freeze
 
       HEADER_MAP = {
         "employee id" => :employee_id,
@@ -116,7 +143,9 @@ module PayrollIntake
         raise ArgumentError, "Workbook is missing the #{Template::PAYROLL_SHEET} sheet." unless sheet_name
 
         sheet = xlsx.sheet(sheet_name)
-        last_row = sheet.last_row.to_i
+        formula_cells = extract_xlsx_formula_cells(sheet_name)
+        max_formula_row = formula_cells.keys.map(&:first).max.to_i
+        last_row = [ sheet.last_row.to_i, max_formula_row ].max
         raise ArgumentError, "Workbook #{sheet_name} sheet is empty." if last_row < 1
 
         headers = (1..sheet.last_column.to_i).map { |col| sheet.cell(1, col) }
@@ -124,7 +153,9 @@ module PayrollIntake
 
         rows = []
         (2..last_row).each do |row_num|
-          values = column_map.transform_values { |col_index| sheet.cell(row_num, col_index + 1) }
+          values = column_map.transform_values do |col_index|
+            read_xlsx_cell(sheet, row_num, col_index + 1, formula_cells)
+          end
           parsed = parse_row(values, row_num: row_num)
           rows << parsed if parsed
         end
@@ -132,6 +163,75 @@ module PayrollIntake
         { rows: rows, metadata: metadata.merge(format: "xlsx"), warnings: [] }
       rescue Zip::Error, Roo::Error => e
         raise ArgumentError, "Could not read Excel workbook: #{e.message}"
+      end
+
+      def read_xlsx_cell(sheet, row_num, col_num, formula_cells)
+        if formula_cells.key?([ row_num, col_num ]) || sheet.formula?(row_num, col_num)
+          expression = formula_cells[[ row_num, col_num ]] || sheet.formula(row_num, col_num).to_s
+          return FormulaCell.new(expression: expression.to_s)
+        end
+
+        if sheet.celltype(row_num, col_num) == :float
+          raw = sheet.excelx_value(row_num, col_num)
+          return nil if raw.nil?
+
+          return NumericXmlValue.new(raw: raw.to_s.strip)
+        end
+
+        sheet.cell(row_num, col_num)
+      end
+
+      def extract_xlsx_formula_cells(sheet_name)
+        formulas = {}
+        Zip::File.open(file_path) do |zip|
+          sheet_entry_name = resolve_xlsx_sheet_entry(zip, sheet_name)
+          return formulas unless sheet_entry_name && zip.find_entry(sheet_entry_name)
+
+          doc = Nokogiri::XML(zip.read(sheet_entry_name))
+          doc.remove_namespaces!
+          doc.xpath("//sheetData/row/c[f]").each do |cell_node|
+            ref = cell_node["r"].to_s
+            coords = parse_cell_reference(ref)
+            next unless coords
+
+            formulas[coords] = cell_node.at_xpath("f")&.text.to_s
+          end
+        end
+        formulas
+      rescue Zip::Error, Nokogiri::XML::SyntaxError
+        {}
+      end
+
+      def resolve_xlsx_sheet_entry(zip, sheet_name)
+        workbook_entry = zip.find_entry("xl/workbook.xml")
+        rels_entry = zip.find_entry("xl/_rels/workbook.xml.rels")
+        return nil unless workbook_entry && rels_entry
+
+        workbook_doc = Nokogiri::XML(workbook_entry.get_input_stream.read)
+        workbook_doc.remove_namespaces!
+        sheet_node = workbook_doc.xpath("//sheets/sheet").find do |node|
+          node["name"].to_s.strip.casecmp?(sheet_name.to_s.strip)
+        end
+        rel_id = sheet_node && (sheet_node["id"] || sheet_node.attributes.values.find { |attr| attr.name == "id" }&.value)
+        return nil unless rel_id
+
+        rels_doc = Nokogiri::XML(rels_entry.get_input_stream.read)
+        rels_doc.remove_namespaces!
+        rel_node = rels_doc.xpath("//Relationship").find { |node| node["Id"] == rel_id }
+        target = rel_node&.[]("Target").to_s
+        return nil if target.empty?
+
+        target = target.delete_prefix("/")
+        target.start_with?("xl/") ? target : "xl/#{target}"
+      end
+
+      def parse_cell_reference(ref)
+        match = /\A([A-Z]+)(\d+)\z/i.match(ref.strip)
+        return nil unless match
+
+        col_num = match[1].upcase.each_char.reduce(0) { |acc, ch| (acc * 26) + (ch.ord - "A".ord + 1) }
+        row_num = match[2].to_i
+        [ row_num, col_num ]
       end
 
       def parse_csv
@@ -262,14 +362,24 @@ module PayrollIntake
 
         row_errors = []
         raw_employee_id = values[:employee_id]
-        employee_id = strict_positive_integer(raw_employee_id)
-        if cell_blank?(raw_employee_id)
-          row_errors << row_error("missing_employee_id", "Row #{row_num}: Employee ID is required.")
-        elsif employee_id.nil?
-          row_errors << row_error("invalid_employee_id", "Row #{row_num}: Employee ID must be a positive whole number (got #{raw_employee_id.inspect}).")
+        if formula_value?(raw_employee_id)
+          employee_id = nil
+          row_errors << formula_error(row_num, :employee_id)
+        else
+          employee_id = strict_positive_integer(raw_employee_id)
+          if cell_blank?(raw_employee_id)
+            row_errors << row_error("missing_employee_id", "Row #{row_num}: Employee ID is required.")
+          elsif employee_id.nil?
+            row_errors << row_error("invalid_employee_id", "Row #{row_num}: Employee ID must be a positive whole number (got #{display_raw(raw_employee_id)}).")
+          end
         end
 
-        employee_name = values[:employee_name].to_s.strip.presence
+        if formula_value?(values[:employee_name])
+          employee_name = nil
+          row_errors << formula_error(row_num, :employee_name)
+        else
+          employee_name = values[:employee_name].to_s.strip.presence
+        end
 
         parsed_hours = {}
         HOUR_FIELDS.each do |field, label|
@@ -291,10 +401,17 @@ module PayrollIntake
         components, component_errors = parse_one_time_item(values, row_num: row_num)
         row_errors.concat(component_errors)
 
+        if formula_value?(values[:notes])
+          notes = nil
+          row_errors << formula_error(row_num, :notes)
+        else
+          notes = values[:notes].to_s.strip.presence
+        end
+
         {
           row_number: row_num,
           employee_id: employee_id,
-          raw_employee_id: raw_employee_id.is_a?(String) ? raw_employee_id.strip : raw_employee_id,
+          raw_employee_id: normalized_raw_employee_id(raw_employee_id),
           employee_name: employee_name,
           week1_hours: parsed_hours[:week1_hours],
           week2_hours: parsed_hours[:week2_hours],
@@ -307,7 +424,7 @@ module PayrollIntake
           bonus: parsed_money[:bonus],
           loan_deduction: parsed_money[:loan_deduction],
           payroll_components: components,
-          notes: values[:notes].to_s.strip.presence,
+          notes: notes,
           parse_errors: row_errors
         }
       end
@@ -319,15 +436,25 @@ module PayrollIntake
         return [ [], [] ] if cell_blank?(raw_type) && cell_blank?(raw_label) && cell_blank?(raw_amount)
 
         errors = []
-        type_token = raw_type.to_s.strip.upcase
-        rule = COMPONENT_TYPES[type_token]
-        if type_token.empty?
-          errors << row_error("missing_one_time_item_type", "Row #{row_num}: One-Time Item Type is required when entering a one-time item.")
-        elsif rule.nil?
-          errors << row_error(
-            "invalid_one_time_item_type",
-            "Row #{row_num}: Unsupported One-Time Item Type #{raw_type.inspect}. Allowed: #{COMPONENT_TYPES.keys.join(', ')}."
-          )
+        if formula_value?(raw_type)
+          errors << formula_error(row_num, :one_time_item_type)
+          rule = nil
+          type_token = ""
+        else
+          type_token = raw_type.to_s.strip.upcase
+          rule = COMPONENT_TYPES[type_token]
+          if type_token.empty?
+            errors << row_error("missing_one_time_item_type", "Row #{row_num}: One-Time Item Type is required when entering a one-time item.")
+          elsif rule.nil?
+            errors << row_error(
+              "invalid_one_time_item_type",
+              "Row #{row_num}: Unsupported One-Time Item Type #{display_raw(raw_type)}. Allowed: #{COMPONENT_TYPES.keys.join(', ')}."
+            )
+          end
+        end
+
+        if formula_value?(raw_label)
+          errors << formula_error(row_num, :one_time_item_label)
         end
 
         amount, amount_error = parse_nonnegative_decimal(raw_amount, row_num: row_num, field: :one_time_item_amount, label: "One-Time Item Amount", money: true)
@@ -351,7 +478,7 @@ module PayrollIntake
           payee_name: rule.fetch(:kind) == "deduction" ? label : nil,
           effective_pay_date: pay_period&.pay_date&.iso8601,
           source: "cornerstone_workbook",
-          notes: values[:notes].to_s.strip.presence
+          notes: formula_value?(values[:notes]) ? nil : values[:notes].to_s.strip.presence
         }
 
         [ [ component ], [] ]
@@ -359,6 +486,10 @@ module PayrollIntake
 
       def parse_nonnegative_decimal(raw, row_num:, field:, label:, money:)
         return [ nil, nil ] if cell_blank?(raw)
+
+        if formula_value?(raw)
+          return [ nil, formula_error(row_num, field, label: label) ]
+        end
 
         if raw == true || raw == false
           return [ nil, row_error("invalid_#{field}", "Row #{row_num}: #{label} must be a non-negative number, not a boolean (#{raw.inspect}).") ]
@@ -369,10 +500,8 @@ module PayrollIntake
           BigDecimal(raw.to_s)
         when BigDecimal
           raw
-        when Float
-          return [ nil, row_error("invalid_#{field}", "Row #{row_num}: #{label} must be a finite non-negative number.") ] unless raw.finite?
-
-          BigDecimal(raw.to_s)
+        when NumericXmlValue
+          parse_numeric_xml_decimal(raw.raw)
         when String
           parse_strict_decimal_string(raw, money: money)
         else
@@ -380,7 +509,7 @@ module PayrollIntake
         end
 
         if parsed.nil? || !parsed.finite?
-          return [ nil, row_error("invalid_#{field}", "Row #{row_num}: #{label} must be a valid non-negative number (got #{raw.inspect}).") ]
+          return [ nil, row_error("invalid_#{field}", "Row #{row_num}: #{label} must be a valid non-negative number (got #{display_raw(raw)}).") ]
         end
 
         if parsed.negative?
@@ -388,7 +517,26 @@ module PayrollIntake
           return [ nil, row_error(code, "Row #{row_num}: #{label} cannot be negative (got #{parsed.to_s('F')}).") ]
         end
 
-        [ parsed.round(2), nil ]
+        rounded = parsed.round(2)
+        max_value = money ? MAX_MONEY_VALUE : MAX_HOURS_VALUE
+        if rounded > max_value
+          return [
+            nil,
+            row_error(
+              "value_out_of_range",
+              "Row #{row_num}: #{label} exceeds the maximum allowed value of #{format('%.2f', max_value)} (got #{rounded.to_s('F')})."
+            )
+          ]
+        end
+
+        [ rounded, nil ]
+      end
+
+      def parse_numeric_xml_decimal(raw)
+        token = raw.to_s.strip
+        return nil if token.empty?
+
+        BigDecimal(token, exception: false)
       end
 
       def parse_strict_decimal_string(raw, money:)
@@ -411,6 +559,7 @@ module PayrollIntake
 
       def parse_strict_yes_no(raw, row_num:)
         return [ nil, nil ] if cell_blank?(raw)
+        return [ nil, formula_error(row_num, :tips_already_paid) ] if formula_value?(raw)
 
         if raw.is_a?(String)
           token = raw.strip.upcase
@@ -422,13 +571,13 @@ module PayrollIntake
           nil,
           row_error(
             "invalid_tips_already_paid",
-            "Row #{row_num}: Tips Already Paid must be YES, NO, or blank (got #{raw.inspect})."
+            "Row #{row_num}: Tips Already Paid must be YES, NO, or blank (got #{display_raw(raw)})."
           )
         ]
       end
 
       def strict_positive_integer(raw)
-        return nil if cell_blank?(raw) || raw == true || raw == false
+        return nil if cell_blank?(raw) || raw == true || raw == false || formula_value?(raw)
 
         case raw
         when Integer
@@ -437,10 +586,11 @@ module PayrollIntake
           return nil unless raw.finite? && raw.positive? && raw.frac.zero?
 
           raw.to_i
-        when Float
-          return nil unless raw.finite? && raw.positive? && (raw % 1).zero?
+        when NumericXmlValue
+          decimal = parse_numeric_xml_decimal(raw.raw)
+          return nil unless decimal&.finite? && decimal.positive? && decimal.frac.zero?
 
-          raw.to_i
+          decimal.to_i
         when String
           token = raw.strip
           return token.to_i if token.match?(/\A[1-9]\d*\z/)
@@ -448,6 +598,44 @@ module PayrollIntake
           nil
         else
           nil
+        end
+      end
+
+      def formula_value?(value)
+        return true if value.is_a?(FormulaCell)
+        return value.lstrip.start_with?("=") if value.is_a?(String)
+
+        false
+      end
+
+      def formula_error(row_num, field, label: COLUMN_LABELS[field] || field.to_s.humanize)
+        row_error(
+          "formula_not_allowed",
+          "Row #{row_num}: #{label} cannot contain a spreadsheet formula. Enter a plain value instead."
+        )
+      end
+
+      def normalized_raw_employee_id(raw)
+        case raw
+        when FormulaCell
+          "=#{raw.expression}"
+        when NumericXmlValue
+          raw.raw
+        when String
+          raw.strip
+        else
+          raw
+        end
+      end
+
+      def display_raw(raw)
+        case raw
+        when FormulaCell
+          "\"=#{raw.expression}\""
+        when NumericXmlValue
+          raw.raw.inspect
+        else
+          raw.inspect
         end
       end
 
@@ -467,6 +655,8 @@ module PayrollIntake
 
       def cell_blank?(value)
         return true if value.nil?
+        return false if value.is_a?(FormulaCell)
+        return value.raw.strip.empty? if value.is_a?(NumericXmlValue)
         return value.strip.empty? if value.is_a?(String)
 
         false

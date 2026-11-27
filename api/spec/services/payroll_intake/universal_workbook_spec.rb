@@ -551,6 +551,253 @@ RSpec.describe "Track C B8-B9: Cornerstone universal workbook, merged apply path
         expect(item.hours_worked).to eq(BigDecimal("160.00"))
         expect(item.overtime_hours).to eq(BigDecimal("12.25"))
       end
+
+      it "rejects conflicting mixed weekly and regular/OT hours in source_reports mode unless they reconcile" do
+        company.update!(payroll_intake_settings: {
+          "cornerstone_workbook" => { "overtime_mode" => "source_reports" }
+        })
+
+        conflicting_csv = upload_for("monthly-conflict.csv", build_csv_bytes(rows: [
+          [ employee_01.id, "Employee 01", "45.00", "35.00", "40.00", "", "", "", "", "", "", "", "", "", "", "" ]
+        ]), csv_mime)
+
+        session = PayrollIntake::PreviewService.new(
+          pay_period: pay_period,
+          source_type: "cornerstone_workbook",
+          files: [ conflicting_csv ],
+          actor: staff
+        ).call.fetch(:session)
+
+        row = session.rows.sole
+        expect(row.errors_payload.map { |e| e["code"] }).to include("conflicting_hours_columns")
+        expect(row.errors_payload.first["message"]).to include("80.00").and include("40.00")
+
+        apply_result = PayrollIntake::ApplyService.new(
+          session: session,
+          row_overrides: [ { id: row.id, disposition: "included" } ],
+          actor: staff
+        ).call
+        expect(apply_result[:errors]).not_to be_empty
+        expect(pay_period.payroll_items.where(employee: employee_01)).to be_empty
+
+        # Reconciled mixed input (45 + 35 == 75 + 5 == 80) succeeds cleanly
+        reconciled_csv = upload_for("monthly-reconciled.csv", build_csv_bytes(rows: [
+          [ employee_01.id, "Employee 01", "45.00", "35.00", "75.00", "5.00", "", "", "", "", "", "", "", "", "", "" ]
+        ]), csv_mime)
+
+        session2 = PayrollIntake::PreviewService.new(
+          pay_period: pay_period,
+          source_type: "cornerstone_workbook",
+          files: [ reconciled_csv ],
+          actor: staff,
+          supersedes_package_id: session.package_id,
+          supersession_reason: "Reconciled hours"
+        ).call.fetch(:session)
+
+        expect(session2.rows.sole.errors_payload).to be_empty
+        apply_result2 = PayrollIntake::ApplyService.new(
+          session: session2,
+          row_overrides: [ { id: session2.rows.sole.id, disposition: "included" } ],
+          actor: staff
+        ).call
+        expect(apply_result2[:errors]).to be_empty
+        item = pay_period.payroll_items.find_by!(employee: employee_01)
+        expect(item.hours_worked).to eq(BigDecimal("75.00"))
+        expect(item.overtime_hours).to eq(BigDecimal("5.00"))
+      end
+    end
+  end
+
+  describe "Contractor field policy (1099 rows)" do
+    let!(:hourly_contractor) do
+      create(
+        :employee,
+        company: company,
+        first_name: "Contractor",
+        last_name: "01",
+        employment_type: "contractor",
+        contractor_type: "individual",
+        contractor_pay_type: "hourly",
+        pay_rate: 20.00
+      )
+    end
+    let!(:flat_fee_contractor) do
+      create(
+        :employee,
+        company: company,
+        first_name: "Contractor",
+        last_name: "02",
+        employment_type: "contractor",
+        contractor_type: "individual",
+        contractor_pay_type: "flat_fee",
+        pay_rate: 1500.00
+      )
+    end
+
+    it "rejects PTO, holiday, and tips (including tips already paid) on contractor rows instead of silently dropping or offsetting them" do
+      csv_file = upload_for("contractor-unsupported.csv", build_csv_bytes(rows: [
+        [ hourly_contractor.id, "Contractor 01", "40.00", "0", "", "", "4.00", "8.00", "60.00", "YES", "", "", "", "", "", "" ],
+        [ flat_fee_contractor.id, "Contractor 02", "40.00", "0", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ csv_file ],
+        actor: staff
+      ).call.fetch(:session)
+
+      hourly_row = session.rows.find_by!(employee_id: hourly_contractor.id)
+      expect(hourly_row.errors_payload.map { |e| e["code"] }).to contain_exactly(
+        "contractor_unsupported_pto_hours",
+        "contractor_unsupported_holiday_hours",
+        "contractor_unsupported_tips"
+      )
+
+      flat_row = session.rows.find_by!(employee_id: flat_fee_contractor.id)
+      expect(flat_row.errors_payload.map { |e| e["code"] }).to contain_exactly("contractor_unsupported_hours")
+
+      result = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [
+          { id: hourly_row.id, disposition: "included" },
+          { id: flat_row.id, disposition: "excluded", disposition_reason: "Flat-fee handled separately" }
+        ],
+        actor: staff
+      ).call
+      expect(result[:errors]).not_to be_empty
+      expect(pay_period.payroll_items.where(employee: hourly_contractor)).to be_empty
+    end
+
+    it "applies supported contractor fields (hourly hours + bonus) accurately with zero tax or tip offset" do
+      csv_file = upload_for("contractor-clean.csv", build_csv_bytes(rows: [
+        [ hourly_contractor.id, "Contractor 01", "40.00", "0", "", "", "", "", "", "", "50.00", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ csv_file ],
+        actor: staff
+      ).call.fetch(:session)
+
+      expect(session.rows.sole.errors_payload).to be_empty
+      result = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [ { id: session.rows.sole.id, disposition: "included" } ],
+        actor: staff
+      ).call
+      expect(result[:errors]).to be_empty
+
+      item = pay_period.payroll_items.find_by!(employee: hourly_contractor)
+      # 40 hrs * $20 + $50 bonus = $850 gross, $0 deductions, $850 net
+      expect(item.gross_pay).to eq(BigDecimal("850.00"))
+      expect(item.total_deductions).to eq(BigDecimal("0.00"))
+      expect(item.net_pay).to eq(BigDecimal("850.00"))
+    end
+  end
+
+  describe "XLSX formula rejection, Float-free BigDecimal reading, and precision bounds" do
+    def inject_xlsx_formulas(base_bytes, cached_formula: true)
+      source_tmp = Tempfile.new([ "formula-src", ".xlsx" ])
+      source_tmp.binmode
+      source_tmp.write(base_bytes)
+      source_tmp.close
+      (@tempfiles ||= []) << source_tmp
+
+      out_tmp = Tempfile.new([ "formula-out", ".xlsx" ])
+      out_tmp.binmode
+      Zip::OutputStream.open(out_tmp.path) do |out|
+        Zip::File.open(source_tmp.path) do |zip|
+          zip.each do |entry|
+            content = entry.get_input_stream.read
+            if entry.name == "xl/worksheets/sheet2.xml"
+              replacement = cached_formula ? "<f>SUM(40,5)</f><v>45</v>" : "<f>SUM(40,5)</f>"
+              content = content.sub(%r{<v>40\.00</v>|<v>40</v>}, replacement)
+            end
+            out.put_next_entry(entry.name)
+            out.write(content)
+          end
+        end
+      end
+      (@tempfiles ||= []) << out_tmp
+      File.binread(out_tmp.path)
+    end
+
+    it "rejects both cached and uncached XLSX formula cells and CSV formulas with formula_not_allowed" do
+      base_xlsx = build_xlsx_bytes(rows: [
+        [ employee_01.id, "Employee 01", 40, 35, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil ]
+      ])
+
+      [ true, false ].each do |cached|
+        formula_xlsx = inject_xlsx_formulas(base_xlsx, cached_formula: cached)
+        parsed = PayrollIntake::UniversalWorkbook::Parser.parse_file(
+          upload_for("formula-#{cached}.xlsx", formula_xlsx, xlsx_mime),
+          company: company,
+          pay_period: pay_period
+        )
+        codes = parsed.fetch(:rows).sole.fetch(:parse_errors).map { |e| e[:code] }
+        expect(codes).to include("formula_not_allowed")
+      end
+
+      csv_formula = build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "=40+5", "35", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      ])
+      parsed_csv = PayrollIntake::UniversalWorkbook::Parser.parse_file(
+        upload_for("formula.csv", csv_formula, csv_mime),
+        company: company,
+        pay_period: pay_period
+      )
+      expect(parsed_csv.fetch(:rows).sole.fetch(:parse_errors).map { |e| e[:code] }).to include("formula_not_allowed")
+    end
+
+    it "reads XLSX numeric cells directly from raw XML into BigDecimal without Float rounding and enforces precision bounds" do
+      xlsx_bytes = build_xlsx_bytes(rows: [
+        [ employee_01.id, "Employee 01", 40.15, 39.85, nil, nil, nil, nil, 99_999_999.99, "NO", nil, nil, nil, nil, nil, nil ],
+        [ employee_02.id, "Employee 02", 1_000_000.00, 0, nil, nil, nil, nil, 100_000_000.00, "NO", nil, nil, nil, nil, nil, nil ]
+      ])
+
+      parsed = PayrollIntake::UniversalWorkbook::Parser.parse_file(
+        upload_for("precision.xlsx", xlsx_bytes, xlsx_mime),
+        company: company,
+        pay_period: pay_period
+      )
+      row1, row2 = parsed.fetch(:rows)
+
+      expect(row1[:parse_errors]).to be_empty
+      expect(row1[:week1_hours]).to eq(BigDecimal("40.15"))
+      expect(row1[:week2_hours]).to eq(BigDecimal("39.85"))
+      expect(row1[:tips]).to eq(BigDecimal("99999999.99"))
+
+      error_codes = row2[:parse_errors].map { |e| e[:code] }
+      expect(error_codes).to eq(%w[value_out_of_range value_out_of_range])
+    end
+  end
+
+  describe "Migration 20261127220000 rollback safety" do
+    it "refuses rollback with IrreversibleMigration before mutating schema when cornerstone_workbook documents exist" do
+      require Rails.root.join("db/migrate/20261127220000_widen_payroll_intake_document_roles_for_universal_workbook.rb")
+
+      csv_file = upload_for("migration-guard.csv", build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "40.00", "40.00", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ csv_file ],
+        actor: staff
+      ).call
+
+      migration = WidenPayrollIntakeDocumentRolesForUniversalWorkbook.new
+      expect { migration.down }.to raise_error(ActiveRecord::IrreversibleMigration, /cornerstone_workbook/)
+      expect(
+        ActiveRecord::Base.connection.index_exists?(
+          :payroll_submission_documents,
+          :payroll_submission_id,
+          name: WidenPayrollIntakeDocumentRolesForUniversalWorkbook::WORKBOOK_INDEX_NAME
+        )
+      ).to be(true)
     end
   end
 end
