@@ -412,7 +412,7 @@ RSpec.describe "Employee emails" do
         paths = described_class.write!(dir)
 
         expect(paths.map { |path| File.basename(path) }).to include("invite_sign_up.html", "invite_sign_in.txt",
-          "activation_notice.html", "email_change_notice.html", "email_change_notice.txt", "tax_form_notice.html")
+          "activation_notice.html", "email_change_notice.html", "email_change_notice.txt", "tax_form_notice.html", "pay_stub_corrected.html")
         expect(File.read(File.join(dir, "email_change_notice.html")))
           .to include("The email for your Harbor Finch Kitchen employee app was changed")
         expect(File.read(File.join(dir, "email_change_notice.txt"))).to include("Reply-To: help@harborfinch.example.test")

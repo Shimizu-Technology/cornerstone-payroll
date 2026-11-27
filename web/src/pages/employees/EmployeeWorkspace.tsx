@@ -785,6 +785,7 @@ function PayHistory({ companyId, report, returnTo, readOnly }: PayHistoryProps):
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-semibold text-neutral-950">{formatDate(item.pay_date)}</p>
+                    {item.stub_corrected && <Badge variant="warning">Corrected</Badge>}
                     <Link className="mt-1 block text-sm font-medium text-primary-700" to={payHistoryRunPath(companyId, item, returnTo)}>{item.period_description}</Link>
                   </div>
                   <div className="text-right"><Badge variant={item.record_type === 'native' ? 'default' : 'warning'}>{item.source.label}</Badge>{item.basis_label && <p className="mt-1 text-xs text-neutral-600">{item.basis_label}</p>}</div>
@@ -816,6 +817,7 @@ function PayHistory({ companyId, report, returnTo, readOnly }: PayHistoryProps):
                 <TableRow key={item.key}>
                   <TableCell className="font-semibold text-neutral-950">
                     <span className="block whitespace-nowrap">{formatDate(item.pay_date)}</span>
+                    {item.stub_corrected && <Badge variant="warning" className="mt-1">Corrected</Badge>}
                     {item.record_type === 'native' && item.pay_period_id && item.payroll_item_id && (item.check_number || item.gross_pay > 0 || item.net_pay > 0) && (
                       <Button variant="outline" size="sm" className="mt-2 whitespace-nowrap" disabled={stubLoadingId !== null} onClick={() => void viewStub(item)} aria-label={`View stub for ${formatDate(item.pay_date)}`}>
                         {stubLoadingId === item.payroll_item_id ? 'Loading…' : 'View stub'}

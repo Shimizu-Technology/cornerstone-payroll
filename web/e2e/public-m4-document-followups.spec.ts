@@ -129,7 +129,8 @@ for (const width of [390, 1280]) {
     await page.route('**/api/v1/employee/statements/902', (route) => json(route, {
       ...revised,
       earlier_versions: [
-        { id: '892', status: 'replaced', posted_at: '2026-09-26T02:00:00Z', payment_line: 'Direct deposit' },
+        { id: '897', status: 'replaced', corrected: false, posted_at: '2026-09-27T02:00:00Z', payment_line: 'Direct deposit' },
+        { id: '892', status: 'replaced', corrected: true, posted_at: '2026-09-26T02:00:00Z', payment_line: 'Check #1034' },
         { id: '882', status: 'replaced', posted_at: '2026-09-25T02:00:00Z', payment_line: 'Check #1034' },
       ],
     }));
@@ -140,8 +141,10 @@ for (const width of [390, 1280]) {
     await expect(page.getByRole('heading', { name: 'Original pay stub' })).toBeHidden();
     await history.focus();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { name: 'Earlier correction' })).toBeVisible();
-    await expect(page.getByText('Check #1034')).toBeVisible();
+    const correction = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Earlier correction' }) });
+    await expect(correction.getByText('Check #1034')).toBeVisible();
+    const detailsUpdate = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Earlier pay stub' }) });
+    await expect(detailsUpdate.getByText('Direct deposit')).toBeVisible();
     await expectNoSideScroll(page);
 
     await expect(page.getByRole('article')).toContainText('$•••');
