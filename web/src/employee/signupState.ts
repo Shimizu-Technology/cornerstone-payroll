@@ -104,7 +104,9 @@ export function forgetSignInReturn(): void {
 /** Clears the kept return path once the signed-in app has reached it. */
 export function arrivedAt(path: string): void {
   try {
-    if (storage()?.getItem(RETURN_KEY)?.split(/[?#]/)[0] === path) storage()?.removeItem(RETURN_KEY);
+    // Normalised like AppRoutes' path: no query or hash, no trailing slash, "/" kept.
+    const saved = storage()?.getItem(RETURN_KEY)?.split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+    if (storage()?.getItem(RETURN_KEY) && saved === path) storage()?.removeItem(RETURN_KEY);
   } catch {
     // Nothing stored.
   }
@@ -127,6 +129,6 @@ export function birthDate(draft: { month: string; day: string; year: string }, n
 
 /** The 429 message, using the Retry-After the API sent (a code's lockout window can be 15 minutes). */
 export function rateLimitedText(retryAfterSeconds: number | null | undefined): string {
-  if (!retryAfterSeconds || retryAfterSeconds <= 90) return 'Too many tries. Wait a minute, then try again.';
+  if (!retryAfterSeconds || retryAfterSeconds <= 60) return 'Too many tries. Wait a minute, then try again.';
   return `Too many tries. Wait about ${Math.ceil(retryAfterSeconds / 60)} minutes, then try again.`;
 }

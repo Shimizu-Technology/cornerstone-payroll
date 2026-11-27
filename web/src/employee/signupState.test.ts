@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { currentInviteToken, forgetInviteToken, rateLimitedText, takeInviteToken } from './signupState';
+import { arrivedAt, currentInviteToken, forgetInviteToken, rateLimitedText, takeInviteToken } from './signupState';
 
 const TOKEN = 'a'.repeat(40);
 
@@ -39,11 +39,33 @@ describe('invite token', () => {
 });
 
 describe('rateLimitedText', () => {
-  it('says how long to wait from Retry-After', () => {
+  it('rounds Retry-After up to whole minutes, with a one-minute fallback', () => {
     expect(rateLimitedText(null)).toBe('Too many tries. Wait a minute, then try again.');
+    expect(rateLimitedText(undefined)).toBe('Too many tries. Wait a minute, then try again.');
     expect(rateLimitedText(60)).toBe('Too many tries. Wait a minute, then try again.');
+    expect(rateLimitedText(61)).toBe('Too many tries. Wait about 2 minutes, then try again.');
+    expect(rateLimitedText(90)).toBe('Too many tries. Wait about 2 minutes, then try again.');
     // The per-code throttle that a sign-up lockout uses up lasts 15 minutes.
     expect(rateLimitedText(900)).toBe('Too many tries. Wait about 15 minutes, then try again.');
-    expect(rateLimitedText(100)).toBe('Too many tries. Wait about 2 minutes, then try again.');
+  });
+});
+
+describe('arrivedAt', () => {
+  afterEach(() => sessionStorage.clear());
+
+  it('clears a kept return path once the app reaches it, ignoring a trailing slash, query or hash', () => {
+    sessionStorage.setItem('employee-sign-in-return', '/pay/');
+    arrivedAt('/pay');
+    expect(sessionStorage.getItem('employee-sign-in-return')).toBeNull();
+
+    sessionStorage.setItem('employee-sign-in-return', '/pay/12?year=2026#top');
+    arrivedAt('/pay/12');
+    expect(sessionStorage.getItem('employee-sign-in-return')).toBeNull();
+  });
+
+  it('keeps it on any other page', () => {
+    sessionStorage.setItem('employee-sign-in-return', '/claim');
+    arrivedAt('/');
+    expect(sessionStorage.getItem('employee-sign-in-return')).toBe('/claim');
   });
 });

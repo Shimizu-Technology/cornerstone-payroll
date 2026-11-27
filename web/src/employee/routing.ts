@@ -4,7 +4,9 @@
  */
 export function redirectTarget(state: unknown): string {
   const from = (state as { from?: unknown } | null)?.from;
-  if (typeof from !== 'string' || !from.startsWith('/') || from.includes('\\')) return '/';
+  // Control characters too: URL parsing drops tab and newlines, so "/\t/host" would leave the site.
+  // eslint-disable-next-line no-control-regex
+  if (typeof from !== 'string' || !from.startsWith('/') || from.includes('\\') || /[\u0000-\u001f\u007f]/.test(from)) return '/';
   return from.startsWith('//') || from.startsWith('/sign-in') ? '/' : from;
 }
 
