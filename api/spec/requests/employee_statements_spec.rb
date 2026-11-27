@@ -319,7 +319,7 @@ RSpec.describe "Employee statements", type: :request do
 
       get "/api/v1/employee/statements/#{replacement.id}", headers: headers_for
       expect(response.parsed_body.fetch("earlier_versions")).to eq([
-        { "id" => original.id.to_s, "status" => "replaced", "posted_at" => original.posted_at.iso8601, "payment_line" => "Check #4012" }
+        { "id" => original.id.to_s, "status" => "replaced", "posted_at" => original.posted_at.iso8601, "payment_line" => "Check #4012", "corrected" => false }
       ])
       # The original's id opens the current version, and its PDF is the original as issued.
       get "/api/v1/employee/statements/#{original.id}", headers: headers_for

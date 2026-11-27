@@ -77,7 +77,7 @@ describe('employee API contracts', () => {
         { label: 'Territory surcharge', amount: '1.00', ytd: null, kind: 'something_new', display_label: 'Territory surcharge' },
       ],
       earlier_versions: [
-        { id: '880', status: 'replaced', posted_at: '2026-11-20T08:00:00Z', payment_line: 'Check #4012' },
+        { id: '880', status: 'replaced', corrected: true, posted_at: '2026-11-20T08:00:00Z', payment_line: 'Check #4012' },
         { id: '881', status: 'withdrawn', posted_at: '2026-11-21T08:00:00Z', payment_line: null },
         { id: 'bad id!', status: 'replaced' },
         { id: '879', status: 'replaced', posted_at: 'not a time' },
@@ -87,8 +87,8 @@ describe('employee API contracts', () => {
       ['guam_income_tax', 'Guam income tax'], [null, 'Territory surcharge'],
     ]);
     expect(detail?.earlierVersions).toEqual([
-      { id: '880', status: 'replaced', postedAt: '2026-11-20T08:00:00Z', paymentLine: 'Check #4012' },
-      { id: '879', status: 'replaced', postedAt: null, paymentLine: null },
+      { id: '880', status: 'replaced', corrected: true, postedAt: '2026-11-20T08:00:00Z', paymentLine: 'Check #4012' },
+      { id: '879', status: 'replaced', corrected: false, postedAt: null, paymentLine: null },
     ]);
   });
 
