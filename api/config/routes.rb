@@ -84,6 +84,7 @@ Rails.application.routes.draw do
         post "delivery_consents/keep_paper", to: "delivery_consents#keep_paper", format: false
         post "delivery_consents/w2gu_access_proof/pdf", to: "delivery_consents#w2gu_access_proof", format: false
         get :help, to: "help#show", format: false
+        get :job, to: "job#show", format: false
         resources :statements, only: [ :index, :show ], format: false do
           get :pdf, on: :member
         end
