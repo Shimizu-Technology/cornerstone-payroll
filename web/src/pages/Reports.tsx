@@ -1328,6 +1328,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
     { key: 'xlsx', label: 'Excel workbook (.xlsx)', description: 'Multi-sheet workbook for reconciliation.', kind: 'spreadsheet', loading: exportingXlsx, onSelect: downloadXlsx },
     { key: 'csv', label: 'History data (.csv)', description: 'Flat paycheck history for data workflows.', kind: 'data', loading: exportingCsv, onSelect: downloadCsv },
   ];
+  const historyHasAdditionalWithholding = (report?.history ?? []).some((h) => Number(h.additional_withholding ?? 0) !== 0);
 
   return (
     <div className="space-y-6">
@@ -1397,7 +1398,8 @@ export function EmployeePayHistoryPanel(): ReactNode {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
                 <TotalBox label="Gross Pay" value={report.summary.gross_pay ?? 0} />
                 <TotalBox label="Custom Earnings" value={report.summary.custom_earnings_total ?? 0} />
-                <TotalBox label={GUAM_INCOME_TAX} value={report.summary.withholding_tax ?? 0} />
+                <TotalBox label={GUAM_INCOME_TAX} value={report.summary.base_withholding_tax ?? report.summary.withholding_tax ?? 0} />
+                {Number(report.summary.additional_withholding ?? 0) !== 0 && <TotalBox label={ADDITIONAL_GUAM_INCOME_TAX} value={report.summary.additional_withholding ?? 0} />}
                 <TotalBox label="SS Tax" value={report.summary.social_security_tax ?? 0} />
                 <TotalBox label="Medicare" value={report.summary.medicare_tax ?? 0} />
                 <TotalBox label="Retirement" value={report.summary.retirement ?? 0} />
@@ -1419,7 +1421,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
               {report.history.map((history) => (
                 <div key={history.key} className="rounded-xl border border-neutral-200 p-4">
                   <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{formatDate(history.pay_date)}</p><p className="mt-1 break-words text-xs text-neutral-600">{formatDateRange(history.period_start, history.period_end) || history.period_description}</p></div><Badge variant={history.record_type === 'imported' ? 'warning' : 'default'}>{history.source.label}</Badge></div>
-                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-neutral-500">Gross pay</dt><dd className="font-semibold">{fmt(history.gross_pay)}{Number(history.non_taxable_pay ?? 0) !== 0 && <span className="block text-xs font-normal text-neutral-600">incl. {fmt(history.non_taxable_pay ?? 0)} non-taxable</span>}</dd></div><div><dt className="text-neutral-500">Net pay</dt><dd className="font-semibold">{fmt(history.net_pay)}</dd></div><div><dt className="text-neutral-500">Payment</dt><dd>{payrollPaymentLabel(history)}{history.check_number && <span className="block text-xs text-neutral-600">Check #{history.check_number}</span>}</dd></div><div><dt className="text-neutral-500">Total deductions</dt><dd>{fmt(history.total_deductions)}</dd></div></dl>
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm">
                     <summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary>
                     <dl className="mt-3 grid grid-cols-2 gap-3">
@@ -1428,6 +1430,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                       <div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div>
                       <div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div>
                       <div><dt>{GUAM_INCOME_TAX}</dt><dd>{fmt(history.withholding_tax ?? 0)}</dd></div>
+                      {Number(history.additional_withholding ?? 0) !== 0 && <div><dt>{ADDITIONAL_GUAM_INCOME_TAX}</dt><dd>{fmt(history.additional_withholding ?? 0)}</dd></div>}
                       <div><dt>Combined hours</dt><dd>{history.total_hours ?? '—'}</dd></div>
                     </dl>
                   </details>
@@ -1450,7 +1453,8 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     <th className="pb-2 pr-4 font-medium text-right">Deductions</th>
                     <th className="pb-2 pr-4 font-medium text-right">Net Pay</th>
                     <th className="pb-2 font-medium">Payment</th>
-                    <th className="pb-2 px-4 font-medium text-right">{GUAM_INCOME_TAX_WITHHELD}</th>
+                    <th className="pb-2 px-4 font-medium text-right">{GUAM_INCOME_TAX}</th>
+                    {historyHasAdditionalWithholding && <th className="pb-2 pr-4 font-medium text-right">{ADDITIONAL_GUAM_INCOME_TAX}</th>}
                     <th className="pb-2 font-medium text-right">Combined Hours</th>
                   </tr>
                 </thead>
@@ -1463,18 +1467,19 @@ export function EmployeePayHistoryPanel(): ReactNode {
                       <td className="py-2 pr-4 text-right tabular-nums">{h.hours_worked ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{h.overtime_hours ?? '—'}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_earnings_total ?? 0)}</td>
-                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}</td>
+                      <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.gross_pay)}{Number(h.non_taxable_pay ?? 0) !== 0 && <span className="block text-xs text-neutral-600">incl. {fmt(h.non_taxable_pay ?? 0)} non-taxable</span>}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.custom_deductions_total ?? 0)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.total_deductions)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-semibold">{fmt(h.net_pay)}</td>
                       <td className="py-2 text-neutral-500">{payrollPaymentLabel(h)}{h.check_number && <span className="block font-mono text-xs">Check #{h.check_number}</span>}</td>
                       <td className="py-2 px-4 text-right tabular-nums">{fmt(h.withholding_tax ?? 0)}</td>
+                      {historyHasAdditionalWithholding && <td className="py-2 pr-4 text-right tabular-nums">{fmt(h.additional_withholding ?? 0)}</td>}
                       <td className="py-2 text-right tabular-nums">{h.total_hours ?? '—'}</td>
                     </tr>
                   ))}
                   {report.history.length === 0 && (
                     <tr>
-                      <td colSpan={13} className="py-6 text-center text-neutral-600">
+                      <td colSpan={historyHasAdditionalWithholding ? 14 : 13} className="py-6 text-center text-neutral-600">
                         No pay history found.
                       </td>
                     </tr>

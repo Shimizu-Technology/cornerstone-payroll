@@ -66,7 +66,9 @@ module Parity
           },
           payment: {
             method: payment["method"],
-            check_number: normalize_check_number(payment["check_number_last4"]),
+            # The AIRE worker app shows only the last 4 digits.
+            check_number: nil,
+            check_number_last4: normalize_check_number(payment["check_number_last4"]),
             status: payment["status"]
           },
           status: {
