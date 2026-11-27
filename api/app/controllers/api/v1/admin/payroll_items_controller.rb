@@ -148,10 +148,14 @@ module Api
             bucket_hours_for.call(saved_allocations, "overtime_hours") != bucket_hours_for.call(@payroll_item.wage_rate_hours, "overtime_hours")
           remaining_client_regular = client_owns_regular && !regular_changed
           remaining_client_overtime = client_owns_overtime && !overtime_changed
-          clear_client_hours_evidence = has_client_extra_hours &&
+          clear_client_hours_evidence = if has_client_extra_hours
             !remaining_client_regular && !remaining_client_overtime &&
-            ((client_owns_regular && regular_changed) || (client_owns_overtime && overtime_changed))
-          # When every client-owned component changed, staff hours become the new baseline.
+              ((client_owns_regular && regular_changed) || (client_owns_overtime && overtime_changed))
+          else
+            regular_changed
+          end
+          # When every client-owned component changed (or on ordinary regular-hours
+          # edits with no client changes), write explicit nil matching main's JSON shape.
           @payroll_item.custom_columns_data = @payroll_item.custom_columns_data.to_h.merge("client_change_evidence" => nil) if clear_client_hours_evidence
           allocations_changed = saved_allocations != @payroll_item.wage_rate_hours
           # Non-client hours (and any component staff took over) can also arrive only through job allocations.
@@ -447,6 +451,7 @@ module Api
 
           applied_hours_fields = other & %w[overtime_hours holiday_hours pto_hours]
           applied_hours = evidence["applied_hours"].merge(applied_hours_fields.to_h { |field| [ field, item.public_send(field).to_d.to_s("F") ] })
+          applied_hours["hours_worked"] = item.hours_worked.to_d.to_s("F") unless keep_regular
           updated_evidence = evidence.merge("applied_hours" => applied_hours, "applied_allocations" => current, "baseline_allocations" => baseline)
           unless keep_overtime
             updated_evidence["delta_overtime_hours"] = "0.0" if evidence.key?("delta_overtime_hours")

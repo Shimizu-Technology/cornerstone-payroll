@@ -8,12 +8,18 @@ import type { PayrollIntakeImportData } from '@/services/api';
 import type { ImportPreviewResponse, ImportPreviewRow } from '@/services/api';
 
 const mocks = vi.hoisted(() => ({
-  currentImport: vi.fn(), applyImport: vi.fn(), listItems: vi.fn(), createItem: vi.fn(), updateItem: vi.fn(),
+  currentImport: vi.fn(), applyImport: vi.fn(), setUpImportInstallmentLoan: vi.fn(), previewPortalSubmission: vi.fn(),
+  listItems: vi.fn(), createItem: vi.fn(), updateItem: vi.fn(),
 }));
 vi.mock('@/services/api', async original => ({
   ...await original<typeof import('@/services/api')>(),
   payrollIntakeImportsApi: { list: vi.fn().mockResolvedValue({ imports: [] }) },
-  payPeriodsApi: { currentImport: mocks.currentImport, applyImport: mocks.applyImport },
+  payPeriodsApi: {
+    currentImport: mocks.currentImport,
+    applyImport: mocks.applyImport,
+    setUpImportInstallmentLoan: mocks.setUpImportInstallmentLoan,
+    previewPortalSubmission: mocks.previewPortalSubmission,
+  },
   payrollItemsApi: { list: mocks.listItems, create: mocks.createItem, update: mocks.updateItem },
 }));
 
@@ -761,4 +767,45 @@ it('clamps single-workweek Apply payload to week 1 and clears client-change conf
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
     reviewed_changes: [expect.objectContaining({ change_index: 0, workweek: 1, preview_token: 'tok-single-week' })],
   })));
+});
+
+it('disables the job and rate selector while a rematch is loading', async () => {
+  const withLoanAndRates = row({
+    source_row_id: 1,
+    wage_rate_options: [{ id: 11, label: 'Main Kitchen', rate: 20 }, { id: 12, label: 'Shared Kitchen', rate: 20 }],
+    selected_wage_rate_id: 11,
+    installment_loan_setup: {
+      action: 'resume',
+      employee_loan_id: 42,
+      name: 'Car Loan',
+      current_balance: '100.00',
+      payment_amount: '50.00',
+      message: 'Car Loan is paused.',
+    },
+  });
+  const data = preview([]);
+  data.preview.matched = [withLoanAndRates];
+  data.source_package.documents = [{ id: 1, source_role: 'revel_hours', filename: 'revel.pdf', content_type: 'application/pdf', byte_size: 100 }];
+  data.loan_setup = { allowed: true, reason: null };
+
+  let resolveRematch!: (value: ImportPreviewResponse) => void;
+  mocks.setUpImportInstallmentLoan.mockResolvedValue({ already_set_up: false });
+  mocks.previewPortalSubmission.mockReturnValue(new Promise<ImportPreviewResponse>((resolve) => {
+    resolveRematch = resolve;
+  }));
+
+  open(data);
+  const jobSelect = screen.getAllByLabelText('Job and rate for Avery Server')[0] as HTMLSelectElement;
+  expect(jobSelect.disabled).toBe(false);
+
+  fireEvent.click(screen.getAllByRole('button', { name: 'Resume Car Loan' })[0]);
+  await waitFor(() => expect(mocks.previewPortalSubmission).toHaveBeenCalled());
+  expect(jobSelect.disabled).toBe(true);
+
+  const refreshed = preview([]);
+  refreshed.preview.matched = [{ ...withLoanAndRates, installment_loan_setup: undefined }];
+  refreshed.source_package.documents = data.source_package.documents;
+  resolveRematch(refreshed);
+
+  await waitFor(() => expect((screen.getAllByLabelText('Job and rate for Avery Server')[0] as HTMLSelectElement).disabled).toBe(false));
 });

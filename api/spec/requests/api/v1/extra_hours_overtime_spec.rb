@@ -1383,6 +1383,130 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       expect(flat_item.wage_rate_hours).to eq([])
     end
 
+    it "preserves client overtime evidence when staff edit only regular hours (flat or via job allocations), so withdrawal keeps regular and removes client OT" do
+      flat_worker = create(:employee, company: company, first_name: "Flat", last_name: "OnlyReg", pay_rate: 20.00)
+      flat_job = create(:employee_wage_rate, employee: flat_worker, label: "Maintenance", rate: 20.00, is_primary: true)
+      flat_item = create(:payroll_item, company: company, pay_period: pay_period, employee: flat_worker,
+                         pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil)
+
+      alloc_worker = create(:employee, company: company, first_name: "Alloc", last_name: "OnlyReg", pay_rate: 20.00)
+      alloc_job = create(:employee_wage_rate, employee: alloc_worker, label: "Maintenance", rate: 20.00, is_primary: true)
+      alloc_item = create(:payroll_item, company: company, pay_period: pay_period, employee: alloc_worker,
+                          pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil)
+
+      ordinary_worker = create(:employee, company: company, first_name: "Plain", last_name: "Worker", pay_rate: 20.00)
+      ordinary_item = create(:payroll_item, company: company, pay_period: pay_period, employee: ordinary_worker,
+                             pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil, custom_columns_data: {})
+
+      pdf_bytes = File.binread(build_revel_pdf(
+        [ { name: "Example, Avery", regular_hours: 40, overtime_hours: 0, regular_pay: 800 } ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      ))
+
+      # Revision 1: client adds +4 regular + 2 OT on each 30-reg worker
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             revel_payroll: portal_upload("revel.pdf", pdf_bytes, pdf_mime),
+             workbook_choice: "none",
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: flat_worker.id, employee_wage_rate_id: flat_job.id, regular_hours: "4", overtime_hours: "2" },
+               { kind: "extra_hours", employee_id: alloc_worker.id, employee_wage_rate_id: alloc_job.id, regular_hours: "4", overtime_hours: "2" }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev1_id = response.parsed_body.dig("data", "submissions", 0, "id")
+      rev1_doc_id = response.parsed_body.dig("data", "submissions", 0, "documents", 0, "document", "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: rev1_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, regular_hours: "4", overtime_hours: "2", preview_token: preview_token_for(response.parsed_body, 0), decision: "apply" },
+               { change_index: 1, regular_hours: "4", overtime_hours: "2", preview_token: preview_token_for(response.parsed_body, 1), decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      expect(flat_item.reload).to have_attributes(hours_worked: BigDecimal("34.00"), overtime_hours: BigDecimal("2.00"))
+      expect(alloc_item.reload).to have_attributes(hours_worked: BigDecimal("34.00"), overtime_hours: BigDecimal("2.00"))
+
+      # Staff edit ONLY regular hours 34 -> 35 (flat on flat_worker, via wage_rate_hours on alloc_worker)
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{flat_item.id}",
+            params: { payroll_item: { hours_worked: 35.0 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      edited_allocations = alloc_item.wage_rate_hours.map { |entry| entry.merge("regular_hours" => 35.0) }
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{alloc_item.id}",
+            params: { payroll_item: { wage_rate_hours: edited_allocations } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      [ flat_item.reload, alloc_item.reload ].each do |updated|
+        evidence = updated.custom_columns_data["client_change_evidence"]
+        expect(evidence).to include(
+          "kind" => "extra_hours",
+          "baseline_regular_hours" => "35.0",
+          "applied_regular_hours" => "35.0",
+          "baseline_overtime_hours" => "0.0",
+          "applied_overtime_hours" => "2.0",
+          "delta_regular_hours" => "0.0",
+          "delta_overtime_hours" => "2.0",
+          "reviewed_value" => "2"
+        )
+        expect(evidence["applied_hours"]).to include("hours_worked" => "35.0", "overtime_hours" => "2.0")
+      end
+
+      # Ordinary regular-hours edit without client changes preserves explicit null key shape like main
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{ordinary_item.id}",
+            params: { payroll_item: { hours_worked: 31.0 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(ordinary_item.reload.custom_columns_data.key?("client_change_evidence")).to be(true)
+      expect(ordinary_item.custom_columns_data["client_change_evidence"]).to be_nil
+
+      # Revision 2 drops both extra-hours entries (keeping byte-identical PDF)
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             based_on_revision: 1,
+             keep_document_ids: [ rev1_doc_id ],
+             workbook_choice: "none",
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev2_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: rev2_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: []
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      # Staff's 35.00 regular edit is kept, client's 2.00 OT is removed -> $700.00 gross at $20/hr
+      [ flat_item.reload, alloc_item.reload ].each do |restored|
+        expect(restored.hours_worked).to eq(BigDecimal("35.00"))
+        expect(restored.overtime_hours).to eq(BigDecimal("0.00"))
+        expect(restored.gross_pay).to eq(BigDecimal("700.00"))
+        expect(restored.custom_columns_data["client_change_evidence"]).to be_nil
+      end
+      expect(flat_item.wage_rate_hours).to eq([])
+      expect(alloc_item.wage_rate_hours.sole).to include("regular_hours" => 35.0, "overtime_hours" => 0.0)
+    end
+
     it "applies two approved split extra-hours rows for the same employee cumulatively across jobs" do
       second_job = create(:employee_wage_rate, employee: employee, label: "Bar", rate: 30.00)
 
