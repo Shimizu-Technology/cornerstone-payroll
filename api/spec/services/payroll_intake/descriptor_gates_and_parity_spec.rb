@@ -434,12 +434,81 @@ RSpec.describe "Track C B4-B6 descriptor-driven gates, submission roles, and MoS
 
       item = pay_period.payroll_items.find_by!(employee: employee)
       expect(item.imported_hours_snapshot).to eq("regular_hours" => "40.0", "overtime_hours" => "2.0")
+      expect(item.custom_columns_data["mosa_imported_hours"]).to eq("regular_hours" => "40.0", "overtime_hours" => "2.0")
 
       item.update!(hours_worked: 38)
       expect(PayrollImport::LivePreviewRowState.hand_edited_hours(
         { "employee_id" => employee.id, "employee_name" => employee.full_name, "regular_hours" => 41, "overtime_hours" => 2 },
         item
       )).to include("saved_regular_hours" => "38.0", "source_regular_hours" => "41.0")
+    end
+
+    it "updates both imported_hours and legacy mosa_imported_hours on existing items so hand-edited-hours confirmation still fires" do
+      tracked_adapter = build_synthetic_adapter(key: "tracked_intake_legacy_dual", tracks_reviewed_hours: true)
+      PayrollIntake::Registry.register(tracked_adapter)
+      organization = create(:organization)
+      company = create(:company, organization: organization, payroll_intake_source_types: [ "tracked_intake_legacy_dual" ])
+      staff = create(:user, organization: organization, company: company, role: "admin")
+      pay_period = create(:pay_period, company: company,
+        start_date: Date.new(2026, 6, 14), end_date: Date.new(2026, 6, 27), pay_date: Date.new(2026, 7, 3), status: "draft")
+      employee = create(:employee, company: company, first_name: "Morgan", last_name: "Legacy", pay_rate: 20.0)
+      config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: 2026)
+      create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+      CompanyWorkweek.create!(
+        company: company, starts_on_weekday: 0, starts_at_minutes: 0, timezone: "Pacific/Guam",
+        effective_on: Date.new(2026, 1, 1), source: "operator_confirmed", confirmation_status: "confirmed",
+        confirmed_by: staff, confirmed_at: Time.current, notes: "Confirmed"
+      )
+
+      # Existing item starts with a legacy mosa_imported_hours baseline of 40h.
+      existing = create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee,
+        hours_worked: 40,
+        overtime_hours: 0,
+        import_source: "tracked_intake_legacy_dual",
+        import_origin: "intake",
+        custom_columns_data: {
+          "mosa_imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" },
+          "imported_hours" => { "regular_hours" => "40.0", "overtime_hours" => "0.0" }
+        }
+      )
+
+      session = PayrollIntakeSession.create!(
+        company: company, pay_period: pay_period, source_type: "tracked_intake_legacy_dual",
+        source_label: "Tracked", import_hash: SecureRandom.hex(32), parser_version: "tracked_intake_legacy_dual:v1",
+        package_id: SecureRandom.uuid, package_revision: 1,
+        package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION, status: "previewed",
+        evidence_snapshot: {
+          "workweek" => PayrollIntake::WorkweekEvidence.new(pay_period: pay_period, overtime_mode: "source_reports").capture!,
+          "intake_settings" => { "overtime_mode" => "source_reports" }
+        },
+        created_by: staff
+      )
+      row = session.rows.create!(
+        position: 0, source_employee_name: employee.full_name, employee: employee,
+        regular_hours: 35, overtime_hours: 0, reported_tips: 0, tips_paid_out: 0, status: "ready"
+      )
+
+      applied = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [ { id: row.id, disposition: "included", employee_id: employee.id } ],
+        actor: staff,
+        force_overwrite: true
+      ).call
+      expect(applied[:errors]).to be_empty
+
+      existing.reload
+      expect(existing.imported_hours_snapshot).to eq("regular_hours" => "35.0", "overtime_hours" => "0.0")
+      expect(existing.custom_columns_data["mosa_imported_hours"]).to eq("regular_hours" => "35.0", "overtime_hours" => "0.0")
+
+      # Staff edits the row back to 40h; a later import of 42h must still trigger hand_edited_hours.
+      existing.update!(hours_worked: 40)
+      expect(PayrollImport::LivePreviewRowState.hand_edited_hours(
+        { "employee_id" => employee.id, "employee_name" => employee.full_name, "regular_hours" => 42, "overtime_hours" => 0 },
+        existing
+      )).to include("saved_regular_hours" => "40.0", "source_regular_hours" => "42.0")
     end
   end
 end
