@@ -30,9 +30,8 @@ module Api
             # The pay-run worksheet shows the rates that payroll will use.
             @rates_on = period.end_date
           elsif params[:rates_on].present?
-            text = params[:rates_on].to_s.strip
-            parsed = text.match?(/\A\d{4}-\d{2}-\d{2}\z/) ? (Date.iso8601(text) rescue nil) : nil
-            return render json: { error: "rates_on must be an ISO date (YYYY-MM-DD)" }, status: :unprocessable_entity unless parsed
+            parsed = parse_bounded_period_rates_on(params[:rates_on])
+            return render json: { error: "rates_on must be the end date of a pay period for this company (YYYY-MM-DD)" }, status: :unprocessable_entity unless parsed
 
             @rates_on = parsed
           end
@@ -750,6 +749,21 @@ module Api
           return @can_review_employee_intake if defined?(@can_review_employee_intake)
 
           @can_review_employee_intake = StaffRolePolicy.allowed?(current_user, :manage_client_configuration, company: current_company)
+        end
+
+        def parse_bounded_period_rates_on(value)
+          text = value.to_s.strip
+          return nil unless text.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+
+          parsed = Date.iso8601(text)
+          today = PayrollBusinessClock.today
+          return nil unless parsed.between?(today - 10.years, today + 2.years)
+
+          matches_period = PayPeriod.where(company_id: current_company_id, end_date: parsed).exists? ||
+            PayrollSubmissions::Catalog.new(company: current_company).entries.any? { |entry| entry.end_date == parsed }
+          matches_period ? parsed : nil
+        rescue ArgumentError, Date::Error
+          nil
         end
 
         def serialize_employee(

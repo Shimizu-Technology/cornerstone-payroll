@@ -436,9 +436,48 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       expect(june_by_id.fetch(w2_to_1099.id)["employment_type"]).to eq("hourly")
       expect(june_by_id.fetch(contractor_to_w2.id)).to include("employment_type" => "contractor", "contractor_pay_type" => "hourly")
 
-      # Malformed rates_on is rejected
+      # Malformed and out-of-range rates_on values are refused (422)
       get "/api/v1/client/employees", params: { status: "active", rates_on: "not-a-date" }
       expect(response).to have_http_status(:unprocessable_entity)
+
+      get "/api/v1/client/employees", params: { status: "active", rates_on: "9999-12-31" }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      # Valid ISO date that is NOT an open submittable period end date is refused (422)
+      get "/api/v1/client/employees", params: { status: "active", rates_on: "2026-06-26" }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      # Client viewer is refused rates_on (403) while omitted param keeps today's behavior unchanged
+      viewer = create(:user, organization: organization, company: company, role: "client", client_access_level: "viewer")
+      CompanyAssignment.create!(user: viewer, company: company)
+      stub_portal_user(Api::V1::Client::EmployeesController, viewer, company)
+
+      get "/api/v1/client/employees", params: { status: "active", rates_on: "2026-06-27" }
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("client_view_only")
+
+      get "/api/v1/client/employees", params: { status: "active", per_page: 200 }
+      expect(response).to have_http_status(:ok), response.body
+      viewer_today_by_id = response.parsed_body.fetch("data").index_by { |row| row["id"] }
+      expect(viewer_today_by_id.fetch(w2_to_1099.id)["employment_type"]).to eq("contractor")
+      expect(viewer_today_by_id.fetch(contractor_to_w2.id)["employment_type"]).to eq("hourly")
+
+      # Admin endpoint accepts a company period end date and refuses out-of-range / malformed / unrelated dates
+      stub_portal_user(Api::V1::Admin::EmployeesController, staff, company)
+      get "/api/v1/admin/employees", params: { status: "active", per_page: 200, rates_on: "2026-06-27" }
+      expect(response).to have_http_status(:ok), response.body
+      admin_june_by_id = response.parsed_body.fetch("data").index_by { |row| row["id"] }
+      expect(admin_june_by_id.fetch(w2_to_1099.id)["employment_type"]).to eq("hourly")
+      expect(admin_june_by_id.fetch(contractor_to_w2.id)["employment_type"]).to eq("contractor")
+
+      get "/api/v1/admin/employees", params: { status: "active", rates_on: "9999-12-31" }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      get "/api/v1/admin/employees", params: { status: "active", rates_on: "not-a-date" }
+      expect(response).to have_http_status(:unprocessable_entity)
+
+      # Restore client manager stub for remaining submission assertions
+      stub_portal_user(Api::V1::Client::EmployeesController, client_user, company)
 
       # Direction 1 (W-2 in June -> 1099 in July): June submission without workweek is rejected, with workweek succeeds
       post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
@@ -807,17 +846,21 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       # Also add a file-absent worker with pre-existing regular + OT baseline to exercise restore_client_hours_baseline!
       absent_worker = create(:employee, company: company, first_name: "Baseline", last_name: "Absent", pay_rate: 20.00)
       absent_job = create(:employee_wage_rate, employee: absent_worker, label: "Support", rate: 20.00, is_primary: true)
-      create(:payroll_item,
-             company: company,
-             pay_period: pay_period,
-             employee: absent_worker,
-             pay_rate: 20.00,
-             hours_worked: 2.0,
-             overtime_hours: 1.0,
-             import_source: "mosa_revel",
-             wage_rate_hours: [
-               { employee_wage_rate_id: absent_job.id, label: "Support", rate: 20.0, regular_hours: 2.0, overtime_hours: 1.0, holiday_hours: 0.0, pto_hours: 0.0, is_primary: true, active: true }
-             ])
+      baseline_absent_item = create(:payroll_item,
+                                    company: company,
+                                    pay_period: pay_period,
+                                    employee: absent_worker,
+                                    pay_rate: 20.00,
+                                    hours_worked: 2.0,
+                                    overtime_hours: 1.0,
+                                    import_source: "mosa_revel",
+                                    wage_rate_hours: [
+                                      { employee_wage_rate_id: absent_job.id, label: "Support", rate: 20.0, regular_hours: 2.0, overtime_hours: 1.0, holiday_hours: 0.0, pto_hours: 0.0, is_primary: true, active: true }
+                                    ])
+      baseline_absent_item.calculate!
+      baseline_absent_item.save!
+      expected_absent_allocations = baseline_absent_item.reload.wage_rate_hours.deep_dup
+      expect(baseline_absent_item.gross_pay).to eq(BigDecimal("70.00"))
 
       pdf_bytes = File.binread(build_revel_pdf(
         [ { name: "Example, Avery", regular_hours: 70, overtime_hours: 2, regular_pay: 9999 } ],
@@ -895,7 +938,8 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
 
       expect(absent_item.hours_worked).to eq(BigDecimal("2.00"))
       expect(absent_item.overtime_hours).to eq(BigDecimal("1.00"))
-      expect(absent_item.wage_rate_hours.sole).to include("regular_hours" => 2.0, "overtime_hours" => 1.0)
+      expect(absent_item.gross_pay).to eq(BigDecimal("70.00"))
+      expect(absent_item.wage_rate_hours).to eq(expected_absent_allocations)
       expect(absent_item.custom_columns_data["client_change_evidence"]).to be_nil
     end
 
