@@ -104,7 +104,7 @@ RSpec.describe "Employee statements", type: :request do
     it "shows financial withdrawals and paper voids while keeping drafts and unposted items out" do
       shown = stub_on(Date.new(2026, 9, 10))
       draft = post_stub!(item_for(period_on(Date.new(2026, 9, 24))))
-      draft.payroll_item.pay_period.update_columns(status: "draft")
+      draft.payroll_item.pay_period.update_columns(status: "draft", correction_status: "voided")
       voided_run = post_stub!(item_for(period_on(Date.new(2026, 10, 8))))
       voided_run.payroll_item.pay_period.update_columns(correction_status: "voided")
       reversed = post_stub!(item_for(period_on(Date.new(2026, 10, 22))))

@@ -32,7 +32,7 @@ module Api
           # Failing checks are listed before a fresh step-up is asked for.
           update.preflight! if update.turning_on?
           if update.turning_on?
-            require_direct_recent_verification!
+            require_direct_recent_verification!(impersonation_error: "Exit Sign in as before changing the employee app switch.")
             return if performed?
           end
           result = record_override("employee_app_switch", snapshot: -> { EmployeeAppSwitch.switched_on_values(current_company.reload) },
@@ -131,11 +131,11 @@ module Api
 
         def demo_stop_snapshot
           early_access_snapshot.merge("demo_switches" => Company.demo.where(organization_id: current_company.organization_id)
-            .order(:id).lock.to_h { |company| [ company.id.to_s, EmployeeAppSwitch.on_anywhere(company) ] })
+            .order(:id).to_h { |company| [ company.id.to_s, EmployeeAppSwitch.on_anywhere(company) ] })
         end
 
         def verified_for_early_access!
-          require_direct_recent_verification!
+          require_direct_recent_verification!(impersonation_error: "Exit Sign in as before changing demo early access.")
           !performed?
         end
 

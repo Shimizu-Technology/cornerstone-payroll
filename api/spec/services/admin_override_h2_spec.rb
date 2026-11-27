@@ -107,10 +107,10 @@ RSpec.describe AdminOverrideService do
       expect(period.reload).not_to be_voided
     end
 
-    %w[paid filed].each do |status|
+    %w[paid filed exception].each do |status|
       it "blocks rollback for a #{status} filing" do
         filing.update!(status: status)
-        expect { rollback }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /paid or submitted tax/)
+        expect { rollback }.to raise_error(PayPeriodCorrectionService::InvalidStateError, /tax filing evidence/)
         expect(document.reload).to be_posted
         expect(filing.reload.status).to eq(status)
       end

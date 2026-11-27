@@ -117,8 +117,14 @@ class AdminOverrideService
     reason = reason!(reason)
 
     ApplicationRecord.transaction(requires_new: true) do
-      company.organization.lock! if organization_wide
-      company.lock!
+      if organization_wide
+        company.organization.lock!
+        companies = Company.where(organization_id: company.organization_id)
+        companies.where(id: company.id).or(companies.demo).order(:id).lock.load
+        company.reload
+      else
+        company.lock!
+      end
       actor = authorize!(actor: actor, company: company, capability: capability)
       subject.lock! unless subject == company
       record!(company: company, subject: subject, actor: actor, reason: reason, action: action,

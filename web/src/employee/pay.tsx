@@ -106,7 +106,7 @@ function PaidLine({ statement }: { statement: StatementSummary }): ReactElement 
   const method = paymentLine(statement.payment);
   return (
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-neutral-700">
-      <span>{status?.label === 'Voided' ? `Pay date ${longDate(statement.payDate)}` : `Paid ${longDate(statement.payDate)}`}</span>
+      <span>{statement.withdrawn || status?.label === 'Voided' ? `Pay date ${longDate(statement.payDate)}` : `Paid ${longDate(statement.payDate)}`}</span>
       {method && <><span aria-hidden="true">·</span><span>{method}</span></>}
       {status && status.label !== 'Paid' && <Chip tone={status.tone}>{status.label}</Chip>}
       {statement.corrected && <Chip tone="warn">Corrected</Chip>}
@@ -209,16 +209,21 @@ function PayComingSoon(): ReactElement {
 
 function LatestPay({ statement, statements }: { statement: StatementSummary; statements: StatementSummary[] }): ReactElement {
   const hours = hoursLabel(statement.totalHours);
-  if (statement.withdrawn) return <p role="status">{statement.notice}</p>;
   return (
     <div className="space-y-4">
       <div>
-        <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>
-        <p className="emp-hero-amount"><Money value={statement.netPay} /></p>
-        <PaidLine statement={statement} />
-        {statement.notice && <p role="status">{statement.notice}</p>}
-        {hours && <p className="text-neutral-700">{hours}</p>}
-        <Comparison statement={statement} statements={statements} />
+        {statement.withdrawn ? <>
+          <p className="emp-label-quiet">{formatDateRange(statement.periodStart, statement.periodEnd)}</p>
+          <PaidLine statement={statement} />
+          <p role="status">{statement.notice}</p>
+        </> : <>
+          <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>
+          <p className="emp-hero-amount"><Money value={statement.netPay} /></p>
+          <PaidLine statement={statement} />
+          {statement.notice && <p role="status">{statement.notice}</p>}
+          {hours && <p className="text-neutral-700">{hours}</p>}
+          <Comparison statement={statement} statements={statements} />
+        </>}
       </div>
       <EmpButtonLink to={`/pay/${statement.id}`} block onClick={focusHeadingOnNextScreen}>
         <FileText aria-hidden="true" className="size-6" />
@@ -340,7 +345,7 @@ function HomeWithPay(): ReactElement {
   return (
     <div className="emp-home-grid">
       <div className="emp-column">
-        <Card title="Latest pay" action={latest ? <HideAmountsToggle /> : undefined}>
+        <Card title="Latest pay" action={latestActive ? <HideAmountsToggle /> : undefined}>
           {body((check) => <LatestPay statement={check} statements={statements} />, <NoPayYet />)}
         </Card>
         {(state.status !== 'ready' || recent.length > 0) && (
@@ -356,7 +361,7 @@ function HomeWithPay(): ReactElement {
       </div>
       <div className="emp-column emp-wide-only">
         <Card title="This year so far">
-          {body(() => latestActive ? <YearSoFar latest={latestActive} /> : null, <p className="text-neutral-600">Your totals will show here after your first payday.</p>)}
+          {body(() => latestActive ? <YearSoFar latest={latestActive} /> : <p className="text-neutral-600">Your totals will show here after your next active payday.</p>, <p className="text-neutral-600">Your totals will show here after your first payday.</p>)}
         </Card>
         <QuestionsCard />
       </div>
@@ -458,9 +463,8 @@ function PayDesktop(): ReactElement {
   const fallbackId = listed[0]?.id ?? (newest.state.status === 'ready' ? inListOrder(newest.state.data.statements)[0]?.id : undefined);
   const selectedId = statementId ?? fallbackId ?? null;
   const suffix = year ? `?year=${year}` : '';
-  const hasAmounts = listed.length > 0
-    || (newest.state.status === 'ready' && newest.state.data.statements.length > 0)
-    || Boolean(selected.state.status === 'ready' && selected.state.data);
+  const hasAmounts = listed.some((statement) => !statement.withdrawn)
+    || (selected.state.status === 'ready' && selected.state.data !== null && !selected.state.data.withdrawn);
 
   return (
     <Page title="Pay stubs" actions={hasAmounts ? <HideAmountsToggle /> : undefined}>
@@ -524,7 +528,8 @@ function PayListPhone(): ReactElement {
   } else {
     body = <SkeletonRows rows={5} label="Loading your pay stubs" />;
   }
-  const hasAmounts = newest.state.status === 'ready' && newest.state.data.statements.length > 0;
+  const shown = useStatements(year);
+  const hasAmounts = shown.state.status === 'ready' && shown.state.data.statements.some((statement) => !statement.withdrawn);
   return (
     <Page title="Pay stubs" actions={hasAmounts ? <HideAmountsToggle /> : undefined}>
       <Card>{body}</Card>
@@ -540,7 +545,7 @@ function StubScreen({ id }: { id: string }): ReactElement {
   const list = useStatements(year);
   const statement = useStatement(id);
   const siblings = list.state.status === 'ready' ? inListOrder(list.state.data.statements) : [];
-  const hasAmounts = statement.state.status === 'ready' && statement.state.data !== null;
+  const hasAmounts = statement.state.status === 'ready' && statement.state.data !== null && !statement.state.data.withdrawn;
   return (
     <Page title="Pay stub" actions={hasAmounts ? <HideAmountsToggle /> : undefined} before={<BackLink to={back}>Pay</BackLink>}>
       <Card>
@@ -717,7 +722,6 @@ function StubDetailView({
       <BackLink to={`/pay${linkSuffix}`}>Back to pay stubs</BackLink>
     </div>
   );
-  if (stub.withdrawn) return <p role="status">{stub.notice}</p>;
   const period = formatDateRange(stub.periodStart, stub.periodEnd);
   const hours = hoursLabel(stub.totalHours);
   const quickbooks = stub.source === 'quickbooks';
@@ -733,62 +737,64 @@ function StubDetailView({
         {quickbooks && <Chip tone="neutral">From QuickBooks records</Chip>}
         <PaidLine statement={stub} />
         {stub.notice && <p role="status">{stub.notice}</p>}
-        {hours && <p className="text-neutral-700">{hours}</p>}
+        {!stub.withdrawn && hours && <p className="text-neutral-700">{hours}</p>}
       </header>
 
-      {stub.earlierVersions.length > 0 && <EarlierStubs key={stub.id} versions={stub.earlierVersions} payDate={stub.payDate} />}
+      {!stub.withdrawn && <>
+        {stub.earlierVersions.length > 0 && <EarlierStubs key={stub.id} versions={stub.earlierVersions} payDate={stub.payDate} />}
 
-      <div className="emp-net">
-        <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>
-        <p className="emp-hero-amount"><Money value={stub.netPay} /></p>
-        <Comparison statement={stub} statements={siblings} />
-      </div>
+        <div className="emp-net">
+          <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>
+          <p className="emp-hero-amount"><Money value={stub.netPay} /></p>
+          <Comparison statement={stub} statements={siblings} />
+        </div>
 
-      {stub.note && <p className="emp-hint"><MaskedText text={stub.note} /></p>}
+        {stub.note && <p className="emp-hint"><MaskedText text={stub.note} /></p>}
 
-      {hasOnlyYtdEarnings && <p className="emp-no-current-earnings emp-hint">No earnings this pay period.</p>}
-      {stub.earnings.length > 0 && (
-        <StubTable caption="Pay before taxes" term="gross pay" total={stub.grossPay} ytdOnly={hasOnlyYtdEarnings}>
-          {stub.earnings.map((line, index) => <EarningRow key={`${line.label}-${index}`} line={line} />)}
-        </StubTable>
-      )}
-      {stub.earnings.length === 0 && stub.grossPay && (
-        <dl className="emp-totals"><div><dt>Pay before taxes <span className="emp-term">(gross)</span></dt><dd><Money value={stub.grossPay} /></dd></div></dl>
-      )}
-      {stub.taxes.length > 0 && (
-        <StubTable caption="Taxes" total={sum(stub.taxes)}>
-          {stub.taxes.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} tax />)}
-        </StubTable>
-      )}
-      {stub.deductions.length > 0 && (
-        <StubTable caption="Deductions" total={sum(stub.deductions)}>
-          {stub.deductions.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} />)}
-        </StubTable>
-      )}
-      {stub.otherPay.length > 0 && (
-        <StubTable caption="Added after taxes" total={sum(stub.otherPay)}>
-          {stub.otherPay.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} />)}
-        </StubTable>
-      )}
+        {hasOnlyYtdEarnings && <p className="emp-no-current-earnings emp-hint">No earnings this pay period.</p>}
+        {stub.earnings.length > 0 && (
+          <StubTable caption="Pay before taxes" term="gross pay" total={stub.grossPay} ytdOnly={hasOnlyYtdEarnings}>
+            {stub.earnings.map((line, index) => <EarningRow key={`${line.label}-${index}`} line={line} />)}
+          </StubTable>
+        )}
+        {stub.earnings.length === 0 && stub.grossPay && (
+          <dl className="emp-totals"><div><dt>Pay before taxes <span className="emp-term">(gross)</span></dt><dd><Money value={stub.grossPay} /></dd></div></dl>
+        )}
+        {stub.taxes.length > 0 && (
+          <StubTable caption="Taxes" total={sum(stub.taxes)}>
+            {stub.taxes.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} tax />)}
+          </StubTable>
+        )}
+        {stub.deductions.length > 0 && (
+          <StubTable caption="Deductions" total={sum(stub.deductions)}>
+            {stub.deductions.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} />)}
+          </StubTable>
+        )}
+        {stub.otherPay.length > 0 && (
+          <StubTable caption="Added after taxes" total={sum(stub.otherPay)}>
+            {stub.otherPay.map((line, index) => <AmountRow key={`${line.label}-${index}`} line={line} />)}
+          </StubTable>
+        )}
 
-      {(stub.ytdNet || stub.ytdGross) && (
-        <section aria-label="This year so far" className="space-y-2">
-          <h3 className="emp-h3">This year so far</h3>
-          <dl className="emp-totals">
-            {stub.ytdNet && <div><dt>Take-home pay</dt><dd><Money value={stub.ytdNet} /></dd></div>}
-            {stub.ytdGross && <div><dt>Pay before taxes <span className="emp-term">(gross)</span></dt><dd><Money value={stub.ytdGross} /></dd></div>}
-          </dl>
-        </section>
-      )}
+        {(stub.ytdNet || stub.ytdGross) && (
+          <section aria-label="This year so far" className="space-y-2">
+            <h3 className="emp-h3">This year so far</h3>
+            <dl className="emp-totals">
+              {stub.ytdNet && <div><dt>Take-home pay</dt><dd><Money value={stub.ytdNet} /></dd></div>}
+              {stub.ytdGross && <div><dt>Pay before taxes <span className="emp-term">(gross)</span></dt><dd><Money value={stub.ytdGross} /></dd></div>}
+            </dl>
+          </section>
+        )}
 
-      {(quickbooks ? stub.originalPdf : stub.pdfAvailable) && (
-        <StubPdfButton id={stub.id} filename={`${quickbooks ? 'original-pay-stub' : 'pay-stub'}-${stub.payDate}.pdf`}
-          label={quickbooks ? 'View original stub (PDF)' : 'Download PDF'} />
-      )}
-      {/* A QuickBooks note is the recorded-adjustment note: the amounts above include it, the PDF doesn't. */}
-      {quickbooks && stub.originalPdf && stub.note && (
-        <p className="emp-hint">This PDF is the original QuickBooks stub from before the recorded adjustment, so its amounts differ from the ones above.</p>
-      )}
+        {(quickbooks ? stub.originalPdf : stub.pdfAvailable) && (
+          <StubPdfButton id={stub.id} filename={`${quickbooks ? 'original-pay-stub' : 'pay-stub'}-${stub.payDate}.pdf`}
+            label={quickbooks ? 'View original stub (PDF)' : 'Download PDF'} />
+        )}
+        {/* A QuickBooks note is the recorded-adjustment note: the amounts above include it, the PDF doesn't. */}
+        {quickbooks && stub.originalPdf && stub.note && (
+          <p className="emp-hint">This PDF is the original QuickBooks stub from before the recorded adjustment, so its amounts differ from the ones above.</p>
+        )}
+      </>}
       <PrevNext siblings={siblings} id={stub.id} linkSuffix={linkSuffix} className="emp-prevnext-bottom" newScreen={newScreen} />
     </article>
   );

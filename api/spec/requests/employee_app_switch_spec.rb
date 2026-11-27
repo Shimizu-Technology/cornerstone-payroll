@@ -827,6 +827,15 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(app_open.call).to be(true)
     end
 
+    it "skips the expiry sweep when the override notification ledger rolls back early access" do
+      allow(PortalNotifications).to receive(:admin_override!).and_raise(ActiveRecord::RecordInvalid.new(PortalNotificationEvent.new))
+      expect(EmployeeAppSwitch::DemoExpiry).not_to receive(:call)
+
+      expect { open_window! }.not_to change(EmployeeAppEarlyAccessWindow, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(AdminOverride.where(action: "employee_app_early_access_set")).to be_empty
+    end
+
     it "ends a window with a reason, and the row can't be edited afterwards" do
       open_window!
       delete "#{path}/early_access", params: { reason: "Rehearsal finished" }, as: :json, headers: auth(recent: false, target: demo)

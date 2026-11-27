@@ -819,7 +819,8 @@ module Api
           return if performed?
           return render json: { error: "Select a client first." }, status: :unprocessable_entity unless current_company
 
-          AdminOverrideService.retry_job!(company: current_company, actor: current_user, verified: true,
+          AdminOverrideService.retry_job!(company: current_company, actor: current_user,
+            verified: MfaPolicy.recently_step_up_verified?(@clerk_token_payload),
             impersonated: impersonated_session?, job_key: params[:job], reason: params[:reason])
           render json: { status: "queued" }, status: :accepted
         rescue ActiveJob::EnqueueError

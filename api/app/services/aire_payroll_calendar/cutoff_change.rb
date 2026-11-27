@@ -52,7 +52,7 @@ module AirePayrollCalendar
     end
 
     def call
-      result = PayPeriod.transaction do
+      result = PayPeriod.transaction(requires_new: true) do
         @pay_period.lock!
         replay = replay_result
         next replay if replay
