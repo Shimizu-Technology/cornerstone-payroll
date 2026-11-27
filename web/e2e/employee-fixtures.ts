@@ -103,8 +103,12 @@ export const job = {
   employee_id: '1042',
   worker_type: 'w2',
   pay_frequency: 'biweekly',
-  pay: { type: 'hourly', rates: [{ label: 'Server', rate: '15.00' }, { label: 'Banquet server', rate: '17.25' }] },
-  start_date: '2024-03-04',
+  pay: { type: 'hourly', rates: [
+    { label: 'Server', rate: '15.00', change: { rate: '17.00', effective_on: '2026-12-01' } },
+    { label: 'Banquet server', rate: '17.25', change: null },
+  ] },
+  start_date: '2026-11-02',
+  first_hired_on: '2024-03-04',
   payment_method: 'direct_deposit',
   contact_name: 'Rina Calvo',
 };

@@ -39,9 +39,9 @@ RSpec.describe "Employee job", type: :request do
       "employer_name" => "Alpha Grill", "department" => "Front of House", "role" => "Server",
       "employee_id" => employee.id.to_s, "worker_type" => "w2", "pay_frequency" => "biweekly",
       "pay" => { "type" => "hourly", "rates" => [
-        { "label" => "Server", "rate" => "15.00" }, { "label" => "Bartender", "rate" => "17.50" }
+        { "label" => "Server", "rate" => "15.00", "change" => nil }, { "label" => "Bartender", "rate" => "17.50", "change" => nil }
       ] },
-      "start_date" => "2024-03-04", "payment_method" => "direct_deposit", "contact_name" => "Alex Santos"
+      "start_date" => "2024-03-04", "first_hired_on" => nil, "payment_method" => "direct_deposit", "contact_name" => "Alex Santos"
     )
   end
 
@@ -52,8 +52,8 @@ RSpec.describe "Employee job", type: :request do
 
     employee.update_columns(company_job_role_id: nil, job_title: " ", department_id: nil, hire_date: nil,
       payment_delivery_method: nil)
-    expect(job_for).to include("role" => nil, "department" => nil, "start_date" => nil, "payment_method" => nil,
-      "contact_name" => nil, "pay" => { "type" => "hourly", "rates" => [ { "label" => nil, "rate" => "15.00" } ] })
+    expect(job_for).to include("role" => nil, "department" => nil, "start_date" => nil, "payment_method" => "paper_check",
+      "contact_name" => nil, "pay" => { "type" => "hourly", "rates" => [ { "label" => nil, "rate" => "15.00", "change" => nil } ] })
   end
 
   # Pay history is recorded when the worker is set up, so each pay basis gets its own worker.
@@ -66,23 +66,92 @@ RSpec.describe "Employee job", type: :request do
 
   it "gives a salary per pay period and per year" do
     expect(job_of(employment_type: "salary", salary_type: "annual", pay_rate: 52_000).fetch("pay"))
-      .to eq("type" => "salary", "per_period" => "2000.00", "annual" => "52000.00")
+      .to eq("type" => "salary", "per_period" => "2000.00", "annual" => "52000.00", "change" => nil)
     expect(job_of(employment_type: "salary", salary_type: "per_period", pay_rate: 1_500, pay_frequency: "semimonthly"))
-      .to include("pay_frequency" => "semimonthly", "pay" => { "type" => "salary", "per_period" => "1500.00", "annual" => "36000.00" })
+      .to include("pay_frequency" => "semimonthly", "pay" => { "type" => "salary", "per_period" => "1500.00", "annual" => "36000.00", "change" => nil })
     expect(job_of(employment_type: "salary", salary_type: "variable", pay_rate: 0).fetch("pay"))
-      .to eq("type" => "salary", "per_period" => nil, "annual" => nil)
+      .to eq("type" => "salary", "per_period" => nil, "annual" => nil, "change" => nil)
   end
 
   it "describes a contractor's flat fee or hourly rate" do
     expect(job_of(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "flat_fee", pay_rate: 800))
-      .to include("worker_type" => "1099", "pay" => { "type" => "flat_fee", "per_period" => "800.00" })
+      .to include("worker_type" => "1099", "pay" => { "type" => "flat_fee", "per_period" => "800.00", "change" => nil })
     expect(job_of(employment_type: "contractor", contractor_type: "individual", contractor_pay_type: "hourly", pay_rate: 40).fetch("pay"))
-      .to eq("type" => "hourly", "rates" => [ { "label" => nil, "rate" => "40.00" } ])
+      .to eq("type" => "hourly", "rates" => [ { "label" => nil, "rate" => "40.00", "change" => nil } ])
   end
 
   it "reads pay from the rate history in effect today, not a cached column" do
     employee.update_columns(pay_rate: 99)
-    expect(job_for.fetch("pay")).to eq("type" => "hourly", "rates" => [ { "label" => nil, "rate" => "15.00" } ])
+    expect(job_for.fetch("pay")).to eq("type" => "hourly", "rates" => [ { "label" => nil, "rate" => "15.00", "change" => nil } ])
+  end
+
+  describe "a pay change scheduled before the next paycheck" do
+    let(:today) { PayrollBusinessClock.today }
+    let(:actor) { create(:user, company: company, organization: organization, role: "admin") }
+
+    # The next payday pays for a period ending two weeks from today.
+    def next_payday!
+      create(:pay_period, company: company, start_date: today + 1, end_date: today + 14, pay_date: today + 18,
+        status: "committed", committed_at: Time.current)
+    end
+
+    def change!(person, effective_on, **changes)
+      EmployeeCompensationChangeService.new(employee: person, actor: actor, source: "staff", reason: "Scheduled raise",
+        effective_on: effective_on.iso8601, **changes).call!
+    end
+
+    it "notes each job's new rate when it takes effect within the next paycheck's period" do
+      server = create(:employee_wage_rate, employee: employee, label: "Server", rate: 15, is_primary: true)
+      create(:employee_wage_rate, employee: employee, label: "Bartender", rate: 17.5)
+      next_payday!
+      change!(employee, today + 5, wage_rate_edits: [ { id: server.id, rate: 17 } ])
+
+      expect(job_for.fetch("pay")).to eq("type" => "hourly", "rates" => [
+        { "label" => "Server", "rate" => "15.00", "change" => { "rate" => "17.00", "effective_on" => (today + 5).iso8601 } },
+        { "label" => "Bartender", "rate" => "17.50", "change" => nil }
+      ])
+    end
+
+    it "notes a single profile rate's change, but not one after that period or without a settled next payday" do
+      change!(employee, today + 5, pay_rate: 17)
+      # No settled next payday: nothing to tie the change to.
+      expect(job_for.dig("pay", "rates")).to eq([ { "label" => nil, "rate" => "15.00", "change" => nil } ])
+
+      next_payday!
+      expect(job_for.dig("pay", "rates")).to eq([
+        { "label" => nil, "rate" => "15.00", "change" => { "rate" => "17.00", "effective_on" => (today + 5).iso8601 } }
+      ])
+
+      later = create(:employee, company: company, pay_rate: 15)
+      change!(later, today + 20, pay_rate: 17)
+      login = create(:user, role: :portal_employee, company: company, clerk_id: "user_later")
+      later_link = EmployeeAccountLink.create!(user: login, company: company, employee: later, status: "active")
+      expect(job_for(later_link, subject: "user_later").dig("pay", "rates")).to eq([ { "label" => nil, "rate" => "15.00", "change" => nil } ])
+    end
+
+    it "notes a salary's new amount per payday and per year" do
+      salaried = create(:employee, company: company, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+      next_payday!
+      change!(salaried, today + 5, pay_rate: 57_200)
+      login = create(:user, role: :portal_employee, company: company, clerk_id: "user_salary")
+      salary_link = EmployeeAccountLink.create!(user: login, company: company, employee: salaried, status: "active")
+
+      expect(job_for(salary_link, subject: "user_salary").fetch("pay")).to eq(
+        "type" => "salary", "per_period" => "2000.00", "annual" => "52000.00",
+        "change" => { "per_period" => "2200.00", "annual" => "57200.00", "effective_on" => (today + 5).iso8601 }
+      )
+    end
+  end
+
+  it "starts the current stint at a rehire and keeps the original hire date" do
+    employee.update!(hire_date: Date.new(2026, 3, 9))
+    expect(job_for).to include("start_date" => "2026-03-09", "first_hired_on" => nil)
+
+    EmployeeStatusEvent.create!(company: company, employee: employee, event_type: "terminated", previous_status: "active",
+      resulting_status: "terminated", effective_date: Date.new(2026, 7, 31), source: "operator")
+    EmployeeStatusEvent.create!(company: company, employee: employee, event_type: "reactivated", previous_status: "terminated",
+      resulting_status: "active", effective_date: Date.new(2026, 11, 2), source: "operator")
+    expect(job_for).to include("start_date" => "2026-11-02", "first_hired_on" => "2026-03-09")
   end
 
   it "never includes the SSN, bank numbers or internal notes" do
@@ -117,7 +186,7 @@ RSpec.describe "Employee job", type: :request do
     bravo_link = EmployeeAccountLink.create!(user: worker, company: bravo, employee: bravo_employee, status: "active")
 
     expect(job_for(bravo_link)).to include("employer_name" => "Bravo Cafe", "role" => "Barista",
-      "employee_id" => bravo_employee.id.to_s, "pay" => { "type" => "hourly", "rates" => [ { "label" => nil, "rate" => "13.00" } ] })
+      "employee_id" => bravo_employee.id.to_s, "pay" => { "type" => "hourly", "rates" => [ { "label" => nil, "rate" => "13.00", "change" => nil } ] })
     expect(job_for(link)).to include("employer_name" => "Alpha Grill", "role" => "Server")
   end
 

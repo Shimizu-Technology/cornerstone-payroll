@@ -299,7 +299,8 @@ test.describe('employee app on a phone', () => {
     await expect(card).toContainText('Employee (W-2)');
     await expect(card).not.toContainText('$15.00');
     await card.getByRole('button', { name: 'Show amounts' }).click();
-    await expect(card.getByRole('listitem')).toHaveText(['Server$15.00 an hour', 'Banquet server$17.25 an hour']);
+    await expect(card.getByRole('listitem')).toHaveText(['Server$15.00 an hourChanges to $17.00 an hour on Dec 1', 'Banquet server$17.25 an hour']);
+    await expect(card).toContainText('Originally hired Mar 4, 2024');
     await expect(card.getByRole('link', { name: 'Contact Rina Calvo' })).toHaveAttribute('href', '/help');
 
     for (const width of [390, 360]) {
