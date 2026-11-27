@@ -13,6 +13,14 @@ import { useCompany } from '@/contexts/CompanyContext';
 
 import { supportToken } from '@/support/grant';
 
+const ORGANIZATION_WIDE_PATHS = [
+  '/app/notifications',
+  '/settings/clients',
+  '/settings/organizations',
+  '/settings/tax-config',
+  '/settings/users',
+];
+
 const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
 
 function isEditableShortcutTarget(target: EventTarget | null) {
@@ -23,10 +31,13 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
 export function Layout() {
   const { activeCompany, activeCompanyId, activeOrganizationName, activeOrganizationId } = useCompany();
-  const { user, isClientViewer } = useAuth();
+  const { user, isAdmin, isClientViewer } = useAuth();
   const isClient = user?.role === 'client';
   const location = useLocation();
   const financePage = location.pathname.startsWith('/tools/finance') || location.pathname.startsWith('/tools/invoices') || location.pathname.startsWith('/tools/expenses');
+  const pathname = location.pathname.replace(/\/$/, '').toLowerCase();
+  const organizationWide = ORGANIZATION_WIDE_PATHS.includes(pathname) ||
+    (pathname === '/settings/audit-logs' && isAdmin && !Number(new URLSearchParams(location.search).get('company_id')));
   const practicePortal = activeCompany?.practice_portal === true;
   const readOnlyWorkspace = !practicePortal && !canWriteCompany(activeCompany);
   const outlet = useOutlet();
@@ -154,7 +165,7 @@ export function Layout() {
       />
 
       <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur-sm lg:hidden">
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-neutral-200/80 bg-white/90 pb-3 pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] pt-[calc(0.75rem+env(safe-area-inset-top))] backdrop-blur-sm lg:hidden">
           <button
             type="button"
             className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-neutral-300 bg-white p-2 text-neutral-700 shadow-sm transition hover:bg-neutral-50"
@@ -167,15 +178,15 @@ export function Layout() {
           </button>
           <div className="min-w-0 text-center">
             <p className="text-sm font-semibold tracking-tight text-neutral-900">{isClient ? 'Cornerstone Payroll · Client Portal' : 'Cornerstone Payroll'}</p>
-            <div className="flex items-center justify-center gap-1.5">
+            {!organizationWide && <div className="flex items-center justify-center gap-1.5">
               <p className="truncate text-xs font-medium text-primary-700">{financePage ? activeOrganizationName || 'Finance workspace' : activeCompany?.name || 'Payroll workspace'}</p>
               {!financePage && activeCompany?.demo && <DemoBadge />}
-            </div>
+            </div>}
           </div>
           <div className="h-11 w-11" />
         </div>
 
-        <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-neutral-50 pb-[env(safe-area-inset-bottom)]">
+        <main className="relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-neutral-50 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] lg:pl-0 lg:pr-0">
           {!financePage && activeCompany && (activeCompany.test_workspace ?? activeCompany.payroll_environment === 'migration_rehearsal') && (
             <div className="sticky top-0 z-20 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-amber-950 sm:px-6">
               <div className="mx-auto flex max-w-screen-2xl items-start gap-2.5 text-sm">

@@ -260,7 +260,7 @@ function ReadinessSummary({ master, checks, names }: { master: SwitchRow; checks
               {blocking.map((key) => (
                 <li key={key} className="[overflow-wrap:anywhere]">
                   {names[key] ?? key}
-                  {CHECK_COPY[key] && <span className="text-neutral-600"> · {CHECK_COPY[key].owner} fixes this</span>}
+                  <span className="text-neutral-600"> · {CHECK_COPY[key]?.owner ?? 'Shimizu Technology'} fixes this</span>
                 </li>
               ))}
             </ul>
@@ -284,7 +284,7 @@ function waivedLabel(key: string): string {
 }
 
 function CheckRow({ check, scope, showDiagnostics }: { check: ReadinessCheck; scope: string | null; showDiagnostics: boolean }) {
-  const owner = CHECK_COPY[check.key]?.owner;
+  const owner = CHECK_COPY[check.key]?.owner ?? 'Shimizu Technology';
   // Cornerstone's own checks and waivers explain themselves in plain words;
   // the platform checks name server settings, so they stay in the details.
   const plainDetail = owner === 'Cornerstone' || check.status === 'waived';
@@ -303,7 +303,7 @@ function CheckRow({ check, scope, showDiagnostics }: { check: ReadinessCheck; sc
           <Badge variant={check.status === 'passed' ? 'success' : check.status === 'waived' ? 'warning' : 'danger'}>{label}</Badge>
         </div>
         {scope && <p className="text-xs font-medium text-neutral-500">{scope}</p>}
-        {check.status === 'failed' && owner && <p className="mt-1 text-xs font-semibold text-neutral-600">{owner} fixes this</p>}
+        {check.status === 'failed' && <p className="mt-1 text-xs font-semibold text-neutral-600">{owner} fixes this</p>}
         {check.detail && plainDetail && <p className="mt-1 text-sm text-neutral-700 [overflow-wrap:anywhere]">{check.detail}</p>}
         {showDiagnostics && check.status !== 'passed' && check.detail && !plainDetail && (
           <details className="mt-1 text-sm">

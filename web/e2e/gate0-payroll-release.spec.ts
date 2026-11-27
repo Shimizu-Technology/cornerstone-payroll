@@ -183,7 +183,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
   }
 
-  test('fully hides and restores the desktop sidebar without changing mobile navigation', async ({ browser }): Promise<void> => {
+  test('collapses the desktop sidebar to a rail and restores it without changing mobile navigation', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       extraHTTPHeaders: {
@@ -197,21 +197,22 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeVisible();
     await page.getByRole('button', { name: 'Collapse sidebar' }).click();
-    await expect(sidebar).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
-    expect(await page.getByTestId('app-shell').evaluate((root) => getComputedStyle(root).getPropertyValue('--sidebar-width'))).toBe('0rem');
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).toHaveCSS('width', '64px');
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    expect(await page.getByTestId('app-shell').evaluate((root) => getComputedStyle(root).getPropertyValue('--sidebar-width'))).toBe('4rem');
     expect(await page.evaluate(() => localStorage.getItem('sidebar-collapsed'))).toBe('true');
 
     await page.reload();
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
-    await page.getByRole('button', { name: 'Show sidebar' }).click();
-    await expect(sidebar).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    await page.getByRole('button', { name: 'Expand sidebar' }).click();
+    await expect(sidebar).toHaveCSS('width', '288px');
     expect(await page.evaluate(() => localStorage.getItem('sidebar-collapsed'))).toBe('false');
 
     await page.keyboard.press('Control+b');
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible();
     await page.getByRole('button', { name: 'Open navigation' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -391,7 +392,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(accountantPage.getByRole('link', { name: 'Timecard OCR' })).toBeVisible();
     await expect(accountantPage.getByRole('link', { name: 'Activity History' })).toBeVisible();
     await expect(accountantPage.getByRole('link', { name: 'Pay Schedule' })).toHaveCount(0);
-    await expect(accountantPage.getByRole('link', { name: 'Client Changes' })).toHaveCount(0);
+    await expect(accountantPage.getByRole('link', { name: 'Change Requests' })).toHaveCount(0);
 
     await accountantPage.goto('/pay-schedule-settings');
     await expect(accountantPage).toHaveURL(/\/app$/);

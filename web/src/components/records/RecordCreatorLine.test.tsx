@@ -9,5 +9,5 @@ it('shows known creator, role and creation date', () => {
 });
 it('explains missing historical attribution', () => {
   render(<RecordCreatorLine creator={null} />);
-  expect(screen.getByText('Unknown (before tracking)')).toBeTruthy();
+  expect(screen.getByText('Creator not recorded')).toBeTruthy();
 });

@@ -22,6 +22,7 @@ export function ConnectionSteps({ overview, showDiagnostics }: { overview: Profi
       <p className="mt-2 text-sm leading-6 text-amber-950">
         Connect Cornerstone Tax to bring staff hours into this report.
       </p>
+      <p className="mt-1 text-sm text-amber-950">Shimizu Technology finishes this connection.</p>
       {showDiagnostics && (
         <details className="mt-3 text-sm text-amber-950">
           <summary className="cursor-pointer font-semibold">Connection diagnostics</summary>

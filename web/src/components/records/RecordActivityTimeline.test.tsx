@@ -222,7 +222,7 @@ it('shows an explicit empty history and unknown creator', async () => {
   apiMocks.list.mockResolvedValue({ data: [], creator: null, meta: { current_page: 1, total_pages: 0 } });
   renderTimeline(<RecordActivityTimeline companyId={7} recordId={12} recordType="employees" />);
   expect(await screen.findByText('No recorded activity yet')).toBeTruthy();
-  expect(screen.getByText('Unknown (before tracking)')).toBeTruthy();
+  expect(screen.getByText('Creator not recorded')).toBeTruthy();
   cleanup();
 });
 
