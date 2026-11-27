@@ -589,10 +589,10 @@ describe('EmployeeContactDetails', () => {
   });
 
   it('offers inline same-person confirmation when saving an employee login email and retries with confirm_same_person_email', async () => {
-    const emma = buildEmployee({ id: 105, first_name: 'Emma', last_name: 'Mercer' });
+    const elena = buildEmployee({ id: 105, first_name: 'Elena', last_name: 'Mercer' });
 
     apiMocks.clientList.mockResolvedValue({
-      data: [emma],
+      data: [elena],
       meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
     });
 
@@ -612,8 +612,8 @@ describe('EmployeeContactDetails', () => {
       )
       .mockResolvedValueOnce({
         data: {
-          ...emma,
-          email: 'emma.client@example.com',
+          ...elena,
+          email: 'elena.client@example.com',
           contact_source: 'client',
         },
         contact_warnings: [],
@@ -623,7 +623,7 @@ describe('EmployeeContactDetails', () => {
     expect((await screen.findAllByText('Elena Mercer')).length).toBeGreaterThan(0);
 
     fireEvent.change(field('Email for Elena Mercer'), {
-      target: { value: 'emma.client@example.com' },
+      target: { value: 'elena.client@example.com' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Elena Mercer' }));
 
@@ -642,7 +642,7 @@ describe('EmployeeContactDetails', () => {
       expect(apiMocks.clientUpdate).toHaveBeenLastCalledWith(
         105,
         expect.objectContaining({
-          email: 'emma.client@example.com',
+          email: 'elena.client@example.com',
           confirm_same_person_email: true,
         }),
       );
@@ -654,9 +654,9 @@ describe('EmployeeContactDetails', () => {
     ['placeholder_email', "Not a real email. Use the employee's own address."],
     ['recipient_not_allowed', "Email from this client's account can't go to this address. Use a different address."],
   ])('says why a %s email was refused under the email field', async (code, message) => {
-    const emma = buildEmployee({ id: 106, first_name: 'Emma', last_name: 'Mercer' });
+    const elena = buildEmployee({ id: 106, first_name: 'Elena', last_name: 'Mercer' });
     apiMocks.clientList.mockResolvedValue({
-      data: [emma],
+      data: [elena],
       meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 1 },
     });
     apiMocks.clientUpdate.mockRejectedValueOnce(new ApiError(

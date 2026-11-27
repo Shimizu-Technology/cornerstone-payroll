@@ -257,21 +257,21 @@ RSpec.describe CheckGenerator do
 
     it "keeps details and summary below crowded statement tables" do
       crowded_rows = [
-        [ "Allotment - Daniel", "400.00", "4,000.00" ],
+        [ "Allotment - Daniel", "400.00", "8,000.00" ],
         [ "Rent Reimbursement", "150.00", "3,000.00" ],
-        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
+        [ "Auto Loan Reimbursement", "100.00", "1,600.00" ],
         [ "Loan (Nora Lee)", "0.00", "350.00" ],
         [ "Loan - Daniel Carter", "0.00", "300.00" ],
         [ "ER 401(k) Pre-Tax", "200.00", "4,200.00" ]
       ]
       crowded_deduction_rows = [
-        [ "401(k) Pre-Tax", "200.00", "4,200.00" ],
+        [ "401(k) Pre-Tax", "500.00", "10,500.00" ],
         [ "Loan", "0.00", "350.00" ],
         [ "Loan - Devon Holbrook", "0.00", "2,500.00" ],
-        [ "Health Insurance", "126.00", "1,200.00" ],
-        [ "Remittance ID 0000101", "168.00", "1,600.00" ],
-        [ "Tips Paid Out", "0.00", "1,900.80" ],
-        [ { content: "TOTAL", font_style: :bold }, { content: "681.81", font_style: :bold }, { content: "18,702.83", font_style: :bold } ]
+        [ "Health Insurance", "100.00", "2,100.00" ],
+        [ "Remittance ID 0000101", "150.00", "3,150.00" ],
+        [ "Tips Paid Out", "0.00", "1,200.00" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "750.00", font_style: :bold }, { content: "19,800.00", font_style: :bold } ]
       ]
       allow(generator).to receive(:other_pay_rows).and_return(crowded_rows)
       allow(generator).to receive(:deduction_rows).and_return(crowded_deduction_rows)
@@ -294,24 +294,24 @@ RSpec.describe CheckGenerator do
         expect(summary_top).to be < deduction_bottom - 2.0
       end
       expect(page.text).to include(
-        "ER 401(k) Pre-Tax", "4,200.00", "Remittance ID 0000101", "18,702.83", "Pay Period", "MEMO:"
+        "ER 401(k) Pre-Tax", "4,200.00", "Remittance ID 0000101", "19,800.00", "Pay Period", "MEMO:"
       )
     end
 
-    it "keeps Sara-shaped Other Pay YTD values clear of the summary box with a legacy offset" do
+    it "keeps dense Other Pay YTD values clear of the summary box with a legacy offset" do
       company.update!(check_layout_config: { stub: { summary_x_offset: -18.0 } })
       allow(generator).to receive(:other_pay_rows).and_return([
-        [ "Allotment - Daniel", "400.00", "4,000.00" ],
+        [ "Allotment - Daniel", "400.00", "8,000.00" ],
         [ "Rent Reimbursement", "150.00", "3,000.00" ],
-        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
+        [ "Auto Loan Reimbursement", "100.00", "1,600.00" ],
         [ "Loan (Nora Lee)", "0.00", "350.00" ],
         [ "Loan - Daniel Carter", "0.00", "300.00" ],
         [ "ER 401(k) Pre-Tax", "200.00", "4,200.00" ]
       ])
       allow(generator).to receive(:deduction_rows).and_return([
-        [ "401(k) Pre-Tax", "1,500.00", "12,000.00" ],
-        [ "Loan", "41.50", "2,587.50" ],
-        [ { content: "TOTAL", font_style: :bold }, { content: "1,257.85", font_style: :bold }, { content: "26,914.50", font_style: :bold } ]
+        [ "401(k) Pre-Tax", "600.00", "12,000.00" ],
+        [ "Loan", "50.00", "1,000.00" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "650.00", font_style: :bold }, { content: "13,000.00", font_style: :bold } ]
       ])
 
       summary_boxes = []
@@ -492,33 +492,33 @@ RSpec.describe CheckGenerator do
         through_period_end: Date.new(2026, 2, 28),
         through_pay_date: Date.new(2026, 3, 10),
         source_breakdown: {
-          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "5500.00" },
+          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "10000.00" },
           "after_tax_deduction_breakdown" => {
-            "Health Insurance" => "1100.00",
-            "Case No. 0000101" => "1450.00"
+            "Health Insurance" => "2000.00",
+            "Case No. 0000101" => "3000.00"
           },
-          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "3800.00" }
+          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "4000.00" }
         },
-        tips_paid_out: 1_900.80
+        tips_paid_out: 1_200.00
       )
       create_statement_field_entry(
-        label: "Health Insurance", amount: 126, treatment: "post_tax_deduction", category: "insurance")
+        label: "Health Insurance", amount: 100, treatment: "post_tax_deduction", category: "insurance")
       create_statement_field_entry(
-        label: "Remittance ID 0000101", amount: 168, treatment: "post_tax_deduction", category: "child_support")
+        label: "Remittance ID 0000101", amount: 150, treatment: "post_tax_deduction", category: "child_support")
       payroll_item.update!(retirement_payment: 500.00, employer_retirement_match: 200.00)
 
       deduction_rows = generator.send(:deduction_rows)
       other_pay_rows = generator.send(:other_pay_rows)
       text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
 
-      expect(deduction_rows).to include([ "401(k) Pre-Tax", "500.00", "6,000.00" ])
-      expect(deduction_rows).to include([ "Health Insurance", "126.00", "1,200.00" ])
-      expect(deduction_rows).to include([ "Remittance ID 0000101", "168.00", "1,600.00" ])
-      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,900.80" ])
-      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "200.00", "4,000.00" ])
-      expect(text).to include("401(k) Pre-Tax", "6,000.00")
-      expect(text).to include("ER 401(k) Pre-Tax", "4,000.00")
-      expect(text).to include("10,000.00")
+      expect(deduction_rows).to include([ "401(k) Pre-Tax", "500.00", "10,500.00" ])
+      expect(deduction_rows).to include([ "Health Insurance", "100.00", "2,100.00" ])
+      expect(deduction_rows).to include([ "Remittance ID 0000101", "150.00", "3,150.00" ])
+      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,200.00" ])
+      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "200.00", "4,200.00" ])
+      expect(text).to include("401(k) Pre-Tax", "10,500.00")
+      expect(text).to include("ER 401(k) Pre-Tax", "4,200.00")
+      expect(text).to include("16,950.00")
     end
   end
 

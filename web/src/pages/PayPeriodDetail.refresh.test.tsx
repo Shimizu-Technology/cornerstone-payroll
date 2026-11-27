@@ -2325,7 +2325,7 @@ it('treats a row the add-back rebuilt from the import as saved, so hours entry s
     excluded_employees: [{ employee_id: 30, name: 'Avery Monroe', reason: 'Removed from pay period' }],
     expected_entries: { fields: [field], missing_regulars: [], outstanding: [] } } as unknown as PayPeriod;
   const restoredItem = { id: 91, employee_id: 30, employee_name: 'Avery Monroe', employment_type: 'hourly', pay_rate: 35, hours_worked: 0, overtime_hours: 0,
-    loan_deduction: 0, requested_loan_deduction: 150.0, reported_tips: 0, tips_paid_out: 0, bonus: 0, gross_pay: 0, net_pay: 0, wage_rate_hours: [], import_source: 'mosa_revel' };
+    loan_deduction: 0, requested_loan_deduction: 150, reported_tips: 0, tips_paid_out: 0, bonus: 0, gross_pay: 0, net_pay: 0, wage_rate_hours: [], import_source: 'mosa_revel' };
   const restored = { ...period, status: 'draft', payroll_items: [restoredItem], excluded_employee_ids: [], excluded_employees: [],
     expected_entries: { fields: [{ ...field, status: 'missing' }], missing_regulars: [], outstanding: ['Avery Monroe · maintenance hours'] } } as unknown as PayPeriod;
   apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
@@ -2345,7 +2345,7 @@ it('treats a row the add-back rebuilt from the import as saved, so hours entry s
   await waitFor(() => expect(apiMocks.runPayroll).toHaveBeenCalledOnce());
   const payload = apiMocks.runPayroll.mock.calls[0][1];
   expect(payload.hours['30'].wage_rates).toContainEqual(expect.objectContaining({ employee_wage_rate_id: 3, regular_hours: 40 }));
-  expect(payload.loan_deductions?.['30'] ?? 159.1).toBe(159.1);
+  expect(payload.loan_deductions?.['30'] ?? 150).toBe(150);
 });
 
 it('keeps what was not brought back on screen when the reload after an add-back fails', async () => {
@@ -2374,7 +2374,7 @@ it('keeps the roster add-back notice after the run returns to draft', async () =
   const period = { ...initialPayPeriod, status: 'calculated', run_purpose: 'regular', payroll_items: [], excluded_employee_ids: [30],
     excluded_employees: [{ employee_id: 30, name: 'Avery Monroe', reason: 'Removed from pay period' }] } as unknown as PayPeriod;
   const restoredItem = { id: 91, employee_id: 30, employee_name: 'Avery Monroe', employment_type: 'hourly', pay_rate: 35, hours_worked: 0, overtime_hours: 0,
-    loan_deduction: 0, requested_loan_deduction: 150.0, gross_pay: 0, net_pay: 0, wage_rate_hours: [], import_source: 'mosa_revel' };
+    loan_deduction: 0, requested_loan_deduction: 150, gross_pay: 0, net_pay: 0, wage_rate_hours: [], import_source: 'mosa_revel' };
   apiMocks.employeesList.mockResolvedValue({ data: [employee], meta: { total_pages: 1 } });
   apiMocks.liabilities.mockResolvedValue({ payroll_liability_reconciliation: null });
   apiMocks.payrollFieldInputs.mockResolvedValue({ payroll_field_inputs: { fields: [], assignments: [] } });

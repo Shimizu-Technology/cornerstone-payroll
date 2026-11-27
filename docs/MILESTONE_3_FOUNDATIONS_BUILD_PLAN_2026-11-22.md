@@ -60,7 +60,7 @@ Every code claim below was verified against `origin/main` (`be960a50`) on Novemb
 - **Single-role `User` model:** `api/app/models/user.rb:38` has one enum (`admin`, `manager`, `employee`, `accountant`, `client`, `super_admin`, `org_admin`) and one home `company_id` (`api/db/schema.rb:4571`). `StaffRolePolicy` (`api/app/policies/staff_role_policy.rb:7-285`) gates `Api::V1::Admin::BaseController` (`api/app/controllers/api/v1/admin/base_controller.rb:22-28`), and `ClientPortalAccess` (`api/app/controllers/concerns/client_portal_access.rb:11-15`) gates `Api::V1::Client::BaseController` (`api/app/controllers/api/v1/client/base_controller.rb:11-12`).
 - **Gaps:**
   - The unused `employee: 2` role on `User` falls into `User#accessible_company_ids` (`user.rb:158`) and would return `[company_id] + assigned_ids` (whole-company scope), with no foreign key to `employees`.
-  - One person cannot cleanly hold both a `client` role (e.g., Emma at MoSa's) and an `employee` role under the one-login model decided on November 19.
+  - One person cannot cleanly hold both a `client` role (e.g., a client manager who is also on payroll) and an `employee` role under the one-login model decided on November 19.
   - `ApplicationController` (`api/app/controllers/application_controller.rb:65-85`) has a dev bypass that falls back to an admin user when `AUTH_ENABLED != "true"`. Any employee base controller must not inherit that fallback.
 
 ### 1.3 Database-level company separation (RLS)
@@ -92,7 +92,7 @@ Every code claim below was verified against `origin/main` (`be960a50`) on Novemb
 
 - **Overwritten in place across many writers:**
   - `employees.pay_rate` (`api/app/models/employee.rb:148-150,290-292`) and `employee_wage_rates` (`api/db/schema.rb:1166-1176`, `api/app/models/employee_wage_rate.rb:1-82`) have no `effective_on` or `ends_on`.
-  - **All verified write paths (13 files):**
+  - **All verified write paths (12 files):**
     1. `api/app/controllers/api/v1/admin/employees_controller.rb:62,102-126` (`create` and `update`),
     2. `api/app/controllers/api/v1/admin/employee_wage_rates_controller.rb:41-52`,
     3. `api/app/services/employee_wage_rate_sync_service.rb:26-46` (overwrites or destroys rows at line 33),
@@ -104,8 +104,7 @@ Every code claim below was verified against `origin/main` (`be960a50`) on Novemb
     9. `api/app/services/employee_bulk_import/import_service.rb:88`,
     10. `api/app/services/payroll_go_live_setup_transfer_service.rb:6,21-25`,
     11. `api/app/services/year_end/one_off_payee_resolver.rb:163`,
-    12. `api/lib/tasks/mosa_data_config.rake:93`,
-    13. `api/app/services/test_workspace/setup_cloner.rb:90` (clones setup into test workspaces).
+    12. `api/app/services/test_workspace/setup_cloner.rb:90` (clones setup into test workspaces).
 - **Existing effective-dated models to follow:** `employee_w4_elections` (`api/db/schema.rb:1138-1154`), `employee_work_profiles` (`api/db/schema.rb:1178-1204`, `effective_on`/`ends_on` with unique `WHERE ends_on IS NULL`), and `employee_retirement_elections` (`employee.rb:268-276`).
 - **All verified calculation, import, report, and default readers:**
   - Committed runs snapshot `payroll_items.pay_rate` and `payroll_items.wage_rate_hours`, and `HourlyPayrollCalculator` (`api/app/services/hourly_payroll_calculator.rb:63,108`), `SalaryPayrollCalculator` (`api/app/services/salary_payroll_calculator.rb:57,60`), and `IssueCorrectivePaycheckService` (`api/app/services/issue_corrective_paycheck_service.rb:646,916`) read the item snapshot.
@@ -562,7 +561,7 @@ flowchart LR
     - `api/app/services/employee_compensation_change_service.rb` (locks company → employee, rejects backdating over approved/committed pay periods unless explicit historical correction, closes prior `ends_on = effective_on - 1`, inserts new version, syncs cache columns when `effective_on <= Date.current`, records readable before/after `AuditLog`)
     - `api/app/jobs/sync_effective_compensation_job.rb` + `api/config/recurring.yml` (daily activation job syncing cache columns on `effective_on`)
     - `api/app/models/employee.rb` and `api/app/models/employee_wage_rate.rb` (write guard + `payroll_rate_on(date)` / `wage_rates_on(date)`)
-  - **All 13 write & creation paths routed through `EmployeeCompensationChangeService`:**
+  - **All 12 write & creation paths routed through `EmployeeCompensationChangeService`:**
     - `api/app/controllers/api/v1/admin/employees_controller.rb:62,102-126` (`create` and `update`),
     - `api/app/controllers/api/v1/admin/employee_wage_rates_controller.rb:41-52`,
     - `api/app/services/employee_wage_rate_sync_service.rb:26-46` (replace `destroy_all` at `line 33` with end-dating),
@@ -574,7 +573,6 @@ flowchart LR
     - `api/app/services/employee_bulk_import/import_service.rb:88`,
     - `api/app/services/payroll_go_live_setup_transfer_service.rb:6,21-25`,
     - `api/app/services/year_end/one_off_payee_resolver.rb:163`,
-    - `api/lib/tasks/mosa_data_config.rake:93`,
     - `api/app/services/test_workspace/setup_cloner.rb:90`.
   - **All 24 readers updated to resolve via `payroll_rate_on` / `wage_rates_on`:**
     - `api/app/controllers/api/v1/admin/pay_periods_controller.rb:425-428,1735-1758`,
