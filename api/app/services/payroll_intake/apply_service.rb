@@ -391,10 +391,12 @@ module PayrollIntake
 
     def record_reviewed_hours_baseline!(payroll_item, values)
       data = payroll_item.custom_columns_data.is_a?(Hash) ? payroll_item.custom_columns_data.deep_dup : {}
-      data["imported_hours"] = {
+      recorded_hours = {
         "regular_hours" => BigDecimal(values[:regular_hours].to_s).to_s("F"),
         "overtime_hours" => BigDecimal(values[:overtime_hours].to_s).to_s("F")
       }
+      data["imported_hours"] = recorded_hours
+      data["mosa_imported_hours"] = recorded_hours
       payroll_item.custom_columns_data = data
     end
 
