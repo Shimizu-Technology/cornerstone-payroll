@@ -618,10 +618,13 @@ export function parseActivation(data: unknown, pageOrigin: string): ActivationOu
 //   GET  /employee/delivery_consents
 //   POST /employee/delivery_consents                  (step-up; W-2GU also needs PDF access proof)
 //   POST /employee/delivery_consents/withdraw         (one tap, no step-up)
+//   POST /employee/delivery_consents/keep_paper       (one tap, no step-up; records the answer only)
 //   POST /employee/delivery_consents/w2gu_access_proof/pdf
 
 export type DeliveryConsentKind = 'pay_statements' | 'w2gu';
 export type DeliveryConsentStatus = 'not_consented' | 'consented' | 'withdrawn';
+/** The employee's answer to "Go paperless?": a withdrawal counts as keep paper. */
+export type DeliveryAnswer = 'paperless' | 'keep_paper' | 'not_answered';
 
 export interface DeliveryDisclosure {
   version: string;
@@ -645,6 +648,8 @@ export interface ActiveDeliveryConsent {
 export interface DeliveryConsentItem {
   kind: DeliveryConsentKind;
   status: DeliveryConsentStatus;
+  answer: DeliveryAnswer;
+  paperChosenAt: string | null;
   activeConsent: ActiveDeliveryConsent | null;
   lastWithdrawnAt: string | null;
   disclosure: DeliveryDisclosure | null;
@@ -708,9 +713,13 @@ export function parseDeliveryConsents(data: unknown): DeliveryConsentsState {
     const kind = oneOf(row?.kind, ['pay_statements', 'w2gu'] as const);
     if (!row || !kind) return [];
     const status = oneOf(row.status, ['not_consented', 'consented', 'withdrawn'] as const) ?? 'not_consented';
+    const answer = oneOf(row.answer, ['paperless', 'keep_paper', 'not_answered'] as const)
+      ?? (status === 'consented' ? 'paperless' : status === 'withdrawn' ? 'keep_paper' : 'not_answered');
     return [{
       kind,
       status,
+      answer,
+      paperChosenAt: text(row.paper_chosen_at),
       activeConsent: parseActiveConsent(row.active_consent),
       lastWithdrawnAt: text(row.last_withdrawn_at),
       disclosure: parseDisclosure(row.disclosure),

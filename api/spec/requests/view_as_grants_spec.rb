@@ -844,6 +844,7 @@ RSpec.describe "View-only support sessions", type: :request do
       [ :put, "/api/v1/employee/address_requests/1" ],
       [ :post, "/api/v1/employee/delivery_consents" ],
       [ :post, "/api/v1/employee/delivery_consents/withdraw" ],
+      [ :post, "/api/v1/employee/delivery_consents/keep_paper" ],
       [ :post, "/api/v1/employee/delivery_consents/w2gu_access_proof/pdf" ]
     ].each do |verb, path|
       public_send(verb, path, headers: emp_headers)

@@ -20,6 +20,8 @@ import {
 import { HelpTab } from './employee/help';
 import { MyInfoTab } from './employee/myinfo';
 import { HomeTab, PayTab } from './employee/pay';
+import { PaperlessStep } from './employee/paperless';
+import { PAPERLESS_PATH } from './employee/paperlessState';
 import { EmployerPicker } from './employee/picker';
 import { SignInScreen, WelcomeScreen } from './employee/screens';
 import { ActivateScreen, FinishSignUpScreen, LinkCheckScreen, SignedInInvite, SignInFirst, SignUpAccountScreen } from './employee/signup';
@@ -70,6 +72,7 @@ function SignedInApp({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElemen
 
 function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement {
   const { state, retry, chooseLink } = useEmployeeSession();
+  const location = useLocation();
   const signOutAsync = useSignOut();
   const signOut = (): void => { void signOutAsync(); };
 
@@ -96,8 +99,10 @@ function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactEl
     return <EmployeeShell viewAs={viewAs} showNav={false}>{content}</EmployeeShell>;
   }
 
+  // The one-time "Go paperless?" step is a single question: no tabs.
+  const onStep = (location.pathname.replace(/\/+$/, '') || '/') === PAPERLESS_PATH;
   return (
-    <EmployeeShell viewAs={viewAs}>
+    <EmployeeShell viewAs={viewAs} showNav={!onStep}>
       {state.status === 'loading' ? <LoadingState /> : (
         <Routes>
           <Route index element={<HomeTab />} />
@@ -107,6 +112,7 @@ function SignedInScreens({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactEl
           <Route path="taxes" element={<TaxesTab />} />
           <Route path="my-info" element={<MyInfoTab />} />
           <Route path="help" element={<HelpTab />} />
+          <Route path={PAPERLESS_PATH.slice(1)} element={<PaperlessStep />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}
@@ -151,8 +157,11 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
   if (path === '/sign-up/done') return <FinishSignUpScreen />;
   if (path === '/claim' || path === '/add-access') return <LinkCheckScreen mode="claim" />;
   if (path === '/reactivate') return <LinkCheckScreen mode="reactivate" />;
+  // After /claim or /reactivate, open the employer just added (chooseLink still
+  // checks it's one of this login's usable links).
+  const claimedLinkId = (location.state as { linkId?: unknown } | null)?.linkId;
   return (
-    <EmployeeSessionProvider viewOnly={Boolean(viewAs)}>
+    <EmployeeSessionProvider viewOnly={Boolean(viewAs)} initialLinkId={!viewAs && typeof claimedLinkId === 'string' ? claimedLinkId : null}>
       <SignedInApp viewAs={viewAs} />
     </EmployeeSessionProvider>
   );

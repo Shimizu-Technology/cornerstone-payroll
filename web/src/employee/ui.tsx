@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactElement, type ReactNode, type Ref } from 'react';
 import { Link } from 'react-router';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,7 @@ const variants: Record<Variant, string> = {
 interface EmpButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   block?: boolean;
+  ref?: Ref<HTMLButtonElement>;
 }
 
 export function EmpButton({ variant = 'primary', block, className, type = 'button', ...props }: EmpButtonProps): ReactElement {

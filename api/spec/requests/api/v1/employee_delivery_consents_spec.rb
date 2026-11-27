@@ -96,6 +96,10 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
 
       post "#{base}/w2gu_access_proof/pdf", headers: employee_headers, as: :json
       expect_not_found
+
+      post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      expect_not_found
+      expect(DeliveryPreference.count).to eq(0)
     end
 
     it "defaults delivery_consent to off on companies without an explicit opt-in" do
@@ -464,6 +468,110 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
     end
   end
 
+  describe "keep paper answer" do
+    def give_pay_consent!
+      disclosure = DeliveryDisclosure.current_for("pay_statements")
+      post base, params: {
+        kind: "pay_statements",
+        acknowledged: true,
+        disclosure_version: disclosure.version,
+        disclosure_digest: disclosure.digest
+      }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:created)
+    end
+
+    def pay_item
+      response.parsed_body.fetch("consents").find { |c| c["kind"] == "pay_statements" }
+    end
+
+    it "starts unanswered, records keep paper without step-up or a consent, audits it once and repeats without another record" do
+      get base, headers: employee_headers
+      expect(pay_item).to include("answer" => "not_answered", "paper_chosen_at" => nil)
+
+      travel_to(Time.zone.parse("2026-11-27 09:30:00")) do
+        # Stale verification is fine: keeping paper changes nothing about delivery.
+        post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers(fva: [ 25, 25 ]), as: :json
+      end
+      expect(response).to have_http_status(:ok)
+      expect(response.headers.fetch("Cache-Control")).to include("no-store")
+      expect(pay_item).to include("status" => "not_consented", "answer" => "keep_paper", "paper_continues" => true,
+        "paper_chosen_at" => "2026-11-27T09:30:00Z")
+      expect(response.parsed_body.fetch("consents").find { |c| c["kind"] == "w2gu" }["answer"]).to eq("not_answered")
+      expect(DeliveryConsent.count).to eq(0)
+
+      preference = DeliveryPreference.sole
+      expect(preference).to have_attributes(company_id: company.id, employee_id: employee.id, employee_account_link_id: link.id,
+        user_id: worker.id, kind: "pay_statements", choice: "keep_paper", user_agent: "TestPhone/1.0")
+      expect(preference.ip_address).to be_present
+      audit = AuditLog.find_by!(action: "employee_delivery_consents#keep_paper")
+      expect(audit).to have_attributes(record_type: "delivery_preferences", record_id: preference.id, company_id: company.id)
+      expect(audit.metadata).to include("kind" => "pay_statements", "choice" => "keep_paper", "employee_id" => employee.id)
+
+      post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(DeliveryPreference.count).to eq(1)
+      expect(AuditLog.where(action: "employee_delivery_consents#keep_paper").count).to eq(1)
+    end
+
+    it "lets a later consent outrank keep paper, and counts a withdrawal as keep paper" do
+      post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok)
+
+      give_pay_consent!
+      expect(pay_item).to include("answer" => "paperless", "paper_chosen_at" => nil)
+
+      post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["code"]).to eq("consent_active")
+      expect(DeliveryConsent.active.count).to eq(1)
+
+      DeliveryPreference.delete_all
+      post "#{base}/withdraw", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(pay_item).to include("status" => "withdrawn", "answer" => "keep_paper")
+      expect(pay_item["paper_chosen_at"]).to eq(pay_item["last_withdrawn_at"])
+    end
+
+    it "rejects unknown kinds" do
+      post "#{base}/keep_paper", params: { kind: "w2" }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["code"]).to eq("invalid_kind")
+      expect(DeliveryPreference.count).to eq(0)
+    end
+
+    it "records only the signed-in employee's own answer" do
+      colleague = create(:user, company: company, role: "portal_employee", clerk_id: "user_keep_paper_colleague")
+      colleague_employee = create(:employee, company: company)
+      colleague_link = link_to(colleague, colleague_employee)
+
+      # Another employee's link header is refused like any unknown link.
+      post "#{base}/keep_paper", params: { kind: "pay_statements" },
+        headers: employee_headers(colleague_link, subject: worker.clerk_id), as: :json
+      expect_not_found
+      expect(DeliveryPreference.count).to eq(0)
+
+      # Naming the colleague in the body changes nothing: the link decides whose answer it is.
+      post "#{base}/keep_paper", params: { kind: "pay_statements", employee_id: colleague_employee.id,
+        employee_account_link_id: colleague_link.id }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(DeliveryPreference.sole).to have_attributes(employee_id: employee.id, employee_account_link_id: link.id)
+
+      get base, headers: employee_headers(colleague_link)
+      expect(pay_item["answer"]).to eq("not_answered")
+    end
+
+    it "allows an eligible former link and refuses an expired one" do
+      link.update!(status: "former", former_access_until: 1.year.from_now)
+      post "#{base}/keep_paper", params: { kind: "w2gu" }, headers: employee_headers, as: :json
+      expect(response).to have_http_status(:ok)
+
+      link.update!(former_access_until: 1.day.ago)
+      post "#{base}/keep_paper", params: { kind: "pay_statements" }, headers: employee_headers, as: :json
+      expect_not_found
+      expect(DeliveryPreference.pluck(:kind)).to eq(%w[w2gu])
+    end
+  end
+
   describe "staff employee record view" do
     it "includes ordered delivery consent status on GET /api/v1/admin/employees/:id" do
       disclosure = DeliveryDisclosure.current_for("pay_statements")
@@ -492,7 +600,63 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
         "electronic_only_ready" => false,
         "paper_continues" => true
       )
-      expect(summary["items"].last).to include("kind" => "w2gu", "status" => "not_consented")
+      expect(summary["items"].last).to include("kind" => "w2gu", "status" => "not_consented", "answer" => "not_answered")
+      expect(pay_summary["answer"]).to eq("paperless")
+    end
+
+    it "shows each answer and counts the company's active employees by answer" do
+      disclosure = DeliveryDisclosure.current_for("pay_statements")
+      user_seq = 0
+      linked = lambda do
+        user_seq += 1
+        target = create(:employee, company: company)
+        user = create(:user, company: company, role: "portal_employee", clerk_id: "user_counts_#{user_seq}")
+        [ target, link_to(user, target) ]
+      end
+      consent_for = lambda do |target, target_link, withdrawn_at: nil|
+        DeliveryConsent.create!(
+          company: company, user: target_link.user, employee: target, employee_account_link: target_link,
+          delivery_disclosure: disclosure, kind: "pay_statements", disclosure_version: disclosure.version,
+          disclosure_digest: disclosure.digest, given_at: 2.hours.ago, withdrawn_at: withdrawn_at, method: "employee_portal_checkbox"
+        )
+      end
+      keep_paper_for = lambda do |target, target_link|
+        DeliveryPreference.create!(company: company, employee: target, employee_account_link: target_link,
+          user: target_link.user, kind: "pay_statements", recorded_at: 1.hour.ago)
+      end
+
+      consented, consented_link = linked.call
+      consent_for.call(consented, consented_link)
+      paper, paper_link = linked.call
+      keep_paper_for.call(paper, paper_link)
+      withdrawn, withdrawn_link = linked.call
+      consent_for.call(withdrawn, withdrawn_link, withdrawn_at: 1.hour.ago)
+      keep_paper_for.call(withdrawn, withdrawn_link)
+      create(:employee, company: company) # no app account yet: not answered
+      gone, gone_link = linked.call
+      keep_paper_for.call(gone, gone_link)
+      gone.update!(status: "terminated", termination_date: Date.new(2026, 11, 1))
+      create(:employee, company: create(:company)) # another company is never counted
+      create(:employee, :contractor, company: company) # counted for pay statements; 1099 contractors get no W-2GU
+
+      staff_headers = bearer(staff_user.clerk_id, fva: [ 0, 0 ], two_factor_enabled: true).merge("X-Company-Id" => company.id.to_s)
+      get "/api/v1/admin/employees/#{paper.id}", headers: staff_headers
+      expect(response).to have_http_status(:ok), response.body
+      summary = response.parsed_body.dig("data", "delivery_consents")
+      expect(summary["items"].first).to include("kind" => "pay_statements", "status" => "not_consented", "answer" => "keep_paper",
+        "paper_continues" => true)
+      expect(summary["items"].first["paper_chosen_at"]).to be_present
+      # Active employees: the shared example employee, consented, paper, withdrawn, the one without an
+      # account and the contractor, who isn't counted for W-2GU.
+      expect(summary["company_counts"]).to eq(
+        "pay_statements" => { "paperless" => 1, "keep_paper" => 2, "not_answered" => 3, "total" => 6 },
+        "w2gu" => { "paperless" => 0, "keep_paper" => 0, "not_answered" => 5, "total" => 5 }
+      )
+
+      get "/api/v1/admin/employees/#{consented.id}", headers: staff_headers
+      expect(response.parsed_body.dig("data", "delivery_consents", "items").first["answer"]).to eq("paperless")
+      get "/api/v1/admin/employees/#{employee.id}", headers: staff_headers
+      expect(response.parsed_body.dig("data", "delivery_consents", "items").first["answer"]).to eq("not_answered")
     end
 
     it "keeps delivery_consents in resolve_configuration_review_item and review_intake_exception responses" do
