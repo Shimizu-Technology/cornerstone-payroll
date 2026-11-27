@@ -741,5 +741,24 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
     ensure
       workbook_file&.close!
     end
+
+    it "rejects unknown or non-reviewed-hours source_type parameters with 422 on preview_import" do
+      company.update!(payroll_intake_source_types: %w[mosa_revel spike_email])
+      pdf_path = build_revel_pdf(
+        [ { name: "Example, Avery", regular_hours: 40, overtime_hours: 0, regular_pay: 600 } ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      )
+
+      %w[unknown_source spike_email].each do |invalid_source|
+        post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+             params: {
+               source_type: invalid_source,
+               pdf_file: Rack::Test::UploadedFile.new(pdf_path, "application/pdf", true, original_filename: "revel.pdf")
+             }
+        expect(response).to have_http_status(:unprocessable_entity), response.body
+        expect(response.parsed_body.fetch("error")).to include(invalid_source)
+      end
+    end
   end
 end

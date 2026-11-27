@@ -150,6 +150,11 @@ module PayrollIntake
         derived = @files.each_with_object({}) { |slot, acc| acc[slot.portal_role] = slot.role if slot.portal_role.present? }
         role_map = derived.freeze
       end
+      portal_roles_to_check = (role_map.keys + @files.filter_map(&:portal_role)).uniq
+      invalid_portal_roles = portal_roles_to_check.reject { |role| role.match?(/\A[a-z][a-z0-9_]{0,63}\z/) }
+      if invalid_portal_roles.any?
+        raise ArgumentError, "Payroll intake descriptor '#{@key}' has invalid portal roles: #{invalid_portal_roles.join(', ')}"
+      end
       @portal = {
         "submittable" => portal_hash.fetch("submittable", false) == true,
         "role_map" => role_map

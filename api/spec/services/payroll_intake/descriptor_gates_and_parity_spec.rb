@@ -391,6 +391,21 @@ RSpec.describe "Track C B4-B6 descriptor-driven gates, submission roles, and MoS
           ]
         )
       end.to raise_error(ArgumentError, /more than one supports_link/)
+
+      expect do
+        PayrollIntake::Descriptor.new(
+          key: "bad_portal_role",
+          label: "Bad Portal Role",
+          parser_version: "bad_portal_role:v1",
+          adapter_class: Object,
+          extraction: "deterministic",
+          idempotency: "files_and_workweek",
+          files: [
+            { role: "wb", label: "Workbook", accept: %w[.xlsx], portal_role: "payroll-workbook" }
+          ],
+          portal: { submittable: true }
+        )
+      end.to raise_error(ArgumentError, /invalid portal roles/)
     end
 
     it "records an imported_hours baseline when PayrollIntake::ApplyService applies a tracks_reviewed_hours adapter" do
