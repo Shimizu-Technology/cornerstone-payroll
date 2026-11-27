@@ -696,7 +696,7 @@ class PayStubGenerator
   end
 
   def earnings_ytd_breakdown
-    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item, sources: ytd_sources)
+    @earnings_ytd_breakdown ||= PayrollEarningsYtdBreakdown.new(payroll_item, sources: ytd_sources, employee_copy: @employee_copy)
   end
 
   def source_earning_labels
