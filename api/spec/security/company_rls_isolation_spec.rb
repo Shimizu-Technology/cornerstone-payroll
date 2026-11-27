@@ -897,7 +897,10 @@ RSpec.describe "Company RLS", :rls do
       raise "setup_step_three must run inside a transaction" unless connection.transaction_open?
 
       if connection.select_value("SELECT 1 FROM pg_roles WHERE rolname = 'payroll_app'").present?
-        skip "Skipping Step 3 RLS role test: shared PostgreSQL cluster already defines role payroll_app (never altered by specs)"
+        reason = "shared PostgreSQL cluster already defines role payroll_app (never altered by specs)"
+        raise "Step 3 RLS role test cannot run in CI: #{reason}" if ENV["CI"].present?
+
+        skip "Skipping Step 3 RLS role test: #{reason}"
       end
 
       connection.execute("CREATE ROLE payroll_app NOSUPERUSER #{bypass ? 'BYPASSRLS' : 'NOBYPASSRLS'}")

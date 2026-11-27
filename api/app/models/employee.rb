@@ -231,10 +231,11 @@ class Employee < ApplicationRecord
     resolved_w4_on = w4_on.to_date
     today = PayrollBusinessClock.today
     max_hire_year = today.year + 1
-    whitespace = %q(E' \t\n\x0B\f\r')
+    # Matches the exact 25 Unicode White_Space codepoints treated as blank by Ruby's String#blank?
+    whitespace = %q(E' \t\n\u000B\f\r\u0085\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000')
 
     new_client_hire_sql = <<~SQL.squish
-      employees.readiness_gate_enforced = TRUE
+      employees.readiness_gate_enforced IS TRUE
       AND NOT EXISTS (
         SELECT 1
         FROM employee_status_events ese
@@ -315,7 +316,7 @@ class Employee < ApplicationRecord
       COALESCE(BTRIM(employees.first_name, #{whitespace}), '') = ''
       OR COALESCE(BTRIM(employees.last_name, #{whitespace}), '') = ''
       OR (
-        employees.employment_type = 'contractor'
+        COALESCE(employees.employment_type, '') = 'contractor'
         AND COALESCE(employees.contractor_type, '') = 'business'
         AND COALESCE(BTRIM(employees.business_name, #{whitespace}), '') = ''
       )
@@ -399,7 +400,7 @@ class Employee < ApplicationRecord
           OR COALESCE(effective_comp.employment_type, '') NOT IN ('hourly', 'salary', 'contractor')
       )
       OR (
-        employees.employment_type = 'contractor'
+        COALESCE(employees.employment_type, '') = 'contractor'
         AND employees.w9_on_file IS NOT TRUE
       )
       OR (
@@ -434,9 +435,10 @@ class Employee < ApplicationRecord
     binds = { rates_on: resolved_rates_on, w4_on: resolved_w4_on, today: today, max_hire_year: max_hire_year }
 
     # Active Record Encryption prevents PostgreSQL from inspecting decrypted SSN/EIN digits.
-    # Verify encrypted tax IDs in Ruby for any employee in the current relation that passed the SQL checks
-    # so this scope never calls an employee "ready" when EmployeeReadinessEvaluator says "incomplete".
-    invalid_tax_id_ids = where("NOT ((#{sql_predicate}) IS TRUE)", **binds)
+    # Verify encrypted tax IDs in Ruby for any employee in the current relation that explicitly
+    # passed the SQL checks (sql_predicate IS FALSE) so this scope never calls an employee "ready"
+    # when EmployeeReadinessEvaluator says "incomplete" or when the SQL predicate evaluates to NULL.
+    invalid_tax_id_ids = where("(#{sql_predicate}) IS FALSE", **binds)
       .except(:select, :order, :limit, :offset, :includes, :preload, :eager_load)
       .select("employees.id", "employees.employment_type", "employees.contractor_type", "employees.ssn_encrypted", "employees.contractor_ein")
       .distinct
@@ -445,9 +447,9 @@ class Employee < ApplicationRecord
       end
 
     if invalid_tax_id_ids.any?
-      where("(#{sql_predicate}) OR employees.id IN (:invalid_tax_id_ids)", **binds, invalid_tax_id_ids: invalid_tax_id_ids)
+      where("((#{sql_predicate}) IS NOT FALSE) OR employees.id IN (:invalid_tax_id_ids)", **binds, invalid_tax_id_ids: invalid_tax_id_ids)
     else
-      where(sql_predicate, **binds)
+      where("((#{sql_predicate}) IS NOT FALSE)", **binds)
     end
   }
 

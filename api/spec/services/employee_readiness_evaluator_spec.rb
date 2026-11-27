@@ -539,6 +539,12 @@ RSpec.describe EmployeeReadinessEvaluator do
         effective_date: Date.new(2026, 11, 5), source: "client_portal"
       )
 
+      nbsp_first_name = create_ready_w2_hourly
+      nbsp_first_name.update_columns(first_name: "\u00A0")
+
+      ideographic_space_city = create_ready_w2_hourly
+      ideographic_space_city.update_columns(city: "\u3000")
+
       population = [
         ready_w2, ready_multirate, future_rate_w2, future_wage_rate_w2,
         ready_variable_salary, zero_fixed_salary, future_w4, default_w4_only,
@@ -548,7 +554,7 @@ RSpec.describe EmployeeReadinessEvaluator do
         contractor_business_ready, short_ssn_w2, short_ein_business,
         short_tin_individual, short_ssn_valid_ein_individual,
         null_pay_frequency_comp, null_salary_type_comp, null_contractor_pay_type_comp,
-        deactivated_reactivated_new_hire
+        deactivated_reactivated_new_hire, nbsp_first_name, ideographic_space_city
       ].map(&:reload)
 
       must_be_incomplete_ids = [
@@ -558,7 +564,9 @@ RSpec.describe EmployeeReadinessEvaluator do
         null_pay_frequency_comp.id,
         null_salary_type_comp.id,
         null_contractor_pay_type_comp.id,
-        deactivated_reactivated_new_hire.id
+        deactivated_reactivated_new_hire.id,
+        nbsp_first_name.id,
+        ideographic_space_city.id
       ]
 
       [
