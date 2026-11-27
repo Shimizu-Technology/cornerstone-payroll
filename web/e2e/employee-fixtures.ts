@@ -96,6 +96,19 @@ export const helpContacts = [
   { name: 'Joe Santos', role: 'Shift lead', phone: '(671) 555-0111', email: null, text_ok: false },
 ];
 
+export const job = {
+  employer_name: 'Coral Kitchen',
+  department: 'Front of House',
+  role: 'Server',
+  employee_id: '1042',
+  worker_type: 'w2',
+  pay_frequency: 'biweekly',
+  pay: { type: 'hourly', rates: [{ label: 'Server', rate: '15.00' }, { label: 'Banquet server', rate: '17.25' }] },
+  start_date: '2024-03-04',
+  payment_method: 'direct_deposit',
+  contact_name: 'Rina Calvo',
+};
+
 export const PDF_BYTES = '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n';
 
 export const REVERIFY = { clerk_error: { type: 'forbidden', reason: 'reverification-error', metadata: { reverification: { level: 'first_factor', afterMinutes: 10 } } } };
@@ -107,6 +120,8 @@ export interface EmployeeMock {
   statements?: (year: string | null) => unknown[];
   profile?: Record<string, unknown>;
   helpContacts?: unknown[];
+  /** GET /employee/job's `job`: null for a former job. */
+  job?: Record<string, unknown> | null;
   taxForms?: unknown[];
   activation?: (body: Record<string, unknown>) => { status: number; body?: unknown };
   claim?: (body: Record<string, unknown>) => { status: number; body?: unknown };
@@ -162,6 +177,7 @@ export async function mockEmployeeApi(page: Page, mock: EmployeeMock = {}): Prom
     }
     if (path === '/employee/tax_forms') return json(route, { tax_forms: mock.taxForms ?? [{ id: 12, tax_year: 2025, kind: 'w2gu', status: 'posted', corrected: false }] });
     if (path === '/employee/help') return json(route, { help_contacts: mock.helpContacts ?? helpContacts });
+    if (path === '/employee/job') return json(route, { job: mock.job === undefined ? (mock.context?.status === 'former' ? null : job) : mock.job });
     if (path === '/employee/profile') return json(route, log.profile);
     if (path === '/employee/profile/phone') {
       log.profile = { ...log.profile, phone: body.phone, phone_confirmed: true };

@@ -11,6 +11,7 @@ import { askManager } from './brand';
 import type { Address, AddressRequest, EmergencyContact, EmployeeProfile } from './contracts';
 import { useBrand, useEmployeeAuth, useReadySession } from './contexts';
 import { DeliveryConsentSection } from './consent';
+import { MyJobCard } from './job';
 import { formatPhone } from '@/lib/display-phone';
 import { addressLines, longDate } from './format';
 import { useSignOut } from './hooks';
@@ -612,7 +613,8 @@ function ProfileCards(): ReactElement {
       <AddressCard {...props('address')} />
       <EmergencyCard {...props('emergency')} />
       <LegalCard profile={state.data} />
-      <PaymentCard profile={state.data} />
+      {/* My job says how they're paid while the job is current. */}
+      {isFormer && <PaymentCard profile={state.data} />}
     </>
   );
 }
@@ -622,6 +624,7 @@ export function MyInfoTab(): ReactElement {
   return (
     <Page title="My info">
       <div className="emp-cards-grid">
+        <MyJobCard />
         {state.info.features.profileRequests ? <ProfileCards /> : (
           <Card>
             <Placeholder icon={UserRound} title="Your contact details will show here">
