@@ -116,6 +116,8 @@ RSpec.describe "Client viewer access", type: :request do
       /api/v1/client/support_access_logs
       /api/v1/client/employee_intake_settings
       /api/v1/client/employee_app_rollout/#{company.id}
+      /api/v1/client/employee_app_status/#{company.id}
+      /api/v1/client/employee_app_status/#{company.id}/csv
       /api/v1/client/employees/#{employee.id}/employee_app
       /api/v1/client/pay_stubs/employee/#{employee.id}
     ]

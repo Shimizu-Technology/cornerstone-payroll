@@ -49,7 +49,7 @@ import { CompanySwitcher } from './CompanySwitcher';
 import { OrganizationSwitcher } from './OrganizationSwitcher';
 import { roleLabel } from '@/lib/role-labels';
 import { platformShortcut } from '@/lib/keyboard-shortcuts';
-import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppSwitchPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
+import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppStatusPath, employeeAppSwitchPath, employeeContactDetailsPath, employeesPath, payrollGoLivePath, payRunsPath } from '@/lib/routes';
 
 interface NavItem {
   name: string;
@@ -71,6 +71,7 @@ const clientNavigation: NavItem[] = [
   { name: 'Client Inbox', href: '/app/client-inbox', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app', href: '/employee-app/rollout', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app status', href: '/employee-app/status', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Contact Details', href: '/contact-details', icon: <Mail className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay Periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
@@ -86,6 +87,7 @@ const portalNavigation: NavItem[] = [
   { name: 'Messages', href: '/messages', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employees', href: '/employees', icon: <Users className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Employee app', href: '/employee-app/rollout', icon: <Smartphone className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'Employee app status', href: '/employee-app/status', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Contact details', href: '/contact-details', icon: <Mail className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Departments', href: '/departments', icon: <Building className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Pay periods', href: '/pay-periods', icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" /> },
@@ -302,8 +304,9 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
     if (item.href === '/contact-details') return { ...item, href: employeeContactDetailsPath(activeCompanyId) };
     if (item.href === '/pay-periods') return { ...item, href: payRunsPath(activeCompanyId) };
     if (item.href === '/employee-app/rollout') return { ...item, href: employeeAppRolloutPath(activeCompanyId) };
+    if (item.href === '/employee-app/status') return { ...item, href: employeeAppStatusPath(activeCompanyId) };
     return item;
-  }).filter((item) => item.href !== '/employee-app/rollout');
+  }).filter((item) => item.href !== '/employee-app/rollout' && item.href !== '/employee-app/status');
   const visibleToolsNavigation = toolsNavigation.filter((item) => {
     if (item.href === '/historical-payroll' || item.href === '/payroll-go-live') return historicalPayrollEnabled;
     if (item.href === '/tools/finance' || item.href === '/tools/invoices' || item.href === '/tools/expenses') return isAdmin;

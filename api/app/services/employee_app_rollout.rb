@@ -39,10 +39,16 @@ class EmployeeAppRollout
     status
   end
 
+  # Each employee's latest access, keyed by employee id. DISTINCT ON returns
+  # one row per employee, even across rehires and resends.
+  def latest_accesses(scope = nil)
+    links = latest_access_scope.select("DISTINCT ON (employee_id) employee_account_links.*")
+    links = links.where(employee_id: scope) if scope
+    links.reorder(:employee_id, id: :desc).index_by(&:employee_id)
+  end
+
   def summary(actor:)
-    # DISTINCT ON returns one row per employee, even across rehires and resends.
-    latest = latest_access_scope.select("DISTINCT ON (employee_id) employee_account_links.*")
-      .reorder(:employee_id, id: :desc).index_by(&:employee_id)
+    latest = latest_accesses
     contact_context = EmployeeContactValidator.contact_details_context(company: @company)
     login_emails = matching_login_emails(contact_context.fetch(:company_email_counts).keys)
     candidate_rows = []
@@ -93,6 +99,8 @@ class EmployeeAppRollout
     EmployeeAccountLink.where(company: @company).includes(:invited_by).order(id: :desc)
   end
 
+  public
+
   def status_of(access)
     return :not_invited unless access
     # Activation locks are only written while a link is still invited and are
@@ -101,6 +109,8 @@ class EmployeeAppRollout
 
     access.status.to_sym
   end
+
+  private
 
   def recent_lock_alert
     AuditLog.where(company: @company, action: "employee_links#activation_lock_alert")

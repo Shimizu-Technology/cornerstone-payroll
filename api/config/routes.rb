@@ -103,6 +103,9 @@ Rails.application.routes.draw do
         resource :employee_intake_settings, only: :show
         resource :intake_profile, only: :show, controller: :intake_profiles
         get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
+        get "employee_app_status/:company_id", to: "employee_app_statuses#show"
+        get "employee_app_status/:company_id/csv", to: "employee_app_statuses#csv"
+        get "employee_app_status/:company_id/xlsx", to: "employee_app_statuses#xlsx"
         post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
         get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
         post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",
@@ -394,6 +397,9 @@ Rails.application.routes.draw do
         end
         resource :portal_notification_recipients, only: [ :show, :update ]
         get "employee_app_rollout/:company_id", to: "employee_app_rollouts#show"
+        get "employee_app_status/:company_id", to: "employee_app_statuses#show"
+        get "employee_app_status/:company_id/csv", to: "employee_app_statuses#csv"
+        get "employee_app_status/:company_id/xlsx", to: "employee_app_statuses#xlsx"
         post "employee_app_rollout/:company_id/invite", to: "employee_app_rollouts#bulk_invite"
         get "employees/:employee_id/employee_app", to: "employee_app_rollouts#employee"
         post "employees/:employee_id/employee_app/:operation", to: "employee_app_rollouts#change",

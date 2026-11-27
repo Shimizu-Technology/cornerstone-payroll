@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { employeeAppRolloutPath, employeeEditPath } from '@/lib/routes';
+import { employeeAppRolloutPath, employeeAppStatusPath, employeeEditPath } from '@/lib/routes';
 import { ApiError } from '@/services/api';
 import {
   employeeAppOff, employeeAppRolloutApi, formatEmployeeAppDate, inviteEmailMessages,
   type EmployeeAppAccess, type EmployeeAppOperation, type EmployeeAppStatus, type InviteDelivery, type PrintedInvite,
 } from '@/services/employee-app-rollout-api';
+import { AgreementFacts } from './AppStatusFacts';
 import { InviteDeliveryField } from './InviteDeliveryField';
 import { PrintedInvites } from './PrintedInvites';
 import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
@@ -74,7 +75,10 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience,
     <Card>
       <CardHeader className="flex flex-wrap items-center justify-between gap-2 space-y-0">
         <CardTitle>Employee app</CardTitle>
-        <Link className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline" to={employeeAppRolloutPath(companyId)}>Company rollout</Link>
+        <div className="flex flex-wrap gap-x-4">
+          <Link className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline" to={employeeAppStatusPath(companyId)}>Company report</Link>
+          <Link className="inline-flex min-h-11 items-center text-sm font-semibold text-primary-800 underline" to={employeeAppRolloutPath(companyId)}>Company rollout</Link>
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {accessReadFailed && (
@@ -108,6 +112,7 @@ export function EmployeeAppPanel({ companyId, companyName, employeeId, audience,
             {access.reset_pending && <p className="text-sm font-medium text-amber-800">
               Sign-up reset is waiting to finish. {actions.includes('reset_sign_up') ? 'Choose Reset sign-up to finish it.' : access.enabled && !access.staff_actions ? 'Ask Cornerstone to finish the reset.' : null}
             </p>}
+            {access.agreements && <AgreementFacts agreements={access.agreements} />}
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="[overflow-wrap:anywhere]">{access.email || 'No email on file'}</span>
               {!viewOnly && canEditContact && (onEditContact
