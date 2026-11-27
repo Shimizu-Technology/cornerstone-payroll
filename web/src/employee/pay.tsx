@@ -18,6 +18,7 @@ import {
 } from './format';
 import { today } from './config';
 import { Amount, HideAmountsToggle } from './HideAmounts';
+import { JobLine } from './job';
 import { Card, Chip, EmpButton, EmpButtonLink, LoadProblem, Page, Placeholder, SkeletonRows } from './ui';
 import { isSessionError, useEmployeeData, type DataState } from './useEmployeeData';
 import { useMediaQuery } from './useMediaQuery';
@@ -301,6 +302,7 @@ export function HomeTab(): ReactElement {
   const stubsOn = session.info.features.stubs;
   return (
     <Page title={name ? `Hi, ${name}` : 'Welcome'}>
+      <JobLine />
       <FormerNotice />
       <NextPayday />
       {stubsOn ? <HomeWithPay /> : (

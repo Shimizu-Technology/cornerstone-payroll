@@ -396,6 +396,75 @@ export function parseTaxForms(data: unknown): TaxForm[] {
   });
 }
 
+// ---------- GET /employee/job ----------
+// Served (JobController, EmployeeProfiles::Job): { job: { employer_name,
+// department, role, employee_id, worker_type: "w2" | "1099", pay_frequency,
+// pay: { type: "hourly", rates: [{ label, rate }] } | { type: "salary",
+// per_period, annual } | { type: "flat_fee", per_period }, start_date,
+// payment_method, contact_name } | null }. Null for a former job. Pay is as
+// of today; no SSN or bank numbers.
+
+export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
+
+export interface JobRate {
+  /** The job's name on the wage rate ("Server"), or null for a single profile rate. */
+  label: string | null;
+  rate: Money;
+}
+
+export type JobPay =
+  | { type: 'hourly'; rates: JobRate[] }
+  /** Both null for a salary set each pay period. */
+  | { type: 'salary'; perPeriod: Money | null; annual: Money | null }
+  | { type: 'flat_fee'; perPeriod: Money | null };
+
+export interface EmployeeJob {
+  employerName: string | null;
+  department: string | null;
+  role: string | null;
+  /** The number printed as "Employee ID" on pay stubs. */
+  employeeId: string | null;
+  workerType: 'w2' | '1099';
+  payFrequency: PayFrequency | null;
+  pay: JobPay | null;
+  startDate: string | null;
+  paymentMethod: 'direct_deposit' | 'paper_check' | null;
+  /** The first Help contact's name, for "Something wrong? Contact ...". */
+  contactName: string | null;
+}
+
+function jobPay(value: unknown): JobPay | null {
+  const pay = record(value);
+  if (pay?.type === 'hourly') {
+    const rates = list(pay, 'rates').flatMap((item) => {
+      const row = record(item);
+      const rate = money(row?.rate);
+      return rate ? [{ label: text(row?.label), rate }] : [];
+    });
+    return rates.length > 0 ? { type: 'hourly', rates } : null;
+  }
+  if (pay?.type === 'salary') return { type: 'salary', perPeriod: money(pay.per_period), annual: money(pay.annual) };
+  if (pay?.type === 'flat_fee') return { type: 'flat_fee', perPeriod: money(pay.per_period) };
+  return null;
+}
+
+export function parseJob(data: unknown): EmployeeJob | null {
+  const job = record(record(data)?.job);
+  if (!job) return null;
+  return {
+    employerName: text(job.employer_name),
+    department: text(job.department),
+    role: text(job.role),
+    employeeId: text(job.employee_id),
+    workerType: job.worker_type === '1099' ? '1099' : 'w2',
+    payFrequency: oneOf(job.pay_frequency, ['weekly', 'biweekly', 'semimonthly', 'monthly'] as const),
+    pay: jobPay(job.pay),
+    startDate: isoDate(job.start_date),
+    paymentMethod: oneOf(job.payment_method, ['direct_deposit', 'paper_check'] as const),
+    contactName: text(job.contact_name),
+  };
+}
+
 // ---------- GET /employee/help ----------
 // Served (HelpController, M4-4c): { help_contacts: [{ name, role, phone, email, text_ok }] },
 // each CompanyHelpContact#as_help_json (M4-9a), in the order the client set.

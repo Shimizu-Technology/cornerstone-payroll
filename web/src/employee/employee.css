@@ -1351,6 +1351,57 @@ select.emp-input {
   overflow-wrap: anywhere;
 }
 
+/* My job: one label and value per row; label beside the value once there's room. */
+.emp-job {
+  display: grid;
+  margin: 0;
+}
+
+.emp-job > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-block: 10px;
+}
+
+.emp-job > div:first-child { padding-top: 0; }
+.emp-job > div + div { border-top: 1px solid #eef2f6; }
+
+.emp-job dd {
+  margin: 0;
+  min-width: 0;
+}
+
+@media (min-width: 600px) {
+  .emp-job > div {
+    grid-template-columns: minmax(0, 9.5rem) minmax(0, 1fr);
+    gap: 16px;
+    align-items: baseline;
+  }
+}
+
+.emp-job-rates {
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 0;
+}
+
+.emp-job-rates li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Server · Front of House" under the Home greeting. */
+.emp-job-line {
+  margin-top: -10px;
+  color: #475569;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .emp-compare-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

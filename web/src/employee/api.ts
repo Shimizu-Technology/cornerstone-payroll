@@ -8,10 +8,10 @@
 // Response shapes live in contracts.ts.
 import { SUPPORT_HEADER } from '@/support/grant';
 import {
-  accessDay, addressBody, identityBody, isoDate, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts,
+  accessDay, addressBody, identityBody, isoDate, parseActivation, parseContext, parseDeliveryConsents, parseHelpContacts, parseJob,
   parseProfile, parseStatementDetail, parseStatementPage, parseTaxForms, parseW2GuAccessProof, verificationIdFrom,
   type ActivationOutcome, type Address, type DeliveryConsentKind, type DeliveryConsentsState, type EmployeeContextInfo,
-  type EmployeeProfile, type HelpContact, type IdentityCheck, type StatementDetail, type StatementPage, type TaxForm,
+  type EmployeeJob, type EmployeeProfile, type HelpContact, type IdentityCheck, type StatementDetail, type StatementPage, type TaxForm,
   type W2GuAccessProofChallenge,
 } from './contracts';
 
@@ -337,6 +337,15 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
     },
     async helpContacts(linkId: string, signal?: AbortSignal): Promise<HelpContact[]> {
       return parseHelpContacts(await request<unknown>('/employee/help', { linkId, signal }));
+    },
+    /** "My job", or null for a former job. A 404 here (an API without the route yet) shows nothing, not "access ended". */
+    async job(linkId: string, signal?: AbortSignal): Promise<EmployeeJob | null> {
+      try {
+        return parseJob(await request<unknown>('/employee/job', { linkId, signal }));
+      } catch (error) {
+        if (error instanceof EmployeeApiError && error.kind === 'resource_not_found') return null;
+        throw error;
+      }
     },
     async profile(linkId: string, signal?: AbortSignal): Promise<EmployeeProfile> {
       return parseProfile(await request<unknown>('/employee/profile', { linkId, signal }));
