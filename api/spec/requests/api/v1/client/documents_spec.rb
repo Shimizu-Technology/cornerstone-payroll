@@ -244,7 +244,7 @@ RSpec.describe "Api::V1::Client::Documents", type: :request do
 
     it "uploads multiple mixed file types in one request" do
       csv = Tempfile.new([ "client-portal-upload", ".csv" ])
-      csv.write("employee,hours\nAva Cruz,40\n")
+      csv.write("employee,hours\nAvery Sample,40\n")
       csv.rewind
       csv_upload = Rack::Test::UploadedFile.new(csv.path, "text/csv", original_filename: "hours.csv")
 

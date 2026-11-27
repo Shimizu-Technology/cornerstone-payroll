@@ -142,7 +142,7 @@ it('shows add-back feedback only on the selected employee while all other writes
 it('shows a saved add-back in the worker row, announces a fresh one, and keeps the live region mounted', async () => {
   const excluded = { ...period, expected_entries: { ...period.expected_entries!, fields: [{ ...period.expected_entries!.fields[0], status: 'excluded' as const }], missing_regulars: [] } };
   const result = { employee_id: 7, employee_name: 'Avery Monroe', import_id: 3,
-    restored: [{ key: 'loan', kind: 'loan' as const, label: 'Loan', amount: '159.1' }],
+    restored: [{ key: 'loan', kind: 'loan' as const, label: 'Loan', amount: '150.0' }],
     not_restored: [{ key: 'tips', kind: 'tips' as const, label: 'Tips', amount: '20.0', enter_by_hand: true, reason: 'The import was replaced by newer files. Enter them under Hours → Tips & Deductions.' }] };
   const props = { onUnapprove: vi.fn(), disabled: false, onRestore: vi.fn().mockResolvedValue(result), onCalculate: vi.fn(), onSaved: vi.fn(), onEnterPay: vi.fn() };
   const view = render(<ExpectedEntriesPanel {...props} payPeriod={excluded} />);
@@ -156,23 +156,23 @@ it('shows a saved add-back in the worker row, announces a fresh one, and keeps t
     added_back: [{ ...result, hours_entered: false }] } };
   view.rerender(<ExpectedEntriesPanel {...props} payPeriod={reloaded} addBackNotice={{ source: 'expected_entries', result, hoursEntered: false }} />);
   expect(screen.getByTestId('add-back-announcement')).toBe(live);
-  expect(live.textContent).toBe("Avery Monroe is back. Restored from the import: Loan $159.10. Hours aren't brought back. Enter hours, then calculate.");
+  expect(live.textContent).toBe("Avery Monroe is back. Restored from the import: Loan $150.00. Hours aren't brought back. Enter hours, then calculate.");
   const row = screen.getByLabelText('Hours: Manual hours').closest('div.border-t');
-  expect(row?.textContent).toContain('Restored from the import: Loan $159.10.');
+  expect(row?.textContent).toContain('Restored from the import: Loan $150.00.');
   expect(row?.textContent).toContain('Tips $20.00: The import was replaced by newer files. Enter them under Hours → Tips & Deductions.');
   // Hours saved; the tips still need entering, so the notice stays with the new next step.
   view.rerender(<ExpectedEntriesPanel {...props} payPeriod={{ ...reloaded, expected_entries: { ...reloaded.expected_entries, fields: [{ ...reloaded.expected_entries.fields[0], status: 'filled' as const, value: '40' }],
     added_back: [{ ...result, hours_entered: true }] } }} />);
-  expect(screen.getByText('Avery Monroe is back. Restored from the import: Loan $159.10. Hours are entered.')).toBeTruthy();
+  expect(screen.getByText('Avery Monroe is back. Restored from the import: Loan $150.00. Hours are entered.')).toBeTruthy();
 });
 
 it('shows the add-back result when the reload after it failed', () => {
   const excluded = { ...period, expected_entries: { ...period.expected_entries!, fields: [{ ...period.expected_entries!.fields[0], status: 'excluded' as const }], missing_regulars: [] } };
   const result = { employee_id: 7, employee_name: 'Avery Monroe', restored: [],
-    not_restored: [{ key: 'loan', kind: 'loan' as const, label: 'Loan', amount: '159.1', enter_by_hand: true, reason: 'The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.' }] };
+    not_restored: [{ key: 'loan', kind: 'loan' as const, label: 'Loan', amount: '150.0', enter_by_hand: true, reason: 'The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.' }] };
   render(<ExpectedEntriesPanel onUnapprove={vi.fn()} payPeriod={excluded} disabled={false} onRestore={vi.fn()} onCalculate={vi.fn()} onSaved={vi.fn()} onEnterPay={vi.fn()}
     addBackNotice={{ source: 'expected_entries', result, hoursEntered: false }} />);
-  expect(screen.getByRole('listitem').textContent).toBe('Loan $159.10: The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.');
+  expect(screen.getByRole('listitem').textContent).toBe('Loan $150.00: The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions.');
 });
 
 it('offers an honest no-hours answer for a usually-paid worker added back with import amounts', async () => {

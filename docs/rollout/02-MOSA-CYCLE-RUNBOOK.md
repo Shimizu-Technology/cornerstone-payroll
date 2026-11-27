@@ -32,7 +32,7 @@ Never use an email subject, attachment filename, employee name, or an old MoSa c
 2. If MoSa needs a workbook, choose **Download workbook**. Send that generated workbook for this pay period; do not reuse an old blank workbook.
 3. MoSa continues to provide the Revel PDF. The PDF supplies regular and overtime hours. Cornerstone ignores Revel pay rates and pay amounts.
 4. Use the generated workbook only for changes that Revel does not contain:
-   - Mo and Sara's separate period-pay amounts;
+   - each owner's separate period-pay amount;
    - tips and whether each employee already received those tips;
    - one-time earnings or deductions;
    - approved hour corrections;
@@ -50,7 +50,7 @@ Never use an email subject, attachment filename, employee name, or an old MoSa c
    - **Move to a future payroll**, with a reason and named future period; or
    - **Informational only**, with a reason.
 4. Resolve every unmatched or duplicate employee. A suggested name match must be checked against the person, not accepted from spelling similarity alone.
-5. Confirm that Mo and Sara each have a separate period-pay amount. A combined owner amount is not acceptable.
+5. Confirm that each variable-salary owner has a separate period-pay amount. A combined owner amount is not acceptable.
 6. Review hours, overtime, payroll rate source, tips, loan deductions, one-time items, and warnings for every included row.
 7. Apply the package only when the interface reports no unresolved rows or blocking errors.
 

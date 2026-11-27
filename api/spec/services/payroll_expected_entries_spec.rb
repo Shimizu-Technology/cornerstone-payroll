@@ -174,7 +174,7 @@ RSpec.describe PayrollExpectedEntries do
 
     it "keeps a worker added back with import amounts missing until hours are entered" do
       item = create(:payroll_item, pay_period: period, employee: employee, employment_type: "hourly", gross_pay: 50, hours_worked: 0,
-        reported_tips: 50, loan_deduction: 159.10, custom_columns_data: { "import_add_back" => { "import_id" => 1 } })
+        reported_tips: 50, loan_deduction: 150.00, custom_columns_data: { "import_add_back" => { "import_id" => 1 } })
       expect(data[:missing_regulars].sole).to include(employee_id: employee.id, resolved: false, awaiting_hours: true)
       expect(data[:outstanding]).to eq([ employee.full_name ])
       item.update!(hours_worked: 40)

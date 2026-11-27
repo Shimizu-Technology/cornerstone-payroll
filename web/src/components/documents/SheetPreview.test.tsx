@@ -15,7 +15,7 @@ const workbook: SheetPreviewData = {
   sheets: [
     { name: 'TIPS', columns: 2, truncated_rows: false, truncated_columns: false, rows: [
       { number: 1, cells: ['Employee', 'Tips'] },
-      { number: 3, cells: ['Ava Cruz', '$1,234.50'] },
+      { number: 3, cells: ['Avery Sample', '$1,234.50'] },
     ] },
     { name: 'LOANS', columns: 1, truncated_rows: true, truncated_columns: true, rows: [{ number: 1, cells: ['Loan'] }] },
   ],

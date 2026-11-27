@@ -9,8 +9,8 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
   let(:period) { create(:pay_period, :committed, company: company, start_date: Date.new(2026, 10, 19), end_date: Date.new(2026, 11, 1), pay_date: Date.new(2026, 11, 5)) }
   let(:actor) { create(:user, company: company, role: "admin") }
   let!(:items) do
-    [ [ "Roth Rate", 960, 28.80, 0, 0 ], [ "Roth Catchup", 2000, 1216.35, 0, 0 ],
-      [ "Field Retirement", 2000, 0, 927.91, 0 ], [ "Reimbursement", 2000, 0, 0, 20 ], [ "Ordinary", 2000, 0, 0, 0 ] ].map do |name, gross, roth, field, other|
+    [ [ "Roth Rate", 1000, 30.00, 0, 0 ], [ "Roth Catchup", 2000, 600.00, 0, 0 ],
+      [ "Field Retirement", 2000, 0, 500.00, 0 ], [ "Reimbursement", 2000, 0, 0, 20 ], [ "Ordinary", 2000, 0, 0, 0 ] ].map do |name, gross, roth, field, other|
       employee = create(:employee, company: company, first_name: name, last_name: "Employee", roth_retirement_rate: name == "Roth Rate" ? 0.03 : 0)
       ss = (gross.to_d * 0.062).round(2)
       medicare = (gross.to_d * 0.0145).round(2)
@@ -72,9 +72,9 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
       expect(row[:retirement_payment].to_d).to eq(item.retirement_payment)
       assert_reconciles(gross: row[:gross_pay], other: row[:non_taxable_additions_total], deductions: row[:total_deductions], net: row[:net_pay])
     end
-    expect(report[:summary][:total_traditional_retirement].to_d).to eq(927.91.to_d)
-    expect(report[:summary][:total_roth_retirement].to_d).to eq(1245.15.to_d)
-    expect(report[:summary][:total_retirement].to_d).to eq(2173.06.to_d)
+    expect(report[:summary][:total_traditional_retirement].to_d).to eq(500.00.to_d)
+    expect(report[:summary][:total_roth_retirement].to_d).to eq(630.00.to_d)
+    expect(report[:summary][:total_retirement].to_d).to eq(1130.00.to_d)
     expect(report[:summary][:total_employer_contributions].to_d).to eq(100.to_d)
     expect(report[:simple_register][:rows].find { |row| row[:employee] == "Reimbursement Employee" }[:non_taxable_additions]).to eq(20)
   end
@@ -94,7 +94,7 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
       assert_reconciles(gross: actual[:gross_pay], other: actual[:non_taxable_additions_total], deductions: actual[:total_deductions], net: actual[:net_pay])
     end
     totals = text.lines.select { |line| line.lstrip.start_with?("TOTALS") }.join(" ")
-    expect(totals).to include("$927.91", "$1,245.15")
+    expect(totals).to include("$500.00", "$630.00")
   end
 
   it "exports reconciling XLSX detail and simple-register rows" do
@@ -108,7 +108,7 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
         assert_reconciles(gross: row["Gross Pay"], other: row["Non-Taxable Additions (Total)"], deductions: row["Total Deductions"], net: row["Net Pay"])
       end
       field = (5..9).map { |number| headers.zip(sheet.row(number)).to_h }.find { |row| row["Employee Name"] == "Field Retirement Employee" }
-      expect(field["401(k)"]).to eq(927.91)
+      expect(field["401(k)"]).to eq(500.00)
       simple = book.sheet("Payroll Register")
       header_number = (1..simple.last_row).find { |number| simple.row(number).include?("Retirement (Pre-Tax + Roth)") }
       simple_headers = simple.row(header_number)
@@ -159,12 +159,12 @@ RSpec.describe "Payroll register saved-paycheck reconciliation", type: :request 
         row = headers.zip(sheet.row(number)).to_h
         assert_reconciles(gross: row["Gross Pay"], other: row["Non-Taxable Additions (Total)"], deductions: row["Total Deductions"], net: row["Net Pay"])
       end
-      expect(book.sheet("Totals").to_a).to include([ "401(k)", 927.91 ], [ "Roth 401(k)", 1245.15 ], [ "Non-Taxable Additions (Total)", 20.0 ])
+      expect(book.sheet("Totals").to_a).to include([ "401(k)", 500.00 ], [ "Roth 401(k)", 630.00 ], [ "Non-Taxable Additions (Total)", 20.0 ])
     end
     get "/api/v1/admin/reports/ytd_summary", params: { year: 2026 }
     expect(response).to have_http_status(:ok)
     rows = response.parsed_body.dig("report", "employees")
     rows.each { |row| assert_reconciles(gross: row["gross_pay"], other: row["non_taxable_additions_total"], deductions: row["total_deductions"], net: row["net_pay"]) }
-    expect(rows.find { |row| row["name"] == "Field Retirement Employee" }["retirement"]).to eq(927.91)
+    expect(rows.find { |row| row["name"] == "Field Retirement Employee" }["retirement"]).to eq(500.00)
   end
 end

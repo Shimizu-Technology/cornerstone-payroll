@@ -97,22 +97,22 @@ RSpec.describe PayrollImport::RevelPdfParser do
     end
 
     it "flags fixed-column values that require the flexible parser" do
-      expect(parser.send(:implausible_fixed_parse?, employee: "Fixture, Casey", total_hours: 224.41, total_pay: 224.41)).to be(true)
+      expect(parser.send(:implausible_fixed_parse?, employee: "Fixture, Casey", total_hours: 240.00, total_pay: 240.00)).to be(true)
       expect(parser.send(:implausible_fixed_parse?, employee: "", total_hours: 40.0, total_pay: 400.0)).to be(true)
       expect(parser.send(:implausible_fixed_parse?, employee: "Example, Avery", total_hours: 0.0, total_pay: 400.0)).to be(true)
       expect(parser.send(:implausible_fixed_parse?, employee: "Example, Avery", total_hours: 80.0, total_pay: 1_200.0)).to be(false)
     end
 
     it "right-aligns a compressed Revel row into realistic payroll columns" do
-      line = "Compressed, Rowan".ljust(40) + "- - - 24.26 - - 224.41 - - 24.26 224.41 -"
+      line = "Compressed, Rowan".ljust(40) + "- - - 24.00 - - 240.00 - - 24.00 240.00 -"
       values = parser.send(:parse_flexible_columns, line)
 
       expect(values).to include(
         employee: "Compressed, Rowan",
-        regular_hours: 24.26,
-        regular_pay: 224.41,
-        total_hours: 24.26,
-        total_pay: 224.41
+        regular_hours: 24.00,
+        regular_pay: 240.00,
+        total_hours: 24.00,
+        total_pay: 240.00
       )
       expect(values[:total_hours]).to be < 200
     end

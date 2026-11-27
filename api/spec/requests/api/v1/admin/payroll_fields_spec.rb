@@ -207,7 +207,7 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
     before do
       employee.update!(default_payroll_adjustments: [
         legacy_loan,
-        { label: "Other loan", amount: 428.36, treatment: "post_tax_deduction", active: true }
+        { label: "Other loan", amount: 300.00, treatment: "post_tax_deduction", active: true }
       ])
     end
 
@@ -238,14 +238,14 @@ RSpec.describe "Api::V1::Admin::PayrollFields", type: :request do
       period = create(:pay_period, company: company,
         start_date: Date.new(2026, 9, 7), end_date: Date.new(2026, 9, 20), pay_date: Date.new(2026, 9, 25))
       item = create(:payroll_item, company: company, employee: employee, pay_period: period,
-        import_source: "mosa_revel", loan_deduction: BigDecimal("428.36"))
+        import_source: "mosa_revel", loan_deduction: BigDecimal("300.00"))
       item.sync_default_payroll_adjustments!(employee.reload)
       PayrollCalculator.for(employee, item).calculate
 
       loan_rows = item.payroll_item_deductions.select { |deduction| deduction.deduction_type&.loan? }
       expect(loan_rows.map { |row| row.amount.to_d }).to eq([ BigDecimal("250") ])
-      expect(item.loan_deduction.to_d).to eq(BigDecimal("428.36"))
-      expect(item.loan_payment.to_d).to eq(BigDecimal("678.36"))
+      expect(item.loan_deduction.to_d).to eq(BigDecimal("300.00"))
+      expect(item.loan_payment.to_d).to eq(BigDecimal("550.00"))
     end
 
     it "keeps both sources unchanged when the legacy row is stale or the new setup is invalid" do
