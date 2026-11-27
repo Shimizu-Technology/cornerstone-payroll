@@ -23,7 +23,7 @@ export function consentErrorMessage(error: unknown, fallback: string): string {
       case 'access_proof_invalid':
         return 'That code did not match or expired. Open a fresh test PDF and enter the 6-character code shown inside it.';
       case 'disclosure_outdated':
-        return 'The disclosure text was updated. Reload this page to review the latest wording before giving consent.';
+        return 'The disclosure was just updated. Read the new wording below, then check the box again to agree.';
       case 'no_active_consent':
         return 'Your electronic consent is already off. Paper delivery is active.';
       case 'consent_active':
