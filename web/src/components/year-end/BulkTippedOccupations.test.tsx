@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BulkTippedOccupations } from './BulkTippedOccupations';
 
@@ -9,7 +9,7 @@ vi.mock('@/services/api', () => ({
   tippedOccupationsApi: { catalog: async () => ({ codes: { '000': 'Nonqualifying occupation', '102': 'Wait Staff' } }), bulkSet },
 }));
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { cleanup(); bulkSet.mockClear(); vi.restoreAllMocks(); });
 
 it('confirms the selected count and refreshes the Year-End warnings after saving', async () => {
   const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -37,4 +37,24 @@ it('confirms the selected count and refreshes the Year-End warnings after saving
   fireEvent.click(apply);
   await waitFor(() => expect(onSaved).toHaveBeenCalledWith('Saved the tipped occupation code for 1 employee. For 1 employee, the code ends the day before the next scheduled entry.'));
   expect(bulkSet).toHaveBeenCalledWith(7, { tax_year: 2026, employee_ids: [1], occupation_code: '102', effective_from: '2026-01-01' });
+});
+
+it('submits role defaults with an employee-specific override after confirmation', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  render(<BulkTippedOccupations companyId={7} year={2026} onSaved={vi.fn().mockResolvedValue(undefined)} employees={[
+    { employee_id: 3, name: 'Worker Three', edit_path: '/three' },
+  ]} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Set tipped occupation codes' }));
+  fireEvent.click(await screen.findByLabelText('Select all 1 employees'));
+  fireEvent.click(screen.getByLabelText("Use each employee's role code"));
+  expect(screen.getByText(/No role code/)).toBeTruthy();
+  expect(screen.getByText('Choose an override for Worker Three.')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Apply to 1 selected' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('Override for Worker Three'), { target: { value: '000' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 selected' }));
+
+  await waitFor(() => expect(bulkSet).toHaveBeenCalledWith(7, {
+    tax_year: 2026, employee_ids: [3], use_role_code: true, overrides: { 3: '000' }, expected_role_codes: {}, effective_from: '2026-01-01',
+  }));
 });

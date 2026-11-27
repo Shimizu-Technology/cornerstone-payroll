@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_28_010100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -762,6 +762,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_220000) do
     t.check_constraint "\"position\" >= 1 AND \"position\" <= 5", name: "company_help_contact_position_range"
     t.check_constraint "char_length(btrim(name::text)) >= 1 AND char_length(btrim(name::text)) <= 80", name: "company_help_contact_name_length"
     t.check_constraint "num_nonnulls(phone, email) >= 1", name: "company_help_contact_reachable"
+  end
+
+  create_table "company_job_roles", force: :cascade do |t|
+    t.bigint "company_id", null: false
+    t.string "name", null: false
+    t.string "occupation_code"
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id", "name" ], name: "index_company_job_roles_on_company_id_and_name", unique: true
+    t.index [ "company_id" ], name: "index_company_job_roles_on_company_id"
+    t.index [ "id", "company_id" ], name: "index_company_job_roles_on_id_and_company_id", unique: true
   end
 
   create_table "company_pay_schedules", force: :cascade do |t|
@@ -1866,6 +1878,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_220000) do
     t.datetime "email_verified_at"
     t.datetime "phone_confirmed_by_employee_at"
     t.string "contact_source"
+    t.bigint "company_job_role_id"
+    t.string "legacy_stub_regular_wage_label"
+    t.index [ "company_job_role_id" ], name: "index_employees_on_company_job_role_id"
     t.index "lower(btrim((email)::text, ' \t\n\v\f\r'::text))", name: "index_employees_on_lower_email", where: "(email IS NOT NULL)"
     t.index [ "company_id", "last_name", "first_name" ], name: "index_employees_on_company_id_and_last_name_and_first_name"
     t.index [ "company_id", "test_workspace_source_employee_id" ], name: "idx_employees_training_source_unique", unique: true, where: "(test_workspace_source_employee_id IS NOT NULL)"
@@ -5486,6 +5501,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_220000) do
   add_foreign_key "companies", "printer_profiles", column: "active_printer_profile_id"
   add_foreign_key "companies", "users", column: "employee_intake_enabled_by_id"
   add_foreign_key "companies", "users", column: "migration_rehearsal_created_by_id"
+  add_foreign_key "company_job_roles", "companies", on_delete: :cascade
   add_foreign_key "company_assignments", "companies"
   add_foreign_key "company_assignments", "users"
   add_foreign_key "company_assignments", "users", column: "granted_by_id"
@@ -5619,6 +5635,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_220000) do
   add_foreign_key "employee_year_fica_source_reviews", "users", column: "created_by_id"
   add_foreign_key "employee_ytd_totals", "employees"
   add_foreign_key "employee_ytd_totals", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_ytd_totals_company_parent"
+  add_foreign_key "employees", "company_job_roles", column: [ "company_job_role_id", "company_id" ], primary_key: [ "id", "company_id" ]
   add_foreign_key "employees", "companies"
   add_foreign_key "employees", "departments"
   add_foreign_key "employees", "employees", column: "previous_employee_id"
