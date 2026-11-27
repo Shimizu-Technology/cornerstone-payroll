@@ -226,6 +226,47 @@ describe('Employee app panel', () => {
     expect(await screen.findByText(/Printed code issued by Pat Issuer/)).toBeTruthy();
   });
 
+  it('shows when they last opened the app, the terms version and both paperless answers, with dates', async () => {
+    openPanel({
+      ...employee, status: 'active',
+      agreements: {
+        account: { status: 'active', label: 'Signed up', invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: '2026-11-05T00:00:00Z', last_opened_at: '2026-11-26T03:00:00Z' },
+        terms: { version: 'terms-2026-10', accepted_at: '2026-10-05T00:00:00Z', current: false },
+        pay_statements: { answer: 'paperless', answered_at: '2026-11-06T00:00:00Z' },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', delivery_consent_enabled: true,
+      },
+    });
+    const facts = await screen.findByLabelText('Agreements');
+    expect(facts.textContent).toContain('Last opened the app');
+    expect(facts.textContent).toMatch(/Nov 26, 2026/);
+    expect(facts.textContent).toContain('Older version');
+    expect(facts.textContent).toContain('terms-2026-10 · Oct 5, 2026');
+    expect(facts.textContent).toContain('Paperless');
+    expect(facts.textContent).toContain('Not answered');
+    expect(screen.getByRole('link', { name: 'Company report' }).getAttribute('href')).toBe('/companies/1/employee-app/status');
+  });
+
+  it('gives a client viewer the same facts and still no actions', async () => {
+    auth.isClientViewer = true;
+    openPanel({
+      ...employee, can_manage_invites: false,
+      agreements: {
+        account: { status: 'invited', label: 'Invited', invite_sent_at: '2026-11-01T00:00:00Z', signed_up_at: null, last_opened_at: null },
+        terms: { version: null, accepted_at: null, current: false },
+        pay_statements: { answer: 'not_answered', answered_at: null },
+        w2gu: { answer: 'not_answered', answered_at: null },
+        current_terms_version: 'terms-2026-11', delivery_consent_enabled: false,
+      },
+    });
+    const facts = await screen.findByLabelText('Agreements');
+    expect(facts.textContent).toContain('Never');
+    expect(facts.textContent).toContain('Not accepted');
+    expect(facts.textContent).toContain('Employees aren’t asked about paperless yet.');
+    expect(screen.queryByRole('button', { name: 'Resend invite' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Invite' })).toBeNull();
+  });
+
   it('sends the explicit company and employee IDs in its read and wave requests', async () => {
     const api = employeeAppRolloutApi(7, 'client');
     await api.get();

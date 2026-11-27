@@ -22,26 +22,39 @@ module DeliveryConsents
       [ preference&.recorded_at, withdrawn_consent&.withdrawn_at ].compact.max
     end
 
+    # Per employee and kind, { answer:, answered_at: } for employees of one company.
+    def self.by_employee(company_id, employee_ids)
+      ids = employee_ids.to_a
+      consents = DeliveryConsent.where(company_id: company_id, employee_id: ids)
+        .order(given_at: :desc, id: :desc).to_a.group_by { |consent| [ consent.employee_id, consent.kind ] }
+      preferences = DeliveryPreference.where(company_id: company_id, employee_id: ids)
+        .index_by { |preference| [ preference.employee_id, preference.kind ] }
+
+      ids.index_with do |employee_id|
+        DeliveryDisclosure::KINDS.index_with do |kind|
+          records = consents.fetch([ employee_id, kind ], [])
+          active = records.find(&:active?)
+          withdrawn = records.find(&:withdrawn?)
+          preference = preferences[[ employee_id, kind ]]
+          {
+            answer: answer(active_consent: active, withdrawn_consent: withdrawn, preference: preference),
+            answered_at: active ? active.given_at : paper_chosen_at(withdrawn_consent: withdrawn, preference: preference)
+          }
+        end
+      end
+    end
+
     # Per kind, how the company's active employees answered.
     def self.company_counts(company_id)
-      employees = Employee.active.where(company_id: company_id)
-      total = employees.count
-      consents = DeliveryConsent.where(company_id: company_id, employee_id: employees.select(:id))
-        .pluck(:kind, :employee_id, :withdrawn_at)
-      preferences = DeliveryPreference.where(company_id: company_id, employee_id: employees.select(:id))
-        .pluck(:kind, :employee_id)
+      answers = by_employee(company_id, Employee.active.where(company_id: company_id).pluck(:id)).values
 
       DeliveryDisclosure::KINDS.index_with do |kind|
-        of_kind = consents.select { |row| row[0] == kind }
-        paperless = of_kind.select { |row| row[2].nil? }.to_set { |row| row[1] }
-        paper = (of_kind.reject { |row| row[2].nil? }.map { |row| row[1] } +
-          preferences.select { |row| row[0] == kind }.map { |row| row[1] }).to_set - paperless
-
+        tally = answers.map { |row| row.dig(kind, :answer) }.tally
         {
-          paperless: paperless.size,
-          keep_paper: paper.size,
-          not_answered: total - paperless.size - paper.size,
-          total: total
+          paperless: tally.fetch(PAPERLESS, 0),
+          keep_paper: tally.fetch(KEEP_PAPER, 0),
+          not_answered: tally.fetch(NOT_ANSWERED, 0),
+          total: answers.size
         }
       end
     end
