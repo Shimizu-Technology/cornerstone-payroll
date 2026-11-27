@@ -6,7 +6,7 @@ module Api
       class EmployeeTippedOccupationsController < BaseController
         class InvalidInput < StandardError; end
 
-        CODES = JSON.parse(Rails.root.join("config/tipped_occupation_codes.json").read).fetch("codes").freeze
+        CODES = CompanyJobRole::CODES
         FIELDS = %w[id occupation_code effective_from effective_to].freeze
 
         before_action :set_employee, only: %i[index create update destroy]
@@ -82,7 +82,8 @@ module Api
         end
 
         def bulk_set
-          code = validated_code
+          use_role_code = params[:use_role_code] == true
+          code = validated_code unless use_role_code
           year = Integer(params.require(:tax_year).to_s, 10, exception: false)
           unless year && year >= 2026 && (W2GuAggregator::SS_WAGE_BASE_BY_YEAR.key?(year) || AnnualTaxConfig.for_year(year)&.ss_wage_base)
             raise InvalidInput, "Choose a supported tax year."
@@ -95,6 +96,10 @@ module Api
           ids = params.permit(employee_ids: []).fetch(:employee_ids, []).map { |id| Integer(id.to_s, 10, exception: false) }.uniq
           raise InvalidInput, "Select at least one employee." if ids.empty? || ids.any?(&:nil?)
 
+          expected = params[:expected_role_codes]
+          expected = expected.permit(*ids.map(&:to_s)).to_h if expected.is_a?(ActionController::Parameters)
+          overrides = params[:overrides]
+          overrides = overrides.is_a?(ActionController::Parameters) ? overrides.permit(*ids.map(&:to_s)).to_h : {}
           capped_count = 0
           write do
             report = W2GuAggregator.new(current_company, year).generate
@@ -107,10 +112,13 @@ module Api
 
             next_starts = EmployeeTippedOccupation.where(company_id: current_company.id, employee_id: ids)
               .where("effective_from > ?", start_date).group(:employee_id).minimum(:effective_from)
-            current_company.employees.where(id: ids).order(:id).each do |employee|
+            employees = current_company.employees.where(id: ids).includes(:company_job_role).order(:id).lock.to_a
+            selected_codes = use_role_code ? role_codes!(employees, overrides, expected) : {}
+            employees.each do |employee|
+              selected_code = selected_codes.fetch(employee.id, code)
               next_start = next_starts[employee.id]
               capped_count += 1 if next_start
-              save_occupation(employee, code, start_date, next_start&.prev_day)
+              save_occupation(employee, selected_code, start_date, next_start&.prev_day)
             end
           end
 
@@ -120,6 +128,29 @@ module Api
         end
 
         private
+
+        def role_codes!(employees, overrides, expected)
+          invalid = []
+          changed = []
+          codes = employees.to_h do |employee|
+            key = employee.id.to_s
+            override = overrides[key].presence
+            code = override || employee.company_job_role&.occupation_code
+            invalid << employee.full_name unless CODES.key?(code)
+            if !override && expected.respond_to?(:key?) && expected.key?(key) && expected[key] != code
+              changed << employee.full_name
+            end
+            [ employee.id, code ]
+          end
+          if invalid.any?
+            raise InvalidInput, "Choose an occupation code override for #{invalid.to_sentence}."
+          end
+          if changed.any?
+            raise InvalidInput, "Role codes changed for #{changed.to_sentence}. Refresh the checklist and try again."
+          end
+
+          codes
+        end
 
         def write
           current_company.with_lock(requires_new: true) do
