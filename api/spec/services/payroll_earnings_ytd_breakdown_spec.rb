@@ -45,10 +45,10 @@ RSpec.describe PayrollEarningsYtdBreakdown do
       employee: employee,
       through_period_end: Date.new(2026, 9, 6),
       through_pay_date: Date.new(2026, 9, 10),
-      gross_pay: 218_147.17,
-      non_taxable_pay: 13_721.44,
+      gross_pay: 150_000.00,
+      non_taxable_pay: 10_000.00,
       source_breakdown: { "earnings_breakdown" => {
-        "Salary" => "204425.73", "Reimb" => "8677.44", "Rent" => "5044.00"
+        "Salary" => "140000.00", "Reimb" => "6000.00", "Rent" => "4000.00"
       } }
     )
     payroll_item.update!(gross_pay: 0)
@@ -56,34 +56,34 @@ RSpec.describe PayrollEarningsYtdBreakdown do
     breakdown = described_class.new(payroll_item)
     expect(breakdown.call.map(&:source_label)).to include("Salary")
     expect(breakdown.call.map(&:source_label)).not_to include("Reimb", "Rent")
-    expect(breakdown.pay_ytd_total(218_147.17)).to eq(204_425.73.to_d)
-    expect(employee.historical_employee_ytd_balances.sole.gross_pay).to eq(218_147.17.to_d)
+    expect(breakdown.pay_ytd_total(150_000.00)).to eq(140_000.00.to_d)
+    expect(employee.historical_employee_ytd_balances.sole.gross_pay).to eq(150_000.00.to_d)
   end
 
-  it "keeps Monique's salary, bonus, and tips separate while carrying their QuickBooks YTD" do
-    monique = create(:employee, company: company, first_name: "Monique", last_name: "Amani", employment_type: "salary")
+  it "keeps salaried owner salary, bonus, and tips separate while carrying their QuickBooks YTD" do
+    owner = create(:employee, company: company, first_name: "Morgan", last_name: "Ellis", employment_type: "salary")
     apply_historical_balance(
-      employee: monique,
-      gross_pay: 191_150.93,
+      employee: owner,
+      gross_pay: 112_000.00,
       earnings: {
-        "Salary" => 171_619.84,
-        "Bonus" => 17_630.29,
-        "Paycheck Tips" => 1_900.80
+        "Salary" => 100_000.00,
+        "Bonus" => 10_000.00,
+        "Paycheck Tips" => 2_000.00
       }
     )
-    item = create(:payroll_item, pay_period: pay_period, company: company, employee: monique,
-      employment_type: "salary", gross_pay: 9_527.02, reported_tips: 120.22)
-    item.payroll_item_earnings.create!(category: "salary", label: "Salary", amount: 8_478.89)
-    item.payroll_item_earnings.create!(category: "tips", label: "Tips", amount: 120.22)
-    item.payroll_item_earnings.create!(category: "other", label: "BONUS [1522/1]", amount: 927.91)
+    item = create(:payroll_item, pay_period: pay_period, company: company, employee: owner,
+      employment_type: "salary", gross_pay: 5_100.00, reported_tips: 100.00)
+    item.payroll_item_earnings.create!(category: "salary", label: "Salary", amount: 4_500.00)
+    item.payroll_item_earnings.create!(category: "tips", label: "Tips", amount: 100.00)
+    item.payroll_item_earnings.create!(category: "other", label: "BONUS [1522/1]", amount: 500.00)
 
     rows = described_class.new(item).call.index_by(&:source_label)
 
-    expect(rows.fetch("Salary")).to have_attributes(current: 8_478.89.to_d, ytd: 180_098.73.to_d)
-    expect(rows.fetch("Tips")).to have_attributes(label: "Paycheck Tips", current: 120.22.to_d, ytd: 2_021.02.to_d)
-    expect(rows.fetch("BONUS [1522/1]")).to have_attributes(current: 927.91.to_d, ytd: 18_558.20.to_d)
-    expect(rows.values.sum(0.to_d, &:current)).to eq(9_527.02.to_d)
-    expect(rows.values.sum(0.to_d, &:ytd)).to eq(200_677.95.to_d)
+    expect(rows.fetch("Salary")).to have_attributes(current: 4_500.00.to_d, ytd: 104_500.00.to_d)
+    expect(rows.fetch("Tips")).to have_attributes(label: "Paycheck Tips", current: 100.00.to_d, ytd: 2_100.00.to_d)
+    expect(rows.fetch("BONUS [1522/1]")).to have_attributes(current: 500.00.to_d, ytd: 10_500.00.to_d)
+    expect(rows.values.sum(0.to_d, &:current)).to eq(5_100.00.to_d)
+    expect(rows.values.sum(0.to_d, &:ytd)).to eq(117_100.00.to_d)
   end
 
   it "uses an exact label match before semantic fallback so distinct bonus rows do not collapse" do

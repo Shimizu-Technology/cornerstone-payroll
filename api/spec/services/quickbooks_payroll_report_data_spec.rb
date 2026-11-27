@@ -8,8 +8,8 @@ RSpec.describe QuickbooksPayrollReportData do
     employee = create(:employee, company: company)
     pay_period = create(:pay_period, :committed, company: company)
     item = create(:payroll_item, pay_period: pay_period, employee: employee, company: company,
-      loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
-    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+      loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"))
+    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Devon Holbrook",
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
     item.payroll_item_field_entries.create!(payroll_field_definition: field,
       label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
@@ -17,8 +17,8 @@ RSpec.describe QuickbooksPayrollReportData do
 
     entries = described_class.new(pay_period).deduction_contribution_entries_for_item(item)
 
-    expect(entries).to include(have_attributes(description: "Loan", employee_amount: BigDecimal("428.36")))
-    expect(entries).to include(have_attributes(description: "Loan - Madela Severin", employee_amount: BigDecimal("250")))
+    expect(entries).to include(have_attributes(description: "Loan", employee_amount: BigDecimal("300.00")))
+    expect(entries).to include(have_attributes(description: "Loan - Devon Holbrook", employee_amount: BigDecimal("250")))
   end
 
   it "uses explicit payroll field reporting groups for 401(k) retirement sections" do

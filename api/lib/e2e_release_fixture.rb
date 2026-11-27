@@ -437,9 +437,9 @@ class E2eReleaseFixture
       import_typo_employee = create_employee!(
         company: company,
         department: department,
-        first_name: "Rosie",
-        last_name: "Petirus",
-        email: "rosie@example.test",
+        first_name: "Riley",
+        last_name: "Marlowe",
+        email: "riley@example.test",
         ssn: "900-00-0008",
         pay_rate: 19.25,
         hire_date: Date.new(2026, 8, 30)
@@ -455,7 +455,7 @@ class E2eReleaseFixture
       )
       import_loan_type = DeductionType.create!(
         company: company,
-        name: "Rosie recurring repayment",
+        name: "Riley recurring repayment",
         category: "post_tax",
         sub_category: "loan",
         active: true
@@ -464,7 +464,7 @@ class E2eReleaseFixture
         company: company,
         employee: import_typo_employee,
         deduction_type: import_loan_type,
-        name: "Rosie recurring repayment",
+        name: "Riley recurring repayment",
         tracking_mode: "recurring_no_balance",
         payment_amount: 123.50,
         first_deduction_date: safe_import_period.pay_date
@@ -792,7 +792,7 @@ class E2eReleaseFixture
         safe_pdf,
         [
           { name: "Example, Avery", regular_hours: 40.0, overtime_hours: 2.0, source_pay: 9_999.99 },
-          { name: "Petrius, Rosie", regular_hours: 37.5, overtime_hours: 0.0, source_pay: 8_888.88 }
+          { name: "Malrowe, Riley", regular_hours: 37.5, overtime_hours: 0.0, source_pay: 8_888.88 }
         ],
         period_start: Date.new(2026, 8, 30),
         period_end: Date.new(2026, 9, 12)
@@ -807,7 +807,7 @@ class E2eReleaseFixture
         safe_workbook,
         [
           { last_name: "Example", first_name: "Avery", tips: 25.50, deduction: 0.0 },
-          { last_name: "Petrius", first_name: "Rosie", tips: 117.50, deduction: 123.50 }
+          { last_name: "Malrowe", first_name: "Riley", tips: 117.50, deduction: 123.50 }
         ],
         period_end: Date.new(2026, 9, 12),
         pay_date: Date.new(2026, 9, 18)

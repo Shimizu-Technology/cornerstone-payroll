@@ -619,9 +619,9 @@ RSpec.describe "Pay-period submissions", type: :request do
       expect(data.fetch("standing_changes").sole).not_to have_key("amount")
       send_package(no_changes: true)
       expect(response).to have_http_status(:unprocessable_entity)
-      send_package(changes: [ { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id, amount: "8421.13" } ].to_json)
+      send_package(changes: [ { kind: "owner_pay", standing_change_id: default.id, employee_id: owner.id, amount: "4500.00" } ].to_json)
       expect(response).to have_http_status(:created), response.body
-      expect(data.fetch("submissions").first.fetch("changes").sole).to include("amount" => "8421.13")
+      expect(data.fetch("submissions").first.fetch("changes").sole).to include("amount" => "4500.00")
       expect(PayrollItem.count).to eq(0)
     end
 
