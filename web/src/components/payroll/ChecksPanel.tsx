@@ -1,4 +1,5 @@
 import { formatGuamDateTimeShort } from '@/lib/utils';
+import { formatDate } from '@/lib/display-date';
 import { RecordDirectDepositPaymentDialog } from './RecordDirectDepositPaymentDialog';
 import { useFeedbackState, ActionFeedback, useFeedback } from '@/components/ui/action-feedback';
 /**
@@ -90,7 +91,7 @@ function CancellationSyncNotice({ state, reviewHref }: { state?: PaymentCancella
 
 function BankPaymentEvidence({ item, readOnly, onConfirm }: { item?: DirectDepositItem; readOnly: boolean; onConfirm: (item: DirectDepositItem) => void }): ReactElement | null {
   if (!item) return null;
-  if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {item.payment_confirmation.settled_on} · {item.payment_confirmation.bank_reference}</span>;
+  if (item.payment_confirmation) return <span className="col-span-2 min-w-0 break-words text-sm text-emerald-700">Bank paid {formatDate(item.payment_confirmation.settled_on)} · {item.payment_confirmation.bank_reference}</span>;
   if (readOnly) return <span className="text-sm text-neutral-500">Bank payment not recorded</span>;
   return <Button size="sm" variant="outline" className="max-sm:min-h-[44px]" disabled={Boolean(item.source_payment_blocker)} title={item.source_payment_blocker || undefined} onClick={() => onConfirm(item)}>Confirm bank payment</Button>;
 }

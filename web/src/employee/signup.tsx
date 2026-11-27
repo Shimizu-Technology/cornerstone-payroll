@@ -20,7 +20,7 @@ import type { IdentityCheck } from './contracts';
 import { useBrand, useEmployeeAuth } from './contexts';
 import { CantSignIn } from './help';
 import { useDocumentTitle, useSignOut } from './hooks';
-import { birthDate, currentInviteToken, forgetInviteToken, normalizeCode, takeInviteToken } from './signupState';
+import { birthDate, currentInviteToken, forgetInviteToken, normalizeCode, rateLimitedText, takeInviteToken } from './signupState';
 import { BrandMark, EmpButton, Field, FormMessage } from './ui';
 
 // ---------- Identity fields ----------
@@ -195,7 +195,12 @@ function TwoStepMessage({ kind }: { kind: 'mfa_setup' | 'mfa_required' }): React
   );
 }
 
-function FailureMessage({ failure, cancelledText }: { failure: Failure | null; cancelledText?: string }): ReactElement | null {
+/** How long a 429 asked us to wait, from its Retry-After header. */
+function retryAfterOf(error: unknown): number | null {
+  return error instanceof EmployeeApiError ? error.retryAfterSeconds : null;
+}
+
+function FailureMessage({ failure, cancelledText, retryAfterSeconds }: { failure: Failure | null; cancelledText?: string; retryAfterSeconds?: number | null }): ReactElement | null {
   if (!failure) return null;
   if (failure === 'no_match') return <NoMatchMessage />;
   if (failure === 'email_mismatch') {
@@ -207,7 +212,7 @@ function FailureMessage({ failure, cancelledText }: { failure: Failure | null; c
   if (failure === 'mfa_setup' || failure === 'mfa_required') return <TwoStepMessage kind={failure} />;
   if (failure === 'cancelled') return <FormMessage tone="bad">{cancelledText ?? "Not done. Confirm it's you to continue."}</FormMessage>;
   if (failure === 'signed_out') return <FormMessage tone="bad">Your sign-in ended. Sign in again, then try again.</FormMessage>;
-  if (failure === 'rate_limited') return <FormMessage tone="bad">Too many tries. Wait a minute, then try again.</FormMessage>;
+  if (failure === 'rate_limited') return <FormMessage tone="bad">{rateLimitedText(retryAfterSeconds)}</FormMessage>;
   if (failure === 'terms_updated') return <FormMessage tone="bad">The terms were updated. Please review them again.</FormMessage>;
   if (failure === 'offline') return <FormMessage tone="bad">You're offline. Connect to Wi-Fi or data, then try again.</FormMessage>;
   return <FormMessage tone="bad">Something went wrong on our end. Try again in a minute.</FormMessage>;
@@ -271,6 +276,7 @@ export function ActivateScreen(): ReactElement {
   const [emailProblems, setEmailProblems] = useState<{ email?: string; terms?: string }>({});
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
 
   useDocumentTitle(step === 'email' ? 'Your email' : step === 'sign_in' ? 'Sign in instead' : 'Set up your account');
 
@@ -310,6 +316,7 @@ export function ActivateScreen(): ReactElement {
         setAgreed(false);
         reload();
       }
+      setRetryAfterSeconds(retryAfterOf(error));
       setFailure(result);
       // Wrong details: back to the step that has them.
       if (result === 'no_match') setStep('details');
@@ -362,7 +369,7 @@ export function ActivateScreen(): ReactElement {
             </p>
           </div>
           <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={emailProblems.terms} />
-          <FailureMessage failure={failure} />
+          <FailureMessage failure={failure} retryAfterSeconds={retryAfterSeconds} />
           <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? 'Opening…' : 'Create account'}</EmpButton>
           <p className="emp-hint text-center">Next you'll choose a password, or use Google or an emailed code.</p>
           <EmpButton variant="quiet" block onClick={() => { setStep('details'); setFailure(null); }}>Back to step 1</EmpButton>
@@ -380,7 +387,7 @@ export function ActivateScreen(): ReactElement {
           <p className="emp-lead">First, tell us who you are. We'll check everything when you create your account.</p>
         </div>
         <IdentityFields draft={draft} setDraft={setDraft} problems={problems} token={token} />
-        <FailureMessage failure={failure} />
+        <FailureMessage failure={failure} retryAfterSeconds={retryAfterSeconds} />
         <EmpButton type="submit" block>Continue</EmpButton>
         <p className="text-center">
           Already have an account? <SignInToClaim />
@@ -493,6 +500,7 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
   const [working, setWorking] = useState(false);
   const [switchingAccount, setSwitchingAccount] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
+  const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
   useDocumentTitle(copy.title);
 
   const submit = async (event: FormEvent): Promise<void> => {
@@ -517,6 +525,7 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
         setAgreed(false);
         reload();
       }
+      setRetryAfterSeconds(retryAfterOf(error));
       setFailure(result);
     } finally {
       setWorking(false);
@@ -544,7 +553,7 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
         )}
         <IdentityFields draft={draft} setDraft={setDraft} problems={problems} token={token} />
         <TermsCheckbox terms={terms} loadFailed={loadFailed} reload={reload} checked={agreed} onChange={setAgreed} error={problems.terms} />
-        <FailureMessage failure={failure} cancelledText={copy.cancelled} />
+        <FailureMessage failure={failure} cancelledText={copy.cancelled} retryAfterSeconds={retryAfterSeconds} />
         <p className="emp-hint">To keep your pay private, we'll ask you to confirm it's you with your password or a code.</p>
         <EmpButton type="submit" block disabled={working || switchingAccount || !terms} aria-busy={working}>{working ? copy.working : copy.button}</EmpButton>
         {!token && <p className="emp-hint text-center">Got an invite email? Open its link on this device instead of typing a code.</p>}

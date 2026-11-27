@@ -185,7 +185,8 @@ claim() {
   # and down.sh cover those two.
   local pid="$1" reason="$2"
   if [[ -n "${DEV_LIFECYCLE_SESSION:-}" ]] && command -v dev-lifecycle >/dev/null 2>&1; then
-    dev-lifecycle claim --session "$DEV_LIFECYCLE_SESSION" --owner local-prod --reason "$reason" process "$pid" >/dev/null 2>&1 || true
+    dev-lifecycle claim --session "$DEV_LIFECYCLE_SESSION" --owner local-prod --reason "$reason" process "$pid" >/dev/null 2>&1 && return 0
+    [[ "$reason" == *postgres* || "$reason" == *redis* ]] || warn "dev-lifecycle did not claim pid $pid ($reason); claim it by hand"
   fi
 }
 

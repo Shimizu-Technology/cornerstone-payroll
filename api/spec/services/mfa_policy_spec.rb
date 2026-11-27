@@ -82,6 +82,19 @@ RSpec.describe MfaPolicy do
       expect(described_class.factor_age_minutes(claims([ 0, -1 ]), 1, now: now)).to be_nil
       expect(described_class.factor_age_minutes(claims([ 0, "1" ]), 0, now: now)).to be_nil
     end
+
+    # Clerk issues nbf 10 seconds before iat. A server clock a little behind
+    # Clerk's sees a just-minted token's iat in the future.
+    it "counts an iat ahead of this clock as just issued while the token's nbf has passed" do
+      expect(described_class.factor_age_minutes(claims([ 0, -1 ], iat: now.to_i + 2, nbf: now.to_i - 8), 0, now: now)).to eq(0)
+      expect(described_class.factor_age_minutes(claims([ 3, -1 ], iat: now.to_i + 10, nbf: now.to_i), 0, now: now)).to eq(3)
+    end
+
+    it "still can't date a future iat whose nbf hasn't passed or isn't before it" do
+      [ now.to_i + 1, now.to_i + 2, nil, "#{now.to_i - 8}" ].each do |nbf|
+        expect(described_class.factor_age_minutes(claims([ 0, -1 ], iat: now.to_i + 2, nbf: nbf), 0, now: now)).to be_nil, nbf.inspect
+      end
+    end
   end
 
   describe ".recently_verified_second_factor?" do
@@ -136,6 +149,10 @@ RSpec.describe MfaPolicy do
       [ nil, "now", now.to_i + 1 ].each do |iat|
         expect(described_class.recently_verified_first_factor?(claims([ 0, -1 ], iat: iat), now: now)).to be(false), iat.inspect
       end
+    end
+
+    it "accepts the token Clerk mints right after reverification when this clock is a few seconds behind" do
+      expect(described_class.recently_verified_first_factor?(claims([ 0, -1 ], iat: now.to_i + 2, nbf: now.to_i - 8), now: now)).to be(true)
     end
 
     it "uses the current time by default" do

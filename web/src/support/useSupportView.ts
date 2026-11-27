@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { leaveSupportView, supportRequest, type SupportGrant } from './grant';
+import { leaveSupportView, supportExitDestination, supportRequest, type SupportGrant } from './grant';
 
 export function useSupportView(base: string, getToken: () => Promise<string | null>, destination: string) {
   const [grant, setGrant] = useState<SupportGrant | null>(null);
@@ -57,7 +57,7 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
     try {
       const response = await supportRequest(base, await getToken(), 'DELETE', AbortSignal.timeout(15_000));
       if (!response.ok) throw new Error('Could not end this support view.');
-      leaveSupportView(destination);
+      leaveSupportView(supportExitDestination(grant, destination));
     } catch {
       setEndError('Could not end this support view. Try again.');
       setEnding(false);
@@ -67,6 +67,6 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
   return {
     grant, loadError, endError, ending, end,
     retry: () => { setLoadError(null); setAttempt((count) => count + 1); },
-    leave: () => leaveSupportView(destination),
+    leave: () => leaveSupportView(supportExitDestination(grant, destination)),
   };
 }

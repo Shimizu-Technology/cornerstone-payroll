@@ -78,3 +78,9 @@ export function birthDate(draft: { month: string; day: string; year: string }, n
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
+
+/** The 429 message, using the Retry-After the API sent (a code's lockout window can be 15 minutes). */
+export function rateLimitedText(retryAfterSeconds: number | null | undefined): string {
+  if (!retryAfterSeconds || retryAfterSeconds <= 90) return 'Too many tries. Wait a minute, then try again.';
+  return `Too many tries. Wait about ${Math.ceil(retryAfterSeconds / 60)} minutes, then try again.`;
+}
