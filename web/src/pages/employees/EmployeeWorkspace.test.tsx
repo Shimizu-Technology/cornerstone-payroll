@@ -36,6 +36,7 @@ vi.mock('@/services/api', () => ({
   reportsApi: { employeePayHistory: apiMocks.employeePayHistory },
   payStubsApi: { batchPdf: apiMocks.batchPdf },
   recordActivitiesApi: { list: apiMocks.recordActivities },
+  tippedOccupationsApi: { history: async () => ({ data: [], codes: {} }) },
 }));
 
 vi.mock('@/components/employees/EmployeeRetirementElectionPanel', () => ({

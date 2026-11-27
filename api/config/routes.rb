@@ -459,6 +459,7 @@ Rails.application.routes.draw do
           end
           resource :hours_evidence, only: :show, controller: :employee_hours_evidence
           resources :work_profiles, only: [ :index, :create ], controller: :employee_work_profiles
+          resources :tipped_occupations, only: %i[index create update destroy], controller: :employee_tipped_occupations
           resources :retirement_elections, only: [ :index, :create ], controller: :employee_retirement_elections
           resources :retirement_year_inputs, only: [ :index, :create ], controller: :employee_retirement_year_inputs
           resources :document_requirements, only: [ :index, :update ], controller: :employee_document_requirements
@@ -757,6 +758,8 @@ Rails.application.routes.draw do
 
         get "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#index"
         put "payroll_filing_responsibilities", to: "payroll_filing_responsibilities#upsert"
+        get "tipped_occupation_codes", to: "employee_tipped_occupations#catalog"
+        post "year_end/tipped_occupations", to: "employee_tipped_occupations#bulk_set"
         get "year_end/clients", to: "year_end#clients"
         get "year_end/checklist", to: "year_end#checklist"
         post "year_end/acknowledgements", to: "year_end#create_acknowledgement"

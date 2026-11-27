@@ -197,7 +197,9 @@ class Efw2W2GuGenerator
       label = [ employee.full_name, employee.name_suffix ].compact_blank.join(" ")
       validate_text(employee, label, %i[first_name middle_name last_name name_suffix address_line1 address_line2 city], employee_problems)
       add_problem(employee_problems, :ssn_invalid, "#{label}: valid SSN required") unless employee.ssn_digits.to_s.match?(/\A(?!000|666|9)\d{3}(?!00)\d{2}(?!0000)\d{4}\z/)
-      add_problem(employee_problems, :employee_name_missing, "#{label}: first and last name required") if clean(employee.first_name, name: true).blank? || clean(employee.last_name, name: true).blank?
+      if clean(employee.first_name, name: true).blank? || clean(employee.last_name, name: true).blank?
+        add_problem(employee_problems, :employee_name_invalid, "#{label}: name format is invalid for e-file")
+      end
       validate_widths(employee, label, { first_name: 15, middle_name: 15, last_name: 20, name_suffix: 4 }, employee_problems, name: true)
       validate_address(employee, label, employee_problems)
       add_problem(employee_problems, :ss_wage_base_exceeded, "#{label}: Social Security wages plus tips exceed 2026 wage base") if cents(row[BOXES[2]]) + cents(row[BOXES[6]]) > 18_450_000

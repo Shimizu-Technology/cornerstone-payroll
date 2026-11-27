@@ -187,6 +187,21 @@ RSpec.describe "Demo company containment", type: :request do
       expect(response).to have_http_status(:forbidden)
     end
 
+    it "labels numeric placeholder names as expected in the checklist without relaxing e-file validation" do
+      create(:information_return_threshold, tax_year: 2026, threshold_amount: 2_000)
+      demo_employee.update_columns(first_name: "Employee", last_name: "01")
+
+      get "/api/v1/admin/year_end/checklist", params: { year: 2026 }
+      expect(response).to have_http_status(:ok), response.body
+      people = response.parsed_body.dig("data", "steps").find { |step| step.fetch("key") == "people" }
+      expect(people).to include("status" => "done", "summary" => a_string_including("has a filing ID and address"))
+      issues = people.fetch("issues")
+      expect(issues).to include(hash_including("code" => "DEMO_PLACEHOLDER_NAME_EXPECTED", "expected_for_demo" => true,
+        "employee_id" => demo_employee.id))
+      expect(YearEnd::Checklist.new(company: demo, year: 2026, user: admin).w2_mark_ready_blockers)
+        .not_to include(hash_including(code: "DEMO_PLACEHOLDER_NAME_EXPECTED"))
+    end
+
     it "lets review downloads and checklist steps through like a live client" do
       get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }
       expect_pdf_download
