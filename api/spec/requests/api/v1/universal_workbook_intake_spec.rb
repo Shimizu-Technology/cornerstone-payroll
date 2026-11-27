@@ -243,7 +243,7 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       expect(portal_period.status_events.where(event: "import", payroll_submission_id: submission_id)).to exist
     end
 
-    it "applies staff-approved client extra_hours (6.50h @ $20/hr) on top of a portal universal workbook (75 reg / 5 OT + $25 bonus = $1,805 gross)" do
+    it "applies staff-approved client extra_hours (6.50h in week 2 @ $20/hr) on top of a portal universal workbook (75 reg / 5 OT + $25 bonus -> 80 reg / 6.5 OT = $1,820 gross)" do
       ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
       primary_rate = employee_01.employee_wage_rates.find_by(is_primary: true) ||
         employee_01.employee_wage_rates.create!(label: "Primary", rate: 20.00, is_primary: true, active: true)
@@ -263,7 +263,8 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
                  kind: "extra_hours",
                  employee_id: employee_01.id,
                  employee_wage_rate_id: primary_rate.id,
-                 hours: "6.50"
+                 hours: "6.50",
+                 workweek: 2
                }
              ].to_json
            }
@@ -281,7 +282,11 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
         "change_index" => 0,
         "kind" => "extra_hours",
         "employee_id" => employee_01.id,
-        "hours" => "6.5"
+        "hours" => "6.5",
+        "workweek" => 2,
+        "resulting_regular_hours" => "80.0",
+        "resulting_overtime_hours" => "6.5",
+        "gross_pay_delta" => "145.00"
       )
 
       import_id = response.parsed_body.fetch("import_id")
@@ -293,20 +298,21 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
              portal_source_id: portal_source_id,
              confirm_client_changes: true,
              reviewed_changes: [
-               { change_index: 0, hours: "6.50", decision: "apply" }
+               { change_index: 0, hours: "6.50", workweek: 2, decision: "apply" }
              ]
            },
            as: :json
       expect(response).to have_http_status(:ok), response.body
 
       item = pay_period.reload.payroll_items.find_by!(employee: employee_01)
-      # Workbook: 75.00 reg + 5.00 OT + $25 bonus = $1,675.00
-      # Approved client change: +6.50 extra hours @ $20/hr = +$130.00 -> $1,805.00 gross
-      expect(item.hours_worked).to eq(BigDecimal("81.50"))
-      expect(item.overtime_hours).to eq(BigDecimal("5.00"))
+      # Workbook: Week 1 = 45, Week 2 = 35 -> 75.00 reg + 5.00 OT + $25 bonus = $1,675.00
+      # Approved client change: +6.50 extra hours in week 2 -> Week 2 = 41.50 (+5.00 reg @ $20 + 1.50 OT @ $30 = +$145.00) -> $1,820.00 gross
+      expect(item.hours_worked).to eq(BigDecimal("80.00"))
+      expect(item.overtime_hours).to eq(BigDecimal("6.50"))
       expect(item.bonus).to eq(BigDecimal("25.00"))
-      expect(item.gross_pay).to eq(BigDecimal("1805.00"))
-      expect(item.custom_columns_data.dig("client_change_evidence", "applied_regular_hours")).to eq("81.5")
+      expect(item.gross_pay).to eq(BigDecimal("1820.00"))
+      expect(item.custom_columns_data.dig("client_change_evidence", "applied_regular_hours")).to eq("80.0")
+      expect(item.custom_columns_data.dig("client_change_evidence", "applied_overtime_hours")).to eq("6.5")
     end
 
     it "clears withdrawn extra_hours client_change_evidence across rev 1 -> rev 2 -> rev 3 so omitting the employee in rev 3 succeeds" do
@@ -315,7 +321,7 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
         employee_01.employee_wage_rates.create!(label: "Primary", rate: 20.00, is_primary: true, active: true)
       ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
 
-      # Rev 1: workbook 45+35 (75 reg / 5 OT) + $25 bonus + 3.25 approved extra hours @ $20 -> 78.25 reg, $1,740 gross
+      # Rev 1: workbook 45+35 (75 reg / 5 OT) + $25 bonus + 3.25 approved extra hours in week 2 @ $20 -> 78.25 reg / 5 OT, $1,740 gross
       rev1_csv = CSV.generate do |csv|
         csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
         csv << [ employee_01.id, "Employee 01", "45.00", "35.00", "", "", "", "", "", "", "25.00", "", "", "", "", "" ]
@@ -325,7 +331,7 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
              payroll_workbook: portal_upload("rev1.csv", rev1_csv, csv_mime),
              no_changes: "false",
              changes: [
-               { kind: "extra_hours", employee_id: employee_01.id, employee_wage_rate_id: primary_rate.id, hours: "3.25" }
+               { kind: "extra_hours", employee_id: employee_01.id, employee_wage_rate_id: primary_rate.id, hours: "3.25", workweek: 2 }
              ].to_json
            }
       expect(response).to have_http_status(:created), response.body
@@ -340,7 +346,7 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
              import_id: response.parsed_body.fetch("import_id"),
              portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
              confirm_client_changes: true,
-             reviewed_changes: [ { change_index: 0, hours: "3.25", decision: "apply" } ]
+             reviewed_changes: [ { change_index: 0, hours: "3.25", workweek: 2, decision: "apply" } ]
            },
            as: :json
       expect(response).to have_http_status(:ok), response.body

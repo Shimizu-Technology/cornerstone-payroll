@@ -54,9 +54,14 @@ module PayrollIntake
       end
 
       restore_client_hours_baseline!(payroll_item) if row[:workbook_only]
-      baseline_hours = payroll_item.hours_worked.to_d.to_s("F")
+      baseline_regular_hours = payroll_item.hours_worked.to_d.to_s("F")
+      baseline_overtime_hours = payroll_item.overtime_hours.to_d.to_s("F")
       baseline_allocations = payroll_item.wage_rate_hours.deep_dup
       allocations = payroll_item.wage_rate_hours.deep_dup
+
+      resolved = resolve_client_hours_deltas!(payroll_item, employee, row, input, rate)
+      delta_regular = resolved.fetch(:delta_regular_hours)
+      delta_overtime = resolved.fetch(:delta_overtime_hours)
 
       if allocations.empty? && [ payroll_item.hours_worked, payroll_item.overtime_hours, payroll_item.holiday_hours, payroll_item.pto_hours ].any? { |hours| hours.to_d.positive? }
         base = if use_selected_wage_rate_for_existing && row[:selected_wage_rate_id].present?
@@ -98,18 +103,29 @@ module PayrollIntake
         allocations << entry
       end
 
-      entry["regular_hours"] = (entry["regular_hours"].to_d + input[:hours].to_d).to_f
-      payroll_item.hours_worked = payroll_item.hours_worked.to_d + input[:hours].to_d
+      entry["regular_hours"] = (entry["regular_hours"].to_d + delta_regular).to_f
+      entry["overtime_hours"] = (entry["overtime_hours"].to_d + delta_overtime).to_f
+      payroll_item.hours_worked = payroll_item.hours_worked.to_d + delta_regular
+      payroll_item.overtime_hours = payroll_item.overtime_hours.to_d + delta_overtime
       payroll_item.wage_rate_hours = allocations
 
       if row[:client_change_evidence].present?
         row[:client_change_evidence] = row[:client_change_evidence].merge(
-          baseline_regular_hours: baseline_hours,
+          hours_mode: resolved[:hours_mode],
+          workweek: resolved[:workweek],
+          workweek_start_date: input[:workweek_start_date] || resolved[:workweek_start_date],
+          workweek_end_date: input[:workweek_end_date] || resolved[:workweek_end_date],
+          delta_regular_hours: delta_regular.to_s("F"),
+          delta_overtime_hours: delta_overtime.to_s("F"),
+          gross_pay_delta: format("%.2f", resolved[:gross_pay_delta]),
+          baseline_regular_hours: baseline_regular_hours,
+          baseline_overtime_hours: baseline_overtime_hours,
           baseline_allocations: baseline_allocations,
           applied_regular_hours: payroll_item.hours_worked.to_d.to_s("F"),
+          applied_overtime_hours: payroll_item.overtime_hours.to_d.to_s("F"),
           applied_allocations: payroll_item.wage_rate_hours,
           applied_hours: client_hours_inputs(payroll_item)
-        )
+        ).compact
       end
     end
 
@@ -124,11 +140,17 @@ module PayrollIntake
       previous = item.custom_columns_data.to_h["client_change_evidence"].to_h
       return unless previous["kind"] == "extra_hours"
 
-      unless previous.key?("baseline_regular_hours") && item.hours_worked.to_d == previous["applied_regular_hours"].to_d &&
-          same_job_hours?(item.wage_rate_hours, previous["applied_allocations"]) && client_hours_inputs(item) == previous["applied_hours"]
+      overtime_matches = !previous.key?("applied_overtime_hours") ||
+        item.overtime_hours.to_d == previous["applied_overtime_hours"].to_d
+      unless previous.key?("baseline_regular_hours") &&
+          item.hours_worked.to_d == previous["applied_regular_hours"].to_d &&
+          overtime_matches &&
+          same_job_hours?(item.wage_rate_hours, previous["applied_allocations"]) &&
+          client_hours_inputs(item) == previous["applied_hours"]
         raise ArgumentError, "Saved hours changed after the client's hours were imported for #{item.employee.full_name}. Applied regular hours: #{previous["applied_regular_hours"]}; baseline: #{previous["baseline_regular_hours"]}; current: #{item.hours_worked}. Save the intended hours against each job on the worksheet, then reopen this import. Reconcile the worksheet hours before importing again."
       end
       item.hours_worked = previous.fetch("baseline_regular_hours")
+      item.overtime_hours = previous["baseline_overtime_hours"] if previous.key?("baseline_overtime_hours")
       item.wage_rate_hours = previous.fetch("baseline_allocations")
       true
     end
@@ -136,6 +158,55 @@ module PayrollIntake
     private
 
     attr_reader :pay_period
+
+    def resolve_client_hours_deltas!(payroll_item, employee, row, input, rate)
+      if ExtraHoursPolicy.contractor?(employee, as_of: pay_period.end_date)
+        return ExtraHoursPolicy.resolve_deltas!(
+          mode: "straight_time",
+          baseline_regular: payroll_item.hours_worked,
+          baseline_overtime: payroll_item.overtime_hours,
+          rate: rate.rate,
+          hours: input[:hours],
+          regular_hours: input[:regular_hours],
+          overtime_hours: input[:overtime_hours]
+        )
+      end
+
+      if input[:workweek].present?
+        workweeks = ExtraHoursPolicy.workweeks_for(
+          company: pay_period.company,
+          start_date: pay_period.start_date,
+          end_date: pay_period.end_date,
+          pay_period: pay_period
+        )
+        base_w1 = input.key?(:baseline_week1_hours) ? input[:baseline_week1_hours] : row[:week1_hours]
+        base_w2 = input.key?(:baseline_week2_hours) ? input[:baseline_week2_hours] : row[:week2_hours]
+        return ExtraHoursPolicy.resolve_deltas!(
+          mode: "workweek",
+          baseline_regular: payroll_item.hours_worked,
+          baseline_overtime: payroll_item.overtime_hours,
+          rate: rate.rate,
+          hours: input[:hours],
+          workweek: input[:workweek],
+          workweeks: workweeks,
+          baseline_week1: base_w1,
+          baseline_week2: base_w2
+        )
+      end
+
+      if input.key?(:regular_hours) || input.key?(:overtime_hours)
+        return ExtraHoursPolicy.resolve_deltas!(
+          mode: "split",
+          baseline_regular: payroll_item.hours_worked,
+          baseline_overtime: payroll_item.overtime_hours,
+          rate: rate.rate,
+          regular_hours: input[:regular_hours],
+          overtime_hours: input[:overtime_hours]
+        )
+      end
+
+      raise ArgumentError, "Choose regular/overtime hours or a workweek for #{employee.full_name}'s extra hours before applying."
+    end
 
     def client_hours_inputs(item)
       %w[hours_worked overtime_hours holiday_hours pto_hours].to_h { |field| [ field, item.public_send(field).to_d.to_s("F") ] }

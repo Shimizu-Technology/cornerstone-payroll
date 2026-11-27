@@ -343,7 +343,7 @@ module Api
             ).validate!
             included_decisions = disposition_plan.decisions.select(&:included?)
 
-            client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period) if selection
+            client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period, session: source_package) if selection
             validate_mosa_included_rows!(included_decisions, restorable_owner_ids: client_changes&.restorable_owner_ids || [])
             included_employee_ids = included_decisions.map { |decision| decision.row.employee_id }.compact.to_set
 
@@ -386,7 +386,7 @@ module Api
             end
 
             if selection
-              matched_data = client_changes.apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours, :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay ])[:reviewed_changes],
+              matched_data = client_changes.apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours, :regular_hours, :overtime_hours, :workweek, :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay ])[:reviewed_changes],
                   confirmed: params[:confirm_client_changes], dispositions: disposition_plan.decisions, source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
             end
 
@@ -575,8 +575,8 @@ module Api
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
             pending_portal_source: pending_portal_source_json,
             loan_setup: loan_setup_access,
-            client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),
-            pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched]) : nil)
+            client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched], source_package: source_package) : nil),
+            pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched], source_package: source_package) : nil)
           }
         end
 
@@ -674,8 +674,8 @@ module Api
             ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id)
         end
 
-        def change_prefill(submission, rows)
-          changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period)
+        def change_prefill(submission, rows, source_package: nil)
+          changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period, session: source_package)
           { submission_id: submission.id, revision: submission.revision, rows: changes.proposals(source_rows: rows.map(&:deep_symbolize_keys)), removals: changes.removals,
             manual_review_warnings: changes.manual_review_warnings }
         end

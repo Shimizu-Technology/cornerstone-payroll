@@ -233,19 +233,26 @@ it('fills per-owner boxes from client changes, permits edits and requires explic
   const data = preview([ownerMissing]);
   data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
     { change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', amount: '4500.00' },
-    { change_index: 1, kind: 'extra_hours', employee_id: 1, employee_name: 'Avery Server', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0' },
+    { change_index: 1, kind: 'extra_hours', employee_id: 1, employee_name: 'Avery Server', hours: '68', extra_hours_mode: 'split', regular_hours: '68', overtime_hours: '0', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', baseline_regular_hours: '40.0', baseline_overtime_hours: '0.0' },
   ] };
   mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
   open(data);
   expect(ownerInput().value).toBe('4500.00');
-  expect((screen.getByLabelText('Extra hours for Avery Server') as HTMLInputElement).value).toBe('68');
+  expect((screen.getByLabelText('Regular hours for Avery Server') as HTMLInputElement).value).toBe('68');
+  expect((screen.getByLabelText('Overtime hours for Avery Server') as HTMLInputElement).value).toBe('0');
   expect(applyButton().disabled).toBe(true);
   fireEvent.change(ownerInput(), { target: { value: '4495.00' } });
   fireEvent.change(screen.getByLabelText("Reason for changing Morgan Owner's entry"), { target: { value: 'Client confirmed correction' } });
   fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
   expect(applyButton().disabled).toBe(false);
   fireEvent.click(applyButton());
-  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({ confirm_client_changes: true, reviewed_changes: [{ change_index: 0, amount: '4495.00', reason: 'Client confirmed correction' }, { change_index: 1, hours: '68' }] })));
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
+    confirm_client_changes: true,
+    reviewed_changes: [
+      { change_index: 0, amount: '4495.00', reason: 'Client confirmed correction' },
+      { change_index: 1, regular_hours: '68', overtime_hours: '0', hours: '68' },
+    ],
+  })));
   expect(mocks.createItem).not.toHaveBeenCalled(); expect(mocks.updateItem).not.toHaveBeenCalled();
 });
 
@@ -279,7 +286,7 @@ it('counts employees present only in the client changes in the Apply total', () 
   const data = preview([ownerMissing]);
   data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
     { change_index: 0, kind: 'owner_pay', employee_id: 2, employee_name: 'Morgan Owner', amount: '4500.00' },
-    { change_index: 1, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0' },
+    { change_index: 1, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', extra_hours_mode: 'split', regular_hours: '68', overtime_hours: '0', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0' },
   ] };
   open(data);
   expect(screen.getByRole('button', { name: 'Apply Import (3 employees)' })).toBeTruthy();
@@ -287,7 +294,7 @@ it('counts employees present only in the client changes in the Apply total', () 
 it('requires overwrite confirmation for an existing worksheet employee absent from both files', () => {
   const data = preview([]);
   data.client_change_prefill = { submission_id: 20, revision: 2, rows: [
-    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', extra_hours_mode: 'split', regular_hours: '68', overtime_hours: '0', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
   ] };
   open(data);
   expect(screen.getByText('Baseline before client hours: 2.0 regular hours · 0.0 overtime hours.')).toBeTruthy();
@@ -303,7 +310,7 @@ it('requires renewed overwrite confirmation when selecting a revision adds an ex
   data.preview.matched[0].overwrite_required = true;
   data.pending_portal_source = { submission_id: 20, revision: 2, period_id: 90, changes: [], no_changes: false };
   data.pending_change_prefill = { submission_id: 20, revision: 2, rows: [
-    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', extra_hours_mode: 'split', regular_hours: '68', overtime_hours: '0', employee_wage_rate_id: 7, wage_rate_label: 'Maintenance', wage_rate: '35.0', overwrite_required: true, saved_regular_hours: '2.0', saved_overtime_hours: '0.0' },
   ] };
   open(data);
   fireEvent.click(screen.getByLabelText(/Replace existing hours, tips and direct loan deductions/));
@@ -340,7 +347,7 @@ it('requires a deliberate pay choice when client and existing or workbook pay di
 it('lets staff decline an invalid client row with a required reason and records the decision', async () => {
   const data = preview([]);
   data.client_change_prefill = { submission_id: 20, revision: 2, removals: ["Jordan: revision 1's 68 h will be removed"], rows: [
-    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', error: 'Employee is excluded' },
+    { change_index: 0, kind: 'extra_hours', employee_id: 99, employee_name: 'Jordan Worker', hours: '68', extra_hours_mode: 'split', regular_hours: '68', overtime_hours: '0', error: 'Employee is excluded' },
   ] };
   mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: {} });
   open(data);
@@ -426,4 +433,128 @@ it('keeps the reviewed import in place, shows a busy Apply button, and permits r
   fail(new Error('Synthetic import failure'));
   await waitFor(() => expect(applyButton().disabled).toBe(false));
   expect(screen.getByText('Synthetic import failure')).toBeTruthy();
+});
+
+it('shows live regular/overtime hours and gross pay delta for biweekly workweek changes and updates when switching weeks', async () => {
+  const data = preview([]);
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '6.5',
+        extra_hours_mode: 'workweek',
+        workweek: 2,
+        workweeks: [
+          { index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' },
+          { index: 2, start_date: '2026-06-21', end_date: '2026-06-27', label: 'Jun 21–27' },
+        ],
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Primary',
+        wage_rate: '20.0',
+        baseline_regular_hours: '75.0',
+        baseline_overtime_hours: '5.0',
+        baseline_week1_hours: '45.0',
+        baseline_week2_hours: '35.0',
+      },
+    ],
+  };
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(data);
+
+  const previewBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Avery Server' });
+  expect(previewBox.textContent).toContain('80.00 regular · 6.50 overtime');
+  expect(previewBox.textContent).toContain('+$145.00');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Week 1 (Jun 14–20)' }));
+  expect(previewBox.textContent).toContain('75.00 regular · 11.50 overtime');
+  expect(previewBox.textContent).toContain('+$195.00');
+
+  // Changing the workweek requires an edit reason before confirmation
+  expect((screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("Reason for changing Avery Server's entry"), { target: { value: 'Worked in week 1 per timesheet' } });
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
+    confirm_client_changes: true,
+    reviewed_changes: [{ change_index: 0, hours: '6.5', workweek: 1, reason: 'Worked in week 1 per timesheet' }],
+  })));
+});
+
+it('shows live split preview (+$155.00 for 4 reg + 2.5 OT at $20/hr) and blocks pending unclassified rows until staff picks a week or split', async () => {
+  const data = preview([]);
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '6.5',
+        extra_hours_mode: 'split',
+        needs_classification: true,
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Service',
+        wage_rate: '20.0',
+        baseline_regular_hours: '70.0',
+        baseline_overtime_hours: '2.0',
+      },
+    ],
+  };
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(data);
+
+  expect(screen.getByText(/without a regular\/overtime split/)).toBeTruthy();
+  expect((screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement).disabled).toBe(true);
+  expect(applyButton().disabled).toBe(true);
+
+  fireEvent.change(screen.getByLabelText('Regular hours for Avery Server'), { target: { value: '4' } });
+  fireEvent.change(screen.getByLabelText('Overtime hours for Avery Server'), { target: { value: '2.5' } });
+  const previewBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Avery Server' });
+  expect(previewBox.textContent).toContain('74.00 regular · 4.50 overtime');
+  expect(previewBox.textContent).toContain('+$155.00');
+
+  fireEvent.click(screen.getByLabelText(/I checked the owner pay and extra hours/));
+  expect(applyButton().disabled).toBe(false);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
+    reviewed_changes: [{ change_index: 0, regular_hours: '4', overtime_hours: '2.5', hours: '6.5' }],
+  })));
+});
+
+it('shows straight-time preview with 0 OT for 1099 contractors', () => {
+  const data = preview([]);
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 99,
+        employee_name: 'Casey Contractor',
+        hours: '6.5',
+        extra_hours_mode: 'straight_time',
+        is_contractor: true,
+        employee_wage_rate_id: 8,
+        wage_rate_label: 'Contract',
+        wage_rate: '20.0',
+        baseline_regular_hours: '75.0',
+        baseline_overtime_hours: '0.0',
+      },
+    ],
+  };
+  open(data);
+  const previewBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Casey Contractor' });
+  expect(previewBox.textContent).toContain('81.50 regular · 0.00 overtime');
+  expect(previewBox.textContent).toContain('+$130.00');
+  expect(previewBox.textContent).toContain('(straight time)');
+  expect(screen.getByText(/1099 contractor · straight time only/)).toBeTruthy();
 });
