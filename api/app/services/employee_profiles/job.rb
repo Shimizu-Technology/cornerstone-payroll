@@ -7,8 +7,10 @@ module EmployeeProfiles
   # Employee#wage_rates_on). A change already scheduled to take effect by
   # the end of the period the next payday pays for comes with it, read on
   # that period's end date as payroll reads it, so the note matches the next
-  # paycheck. Never the SSN, bank details, notes or anyone else's record. A
-  # former job shows nothing.
+  # paycheck. Once payroll has calculated that check, its own rates win: a
+  # later history correction keeps calculated checks as they are. Never the
+  # SSN, bank details, notes or anyone else's record. A former job shows
+  # nothing.
   class Job
     def initialize(context, today: PayrollBusinessClock.today)
       @context = context
@@ -58,13 +60,42 @@ module EmployeeProfiles
       @start_date = [ employee.hire_date, rehired_on ].compact.max
     end
 
+    def next_period
+      return @next_period if defined?(@next_period)
+
+      @next_period = NextPayday.period(@context, today: @today)
+    end
+
     # The end date of the period the shown next payday pays for, when a
     # scheduled change could reach that paycheck.
     def next_period_end
-      return @next_period_end if defined?(@next_period_end)
+      end_date = next_period&.end_date
+      end_date if end_date && end_date > @today
+    end
 
-      end_date = NextPayday.period(@context, today: @today)&.end_date
-      @next_period_end = end_date if end_date && end_date > @today
+    # This person's own check in that period once payroll has calculated it.
+    def next_check
+      return @next_check if defined?(@next_check)
+
+      @next_check = if next_period&.status.in?(%w[calculated approved committed])
+        PayrollItem.where(company_id: @context.company_id, pay_period_id: next_period.id, employee_id: employee.id,
+          voided: false, correction_for_payroll_item_id: nil).order(:id).first
+      end
+    end
+
+    # The next check's rate for a job: its wage-rate line, or its single rate
+    # when it has no job lines (payroll pays the primary job from pay_rate).
+    def next_check_rate(row, rows)
+      lines = Array(next_check.wage_rate_hours)
+      return lines.find { |line| line["employee_wage_rate_id"].to_s == row.id.to_s }&.dig("rate") if lines.any?
+
+      next_check.pay_rate if row == (rows.find(&:is_primary) || rows.first)
+    end
+
+    # A calculated check paying something other than today's amount. It has
+    # no start date of its own, so the app says "Your next paycheck uses ...".
+    def next_check_change(today_value, check_value)
+      { rate: money(check_value), effective_on: nil } if check_value && check_value.to_d != today_value.to_d
     end
 
     # The pay version payroll will use for the next paycheck, when it starts after today.
@@ -92,14 +123,20 @@ module EmployeeProfiles
     # change when there is one. A worker paid from the profile rate alone
     # has one unlabeled rate.
     def hourly
-      later = next_period_end ? employee.wage_rates_on(next_period_end).index_by(&:id) : {}
-      rates = employee.wage_rates_on(@today).filter_map do |row|
-        { label: row.label, rate: money(row.rate), change: wage_rate_change(row, later[row.id]) } if row.rate
+      later = next_period_end && !next_check ? employee.wage_rates_on(next_period_end).index_by(&:id) : {}
+      rows = employee.wage_rates_on(@today).select(&:rate)
+      rates = rows.map do |row|
+        change = next_check ? next_check_change(row.rate, next_check_rate(row, rows)) : wage_rate_change(row, later[row.id])
+        { label: row.label, rate: money(row.rate), change: change }
       end
       if rates.empty? && snapshot["pay_rate"]
-        later_rate = upcoming_compensation&.pay_rate
-        change = { rate: money(later_rate), effective_on: upcoming_compensation.effective_on.iso8601 } if later_rate && later_rate.to_d != snapshot["pay_rate"].to_d
-        rates = [ { label: nil, rate: money(snapshot["pay_rate"]), change: change } ]
+        today_rate = snapshot["pay_rate"]
+        change = if next_check
+          next_check_change(today_rate, next_check.pay_rate)
+        elsif (later_rate = upcoming_compensation&.pay_rate) && later_rate.to_d != today_rate.to_d
+          { rate: money(later_rate), effective_on: upcoming_compensation.effective_on.iso8601 }
+        end
+        rates = [ { label: nil, rate: money(today_rate), change: change } ]
       end
       { type: "hourly", rates: rates }
     end
@@ -113,13 +150,21 @@ module EmployeeProfiles
 
     # A salary or flat fee change on the same pay basis; a change of basis isn't described.
     def with_change(current)
-      later = upcoming_compensation&.snapshot
+      later = next_check ? next_check_compensation : upcoming_compensation&.snapshot
       return current.merge(change: nil) unless later && later.values_at(*%w[employment_type salary_type contractor_pay_type]) ==
         snapshot.values_at(*%w[employment_type salary_type contractor_pay_type])
 
       upcoming = current[:type] == "salary" ? salary(later) : flat_fee(later)
       changed = upcoming[:per_period] && upcoming[:per_period] != current[:per_period]
-      current.merge(change: (upcoming.merge(effective_on: upcoming_compensation.effective_on.iso8601).except(:type) if changed))
+      effective_on = next_check ? nil : upcoming_compensation.effective_on.iso8601
+      current.merge(change: (upcoming.merge(effective_on: effective_on).except(:type) if changed))
+    end
+
+    # The pay basis the calculated check used, with the rate it paid.
+    def next_check_compensation
+      basis = next_check.calculation_context_snapshot.to_h.fetch("employee", {}).to_h
+        .slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES)
+      snapshot.merge(basis).merge("pay_rate" => next_check.pay_rate)
     end
 
     def flat_fee(compensation)

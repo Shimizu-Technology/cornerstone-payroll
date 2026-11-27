@@ -152,6 +152,11 @@ describe('My job', () => {
 
     show('/my-info', { ...JOB, pay: { type: 'hourly', rates: [{ label: null, rate: '15.00', change: { rate: '17.00', effective_on: '2026-12-01' } }] } });
     expect((await jobCard()).textContent).toContain('$15.00 an hourChanges to $17.00 an hour on Dec 1');
+    cleanup();
+
+    // A calculated next check that pays a different rate has no start date of its own.
+    show('/my-info', { ...JOB, pay: { type: 'hourly', rates: [{ label: null, rate: '18.00', change: { rate: '15.00', effective_on: null } }] } });
+    expect((await jobCard()).textContent).toContain('$18.00 an hourYour next paycheck uses $15.00 an hour');
   });
 
   it('notes a salary change per payday, and shows the original hire date after a rehire', async () => {

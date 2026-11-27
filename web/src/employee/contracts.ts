@@ -404,7 +404,9 @@ export function parseTaxForms(data: unknown): TaxForm[] {
 // start_date, first_hired_on, payment_method, contact_name } | null }. Null
 // for a former job. Pay is as of today; `change` is a change scheduled to
 // reach the next paycheck ({ rate | per_period, annual, effective_on }), or
-// null. first_hired_on is set only after a rehire. No SSN or bank numbers.
+// null. effective_on is null when the next check is already calculated at a
+// different amount. first_hired_on is set only after a rehire. No SSN or
+// bank numbers.
 
 export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
 
@@ -412,15 +414,19 @@ export interface JobRate {
   /** The job's name on the wage rate ("Server"), or null for a single profile rate. */
   label: string | null;
   rate: Money;
-  /** The rate the next paycheck will use, when a change starts before its period ends. */
-  change: { rate: Money; effectiveOn: string } | null;
+  /**
+   * The rate the next paycheck will use, when it differs from today's: a
+   * change starting before its period ends, or (effectiveOn null) the rate
+   * an already calculated check pays.
+   */
+  change: { rate: Money; effectiveOn: string | null } | null;
 }
 
-/** A salary or fee the next paycheck will use, when a change starts before its period ends. */
+/** A salary or fee the next paycheck will use, when it differs from today's (effectiveOn as for JobRate). */
 export interface PeriodPayChange {
   perPeriod: Money;
   annual: Money | null;
-  effectiveOn: string;
+  effectiveOn: string | null;
 }
 
 export type JobPay =
@@ -450,15 +456,13 @@ export interface EmployeeJob {
 function rateChange(value: unknown): JobRate['change'] {
   const change = record(value);
   const rate = money(change?.rate);
-  const effectiveOn = isoDate(change?.effective_on);
-  return rate && effectiveOn ? { rate, effectiveOn } : null;
+  return rate ? { rate, effectiveOn: isoDate(change?.effective_on) } : null;
 }
 
 function periodPayChange(value: unknown): PeriodPayChange | null {
   const change = record(value);
   const perPeriod = money(change?.per_period);
-  const effectiveOn = isoDate(change?.effective_on);
-  return perPeriod && effectiveOn ? { perPeriod, annual: money(change?.annual), effectiveOn } : null;
+  return perPeriod ? { perPeriod, annual: money(change?.annual), effectiveOn: isoDate(change?.effective_on) } : null;
 }
 
 function jobPay(value: unknown): JobPay | null {

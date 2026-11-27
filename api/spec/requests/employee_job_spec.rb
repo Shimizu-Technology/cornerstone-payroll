@@ -129,6 +129,64 @@ RSpec.describe "Employee job", type: :request do
       expect(job_for(later_link, subject: "user_later").dig("pay", "rates")).to eq([ { "label" => nil, "rate" => "15.00", "change" => nil } ])
     end
 
+    context "when payroll has already calculated that check" do
+      # The period behind the next payday is under way and committed with this person's check.
+      def committed_check!(person, **attributes)
+        period = create(:pay_period, company: company, start_date: today - 3, end_date: today + 5, pay_date: today + 9,
+          status: "committed", committed_at: Time.current)
+        create(:payroll_item, pay_period: period, employee: person, company: company, pay_rate: 15, **attributes)
+      end
+
+      def correction!(person, effective_on, **changes)
+        change!(person, effective_on, historical_correction: true, **changes)
+      end
+
+      it "reads the check's own rate, not a later history correction it keeps" do
+        committed_check!(employee)
+        correction!(employee, today + 2, pay_rate: 18)
+        # The correction would reach the period end, but the committed check pays $15.
+        expect(job_for.dig("pay", "rates")).to eq([ { "label" => nil, "rate" => "15.00", "change" => nil } ])
+      end
+
+      it "says what the check pays when today's rate already differs" do
+        committed_check!(employee)
+        correction!(employee, today - 1, pay_rate: 18)
+        expect(job_for.dig("pay", "rates")).to eq([
+          { "label" => nil, "rate" => "18.00", "change" => { "rate" => "15.00", "effective_on" => nil } }
+        ])
+      end
+
+      it "reads each job from the check's wage-rate lines" do
+        server = create(:employee_wage_rate, employee: employee, label: "Server", rate: 15, is_primary: true)
+        bar = create(:employee_wage_rate, employee: employee, label: "Bartender", rate: 17.5)
+        committed_check!(employee, wage_rate_hours: [
+          { "employee_wage_rate_id" => server.id, "label" => "Server", "rate" => "15.0", "regular_hours" => 40, "is_primary" => true, "active" => true },
+          { "employee_wage_rate_id" => bar.id, "label" => "Bartender", "rate" => "17.5", "regular_hours" => 8, "active" => true }
+        ])
+        correction!(employee, today + 2, wage_rate_edits: [ { id: server.id, rate: 18 } ])
+
+        expect(job_for.dig("pay", "rates")).to eq([
+          { "label" => "Server", "rate" => "15.00", "change" => nil },
+          { "label" => "Bartender", "rate" => "17.50", "change" => nil }
+        ])
+      end
+
+      it "reads a salary from the check, saying what it pays when today's salary differs" do
+        salaried = create(:employee, company: company, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
+        committed_check!(salaried, employment_type: "salary", pay_rate: 52_000, calculation_context_snapshot: {
+          "employee" => { "employment_type" => "salary", "salary_type" => "annual", "pay_frequency" => "biweekly" }
+        })
+        correction!(salaried, today - 1, pay_rate: 57_200)
+        login = create(:user, role: :portal_employee, company: company, clerk_id: "user_salary")
+        salary_link = EmployeeAccountLink.create!(user: login, company: company, employee: salaried, status: "active")
+
+        expect(job_for(salary_link, subject: "user_salary").fetch("pay")).to eq(
+          "type" => "salary", "per_period" => "2200.00", "annual" => "57200.00",
+          "change" => { "per_period" => "2000.00", "annual" => "52000.00", "effective_on" => nil }
+        )
+      end
+    end
+
     it "notes a salary's new amount per payday and per year" do
       salaried = create(:employee, company: company, employment_type: "salary", salary_type: "annual", pay_rate: 52_000)
       next_payday!
