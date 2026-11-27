@@ -1,3 +1,4 @@
+import { PayrollOverrideActions } from './pay-periods/pay-run/PayrollOverrideActions';
 import { UnsavedPayrollChangesGuard } from '@/components/routing/UnsavedPayrollChangesGuard';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -149,6 +150,9 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
       attention={attention.length ? attention.map((item, index) => <span key={item.text}>{index > 0 && ' · '}<Link className="underline decoration-neutral-300 underline-offset-4 hover:text-primary-800" to={item.href}>{item.text}</Link></span>) : <Link className="underline decoration-neutral-300 underline-offset-4" to={route('work', nextStep.hash)}>{nextStep.text}</Link>}
       information={exclusions.information.join(' · ')}
       actions={<PayRunProcessingActions {...sections.processing} />} totals={<PayRunSummary {...sections.summary} />} />
+    {activeTab === 'work' && companyId && <PayrollOverrideActions key={payPeriod.id} companyId={companyId} periodId={payPeriod.id}
+      reviewId={payPeriod.rollback_review_id} canRetry={payPeriod.can_retry_payroll_job}
+      onReviewComplete={() => void sections.corrections.loadPayPeriod(payPeriod.id, true, true)} />}
     {props.navigation}
     <h2 className="sr-only">{activeTab === 'checks' ? 'Checks and payments' : activeTab === 'reports' ? 'Reports' : activeTab === 'activity' ? 'Activity' : 'Payroll'}</h2>
     <div className="min-h-[24rem] space-y-4 p-4 sm:p-6 lg:px-8">

@@ -14,6 +14,10 @@ module PortalNotifications
   BATCH_WINDOW = 2.minutes
 
   CATEGORIES = {
+    "admin_override_staff" => {
+      audience: "staff", default_mode: "immediate", label: "Administrative changes",
+      description: "A privileged change was made for a client."
+    },
     "payroll_finalized" => {
       audience: "client", default_mode: "digest", label: "Payroll finalized",
       description: "Payroll is final and pay statements post on pay date."
@@ -93,6 +97,10 @@ module PortalNotifications
   }.freeze
 
   EVENT_TYPES = {
+    "admin_override" => { category: "admin_override_staff", scopes: {
+      "account_team" => "admin_override_staff", "super_admins" => "payroll_super_admin",
+      "client_managers" => "payroll_updates"
+    } },
     "payroll_committed" => { category: "payroll_finalized", scopes: {
       "client_managers" => "payroll_finalized", "client_viewers" => "payroll_finalized"
     } },
@@ -220,6 +228,15 @@ module PortalNotifications
 
     # Record the alert in the rollback transaction with its immutable action ID.
     # Let ledger errors propagate so the rollback and its audit writes fail.
+    def admin_override!(entry, client_managers: false)
+      scopes = %w[account_team super_admins]
+      scopes << "client_managers" if client_managers
+      scopes.each do |scope|
+        record!(event_type: "admin_override", company: entry.company, actor: entry.actor, subject: entry.company,
+          dedupe_key: "admin_override:#{entry.id}:#{scope}", metadata: { recipient_scope: scope })
+      end
+    end
+
     def payroll_reopened!(period, actor:, action_id:, self_override: false)
       raise ArgumentError, "Payroll rollback action ID is required" if action_id.blank?
 

@@ -63,7 +63,7 @@ describe('AireLockTimeControl', () => {
     expect(dialog.textContent).toContain('go to the next pay period as late hours');
 
     await user.click(screen.getAllByRole('button', { name: 'Lock now' }).at(-1)!);
-    expect(screen.getByRole('alert').textContent).toBe('Enter a reason for the change.');
+    expect(screen.getByRole('alert').textContent).toBe('Enter a reason of at least 10 characters.');
     expect(mocks.change).not.toHaveBeenCalled();
 
     await user.type(screen.getByLabelText(/Reason/), 'All approvals are in');
