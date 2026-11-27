@@ -87,8 +87,8 @@ describe('employee API contracts', () => {
       ['guam_income_tax', 'Guam income tax'], [null, 'Territory surcharge'],
     ]);
     expect(detail?.earlierVersions).toEqual([
-      { id: '880', status: 'replaced', corrected: true, postedAt: '2026-11-20T08:00:00Z', paymentLine: 'Check #4012' },
-      { id: '879', status: 'replaced', corrected: false, postedAt: null, paymentLine: null },
+      { id: '880', status: 'replaced', corrected: true, ytdChanged: false, postedAt: '2026-11-20T08:00:00Z', paymentLine: 'Check #4012' },
+      { id: '879', status: 'replaced', corrected: false, ytdChanged: false, postedAt: null, paymentLine: null },
     ]);
   });
 

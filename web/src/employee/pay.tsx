@@ -576,10 +576,11 @@ function StubPdfButton({ id, filename, label }: { id: string; filename: string; 
   );
 }
 
-function EarlierStubs({ versions, payDate, corrected }: { versions: EarlierVersion[]; payDate: string; corrected: boolean }): ReactElement {
+function EarlierStubs({ versions, payDate, corrected, ytdChanged }: { versions: EarlierVersion[]; payDate: string; corrected: boolean; ytdChanged: boolean }): ReactElement {
   return (
     <details className="rounded-xl border border-neutral-200 px-3">
       <summary className="min-h-11 cursor-pointer py-2.5 font-semibold">{corrected ? 'Corrected — see the original' : 'See earlier versions'}</summary>
+      {ytdChanged && <p className="text-sm text-neutral-700">Year-to-date figures updated</p>}
       <p className="pb-3 text-sm text-neutral-700">Earlier stubs are available as they were issued.</p>
       <ul className="divide-y divide-neutral-200">
         {versions.map((version, index) => {
@@ -589,6 +590,7 @@ function EarlierStubs({ versions, payDate, corrected }: { versions: EarlierVersi
             <li key={version.id} className="space-y-2 py-3">
               <h3 className="emp-h3">{title}</h3>
               {version.postedAt && <p className="text-sm text-neutral-700">Posted {formatGuamDateTime(version.postedAt, { second: undefined })}</p>}
+              {version.ytdChanged && <p className="text-sm text-neutral-700">Year-to-date figures updated</p>}
               {version.paymentLine && <p className="text-sm text-neutral-700">{version.paymentLine}</p>}
               <StubPdfButton id={version.id}
                 filename={original ? `original-pay-stub-${payDate}.pdf` : `earlier-pay-stub-${payDate}-${version.id}.pdf`}
@@ -741,7 +743,7 @@ function StubDetailView({
       </header>
 
       {!stub.withdrawn && <>
-        {stub.earlierVersions.length > 0 && <EarlierStubs key={stub.id} versions={stub.earlierVersions} payDate={stub.payDate} corrected={stub.corrected} />}
+        {stub.earlierVersions.length > 0 && <EarlierStubs key={stub.id} versions={stub.earlierVersions} payDate={stub.payDate} corrected={stub.corrected} ytdChanged={stub.ytdChanged} />}
 
         <div className="emp-net">
           <p className="emp-label-quiet">Take-home pay <span className="emp-term">(net pay)</span></p>

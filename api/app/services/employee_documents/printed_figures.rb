@@ -15,13 +15,21 @@ module EmployeeDocuments
 
     module_function
 
-    def for_document(document)
-      document.printed_figures_sha256 || begin
-        bytes = R2StorageService.new.download(document.storage_key)
-        raise Unreadable unless bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
-
-        digest(bytes)
+    Digests = Data.define(:full, :current) do
+      def attributes
+        { printed_figures_sha256: full, current_figures_sha256: current }
       end
+    end
+
+    def for_document(document)
+      if document.printed_figures_sha256 && document.current_figures_sha256
+        return Digests.new(full: document.printed_figures_sha256, current: document.current_figures_sha256)
+      end
+
+      bytes = R2StorageService.new.download(document.storage_key)
+      raise Unreadable unless bytes && Digest::SHA256.hexdigest(bytes) == document.sha256
+
+      digest(bytes)
     end
 
     def digest(bytes)
@@ -42,7 +50,20 @@ module EmployeeDocuments
       end
       raise Unreadable unless %w[EARNINGS SUMMARY].all? { |heading| figures[heading].any? }
 
-      Digest::SHA256.hexdigest(figures.sort.to_json)
+      current = figures.except("YEAR-TO-DATE SUMMARY").filter_map do |heading, entries|
+        values = if heading == "SUMMARY"
+          entries
+        else
+          # The last cell is YTD. Ignore rows that exist solely to display
+          # earlier pay, while retaining rows with current hours or amounts.
+          entries.map { |entry| entry.size == 1 ? entry : entry[0...-1] }.select do |entry|
+            entry.any? { |value| value.delete("$").to_d.nonzero? }
+          end
+        end
+        [ heading, values ] if values.any?
+      end
+      Digests.new(full: Digest::SHA256.hexdigest(figures.sort.to_json),
+        current: Digest::SHA256.hexdigest(current.sort.to_json))
     rescue PDF::Reader::Error, ArgumentError => error
       raise Unreadable, error.class.name
     end

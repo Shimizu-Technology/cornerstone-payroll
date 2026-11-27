@@ -295,6 +295,22 @@ RSpec.describe "Employee statements", type: :request do
       travel_to(at) { EmployeeDocuments::PostPayStub.new(item.reload).call }
     end
 
+    it "preserves the current correction label and distinguishes money, YTD and details in history" do
+      original = post_stub!(item, status: "replaced")
+      correction = post_stub!(item, revision: 2, status: "replaced", replaces: original)
+      correction.update!(money_changed: true, correction_label: true)
+      details = post_stub!(item, revision: 3, status: "replaced", replaces: correction)
+      details.update!(money_changed: false, correction_label: true)
+      current = post_stub!(item, revision: 4, replaces: details)
+      current.update!(money_changed: false, correction_label: true, ytd_changed: true)
+
+      get "/api/v1/employee/statements/#{current.id}", headers: headers_for
+
+      expect(response.parsed_body).to include("corrected" => true, "ytd_changed" => true)
+      expect(response.parsed_body.fetch("earlier_versions").map { |row| row.values_at("id", "corrected") })
+        .to eq([ [ details.id.to_s, false ], [ correction.id.to_s, true ], [ original.id.to_s, false ] ])
+    end
+
     it "labels a paper void until its corrected replacement posts" do
       post!(Time.utc(2026, 8, 20))
       original = EmployeeDocument.where(payroll_item: item).sole
@@ -319,7 +335,7 @@ RSpec.describe "Employee statements", type: :request do
 
       get "/api/v1/employee/statements/#{replacement.id}", headers: headers_for
       expect(response.parsed_body.fetch("earlier_versions")).to eq([
-        { "id" => original.id.to_s, "status" => "replaced", "posted_at" => original.posted_at.iso8601, "payment_line" => "Check #4012", "corrected" => false }
+        { "id" => original.id.to_s, "status" => "replaced", "posted_at" => original.posted_at.iso8601, "payment_line" => "Check #4012", "corrected" => false, "ytd_changed" => false }
       ])
       # The original's id opens the current version, and its PDF is the original as issued.
       get "/api/v1/employee/statements/#{original.id}", headers: headers_for
