@@ -144,7 +144,19 @@ module PayrollSubmissions
 
     def normalized_answers
       no_changes = ActiveModel::Type::Boolean.new.cast(@params[:no_changes]) || false
-      rows = ChangeRows.normalize!(@params[:changes], company_id: @company.id, rates_on: @entry.end_date)
+      extra_hours_config = PayrollIntake::ExtraHoursPolicy.period_config(
+        company: @company,
+        start_date: @entry.start_date,
+        end_date: @entry.end_date,
+        pay_period: @catalog.live_pay_period(@entry),
+        source_type: portal_descriptor&.key
+      )
+      rows = ChangeRows.normalize!(
+        @params[:changes],
+        company_id: @company.id,
+        rates_on: @entry.end_date,
+        extra_hours_config: extra_hours_config
+      )
       raise FileSet::Invalid, { "changes" => [ "Choose either \"No changes this period\" or list the changes, not both" ] } if no_changes && rows.any? { |row| !row["skipped"] && !row["standing_change_id"] }
 
       raise FileSet::Invalid, { "changes" => [ 'List the changes this period or choose "No changes this period"' ] } unless no_changes || rows.any? { |row| !row["skipped"] }

@@ -591,6 +591,7 @@ export const employeesApi = {
   list: (params?: {
     company_id?: number;
     eligible_pay_period_id?: number;
+    rates_on?: string;
     status?: string;
     department_id?: number;
     employment_type?: string;
@@ -851,6 +852,13 @@ export const clientEmployeesApi = {
     group_by?: string;
     /** "contact" returns contact-only records for the Contact details page. */
     view?: 'contact';
+    /**
+     * Resolve compensation and saved wage rates as of the end date of a
+     * currently open payroll submission period (YYYY-MM-DD). Not a general
+     * historical lookup: other valid or out-of-range dates return 422, and
+     * client viewers or companies without payroll submissions enabled receive 403.
+     */
+    rates_on?: string;
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
@@ -1807,7 +1815,7 @@ export const payPeriodsApi = {
       no_tips_or_loans?: boolean;
       wage_rate_choices?: Record<string, number>;
       confirm_client_changes?: boolean;
-      reviewed_changes?: { change_index: number; amount?: string; hours?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
+      reviewed_changes?: { change_index: number; amount?: string; hours?: string; regular_hours?: string; overtime_hours?: string; workweek?: number; baseline_regular_hours?: string; baseline_overtime_hours?: string; preview_token?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
     },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
@@ -2430,7 +2438,50 @@ export interface MosaSourceRow {
   warnings: PayrollIntakeWarning[];
 }
 
-export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; removals?: string[]; rows: { change_index: number; previous_value?: string; kind: 'owner_pay' | 'extra_hours'; requires_pay_decision?: boolean; employee_id?: number; employee_name?: string; amount?: string; hours?: string; employee_wage_rate_id?: number; wage_rate_label?: string; wage_rate?: string; error?: string; overwrite_required?: boolean; saved_regular_hours?: string; saved_overtime_hours?: string; saved_period_pay?: string; workbook_period_pay?: string; pay_conflict?: boolean }[] };
+export type ClientChangePrefillRow = {
+  change_index: number;
+  previous_value?: string;
+  kind: 'owner_pay' | 'extra_hours';
+  requires_pay_decision?: boolean;
+  employee_id?: number;
+  employee_name?: string;
+  amount?: string;
+  hours?: string;
+  regular_hours?: string;
+  overtime_hours?: string;
+  workweek?: number;
+  workweek_start_date?: string;
+  workweek_end_date?: string;
+  extra_hours_mode?: 'split' | 'workweek' | 'straight_time';
+  is_contractor?: boolean;
+  workweeks?: { index: number; start_date: string; end_date: string; label: string }[];
+  needs_classification?: boolean;
+  fallback_reason?: string;
+  baseline_regular_hours?: string;
+  baseline_overtime_hours?: string;
+  preview_token?: string;
+  baseline_line_regular_hours?: string;
+  baseline_line_overtime_hours?: string;
+  baseline_week1_hours?: string;
+  baseline_week2_hours?: string;
+  delta_regular_hours?: string;
+  delta_overtime_hours?: string;
+  resulting_regular_hours?: string;
+  resulting_overtime_hours?: string;
+  gross_pay_delta?: string;
+  employee_wage_rate_id?: number;
+  wage_rate_label?: string;
+  wage_rate?: string;
+  error?: string;
+  overwrite_required?: boolean;
+  saved_regular_hours?: string;
+  saved_overtime_hours?: string;
+  saved_period_pay?: string;
+  workbook_period_pay?: string;
+  pay_conflict?: boolean;
+};
+
+export type ClientChangePrefill = { submission_id: number; revision: number; manual_review_warnings?: string[]; removals?: string[]; rows: ClientChangePrefillRow[] };
 
 export interface ImportSourceDocument {
   id: number;

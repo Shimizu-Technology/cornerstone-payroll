@@ -343,7 +343,7 @@ module Api
             ).validate!
             included_decisions = disposition_plan.decisions.select(&:included?)
 
-            client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period) if selection
+            client_changes = PayrollSubmissions::ImportChanges.new(submission: selection.payroll_submission, pay_period: @pay_period, session: source_package) if selection
             validate_mosa_included_rows!(included_decisions, restorable_owner_ids: client_changes&.restorable_owner_ids || [])
             included_employee_ids = included_decisions.map { |decision| decision.row.employee_id }.compact.to_set
 
@@ -386,8 +386,18 @@ module Api
             end
 
             if selection
-              matched_data = client_changes.apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours, :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay ])[:reviewed_changes],
-                  confirmed: params[:confirm_client_changes], dispositions: disposition_plan.decisions, source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
+              matched_data = client_changes.apply_to(
+                matched_data,
+                reviewed: params.permit(reviewed_changes: [
+                  :change_index, :amount, :hours, :regular_hours, :overtime_hours, :workweek,
+                  :baseline_regular_hours, :baseline_overtime_hours, :preview_token,
+                  :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay
+                ])[:reviewed_changes],
+                confirmed: params[:confirm_client_changes],
+                dispositions: disposition_plan.decisions,
+                source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] },
+                previewed_baselines: import_record.raw_data.to_h.fetch("previewed_extra_hours_baselines", {})
+              )
             end
 
             unpaid_owners = client_changes&.unpaid_owners || {}
@@ -564,19 +574,22 @@ module Api
           @audit_import_record = import_record
           source_package = package_result.fetch(:session)
           preview = preview_from_source_package(source_package, serialize_numbers: true)
-          preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
-          preview[:tip_treatment_confirmed] = import_record.raw_data.to_h["tip_treatment_confirmed"].present?
           selection ||= import_record.submission_imports.order(id: :desc).first
           source = selection&.payroll_submission || pending_portal_period&.current_submission
           preview[:source_warnings] += workbook_warnings(source_package, source)
+          client_prefill = selection ? change_prefill(selection.payroll_submission, preview[:matched], source_package: source_package) : nil
+          pending_prefill = !selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched], source_package: source_package) : nil
+          persist_previewed_extra_hours_baselines!(import_record, client_prefill || pending_prefill)
+          preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
+          preview[:tip_treatment_confirmed] = import_record.raw_data.to_h["tip_treatment_confirmed"].present?
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
             pay_period: { start_date: @pay_period.start_date, end_date: @pay_period.end_date },
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
             pending_portal_source: pending_portal_source_json,
             loan_setup: loan_setup_access,
-            client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched]) : nil),
-            pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched]) : nil)
+            client_change_prefill: client_prefill,
+            pending_change_prefill: pending_prefill
           }
         end
 
@@ -674,10 +687,70 @@ module Api
             ip_address: request.remote_ip, user_agent: request.user_agent, request_id: request.request_id)
         end
 
-        def change_prefill(submission, rows)
-          changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period)
+        def change_prefill(submission, rows, source_package: nil)
+          changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period, session: source_package)
           { submission_id: submission.id, revision: submission.revision, rows: changes.proposals(source_rows: rows.map(&:deep_symbolize_keys)), removals: changes.removals,
             manual_review_warnings: changes.manual_review_warnings }
+        end
+
+        def persist_previewed_extra_hours_baselines!(import_record, prefill)
+          return unless import_record&.status == "previewed" && prefill.present?
+
+          submission_id = prefill[:submission_id]
+          extra_rows = Array(prefill[:rows]).select { |row| row[:kind] == "extra_hours" }
+          return if extra_rows.empty?
+
+          # Lock in the same order as with_import_lock and write only the baseline
+          # key via jsonb_set so concurrent raw_data updates (such as confirmed
+          # tip treatment) can never be clobbered by a stale in-memory record.
+          ApplicationRecord.transaction do
+            Company.lock.find(@pay_period.company_id)
+            @pay_period.lock!
+            locked = PayrollImportRecord.lock.find_by(id: import_record.id)
+            return unless locked&.status == "previewed"
+
+            existing = locked.raw_data.to_h["previewed_extra_hours_baselines"].to_h
+            reusable = extra_rows.all? do |row|
+              entry = existing["#{submission_id}:#{row[:change_index]}"]
+              entry.is_a?(Hash) &&
+                entry["preview_token"].present? &&
+                entry["baseline_regular_hours"].to_s == row[:baseline_regular_hours].to_s &&
+                entry["baseline_overtime_hours"].to_s == row[:baseline_overtime_hours].to_s &&
+                entry["baseline_week1_hours"].to_s == row[:baseline_week1_hours].to_s &&
+                entry["baseline_week2_hours"].to_s == row[:baseline_week2_hours].to_s
+            end
+
+            if reusable
+              extra_rows.each do |row|
+                row[:preview_token] = existing.dig("#{submission_id}:#{row[:change_index]}", "preview_token")
+              end
+              import_record.raw_data = locked.raw_data
+              return
+            end
+
+            preview_token = SecureRandom.hex(16)
+            baselines = extra_rows.each_with_object({}) do |row, map|
+              row[:preview_token] = preview_token
+              map["#{submission_id}:#{row[:change_index]}"] = {
+                "baseline_regular_hours" => row[:baseline_regular_hours].to_s,
+                "baseline_overtime_hours" => row[:baseline_overtime_hours].to_s,
+                "baseline_week1_hours" => row[:baseline_week1_hours].to_s,
+                "baseline_week2_hours" => row[:baseline_week2_hours].to_s,
+                "preview_token" => preview_token
+              }
+            end
+            merged = existing.merge(baselines)
+
+            PayrollImportRecord.where(id: locked.id, status: "previewed").update_all(
+              Arel.sql(
+                PayrollImportRecord.sanitize_sql_array([
+                  "raw_data = jsonb_set(COALESCE(raw_data, '{}'::jsonb), '{previewed_extra_hours_baselines}', ?::jsonb, true)",
+                  merged.to_json
+                ])
+              )
+            )
+            import_record.raw_data = locked.raw_data.to_h.merge("previewed_extra_hours_baselines" => merged)
+          end
         end
 
         def pay_run_selection!(record)

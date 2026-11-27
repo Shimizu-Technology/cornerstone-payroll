@@ -2,6 +2,9 @@ import api, { adminClientDocumentsApi, adminPortalThreadsApi, clientDocumentsApi
 import type { ClientDocument, ClientPortalMessage, PayrollIntakeDescriptor, PayrollIntakeProfile, PortalFileRequest } from './api';
 import type { PaginationMeta } from '@/types';
 
+export type ExtraHoursWorkweek = { index: number; start_date: string; end_date: string; label: string };
+export type ExtraHoursConfig = { mode: 'split' | 'workweek'; overtime_mode: string; workweeks: ExtraHoursWorkweek[] };
+
 export type SubmissionStatus = 'waiting_for_files' | 'submitted' | 'received' | 'in_review' | 'draft_ready' | 'approved' | 'changes_requested' | 'paid';
 export type ChangeKind = 'extra_hours' | 'owner_pay' | 'paid_leave' | 'new_hire' | 'wage_change' | 'deduction' | 'direct_deposit_addition';
 export type ChangeRow = {
@@ -12,6 +15,7 @@ export type ChangeRow = {
   allow_none?: boolean;
   standing_change_id?: number;
   skipped?: boolean;
+  contractor?: boolean;
   employee_wage_rate_id?: number;
   wage_rate_label?: string;
   wage_rate?: string;
@@ -22,6 +26,12 @@ export type ChangeRow = {
   employee_ids?: number[];
   employee_names?: string[];
   hours?: string;
+  regular_hours?: string;
+  overtime_hours?: string;
+  workweek?: number;
+  workweek_start_date?: string;
+  workweek_end_date?: string;
+  hours_mode?: 'split' | 'workweek' | 'straight_time';
   amount?: string;
   basis?: 'total' | 'each';
   name?: string;
@@ -68,10 +78,11 @@ export type PeriodAction = 'submit' | 'approve' | 'request_changes' | 'message' 
 export type PeriodDetail = PeriodSummary & {
   schedule_note: string; thread_id: number | null; allowed_actions: PeriodAction[]; file_requests?: PortalFileRequest[];
   intake_descriptor?: PayrollIntakeDescriptor | null;
+  extra_hours_config?: ExtraHoursConfig;
   standing_changes?: ChangeRow[];
   submissions: SubmissionRevision[]; drafts: SubmissionDraft[]; history: SubmissionHistoryEvent[];
 };
-export type PickerEmployee = { id: number; name: string; variable_salary?: boolean; hourly?: boolean; wage_rates?: { id: number; label: string; rate: string | number | null }[] };
+export type PickerEmployee = { id: number; name: string; variable_salary?: boolean; hourly?: boolean; contractor?: boolean; wage_rates?: { id: number; label: string; rate: string | number | null }[] };
 type Detail = { data: PeriodDetail };
 
 const encode = (ref: string): string => encodeURIComponent(ref);
@@ -91,7 +102,7 @@ export async function loadAllEmployees(fetchPage: (page: number) => Promise<Empl
   }
   const seen = new Set<number>();
   return rows.filter(row => !seen.has(row.id) && seen.add(row.id))
-    .map(row => ({ id: row.id, name: `${row.first_name} ${row.last_name}`.trim(), wage_rates: row.wage_rates?.filter((rate): rate is { id: number; label: string; rate: string | number | null } => rate.id != null), ...(row.employment_type ? { variable_salary: row.employment_type === 'salary' && row.salary_type === 'variable', hourly: row.employment_type === 'hourly' || (row.employment_type === 'contractor' && row.contractor_pay_type === 'hourly') } : {}) }));
+    .map(row => ({ id: row.id, name: `${row.first_name} ${row.last_name}`.trim(), wage_rates: row.wage_rates?.filter((rate): rate is { id: number; label: string; rate: string | number | null } => rate.id != null), ...(row.employment_type ? { variable_salary: row.employment_type === 'salary' && row.salary_type === 'variable', hourly: row.employment_type === 'hourly' || (row.employment_type === 'contractor' && row.contractor_pay_type === 'hourly'), contractor: row.employment_type === 'contractor' } : {}) }));
 }
 
 type SharedPeriodApi = {
@@ -123,8 +134,8 @@ export const clientPayrollSubmissionsApi = {
     api.post<Detail>(`/client/payroll_submission_periods/${encode(ref)}/decision`, data),
   threads: clientPortalThreadsApi,
   documents: clientDocumentsApi,
-  employees: (): Promise<PickerEmployee[]> =>
-    loadAllEmployees(page => clientEmployeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page })),
+  employees: (ratesOn?: string): Promise<PickerEmployee[]> =>
+    loadAllEmployees(page => clientEmployeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page, ...(ratesOn ? { rates_on: ratesOn } : {}) })),
 };
 
 export const adminPayrollSubmissionsApi = {
@@ -139,8 +150,8 @@ export const adminPayrollSubmissionsApi = {
     api.post<void>(`/admin/payroll_submission_periods/${encode(ref)}/seen`, { foreground: true, displayed_event_id: displayedEventId }, { notifyMaintenance: false }),
   threads: adminPortalThreadsApi,
   documents: adminClientDocumentsApi,
-  employees: (): Promise<PickerEmployee[]> =>
-    loadAllEmployees(page => employeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page })),
+  employees: (ratesOn?: string): Promise<PickerEmployee[]> =>
+    loadAllEmployees(page => employeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page, ...(ratesOn ? { rates_on: ratesOn } : {}) })),
 };
 
 export type PayrollSubmissionsApi = typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi;

@@ -67,7 +67,7 @@ RSpec.describe PayrollImport::ImportService do
     before do
       allow_any_instance_of(PayrollItem).to receive(:calculate!) { |paycheck| paycheck.save! }
       row = { employee_id: worker.id, workbook_only: true, total_tips: 0,
-        client_extra_hours: { hours: "68", employee_wage_rate_id: job.id, rate: "35" },
+        client_extra_hours: { hours: "68", regular_hours: "68", overtime_hours: "0", employee_wage_rate_id: job.id, rate: "35" },
         client_change_evidence: { kind: "extra_hours", submission_id: 1 } }
       expect(service.apply!(matched: [ row ])[:errors]).to be_empty
       expect(item.reload.hours_worked).to eq(70)
@@ -147,7 +147,7 @@ RSpec.describe PayrollImport::ImportService do
       ]
       item.save!
       added = { employee_id: worker.id, workbook_only: true, total_tips: 0,
-        client_extra_hours: { hours: "68", employee_wage_rate_id: maintenance.id, rate: "35" },
+        client_extra_hours: { hours: "68", regular_hours: "68", overtime_hours: "0", employee_wage_rate_id: maintenance.id, rate: "35" },
         client_change_evidence: { kind: "extra_hours", submission_id: 1 } }
       expect(service.apply!(matched: [ added ])[:errors]).to be_empty
       expect(item.reload.hours_worked).to eq(73)
@@ -992,7 +992,7 @@ RSpec.describe PayrollImport::ImportService do
             employee_id: employee.id,
             workbook_only: true,
             selected_wage_rate_id: rate_42.id,
-            client_extra_hours: { hours: "4.5", employee_wage_rate_id: rate_35.id, rate: "35.0" },
+            client_extra_hours: { hours: "4.5", regular_hours: "4.5", overtime_hours: "0", employee_wage_rate_id: rate_35.id, rate: "35.0" },
             client_change_evidence: { kind: "extra_hours", submission_id: 2, reviewed_value: "4.5" }
           }
         ]

@@ -94,9 +94,17 @@ module PayrollSubmissions
 
     def detail(entry)
       record = entry.record
+      descriptor = @catalog.company.portal_submittable_intake_descriptor
       payload = summary(entry).merge(
         schedule_note: schedule_note,
         intake_descriptor: serialized_portal_descriptor(entry),
+        extra_hours_config: PayrollIntake::ExtraHoursPolicy.period_config(
+          company: @catalog.company,
+          start_date: entry.start_date,
+          end_date: entry.end_date,
+          pay_period: @catalog.live_pay_period(entry),
+          source_type: descriptor&.key
+        ),
         standing_changes: StandingChanges.new(company: @catalog.company, before_pay_date: @catalog.pay_date_for(entry), rates_on: entry.end_date).rows.reject { |row| !@staff && row[:availability_error].present? },
         thread_id: record&.client_portal_thread_id,
         file_requests: record ? file_requests(record) : [],
