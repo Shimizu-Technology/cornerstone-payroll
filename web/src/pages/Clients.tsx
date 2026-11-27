@@ -1,5 +1,6 @@
 import { isReverificationCancelledError } from '@clerk/react/errors';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { stepUpErrorMessage } from '@/lib/useStepUpRequest';
 import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useFeedbackState, useFeedback, ActionFeedback } from '@/components/ui/action-feedback';
@@ -726,7 +727,7 @@ export function Clients() {
           const response = await sendApprovalSetting(editingId, { ...payload, client_approval_disable_reason: form.client_approval_disable_reason });
           if (!response.ok) {
             const result = await response.json().catch(() => null);
-            throw new Error(result?.error || result?.errors?.join(', ') || 'Could not turn off client approval.');
+            throw new Error(stepUpErrorMessage(result, 'Could not turn off client approval.'));
           }
         } else {
           await companiesApi.update(editingId, payload);

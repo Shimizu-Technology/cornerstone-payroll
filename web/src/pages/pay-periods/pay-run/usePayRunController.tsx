@@ -1,5 +1,6 @@
 import { isReverificationCancelledError } from '@clerk/react/errors';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { stepUpErrorMessage } from '@/lib/useStepUpRequest';
 import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { estimateDraftGross } from '@/lib/draft-gross';
 import { needsSourceCoverageAcknowledgement } from '@/lib/payroll-source-coverage';
@@ -959,7 +960,7 @@ export function usePayRunController({
         notes: clientApprovalNotes.trim() || undefined,
       });
       const result = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(result?.error || 'Failed to record client approval');
+      if (!response.ok) throw new Error(stepUpErrorMessage(result, 'Failed to record client approval'));
       setPayPeriod(current => current?.id === payPeriod.id && current.payroll_review?.id === payPeriod.payroll_review?.id
         ? { ...current, payroll_review: result.payroll_review } : current);
       setClientApprovalOpen(false);

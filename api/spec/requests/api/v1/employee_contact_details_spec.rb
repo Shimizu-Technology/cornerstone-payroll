@@ -518,5 +518,40 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
       email_only = Struct.new(:email).new("fallback@example.com")
       expect(AuditRecordSnapshot.subject_name(email_only)).to eq("fallback@example.com")
     end
+
+    it "reports has_pending_address_request in contact_details_status and clears it when staff supersedes the address" do
+      allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
+      employee_user = create(:user, company: company, organization: organization, role: "portal_employee", email: "worker.portal@example.com")
+      link = EmployeeAccountLink.create!(
+        company: company, employee: complete_employee, user: employee_user,
+        status: :active, invited_by: admin_user, activated_at: Time.current
+      )
+      change_request = EmployeeChangeRequest.create!(
+        company: company,
+        employee: complete_employee,
+        requested_by: employee_user,
+        requested_by_link: link,
+        request_kind: "update",
+        status: :pending,
+        proposed_changes: { "address_line1" => "200 Requested Ave" },
+        original_values: { "address_line1" => complete_employee.address_line1 }
+      )
+
+      get "/api/v1/admin/employees/#{complete_employee.id}", headers: { "X-Company-Id" => company.id.to_s }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "contact_details_status", "has_pending_address_request")).to be(true)
+
+      get "/api/v1/admin/employees", headers: { "X-Company-Id" => company.id.to_s }, params: { view: "contact" }
+      expect(response).to have_http_status(:ok), response.body
+      row = response.parsed_body.fetch("data").find { |item| item["id"] == complete_employee.id }
+      expect(row.dig("contact_details_status", "has_pending_address_request")).to be(true)
+
+      patch "/api/v1/admin/employees/#{complete_employee.id}",
+            headers: { "X-Company-Id" => company.id.to_s },
+            params: { employee: { address_line1: "300 Direct Staff Rd" }, response_view: "contact" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(change_request.reload).to be_superseded
+      expect(response.parsed_body.dig("data", "contact_details_status", "has_pending_address_request")).to be(false)
+    end
   end
 end

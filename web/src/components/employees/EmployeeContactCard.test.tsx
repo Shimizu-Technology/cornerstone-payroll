@@ -381,4 +381,68 @@ describe('EmployeeContactCard', () => {
       delete (Element.prototype as Partial<Element>).scrollIntoView;
     }
   });
+
+  it('asks staff to confirm before replacing a pending employee address request, and skips confirmation for non-address edits', async () => {
+    const withPendingRequest: ContactEmployee = {
+      ...riley,
+      contact_details_status: {
+        needs_contact_details: false,
+        missing_fields: [],
+        email_issue: null,
+        has_pending_address_request: true,
+      },
+    };
+    apiMocks.adminUpdate
+      .mockResolvedValueOnce({
+        data: { ...withPendingRequest, phone: '+16715550199', contact_revision: 'rev-2' },
+        contact_warnings: [],
+      })
+      .mockResolvedValueOnce({
+        data: {
+          ...withPendingRequest,
+          phone: '+16715550199',
+          address_line1: '200 New St',
+          contact_revision: 'rev-3',
+          contact_details_status: {
+            needs_contact_details: false,
+            missing_fields: [],
+            email_issue: null,
+            has_pending_address_request: false,
+          },
+        },
+        contact_warnings: [],
+      });
+
+    renderCard({ employee: withPendingRequest, audience: 'admin' });
+
+    // Non-address edit saves immediately without confirmation.
+    openEditor();
+    type('Mobile', '555-0199');
+    clickSave();
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('This employee has a pending address request. Saving will replace it.')).toBeNull();
+
+    // Address edit prompts for confirmation before sending PATCH.
+    openEditor();
+    type('Street address', '200 New St');
+    clickSave();
+    expect(await screen.findByText('This employee has a pending address request. Saving will replace it.')).toBeTruthy();
+    expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1);
+
+    // Cancel keeps the editor open and does not save.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('This employee has a pending address request. Saving will replace it.')).toBeNull();
+    expect(field('Street address for Riley Santos').value).toBe('200 New St');
+    expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1);
+
+    // Confirming Save submits the address update.
+    clickSave();
+    expect(await screen.findByText('This employee has a pending address request. Saving will replace it.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(2));
+    expect(apiMocks.adminUpdate).toHaveBeenLastCalledWith(42, expect.objectContaining({
+      address_line1: '200 New St',
+    }), 7);
+    expect(await screen.findByText('200 New St')).toBeTruthy();
+  });
 });

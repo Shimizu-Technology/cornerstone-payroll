@@ -3,6 +3,7 @@ import { isReverificationCancelledError } from '@clerk/react/errors';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { stepUpErrorMessage } from '@/lib/useStepUpRequest';
 import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 
 const acknowledgement = 'I am approving this exact payroll revision for the client under Cornerstone authority.';
@@ -36,7 +37,7 @@ export function ClientApprovalOverride({ companyId, periodId, revisionId, onDone
       if (!response.ok) {
         const data = await response.json().catch(() => null);
         if (data?.code === 'stale_payroll_review_revision') onDone();
-        throw new Error(data?.error || 'Could not approve for the client.');
+        throw new Error(stepUpErrorMessage(data, 'Could not approve for the client.'));
       }
       onDone();
       setOpen(false);
