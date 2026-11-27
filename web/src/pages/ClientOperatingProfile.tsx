@@ -105,7 +105,7 @@ function SettingControl({ field, value, editable, locked, onChange }: {
       {locked ? (
         <div className="flex min-h-11 items-center gap-2 text-sm text-neutral-600">
           <LockKeyhole className="size-4 shrink-0" aria-hidden="true" />
-          <span>{field.type === 'boolean' ? 'Off' : text} · Available in Milestone {field.locked_until_milestone}</span>
+          <span>{field.type === 'boolean' ? 'Off' : field.type === 'enum' ? settingLabel(text) : text} · Available in Milestone {field.locked_until_milestone}</span>
         </div>
       ) : field.type === 'nullable_string_array' ? (
         <div className="space-y-2">

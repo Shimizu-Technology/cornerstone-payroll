@@ -531,5 +531,44 @@ RSpec.describe CompanyFeatures do
         expect(nil_features.version).to eq(2)
       end
     end
+
+    it "forces employee_lifecycle_mode to approval_first while locked and requires activation timestamp when unlocked" do
+      profile = ClientOperatingProfile.create!(
+        company: company,
+        effective_on: Date.new(2026, 1, 1),
+        version: 1,
+        offering: "payroll_portals",
+        hours_source: "manual",
+        client_portal_enabled: true,
+        employee_portal_enabled: false
+      )
+      profile.update_columns(
+        options: OperatingProfileCatalog.default_options.deep_merge(
+          "client_portal" => { "employee_lifecycle_mode" => "client_managed" }
+        ),
+        lifecycle_mode_activated_at: Time.current
+      )
+
+      # Locked off by default during PRs 1-4 regardless of stored JSON or activation timestamp.
+      locked_features = described_class.for(company, on: Date.new(2026, 2, 1))
+      expect(locked_features.employee_lifecycle_mode).to eq("approval_first")
+      expect(locked_features.client_managed_employee_lifecycle?).to be(false)
+
+      # Even when unlocked, activation timestamp and client_portal_enabled are both required.
+      stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
+      unlocked_active = described_class.for(company, on: Date.new(2026, 2, 1))
+      expect(unlocked_active.employee_lifecycle_mode).to eq("client_managed")
+      expect(unlocked_active.client_managed_employee_lifecycle?).to be(true)
+
+      profile.update_columns(lifecycle_mode_activated_at: nil)
+      unactivated = described_class.for(company, on: Date.new(2026, 2, 1))
+      expect(unactivated.employee_lifecycle_mode).to eq("approval_first")
+      expect(unactivated.client_managed_employee_lifecycle?).to be(false)
+
+      profile.update_columns(lifecycle_mode_activated_at: Time.current, client_portal_enabled: false)
+      portal_disabled = described_class.for(company, on: Date.new(2026, 2, 1))
+      expect(portal_disabled.employee_lifecycle_mode).to eq("approval_first")
+      expect(portal_disabled.client_managed_employee_lifecycle?).to be(false)
+    end
   end
 end

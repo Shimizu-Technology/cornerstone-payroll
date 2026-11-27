@@ -113,7 +113,8 @@ module EmployeeAppSwitch
     end
 
     def merged_values(profile)
-      OperatingProfileCatalog.values_for(profile).merge(@values).merge(CompanyFeatures::LOCKED_OFF.index_with(false))
+      locked_defaults = CompanyFeatures::LOCKED_OFF.index_with { |key| OperatingProfileCatalog.locked_default_for(key) }
+      OperatingProfileCatalog.values_for(profile).merge(@values).merge(locked_defaults)
     end
 
     def validated(profile)

@@ -23,6 +23,7 @@ class ClientOperatingProfile < ApplicationRecord
   validate :no_overlapping_versions
   validate :options_valid_against_catalog
   validate :locked_switches_off
+  validate :lifecycle_mode_activation_blockers_must_be_hash
 
   after_commit { TenantSubdomainRegistry.invalidate! }
 
@@ -78,6 +79,7 @@ class ClientOperatingProfile < ApplicationRecord
     elsif options.is_a?(Hash)
       self.options = options.deep_stringify_keys
     end
+    self.lifecycle_mode_activation_blockers = {} if lifecycle_mode_activation_blockers.nil?
   end
 
   def ends_on_not_before_effective_on
@@ -116,20 +118,28 @@ class ClientOperatingProfile < ApplicationRecord
     errors.add(:base, "Operating profile effective dates overlap an existing version for this company")
   end
 
-  # Bank changes (M4, D3) and the M5/M6 switches can't be turned on; the
-  # Employee app switch's own parts are gated by their activations instead
-  # (CompanyFeatures). Only a save that turns one on fails: a legacy row
-  # stored with one on can still be closed (its dates changed) or
-  # sanitized, so turning the employee app off always works. Such a flag
-  # reads as off anyway (CompanyFeatures::LOCKED_OFF).
+  # Bank changes (M4, D3), the client-managed lifecycle mode while locked, and
+  # the M5/M6 switches can't move off their locked defaults; the Employee app
+  # switch's own parts are gated by their activations instead (CompanyFeatures).
+  # Only a save that moves a locked setting away from its locked default fails:
+  # a legacy row stored with a non-default value can still be closed (its dates
+  # changed) or sanitized, so turning the employee app off always works. Such a
+  # setting reads as its locked default anyway (CompanyFeatures::LOCKED_OFF).
   def locked_switches_off
     before = new_record? ? {} : (options_in_database || {})
     CompanyFeatures::LOCKED_OFF.each do |key|
-      next unless option_value(key) == true
-      next if OperatingProfileCatalog.option_value(before, key) == true
+      locked_default = OperatingProfileCatalog.locked_default_for(key)
+      next if option_value(key) == locked_default
+      next if OperatingProfileCatalog.option_value(before, key) != locked_default
 
       errors.add(:options, "#{OperatingProfileCatalog.find(key)&.label || key} is locked until its milestone launches")
     end
+  end
+
+  def lifecycle_mode_activation_blockers_must_be_hash
+    return if lifecycle_mode_activation_blockers.is_a?(Hash)
+
+    errors.add(:lifecycle_mode_activation_blockers, "must be a JSON object")
   end
 
   def options_valid_against_catalog
