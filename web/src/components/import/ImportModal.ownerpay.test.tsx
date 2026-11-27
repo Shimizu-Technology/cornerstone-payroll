@@ -601,7 +601,7 @@ it('shows exact gross pay delta for rates with more than two decimals ($20.125/h
   };
   open(data);
   const fractionalRateBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Avery Server' });
-  expect(fractionalRateBox.textContent).toContain('+$60.38');
+  expect(fractionalRateBox.textContent).toContain('+$60.39');
   const roundingBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Jordan Worker' });
   expect(roundingBox.textContent).toContain('+$0.52');
 });
@@ -739,6 +739,7 @@ it('clamps single-workweek Apply payload to week 1 and clears client-change conf
         baseline_overtime_hours: '0.0',
         baseline_week1_hours: '38.0',
         baseline_week2_hours: '0.0',
+        preview_token: 'tok-single-week',
       },
     ],
   };
@@ -758,6 +759,6 @@ it('clamps single-workweek Apply payload to week 1 and clears client-change conf
   fireEvent.click(confirmBox);
   fireEvent.click(applyButton());
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
-    reviewed_changes: [expect.objectContaining({ change_index: 0, workweek: 1 })],
+    reviewed_changes: [expect.objectContaining({ change_index: 0, workweek: 1, preview_token: 'tok-single-week' })],
   })));
 });

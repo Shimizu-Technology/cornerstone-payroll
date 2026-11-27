@@ -390,7 +390,7 @@ module Api
                 matched_data,
                 reviewed: params.permit(reviewed_changes: [
                   :change_index, :amount, :hours, :regular_hours, :overtime_hours, :workweek,
-                  :baseline_regular_hours, :baseline_overtime_hours,
+                  :baseline_regular_hours, :baseline_overtime_hours, :preview_token,
                   :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay
                 ])[:reviewed_changes],
                 confirmed: params[:confirm_client_changes],
@@ -697,22 +697,22 @@ module Api
           return unless import_record&.status == "previewed" && prefill.present?
 
           submission_id = prefill[:submission_id]
-          baselines = Array(prefill[:rows]).each_with_object({}) do |row, map|
-            next unless row[:kind] == "extra_hours"
+          extra_rows = Array(prefill[:rows]).select { |row| row[:kind] == "extra_hours" }
+          return if extra_rows.empty?
 
+          preview_token = SecureRandom.hex(16)
+          baselines = extra_rows.each_with_object({}) do |row, map|
+            row[:preview_token] = preview_token
             map["#{submission_id}:#{row[:change_index]}"] = {
               "baseline_regular_hours" => row[:baseline_regular_hours].to_s,
-              "baseline_overtime_hours" => row[:baseline_overtime_hours].to_s
+              "baseline_overtime_hours" => row[:baseline_overtime_hours].to_s,
+              "preview_token" => preview_token
             }
           end
-          return if baselines.empty?
 
           raw = import_record.raw_data.is_a?(Hash) ? import_record.raw_data.deep_dup : {}
           existing = raw["previewed_extra_hours_baselines"].to_h
-          merged = existing.merge(baselines)
-          return if merged == existing
-
-          raw["previewed_extra_hours_baselines"] = merged
+          raw["previewed_extra_hours_baselines"] = existing.merge(baselines)
           import_record.update_columns(raw_data: raw)
         end
 

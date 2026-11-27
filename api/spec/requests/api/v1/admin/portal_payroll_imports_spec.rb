@@ -938,11 +938,16 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       source
     end
 
+    def preview_token_for(data, index)
+      rows = Array(data.dig("client_change_prefill", "rows") || data.dig("pending_change_prefill", "rows"))
+      rows.find { |row| row["change_index"] == index }&.fetch("preview_token", nil)
+    end
+
     def reviewed_standing_params(data)
       { import_id: data.fetch("import_id"), confirm_client_changes: true,
         reviewed_changes: [
           { change_index: 0, amount: "4500.00" },
-          { change_index: 1, regular_hours: "68", overtime_hours: "0" }
+          { change_index: 1, regular_hours: "68", overtime_hours: "0", preview_token: preview_token_for(data, 1) }
         ] }
     end
 
@@ -996,7 +1001,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       data = preview(source)
       input = reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id"),
         wage_rate_choices: { employee.id.to_s => base_job.id })
-      input[:reviewed_changes] << { change_index: 2, regular_hours: "3", overtime_hours: "0" }
+      input[:reviewed_changes] << { change_index: 2, regular_hours: "3", overtime_hours: "0", preview_token: preview_token_for(data, 2) }
       post "#{url}/apply_import", params: input, as: :json
       expect(response).to have_http_status(:ok), response.body
       item = run.payroll_items.find_by!(employee: employee)
@@ -1232,10 +1237,11 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
         "employee_wage_rate_id" => job.id, "wage_rate" => "10.0", "hours" => "5", "regular_hours" => "5", "overtime_hours" => "0" } ]
       source.update_columns(change_rows: changes)
       data = preview(source)
-      reviewed = reviewed_standing_params(data)[:reviewed_changes] + [ { change_index: 2, regular_hours: "5", overtime_hours: "0" } ]
+      reviewed = reviewed_standing_params(data)[:reviewed_changes] + [ { change_index: 2, regular_hours: "5", overtime_hours: "0", preview_token: preview_token_for(data, 2) } ]
       apply_standing(data, reviewed)
       latest = corrected_standing(data, changes)
-      apply_standing(latest, reviewed)
+      latest_reviewed = reviewed_standing_params(latest)[:reviewed_changes] + [ { change_index: 2, regular_hours: "5", overtime_hours: "0", preview_token: preview_token_for(latest, 2) } ]
+      apply_standing(latest, latest_reviewed)
       item = run.payroll_items.find_by!(employee: employee)
       expect(item.hours_worked).to eq(5)
       expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(5)

@@ -1815,7 +1815,7 @@ export const payPeriodsApi = {
       no_tips_or_loans?: boolean;
       wage_rate_choices?: Record<string, number>;
       confirm_client_changes?: boolean;
-      reviewed_changes?: { change_index: number; amount?: string; hours?: string; regular_hours?: string; overtime_hours?: string; workweek?: number; baseline_regular_hours?: string; baseline_overtime_hours?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
+      reviewed_changes?: { change_index: number; amount?: string; hours?: string; regular_hours?: string; overtime_hours?: string; workweek?: number; baseline_regular_hours?: string; baseline_overtime_hours?: string; preview_token?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
     },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),
@@ -2459,6 +2459,7 @@ export type ClientChangePrefillRow = {
   fallback_reason?: string;
   baseline_regular_hours?: string;
   baseline_overtime_hours?: string;
+  preview_token?: string;
   baseline_line_regular_hours?: string;
   baseline_line_overtime_hours?: string;
   baseline_week1_hours?: string;

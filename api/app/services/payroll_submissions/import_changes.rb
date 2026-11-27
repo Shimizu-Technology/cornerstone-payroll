@@ -124,10 +124,10 @@ module PayrollSubmissions
           applied_value = row[:period_pay].presence || change[:saved_period_pay] || value
           @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: applied_value, pay_choice: input[:pay_choice], reason: input[:reason])
         else
+          verify_extra_hours_baseline!(change, input, previewed_baselines)
           emp_key = change[:employee_id].to_s
           running_state = running_extra_hours[emp_key]
           unless running_state
-            verify_extra_hours_baseline!(change, input, previewed_baselines)
             running_state = {
               regular_hours: change[:baseline_regular_hours].to_d,
               overtime_hours: change[:baseline_overtime_hours].to_d,
@@ -327,12 +327,21 @@ module PayrollSubmissions
       current_ot = BigDecimal(change[:baseline_overtime_hours].to_s.presence || "0").round(2)
 
       expected = previewed_baselines["#{@submission.id}:#{change[:change_index]}"]&.stringify_keys
-      if expected
-        prev_reg = BigDecimal(expected["baseline_regular_hours"].to_s.presence || "0").round(2)
-        prev_ot = BigDecimal(expected["baseline_overtime_hours"].to_s.presence || "0").round(2)
-        if prev_reg != current_reg || prev_ot != current_ot
-          raise ArgumentError, "Worksheet hours changed for #{change[:employee_name]} since this preview was opened (preview: #{prev_reg.to_s("F")} regular / #{prev_ot.to_s("F")} overtime; current: #{current_reg.to_s("F")} regular / #{current_ot.to_s("F")} overtime). Preview again before applying."
-        end
+      expected_token = expected&.dig("preview_token").to_s
+      if expected.blank? || expected_token.blank?
+        raise ArgumentError, "Preview baseline is missing for #{change[:employee_name]}. Preview again before applying."
+      end
+
+      sent_token = input[:preview_token].to_s
+      unless sent_token.present? && sent_token.bytesize == expected_token.bytesize &&
+          ActiveSupport::SecurityUtils.secure_compare(sent_token, expected_token)
+        raise ArgumentError, "This preview is out of date for #{change[:employee_name]}. Preview again before applying."
+      end
+
+      prev_reg = BigDecimal(expected["baseline_regular_hours"].to_s.presence || "0").round(2)
+      prev_ot = BigDecimal(expected["baseline_overtime_hours"].to_s.presence || "0").round(2)
+      if prev_reg != current_reg || prev_ot != current_ot
+        raise ArgumentError, "Worksheet hours changed for #{change[:employee_name]} since this preview was opened (preview: #{prev_reg.to_s("F")} regular / #{prev_ot.to_s("F")} overtime; current: #{current_reg.to_s("F")} regular / #{current_ot.to_s("F")} overtime). Preview again before applying."
       end
 
       return unless input.key?(:baseline_regular_hours) || input.key?(:baseline_overtime_hours)
@@ -343,7 +352,7 @@ module PayrollSubmissions
 
       raise ArgumentError, "Worksheet hours changed for #{change[:employee_name]} since this preview was opened (preview: #{sent_reg.to_s("F")} regular / #{sent_ot.to_s("F")} overtime; current: #{current_reg.to_s("F")} regular / #{current_ot.to_s("F")} overtime). Preview again before applying."
     rescue ArgumentError => e
-      raise e if e.message.start_with?("Worksheet hours changed")
+      raise e if e.message.include?("Preview again before applying.")
 
       raise ArgumentError, "Invalid baseline hours for #{change[:employee_name]}. Preview again before applying."
     end
