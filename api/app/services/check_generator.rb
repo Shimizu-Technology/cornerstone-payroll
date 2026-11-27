@@ -193,43 +193,21 @@ class CheckGenerator
   # -----------------------------------------------------------------------
   # YTD data
   # -----------------------------------------------------------------------
+  # The same as-of-check YTD the earnings statement prints: the dated opening
+  # balance plus the earlier and current paychecks PayrollStatementYtdSources
+  # counts, summed as BigDecimal.
   def ytd
     @ytd ||= begin
-      year = pay_period.pay_date&.year || Date.current.year
-      totals = employee.ytd_totals_through(
-        year: year,
-        pay_date: pay_period.pay_date,
-        pay_period_id: pay_period.id
-      )
-
-      gross   = totals[:gross_pay].to_d
-      fit     = totals[:withholding_tax].to_d
-      ss      = totals[:social_security_tax].to_d
-      med     = totals[:medicare_tax].to_d
-      addl_wh = totals[:additional_withholding].to_d
-
-      net = totals[:net_pay].to_d
-      # Live clients report only committed runs; test workspaces already include
-      # calculated/approved runs. Add this check only when absent from that scope.
-      if payroll_item.payroll_included? && pay_period.correction_status.in?([ nil, "correction" ]) &&
-          !PayPeriod.reportable_for_company(pay_period.company).exists?(pay_period.id)
-        gross += payroll_item.gross_pay.to_d
-        fit += payroll_item.withholding_tax.to_d
-        ss += payroll_item.social_security_tax.to_d
-        med += payroll_item.medicare_tax.to_d
-        addl_wh += payroll_item.additional_withholding.to_d
-        net += payroll_item.net_pay.to_d
-      end
-      taxes = fit + ss + med + addl_wh
-
-      { gross: gross, fit: fit, ss: ss, med: med, addl_wh: addl_wh,
-        taxes: taxes, net: net }
+      totals = ytd_sources.totals
+      taxes = totals.values_at(:withholding_tax, :social_security_tax, :medicare_tax, :additional_withholding).sum
+      { gross: totals[:gross], fit: totals[:withholding_tax], ss: totals[:social_security_tax], med: totals[:medicare_tax],
+        addl_wh: totals[:additional_withholding], taxes: taxes, net: totals[:net] }
     end
   end
 
   def cur_taxes
-    payroll_item.withholding_tax.to_f + payroll_item.social_security_tax.to_f +
-      payroll_item.medicare_tax.to_f + payroll_item.additional_withholding.to_f
+    payroll_item.withholding_tax.to_d + payroll_item.social_security_tax.to_d +
+      payroll_item.medicare_tax.to_d + payroll_item.additional_withholding.to_d
   end
 
   def cur_deds
@@ -524,14 +502,18 @@ class CheckGenerator
     rows
   end
 
+  # Per-earning YTD prints only where the earnings statement prints it. When
+  # the year cannot be attributed row by row, the current rows print with "-",
+  # as the statement prints "—", and only the TOTAL carries the YTD.
   def itemized_pay_rows
-    earnings_ytd_breakdown.call.map do |earning|
+    attributable = earnings_ytd_breakdown.attributable_rows
+    (attributable || earnings_ytd_breakdown.call.reject { |earning| earning.current.zero? }).map do |earning|
       [
         source_earning_labels.call(earning.source_label, compact: true) || stub_label(earning.label),
         earning.hours.present? ? fh(earning.hours) : "-",
         earning.rate.present? ? fn(earning.rate) : "-",
         fn(earning.current),
-        fn(earning.ytd)
+        attributable ? fn(earning.ytd) : "-"
       ]
     end
   end
@@ -647,29 +629,6 @@ class CheckGenerator
 
   def statement_ytd_breakdown
     @statement_ytd_breakdown ||= PayrollStatementYtdBreakdown.new(payroll_item, sources: ytd_sources)
-  end
-
-  def ytd_custom_deductions_total
-    @ytd_custom_deductions_total ||= custom_deduction_items.sum do |item|
-      item.custom_deductions_total.to_f + item.pre_tax_payroll_adjustments_total.to_f + item.post_tax_payroll_adjustments_total.to_f
-    end
-  end
-
-  def custom_deduction_items
-    year = pay_period.pay_date&.year || Date.current.year
-
-    employee.payroll_items
-      .joins(:pay_period)
-      .select(:id, :custom_deductions, :payroll_adjustments)
-      .financially_reportable
-      .where(pay_periods: {
-        company_id: company.id,
-        pay_date: Date.new(year, 1, 1)..pay_period.pay_date
-      })
-      .where("pay_periods.pay_date < :pay_date OR (pay_periods.pay_date = :pay_date AND pay_periods.id <= :pay_period_id)",
-        pay_date: pay_period.pay_date,
-        pay_period_id: pay_period.id)
-      .to_a
   end
 
   def summary_box_y(sect_bot, deductions_top, default_top, stub_cfg, deductions_height, summary_height: summary_box_height(stub_cfg))

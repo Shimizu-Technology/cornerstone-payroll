@@ -47,10 +47,10 @@ RSpec.describe PayrollGoLiveSetupTransferService do
 
   it "copies reviewed live setup while leaving paid history and loan balances behind" do
     source = create(:employee, company: source_company, department: create(:department, company: source_company),
-      first_name: "Rosalaine", last_name: "Gumataotao", hire_date: Date.new(1998, 5, 26), pay_rate: 22.50,
+      first_name: "Rowan", last_name: "Halvorsen", hire_date: Date.new(2020, 4, 15), pay_rate: 22.50,
       bank_routing_number_encrypted: "121000358", bank_account_number_encrypted: "123456789")
     target = create(:employee, company:, department: create(:department, company:),
-      first_name: "Rosalaine", last_name: "Gumataotao", ssn_encrypted: source.ssn_digits, hire_date: Date.new(2026, 1, 1), pay_rate: 1)
+      first_name: "Rowan", last_name: "Halvorsen", ssn_encrypted: source.ssn_digits, hire_date: Date.new(2026, 1, 1), pay_rate: 1)
     EmployeeW4Election.create!(
       company: source_company, employee: source, created_by: actor, effective_on: Date.new(2025, 1, 1),
       filing_status: "single", allowances: 0, additional_withholding: 5, w4_dependent_credit: 0,
@@ -84,7 +84,7 @@ RSpec.describe PayrollGoLiveSetupTransferService do
       described_class.apply!(review:, actor:, acknowledgement: described_class::ACKNOWLEDGEMENT)
     end.to change(EmployeeW4Election.where(employee: target), :count).by(1)
 
-    expect(target.reload).to have_attributes(hire_date: Date.new(1998, 5, 26), pay_rate: 22.50)
+    expect(target.reload).to have_attributes(hire_date: Date.new(2020, 4, 15), pay_rate: 22.50)
     # M3-4: the reviewed pay rate starts on the go-live date.
     expect(target.compensation_on(effective_on)).to have_attributes(pay_rate: 22.50, effective_on: effective_on, source: "go_live_setup_transfer")
     expect(target.bank_routing_number_encrypted).to be_nil
@@ -330,8 +330,8 @@ RSpec.describe PayrollGoLiveSetupTransferService do
   end
 
   it "rejects a stale preview after successor employee setup changes" do
-    source = create(:employee, company: source_company, first_name: "Eithen", last_name: "Hadley", pay_rate: 30)
-    target = create(:employee, company:, first_name: "Eithen", last_name: "Hadley", pay_rate: 15, ssn_encrypted: source.ssn_encrypted)
+    source = create(:employee, company: source_company, first_name: "Ethan", last_name: "Mercer", pay_rate: 30)
+    target = create(:employee, company:, first_name: "Ethan", last_name: "Mercer", pay_rate: 15, ssn_encrypted: source.ssn_encrypted)
     review = described_class.preview!(company:, source_company:, batch:, effective_on:, actor:)
 
     target.employee_wage_rates.create!(label: "Corrected rate", rate: 25, active: true, is_primary: false)

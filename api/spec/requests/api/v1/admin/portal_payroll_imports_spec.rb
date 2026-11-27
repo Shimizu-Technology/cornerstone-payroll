@@ -85,7 +85,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
 
   it "shows stale None before apply and retains the warning in the response and import note" do
     field = PayrollStandingChange.create!(company: company, employee: employee, kind: "extra_hours",
-      employee_wage_rate: create(:employee_wage_rate, employee: employee), label: "Addison's hours", required: false)
+      employee_wage_rate: create(:employee_wage_rate, employee: employee), label: "Jordan's hours", required: false)
     source = revision(workbook: true)
     source.update_columns(change_rows: [ { "kind" => "extra_hours", "employee_id" => employee.id,
       "employee_wage_rate_id" => field.employee_wage_rate_id, "standing_change_id" => field.id,
@@ -94,7 +94,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     data = preview(source)
     expect(response).to have_http_status(:ok), response.body
     warning = data.dig("client_change_prefill", "manual_review_warnings").sole
-    expect(warning).to include("Addison's hours", "Enter the value or ask the client")
+    expect(warning).to include("Jordan's hours", "Enter the value or ask the client")
     apply(data)
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body["manual_review_warnings"]).to include(warning)
@@ -931,7 +931,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     def standing_source
       source = revision
       source.update_columns(change_rows: [
-        { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "8421.13" },
+        { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "4500.00" },
         { "kind" => "extra_hours", "employee_id" => manual_worker.id, "employee_wage_rate_id" => manual_job.id,
           "wage_rate" => "35.0", "hours" => "68" }
       ])
@@ -940,14 +940,14 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
 
     def reviewed_standing_params(data)
       { import_id: data.fetch("import_id"), confirm_client_changes: true,
-        reviewed_changes: [ { change_index: 0, amount: "8421.13" }, { change_index: 1, hours: "68" } ] }
+        reviewed_changes: [ { change_index: 0, amount: "4500.00" }, { change_index: 1, hours: "68" } ] }
     end
 
     it "prefills the portal review without writes and atomically applies per-person pay and saved-job hours" do
       source = standing_source
       data = preview(source)
       expect(response).to have_http_status(:ok), response.body
-      expect(data.dig("client_change_prefill", "rows")).to include(include("employee_id" => owner.id, "amount" => "8421.13"),
+      expect(data.dig("client_change_prefill", "rows")).to include(include("employee_id" => owner.id, "amount" => "4500.00"),
         include("employee_id" => manual_worker.id, "hours" => "68", "employee_wage_rate_id" => manual_job.id))
       expect(run.payroll_items).to be_empty
       apply(data)
@@ -958,7 +958,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(response).to have_http_status(:ok), response.body
       owner_item = run.payroll_items.find_by!(employee: owner)
       worker_item = run.payroll_items.find_by!(employee: manual_worker)
-      expect(owner_item.salary_override).to eq(BigDecimal("8421.13"))
+      expect(owner_item.salary_override).to eq(BigDecimal("4500.00"))
       expect(owner_item.custom_columns_data.dig("period_pay_evidence", "source_type")).to eq("client_submission")
       expect(worker_item.hours_worked).to eq(68)
       expect(worker_item.wage_rate_hours.sole).to include("employee_wage_rate_id" => manual_job.id, "rate" => 35.0, "regular_hours" => 68.0)
@@ -972,13 +972,13 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(data["client_change_prefill"]).to be_nil
       expect(data.dig("pending_change_prefill", "submission_id")).to eq(source.id)
       params = reviewed_standing_params(data).merge(use_submission_id: source.id)
-      params[:reviewed_changes][0][:amount] = "8421.12"
+      params[:reviewed_changes][0][:amount] = "4495.00"
       params[:reviewed_changes][0][:reason] = "Client confirmed corrected pay"
       params[:reviewed_changes][1][:hours] = "67.5"
       params[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: params, as: :json
       expect(response).to have_http_status(:ok), response.body
-      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.12"))
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4495.00"))
       expect(run.payroll_items.find_by!(employee: manual_worker).hours_worked).to eq(BigDecimal("67.5"))
       expect(source.submission_imports.sole).to have_attributes(source_route: "pay_run", applied_at: be_present)
     end
@@ -1162,7 +1162,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       patch "#{url}/payroll_items/#{run.payroll_items.find_by!(employee: owner).id}",
         params: { expected_import_id: data["import_id"], payroll_item: { salary_override: "100" } }, as: :json
       expect(response).to have_http_status(:conflict)
-      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
     end
 
     it "opens and applies a third identical-files revision once when the second was only previewed" do
@@ -1206,7 +1206,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       patch "#{url}/payroll_items/#{run.payroll_items.find_by!(employee: owner).id}",
         params: { expected_import_id: data["import_id"], payroll_item: { salary_override: "100" } }, as: :json
       expect(response).to have_http_status(:conflict)
-      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
     end
 
     def corrected_standing(data, changes)
@@ -1236,7 +1236,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     end
 
     %w[skipped dropped].each do |mode|
-      it "removes absent Addison's earlier hours when #{mode}, even with no active proposals" do
+      it "removes absent Jordan's earlier hours when #{mode}, even with no active proposals" do
         source = standing_source
         data = preview(source)
         apply_standing(data)
@@ -1324,7 +1324,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
           if %w[undecided missing_reason].include?(outcome)
             expect(response).to have_http_status(:unprocessable_entity)
             expect(response.parsed_body["error"]).to include(outcome == "undecided" ? "in this review" : "reason")
-            expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
+            expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
             expect(run.pay_period_excluded_employees).to be_empty
             next
           end
@@ -1514,11 +1514,11 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
         people = [ { name: "Owner, Mo", regular_hours: 0, regular_pay: 0 } ]
         people << { name: "Example, Avery", regular_hours: 40, regular_pay: 400 } if files == :with_worker
         source = revision(bytes: File.binread(build_revel_pdf(people, period_start: run.start_date, period_end: run.end_date)))
-        source.update_columns(change_rows: [ { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "8421.13" } ])
+        source.update_columns(change_rows: [ { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "4500.00" } ])
         add_source(source, PayrollImport::MosaSupplementalTemplate.new(run).generate, "changes_workbook", "changes.xlsx",
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        apply_standing(preview(source), [ { change_index: 0, amount: "8421.13" } ])
-        expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
+        apply_standing(preview(source), [ { change_index: 0, amount: "4500.00" } ])
+        expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
 
         second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("skipped" => true) })
         data = preview(second)
@@ -1632,11 +1632,11 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(data.dig("client_change_prefill", "manual_review_warnings").join).to include("no split is inferred")
       expect(data.dig("preview", "matched").find { |row| row["employee_id"] == owner.id }).to include("period_pay_missing" => true)
       stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
-      post "#{url}/payroll_items", params: { employee_id: owner.id, salary_override: "8421.13", expected_import_id: data.fetch("import_id") }, as: :json
+      post "#{url}/payroll_items", params: { employee_id: owner.id, salary_override: "4500.00", expected_import_id: data.fetch("import_id") }, as: :json
       expect(response).to have_http_status(:created), response.body
       post "#{url}/apply_import", params: { import_id: data.fetch("import_id"), portal_source_id: data.dig("portal_source", "selection_id"), force_overwrite: true }, as: :json
       expect(response).to have_http_status(:ok), response.body
-      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("8421.13"))
+      expect(run.payroll_items.find_by!(employee: owner).salary_override).to eq(BigDecimal("4500.00"))
     end
 
     it "rejects a rate changed after preview and a newer portal revision without payroll writes" do

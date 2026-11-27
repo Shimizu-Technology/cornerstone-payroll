@@ -197,6 +197,30 @@ describe('employee app shell', () => {
     expect(localStorage.getItem('employee-app:hide-amounts')).toBe('true');
   });
 
+  it('says when the year-to-date totals are under review', async () => {
+    signedIn();
+    localStorage.setItem('employee-app:hide-amounts', 'false');
+    const note = 'Your year-to-date totals are being reviewed: an earlier paycheck may already be in your opening balance. If a total changes, a corrected stub will follow.';
+    const statement = {
+      id: 908,
+      pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20', run_purpose: 'regular' },
+      check_date: '2026-11-20', gross_pay: '612.50', net_pay: '534.18', total_hours: '38.50',
+      payment: { method: 'direct_deposit', status: 'issued', issued_on: '2026-11-20', check_number_last4: null },
+      pdf_available: true,
+    };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [statement], years: [2026], next_page: null }),
+      '/employee/statements/908': () => Response.json({ ...statement, earnings: [], taxes: [], deductions: [], other_pay: [],
+        ytd: { gross: '1000.00', net: '800.00' }, ytd_note: note }),
+    }));
+    window.history.pushState({}, '', '/pay/908');
+    render(<EmployeeApp />);
+
+    expect(await screen.findByText(note)).toBeTruthy();
+  });
+
   it('points Help to the manager, never to Cornerstone', async () => {
     signedIn();
     window.history.pushState({}, '', '/help');

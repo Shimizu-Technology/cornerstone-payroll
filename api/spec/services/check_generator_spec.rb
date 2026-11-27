@@ -102,18 +102,18 @@ RSpec.describe CheckGenerator do
   end
 
   it "includes both a direct loan and a separate loan field in check deductions" do
-    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+    field = PayrollFieldDefinition.create!(company: company, name: "Loan - Devon Holbrook",
       kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
     payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
       label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
       category: "loan", amount: BigDecimal("250"), source: "employee_default")
-    payroll_item.update!(loan_deduction: BigDecimal("428.36"), loan_payment: BigDecimal("678.36"))
+    payroll_item.update!(loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"))
 
     expect(generator.send(:deduction_rows)).to include(
-      [ "Loan", "428.36", "428.36" ],
-      [ "Loan - Madela Severin", "250.00", "250.00" ]
+      [ "Loan", "300.00", "300.00" ],
+      [ "Loan - Devon Holbrook", "250.00", "250.00" ]
     )
-    expect(generator.send(:cur_deds)).to eq(BigDecimal("678.36"))
+    expect(generator.send(:cur_deds)).to eq(BigDecimal("550.00"))
   end
 
   describe "captured prior-period work on paper stubs" do
@@ -224,7 +224,7 @@ RSpec.describe CheckGenerator do
     end
 
     it "keeps the full names of distinct loan fields and other pay on the stub" do
-      field = PayrollFieldDefinition.create!(company: company, name: "Loan - Madela Severin",
+      field = PayrollFieldDefinition.create!(company: company, name: "Loan - Devon Holbrook",
         kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
       payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
         label: field.name, kind: "deduction", tax_treatment: "post_tax_deduction",
@@ -233,13 +233,13 @@ RSpec.describe CheckGenerator do
 
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
 
-      expect(text).to include("Loan - Madela Severin")
+      expect(text).to include("Loan - Devon Holbrook")
       expect(text).to include("Auto Loan Reimbursement")
       expect(text).not_to include("Auto Loan Reimburs..")
     end
 
     it "bounds unusually long labels while keeping the deduction and summary readable" do
-      long_label = "Loan - Madela Severin Extra Long Reimbursement Installment Reference Number"
+      long_label = "Loan - Devon Holbrook Extra Long Reimbursement Installment Reference Number"
       field = PayrollFieldDefinition.create!(company: company, name: long_label,
         kind: "deduction", tax_treatment: "post_tax_deduction", category: "loan", amount_type: "fixed")
       payroll_item.payroll_item_field_entries.create!(payroll_field_definition: field,
@@ -250,28 +250,28 @@ RSpec.describe CheckGenerator do
       text = reader.pages.map(&:text).join("\n")
 
       expect(reader.page_count).to eq(1)
-      expect(text).to include("Loan - Madela Severin Extra Long", "Reimbursemen...")
+      expect(text).to include("Loan - Devon Holbrook Extra Long", "Reimbursemen...")
       expect(text).to include("SUMMARY", "NET PAY")
       expect(text).not_to include("[TABLE]")
     end
 
     it "keeps details and summary below crowded statement tables" do
       crowded_rows = [
-        [ "Allotment - Douglas", "482.08", "9,641.60" ],
+        [ "Allotment - Daniel", "400.00", "8,000.00" ],
         [ "Rent Reimbursement", "150.00", "3,000.00" ],
-        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
-        [ "Loan (Nena Joe)", "0.00", "350.00" ],
-        [ "Loan - Douglas Phill", "0.00", "300.00" ],
-        [ "ER 401(k) Pre-Tax", "387.81", "8,177.03" ]
+        [ "Auto Loan Reimbursement", "100.00", "1,600.00" ],
+        [ "Loan (Nora Lee)", "0.00", "350.00" ],
+        [ "Loan - Daniel Carter", "0.00", "300.00" ],
+        [ "ER 401(k) Pre-Tax", "200.00", "4,200.00" ]
       ]
       crowded_deduction_rows = [
-        [ "401(k) Pre-Tax", "387.81", "8,177.03" ],
+        [ "401(k) Pre-Tax", "500.00", "10,500.00" ],
         [ "Loan", "0.00", "350.00" ],
-        [ "Loan - Madela Severin", "0.00", "2,500.00" ],
-        [ "Health Insurance", "126.00", "2,583.00" ],
-        [ "Remittance ID 2952492", "168.00", "3,192.00" ],
-        [ "Tips Paid Out", "0.00", "1,900.80" ],
-        [ { content: "TOTAL", font_style: :bold }, { content: "681.81", font_style: :bold }, { content: "18,702.83", font_style: :bold } ]
+        [ "Loan - Devon Holbrook", "0.00", "2,500.00" ],
+        [ "Health Insurance", "100.00", "2,100.00" ],
+        [ "Remittance ID 0000101", "150.00", "3,150.00" ],
+        [ "Tips Paid Out", "0.00", "1,200.00" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "750.00", font_style: :bold }, { content: "19,800.00", font_style: :bold } ]
       ]
       allow(generator).to receive(:other_pay_rows).and_return(crowded_rows)
       allow(generator).to receive(:deduction_rows).and_return(crowded_deduction_rows)
@@ -294,24 +294,24 @@ RSpec.describe CheckGenerator do
         expect(summary_top).to be < deduction_bottom - 2.0
       end
       expect(page.text).to include(
-        "ER 401(k) Pre-Tax", "8,177.03", "Remittance ID 2952492", "18,702.83", "Pay Period", "MEMO:"
+        "ER 401(k) Pre-Tax", "4,200.00", "Remittance ID 0000101", "19,800.00", "Pay Period", "MEMO:"
       )
     end
 
-    it "keeps Sara-shaped Other Pay YTD values clear of the summary box with a legacy offset" do
+    it "keeps dense Other Pay YTD values clear of the summary box with a legacy offset" do
       company.update!(check_layout_config: { stub: { summary_x_offset: -18.0 } })
       allow(generator).to receive(:other_pay_rows).and_return([
-        [ "Allotment - Douglas", "482.08", "9,641.60" ],
+        [ "Allotment - Daniel", "400.00", "8,000.00" ],
         [ "Rent Reimbursement", "150.00", "3,000.00" ],
-        [ "Auto Loan Reimbursement", "121.00", "1,936.00" ],
-        [ "Loan (Nena Joe)", "0.00", "350.00" ],
-        [ "Loan - Douglas Phill", "0.00", "300.00" ],
-        [ "ER 401(k) Pre-Tax", "387.81", "8,177.03" ]
+        [ "Auto Loan Reimbursement", "100.00", "1,600.00" ],
+        [ "Loan (Nora Lee)", "0.00", "350.00" ],
+        [ "Loan - Daniel Carter", "0.00", "300.00" ],
+        [ "ER 401(k) Pre-Tax", "200.00", "4,200.00" ]
       ])
       allow(generator).to receive(:deduction_rows).and_return([
-        [ "401(k) Pre-Tax", "1,216.35", "24,327.00" ],
-        [ "Loan", "41.50", "2,587.50" ],
-        [ { content: "TOTAL", font_style: :bold }, { content: "1,257.85", font_style: :bold }, { content: "26,914.50", font_style: :bold } ]
+        [ "401(k) Pre-Tax", "600.00", "12,000.00" ],
+        [ "Loan", "50.00", "1,000.00" ],
+        [ { content: "TOTAL", font_style: :bold }, { content: "650.00", font_style: :bold }, { content: "13,000.00", font_style: :bold } ]
       ])
 
       summary_boxes = []
@@ -322,7 +322,7 @@ RSpec.describe CheckGenerator do
 
       page = PDF::Reader.new(StringIO.new(generator.generate)).pages.first
       expect(summary_boxes.size).to eq(2)
-      ytd_runs = page.runs.select { |run| run.text == "8,177.03" }
+      ytd_runs = page.runs.select { |run| run.text == "4,200.00" }
       expect(ytd_runs.size).to eq(2)
       ytd_runs.zip(summary_boxes).each do |run, box|
         expect(run.y).to be_between(box[:y] - box[:height], box[:y])
@@ -492,33 +492,33 @@ RSpec.describe CheckGenerator do
         through_period_end: Date.new(2026, 2, 28),
         through_pay_date: Date.new(2026, 3, 10),
         source_breakdown: {
-          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "17630.29" },
+          "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "10000.00" },
           "after_tax_deduction_breakdown" => {
-            "Health Insurance" => "2457.00",
-            "Case No. 2952492" => "3024.00"
+            "Health Insurance" => "2000.00",
+            "Case No. 0000101" => "3000.00"
           },
-          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "7646.04" }
+          "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "4000.00" }
         },
-        tips_paid_out: 1_900.80
+        tips_paid_out: 1_200.00
       )
       create_statement_field_entry(
-        label: "Health Insurance", amount: 126, treatment: "post_tax_deduction", category: "insurance")
+        label: "Health Insurance", amount: 100, treatment: "post_tax_deduction", category: "insurance")
       create_statement_field_entry(
-        label: "Remittance ID 2952492", amount: 168, treatment: "post_tax_deduction", category: "child_support")
-      payroll_item.update!(retirement_payment: 927.91, employer_retirement_match: 381.08)
+        label: "Remittance ID 0000101", amount: 150, treatment: "post_tax_deduction", category: "child_support")
+      payroll_item.update!(retirement_payment: 500.00, employer_retirement_match: 200.00)
 
       deduction_rows = generator.send(:deduction_rows)
       other_pay_rows = generator.send(:other_pay_rows)
       text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
 
-      expect(deduction_rows).to include([ "401(k) Pre-Tax", "927.91", "18,558.20" ])
-      expect(deduction_rows).to include([ "Health Insurance", "126.00", "2,583.00" ])
-      expect(deduction_rows).to include([ "Remittance ID 2952492", "168.00", "3,192.00" ])
-      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,900.80" ])
-      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "381.08", "8,027.12" ])
-      expect(text).to include("401(k) Pre-Tax", "18,558.20")
-      expect(text).to include("ER 401(k) Pre-Tax", "8,027.12")
-      expect(text).to include("26,234.00")
+      expect(deduction_rows).to include([ "401(k) Pre-Tax", "500.00", "10,500.00" ])
+      expect(deduction_rows).to include([ "Health Insurance", "100.00", "2,100.00" ])
+      expect(deduction_rows).to include([ "Remittance ID 0000101", "150.00", "3,150.00" ])
+      expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,200.00" ])
+      expect(other_pay_rows).to include([ "ER 401(k) Pre-Tax", "200.00", "4,200.00" ])
+      expect(text).to include("401(k) Pre-Tax", "10,500.00")
+      expect(text).to include("ER 401(k) Pre-Tax", "4,200.00")
+      expect(text).to include("16,950.00")
     end
   end
 
@@ -573,12 +573,14 @@ RSpec.describe CheckGenerator do
       payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
       payroll_item.payroll_item_earnings.create!(
         category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
-      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 117.70.to_d, call: [
+      rows = [
         PayrollEarningsYtdBreakdown::Row.new(
           label: "Joint", source_label: "Joint", category: "regular",
           hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d
         )
-      ])
+      ]
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 117.70.to_d, call: rows,
+        attributable_rows: rows)
       allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item, sources: instance_of(PayrollStatementYtdSources)).and_return(breakdown)
 
       row = generator.send(:pay_rows).find { |candidate| candidate.first == "Joint" }
@@ -670,10 +672,28 @@ RSpec.describe CheckGenerator do
         source: "manual"
       )
 
+      # Gross includes each paycheck's taxable field addition, so the rows foot
+      # and the year can be attributed row by row on both statements.
+      earlier_item.update_columns(gross_pay: payroll_item.gross_pay + 10)
+      payroll_item.update_columns(gross_pay: payroll_item.gross_pay + 25)
       field_row = generator.send(:pay_rows).find { |row| row.first == "Certification Pay" }
 
       expect(field_row[3]).to eq("25.00")
       expect(field_row[4]).to eq("35.00")
+      statement_row = PayStubGenerator.new(payroll_item.reload).statement.fetch(:earnings).find { |row| row[:label] == "Certification Pay" }
+      expect(statement_row).to include(amount: 25.to_d, ytd: 35.to_d)
+    end
+
+    it "prints - for per-earning YTD where the earnings statement prints a dash" do
+      payroll_item.update!(gross_pay: 117.70, net_pay: 108.69, hours_worked: 10.70, pay_rate: 11)
+      payroll_item.payroll_item_earnings.create!(category: "regular", label: "Joint", hours: 10.70, rate: 11, amount: 117.70)
+      row = PayrollEarningsYtdBreakdown::Row.new(label: "Joint", source_label: "Joint", category: "regular",
+        hours: 10.70, rate: 11.to_d, current: 117.70.to_d, ytd: 1_032.90.to_d)
+      breakdown = instance_double(PayrollEarningsYtdBreakdown, source_items: [], pay_ytd_total: 1_032.90.to_d, call: [ row ],
+        attributable_rows: nil)
+      allow(PayrollEarningsYtdBreakdown).to receive(:new).with(payroll_item, sources: instance_of(PayrollStatementYtdSources)).and_return(breakdown)
+
+      expect(generator.send(:pay_rows).first).to eq([ "Joint", "10.70", "11.00", "117.70", "-" ])
     end
 
     it "exclude committed payroll from later pay dates" do

@@ -9,8 +9,8 @@ vi.mock('@/hooks/useSelectedCompanyCapability', () => ({ useSelectedCompanyCapab
 vi.mock('@/lib/company-write-access', () => ({ canWriteCompany: () => mocks.canEdit }));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title }: { title: string }) => <h1>{title}</h1> }));
 const fixture = { defaults: [], employees: [
-  { id: 1, name: 'Monique Owner', status: 'active', variable_salary: true, hourly: false, wage_rates: [] },
-  { id: 2, name: 'Addison Worker', status: 'active', variable_salary: false, hourly: true, wage_rates: [{ id: 7, label: 'Maintenance', rate: '35.0' }] },
+  { id: 1, name: 'Morgan Owner', status: 'active', variable_salary: true, hourly: false, wage_rates: [] },
+  { id: 2, name: 'Jordan Worker', status: 'active', variable_salary: false, hourly: true, wage_rates: [{ id: 7, label: 'Maintenance', rate: '35.0' }] },
 ] };
 beforeEach(() => { vi.clearAllMocks(); mocks.canEdit = true; mocks.get.mockResolvedValue(fixture); mocks.post.mockResolvedValue(fixture); });
 afterEach(cleanup);
@@ -32,7 +32,7 @@ it('shows unavailable defaults and prevents saves without configuration capabili
   mocks.canEdit = false;
   render(<StandingChangesSettings />);
   await screen.findByText('Needs attention in Settings: Saved job missing');
-  expect((screen.getByRole('button', { name: 'Remove default for Addison Worker' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Remove default for Jordan Worker' }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByLabelText('Employee').closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
   expect(mocks.patch).not.toHaveBeenCalled();
 });
@@ -59,12 +59,12 @@ it('edits an existing default and renders the returned order', async () => {
   mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
   mocks.patch.mockResolvedValue({ ...fixture, defaults: [{ ...existing, position: 2 }] });
   render(<StandingChangesSettings />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Monique Owner' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Morgan Owner' }));
   fireEvent.change(screen.getByLabelText('Order'), { target: { value: '2' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save default' }));
   await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/11', { standing_change: { ...existing, position: 2 } }));
   await screen.findByText(/Every-period changes saved/);
-  fireEvent.click(screen.getByRole('button', { name: 'Edit default for Monique Owner' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit default for Morgan Owner' }));
   expect((screen.getByLabelText('Order') as HTMLInputElement).value).toBe('2');
 });
 it('deactivates an existing default and removes its rendered row', async () => {
@@ -72,10 +72,10 @@ it('deactivates an existing default and removes its rendered row', async () => {
   mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
   mocks.patch.mockResolvedValue({ ...fixture, defaults: [{ ...existing, active: false }] });
   render(<StandingChangesSettings />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Remove default for Monique Owner' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove default for Morgan Owner' }));
   await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith('/admin/payroll_standing_changes/11', { standing_change: { ...existing, active: false } }));
   await screen.findByText('No every-period changes configured.');
-  expect(screen.queryByRole('button', { name: 'Remove default for Monique Owner' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Remove default for Morgan Owner' })).toBeNull();
 });
 
 it('saves field labels, help, requirement and none permissions, and suggests hours for an hourly employee', async () => {
@@ -124,7 +124,7 @@ it('saves a cleared order as 0 when the form is submitted with Enter', async () 
   mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
   mocks.patch.mockResolvedValue({ ...fixture, defaults: [{ ...existing, position: 0 }] });
   render(<StandingChangesSettings />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Monique Owner' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Morgan Owner' }));
   const order = screen.getByLabelText('Order');
   fireEvent.focus(order);
   fireEvent.change(order, { target: { value: '' } });
@@ -135,7 +135,7 @@ it('refuses a fractional order and a run count below the threshold', async () =>
   const existing = { id: 11, kind: 'owner_pay', employee_id: 1, employee_wage_rate_id: null, position: 5, active: true };
   mocks.get.mockResolvedValue({ ...fixture, defaults: [existing] });
   render(<StandingChangesSettings />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Monique Owner' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit default for Morgan Owner' }));
   fireEvent.change(screen.getByLabelText('Order'), { target: { value: '1.5' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save default' }));
   expect((await screen.findByRole('alert')).textContent).toContain('Order must be a whole number');

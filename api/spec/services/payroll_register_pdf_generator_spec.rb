@@ -99,10 +99,10 @@ RSpec.describe PayrollRegisterPdfGenerator do
     end
 
     it "groups currency with thousands separators" do
-      report_data[:employees].first[:payroll_field_entries].first[:amount] = 1216.35
+      report_data[:employees].first[:payroll_field_entries].first[:amount] = 1500.00
       text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
-      expect(text).to include("$1,216.35")
-      expect(text).not_to include("$1216.35", "Shift Bonus [")
+      expect(text).to include("$1,500.00")
+      expect(text).not_to include("$1500.00", "Shift Bonus [")
     end
 
     it "returns a binary String" do

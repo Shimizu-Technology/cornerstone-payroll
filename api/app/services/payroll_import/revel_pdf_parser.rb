@@ -5,33 +5,32 @@ module PayrollImport
   #
   # Example PDF structure (fixed-width columns):
   #      Employee                            Role               Ext. ID               Wage            Regular h.          Overtime h.        Doubletime h.                Regular            Overtime           Doubletime           Total Hours                  Total                 Fees
-  #      Arthur, Juile R.                        -                     -                    -               58.99                      -                     -             604.64                       -                    -              58.99               604.64                      -
+  #      Benson, Calra R.                        -                     -                    -               40.00                      -                     -             600.00                       -                    -              40.00               600.00                      -
   #
   # Returns array of hashes with:
-  # - employee_name (string): "Arthur, Juile R."
-  # - regular_hours (decimal): 58.99
+  # - employee_name (string): "Benson, Calra R."
+  # - regular_hours (decimal): 40.00
   # - overtime_hours (decimal): 0.0
-  # - regular_pay (decimal): 604.64
+  # - regular_pay (decimal): 600.00
   # - overtime_pay (decimal): 0.0
-  # - total_hours (decimal): 58.99
-  # - total_pay (decimal): 604.64
+  # - total_hours (decimal): 40.00
+  # - total_pay (decimal): 600.00
   class RevelPdfParser
     # Column positions determined by analyzing sample PDFs
     # Measured in character positions from start of line
-    # Based on analysis of payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf
     COLUMNS = {
-      employee: 0..39,          # "Arthur, Juile R." ends around position 39
+      employee: 0..39,          # "Benson, Calra R." ends around position 39
       role: 40..59,             # "-" appears at position ~45
       ext_id: 60..79,           # "-" appears at position ~65
       wage: 80..99,             # "-" appears at position ~85
-      regular_hours: 100..119,  # "58.99" appears at position ~104-109
+      regular_hours: 100..119,  # "40.00" appears at position ~104-109
       overtime_hours: 120..139, # "-" appears at position ~130
       doubletime_hours: 140..159, # "-" appears at position ~150
-      regular_pay: 160..179,    # "604.64" appears at position ~164-170
+      regular_pay: 160..179,    # "600.00" appears at position ~164-170
       overtime_pay: 180..199,   # "-" appears at position ~190
       doubletime_pay: 200..219, # "-" appears at position ~210
-      total_hours: 220..239,    # "58.99" appears at position ~228-233
-      total_pay: 240..259,      # "604.64" appears at position ~248-254
+      total_hours: 220..239,    # "40.00" appears at position ~228-233
+      total_pay: 240..259,      # "600.00" appears at position ~248-254
       fees: 260..279            # "-" appears at position ~270
     }.freeze
 
@@ -190,12 +189,12 @@ module PayrollImport
 
         # Case 1: Line has a name and numbers - could be complete or need next line's name
         if has_numbers && name_part.match?(/[A-Za-z]/)
-          # Check if name ends with comma (like "Camacho,") - might need first name from next line
+          # Check if name ends with comma (like "Bennett,") - might need first name from next line
           if name_part.end_with?(",") && i + 1 < lines.length
             next_name = lines[i+1][COLUMNS[:employee]]&.strip || ""
             # If next line has text but no numbers, it's probably the first name
             if next_name.match?(/[A-Za-z]/) && !lines[i+1].match?(/\d+\.\d{2}/)
-              # Merge: "Camacho," + "Zachary" = "Camacho, Zachary"
+              # Merge: "Bennett," + "Zachary" = "Bennett, Zachary"
               combined_name = "#{name_part} #{next_name}".strip
               combined_line = combined_name.ljust(40) + line[40..].to_s
               employee_lines << combined_line
@@ -210,7 +209,7 @@ module PayrollImport
 
         # Case 2: Line has name but no numbers - could be first part of multi-line name
         elsif name_part.match?(/[A-Za-z]/) && !has_numbers
-          # Check if this is a name containing comma (e.g., "Camacho," or "Purcell, Cienna")
+          # Check if this is a name containing comma (e.g., "Bennett," or "Foster, Camille")
           # Could be start of multi-line name
           if (name_part.end_with?(",") || name_part.include?(",")) && i + 1 < lines.length
             next_line = lines[i+1]
@@ -252,10 +251,10 @@ module PayrollImport
       # Remove extra whitespace
       name = name.gsub(/\s+/, " ").strip
 
-      # Fix trailing commas: "Likiaksa, Stephanie," -> "Likiaksa, Stephanie"
+      # Fix trailing commas: "Navarro, Hannah," -> "Navarro, Hannah"
       name = name.sub(/,\s*$/, "") if name.end_with?(",")
 
-      # Fix double commas: "Likiaksa, Stephanie, Iuver" -> "Likiaksa, Stephanie Iuver"
+      # Fix double commas: "Navarro, Hannah, Ellis" -> "Navarro, Hannah Ellis"
       # Actually this might be "Last, First Middle" which is fine
 
       # Revel payroll rows are in "Last, First" format.
@@ -306,8 +305,8 @@ module PayrollImport
 
     def implausible_fixed_parse?(values)
       # 200h ceiling matches MAX_REALISTIC_HOURS in validation script (14 days * ~14h max).
-      # Catches compressed-layout lines like PP09 Thomas/Natalie where fixed columns
-      # misread regular_pay (224.41) as total_hours; fallback flexible parser resolves correctly.
+      # Catches compressed-layout lines where fixed columns misread regular_pay (e.g. 240.00)
+      # as total_hours; fallback flexible parser resolves correctly.
       values[:employee].to_s.strip.empty? || values[:total_hours].to_f > 200.0 || (values[:total_pay].to_f > 0 && values[:total_hours].to_f.zero?)
     end
 

@@ -351,10 +351,6 @@ class PayrollStatementYtdBreakdown
     @sources.historical_balance
   end
 
-  def historical_cutoff
-    historical_balance&.through_pay_date
-  end
-
   def ytd_source_items
     @sources.items
   end

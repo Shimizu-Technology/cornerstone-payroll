@@ -112,9 +112,9 @@ describe('register reconciliation columns', () => {
 
   it('renders saved Roth, payroll-field retirement, reimbursements and employee net without employer money', () => {
     const cases = [
-      { name: 'Roth rate', traditional: 0, roth: 28.8, additions: 0, employer: 0 },
-      { name: 'Roth catch-up', traditional: 0, roth: 1216.35, additions: 0, employer: 0 },
-      { name: 'Field retirement', traditional: 927.91, roth: 0, additions: 0, employer: 100 },
+      { name: 'Roth rate', traditional: 0, roth: 30, additions: 0, employer: 0 },
+      { name: 'Roth catch-up', traditional: 0, roth: 600, additions: 0, employer: 0 },
+      { name: 'Field retirement', traditional: 500, roth: 0, additions: 0, employer: 100 },
       { name: 'Reimbursement', traditional: 0, roth: 0, additions: 20, employer: 0 },
       { name: 'Ordinary', traditional: 0, roth: 0, additions: 0, employer: 0 },
     ];

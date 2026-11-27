@@ -2124,12 +2124,17 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(response).to have_http_status(:ok)
       report = response.parsed_body.fetch("report")
       history = report.fetch("history")
-      withholding = history.pluck("withholding_tax")
+      # Each row splits income tax and W-4 4c as the pay stub does.
+      withholding = history.pluck("total_income_tax_withheld")
       hours = history.pluck("total_hours")
+      expect(history.pluck("withholding_tax")).to eq([ 120.11, 90.0, -10.0 ])
+      expect(history.pluck("additional_withholding")).to eq([ 50.22, 0.0, 0.0 ])
       expect(withholding).to eq([ 170.33, 90.0, -10.0 ])
       expect(hours).to eq([ 39.1, 40.0, -1.0 ])
       expect(history.pluck("hours_worked")).to eq([ 30.11, 30.0, nil ])
       expect(report.dig("summary", "withholding_tax").to_d).to eq(withholding.sum(&:to_d))
+      expect(report.dig("summary", "base_withholding_tax").to_d).to eq(200.11.to_d)
+      expect(report.dig("summary", "additional_withholding").to_d).to eq(50.22.to_d)
       expect(history.pluck("overtime_hours")).to eq([ 5.22, 10.0, nil ])
       expect(report.dig("summary", "total_hours")).to eq(60.11)
       expect(report.dig("summary", "combined_hours").to_d).to eq(hours.sum(&:to_d))
@@ -2139,9 +2144,11 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       csv = CSV.parse(response.body, headers: true)
       expect(csv.headers).to eq([
         "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
-        "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay", "Guam income tax withheld", "SS Tax", "Medicare Tax",
+        "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
+        "Guam income tax", "Additional Guam income tax (W-4 4c)", "Guam income tax withheld", "SS Tax", "Medicare Tax",
         "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
       ])
+      expect(csv["Guam income tax"].map(&:to_d)).to eq([ 120.11, 90, -10 ].map(&:to_d))
       expect(csv["Regular Hours"]).to eq([ "30.11", "30.0", nil ])
       expect(csv["Guam income tax withheld"].map(&:to_d)).to eq(withholding.map(&:to_d))
       expect(csv["Combined Hours"].map(&:to_d)).to eq(hours.map(&:to_d))
@@ -2149,7 +2156,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/employee_pay_history_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include("Guam income tax 250.33", "Combined Hours 78.1", "170.33", "39.1")
+      expect(pdf).to include("Guam income tax withheld 250.33", "Guam income tax 200.11", "Combined Hours 78.1", "170.33", "39.1")
 
       get "/api/v1/admin/reports/employee_pay_history_xlsx", params: params
       expect(response).to have_http_status(:ok)
@@ -2161,10 +2168,12 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(summary_rows.map(&:first)).to eq([
         "Metric", "Basis", "Start Date", "End Date", "Payroll Count", "Gross Pay", "Custom Earnings",
         "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions", "Payroll Field Pre-Tax Deductions",
-        "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions", "Guam income tax", "SS Tax", "Medicare Tax",
+        "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions", "Guam income tax",
+        "Additional Guam income tax (W-4 4c)", "Guam income tax withheld", "SS Tax", "Medicare Tax",
         "401(k)", "Roth 401(k)", "Tips", "Tips Paid Out", "Bonus", "Total Deductions", "Custom Deductions", "Net Pay", "Combined Hours"
       ])
-      expect(summary_rows.to_h).to include("Guam income tax" => 250.33, "Combined Hours" => 78.1)
+      expect(summary_rows.to_h).to include("Guam income tax" => 200.11, "Additional Guam income tax (W-4 4c)" => 50.22,
+        "Guam income tax withheld" => 250.33, "Combined Hours" => 78.1)
       expect(rows.first).to eq(csv.headers)
     end
 
@@ -4013,8 +4022,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       }
       expect(response).to have_http_status(:ok)
       rows = CSV.parse(response.body)
-      expect(rows.first[19..]).to eq([ "Check Number", "Payment method", "Combined Hours" ])
-      expect(rows[1][19, 2]).to eq([ nil, "Direct deposit" ])
+      expect(rows.first[21..]).to eq([ "Check Number", "Payment method", "Combined Hours" ])
+      expect(rows[1][21, 2]).to eq([ nil, "Direct deposit" ])
     end
 
     it "retains source methods for imported employee history without using today's profile" do
