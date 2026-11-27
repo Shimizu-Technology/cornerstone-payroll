@@ -208,7 +208,8 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     try {
       setLoading(true);
       setError(null);
-      openPreview(await payPeriodsApi.currentImport(payPeriodId));
+      const sourceType = currentPackage?.source_type || descriptor?.key;
+      openPreview(sourceType ? await payPeriodsApi.currentImport(payPeriodId, sourceType) : await payPeriodsApi.currentImport(payPeriodId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not reopen the current MoSa import');
     } finally {
@@ -219,7 +220,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   // Reload the saved review in place. Outcomes already chosen for each source row are kept.
   const reloadReview = async (expectedImportId: number, generation = reviewGeneration.current) => {
     if (generation !== reviewGeneration.current) return;
-    const data = await payPeriodsApi.currentImport(payPeriodId);
+    const sourceType = previewData?.source_package.source_type;
+    const data = sourceType
+      ? await payPeriodsApi.currentImport(payPeriodId, sourceType)
+      : await payPeriodsApi.currentImport(payPeriodId);
     if (generation !== reviewGeneration.current) return;
     if (data.import_id !== expectedImportId) {
       throw new Error('The saved review changed. Close this window and open the submission again.');
@@ -383,12 +387,15 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     const previousDocuments = current.source_package.documents;
     const pendingSubmissionId = usePendingRevision ? current.pending_portal_source?.submission_id : undefined;
     const portal = current.portal_source;
+    const sourceType = current.source_package.source_type;
     const data = portal
       ? await payPeriodsApi.previewPortalSubmission(payPeriodId, portal.submission_id, {
           superseded_reason: portal.superseded_reason, supersedes_package_id: current.source_package.package_id,
           supersession_reason: reason, tips_paid_out_from_tips: current.preview.tips_paid_out_from_tips,
         })
-      : recordReason ? await payPeriodsApi.rematchImport(payPeriodId, reason) : await payPeriodsApi.rematchImport(payPeriodId);
+      : recordReason
+        ? (sourceType ? await payPeriodsApi.rematchImport(payPeriodId, reason, sourceType) : await payPeriodsApi.rematchImport(payPeriodId, reason))
+        : (sourceType ? await payPeriodsApi.rematchImport(payPeriodId, undefined, sourceType) : await payPeriodsApi.rematchImport(payPeriodId));
     // Another window may have replaced the review with different files; outcomes
     // chosen here apply only to a review of the same files.
     const sameFiles = sameSourceFiles(previousDocuments, data.source_package.documents);
@@ -444,7 +451,13 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setError(null);
     setNotice(null);
     try {
-      const result = await payPeriodsApi.setUpImportInstallmentLoan(payPeriodId, { import_id: current.import_id, employee_id: row.employee_id, ...fields });
+      const sourceType = current.source_package.source_type;
+      const result = await payPeriodsApi.setUpImportInstallmentLoan(payPeriodId, {
+        import_id: current.import_id,
+        employee_id: row.employee_id,
+        ...(sourceType ? { source_type: sourceType } : {}),
+        ...fields,
+      });
       const done = resume ? `${what} is resumed` : result.already_set_up ? `${what} was already set up` : `${what} is set up`;
       try {
         await matchAgain(current, resume ? `Matched again after ${what} was resumed` : `Matched again after ${what} was set up`, row.employee_id,
@@ -502,7 +515,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     try {
       setLoading(true);
       setError(null);
-      const data = await payPeriodsApi.removeImportSource(payPeriodId, role, reason);
+      const sourceType = previewData.source_package.source_type;
+      const data = sourceType
+        ? await payPeriodsApi.removeImportSource(payPeriodId, role, reason, sourceType)
+        : await payPeriodsApi.removeImportSource(payPeriodId, role, reason);
       openPreview(data, previousRows, pendingSubmissionId);
       if (role === 'supplemental_workbook') setNoTipsOrLoans(false);
       onSourcePreviewed?.();
@@ -522,7 +538,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     try {
       setSavingTips(true);
       setError(null);
-      const data = await payPeriodsApi.saveImportTipTreatment(payPeriodId, previewData.import_id, paid);
+      const sourceType = previewData.source_package.source_type;
+      const data = sourceType
+        ? await payPeriodsApi.saveImportTipTreatment(payPeriodId, previewData.import_id, paid, sourceType)
+        : await payPeriodsApi.saveImportTipTreatment(payPeriodId, previewData.import_id, paid);
       setPreviewData(data);
       setTipsPaidOutFromTips(data.preview.tips_paid_out_from_tips);
     } catch (err) {

@@ -10,7 +10,7 @@ class Company < ApplicationRecord
 
   belongs_to :created_by, class_name: "User", optional: true
   CHECK_STOCK_TYPES = %w[bottom_check top_check first_hawaiian_4up].freeze
-  PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email mosa_revel].freeze
+  PAYROLL_INTAKE_SOURCE_TYPES = %w[spike_email mosa_revel cornerstone_workbook].freeze
   PAYROLL_ENVIRONMENTS = %w[live migration_rehearsal].freeze
   MIGRATION_REHEARSAL_STATUSES = %w[pending ready failed].freeze
   TEST_WORKSPACE_PURPOSES = %w[sandbox migration_rehearsal training_replay backup_snapshot demo].freeze
@@ -467,7 +467,7 @@ class Company < ApplicationRecord
       descriptor = PayrollIntake::Registry.find(source_type)
       effective_overtime = (settings["overtime_mode"].presence || descriptor&.overtime_mode || OperatingProfileCatalog.default_for("overtime.mode")).to_s
       effective_alignment = (settings["workweek_alignment"].presence ||
-        (effective_overtime == "source_reports" ? (descriptor&.workweek_alignment || "warn_if_offset") : "aligned")).to_s
+        (effective_overtime == "source_reports" ? "warn_if_offset" : "aligned")).to_s
       if effective_alignment == "warn_if_offset" && effective_overtime != "source_reports"
         errors.add(
           :payroll_intake_settings,
