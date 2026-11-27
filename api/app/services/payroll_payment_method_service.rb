@@ -69,6 +69,8 @@ class PayrollPaymentMethodService
           @reapproval_pay_period_ids |= default_service.reapproval_pay_period_ids
         end
 
+        sync_scoped_payment_delivery_snapshot!(period) unless period.committed?
+
         AuditLog.record!(
           user: actor,
           company_id: company.id,
@@ -109,6 +111,22 @@ class PayrollPaymentMethodService
 
     @reapproval_pay_period_ids << period.id if period.approved?
     self.class.refresh_review!(period: period, actor: actor)
+  end
+
+  def sync_scoped_payment_delivery_snapshot!(period)
+    snapshot = item.calculation_context_snapshot.to_h
+    return unless snapshot.key?("paycheck_input_fingerprint") ||
+      PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: item.employee, pay_period: period)
+    return unless snapshot.key?("paycheck_input_fingerprint")
+
+    current_default = item.employee.reload.payment_delivery_method.presence || "paper_check"
+    resolved_item_method = item.effective_payment_delivery_method
+    updated_snapshot = snapshot.merge(
+      "item_payment_delivery_method" => resolved_item_method,
+      "employee_payment_default_at_calculation" => current_default,
+      "payment_delivery_method_overridden" => (resolved_item_method != current_default)
+    )
+    item.update!(calculation_context_snapshot: updated_snapshot) if updated_snapshot != snapshot
   end
 
   def self.refresh_review!(period:, actor:)

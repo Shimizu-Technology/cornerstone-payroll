@@ -176,6 +176,15 @@ module Api
                 return render json: { error: "Employee is excluded from this pay period" }, status: :unprocessable_entity
               end
 
+              existing_item = pay_period.payroll_items.find_by(employee_id: employee.id)
+              if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: pay_period, employee: employee, payroll_item: existing_item))
+                return render json: {
+                  error: "#{readiness_blocker.reason} Hours were not imported.",
+                  code: "employee_readiness_incomplete",
+                  missing_keys: readiness_blocker.missing_keys
+                }, status: :unprocessable_entity
+              end
+
               item = pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
               if item.new_record?
                 item.company_id = current_company_id

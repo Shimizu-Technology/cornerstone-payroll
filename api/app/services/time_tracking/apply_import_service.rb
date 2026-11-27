@@ -122,6 +122,27 @@ module TimeTracking
           end
           seen_employee_ids.add(employee.id)
 
+          existing_item = @pay_period.payroll_items.find_by(employee_id: employee.id)
+          if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: @pay_period, employee: employee, payroll_item: existing_item))
+            if finalized_batch?
+              results[:errors] << {
+                source_user_id: source_user_id,
+                employee_id: employee.id,
+                error: "#{employee.full_name} — #{readiness_blocker.reason} Hours were not imported."
+              }
+            else
+              results[:skipped] << {
+                source_user_id: source_user_id,
+                employee_id: employee.id,
+                name: employee.full_name,
+                reason: "Skipped — #{readiness_blocker.reason} Hours were not imported.",
+                code: "employee_readiness_incomplete",
+                missing_keys: readiness_blocker.missing_keys
+              }
+            end
+            next
+          end
+
           item = @pay_period.payroll_items.lock.find_or_initialize_by(employee_id: employee.id)
           if item.persisted? && item.import_source.to_s.start_with?("time_tracking:")
             results[:errors] << { source_user_id: source_user_id, employee_id: employee.id, error: "Employee already has imported time tracking hours in this pay period" }

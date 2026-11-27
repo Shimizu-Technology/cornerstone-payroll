@@ -404,8 +404,17 @@ module Api
               stale = @pay_period.payroll_items.find_by(employee_id: employee_id.to_i)&.employee
               stale ||= Employee.find_by(id: employee_id.to_i, company_id: current_company_id) if params.key?(:employee_ids)
               if stale
-                results[:errors] << { employee_id: stale.id, name: stale.full_name,
-                  error: "#{stale.full_name} is no longer eligible for this run (status or new-hire paperwork). Resolve it, or remove them from payroll, then calculate again." }
+                readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(
+                  pay_period: @pay_period,
+                  employee: stale,
+                  payroll_item: @pay_period.payroll_items.find_by(employee_id: stale.id)
+                )
+                error_message = if readiness_blocker
+                  "#{stale.full_name} — #{readiness_blocker.reason}"
+                else
+                  "#{stale.full_name} is no longer eligible for this run (status or new-hire paperwork). Resolve it, or remove them from payroll, then calculate again."
+                end
+                results[:errors] << { employee_id: stale.id, name: stale.full_name, error: error_message }
               end
               next
             end
@@ -430,9 +439,19 @@ module Api
                 payroll_item.company_id = current_company_id
                 payroll_item.hours_worked = 0
               end
-              payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
+              if PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: employee, pay_period: @pay_period) &&
+                  (payroll_item.new_record? || !payroll_item.payment_delivery_method_overridden_in_snapshot?)
+                payroll_item.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
+              else
+                payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
+              end
 
-              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
+              verified_correction = PayrollReadinessPolicy.verified_correction_paycheck?(
+                pay_period: @pay_period,
+                employee: employee,
+                payroll_item: payroll_item
+              )
+              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || (@pay_period.correction_run? && verified_correction)
               if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
                 payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
               end
@@ -692,9 +711,13 @@ module Api
         # Final lock - no more changes allowed
         def commit
           service = lifecycle_service
-          service.commit!(acknowledged_outstanding_file_request_ids: params[:acknowledged_outstanding_file_request_ids],
-            expected_next_check_number: params[:expected_next_check_number])
+          service.commit!(
+            acknowledged_outstanding_file_request_ids: params[:acknowledged_outstanding_file_request_ids],
+            expected_next_check_number: params[:expected_next_check_number],
+            acknowledged_verification_items: params[:acknowledged_verification_items]
+          )
           @acknowledged_outstanding_file_requests = service.acknowledged_outstanding_file_requests
+          @acknowledged_verification_items = service.acknowledged_verification_items
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue PayPeriodLifecycleService::CommitConflict => e
           render json: { error: e.message, code: e.code }, status: :conflict
@@ -1086,6 +1109,10 @@ module Api
             metadata[:acknowledged_outstanding_file_request_ids] = @acknowledged_outstanding_file_requests.pluck(:id)
             metadata[:outstanding_file_requests] = @acknowledged_outstanding_file_requests
           end
+          if action_name == "commit" && @acknowledged_verification_items.present?
+            metadata[:acknowledged_verification_item_ids] = @acknowledged_verification_items.pluck(:id)
+            metadata[:acknowledged_verification_items] = @acknowledged_verification_items
+          end
           if action_name == "run_payroll" && @payroll_input_changes.present?
             metadata[:input_change_count] = @payroll_input_changes.size
             metadata[:input_changes] = @payroll_input_changes.first(AUDITED_INPUT_CHANGE_LIMIT)
@@ -1464,6 +1491,9 @@ module Api
             lifecycle: lifecycle,
             ineligible_workers: list ? nil : PayrollRunEligibility.new(pay_period).payload,
             expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
+            readiness_excluded_employees: list ? nil : PayrollReadinessPolicy.readiness_excluded_employees_for(pay_period),
+            stale_calculation_employees: list ? nil : PayrollReadinessPolicy.stale_calculation_employees_for(pay_period),
+            unverified_employee_changes: list ? nil : PayPeriodUnverifiedChanges.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,

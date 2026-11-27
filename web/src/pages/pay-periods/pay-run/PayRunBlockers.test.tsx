@@ -72,3 +72,42 @@ it.each([200, 422])('submits the displayed revision and refreshes the banner aft
     vi.unstubAllGlobals();
   }
 });
+
+it('renders the stale-calculation banner with Recalculate action and the unverified-changes banner', () => {
+  const handleRunPayroll = vi.fn().mockResolvedValue(undefined);
+  const props = {
+    part: 'lifecycle',
+    companyId: 7,
+    canEditPayPeriod: true,
+    handleRunPayroll,
+    payPeriod: {
+      id: 12,
+      company_id: 7,
+      status: 'calculated',
+      stale_calculation_employees: [
+        { payroll_item_id: 99, employee_id: 21, name: 'Jordan Sample', reason: 'Employee pay, withholding, tax ID, deductions, or status changed after calculation.' },
+      ],
+      unverified_employee_changes: [
+        {
+          id: 501,
+          updated_at: '2026-11-28T01:00:00.000000Z',
+          employee_id: 21,
+          employee_name: 'Jordan Sample',
+          event_kind: 'compensation_change',
+          status: 'pending_verification',
+          summary: 'Pay rate or compensation changed (pay rate)',
+        },
+      ],
+    },
+  } as unknown as ComponentProps<typeof PayRunBlockers>;
+
+  render(<MemoryRouter><PayRunBlockers {...props} /></MemoryRouter>);
+
+  expect(screen.getByText('Recalculate payroll — employee details changed after calculation')).toBeTruthy();
+  expect(screen.getAllByText('Jordan Sample').length).toBeGreaterThanOrEqual(1);
+  expect(screen.getByText('Changed since last payroll, not verified (1)')).toBeTruthy();
+  expect(screen.getByText(/Pending verification/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
+  expect(handleRunPayroll).toHaveBeenCalledOnce();
+});

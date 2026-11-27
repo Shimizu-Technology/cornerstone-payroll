@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "digest"
+require "openssl"
 
 # Captures the mutable employee configuration that influenced a payroll
 # calculation. Committed payroll items use this immutable snapshot when a
@@ -51,8 +52,8 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, w4_profile: w4_election&.profile_attributes, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil)
-      {
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, w4_profile: w4_election&.profile_attributes, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil, pay_period: nil, payroll_item: nil)
+      snapshot = {
         "version" => VERSION,
         "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee, rates_on: rates_on) : nil,
         "employee" => employee_snapshot(employee, w4_profile: w4_profile).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
@@ -60,6 +61,87 @@ class PayrollCalculationContext
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
         "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
       }
+
+      if pay_period.present? && paycheck_fingerprint_scoped?(employee: employee, pay_period: pay_period)
+        item_method = payroll_item ? payroll_item.effective_payment_delivery_method : (employee.payment_delivery_method.presence || "paper_check")
+        employee_default = employee.payment_delivery_method.presence || "paper_check"
+        prior_overridden = payroll_item&.calculation_context_snapshot.to_h["payment_delivery_method_overridden"] == true
+        snapshot["paycheck_input_fingerprint"] = paycheck_input_fingerprint(employee: employee, pay_period: pay_period)
+        snapshot["item_payment_delivery_method"] = item_method
+        snapshot["employee_payment_default_at_calculation"] = employee_default
+        snapshot["payment_delivery_method_overridden"] = prior_overridden && item_method != employee_default
+      end
+
+      snapshot
+    end
+
+    def paycheck_fingerprint_scoped?(employee:, pay_period:)
+      PayrollReadinessPolicy.fingerprint_scoped?(employee: employee, pay_period: pay_period)
+    end
+
+    # Canonical SHA-256 fingerprint of live period-resolved calculation inputs
+    # for readiness_gate_enforced employees and client_managed companies.
+    # Deliberately excludes employee_loans (which mutate on commit of other runs
+    # and enforce their own balance/schedule check on commit) and separates
+    # payment_delivery_method into state-aware snapshot keys (§6.3B).
+    def paycheck_input_fingerprint(employee:, pay_period:)
+      rates_on = pay_period.end_date
+      w4_on = pay_period.pay_date
+      dated_employee = dated_employee_attributes(employee, rates_on)
+
+      compensation_fields = %w[
+        pay_rate employment_type salary_type pay_frequency
+        contractor_pay_type contractor_type
+        default_custom_earnings default_payroll_adjustments
+        date_of_birth retirement_rate roth_retirement_rate
+        employer_retirement_match_rate employer_roth_match_rate
+        additional_withholding
+      ]
+
+      election = dated_employee["employment_type"] == "contractor" ? nil : employee.w4_election_on(w4_on)
+      w4_payload = if dated_employee["employment_type"] == "contractor"
+        { "contractor" => true, "w9_on_file" => employee.w9_on_file == true }
+      elsif election
+        {
+          "election_id" => election.id,
+          "source" => election.source,
+          "effective_on" => election.effective_on&.iso8601,
+          "w4_signed_on" => election.w4_signed_on&.iso8601,
+          "profile" => election.profile_attributes.deep_stringify_keys
+        }
+      else
+        {
+          "election_id" => nil,
+          "source" => nil,
+          "profile" => EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.deep_stringify_keys
+        }
+      end
+
+      stable_rows = lambda do |association|
+        columns = %w[created_at updated_at]
+        columns << "company_id" if association.klass < CompanyFromParent
+        association.reorder(:id).map { |row| row.attributes.except(*columns) }
+      end
+
+      payload = {
+        "compensation" => dated_employee.slice(*compensation_fields),
+        "wage_rates" => dated_wage_rate_attributes(employee, rates_on).map { |row| row.except("created_at", "updated_at") },
+        "w4" => w4_payload,
+        "tax_id_digest" => tax_id_digest(employee),
+        "status_boundaries" => {
+          "status" => employee.status,
+          "hire_date" => employee.hire_date&.iso8601,
+          "termination_date" => employee.termination_date&.iso8601
+        },
+        "deductions" => deduction_snapshots(employee.employee_deductions.includes(:deduction_type).reorder(:id)),
+        "deduction_assignments" => stable_rows.call(employee.employee_deductions),
+        "payroll_fields" => payroll_field_snapshots(employee.employee_payroll_fields.includes(:payroll_field_definition).reorder(:id)),
+        "payroll_field_assignments" => stable_rows.call(employee.employee_payroll_fields),
+        "retirement_elections" => stable_rows.call(employee.employee_retirement_elections),
+        "retirement_year_inputs" => stable_rows.call(employee.employee_retirement_year_inputs)
+      }
+
+      Digest::SHA256.hexdigest(JSON.generate(canonicalize(payload)))
     end
 
     # For new intake exceptions only. This guards a calculation against later
@@ -150,6 +232,13 @@ class PayrollCalculationContext
     end
 
     private
+
+    def tax_id_digest(employee)
+      ssn_digits = employee.ssn_encrypted.to_s.gsub(/\D/, "")
+      ein_digits = employee.contractor_ein.to_s.gsub(/\D/, "")
+      key = ActiveSupport::KeyGenerator.new(Rails.application.secret_key_base).generate_key("paycheck_input_fingerprint_tax_id", 32)
+      OpenSSL::HMAC.hexdigest("SHA256", key, "#{employee.company_id}:#{employee.id}:#{ssn_digits}:#{ein_digits}")
+    end
 
     def canonicalize(value)
       case value

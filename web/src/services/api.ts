@@ -479,9 +479,15 @@ class ApiClient {
   }
 }
 
+export type AcknowledgedVerificationItem = {
+  id: number;
+  updated_at: string;
+};
+
 export type PayrollCommitSnapshot = {
   acknowledged_outstanding_file_request_ids: number[];
   expected_next_check_number?: number;
+  acknowledged_verification_items?: AcknowledgedVerificationItem[];
 };
 
 export class ApiError extends Error {
@@ -1942,7 +1948,7 @@ export interface TimecardImportMapping {
 
 export interface TimecardImportApplyResponse {
   applied: { employee_id: number; employee_name: string; hours_worked: number; overtime_hours: number }[];
-  skipped: unknown[];
+  skipped: { employee_id?: number; employee_name?: string; name?: string; reason: string; code?: string }[];
   errors: { employee_id: number; name?: string; error: string }[];
 }
 

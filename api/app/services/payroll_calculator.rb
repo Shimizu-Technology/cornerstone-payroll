@@ -1036,7 +1036,9 @@ class PayrollCalculator
       employee_basis: EmployeeCompensationChangeService::BASIS_ATTRIBUTES.index_with { |field| employee_value(field) }
         .merge("pay_rate" => payroll_item.pay_rate),
       w4_profile: w4_profile_for_calculation,
-      retirement_election: retirement_election_for_calculation
+      retirement_election: retirement_election_for_calculation,
+      pay_period: pay_period,
+      payroll_item: payroll_item
     ).merge(built_in_employer_match_identity)
     if line_rounded_earnings?
       payroll_item.calculation_context_snapshot = payroll_item.calculation_context_snapshot.merge("earnings_rounding" => PayrollEarningsRounding::POLICY)

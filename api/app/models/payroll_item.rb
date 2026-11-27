@@ -103,6 +103,15 @@ class PayrollItem < ApplicationRecord
     payment_delivery_method.presence || (pay_period.committed? ? "paper_check" : employee&.payment_delivery_method.presence) || "paper_check"
   end
 
+  def payment_delivery_method_overridden_in_snapshot?
+    snapshot = calculation_context_snapshot.to_h
+    return true if snapshot["payment_delivery_method_overridden"] == true
+
+    recorded_item = snapshot["item_payment_delivery_method"]
+    recorded_default = snapshot["employee_payment_default_at_calculation"]
+    recorded_item.present? && recorded_default.present? && recorded_item != recorded_default
+  end
+
   # True when this row was created by IssueCorrectivePaycheckService and
   # represents a delta against another payroll item (rather than an
   # absolute period entry).
@@ -800,7 +809,13 @@ class PayrollItem < ApplicationRecord
         raise ActiveRecord::RecordInvalid, calculation_period
       end
       self.pay_period = calculation_period
-      self.payment_delivery_method ||= effective_payment_delivery_method
+      if PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: employee, pay_period: calculation_period) &&
+          calculation_period.status.in?(%w[draft calculated]) &&
+          !payment_delivery_method_overridden_in_snapshot?
+        self.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
+      else
+        self.payment_delivery_method ||= effective_payment_delivery_method
+      end
 
       if variable_salary_missing?
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
