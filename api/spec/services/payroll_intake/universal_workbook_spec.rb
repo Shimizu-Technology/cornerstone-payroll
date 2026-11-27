@@ -823,6 +823,29 @@ RSpec.describe "Track C B8-B9: Cornerstone universal workbook, merged apply path
         )
       end.to raise_error(ArgumentError, /exceeds the maximum supported 10000 rows/)
 
+      huge_start_here_io = Zip::OutputStream.write_buffer do |out|
+        Zip::InputStream.open(StringIO.new(base_xlsx)) do |input|
+          while (entry = input.get_next_entry)
+            content = input.read
+            if entry.name == "xl/worksheets/sheet1.xml"
+              content = content.sub("</sheetData>", '<row r="1048576"><c r="A1048576"><v>1</v></c></row></sheetData>')
+            end
+            out.put_next_entry(entry.name)
+            out.write(content)
+          end
+        end
+      end
+
+      started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect do
+        PayrollIntake::UniversalWorkbook::Parser.parse_file(
+          upload_for("huge-start-here.xlsx", huge_start_here_io.string, xlsx_mime),
+          company: company,
+          pay_period: pay_period
+        )
+      end.to raise_error(ArgumentError, /START HERE.*exceeds the maximum supported 10000 rows/)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at).to be < 5.0
+
       stub_const("PayrollIntake::UniversalWorkbook::Parser::MAX_UNCOMPRESSED_SHEET_XML_BYTES", 100)
       expect do
         PayrollIntake::UniversalWorkbook::Parser.parse_file(
