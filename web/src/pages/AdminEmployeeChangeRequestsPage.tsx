@@ -118,14 +118,14 @@ export function AdminEmployeeChangeRequestsPage() {
 
   return (
     <div>
-      <Header title="Client Change Requests" description="Review and approve payroll-sensitive client-submitted changes." />
+      <Header title="Change Requests" description="Review and approve payroll changes requested by client managers and employees." />
 
       <div className="space-y-6 p-4 sm:p-6 lg:p-8">
         <InboxReturnLink />
         {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
 
         <div className="max-w-xs">
-          <Select value={status} onChange={(e) => {
+          <Select aria-label="Change request status" value={status} onChange={(e) => {
             pendingDeepSelection.current = null;
             currentStatusRef.current = e.target.value;
             invalidateRequests();
@@ -193,7 +193,7 @@ export function AdminEmployeeChangeRequestsPage() {
                         <TableCell><StatusBadge status={request.status} /></TableCell>
                         <TableCell>{requestLabel(request)}</TableCell>
                         <TableCell>{request.requested_by_name || '—'}</TableCell>
-                        <TableCell>{formatGuamDateTime(request.created_at)}</TableCell>
+                        <TableCell className="whitespace-normal">{formatGuamDateTime(request.created_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

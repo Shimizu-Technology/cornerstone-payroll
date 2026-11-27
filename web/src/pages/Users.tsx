@@ -4,6 +4,7 @@ import { roleLabel } from '@/lib/role-labels';
 import { invitationNotSent, invitationOutcomeMessage } from '@/lib/invitationOutcome';
 import { useState, useEffect, useCallback, useId, useRef, Fragment, type Dispatch, type SetStateAction } from 'react';
 import { Plus, Check, X, AlertCircle, UserCheck, UserX, Mail, MailX, RefreshCw, Trash2, UserCircle, Activity, ShieldCheck, ArrowRightLeft, FlaskConical, ChevronDown } from 'lucide-react';
+import { DemoBadge } from '@/components/ui/demo-badge';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -575,7 +576,7 @@ export function Users() {
           className="h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
         />
         <div className="min-w-0">
-          <p className="truncate font-medium text-neutral-900">{company.name}</p>
+          <div className="flex items-center gap-2"><span className="truncate font-medium text-neutral-900">{company.name}</span>{company.demo && <DemoBadge />}</div>
           <p className={`text-xs ${option.preparing ? 'text-primary-700' : isTest ? 'font-medium text-amber-700' : 'text-neutral-600'}`}>{option.detail}</p>
         </div>
       </label>

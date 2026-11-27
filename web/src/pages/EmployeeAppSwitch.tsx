@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
 import {
@@ -53,6 +54,7 @@ export function EmployeeAppSwitch() {
 }
 
 function CompanySwitch({ companyId }: { companyId: number }) {
+  const { isSuperAdmin } = useAuth();
   const [state, setState] = useState<EmployeeAppSwitchState | null>(null);
   const [loadError, setLoadError] = useState('');
   const [checking, setChecking] = useState(false);
@@ -119,7 +121,7 @@ function CompanySwitch({ companyId }: { companyId: number }) {
         {notice && <Alert tone="success">{notice}</Alert>}
         {state.company.demo && (
           <Alert tone="info">
-            <strong>Demo company.</strong> Until the database enforces row-level security, a demo can turn on only through the demo early-access rule below. Real companies always need every check.
+            <strong>Demo company.</strong> If the company data protection check is pending, use the demo early-access option below. Live companies must pass every readiness check.
           </Alert>
         )}
 
@@ -135,12 +137,12 @@ function CompanySwitch({ companyId }: { companyId: number }) {
           </CardHeader>
           <CardContent>
             <ul className="divide-y divide-neutral-100">
-              {checks.map((check) => <CheckRow key={check.key} check={check} scope={scopeOf(check.key)} />)}
+              {checks.map((check) => <CheckRow key={check.key} check={check} scope={scopeOf(check.key)} showDiagnostics={isSuperAdmin} />)}
             </ul>
           </CardContent>
         </Card>
 
-        <ObservedState state={state} />
+        {isSuperAdmin && <ObservedState state={state} />}
 
         <Card>
           <CardHeader>
@@ -281,7 +283,7 @@ function waivedLabel(key: string): string {
   return key === 'mfa' ? 'Not required yet' : 'Waived for demo';
 }
 
-function CheckRow({ check, scope }: { check: ReadinessCheck; scope: string | null }) {
+function CheckRow({ check, scope, showDiagnostics }: { check: ReadinessCheck; scope: string | null; showDiagnostics: boolean }) {
   const owner = CHECK_COPY[check.key]?.owner;
   // Cornerstone's own checks and waivers explain themselves in plain words;
   // the platform checks name server settings, so they stay in the details.
@@ -303,12 +305,11 @@ function CheckRow({ check, scope }: { check: ReadinessCheck; scope: string | nul
         {scope && <p className="text-xs font-medium text-neutral-500">{scope}</p>}
         {check.status === 'failed' && owner && <p className="mt-1 text-xs font-semibold text-neutral-600">{owner} fixes this</p>}
         {check.detail && plainDetail && <p className="mt-1 text-sm text-neutral-700 [overflow-wrap:anywhere]">{check.detail}</p>}
-        {check.status !== 'passed' && (check.name !== plainName(check) || (check.detail && !plainDetail)) && (
+        {showDiagnostics && check.status !== 'passed' && check.detail && !plainDetail && (
           <details className="mt-1 text-sm">
             <summary className="cursor-pointer text-neutral-600 hover:text-neutral-900">Technical details</summary>
             <div className="mt-1 space-y-1 rounded-lg bg-neutral-50 p-2 text-neutral-700 [overflow-wrap:anywhere]">
-              <p>{check.name}</p>
-              {check.detail && !plainDetail && <p>{check.detail}</p>}
+              <p>{check.detail.replace(/REQUIRE_MFA=true/g, 'required two-step sign-in').replace(/RLS_GUARD_MODE=raise/g, 'enforced company data protection')}</p>
             </div>
           </details>
         )}
@@ -334,8 +335,8 @@ function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
         <summary className="cursor-pointer list-none px-4 py-4 sm:px-6 sm:py-5 [&::-webkit-details-marker]:hidden">
           <span className="flex items-center justify-between gap-3">
             <span>
-              <CardTitle>Technical details: what the system sees</CardTitle>
-              <CardDescription className="mt-1">For Shimizu Technology. The employee service's guard and the database are separate. The employee service's settings come from its signed answer to this check.</CardDescription>
+              <CardTitle>System diagnostics</CardTitle>
+              <CardDescription className="mt-1">Check how the employee app and database each keep company data separate.</CardDescription>
             </span>
             <ChevronDown className="h-5 w-5 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" aria-hidden="true" />
           </span>
@@ -344,7 +345,7 @@ function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
           <section className="rounded-xl border border-neutral-200 p-4" aria-labelledby="observed-service">
             <h3 id="observed-service" className="font-semibold text-neutral-900">Employee service</h3>
             <dl className="mt-2 space-y-2 text-sm">
-              <Fact term="RLS guard" value={guard} good={observed.rls_guard_mode === 'raise'} />
+              <Fact term="Company data protection" value={guard} good={observed.rls_guard_mode === 'raise'} />
               <Fact term="Database role" value={observed.rls_runtime_role_verified ? 'Restricted role verified' : 'Not verified'} good={observed.rls_runtime_role_verified} />
               <Fact term="Health check" value={!observed.health_check_configured ? 'Not set up on Payroll' : observed.answered_health_check ? 'Answered' : 'No answer'} good={observed.answered_health_check} />
               <Fact term="Signed answer" value={observed.verified ? `Verified${observed.revision ? ` (revision ${observed.revision.slice(0, 12)})` : ''}` : 'Not verified'} good={observed.verified} />
@@ -355,7 +356,7 @@ function ObservedState({ state }: { state: EmployeeAppSwitchState }) {
             <dl className="mt-2 space-y-2 text-sm">
               <Fact term="Row-level security" value={phase} good={database.enforced} />
               <Fact term="Protected tables enforced" value={`${database.enforced_tables} of ${database.protected_tables}`} good={database.enforced} />
-              <Fact term="RLS kill switch" value={killSwitch} good={database.kill_switch_bypass === false} />
+              <Fact term="Database protection bypass" value={killSwitch} good={database.kill_switch_bypass === false} />
             </dl>
           </section>
         </CardContent>
@@ -517,7 +518,7 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
       <CardHeader>
         <CardTitle>{info.name}</CardTitle>
         <CardDescription>
-          With the owner's approval, the named demo companies can turn on before the database enforces row-level security, as long as the employee service's guard is in raise mode. Every other check still applies. After the expiry date the demo's employee app closes on its own. Once the database enforces row-level security the window retires for good.
+          With the owner's approval, selected demo companies can turn on before the database protection check passes if the employee app already blocks access across companies. Every other check still applies. Access expires on the selected date. This option closes permanently once database protection is active.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -582,7 +583,7 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
       </CardContent>
       {ending && (
         <ReasonDialog title="End early access" confirmLabel="End early access" danger
-          description="The database exception ends right away. While the database still doesn't enforce row-level security, any demo employee app parts that are on turn off too."
+          description="The database exception ends right away. While database protection is pending, any demo employee app parts that are on turn off too."
           onClose={() => setEnding(false)}
           onSubmit={async (endReason) => {
             const failure = await mutate({ method: 'DELETE', suffix: '/early_access', body: { reason: endReason } });

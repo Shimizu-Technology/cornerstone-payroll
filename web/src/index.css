@@ -163,3 +163,10 @@ h6,
 @media (max-width: 639px) {
   input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 1rem; }
 }
+
+@layer base {
+  button, a, input, select, textarea, summary {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}

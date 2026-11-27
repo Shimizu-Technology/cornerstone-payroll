@@ -51,12 +51,12 @@ describe('Employee app rollout', () => {
       { employee_ids: [21], delivery: 'email' }, { companyId: 7 });
   });
 
-  it('shows a client viewer the rollout with a view-only note instead of invites or settings', async () => {
+  it('shows a client viewer the rollout without invites or settings', async () => {
     auth.isClientViewer = true;
     mocks.get.mockResolvedValue({ data: { ...rollout, can_manage_invites: false, can_print_codes: false } });
     render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
 
-    expect(await screen.findByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Employee app rollout' })).toBeTruthy();
     expect(screen.getByText('Ready to invite by email').nextElementSibling?.textContent).toBe('2');
     expect(screen.queryByRole('button', { name: 'Send email invites' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Branding and Help settings' })).toBeNull();

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 7, role: 'org_admin' }, isLoading: false, hasCapability: () => true }),
+  useAuth: () => ({ user: { id: 7, role: 'org_admin' }, isSuperAdmin: true, isLoading: false, hasCapability: () => true }),
 }));
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({
@@ -215,7 +215,7 @@ describe('EmployeeAppSwitch', () => {
     expect(screen.queryByText('Stop all demo employee access')).toBeNull();
   });
 
-  it('leads with a plain summary and keeps the server wording under technical details', async () => {
+  it('leads with a plain summary and keeps plain diagnostic details for super admins', async () => {
     mocks.get.mockResolvedValue({ data: state({}, [
       passed('company', 'This is a live client or a demo company'),
       { key: 'subdomain', name: "The company's web address (subdomain) is set", status: 'failed', detail: "Set this company's subdomain on its employee app settings first." },
@@ -235,7 +235,7 @@ describe('EmployeeAppSwitch', () => {
     const mfa = screen.getByText('Two-step sign-in is turned on', { selector: 'p' }).closest('li') as HTMLElement;
     const technical = within(mfa).getByText('Technical details').closest('details') as HTMLDetailsElement;
     expect(technical.open).toBe(false);
-    expect(within(technical).getByText(/REQUIRE_MFA=true/)).toBeTruthy();
+    expect(within(technical).queryByText(/REQUIRE_MFA/)).toBeNull();
     expect(within(technical).getByText(/recorded evidence of the claim/)).toBeTruthy();
     expect(screen.getByText(/Can't turn on yet: 2 checks to finish\. See the readiness checklist above\./)).toBeTruthy();
   });

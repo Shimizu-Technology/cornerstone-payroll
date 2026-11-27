@@ -87,7 +87,7 @@ describe('ClientProfitability', () => {
     }));
     renderPage();
     expect(await screen.findByText('Cornerstone Tax isn’t connected yet')).toBeTruthy();
-    expect(screen.getByText(/Still missing: CORNERSTONE_TAX_API_URL, PAYROLL_WORK_HOURS_SECRET/)).toBeTruthy();
+    expect(screen.queryByText(/CORNERSTONE_TAX_API_URL|PAYROLL_WORK_HOURS_SECRET/)).toBeNull();
     expect((screen.getByRole('button', { name: /Refresh hours from Tax/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(state.report).not.toHaveBeenCalled();
     // The app layout supplies the one <main> landmark.

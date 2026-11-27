@@ -382,10 +382,10 @@ export function EmployeeAppSettings(): ReactElement {
 
   return (
     <div>
-      <Header title="Employee app" description={`How the app looks to ${companyName} employees, and who they can ask for help`} />
+      <Header title="Employee app branding & help" description={`How the app looks to ${companyName} employees, and who they can ask for help`} />
       <div className="space-y-6 p-4 pb-24 sm:p-6 lg:p-8">
         {loadError && <ActionFeedback tone="error" message={loadError} />}
-        {readOnlyReason && <ActionFeedback tone="info" message={readOnlyReason} />}
+        {readOnlyReason && user?.client_access_level !== 'viewer' && <ActionFeedback tone="info" message={readOnlyReason} />}
 
         {!settings || !form ? (
           !loadError && (

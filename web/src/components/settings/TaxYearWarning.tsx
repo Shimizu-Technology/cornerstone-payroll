@@ -1,7 +1,8 @@
+import { Link } from 'react-router';
 import { useEffect, useState } from 'react';
 import { taxYearReadinessApi, type TaxYearReadiness } from '@/services/api';
 
-export function TaxYearWarning({ companyId, payDate }: { companyId: number | null; payDate?: string }) {
+export function TaxYearWarning({ companyId, payDate, showSettingsLink = false }: { companyId: number | null; payDate?: string; showSettingsLink?: boolean }) {
   const [readiness, setReadiness] = useState<TaxYearReadiness | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -19,6 +20,7 @@ export function TaxYearWarning({ companyId, payDate }: { companyId: number | nul
   if (!messages.length) return null;
   return <div role="status" className="mb-4 space-y-2 rounded-lg border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">
     {messages.map(message => <p key={message}>{message}</p>)}
+    {showSettingsLink && <Link to="/settings/tax-config" className="font-semibold underline">Open Tax Configuration</Link>}
     <p>You can save a draft pay period while an administrator reviews tax setup.</p>
   </div>;
 }

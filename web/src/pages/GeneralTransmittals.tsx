@@ -581,7 +581,7 @@ export function GeneralTransmittals() {
                     <h2 className="font-semibold text-neutral-900">Transmittal history</h2>
                     <p className="text-xs text-neutral-600">Drafts and generated packets</p>
                   </div>
-                  <Button size="sm" variant="outline" onClick={() => setForm(emptyForm())}><Plus className="h-4 w-4" /></Button>
+                  <Button size="sm" variant="outline" aria-label="New transmittal" onClick={() => setForm(emptyForm())}><Plus className="h-4 w-4" /></Button>
                 </div>
                 {loading ? <p className="text-sm text-neutral-500">Loading…</p> : transmittals.length === 0 ? (
                   <div className="rounded-xl border border-dashed p-4 text-sm text-neutral-500">No transmittals yet.</div>

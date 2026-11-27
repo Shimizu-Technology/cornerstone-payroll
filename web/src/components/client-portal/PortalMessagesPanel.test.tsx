@@ -29,14 +29,14 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); auth.isClientViewer = false; });
 
-it('shows a client viewer conversations with a view-only note instead of starting or replying', async () => {
+it('shows a client viewer conversations without starting or replying', async () => {
   auth.isClientViewer = true;
   api.list.mockResolvedValue({ data: [thread(2, 'Payroll question')] });
   api.get.mockResolvedValue({ data: { ...thread(2, 'Payroll question'), messages: [] } });
   render(view());
   fireEvent.click((await screen.findAllByText('Payroll question'))[0]);
   await waitFor(() => expect(api.get).toHaveBeenCalled());
-  expect(screen.getAllByText('Your access is view-only. Ask your account manager for changes.').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/Your access is view-only/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Start Conversation' })).toBeNull();
   expect(screen.queryByRole('button', { name: /New conversation/ })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();

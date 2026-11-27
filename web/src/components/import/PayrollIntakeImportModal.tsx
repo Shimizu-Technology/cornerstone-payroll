@@ -713,7 +713,7 @@ export function PayrollIntakeImportModal({
                     <p className="mt-2 text-sm leading-6 text-neutral-600">
                       {sourceType === 'spike_email'
                         ? 'Daily paid tips are imported as both reported taxable tips and tips paid out, so payroll taxes and W-2GU reporting stay correct without paying tips twice.'
-                        : `${isEmployeeIdMatch ? 'Rows match strictly by Cornerstone Employee ID (never by name). ' : ''}Overtime mode: ${descriptor?.overtime_mode || 'weekly_split'}. Default tips: ${descriptor?.tips_default === 'already_paid_out' ? 'already paid out' : 'paid in check'}.`}
+                        : `${isEmployeeIdMatch ? 'Rows match strictly by Cornerstone Employee ID (never by name). ' : ''}Overtime: ${descriptor?.overtime_mode === 'source_reports' ? 'Taken from the time report' : 'Weekly split (40 hrs/week)'}. Default tips: ${descriptor?.tips_default === 'already_paid_out' ? 'already paid out' : 'paid in check'}.`}
                     </p>
                   </div>
                 </div>
