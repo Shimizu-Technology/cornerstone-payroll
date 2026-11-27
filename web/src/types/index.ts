@@ -1458,6 +1458,8 @@ export interface AddBackResult {
 
 export interface PayPeriod {
   rollback_review_required?: boolean;
+  rollback_review_id?: string | null;
+  can_retry_payroll_job?: boolean;
   admin_rollback?: boolean;
   check_number_summary?: { next_check_number: number; last_used_check_number: number | null; can_change: boolean } | null;
   ineligible_workers?: { resolution?: string; employee_id: number; reason: string; status: string; effective_date: string | null }[];

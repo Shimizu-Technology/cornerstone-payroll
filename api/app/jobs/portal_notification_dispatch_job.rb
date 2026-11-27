@@ -5,7 +5,7 @@ class PortalNotificationDispatchJob < ApplicationJob
 
   queue_as :default
 
-  def perform
-    PortalNotifications::Dispatcher.run!
+  def perform(company_id = nil)
+    PortalNotifications::Dispatcher.run!(company_id: company_id)
   end
 end

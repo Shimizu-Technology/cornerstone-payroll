@@ -516,6 +516,7 @@ Rails.application.routes.draw do
 
         delete "pay_periods/:pay_period_id/excluded_employees/:employee_id", to: "pay_period_excluded_employees#destroy"
 
+        post "payroll_job_retry", to: "pay_periods#retry_stuck_job"
         resources :pay_periods do
           resource :aire_payroll_calendar, only: [ :show ], controller: :aire_payroll_calendars do
             post :publish
@@ -584,6 +585,7 @@ Rails.application.routes.draw do
             post :refresh_setup
             get :correction_preflight
             post :reopen_unpaid
+            post :complete_rollback_review
             post :adopt_confirmed_workweek
             get :payroll_field_inputs
             get :comparison

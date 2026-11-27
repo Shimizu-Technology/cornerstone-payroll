@@ -190,6 +190,33 @@ RSpec.describe PostEmployeePayStubsJob do
     )
   end
 
+  it "replaces the withdrawn original when an intermediate correction never posted" do
+    item
+    run_at(cutoff)
+    original = documents.first
+    period.update_columns(correction_status: "voided")
+    run_at(cutoff + 5.minutes)
+    expect(original.reload).to be_withdrawn
+
+    intermediate_period = create(:pay_period, :committed, company: company, committed_at: cutoff + 6.minutes,
+      start_date: period.start_date, end_date: period.end_date, pay_date: period.pay_date)
+    intermediate = create(:payroll_item, pay_period: intermediate_period, employee: employee,
+      net_pay: 700, payment_delivery_method: "direct_deposit", financial_correction_origin_item: item)
+    intermediate_period.update_columns(correction_status: "voided")
+
+    final_period = create(:pay_period, :committed, company: company, committed_at: cutoff + 8.minutes,
+      start_date: period.start_date, end_date: period.end_date, pay_date: period.pay_date)
+    final_item = create(:payroll_item, pay_period: final_period, employee: employee,
+      net_pay: 800, payment_delivery_method: "direct_deposit", financial_correction_origin_item: intermediate)
+    run_at(cutoff + 10.minutes)
+
+    expect(EmployeeDocument.where(payroll_item: intermediate)).to be_empty
+    expect(original.reload).to be_replaced
+    expect(EmployeeDocument.find_by!(payroll_item: final_item)).to have_attributes(
+      status: "posted", corrected: true, replaces_document_id: original.id
+    )
+  end
+
   context "with a delta correction" do
     let(:delta_period) do
       create(:pay_period, :committed, company: company, committed_at: cutoff, start_date: period.start_date,

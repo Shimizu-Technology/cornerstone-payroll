@@ -43,20 +43,53 @@ RSpec.describe "AIRE lock-time changes", type: :request do
       expect(state.fetch("cutoff_control")).to include("available" => false, "reset_available" => false,
         "unavailable_reason" => "Waiting for AIRE to confirm the last change")
       expect(state.fetch("cutoff_history").length).to eq(1)
+      expect(AdminOverride.find_by!(action: "aire_cutoff_change", subject: pay_period)).to have_attributes(actor: org_admin, reason: "Payday holiday")
+    end
+
+    it "replays a cutoff insert race inside the outer admin override transaction" do
+      sign_in(org_admin)
+      request_id = SecureRandom.uuid
+      payload = { lock_action: "change", cutoff_at: "2026-10-25T17:00:00+10:00", reason: "Payday holiday", request_id: request_id }
+      post path, params: payload, as: :json
+      expect(response).to have_http_status(:created)
+      winner = AirePayrollCutoffOverride.find_by!(request_id: request_id)
+      reject_delivery!(winner.aire_payroll_calendar_period.latest_publication)
+
+      allow(AirePayrollCutoffOverride).to receive(:find_by).and_call_original
+      lookups = 0
+      allow(AirePayrollCutoffOverride).to receive(:find_by).with(request_id: request_id) do
+        lookups += 1
+        winner if lookups > 1
+      end
+      expect(AirePayrollCutoffOverride).to receive(:create!) do
+        AirePayrollCutoffOverride.insert_all!([ winner.attributes.except("id").merge("override_id" => SecureRandom.uuid) ])
+      end
+
+      expect { post path, params: payload, as: :json }.not_to change(AdminOverride, :count)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body).to include("idempotent" => true)
     end
 
     it "refuses managers and accountants even though they can publish or read calendars" do
-      %w[manager accountant admin].each do |role|
+      %w[manager accountant admin employee client portal_employee].each do |role|
         sign_in(create(:user, company: company, organization: company.organization, role: role))
-        post path, params: { lock_action: "lock_now", reason: "Try" }, as: :json
+        post path, params: { lock_action: "lock_now", reason: "Try to change the lock" }, as: :json
         expect(response).to have_http_status(:forbidden)
       end
       expect(AirePayrollCutoffOverride.count).to eq(0)
     end
 
+    it "allows the platform admin to change the cutoff without a fresh-factor prompt" do
+      owner = create(:user, company: company, organization: company.organization, role: :super_admin)
+      sign_in(owner)
+      post path, params: { lock_action: "lock_now", reason: "Approvals are complete" }, as: :json
+      expect(response).to have_http_status(:created), response.body
+      expect(AdminOverride.find_by!(action: "aire_cutoff_change")).to have_attributes(actor: owner)
+    end
+
     it "explains a rejected time" do
       sign_in(org_admin)
-      post path, params: { lock_action: "change", cutoff_at: "2026-10-30T09:00:00+10:00", reason: "Too late" }, as: :json
+      post path, params: { lock_action: "change", cutoff_at: "2026-10-30T09:00:00+10:00", reason: "Requested time is too late" }, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
       expect(response.parsed_body).to eq("error" => "Choose a time at least two days before payday")
     end

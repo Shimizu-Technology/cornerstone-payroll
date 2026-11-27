@@ -7,6 +7,8 @@ class EmployeeStatements
   # output is not changed. Payment status is read live from the recorded
   # evidence; it is never part of the frozen PDF.
   class Presenter
+    WITHDRAWN_MESSAGE = "This pay stub was withdrawn. A corrected one will follow."
+    VOIDED_CHECK_MESSAGE = "Check voided. A replacement is coming. This pay still counts toward your year."
     QUICKBOOKS_LABEL = "From QuickBooks records"
     # The printed stub's tax labels, in PayStubGenerator#tax_lines order.
     TAX_KINDS = [
@@ -41,7 +43,8 @@ class EmployeeStatements
         id: @statement.id,
         source: "payroll",
         source_label: nil,
-        pdf_available: true,
+        pdf_available: document.posted? && !item.voided?,
+        **(item.voided? ? { notice: VOIDED_CHECK_MESSAGE } : {}),
         original_pdf: false,
         corrected: document.corrected,
         posted_at: document.posted_at.iso8601
@@ -59,14 +62,21 @@ class EmployeeStatements
     end
 
     def payroll_summary
-      payroll_core.merge(previous: previous_json)
+      return payroll_core.merge(previous: previous_json) unless @statement.withdrawn?
+
+      period = item.pay_period
+      { id: @statement.id, source: "payroll", status: "withdrawn", notice: WITHDRAWN_MESSAGE, pdf_available: false,
+        check_date: period.pay_date.iso8601,
+        pay_period: { start_date: period.start_date.iso8601, end_date: period.end_date.iso8601, pay_date: period.pay_date.iso8601 } }
     end
 
     def payroll_detail
+      return payroll_summary if @statement.withdrawn?
+
       shared = EmployeePayStatements::Presenter.new(item).detail.except(:has_source_entries, :source_entries)
       shared.merge(payroll_summary).merge(
         taxes: shared.fetch(:taxes).map { |row| row.merge(tax_kind(row[:label])) },
-        earlier_versions: @statements.earlier_versions(document).map do |version|
+        earlier_versions: (item.voided? ? [] : @statements.earlier_versions(document)).map do |version|
           { id: version.id.to_s, status: "replaced", posted_at: version.posted_at.iso8601, payment_line: version.payment_line }
         end,
         note: nil
