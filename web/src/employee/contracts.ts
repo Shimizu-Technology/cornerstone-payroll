@@ -248,7 +248,7 @@ export function parseStatementPage(data: unknown): StatementPage {
 // earnings (label, hours, rate, amount, ytd, kind), taxes (plus kind and
 // display_label, e.g. "guam_income_tax" / "Guam income tax"), deductions,
 // other_pay, ytd { gross, net }, note, and earlier_versions: the revisions a
-// Corrected stub replaced, [{ id, status: "replaced", posted_at, payment_line }],
+// current stub replaced, [{ id, status: "replaced", posted_at, payment_line, corrected }],
 // each downloadable as it was issued from /employee/statements/:id/pdf.
 // A replaced revision's id opens the current version. QuickBooks rows show
 // their imported breakdown, or only adjusted totals with a note when an
@@ -281,10 +281,11 @@ export interface TaxLine extends AmountLine {
   displayLabel: string | null;
 }
 
-/** A revision a Corrected stub replaced, downloadable as it was issued. */
+/** A replaced revision, downloadable as it was issued. */
 export interface EarlierVersion {
   id: string;
   status: 'replaced';
+  corrected: boolean;
   postedAt: string | null;
   paymentLine: string | null;
 }
@@ -328,6 +329,7 @@ function earlierVersions(value: unknown): EarlierVersion[] {
       id: versionId, status: 'replaced' as const,
       postedAt: postedAt && !Number.isNaN(Date.parse(postedAt)) ? postedAt : null,
       paymentLine: text(version.payment_line),
+      corrected: bool(version.corrected),
     }];
   });
 }

@@ -584,7 +584,7 @@ function EarlierStubs({ versions, payDate, corrected }: { versions: EarlierVersi
       <ul className="divide-y divide-neutral-200">
         {versions.map((version, index) => {
           const original = index === versions.length - 1;
-          const title = original ? 'Original pay stub' : 'Earlier pay stub';
+          const title = original ? 'Original pay stub' : version.corrected ? 'Earlier correction' : 'Earlier pay stub';
           return (
             <li key={version.id} className="space-y-2 py-3">
               <h3 className="emp-h3">{title}</h3>

@@ -77,7 +77,8 @@ class EmployeeStatements
       shared.merge(payroll_summary).merge(
         taxes: shared.fetch(:taxes).map { |row| row.merge(tax_kind(row[:label])) },
         earlier_versions: (item.voided? ? [] : @statements.earlier_versions(document)).map do |version|
-          { id: version.id.to_s, status: "replaced", posted_at: version.posted_at.iso8601, payment_line: version.payment_line }
+          { id: version.id.to_s, status: "replaced", posted_at: version.posted_at.iso8601,
+            payment_line: version.payment_line, corrected: version.correction_label? }
         end,
         note: nil
       )
