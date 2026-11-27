@@ -117,6 +117,9 @@ Rails.application.routes.draw do
           resources :document_requirements, only: :index, controller: :employee_document_requirements
         end
         resources :departments, only: [ :index, :create, :update ]
+        resource :employee_organization, only: [ :show, :update ], controller: :employee_organization do
+          post :save_role
+        end
         resources :documents, only: [ :index, :create, :destroy ] do
           member do
             get :download
@@ -495,6 +498,9 @@ Rails.application.routes.draw do
         delete "employee_contact_hygiene/placeholder_emails", to: "employee_contact_hygiene#unmark_placeholder_email"
         post   "employee_contact_hygiene/clear_shared_emails", to: "employee_contact_hygiene#clear_shared_emails"
         resources :departments, only: [ :index, :create, :update ]
+        resource :employee_organization, only: [ :show, :update ], controller: :employee_organization do
+          post :save_role
+        end
 
         get "time_tracking_sources/:source_id/health", to: "time_tracking_source_health#show"
         resources :time_tracking_sources, except: [ :new, :edit ] do
