@@ -211,18 +211,33 @@ describe('Employee app rollout', () => {
   });
 
   it('supports Select all ready and Clear selection in Invite a group for the client audience up to max_wave_size', async () => {
-    mocks.get.mockResolvedValue({ data: { ...rollout, max_wave_size: 2 } });
+    mocks.get.mockResolvedValue({ data: {
+      ...rollout,
+      max_wave_size: 2,
+      counts: { ...rollout.counts, ready_to_invite: 3 },
+      candidates: [
+        ...rollout.candidates,
+        { id: 23, name: 'Sample Three', email: 'three@example.test', email_ready: true, email_review_required: false },
+      ],
+    } });
     const user = userEvent.setup();
     render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
 
     const selectAll = await screen.findByRole('button', { name: 'Select all ready (2)' });
+    expect(screen.queryByRole('button', { name: /Select all matches|Select up to/ })).toBeNull();
     await user.click(selectAll);
     expect(screen.getByText('2 selected')).toBeTruthy();
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
     expect((screen.getByRole('checkbox', { name: /Sample One/ }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole('checkbox', { name: /Sample Two/ }) as HTMLInputElement).checked).toBe(true);
+    const thirdCheckbox = screen.getByRole('checkbox', { name: /Sample Three/ }) as HTMLInputElement;
+    expect(thirdCheckbox.checked).toBe(false);
+    expect(thirdCheckbox.disabled).toBe(true);
+    expect(screen.getAllByRole('button', { name: 'Clear selection' })).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: 'Clear selection' }));
     expect(screen.getByText('0 selected')).toBeTruthy();
+    expect(thirdCheckbox.disabled).toBe(false);
   });
 
   it('does not render client bulk-selection controls for the admin audience', async () => {

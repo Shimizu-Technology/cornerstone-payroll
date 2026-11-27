@@ -241,6 +241,40 @@ it('tells a client viewer that only managers can send files on an open period in
   expect(screen.queryByRole('button', { name: /Send/ })).toBeNull();
 });
 
+it('hides the submission form for a client viewer even when allowed_actions includes submit', async () => {
+  mocks.viewOnly = true;
+  mocks.get.mockResolvedValue({
+    data: period({
+      status: 'waiting_for_files',
+      status_label: 'Waiting for files',
+      open_for_files: true,
+      opens_on: '2026-11-15',
+      current_revision: null,
+      submissions: [],
+      allowed_actions: ['submit', 'message'],
+    }),
+  });
+  const { container } = renderAt('client');
+  expect(await screen.findByText('Only client managers can send payroll files.')).toBeTruthy();
+  expect(container.querySelector('form')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Send to Cornerstone' })).toBeNull();
+  expect(screen.queryByRole('button', { name: /Send/ })).toBeNull();
+});
+
+it('hides the update button for a client viewer on a period with an existing revision', async () => {
+  mocks.viewOnly = true;
+  mocks.get.mockResolvedValue({
+    data: period({
+      allowed_actions: ['submit', 'message'],
+    }),
+  });
+  const { container } = renderAt('client');
+  expect(await screen.findByRole('region', { name: 'Revision 2' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Send an update or replace a file' })).toBeNull();
+  expect(container.querySelector('form')).toBeNull();
+  expect(screen.queryByRole('button', { name: /Send/ })).toBeNull();
+});
+
 it('shows the true future opens-on date plus the manager note for a viewer on an unopened period', async () => {
   mocks.viewOnly = true;
   mocks.get.mockResolvedValue({

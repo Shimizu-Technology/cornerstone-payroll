@@ -849,9 +849,13 @@ describe('employee app shell', () => {
     const ytdCard = screen.getByRole('region', { name: 'This year so far' });
     expect(ytdCard.closest('.emp-wide-only')).toBeNull();
     expect(ytdCard.className).toContain('emp-home-ytd');
+    await within(ytdCard).findByText('2026 through Nov 20');
+    expect(within(ytdCard).getAllByText('Amount hidden')).toHaveLength(2);
     expect(ytdCard.textContent).not.toContain('10,000.00');
+    expect(ytdCard.textContent).not.toContain('12,000.00');
     await userEvent.click(toggleBtn);
     expect(await within(ytdCard).findByText('$10,000.00')).toBeTruthy();
+    expect(within(ytdCard).getByText('$12,000.00')).toBeTruthy();
   });
 
   it('hides the company main line on Help when contacts exist and shows it when none are set (A-25)', async () => {
