@@ -2891,6 +2891,9 @@ export interface EmployeePayHistoryRecord {
   payment_method_label?: string;
   payment_method?: string | null;
   reason?: string;
+  /** Imported rows: the figures as imported; recorded adjustments are separate rows. */
+  as_imported?: boolean;
+  basis_label?: string;
   source: {
     system: 'cornerstone' | 'quickbooks_online' | 'prior_provider' | 'historical_adjustment';
     label: string;
@@ -2910,7 +2913,10 @@ export interface EmployeePayrollSummary {
   payroll_count: number;
   imported_payroll_count: number;
   imported_opening_summary_count: number;
+  /** Combined hours, as on pay stubs and pay history rows. */
   total_hours?: number;
+  /** Regular hours only. */
+  worked_hours?: number;
   combined_hours?: number;
   gross_pay: number;
   custom_earnings_total: number;
@@ -3003,6 +3009,7 @@ export interface YtdSummaryReport {
       status: string;
       payroll_count?: number;
       total_hours?: number;
+      worked_hours?: number;
       combined_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;
@@ -3042,6 +3049,7 @@ export interface YtdSummaryReport {
     company_totals: null | {
       year: number;
       total_hours?: number;
+      worked_hours?: number;
       combined_hours?: number;
       total_overtime_hours?: number;
       gross_pay: number;

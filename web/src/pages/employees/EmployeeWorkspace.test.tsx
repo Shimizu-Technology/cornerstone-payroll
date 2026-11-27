@@ -191,7 +191,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
         pay_date: '2026-09-19', period_description: 'September payroll',
         source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
         gross_pay: 900, total_deductions: 100, net_pay: 800,
-        payment_delivery_method: 'direct_deposit', check_number: null,
+        payment_delivery_method: 'direct_deposit', payment_method_label: 'Direct deposit', check_number: null,
       }],
     } });
     render(
@@ -246,7 +246,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
         pay_date: '2026-10-08', period_description: 'October payroll',
         source: { system: 'cornerstone', label: 'Cornerstone', locked: true },
         hours_worked: 21.37, gross_pay: 197.67, total_deductions: 197.67, net_pay: 0,
-        payment_delivery_method: 'paper_check', check_number: null,
+        payment_delivery_method: 'paper_check', payment_method_label: '$0 net · earnings statement only', check_number: null,
       }],
     } });
     render(

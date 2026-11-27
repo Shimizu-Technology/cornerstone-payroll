@@ -390,7 +390,7 @@ RSpec.describe "Api::V1::Integrations::Aire::WorkerStatements", type: :request d
 
       expect(response).to have_http_status(:ok)
       text = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(text).to include("Payment: Direct deposit (stub only; transfer not confirmed)")
+      expect(text).to include("Payment: Direct deposit")
     end
 
     it "lists reversed payroll as voided history but has no current statement PDF for it" do

@@ -1948,7 +1948,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
 
       expect(employee_row.fetch("custom_earnings_total").to_f).to eq(50.00)
       expect(employee_row).to include(
-        "total_hours" => 70.0,
+        "total_hours" => 74.0,
+        "worked_hours" => 70.0,
         "combined_hours" => 74.0,
         "total_overtime_hours" => 4.0,
         "bonus" => 100.0,
@@ -1970,7 +1971,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("company_totals", "custom_earnings_total").to_f).to eq(50.00)
       expect(report.dig("company_totals", "custom_deductions_total").to_f).to eq(40.00)
       expect(report.fetch("company_totals")).to include(
-        "total_hours" => 70.0,
+        "total_hours" => 74.0,
+        "worked_hours" => 70.0,
         "combined_hours" => 74.0,
         "total_overtime_hours" => 4.0,
         "bonus" => 100.0,
@@ -2136,7 +2138,8 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       expect(report.dig("summary", "base_withholding_tax").to_d).to eq(200.11.to_d)
       expect(report.dig("summary", "additional_withholding").to_d).to eq(50.22.to_d)
       expect(history.pluck("overtime_hours")).to eq([ 5.22, 10.0, nil ])
-      expect(report.dig("summary", "total_hours")).to eq(60.11)
+      expect(report.dig("summary", "worked_hours")).to eq(60.11)
+      expect(report.dig("summary", "total_hours")).to eq(report.dig("summary", "combined_hours"))
       expect(report.dig("summary", "combined_hours").to_d).to eq(hours.sum(&:to_d))
 
       get "/api/v1/admin/reports/employee_pay_history_csv", params: params
@@ -2188,15 +2191,15 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/ytd_summary", params: params
       expect(response).to have_http_status(:ok)
       report = response.parsed_body.fetch("report")
-      expect(report.fetch("company_totals")).to include("total_hours" => 60.11, "combined_hours" => 79.1)
-      expect(report.fetch("employees").sole).to include("total_hours" => 60.11, "total_overtime_hours" => 15.22, "combined_hours" => 79.1)
+      expect(report.fetch("company_totals")).to include("total_hours" => 79.1, "worked_hours" => 60.11, "combined_hours" => 79.1)
+      expect(report.fetch("employees").sole).to include("total_hours" => 79.1, "worked_hours" => 60.11, "total_overtime_hours" => 15.22, "combined_hours" => 79.1)
 
       get "/api/v1/admin/reports/ytd_summary_csv", params: params
       expect(response).to have_http_status(:ok)
       csv = CSV.parse(response.body, headers: true)
       breakdown_headers = report.fetch("component_columns").map { |column| "Breakdown Already Included - #{column.fetch('label')}" }
       expect(csv.headers).to eq([
-        "Last Name", "First Name", "Employee Name", "Type", "Status", "Total Hours", "Total OT Hours", "Gross Pay",
+        "Last Name", "First Name", "Employee Name", "Type", "Status", "Regular Hours", "Total OT Hours", "Gross Pay",
         "Custom Earnings", "Payroll Field Taxable Additions", "Payroll Field Non-Taxable Additions",
         "Payroll Field Pre-Tax Deductions", "Payroll Field Post-Tax Deductions", "Payroll Field Employer Contributions",
         "Tips", "Tips Paid Out", "Bonus (Included in Gross)", "Straight Loan (One-Time)", "Other Native Loans (Named/Recurring)",
@@ -2207,18 +2210,18 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "Guam income tax withheld", "SS Tax", "Medicare Tax", "401(k)", "Roth 401(k)", "Total Deductions", "Custom Deductions", "Net Pay",
         "Non-Taxable Additions (Total)", *breakdown_headers, "Combined Hours"
       ])
-      expect(csv["Total Hours"]).to eq([ "60.11" ])
+      expect(csv["Regular Hours"]).to eq([ "60.11" ])
       expect(csv["Combined Hours"]).to eq([ "79.1" ])
 
       get "/api/v1/admin/reports/ytd_summary_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include("Total hours 60.11", "Combined hours 79.10")
+      expect(pdf).to include("Regular hours 60.11", "Total hours 79.10", "Combined hours 79.10")
 
       get "/api/v1/admin/reports/ytd_summary_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
-      expect(workbook.sheet("Company Totals").to_a.to_h).to include("Total hours" => 60.11, "Combined hours" => 79.1)
+      expect(workbook.sheet("Company Totals").to_a.to_h).to include("Worked hours" => 60.11, "Combined hours" => 79.1)
       expect(workbook.sheet("Payroll Summary").row(1)).to eq(csv.headers)
     end
 

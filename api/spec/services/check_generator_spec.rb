@@ -110,7 +110,7 @@ RSpec.describe CheckGenerator do
     payroll_item.update!(loan_deduction: BigDecimal("300.00"), loan_payment: BigDecimal("550.00"))
 
     expect(generator.send(:deduction_rows)).to include(
-      [ "Loan", "300.00", "300.00" ],
+      [ "Loan Repayment", "300.00", "300.00" ],
       [ "Loan - Devon Holbrook", "250.00", "250.00" ]
     )
     expect(generator.send(:cur_deds)).to eq(BigDecimal("550.00"))
@@ -511,7 +511,7 @@ RSpec.describe CheckGenerator do
       other_pay_rows = generator.send(:other_pay_rows)
       text = PDF::Reader.new(StringIO.new(generator.generate_rehearsal_preview)).pages.map(&:text).join("\n")
 
-      expect(deduction_rows).to include([ "401(k) Pre-Tax", "500.00", "10,500.00" ])
+      expect(deduction_rows).to include([ "401(k) Retirement", "500.00", "10,500.00" ])
       expect(deduction_rows).to include([ "Health Insurance", "100.00", "2,100.00" ])
       expect(deduction_rows).to include([ "Remittance ID 0000101", "150.00", "3,150.00" ])
       expect(deduction_rows).to include([ "Tips Paid Out", "0.00", "1,200.00" ])
