@@ -411,6 +411,10 @@ RSpec.describe "Employee profile", :portal_notifications, type: :request do
   end
 
   it "uses the M4-3 guard and cooldown when a login address is repeatedly rejected" do
+    Rack::Attack.cache.store.clear
+    # Start inside one counter window so the window can't roll over mid-test.
+    period = EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_PERIOD.to_i
+    travel_to(Time.zone.at(((Time.now.to_i / period) * period) + 1))
     other_login = reviewer
     with_portal_email do
       EmployeeContactLoginRejectionGuard::LOGIN_EMAIL_REJECTION_LIMIT.times do
