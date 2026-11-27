@@ -896,7 +896,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs`);
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
+    await page.getByRole('button', { name: /^More actions for / }).first().click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Edit', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Edit Pay Period' })).toBeVisible();
     await page.evaluate((path): void => {
       window.history.pushState({}, '', path);
@@ -986,7 +987,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
     const delayedRow = page.getByRole('row').filter({ hasText: 'Jun 21 – Jul 4, 2026' });
     await expect(delayedRow).toBeVisible();
-    await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await delayedRow.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Approve', exact: true }).click();
     await approvalStarted;
 
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
@@ -1063,7 +1065,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
     const delayedRow = page.getByRole('row').filter({ hasText: 'Jul 5 – 18, 2026' });
     await expect(delayedRow).toBeVisible();
-    await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await delayedRow.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Approve', exact: true }).click();
     await approvalStarted;
 
     await page.getByRole('button', { name: /^Draft \(/ }).click();
@@ -1576,7 +1579,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);
 
-    await workflowRow.getByRole('button', { name: 'Enter Hours', exact: true }).click();
+    await workflowRow.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Enter Hours', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);
