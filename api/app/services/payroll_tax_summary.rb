@@ -14,8 +14,8 @@ class PayrollTaxSummary
 
   def lines
     [
-      { label: "Federal income tax", amount: @item.withholding_tax.to_d },
-      { label: "Additional W-4 withholding", amount: @item.additional_withholding.to_d },
+      { label: PayrollLabels::INCOME_TAX, amount: @item.withholding_tax.to_d },
+      { label: PayrollLabels::ADDITIONAL_WITHHOLDING, amount: @item.additional_withholding.to_d },
       { label: "Social Security", amount: @item.social_security_tax.to_d },
       { label: "Medicare (base)", amount: @item.medicare_tax.to_d - @item.additional_medicare_tax.to_d },
       { label: "Additional Medicare", amount: @item.additional_medicare_tax.to_d }
