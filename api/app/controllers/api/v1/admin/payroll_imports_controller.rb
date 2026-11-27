@@ -113,11 +113,12 @@ module Api
           end
 
           package_result = PayrollIntake::PreviewService.new(
-            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true,
+            pay_period: @pay_period, source_type: current.source_type, files: [], actor: current_user, carry_forward: true,
             supersession_reason: params[:reason].to_s.strip.first(500).presence
           ).call
-          # A tip choice follows the workbook it was made for (see tip_confirmation_for).
-          import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
+          # A tip choice follows the workbook it was made for (see tip_confirmation_for);
+          # unconfirmed reviews re-resolve the company's configured default tip treatment.
+          import_record = persist_preview(package_result, nil, nil)
           render json: preview_response(import_record, package_result)
         rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -159,11 +160,12 @@ module Api
           end
 
           package_result = PayrollIntake::PreviewService.new(
-            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true,
+            pay_period: @pay_period, source_type: current.source_type, files: [], actor: current_user, carry_forward: true,
             remove_roles: [ role ], supersedes_package_id: current.package_id, supersession_reason: "Removed: #{label}. #{reason}"
           ).call
-          # A tip choice follows the workbook it was made for (see tip_confirmation_for).
-          import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
+          # A tip choice follows the workbook it was made for (see tip_confirmation_for);
+          # unconfirmed reviews re-resolve the company's configured default tip treatment.
+          import_record = persist_preview(package_result, nil, nil)
           render json: preview_response(import_record, package_result)
         rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity

@@ -195,9 +195,9 @@ module PayrollSubmissions
       roles = kept.map(&:role) + prepared.map(&:role)
       errors = {}
 
-      linkable_slot = descriptor.files.find { |slot| slot.portal_role.present? && slot.supports_link }
+      linkable_slot = descriptor.files.find { |slot| descriptor.portal_role_for(slot.role).present? && slot.supports_link }
       if linkable_slot
-        workbook_role = linkable_slot.portal_role
+        workbook_role = descriptor.portal_role_for(linkable_slot.role)
         choice = answers[:workbook_choice]
         workbook = roles.include?(workbook_role)
         link = answers[:changes_link_url].present?
@@ -218,7 +218,7 @@ module PayrollSubmissions
       end
 
       descriptor.files.each do |slot|
-        portal_role = slot.portal_role
+        portal_role = descriptor.portal_role_for(slot.role)
         next if portal_role.blank?
 
         count = roles.count(portal_role)

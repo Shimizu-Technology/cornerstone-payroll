@@ -94,13 +94,22 @@ export function FileRow({ label, document, fallbackName, api, audience }: { labe
 
 export function RevisionCard({ revision, api, companyId, audience, descriptor }: { revision: SubmissionRevision; api: PayrollSubmissionsApi; companyId?: number | null; audience?: Audience; descriptor?: PayrollIntakeDescriptor | null }): ReactElement {
   const hasLinkableSlot = !descriptor || descriptor.files.some(slot => slot.supports_link);
+  const workbookSummary = revision.workbook_choice === 'none'
+    ? 'Client chose: No tips or loans this period.'
+    : revision.documents.some(d => d.role === 'changes_workbook')
+      ? 'Tips & loans workbook attached.'
+      : revision.changes_link_url
+        ? 'Tips & loans workbook link sent.'
+        : hasLinkableSlot
+          ? 'Legacy revision: no tips & loans workbook or declaration was included.'
+          : null;
   const body = (
     <div className="space-y-3">
       <p className="text-sm text-neutral-700">
         Sent by {revision.submitted_by_name || 'Former portal user'} · {formatGuam(revision.submitted_at)}
         {revision.acknowledged_at ? <> · Received by {revision.acknowledged_by_name} · {formatGuam(revision.acknowledged_at)}</> : revision.current ? <> · Not yet confirmed by Cornerstone</> : null}
       </p>
-      {hasLinkableSlot && <p className="text-sm text-neutral-700">{revision.workbook_choice === 'none' ? 'Client chose: No tips or loans this period.' : revision.documents.some(d => d.role === 'changes_workbook') ? 'Tips & loans workbook attached.' : revision.changes_link_url ? 'Tips & loans workbook link sent.' : 'Legacy revision: no tips & loans workbook or declaration was included.'}</p>}
+      {workbookSummary && <p className="text-sm text-neutral-700">{workbookSummary}</p>}
       {revision.imported_at && <p className="text-sm font-semibold text-success-800">Imported · {formatGuam(revision.imported_at)}</p>}
       {revision.imports?.map(record => <div key={record.id} className="space-y-1 text-sm">
         <a className="text-primary-800 underline" href={companyId ? `/companies/${companyId}/pay-runs/${record.pay_period_id}` : `/pay-periods/${record.pay_period_id}`}>Import #{record.id} · {record.status}</a>

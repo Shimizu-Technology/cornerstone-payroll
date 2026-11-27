@@ -91,7 +91,7 @@ module PayrollSubmissions
       allowed_roles = (descriptor.portal_roles + [ "attachment" ]).uniq
 
       invalid = (roles - allowed_roles).any? || descriptor.files.any? do |slot|
-        portal_role = slot.portal_role
+        portal_role = descriptor.portal_role_for(slot.role)
         next false if portal_role.blank?
 
         count = roles.count(portal_role)

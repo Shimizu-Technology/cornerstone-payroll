@@ -328,5 +328,118 @@ RSpec.describe "Track C B4-B6 descriptor-driven gates, submission roles, and MoS
         expect(error.details).to include("revel_payroll" => [ "Attach the Revel payroll PDF" ])
       end
     end
+
+    it "resolves required portal roles mapped solely via portal.role_map and rejects multiple supports_link slots" do
+      role_map_only_adapter = Class.new do
+        define_singleton_method(:descriptor) do
+          @descriptor ||= PayrollIntake::Descriptor.new(
+            key: "mapped_only_workbook",
+            label: "Mapped Workbook",
+            source_label: "Mapped Workbook",
+            parser_version: "mapped_only_workbook:v1",
+            adapter_class: self,
+            extraction: "deterministic",
+            tracks_reviewed_hours: true,
+            idempotency: "files_and_workweek",
+            reports_overtime: true,
+            files: [
+              {
+                role: "universal_workbook",
+                label: "Universal workbook",
+                accept: %w[.csv],
+                max: 1,
+                required_by_default: true
+              }
+            ],
+            portal: { submittable: true, role_map: { "mapped_workbook" => "universal_workbook" } }
+          )
+        end
+      end
+      PayrollIntake::Registry.register(role_map_only_adapter)
+
+      company = create(:company, payroll_intake_source_types: [ "mapped_only_workbook" ])
+      pay_period = create(:pay_period, company: company,
+        start_date: Date.new(2026, 7, 12), end_date: Date.new(2026, 7, 25), pay_date: Date.new(2026, 7, 31))
+      client = create(:user, company: company, role: "client")
+      CompanyAssignment.create!(user: client, company: company)
+      catalog = PayrollSubmissions::Catalog.new(company: company, today: pay_period.end_date + 1)
+      entry = catalog.resolve("#{pay_period.start_date}_#{pay_period.end_date}")
+
+      expect do
+        PayrollSubmissions::CreateRevision.new(
+          company: company,
+          actor: client,
+          catalog: catalog,
+          entry: entry,
+          params: { no_changes: true }
+        ).call
+      end.to raise_error(PayrollSubmissions::FileSet::Invalid) do |error|
+        expect(error.details).to include("mapped_workbook" => [ "Attach the Universal workbook" ])
+      end
+
+      expect do
+        PayrollIntake::Descriptor.new(
+          key: "two_links",
+          label: "Two links",
+          parser_version: "two_links:v1",
+          adapter_class: Object,
+          extraction: "deterministic",
+          idempotency: "files_and_workweek",
+          files: [
+            { role: "wb_a", label: "Workbook A", accept: %w[.xlsx], supports_link: true },
+            { role: "wb_b", label: "Workbook B", accept: %w[.xlsx], supports_link: true }
+          ]
+        )
+      end.to raise_error(ArgumentError, /more than one supports_link/)
+    end
+
+    it "records an imported_hours baseline when PayrollIntake::ApplyService applies a tracks_reviewed_hours adapter" do
+      tracked_adapter = build_synthetic_adapter(key: "tracked_intake_baseline", tracks_reviewed_hours: true)
+      PayrollIntake::Registry.register(tracked_adapter)
+      organization = create(:organization)
+      company = create(:company, organization: organization, payroll_intake_source_types: [ "tracked_intake_baseline" ])
+      staff = create(:user, organization: organization, company: company, role: "admin")
+      pay_period = create(:pay_period, company: company,
+        start_date: Date.new(2026, 6, 14), end_date: Date.new(2026, 6, 27), pay_date: Date.new(2026, 7, 3), status: "draft")
+      employee = create(:employee, company: company, first_name: "Taylor", last_name: "Tracked", pay_rate: 20.0)
+      config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: 2026)
+      create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+      CompanyWorkweek.create!(
+        company: company, starts_on_weekday: 0, starts_at_minutes: 0, timezone: "Pacific/Guam",
+        effective_on: Date.new(2026, 1, 1), source: "operator_confirmed", confirmation_status: "confirmed",
+        confirmed_by: staff, confirmed_at: Time.current, notes: "Confirmed"
+      )
+      session = PayrollIntakeSession.create!(
+        company: company, pay_period: pay_period, source_type: "tracked_intake_baseline",
+        source_label: "Tracked", import_hash: SecureRandom.hex(32), parser_version: "tracked_intake_baseline:v1",
+        package_id: SecureRandom.uuid, package_revision: 1,
+        package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION, status: "previewed",
+        evidence_snapshot: {
+          "workweek" => PayrollIntake::WorkweekEvidence.new(pay_period: pay_period, overtime_mode: "source_reports").capture!,
+          "intake_settings" => { "overtime_mode" => "source_reports" }
+        },
+        created_by: staff
+      )
+      row = session.rows.create!(
+        position: 0, source_employee_name: employee.full_name, employee: employee,
+        regular_hours: 40, overtime_hours: 2, reported_tips: 0, tips_paid_out: 0, status: "ready"
+      )
+
+      applied = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [ { id: row.id, disposition: "included", employee_id: employee.id } ],
+        actor: staff
+      ).call
+      expect(applied[:errors]).to be_empty
+
+      item = pay_period.payroll_items.find_by!(employee: employee)
+      expect(item.imported_hours_snapshot).to eq("regular_hours" => "40.0", "overtime_hours" => "2.0")
+
+      item.update!(hours_worked: 38)
+      expect(PayrollImport::LivePreviewRowState.hand_edited_hours(
+        { "employee_id" => employee.id, "employee_name" => employee.full_name, "regular_hours" => 41, "overtime_hours" => 2 },
+        item
+      )).to include("saved_regular_hours" => "38.0", "source_regular_hours" => "41.0")
+    end
   end
 end

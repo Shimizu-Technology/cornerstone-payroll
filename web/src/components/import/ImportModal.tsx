@@ -52,6 +52,7 @@ interface ImportModalProps {
 
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableSourceRow = MosaSourceRow;
+const SUPPORTED_REVIEWED_IMPORT_ROLES = new Set(['revel_hours', 'supplemental_workbook']);
 
 export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, descriptor, onSourcePreviewed, onImportComplete, canReactivateWorkers = false, canRehireWorkers = false }: ImportModalProps) {
   const activeSourceType = descriptor?.key || 'mosa_revel';
@@ -459,6 +460,10 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   // received, matching runs again, and outcomes chosen so far are kept.
   const addSourceFile = async (role: string, file: File) => {
     if (!previewData || loading) return;
+    if (!SUPPORTED_REVIEWED_IMPORT_ROLES.has(role)) {
+      setError(`This reviewed-hours import endpoint does not support the "${role}" file role.`);
+      return;
+    }
     const previousRows = sourceRows;
     const pendingSubmissionId = usePendingRevision ? previewData.pending_portal_source?.submission_id : undefined;
     try {
@@ -953,7 +958,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <p className="text-sm text-neutral-600">Add either file now and the other one later. The import is applied once both are in, or once you confirm there are no tips or loans.</p>
               <ul className="space-y-3">
                 {sourcePickers.map((picker) => {
-                  const chosen = picker.role === 'revel_hours' ? pdfFile : excelFile;
+                  const chosen = picker.role === 'revel_hours'
+                    ? pdfFile
+                    : picker.role === 'supplemental_workbook'
+                      ? excelFile
+                      : null;
                   const kept = currentRoles.has(picker.role) ? currentPackage?.documents.find((document) => document.source_role === picker.role) : undefined;
                   return (
                     <li key={picker.role} className="rounded-xl border border-neutral-200 bg-white p-3">
@@ -970,13 +979,19 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                           </p>
                           <input
                             id={`import-source-${picker.role}`}
-                            ref={picker.role === 'revel_hours' ? pdfInputRef : excelInputRef}
+                            ref={picker.role === 'revel_hours' ? pdfInputRef : picker.role === 'supplemental_workbook' ? excelInputRef : undefined}
                             type="file"
                             accept={picker.accept || acceptByRole[picker.role]}
                             onChange={(event) => {
                               const file = event.target.files?.[0] || null;
-                              if (picker.role === 'revel_hours') setPdfFile(file);
-                              else { setExcelFile(file); setTipsPaidOutFromTips(defaultTipsPaidOut); }
+                              if (picker.role === 'revel_hours') {
+                                setPdfFile(file);
+                              } else if (picker.role === 'supplemental_workbook') {
+                                setExcelFile(file);
+                                setTipsPaidOutFromTips(defaultTipsPaidOut);
+                              } else if (file) {
+                                setError(`This reviewed-hours import endpoint does not support the "${picker.role}" file role.`);
+                              }
                             }}
                             className="mt-2 block w-full text-sm text-neutral-600 file:mr-3 file:min-h-11 file:rounded-md file:border-0 file:bg-primary-50 file:px-4 file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
                           />

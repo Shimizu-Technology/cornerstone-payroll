@@ -33,10 +33,11 @@ module PayrollIntake
       end
 
       # Per 29 CFR 778.104, misaligned pay periods are only permissible when
-      # the source itself reports overtime. Computed overtime modes always
-      # require complete, aligned 7-day legal workweeks.
+      # the source itself reports overtime AND the client's workweek alignment
+      # policy is warn_if_offset. Computed overtime modes or aligned policy
+      # always require complete, aligned 7-day legal workweeks.
       def allow_misaligned_workweek?
-        source_reports_overtime?
+        source_reports_overtime? && workweek_alignment == "warn_if_offset"
       end
 
       def to_evidence

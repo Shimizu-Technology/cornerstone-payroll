@@ -141,6 +141,9 @@ module PayrollIntake
       @overtime_mode = overtime_mode.to_s.freeze
       @workweek_alignment = (workweek_alignment.presence || (@reports_overtime ? "warn_if_offset" : "aligned")).to_s.freeze
       @files = Array(files).map { |slot| coerce_file_slot(slot) }.freeze
+      if @files.count(&:supports_link) > 1
+        raise ArgumentError, "Payroll intake descriptor '#{@key}' cannot define more than one supports_link file slot"
+      end
       portal_hash = portal.to_h.stringify_keys
       role_map = portal_hash.fetch("role_map", {}).to_h.transform_keys(&:to_s).transform_values(&:to_s).freeze
       if role_map.empty?

@@ -1209,7 +1209,9 @@ export function usePayRunController({
   const enabledIntakeAdapters = canEditPayPeriod
     ? intakeAdaptersForPayPeriod(payPeriod.payroll_intake_adapters, payPeriod.payroll_intake_source_types)
     : [];
-  const reviewedHoursAdapter = enabledIntakeAdapters.find((adapter) => adapter.tracks_reviewed_hours) || null;
+  const reviewedHoursAdapter = enabledIntakeAdapters.find((adapter) => adapter.key === activeImportDescriptorKey && adapter.tracks_reviewed_hours)
+    || enabledIntakeAdapters.find((adapter) => adapter.tracks_reviewed_hours)
+    || null;
   const activeIntakeAdapter = enabledIntakeAdapters.find((adapter) => adapter.key === activeImportDescriptorKey)
     || enabledIntakeAdapters.find((adapter) => !adapter.tracks_reviewed_hours)
     || null;

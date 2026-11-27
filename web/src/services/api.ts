@@ -4537,7 +4537,7 @@ export const companiesApi = {
   },
   get: (id: number, companyId?: number) =>
     api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`, undefined, { companyId }),
-  intakeProfile: (id: number, on?: string, companyId?: number) => {
+  intakeProfile: (id: number, on?: string, companyId?: number): Promise<PayrollIntakeProfile> => {
     const query = on ? `?on=${encodeURIComponent(on)}` : '';
     return api.get<PayrollIntakeProfile>(`/admin/companies/${id}/intake_profile${query}`, undefined, { companyId: companyId ?? id });
   },

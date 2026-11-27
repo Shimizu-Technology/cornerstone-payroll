@@ -103,7 +103,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     if (busy) return;
     setError(null); setDetails({});
     for (const slot of portalSlots) {
-      if (slot.supports_link) continue;
+      if (slot.portal_role === linkableSlot?.portal_role) continue;
       if (isPortalSlotRequired(slot) && !slotFiles[slot.portal_role] && !keptDocumentFor(slot.portal_role)) {
         const message = slot.portal_role === 'revel_payroll'
           ? 'Attach the Revel payroll PDF'
@@ -145,13 +145,13 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     try {
       const slotIdentities = await Promise.all(portalSlots.map(async (slot) => [
         slot.portal_role,
-        await fileIdentity(slot.supports_link ? sentWorkbook : (slotFiles[slot.portal_role] || null)),
+        await fileIdentity(slot.portal_role === linkableSlot?.portal_role ? sentWorkbook : (slotFiles[slot.portal_role] || null)),
       ]));
       const identity = JSON.stringify([slotIdentities, await Promise.all(attachments.map(fileIdentity)), keepIds, linkableSlot ? workbookChoice : null, excelSupporting, noChanges, changes, sentLink, notes, current?.revision]);
       if (retry.current?.identity !== identity) retry.current = { identity, key: crypto.randomUUID() };
       const form = new FormData();
       portalSlots.forEach((slot) => {
-        const chosen = slot.supports_link ? sentWorkbook : (slotFiles[slot.portal_role] || null);
+        const chosen = slot.portal_role === linkableSlot?.portal_role ? sentWorkbook : (slotFiles[slot.portal_role] || null);
         if (chosen) form.append(slot.portal_role, chosen);
       });
       attachments.forEach(file => form.append('attachments[]', file));
@@ -187,7 +187,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         const hint = slot.portal_hint || slot.hint;
         const kept = keptDocumentFor(slot.portal_role);
         const chosen = slotFiles[slot.portal_role] || null;
-        if (slot.supports_link) {
+        if (slot.portal_role === linkableSlot?.portal_role) {
           return (
             <fieldset key={slot.portal_role} className="min-w-0 space-y-3">
               <legend className="text-sm font-semibold text-neutral-900">{index + 1}. {label}</legend>
