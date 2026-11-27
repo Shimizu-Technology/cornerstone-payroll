@@ -305,6 +305,19 @@ module Api
             status: pay_period.status,
             period_description: pay_period.period_description,
             payroll_intake_source_types: pay_period.company.payroll_intake_source_types,
+            payroll_intake_adapters: pay_period.company.payroll_intake_descriptors.map do |descriptor|
+              effective = PayrollIntake::EffectiveSettings.for(
+                company: pay_period.company,
+                pay_period: pay_period,
+                source_type: descriptor.key
+              )
+              descriptor.serialize(
+                required_sources: effective.required_sources,
+                tips_default: effective.tips_default,
+                overtime_mode: effective.overtime_mode,
+                workweek_alignment: effective.workweek_alignment
+              )
+            end,
             intake_stale_at: pay_period.intake_stale_at,
             intake_stale_reason: pay_period.intake_stale_reason,
             intake_stale_session_id: pay_period.intake_stale_session_id,

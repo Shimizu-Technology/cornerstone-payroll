@@ -6,7 +6,7 @@ class Form500Filing < ApplicationRecord
   belongs_to :created_by, class_name: "User", optional: true
   belongs_to :updated_by, class_name: "User", optional: true
 
-  STATUSES = %w[prepared paid filed exception].freeze
+  STATUSES = %w[prepared paid filed exception cancelled].freeze
 
   validates :pay_period_id, uniqueness: true
   validates :fields, presence: true

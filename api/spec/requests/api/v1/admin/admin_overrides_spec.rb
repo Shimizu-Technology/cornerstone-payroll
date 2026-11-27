@@ -28,6 +28,18 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
     }.merge(overrides), headers: payroll_headers, as: :json
   end
 
+  def retry_stuck_job(job = "stub_posting")
+    post "/api/v1/admin/payroll_job_retry", params: { job: job, reason: reason }, headers: payroll_headers, as: :json
+  end
+
+  it "queues an allow-listed retry for the selected company" do
+    expect { retry_stuck_job }.to have_enqueued_job(PostEmployeePayStubsJob).with(company.id)
+    expect(response).to have_http_status(:accepted), response.body
+    expect(AdminOverride.last).to have_attributes(action: "retry_stub_posting", company: company, actor: actor)
+    retry_stuck_job("ApplicationJob")
+    expect(response).to have_http_status(:unprocessable_entity)
+  end
+
   User.roles.each_key do |candidate|
     context "as #{candidate}" do
       let(:role) { candidate }
@@ -55,6 +67,9 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
         expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
       end
       expect(period.reload).not_to be_voided
+      retry_stuck_job
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body.dig("clerk_error", "reason")).to eq("reverification-error")
     end
   end
 
@@ -67,6 +82,8 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
         expect(response).to have_http_status(:forbidden)
       end
       expect(period.reload).not_to be_voided
+      expect { retry_stuck_job }.not_to have_enqueued_job(PostEmployeePayStubsJob)
+      expect(response).to have_http_status(:forbidden)
     end
   end
 
@@ -223,5 +240,14 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("pay_period", "admin_rollback")).to be(true)
     expect(later_runs.map { |run| run.reload.rollback_review_required? }).to eq([ true, true ])
+
+    review_route = "/api/v1/admin/pay_periods/#{later_runs.first.id}"
+    get review_route, headers: payroll_headers
+    review_id = response.parsed_body.dig("pay_period", "rollback_review_id")
+    expect(review_id).to eq(AdminOverride.find_by!(action: "void_pay_period", subject: period).id.to_s)
+    post "#{review_route}/complete_rollback_review", params: { reason: "Checked thresholds on the later payroll", review_id: review_id },
+      headers: payroll_headers, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(later_runs.map { |run| run.reload.rollback_review_required? }).to eq([ false, true ])
   end
 end

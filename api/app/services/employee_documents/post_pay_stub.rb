@@ -136,7 +136,16 @@ module EmployeeDocuments
       end
 
       id = @item.financial_correction_origin_item_id
-      documents_for(id).lock.first if id
+      origins = PayrollItem.where(company_id: @item.company_id, employee_id: @item.employee_id)
+      10.times do
+        break unless id
+
+        document = documents_for(id).where(payroll_item_id: origins.select(:id)).lock.first
+        return document if document
+
+        id = origins.where(id: id).pick(:financial_correction_origin_item_id)
+      end
+      nil
     end
 
     def cutoff(period)

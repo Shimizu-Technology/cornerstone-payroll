@@ -17,11 +17,13 @@ module PayrollIntake
         adapter_class: self,
         extraction: "text_and_ai",
         accepts_pasted_text: true,
+        tracks_reviewed_hours: false,
         employee_match: "name_fuzzy",
         idempotency: "files_and_workweek",
         reports_overtime: false,
         tips_default: "already_paid_out",
         overtime_mode: "weekly_split",
+        workweek_alignment: "aligned",
         files: [],
         portal: { submittable: false, role_map: {} }
       )
@@ -49,6 +51,80 @@ module PayrollIntake
         [ regular.round(2).to_f, overtime.round(2).to_f ]
       rescue ArgumentError
         [ 0.0, 0.0 ]
+      end
+
+      def self.split_for_daily_records(entries, pay_period:)
+        errors = []
+        workweek = pay_period.resolved_company_workweek
+        start_weekday = workweek&.starts_on_weekday || pay_period.start_date.wday
+        weekly_buckets = Hash.new(0.to_d)
+        Array(entries).each do |entry|
+          data = entry.with_indifferent_access
+          date = parse_source_date(data[:date])
+          unless date && date.between?(pay_period.start_date, pay_period.end_date)
+            errors << { code: "daily_hours_out_of_period", message: "Daily hours date #{data[:date]} falls outside this pay period.", severity: "error" }
+            next
+          end
+          hours = parse_strict_nonnegative_decimal(data[:hours])
+          if hours.nil?
+            errors << { code: "invalid_daily_hours", message: "Daily hours value #{data[:hours].inspect} must be a finite non-negative number.", severity: "error" }
+            next
+          end
+          offset = (date.wday - start_weekday) % 7
+          week_start = date - offset
+          weekly_buckets[week_start] += hours
+        end
+
+        regular = 0.to_d
+        overtime = 0.to_d
+        weekly_buckets.each_value do |hours|
+          if hours > 168
+            errors << { code: "weekly_hours_out_of_range", message: "A legal workweek cannot contain more than 168 hours.", severity: "error" }
+          end
+          regular += [ hours, BigDecimal(HOURS_PER_WEEK_BEFORE_OT.to_s) ].min
+          overtime += [ hours - BigDecimal(HOURS_PER_WEEK_BEFORE_OT.to_s), 0.to_d ].max
+        end
+
+        [ regular.round(2), overtime.round(2), errors, weekly_buckets ]
+      end
+
+      def self.parse_strict_nonnegative_decimal(value)
+        return nil if value.nil? || value == true || value == false
+
+        cleaned = value.to_s.strip.gsub(/[$,]/, "")
+        return nil if cleaned.empty?
+
+        parsed = BigDecimal(cleaned, exception: false)
+        return nil unless parsed&.finite? && !parsed.negative?
+
+        parsed
+      end
+
+      def self.parse_source_date(value)
+        return value if value.is_a?(Date)
+        return nil if value.blank?
+
+        cleaned = value.to_s.strip
+        year_token = cleaned.split(/[\/-]/).last.to_s
+        format = year_token.length == 2 ? "%m/%d/%y" : "%m/%d/%Y"
+
+        begin
+          Date.strptime(cleaned, format)
+        rescue Date::Error
+          begin
+            Date.parse(cleaned)
+          rescue Date::Error
+            nil
+          end
+        end
+      end
+
+      def self.coerce_decimal(value)
+        return 0.to_d if value.blank?
+
+        BigDecimal(value.to_s.gsub(/[$,]/, ""))
+      rescue ArgumentError
+        0.to_d
       end
 
       def self.text_parser_class
@@ -82,6 +158,7 @@ module PayrollIntake
                 "week2_tips": number or null,
                 "total_tips": number or null,
                 "loan_deduction": number or null,
+                "daily_hours": [{ "date": "YYYY-MM-DD", "hours": number }] or omitted when no dated daily records are visible,
                 "confidence": number between 0 and 1
               }
             ],
@@ -94,69 +171,99 @@ module PayrollIntake
         @pay_period = pay_period
         @company = company
         @matcher = PayrollIntake::EmployeeMatcher.new(company: company)
+        @effective_settings = PayrollIntake::EffectiveSettings.for(
+          company: company,
+          pay_period: pay_period,
+          source_type: SOURCE_TYPE
+        )
       end
 
-      def normalize(extracted_rows:, detected_period: nil)
+      def normalize(extracted_rows:, detected_period: nil, trusted_source: true)
         source_period = validate_period!(detected_period)
         rows = Array(extracted_rows).each_with_index.filter_map do |raw_row, index|
-          normalize_row(raw_row.with_indifferent_access, index)
+          normalize_row(raw_row.with_indifferent_access, index, trusted_source: trusted_source)
         end
 
         totals = {
           row_count: rows.length,
           ready_count: rows.count { |row| row[:status] == "ready" },
           review_count: rows.count { |row| row[:status] == "needs_review" },
-          total_regular_hours: round(rows.sum { |row| row[:regular_hours].to_f }),
-          total_overtime_hours: round(rows.sum { |row| row[:overtime_hours].to_f }),
-          total_reported_tips: money(rows.sum { |row| row[:reported_tips].to_f }),
-          total_tips_paid_out: money(rows.sum { |row| row[:tips_paid_out].to_f })
+          total_regular_hours: round(rows.sum(0.to_d) { |row| BigDecimal(row[:regular_hours].to_s) }),
+          total_overtime_hours: round(rows.sum(0.to_d) { |row| BigDecimal(row[:overtime_hours].to_s) }),
+          total_reported_tips: rows.sum(0.to_d) { |row| row[:reported_tips].to_d }.round(2).to_f,
+          total_tips_paid_out: rows.sum(0.to_d) { |row| row[:tips_paid_out].to_d }.round(2).to_f
         }
 
-        { rows: rows, warnings: [], totals: totals, evidence: { "source_period" => source_period } }
+        evidence = {
+          "source_period" => source_period,
+          "overtime_mode" => effective_settings.overtime_mode,
+          "tip_treatment" => {
+            "default" => effective_settings.tips_default,
+            "source" => effective_settings.source
+          }
+        }
+
+        { rows: rows, warnings: [], totals: totals, evidence: evidence }
       end
 
       private
 
-      attr_reader :pay_period, :company, :matcher
+      attr_reader :pay_period, :company, :matcher, :effective_settings
 
-      def normalize_row(raw_row, index)
+      def normalize_row(raw_row, index, trusted_source: true)
         name = raw_row[:employee_name].presence || raw_row[:name].presence || raw_row[:source_employee_name].presence
         return nil if name.blank?
 
         week1_value = raw_row[:week1_hours] || raw_row[:week_1_hours] || raw_row[:first_week_hours]
         week2_value = raw_row[:week2_hours] || raw_row[:week_2_hours] || raw_row[:second_week_hours]
-        week1_hours = numeric(week1_value)
-        week2_hours = numeric(week2_value)
-        total_hours = numeric(raw_row[:total_hours])
+        week1_hours = decimal(week1_value)
+        week2_hours = decimal(week2_value)
+        total_hours = decimal(raw_row[:total_hours])
         week1_present = value_present?(week1_value)
         week2_present = value_present?(week2_value)
         total_present = value_present?(raw_row[:total_hours])
         explicit_regular = value_present?(raw_row[:regular_hours])
         explicit_overtime = value_present?(raw_row[:overtime_hours])
 
-        regular_hours, overtime_hours, hour_errors = hours_for(
+        regular_hours, overtime_hours, hour_errors, hour_warnings = hours_for(
           week1_hours: week1_hours,
           week2_hours: week2_hours,
           total_hours: total_hours,
-          regular_hours: numeric(raw_row[:regular_hours]),
-          overtime_hours: numeric(raw_row[:overtime_hours]),
+          regular_hours: decimal(raw_row[:regular_hours]),
+          overtime_hours: decimal(raw_row[:overtime_hours]),
           week1_present: week1_present,
           week2_present: week2_present,
           total_present: total_present,
           explicit_regular: explicit_regular,
-          explicit_overtime: explicit_overtime
+          explicit_overtime: explicit_overtime,
+          daily_hours: raw_row[:daily_hours] || raw_row[:days]
         )
 
-        week1_tips = money(raw_row[:week1_tips] || raw_row[:week_1_tips] || raw_row[:first_week_tips])
-        week2_tips = money(raw_row[:week2_tips] || raw_row[:week_2_tips] || raw_row[:second_week_tips])
-        extracted_total_tips = money(raw_row[:total_tips] || raw_row[:reported_tips] || raw_row[:tips_paid_out])
-        summed_week_tips = money(week1_tips + week2_tips)
+        week1_tips = money_decimal(raw_row[:week1_tips] || raw_row[:week_1_tips] || raw_row[:first_week_tips])
+        week2_tips = money_decimal(raw_row[:week2_tips] || raw_row[:week_2_tips] || raw_row[:second_week_tips])
+        extracted_total_tips = money_decimal(raw_row[:total_tips] || raw_row[:reported_tips] || raw_row[:tips_paid_out])
+        summed_week_tips = (week1_tips + week2_tips).round(2)
         total_tips = extracted_total_tips.positive? ? extracted_total_tips : summed_week_tips
         total_tips = summed_week_tips if extracted_total_tips.zero? && summed_week_tips.positive?
 
-        warnings = []
-        warnings << warning("missing_tips", "No paid-out tips were detected for this row. Confirm the source email before applying.", "warning") if total_tips.zero?
-        if extracted_total_tips.positive? && summed_week_tips.positive? && (extracted_total_tips - summed_week_tips).abs > 0.01
+        warnings = Array(hour_warnings)
+        row_tip_override = trusted_source ? parse_optional_boolean(raw_row[:tips_already_paid]) : :absent
+        if row_tip_override == :invalid
+          warnings << warning(
+            "invalid_tip_treatment_override",
+            "Unrecognized tips_already_paid value (#{raw_row[:tips_already_paid].inspect}); using default tip treatment (#{effective_settings.tips_default}).",
+            "warning"
+          )
+          row_tip_override = :absent
+        end
+        tips_already_paid = row_tip_override == :absent ? effective_settings.tips_already_paid_default? : row_tip_override
+        tip_treatment_source = row_tip_override == :absent ? effective_settings.source : "row_override"
+        tips_paid_out = tips_already_paid ? total_tips : 0.to_d
+
+        if total_tips.zero? && tips_already_paid
+          warnings << warning("missing_tips", "No paid-out tips were detected for this row. Confirm the source email before applying.", "warning")
+        end
+        if extracted_total_tips.positive? && summed_week_tips.positive? && (extracted_total_tips - summed_week_tips).abs > BigDecimal("0.01")
           warnings << warning("tip_total_mismatch", "Week 1 + Week 2 tips do not tie to the extracted total tips.", "warning")
         end
 
@@ -184,17 +291,111 @@ module PayrollIntake
           week1_tips: week1_tips,
           week2_tips: week2_tips,
           reported_tips: total_tips,
-          tips_paid_out: total_tips,
-          loan_deduction: money(raw_row[:loan_deduction]),
+          tips_paid_out: tips_paid_out,
+          loan_deduction: money_decimal(raw_row[:loan_deduction]),
           warnings: warnings,
           validation_errors: errors,
           status: status,
-          source_payload: raw_row.to_h
+          source_payload: raw_row.to_h.merge(
+            "resolved_tip_treatment" => (tips_already_paid ? "already_paid_out" : "paid_in_check"),
+            "tip_treatment_source" => tip_treatment_source,
+            "resolved_overtime_mode" => effective_settings.overtime_mode
+          )
         }
       end
 
-      def hours_for(week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:)
+      def hours_for(week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:, daily_hours: nil)
+        case effective_settings.overtime_mode
+        when "source_reports"
+          hours_for_source_reports(
+            total_hours: total_hours,
+            regular_hours: regular_hours,
+            overtime_hours: overtime_hours,
+            total_present: total_present,
+            explicit_regular: explicit_regular,
+            explicit_overtime: explicit_overtime,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            daily_hours: daily_hours
+          )
+        when "total_as_regular_warn_over_80"
+          hours_for_total_as_regular_warn_over_threshold(
+            week1_hours: week1_hours,
+            week2_hours: week2_hours,
+            total_hours: total_hours,
+            regular_hours: regular_hours,
+            overtime_hours: overtime_hours,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            total_present: total_present,
+            explicit_regular: explicit_regular,
+            explicit_overtime: explicit_overtime,
+            daily_hours: daily_hours
+          )
+        when "daily_records"
+          hours_for_daily_records(
+            daily_hours: daily_hours,
+            week1_hours: week1_hours,
+            week2_hours: week2_hours,
+            total_hours: total_hours,
+            regular_hours: regular_hours,
+            overtime_hours: overtime_hours,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            total_present: total_present,
+            explicit_regular: explicit_regular,
+            explicit_overtime: explicit_overtime
+          )
+        else
+          hours_for_weekly_split(
+            week1_hours: week1_hours,
+            week2_hours: week2_hours,
+            total_hours: total_hours,
+            regular_hours: regular_hours,
+            overtime_hours: overtime_hours,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            total_present: total_present,
+            explicit_regular: explicit_regular,
+            explicit_overtime: explicit_overtime
+          )
+        end
+      end
+
+      def weekly_frequency?
+        company.pay_frequency.to_s == "weekly"
+      end
+
+      def period_regular_hours_threshold
+        weekly_frequency? ? BigDecimal("40") : BigDecimal("80")
+      end
+
+      def hours_for_weekly_split(week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:)
         errors = []
+        if weekly_frequency?
+          if week1_present
+            if week1_hours > 168
+              errors << error("weekly_hours_out_of_range", "A legal workweek cannot contain more than 168 hours.")
+            end
+            regular, overtime = self.class.split_for_weekly_hours(week1_hours, 0)
+            if total_present && !reconciles?(week1_hours, total_hours)
+              errors << error("weekly_total_mismatch", "Week 1 hours do not tie to the extracted total hours.")
+            end
+            if explicit_regular != explicit_overtime
+              errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
+            elsif explicit_regular && (!reconciles?(regular, regular_hours) || !reconciles?(overtime, overtime_hours))
+              errors << error("overtime_split_mismatch", "Extracted regular/overtime hours do not match the legal weekly calculation.")
+            end
+            return [ regular, overtime, errors, [] ]
+          end
+
+          supplied_total = total_present ? total_hours : (explicit_regular || explicit_overtime ? regular_hours + overtime_hours : 0.to_d)
+          if supplied_total.positive?
+            errors << error("weekly_hours_required", "Enter Week 1 hours so Payroll can calculate overtime from the confirmed legal workweek.")
+          end
+          return [ total_present ? total_hours : regular_hours, explicit_overtime ? overtime_hours : 0.to_d, errors, [] ]
+        end
+
         if week1_present != week2_present
           errors << error("incomplete_weekly_hours", "Both Week 1 and Week 2 hours are required before overtime can be calculated.")
         end
@@ -205,7 +406,7 @@ module PayrollIntake
           end
 
           regular, overtime = self.class.split_for_weekly_hours(week1_hours, week2_hours)
-          weekly_total = round(week1_hours + week2_hours)
+          weekly_total = (week1_hours + week2_hours).round(2)
           if total_present && !reconciles?(weekly_total, total_hours)
             errors << error("weekly_total_mismatch", "Week 1 + Week 2 hours do not tie to the extracted total hours.")
           end
@@ -215,7 +416,7 @@ module PayrollIntake
             errors << error("overtime_split_mismatch", "Extracted regular/overtime hours do not match the legal weekly calculation.")
           end
 
-          return [ regular, overtime, errors ]
+          return [ regular, overtime, errors, [] ]
         end
 
         supplied_total = if total_present
@@ -223,7 +424,7 @@ module PayrollIntake
         elsif explicit_regular || explicit_overtime
           regular_hours + overtime_hours
         else
-          0.0
+          0.to_d
         end
         if supplied_total.positive?
           errors << error("weekly_hours_required", "Enter Week 1 and Week 2 hours so Payroll can calculate overtime from the confirmed legal workweek.")
@@ -234,7 +435,192 @@ module PayrollIntake
           errors << error("source_total_mismatch", "Extracted regular + overtime hours do not tie to the extracted total hours.")
         end
 
-        [ total_present ? total_hours : regular_hours, explicit_overtime ? overtime_hours : 0.0, errors ]
+        [ total_present ? total_hours : regular_hours, explicit_overtime ? overtime_hours : 0.to_d, errors, [] ]
+      end
+
+      def hours_for_total_as_regular_warn_over_threshold(week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:, daily_hours: nil)
+        daily_entries = Array(daily_hours).select { |entry| entry.is_a?(Hash) }
+        weekly_limit = BigDecimal(HOURS_PER_WEEK_BEFORE_OT.to_s)
+
+        if (weekly_frequency? && week1_present) || (week1_present && week2_present)
+          regular, overtime, errors, warnings = hours_for_weekly_split(
+            week1_hours: week1_hours,
+            week2_hours: week2_hours,
+            total_hours: total_hours,
+            regular_hours: regular_hours,
+            overtime_hours: overtime_hours,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            total_present: total_present,
+            explicit_regular: explicit_regular,
+            explicit_overtime: explicit_overtime
+          )
+          if week1_hours > weekly_limit || (!weekly_frequency? && week2_hours > weekly_limit)
+            warnings << warning(
+              "single_week_exceeds_40_hours",
+              "At least one workweek exceeds 40.00 hours (Week 1: #{format('%.2f', week1_hours)}, Week 2: #{format('%.2f', week2_hours)}). Confirm overtime before applying.",
+              "warning"
+            )
+          end
+          return [ regular, overtime, errors, warnings ]
+        end
+
+        errors = []
+        warnings = []
+        if week1_present != week2_present && !weekly_frequency?
+          errors << error("incomplete_weekly_hours", "Both Week 1 and Week 2 hours are required when supplying a weekly breakdown.")
+          if week1_hours > weekly_limit || week2_hours > weekly_limit
+            warnings << warning(
+              "single_week_exceeds_40_hours",
+              "Supplied weekly hours exceed 40.00 hours in a single workweek. Confirm overtime before applying.",
+              "warning"
+            )
+          end
+        end
+        if daily_entries.any?
+          _daily_reg, _daily_ot, daily_errors, buckets = self.class.split_for_daily_records(daily_entries, pay_period: pay_period)
+          errors.concat(daily_errors)
+          over_40_weeks = buckets.values.select { |hours| hours > weekly_limit }
+          if over_40_weeks.any?
+            warnings << warning(
+              "single_week_exceeds_40_hours",
+              "Daily hours show a single workweek exceeding 40.00 hours (#{over_40_weeks.map { |h| format('%.2f', h) }.join(', ')} hours). Confirm overtime before applying.",
+              "warning"
+            )
+          end
+        end
+        if explicit_regular != explicit_overtime
+          errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
+        elsif total_present && explicit_regular && !reconciles?(regular_hours + overtime_hours, total_hours)
+          errors << error("source_total_mismatch", "Extracted regular + overtime hours do not tie to the extracted total hours.")
+        end
+
+        resolved_regular = explicit_regular ? regular_hours : (total_present ? total_hours : 0.to_d)
+        resolved_overtime = explicit_overtime ? overtime_hours : 0.to_d
+        combined = (resolved_regular + resolved_overtime).round(2)
+        threshold = period_regular_hours_threshold
+
+        if !resolved_overtime.positive? && combined > threshold
+          warnings << warning(
+            "hours_exceed_period_threshold",
+            "Total hours (#{format('%.2f', combined)}) exceed #{format('%.2f', threshold)} for this period without a weekly breakdown. Confirm whether any overtime applies before applying.",
+            "warning"
+          )
+        end
+
+        [ resolved_regular, resolved_overtime, errors, warnings ]
+      end
+
+      def hours_for_source_reports(total_hours:, regular_hours:, overtime_hours:, total_present:, explicit_regular:, explicit_overtime:, week1_present: false, week2_present: false, daily_hours: nil)
+        errors = []
+        if explicit_regular && explicit_overtime
+          if total_present && !reconciles?(regular_hours + overtime_hours, total_hours)
+            errors << error("source_total_mismatch", "Extracted regular + overtime hours do not tie to the extracted total hours.")
+          end
+          return [ regular_hours, overtime_hours, errors, [] ]
+        end
+
+        if explicit_overtime && !explicit_regular
+          if total_present
+            derived_regular = (total_hours - overtime_hours).round(2)
+            if derived_regular.negative?
+              errors << error("overtime_exceeds_total", "Extracted overtime hours exceed the extracted total hours.")
+              return [ 0.to_d, overtime_hours, errors, [] ]
+            end
+            return [ derived_regular, overtime_hours, errors, [] ]
+          end
+
+          errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
+          return [ 0.to_d, overtime_hours, errors, [] ]
+        end
+
+        if explicit_regular && !explicit_overtime
+          if total_present
+            derived_overtime = (total_hours - regular_hours).round(2)
+            if derived_overtime.negative?
+              errors << error("regular_exceeds_total", "Extracted regular hours exceed the extracted total hours.")
+              return [ regular_hours, 0.to_d, errors, [] ]
+            end
+            return [ regular_hours, derived_overtime, errors, [] ]
+          end
+
+          errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
+          return [ regular_hours, 0.to_d, errors, [] ]
+        end
+
+        if !total_present && (week1_present || week2_present || Array(daily_hours).any?)
+          errors << error(
+            "incomplete_source_overtime_split",
+            "Source-reported regular and overtime hours (or total hours) are required when overtime mode is source_reports."
+          )
+          return [ 0.to_d, 0.to_d, errors, [] ]
+        end
+
+        [ total_present ? total_hours : 0.to_d, 0.to_d, errors, [] ]
+      end
+
+      def hours_for_daily_records(daily_hours:, week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:)
+        entries = Array(daily_hours).select { |entry| entry.is_a?(Hash) }
+        if entries.any?
+          return split_from_daily_records(entries, total_hours: total_hours, total_present: total_present)
+        end
+
+        if (weekly_frequency? && week1_present) || (week1_present && week2_present)
+          return hours_for_weekly_split(
+            week1_hours: week1_hours,
+            week2_hours: week2_hours,
+            total_hours: total_hours,
+            regular_hours: regular_hours,
+            overtime_hours: overtime_hours,
+            week1_present: week1_present,
+            week2_present: week2_present,
+            total_present: total_present,
+            explicit_regular: explicit_regular,
+            explicit_overtime: explicit_overtime
+          )
+        end
+
+        errors = []
+        supplied_total = total_present ? total_hours : (regular_hours + overtime_hours)
+        if supplied_total.positive?
+          errors << error("daily_hours_required", "Provide daily hours records or Week 1 and Week 2 hours so Payroll can calculate overtime from the confirmed legal workweek.")
+        end
+        [ total_present ? total_hours : regular_hours, explicit_overtime ? overtime_hours : 0.to_d, errors, [] ]
+      end
+
+      def split_from_daily_records(entries, total_hours:, total_present:)
+        regular, overtime, errors, _buckets = self.class.split_for_daily_records(entries, pay_period: pay_period)
+
+        summed = (regular + overtime).round(2)
+        if total_present && !reconciles?(summed, total_hours)
+          errors << error("daily_total_mismatch", "Daily hours do not tie to the extracted total hours.")
+        end
+
+        [ regular.round(2), overtime.round(2), errors, [] ]
+      end
+
+      def decimal(value)
+        self.class.coerce_decimal(value)
+      end
+
+      def money_decimal(value)
+        decimal(value).round(2)
+      end
+
+      RECOGNIZED_TRUE_VALUES = %w[true t 1 yes y already_paid_out].freeze
+      RECOGNIZED_FALSE_VALUES = %w[false f 0 no n paid_in_check].freeze
+
+      def parse_optional_boolean(value)
+        return true if value == true || value == 1
+        return false if value == false || value == 0
+        return :absent if value.nil?
+
+        token = value.to_s.strip.downcase
+        return :absent if token.empty?
+        return true if RECOGNIZED_TRUE_VALUES.include?(token)
+        return false if RECOGNIZED_FALSE_VALUES.include?(token)
+
+        :invalid
       end
 
       def validate_period!(detected_period)
@@ -255,18 +641,7 @@ module PayrollIntake
       end
 
       def parse_date(value)
-        return value if value.is_a?(Date)
-        return nil if value.blank?
-
-        cleaned = value.to_s.strip
-        year_token = cleaned.split(/[\/-]/).last.to_s
-        format = year_token.length == 2 ? "%m/%d/%y" : "%m/%d/%Y"
-
-        Date.strptime(cleaned, format)
-      rescue Date::Error
-        Date.parse(cleaned)
-      rescue Date::Error
-        nil
+        self.class.parse_source_date(value)
       end
 
       def numeric(value)

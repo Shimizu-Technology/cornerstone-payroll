@@ -11,17 +11,17 @@ import { BusyStatus } from '@/components/ui/busy-status';
 
 
 import { payRunPath } from '@/lib/routes';
+import { intakeMenuLabel } from '@/lib/importSources';
 
 import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>) {
   const {
   canEditPayPeriod,
-  canImportMosa,
-  canImportSpikeIntake,
   canImportTimeTracking,
   canLinkAireRecord,
   companyId,
+  enabledIntakeAdapters = [],
   handleUnapprove,
   hasLinkedAireRecord,
   hasStagedWorksheetChanges,
@@ -30,6 +30,7 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
   isCommitted,
   isDraft,
   isVoided,
+  openIntakeAdapter,
   openPayDateCorrection,
   payPeriod,
   payRunId,
@@ -39,8 +40,6 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
   returnTo,
   savedImportReloadRequired,
   setAireRecordsOpen,
-  setImportModalOpen,
-  setPayrollIntakeImportOpen,
   setRefreshBaseSalary,
   setRefreshRecurring,
   setRefreshSetupOpen,
@@ -76,8 +75,11 @@ export function PayRunProcessingActions(props: PayRunSectionProps<'processing'>)
           <Button variant="outline" onClick={openPayDateCorrection}>Correct Pay Date</Button>
         </>}
         {!isCommitted && !isVoided && <>
-          {canImportMosa && <Button variant="outline" onClick={() => setImportModalOpen(true)}>Import (MoSa)</Button>}
-          {canImportSpikeIntake && <Button variant="outline" onClick={() => setPayrollIntakeImportOpen(true)}>Import Spike Email</Button>}
+          {enabledIntakeAdapters.map((adapter) => (
+            <Button key={adapter.key} variant="outline" onClick={() => openIntakeAdapter(adapter.key)}>
+              {intakeMenuLabel(adapter)}
+            </Button>
+          ))}
           {canImportTimeTracking && !needsHours && <Button variant="outline" disabled={connectedPaused} onClick={openHours}>Import time tracking</Button>}
         </>}
         {canEditPayPeriod && payrollItems.length > 0 && <div>

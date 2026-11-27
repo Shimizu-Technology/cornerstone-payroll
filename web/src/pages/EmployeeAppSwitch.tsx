@@ -449,7 +449,7 @@ function ReasonDialog({ title, description, confirmLabel, danger = false, extra,
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!reason.trim() || busy) return;
+    if (reason.trim().length < 10 || busy) return;
     setBusy(true);
     setProblem('');
     const error = await onSubmit(reason.trim());
@@ -467,14 +467,14 @@ function ReasonDialog({ title, description, confirmLabel, danger = false, extra,
           </DialogHeader>
           <div className="space-y-1.5">
             <label htmlFor={reasonId} className="text-sm font-semibold">Reason</label>
-            <Textarea id={reasonId} required maxLength={500} className="text-base" value={reason}
+            <Textarea id={reasonId} required minLength={10} maxLength={500} className="text-base" value={reason}
               onChange={(event) => setReason(event.target.value)} disabled={busy} />
           </div>
           {extra}
           {problem && <p role="alert" className="text-sm text-danger-700">{problem}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant={danger ? 'danger' : 'primary'} loading={busy} disabled={!reason.trim()}>{confirmLabel}</Button>
+            <Button type="submit" variant={danger ? 'danger' : 'primary'} loading={busy} disabled={reason.trim().length < 10}>{confirmLabel}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -555,11 +555,11 @@ function EarlyAccessCard({ state, mutate, onSaved }: {
             </fieldset>
             <div className="space-y-1.5">
               <label htmlFor={reasonId} className="text-sm font-semibold">Reason and owner approval</label>
-              <Textarea id={reasonId} required maxLength={500} className="text-base" value={reason} onChange={(event) => setReason(event.target.value)} />
+              <Textarea id={reasonId} required minLength={10} maxLength={500} className="text-base" value={reason} onChange={(event) => setReason(event.target.value)} />
             </div>
           </fieldset>
           {problem && <p role="alert" className="text-sm text-danger-700">{problem}</p>}
-          <Button type="submit" loading={busy} disabled={!expiresOn || !reason.trim() || selected.length === 0} className="w-full sm:w-auto">
+          <Button type="submit" loading={busy} disabled={!expiresOn || reason.trim().length < 10 || selected.length === 0} className="w-full sm:w-auto">
             {current ? 'Replace early access' : 'Set early access'}
           </Button>
         </form>

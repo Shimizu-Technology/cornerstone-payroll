@@ -109,20 +109,30 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.dig("data", "company", "name")).to eq("Example Grill")
 
-      %i[admin manager accountant].each do |role|
+      %i[admin manager accountant employee client portal_employee].each do |role|
         user = create(:user, company: company, organization: organization, role: role, clerk_id: "user_#{role}")
         CompanyAssignment.create!(user: user, company: company) unless role == :admin
         get path, headers: auth(user)
         expect(response).to have_http_status(:forbidden), "#{role} should be refused"
         switch!({ "employee_portal_enabled" => false }, user: user)
         expect(response).to have_http_status(:forbidden)
+        put "#{path}/early_access", params: { reason: "Try demo access" }, headers: auth(user), as: :json
+        expect(response).to have_http_status(:forbidden)
+        delete "#{path}/early_access", params: { reason: "End demo access" }, headers: auth(user), as: :json
+        expect(response).to have_http_status(:forbidden)
+        post "#{path}/demo_stop", params: { reason: "Stop demo access" }, headers: auth(user), as: :json
+        expect(response).to have_http_status(:forbidden)
       end
+
+      turn_on_directly!(company, %w[employee_portal_enabled])
+      switch!({ "employee_portal_enabled" => false }, user: owner, recent: false)
+      expect(response).to have_http_status(:ok), response.body
 
       other_org = create(:organization)
       outsider = create(:user, company: create(:company, organization: other_org), organization: other_org, role: :org_admin, clerk_id: "user_outsider")
       get path, headers: auth(outsider)
       expect(response).to have_http_status(:forbidden)
-      expect(AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION)).to be_empty
+      expect(AdminOverride.where.not(actor: owner)).to be_empty
     end
   end
 
@@ -295,6 +305,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       switch!({ "employee_portal_enabled" => false, "subdomain_enabled" => false }, reason: "Pause the pilot", recent: false)
       expect(response).to have_http_status(:ok), response.body
       expect(stored.values).to all(be(false))
+      expect(AdminOverride.find_by!(action: "employee_app_switch", company: company)).to have_attributes(reason: "Pause the pilot")
       audit = AuditLog.find_by!(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: company.id)
       expect(audit.metadata).to include("reason" => "Pause the pilot", "turned_on" => [],
         "turned_off" => [ "employee_portal_enabled", "subdomain_enabled", "employee_portal.features.stubs", "employee_portal.features.tax_forms" ])
@@ -315,7 +326,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
       travel_to((PayrollBusinessClock.today + 1).in_time_zone(PayrollBusinessClock::TIME_ZONE).change(hour: 9)) do
         observe!
-        switch!({ "employee_portal_enabled" => false }, reason: "Pause", recent: false)
+        switch!({ "employee_portal_enabled" => false }, reason: "Pause the pilot", recent: false)
         expect(response).to have_http_status(:ok), response.body
         expect(current.reload.ends_on).to eq(PayrollBusinessClock.today - 1)
         newest = ClientOperatingProfile.for_date(company.id, PayrollBusinessClock.today)
@@ -330,7 +341,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       current = ClientOperatingProfile.for_date(demo.id, PayrollBusinessClock.today)
       current.update_columns(options: current.options.deep_merge("employee_portal" => { "features" => { "bank_requests" => true } }))
 
-      post "#{path}/demo_stop", params: { reason: "Stop" }, as: :json, headers: auth(recent: false, target: demo)
+      post "#{path}/demo_stop", params: { reason: "Stop demo access" }, as: :json, headers: auth(recent: false, target: demo)
       expect(response).to have_http_status(:ok), response.body
       expect(current.reload.employee_portal_enabled).to be(false)
       expect(current.option_value("employee_portal.features.bank_requests")).to be(false)
@@ -500,7 +511,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
     end
 
     def switch_with_first_factor!(changes, target:, fresh: true, user: org_admin)
-      patch path, params: { changes: changes, reason: "Rehearsal" }, as: :json,
+      patch path, params: { changes: changes, reason: "Demo rehearsal" }, as: :json,
         headers: first_factor_auth(user, fresh: fresh, target: target)
     end
 
@@ -543,13 +554,13 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "lets the owner set demo early access with a fresh first factor" do
       allow(EmployeeAppSwitch::Enforcement).to receive(:database_state).and_return(shadow_state)
-      put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "Rehearsal" },
+      put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "Demo rehearsal" },
         as: :json, headers: first_factor_auth(owner, fresh: false, target: demo)
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body.dig("clerk_error", "metadata", "reverification", "level")).to eq("first_factor")
       expect(EmployeeAppEarlyAccessWindow.count).to eq(0)
 
-      put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "Rehearsal" },
+      put "#{path}/early_access", params: { expires_on: (PayrollBusinessClock.today + 3).iso8601, company_ids: [ demo.id ], reason: "Demo rehearsal" },
         as: :json, headers: first_factor_auth(owner, target: demo)
       expect(response).to have_http_status(:ok), response.body
       expect(EmployeeAppEarlyAccessWindow.sole).to have_attributes(company_ids: [ demo.id ], set_by_id: owner.id)
@@ -587,6 +598,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(response).to have_http_status(:ok), response.body
       window = EmployeeAppEarlyAccessWindow.sole
       expect(window).to have_attributes(company_ids: [ demo.id ], set_by_id: owner.id, approved_by: owner, reason: "Owner approved rehearsal")
+      expect(AdminOverride.find_by!(action: "employee_app_early_access_set", actor: owner).after_snapshot)
+        .to include("company_ids" => [ demo.id ], "window_id" => window.id)
       expect(AuditLog.find_by!(action: "employee_app_early_access#set").metadata)
         .to include("company_ids" => [ demo.id ], "approved_by_id" => owner.id)
 
@@ -814,6 +827,15 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       expect(app_open.call).to be(true)
     end
 
+    it "skips the expiry sweep when the override notification ledger rolls back early access" do
+      allow(PortalNotifications).to receive(:admin_override!).and_raise(ActiveRecord::RecordInvalid.new(PortalNotificationEvent.new))
+      expect(EmployeeAppSwitch::DemoExpiry).not_to receive(:call)
+
+      expect { open_window! }.not_to change(EmployeeAppEarlyAccessWindow, :count)
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(AdminOverride.where(action: "employee_app_early_access_set")).to be_empty
+    end
+
     it "ends a window with a reason, and the row can't be edited afterwards" do
       open_window!
       delete "#{path}/early_access", params: { reason: "Rehearsal finished" }, as: :json, headers: auth(recent: false, target: demo)
@@ -960,7 +982,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       EmployeeAppSwitch::ProfileWriter.apply!(company: demo, actor: org_admin, values: { "employee_portal_enabled" => false }, reason: "Fixture")
       future.update!(employee_portal_enabled: true)
 
-      post "#{path}/demo_stop", params: { reason: "Stop" }, as: :json, headers: auth(recent: false, target: demo)
+      post "#{path}/demo_stop", params: { reason: "Stop demo access" }, as: :json, headers: auth(recent: false, target: demo)
       expect(response).to have_http_status(:ok), response.body
       expect(future.reload.employee_portal_enabled).to be(false)
       expect(future.option_value("subdomain_enabled")).to be(false)
@@ -979,13 +1001,13 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       allow(clerk).to receive(:revoke_user_sessions).and_return({ success: false, error: "Clerk down" }, { success: true })
 
       expect do
-        post "#{path}/demo_stop", params: { reason: "Leak" }, as: :json, headers: auth(recent: false, target: demo)
+        post "#{path}/demo_stop", params: { reason: "Suspected demo leak" }, as: :json, headers: auth(recent: false, target: demo)
       end.to have_enqueued_job(RevokeEmployeeAppClerkJob).exactly(:once)
       revocation = EmployeeAppClerkRevocation.sole
       expect(revocation).to have_attributes(kind: "sessions", target: login.id.to_s, source: "demo_stop", confirmed_at: nil)
 
       expect do
-        post "#{path}/demo_stop", params: { reason: "Again" }, as: :json, headers: auth(recent: false, target: demo)
+        post "#{path}/demo_stop", params: { reason: "Retry demo shutdown" }, as: :json, headers: auth(recent: false, target: demo)
       end.not_to have_enqueued_job(RevokeEmployeeAppClerkJob)
       expect(EmployeeAppClerkRevocation.count).to eq(1)
       expect(AuditLog.where(action: EmployeeAppSwitch::AUDIT_ACTION, company_id: demo.id).order(:id).last.metadata["requested"])
@@ -1011,20 +1033,20 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         EmployeeAppClerkRevocation.request!(kind: "invitation", target: "inv_orphan", organization: organization, company: demo,
           source: EmployeeAppClerkRevocation::SOURCE_DEMO_STOP, requested_by: org_admin)
       end
-      post "#{path}/demo_stop", params: { reason: "Leak" }, as: :json, headers: auth(recent: false, target: demo)
+      post "#{path}/demo_stop", params: { reason: "Suspected demo leak" }, as: :json, headers: auth(recent: false, target: demo)
       expect(response).to have_http_status(:ok), response.body
       expect(orphan.reload.enqueued_at).to be_nil
 
       allow(RevokeEmployeeAppClerkJob.queue_adapter).to receive(:enqueue).and_call_original
       expect do
-        post "#{path}/demo_stop", params: { reason: "Again" }, as: :json, headers: auth(recent: false, target: demo)
+        post "#{path}/demo_stop", params: { reason: "Retry demo shutdown" }, as: :json, headers: auth(recent: false, target: demo)
       end.to have_enqueued_job(RevokeEmployeeAppClerkJob).with(orphan.id).exactly(:once)
       expect(orphan.reload.enqueued_at).to be_present
       expect(EmployeeAppClerkRevocation.count).to eq(1)
 
       # Already queued: a third stop doesn't queue it again (the sweep covers a lost job).
       expect do
-        post "#{path}/demo_stop", params: { reason: "Third" }, as: :json, headers: auth(recent: false, target: demo)
+        post "#{path}/demo_stop", params: { reason: "Retry orphan cleanup" }, as: :json, headers: auth(recent: false, target: demo)
       end.not_to have_enqueued_job(RevokeEmployeeAppClerkJob)
     end
 
@@ -1049,7 +1071,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
 
     it "is for organization admins only" do
       admin = create(:user, company: company, organization: organization, role: :admin, clerk_id: "user_plain_admin")
-      post "#{path}/demo_stop", params: { reason: "Stop" }, as: :json, headers: auth(admin, target: demo)
+      post "#{path}/demo_stop", params: { reason: "Stop demo access" }, as: :json, headers: auth(admin, target: demo)
       expect(response).to have_http_status(:forbidden)
     end
   end
@@ -1063,7 +1085,7 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
       invite!(employee, actor: org_admin, delivery: "code")
       expect(locked).to eq([ demo.id ])
 
-      EmployeeAppSwitch::DemoStop.call(organization: organization, actor: org_admin, reason: "Stop")
+      EmployeeAppSwitch::DemoStop.call(organization: organization, actor: org_admin, reason: "Stop demo access")
       other = create(:employee, company: demo)
       expect { invite!(other, actor: org_admin, delivery: "code") }.to raise_error(EmployeeLinks::Error, /isn't turned on/)
     end

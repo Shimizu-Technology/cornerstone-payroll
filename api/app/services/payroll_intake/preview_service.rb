@@ -20,7 +20,15 @@ module PayrollIntake
       "mosa_revel" => PayrollIntake::Adapters::MosaRevel
     }.freeze
 
-    def self.source_reports_overtime?(source_type)
+    def self.source_reports_overtime?(source_type, company: nil, pay_period: nil)
+      if company
+        return PayrollIntake::EffectiveSettings.for(
+          company: company,
+          pay_period: pay_period,
+          source_type: source_type
+        ).source_reports_overtime?
+      end
+
       descriptor = PayrollIntake::Registry.find(source_type)
       return descriptor.reports_overtime? if descriptor
 
@@ -96,7 +104,8 @@ module PayrollIntake
             package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
             supersedes: predecessor,
             supersession_reason: supersession_reason,
-            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence)
+            evidence_snapshot: normalized.fetch(:evidence)
+              .merge("workweek" => workweek_evidence, "intake_settings" => effective_settings.to_evidence)
               .merge(import_hash == source_files_hash ? {} : { "source_import_hash" => source_files_hash })
               .merge(@revision_evidence || {})
               .merge(@source_changes ? { "source_changes" => @source_changes } : {}),
@@ -520,10 +529,15 @@ module PayrollIntake
     end
 
     def normalize_extraction(extraction)
-      normalized = adapter_class.new(pay_period: pay_period, company: company).normalize(
+      adapter = adapter_class.new(pay_period: pay_period, company: company)
+      normalize_kwargs = {
         extracted_rows: extraction[:rows],
         detected_period: extraction[:detected_period]
-      )
+      }
+      if adapter.method(:normalize).parameters.any? { |type, name| name == :trusted_source || type == :keyrest }
+        normalize_kwargs[:trusted_source] = extraction.fetch(:trusted_source, true)
+      end
+      normalized = adapter.normalize(**normalize_kwargs)
       warnings = Array(extraction[:warnings]) + Array(normalized[:warnings]) + @carry_warnings
       if workweek_evidence["aligned_with_pay_period"] == false
         warnings << {
@@ -541,9 +555,20 @@ module PayrollIntake
       normalized.merge(warnings: warnings)
     end
 
+    def effective_settings
+      @effective_settings ||= PayrollIntake::EffectiveSettings.for(
+        company: company,
+        pay_period: pay_period,
+        source_type: source_type
+      )
+    end
+
     def capture_workweek_evidence!
       @workweek_evidence = PayrollIntake::WorkweekEvidence.new(
-        pay_period: pay_period, allow_misaligned: self.class.source_reports_overtime?(source_type)
+        pay_period: pay_period,
+        allow_misaligned: effective_settings.allow_misaligned_workweek?,
+        overtime_mode: effective_settings.overtime_mode,
+        workweek_alignment: effective_settings.workweek_alignment
       ).capture!
     end
 
@@ -612,7 +637,7 @@ module PayrollIntake
       end
 
       text_extraction = extract_rows_from_text
-      return text_extraction if text_extraction[:rows].present?
+      return text_extraction.merge(trusted_source: true) if text_extraction[:rows].present?
 
       ai_extraction = PayrollIntake::AiExtractor.new(
         source_type: source_type,
@@ -623,7 +648,8 @@ module PayrollIntake
       {
         rows: ai_extraction[:rows],
         detected_period: ai_extraction[:detected_period] || text_extraction[:detected_period],
-        warnings: Array(text_extraction[:warnings]) + Array(ai_extraction[:warnings])
+        warnings: Array(text_extraction[:warnings]) + Array(ai_extraction[:warnings]),
+        trusted_source: false
       }
     end
 

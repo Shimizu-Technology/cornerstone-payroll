@@ -24,6 +24,7 @@ module PortalNotifications
 
     CATALOG_COPY = {
       "payroll_committed" => [ "Payroll committed", "Payroll is final. Pay statements post on pay date." ],
+      "admin_override" => [ "Administrative change recorded", "Sign in to review your client workspace." ],
       "payroll_reopened" => [ "Payroll rolled back or reopened", "View the current payroll status in the portal." ],
       "employee_change_submitted" => [ "Employee change request", "An employee change request is pending." ],
       "address_approval_requested" => [ "Address request to review", "An employee address request is pending." ],
@@ -125,6 +126,8 @@ module PortalNotifications
     # email's link reaches all the work it mentions. Digest batches split per
     # client; immediate payroll review emails split per client and pay period.
     def self.destination_group(event, delivery_mode: "immediate")
+      return [ :admin_override, event.company_id, event.audience ] if event.event_type == "admin_override"
+
       if event.event_type.in?(%w[payroll_committed payroll_reopened])
         return [ event.event_type, event.company_id, event.subject_id, event.metadata["self_override"] ]
       end
@@ -243,6 +246,7 @@ module PortalNotifications
       end
 
       path = case group
+      when :admin_override then "pay-runs"
       when :employee_rollout then "employee-app/rollout"
       when :messages, :file_requests then audience == "staff" ? "client-messages" : "messages"
       when :payroll then audience == "staff" ? "payroll-submissions" : "payroll-files"

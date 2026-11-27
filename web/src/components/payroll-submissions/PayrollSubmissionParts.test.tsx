@@ -87,3 +87,68 @@ it('keeps staff workbook provenance visible after import apply', () => {
   expect(screen.getByText(/Staff workbook: downloaded.xlsx.*attached by Synthetic Staff/)).toBeTruthy();
   expect(screen.getByText(/SHA-256 a{64}/)).toBeTruthy();
 });
+
+it('preserves historical workbook_choice declarations even when the current descriptor has no linkable slot', () => {
+  const nonLinkableDescriptor = {
+    key: 'universal_workbook',
+    label: 'Universal workbook',
+    source_label: 'Universal workbook',
+    extraction: 'deterministic',
+    accepts_pasted_text: false,
+    tracks_reviewed_hours: true,
+    employee_match: 'employee_id',
+    reports_overtime: true,
+    tips_default: 'paid_in_check',
+    overtime_mode: 'source_reports',
+    workweek_alignment: 'aligned',
+    required_sources: ['universal_workbook'],
+    files: [{
+      role: 'universal_workbook', label: 'Workbook', hint: null, accept: ['.csv'], content_type: null, max: 1,
+      required: true, required_by_default: true, waivable: null, portal_role: 'payroll_workbook',
+      portal_label: 'Workbook', portal_hint: null, supports_link: false, provides: ['regular_hours'],
+    }],
+    portal: { submittable: true, role_map: { payroll_workbook: 'universal_workbook' } },
+  };
+  const historicalNone = {
+    id: 10, revision: 1, current: true, superseded: false, submitted_at: '2026-11-14T00:00:00Z',
+    no_changes: true, workbook_choice: 'none', changes: [], documents: [],
+  } as SubmissionRevision;
+  render(<RevisionCard revision={historicalNone} api={{} as PayrollSubmissionsApi} descriptor={nonLinkableDescriptor} />);
+  expect(screen.getByText('Client chose: No tips or loans this period.')).toBeTruthy();
+});
+
+it('recognizes attached workbooks under a custom descriptor linkable portal role', () => {
+  const customLinkableDescriptor = {
+    key: 'custom_linkable',
+    label: 'Custom workbook',
+    source_label: 'Custom workbook',
+    extraction: 'deterministic',
+    accepts_pasted_text: false,
+    tracks_reviewed_hours: true,
+    employee_match: 'employee_id',
+    reports_overtime: true,
+    tips_default: 'paid_in_check',
+    overtime_mode: 'source_reports',
+    workweek_alignment: 'aligned',
+    required_sources: ['universal_workbook'],
+    files: [{
+      role: 'universal_workbook', label: 'Workbook', hint: null, accept: ['.xlsx'], content_type: null, max: 1,
+      required: true, required_by_default: true, waivable: null, portal_role: 'payroll_workbook',
+      portal_label: 'Payroll workbook', portal_hint: null, supports_link: true, provides: ['regular_hours'],
+    }],
+    portal: { submittable: true, role_map: { payroll_workbook: 'universal_workbook' } },
+  };
+  const attachedRevision = {
+    id: 11, revision: 1, current: true, superseded: false, submitted_at: '2026-11-14T00:00:00Z',
+    no_changes: false, workbook_choice: 'attach', changes: [],
+    documents: [{
+      role: 'payroll_workbook', file_name: 'period.xlsx', file_size: 1024,
+      document: { id: 50, title: 'period.xlsx', file_name: 'period.xlsx', content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', preview_available: false, scan_status: 'clean' } as ClientDocument,
+    }],
+  } as SubmissionRevision;
+
+  render(<RevisionCard revision={attachedRevision} api={{} as PayrollSubmissionsApi} descriptor={customLinkableDescriptor} />);
+  expect(screen.getByText('Tips & loans workbook attached.')).toBeTruthy();
+  expect(screen.getByText('No changes listed; see the workbook or link.')).toBeTruthy();
+  expect(screen.queryByText(/Legacy revision/)).toBeNull();
+});

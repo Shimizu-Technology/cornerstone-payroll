@@ -9,7 +9,11 @@ class PayrollSubmissionDocument < ApplicationRecord
   belongs_to :submission, class_name: "PayrollSubmission", foreign_key: :payroll_submission_id, inverse_of: :submission_documents
   belongs_to :client_document
 
-  validates :role, inclusion: { in: ROLES }
+  def self.allowed_roles
+    (ROLES + PayrollIntake::Registry.portal_roles).uniq
+  end
+
+  validates :role, inclusion: { in: ->(_) { PayrollSubmissionDocument.allowed_roles } }
   validates :sha256, format: { with: /\A[0-9a-f]{64}\z/ }
   validates :file_name_snapshot, presence: true
   validate :records_share_company

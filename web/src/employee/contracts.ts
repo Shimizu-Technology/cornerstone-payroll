@@ -164,6 +164,8 @@ export interface StatementSummary {
   netPay: Money | null;
   totalHours: string | null;
   payment: StatementPayment;
+  withdrawn?: boolean;
+  notice?: string | null;
   /** A frozen PDF can be downloaded (payroll checks once posted). */
   pdfAvailable: boolean;
   /** QuickBooks checks only: Cornerstone's original stub was posted for this check. */
@@ -212,6 +214,8 @@ export function parseStatementSummary(value: unknown): StatementSummary | null {
     periodStart: isoDate(period.start_date) ?? isoDate(row.period_start),
     periodEnd: isoDate(period.end_date) ?? isoDate(row.period_end),
     runPurpose: text(period.run_purpose),
+    ...(row.status === 'withdrawn' ? { withdrawn: true } : {}),
+    ...(typeof row.notice === 'string' ? { notice: row.notice } : {}),
     grossPay: money(row.gross_pay),
     netPay: money(row.net_pay),
     totalHours: money(row.total_hours ?? row.hours_total),
