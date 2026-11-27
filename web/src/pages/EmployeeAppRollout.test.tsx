@@ -46,7 +46,9 @@ describe('Employee app rollout', () => {
     expect(screen.queryByRole('radio', { name: 'Printed code' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Create printed codes' })).toBeNull();
     await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
-    expect(screen.queryByRole('button', { name: /Select all matches|Select up to|Clear selection/ })).toBeNull();
+    // Clients get their own "Select all ready" control; the staff-only bulk controls stay hidden.
+    expect(screen.queryByRole('button', { name: /Select all matches|Select up to/ })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Clear selection' })).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Send email invites' }));
     expect(mocks.post).toHaveBeenCalledWith('/client/employee_app_rollout/7/invite',
       { employee_ids: [21], delivery: 'email' }, { companyId: 7 });
@@ -232,6 +234,7 @@ describe('Employee app rollout', () => {
     expect(screen.queryByRole('button', { name: /Select all ready/ })).toBeNull();
     await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
     expect(screen.getByText('1 selected')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Clear selection' })).toBeNull();
+    // Staff keep their own bulk controls, so exactly one Clear selection shows.
+    expect(screen.getAllByRole('button', { name: 'Clear selection' })).toHaveLength(1);
   });
 });
