@@ -15,6 +15,7 @@ module Api
         # Get pay stub info (not the PDF itself)
         def show
           existing_key = existing_storage_key
+          document = EmployeeDocument.posted_by_payroll_item(@payroll_item.company_id, [ @payroll_item.id ])[@payroll_item.id]
 
           render json: {
             pay_stub: {
@@ -24,6 +25,7 @@ module Api
               # The date the stub prints (the check's own date, else the run's).
               pay_date: @payroll_item.check_date || @payroll_item.pay_period.pay_date,
               net_pay: @payroll_item.net_pay,
+              corrected: document&.correction_label? || false,
               generated: existing_key.present?,
               storage_key: existing_key || storage_key
             }
@@ -263,7 +265,8 @@ module Api
                                         .select(:id)
                          })
                          .newest_printed_first
-                         .limit(params[:limit] || 12)
+                         .limit(params[:limit] || 12).to_a
+          documents = EmployeeDocument.posted_by_payroll_item(employee.company_id, items.map(&:id))
 
           render json: {
             employee: {
@@ -276,6 +279,7 @@ module Api
                 pay_period: item.pay_period.period_description,
                 pay_date: item.check_date || item.pay_period.pay_date,
                 net_pay: item.net_pay,
+                corrected: documents[item.id]&.correction_label? || false,
                 storage_key: pay_stub_key(item)
               }
             end
