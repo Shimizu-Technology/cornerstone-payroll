@@ -121,6 +121,9 @@ RSpec.describe "Demo company containment", type: :request do
     def expect_neutral_refusal
       expect(response).to have_http_status(:forbidden).or have_http_status(:unprocessable_entity)
       expect(response.parsed_body.fetch("error")).to eq(Company::DEMO_UNAVAILABLE_MESSAGE)
+      if response.status == 403
+        expect(response.parsed_body.fetch("code")).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+      end
     end
 
     it "refuses e-files, filing records, FIT deposit checks, shared config and billing" do
@@ -178,7 +181,8 @@ RSpec.describe "Demo company containment", type: :request do
       allow_any_instance_of(ApplicationController).to receive(:current_company_id).and_return(sandbox.id)
       get "/api/v1/admin/reports/w2_gu_efw2", params: { year: 2026, mode: "draft" }
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to include("test workspace")
+      expect(response.parsed_body.fetch("error")).to include("practice company", "test workspace")
+      expect(response.parsed_body.fetch("code")).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
       get "/api/v1/admin/reports/w3ss_pdf", params: { year: 2026, mode: "draft" }
       expect(response).to have_http_status(:forbidden)
     end

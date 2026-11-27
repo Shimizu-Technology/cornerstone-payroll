@@ -214,11 +214,19 @@ class EmployeeContactValidator
         .where(present_node(Employee.arel_table[:email]))
         .group(normalized_email_node)
         .count
+      pending_address_request_employee_ids = EmployeeChangeRequest
+        .for_company(company.id)
+        .pending
+        .profile_addresses
+        .distinct
+        .pluck(:employee_id)
+        .to_set
 
       {
         flagged_emails: flagged,
         company_email_counts: company_email_counts,
-        private_placeholders_hidden: hide_private
+        private_placeholders_hidden: hide_private,
+        pending_address_request_employee_ids: pending_address_request_employee_ids
       }
     end
 
@@ -253,7 +261,8 @@ class EmployeeContactValidator
         "needs_contact_details" => needs_contact,
         "missing_fields" => missing_fields,
         "email_issue" => email_issue,
-        "shared_email_count" => shared_count
+        "shared_email_count" => shared_count,
+        "has_pending_address_request" => ctx.fetch(:pending_address_request_employee_ids).include?(employee.id)
       }
     end
 

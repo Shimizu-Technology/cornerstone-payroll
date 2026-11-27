@@ -71,6 +71,7 @@ export function apiErrorMessage(
     : `The request could not be completed (HTTP ${status}). Refresh the page and try again.`);
   const message = explanations.join('; ');
   if (status === 403 && isMfaRequiredCode(payload.code)) return message;
+  if (status === 403 && payload.code === 'contained_company_restricted') return message;
   if (status === 409 && payload.code === 'sign_up_accepted') return message;
   // These outcomes have a definite recovery step regardless of the endpoint.
   const recovery: Record<number, string> = {
