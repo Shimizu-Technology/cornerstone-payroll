@@ -25,6 +25,7 @@ import { Input } from '@/components/ui/input';
 import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
+import { computeExtraHoursPreview, formatCompactHours, parseDecimalHundredths, type ExtraHoursMode } from '@/lib/extraHoursPreview';
 import { cn, formatCurrency, formatGuamDateTime } from '@/lib/utils';
 import { acceptMapForDescriptor, carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, noticeTitle, pickersForDescriptor, sameSourceFiles } from '@/lib/importSources';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
@@ -70,6 +71,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(defaultTipsPaidOut);
   const [reviewedClientChanges, setReviewedClientChanges] = useState(false);
   const [clientChangeDrafts, setClientChangeDrafts] = useState<Record<number, string>>({});
+  const [clientExtraRegularDrafts, setClientExtraRegularDrafts] = useState<Record<number, string>>({});
+  const [clientExtraOvertimeDrafts, setClientExtraOvertimeDrafts] = useState<Record<number, string>>({});
+  const [clientExtraWorkweeks, setClientExtraWorkweeks] = useState<Record<number, number>>({});
   const [clientDeclines, setClientDeclines] = useState<Record<number, boolean>>({});
   const [clientAdjustmentReasons, setClientAdjustmentReasons] = useState<Record<number, string>>({});
   const [clientDeclineReasons, setClientDeclineReasons] = useState<Record<number, string>>({});
@@ -108,7 +112,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     reviewGeneration.current += 1;
     setStep('upload');
     setUsePendingRevision(false); setStaffWorkbook(null);
-    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
+    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientExtraRegularDrafts({}); setClientExtraOvertimeDrafts({}); setClientExtraWorkweeks({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
     setDuplicateRevision(null);
     setPdfFile(null);
     setExcelFile(null);
@@ -191,7 +195,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   // new review still offers that same revision.
   const openPreview = (data: ImportPreviewResponse, keepOutcomesFrom?: MosaSourceRow[], keepPendingSubmissionId?: number) => {
     setPreviewData(data);
-    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
+    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientExtraRegularDrafts({}); setClientExtraOvertimeDrafts({}); setClientExtraWorkweeks({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
     setUsePendingRevision(keepPendingSubmissionId !== undefined && data.pending_portal_source?.submission_id === keepPendingSubmissionId);
     setRateChoices({});
     setSourceRows(keepOutcomesFrom
@@ -382,7 +386,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const matchAgain = async (current: ImportPreviewResponse, reason: string, employeeId: number, readyStatus: string, attentionStatus: string, recordReason = true) => {
     const previousRows = sourceRows;
     const previousChoices = rateChoices;
-    const previousDrafts = { clientChangeDrafts, clientDeclines, clientAdjustmentReasons, clientDeclineReasons, clientPayChoices };
+    const previousDrafts = { clientChangeDrafts, clientExtraRegularDrafts, clientExtraOvertimeDrafts, clientExtraWorkweeks, clientDeclines, clientAdjustmentReasons, clientDeclineReasons, clientPayChoices };
     const previousPrefill = current.client_change_prefill || current.pending_change_prefill;
     const previousDocuments = current.source_package.documents;
     const pendingSubmissionId = usePendingRevision ? current.pending_portal_source?.submission_id : undefined;
@@ -408,6 +412,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       const prefill = data.client_change_prefill || data.pending_change_prefill;
       if (prefill && previousPrefill && prefill.submission_id === previousPrefill.submission_id && prefill.revision === previousPrefill.revision) {
         setClientChangeDrafts(previousDrafts.clientChangeDrafts);
+        setClientExtraRegularDrafts(previousDrafts.clientExtraRegularDrafts);
+        setClientExtraOvertimeDrafts(previousDrafts.clientExtraOvertimeDrafts);
+        setClientExtraWorkweeks(previousDrafts.clientExtraWorkweeks);
         setClientDeclines(previousDrafts.clientDeclines);
         setClientAdjustmentReasons(previousDrafts.clientAdjustmentReasons);
         setClientDeclineReasons(previousDrafts.clientDeclineReasons);
@@ -572,10 +579,39 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         no_tips_or_loans: staffWaived,
         wage_rate_choices: rateChoices,
         ...(clientChanges.length ? { confirm_client_changes: reviewedClientChanges,
-          reviewed_changes: clientChanges.map(row => ({ change_index: row.change_index,
-            [row.kind === 'owner_pay' ? 'amount' : 'hours']: clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '',
-            ...(isNoPay(row) ? { decision: 'no_pay', reason: noPayReason(row) } : clientDeclines[row.change_index] ? { decision: 'decline', reason: clientDeclineReasons[row.change_index] || '' } : clientAdjustmentReasons[row.change_index]?.trim() ? { reason: clientAdjustmentReasons[row.change_index] } : {}),
-            ...(clientPayChoices[row.change_index] ? { pay_choice: clientPayChoices[row.change_index], saved_period_pay: row.saved_period_pay, workbook_period_pay: row.workbook_period_pay } : {}) })) } : {}),
+          reviewed_changes: clientChanges.map(row => {
+            const base = {
+              change_index: row.change_index,
+              ...(isNoPay(row) ? { decision: 'no_pay', reason: noPayReason(row) } : clientDeclines[row.change_index] ? { decision: 'decline', reason: clientDeclineReasons[row.change_index] || '' } : clientAdjustmentReasons[row.change_index]?.trim() ? { reason: clientAdjustmentReasons[row.change_index] } : {}),
+              ...(clientPayChoices[row.change_index] ? { pay_choice: clientPayChoices[row.change_index], saved_period_pay: row.saved_period_pay, workbook_period_pay: row.workbook_period_pay } : {}),
+            };
+            if (row.kind === 'owner_pay') {
+              return { ...base, amount: clientChangeDrafts[row.change_index] ?? row.amount ?? '' };
+            }
+            const state = extraHoursReviewState(row);
+            if (isNoPay(row) || clientDeclines[row.change_index]) {
+              return { ...base, hours: row.hours ?? '' };
+            }
+            const baselineFields = {
+              ...(row.baseline_regular_hours !== undefined || row.saved_regular_hours !== undefined
+                ? { baseline_regular_hours: row.baseline_regular_hours ?? row.saved_regular_hours }
+                : {}),
+              ...(row.baseline_overtime_hours !== undefined || row.saved_overtime_hours !== undefined
+                ? { baseline_overtime_hours: row.baseline_overtime_hours ?? row.saved_overtime_hours }
+                : {}),
+              ...(row.preview_token ? { preview_token: row.preview_token } : {}),
+            };
+            if (state.mode === 'split') {
+              const regText = state.regularDraft.trim() || '0';
+              const otText = state.overtimeDraft.trim() || '0';
+              const totalHundredths = (parseDecimalHundredths(regText) ?? 0) + (parseDecimalHundredths(otText) ?? 0);
+              return { ...base, ...baselineFields, regular_hours: regText, overtime_hours: otText, hours: formatCompactHours(totalHundredths) };
+            }
+            if (state.mode === 'workweek') {
+              return { ...base, ...baselineFields, hours: state.hoursDraft, ...(state.workweekDraft ? { workweek: state.workweekDraft } : {}) };
+            }
+            return { ...base, ...baselineFields, hours: state.hoursDraft };
+          }) } : {}),
       });
       setResults({
         success: response.results.success.length,
@@ -605,12 +641,167 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const isNoPay = (change: (typeof clientChanges)[number]) => !!change.requires_pay_decision && (!!clientDeclines[change.change_index] || sourceRows.some(row => row.employee_id === change.employee_id && row.disposition === 'excluded'));
   const noPayReason = (change: (typeof clientChanges)[number]) => sourceRows.find(row => row.employee_id === change.employee_id && row.disposition === 'excluded')?.disposition_reason || clientDeclineReasons[change.change_index] || '';
   const hasPayConflict = (row: (typeof clientChanges)[number]) => row.kind === 'owner_pay' && [row.saved_period_pay, row.workbook_period_pay].some(amount => amount !== undefined && Number(amount) !== Number(clientChangeDrafts[row.change_index] ?? row.amount));
+  type ExtraHoursReviewEntry = {
+    mode: ExtraHoursMode;
+    hoursDraft: string;
+    regularDraft: string;
+    overtimeDraft: string;
+    workweekDraft: number | undefined;
+    preview: ReturnType<typeof computeExtraHoursPreview>;
+    adjusted: boolean;
+    missingSubmittedSplit: boolean;
+    employeeActiveRowCount: number;
+    employeeActiveRowIndex: number;
+    cumulativeGrossPayDelta: number | null;
+  };
+  const extraHoursReviewMap = (() => {
+    const map = new Map<number, ExtraHoursReviewEntry>();
+    const activeCountByEmployee = new Map<number, number>();
+    for (const row of clientChanges) {
+      if (row.kind !== 'extra_hours' || !row.employee_id) continue;
+      if (isNoPay(row) || clientDeclines[row.change_index] || row.error) continue;
+      activeCountByEmployee.set(row.employee_id, (activeCountByEmployee.get(row.employee_id) ?? 0) + 1);
+    }
+    const runningByEmployee = new Map<number, {
+      reg: number;
+      ot: number;
+      w1: number;
+      w2: number;
+      grossDeltaCents: number | null;
+      seenCount: number;
+      lineHours: Map<string, { reg: number; ot: number }>;
+    }>();
+
+    for (const row of clientChanges) {
+      if (row.kind !== 'extra_hours') continue;
+      const mode: ExtraHoursMode = row.extra_hours_mode || (row.is_contractor ? 'straight_time' : row.workweeks?.length ? 'workweek' : 'split');
+      const hoursDraft = clientChangeDrafts[row.change_index] ?? row.hours ?? '';
+      const regularDraft = clientExtraRegularDrafts[row.change_index] ?? row.regular_hours ?? '';
+      const overtimeDraft = clientExtraOvertimeDrafts[row.change_index] ?? row.overtime_hours ?? '';
+      const workweekDraft = row.workweeks?.length === 1 ? 1 : (clientExtraWorkweeks[row.change_index] ?? row.workweek ?? undefined);
+      const selectedJobId = row.employee_id ? rateChoices[row.employee_id] : undefined;
+      const isActive = !isNoPay(row) && !clientDeclines[row.change_index] && !row.error;
+      const prior = isActive && row.employee_id ? runningByEmployee.get(row.employee_id) : undefined;
+      const jobKey = `${row.employee_wage_rate_id ?? ''}:${row.wage_rate ?? ''}`;
+      const priorLine = prior?.lineHours.get(jobKey);
+
+      const initialLineRegular = selectedJobId !== undefined
+        ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_line_regular_hours ?? row.baseline_regular_hours ?? row.saved_regular_hours ?? '0') : '0')
+        : row.baseline_line_regular_hours;
+      const initialLineOvertime = selectedJobId !== undefined
+        ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_line_overtime_hours ?? row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0') : '0')
+        : row.baseline_line_overtime_hours;
+
+      const baseRegInput = prior ? prior.reg.toFixed(2) : (row.baseline_regular_hours ?? row.saved_regular_hours ?? '0');
+      const baseOtInput = prior ? prior.ot.toFixed(2) : (row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0');
+      const lineBaseRegInput = priorLine ? priorLine.reg.toFixed(2) : initialLineRegular;
+      const lineBaseOtInput = priorLine ? priorLine.ot.toFixed(2) : initialLineOvertime;
+      const baseW1Input = prior ? prior.w1.toFixed(2) : (row.baseline_week1_hours ?? '0');
+      const baseW2Input = prior ? prior.w2.toFixed(2) : (row.baseline_week2_hours ?? '0');
+
+      const preview = computeExtraHoursPreview({
+        mode,
+        rate: row.wage_rate,
+        baselineRegularHours: baseRegInput,
+        baselineOvertimeHours: baseOtInput,
+        baselineLineRegularHours: lineBaseRegInput,
+        baselineLineOvertimeHours: lineBaseOtInput,
+        baselineWeek1Hours: baseW1Input,
+        baselineWeek2Hours: baseW2Input,
+        hours: hoursDraft,
+        regularHours: regularDraft,
+        overtimeHours: overtimeDraft,
+        workweek: workweekDraft,
+        workweekCount: row.workweeks?.length || 2,
+      });
+
+      const missingSubmittedSplit = row.needs_classification || (mode === 'split' && row.regular_hours === undefined && row.overtime_hours === undefined);
+      let adjusted = false;
+      if (mode === 'split') {
+        if (missingSubmittedSplit) {
+          const submittedTotal = parseDecimalHundredths(row.hours);
+          adjusted = preview.valid && submittedTotal !== null && Math.round(preview.totalHours * 100) !== submittedTotal;
+        } else {
+          const regVal = parseDecimalHundredths(regularDraft.trim() || '0');
+          const otVal = parseDecimalHundredths(overtimeDraft.trim() || '0');
+          const origReg = parseDecimalHundredths(row.regular_hours ?? '0');
+          const origOt = parseDecimalHundredths(row.overtime_hours ?? '0');
+          adjusted = regVal !== origReg || otVal !== origOt;
+        }
+      } else if (mode === 'workweek') {
+        const hoursChanged = parseDecimalHundredths(hoursDraft) !== parseDecimalHundredths(row.hours);
+        const weekChanged = (row.workweeks?.length ?? 0) > 1 && row.workweek !== undefined && workweekDraft !== undefined && workweekDraft !== row.workweek;
+        adjusted = hoursChanged || weekChanged;
+      } else {
+        adjusted = parseDecimalHundredths(hoursDraft) !== parseDecimalHundredths(row.hours);
+      }
+
+      const employeeActiveRowCount = isActive && row.employee_id ? (activeCountByEmployee.get(row.employee_id) ?? 1) : 1;
+      const employeeActiveRowIndex = isActive ? (prior?.seenCount ?? 0) + 1 : 0;
+      let cumulativeGrossPayDelta: number | null = preview.grossPayDelta;
+
+      if (isActive && row.employee_id) {
+        const prevCents = prior ? prior.grossDeltaCents : 0;
+        const nextCents = prevCents !== null && preview.valid && preview.grossPayDelta !== null
+          ? prevCents + Math.round(preview.grossPayDelta * 100)
+          : null;
+        cumulativeGrossPayDelta = nextCents === null ? null : nextCents / 100;
+
+        const nextLineHours = new Map(prior?.lineHours ?? []);
+        const prevLineReg = priorLine ? priorLine.reg : (Number(initialLineRegular ?? baseRegInput) || 0);
+        const prevLineOt = priorLine ? priorLine.ot : (Number(initialLineOvertime ?? baseOtInput) || 0);
+        if (preview.valid) {
+          nextLineHours.set(jobKey, {
+            reg: Math.round((prevLineReg + preview.deltaRegularHours) * 100) / 100,
+            ot: Math.round((prevLineOt + preview.deltaOvertimeHours) * 100) / 100,
+          });
+        }
+        runningByEmployee.set(row.employee_id, {
+          reg: preview.valid ? preview.resultingRegularHours : (Number(baseRegInput) || 0),
+          ot: preview.valid ? preview.resultingOvertimeHours : (Number(baseOtInput) || 0),
+          w1: preview.valid && preview.resultingWeek1Hours !== undefined ? preview.resultingWeek1Hours : (Number(baseW1Input) || 0),
+          w2: preview.valid && preview.resultingWeek2Hours !== undefined ? preview.resultingWeek2Hours : (Number(baseW2Input) || 0),
+          grossDeltaCents: nextCents,
+          seenCount: employeeActiveRowIndex,
+          lineHours: nextLineHours,
+        });
+      }
+
+      map.set(row.change_index, {
+        mode,
+        hoursDraft,
+        regularDraft,
+        overtimeDraft,
+        workweekDraft,
+        preview,
+        adjusted,
+        missingSubmittedSplit,
+        employeeActiveRowCount,
+        employeeActiveRowIndex,
+        cumulativeGrossPayDelta,
+      });
+    }
+    return map;
+  })();
+  const extraHoursReviewState = (row: (typeof clientChanges)[number]): ExtraHoursReviewEntry => extraHoursReviewMap.get(row.change_index)!;
+  const changeRequiresAdjustmentReason = (row: (typeof clientChanges)[number]) => {
+    if (isNoPay(row) || clientDeclines[row.change_index]) return false;
+    if (row.kind === 'owner_pay') {
+      const value = clientChangeDrafts[row.change_index] ?? row.amount ?? '';
+      return (Number(value) !== Number(row.amount) && !row.requires_pay_decision) || Boolean(clientPayChoices[row.change_index] && clientPayChoices[row.change_index] !== 'client');
+    }
+    return extraHoursReviewState(row).adjusted;
+  };
   const clientChangesInvalid = clientChanges.some(row => {
     if (isNoPay(row)) return !noPayReason(row).trim() || noPayReason(row).length > 1000;
     if (clientDeclines[row.change_index]) return !clientDeclineReasons[row.change_index]?.trim() || clientDeclineReasons[row.change_index].length > 1000;
-    const value = clientChangeDrafts[row.change_index] ?? row.amount ?? row.hours ?? '';
-    if (((Number(value) !== Number(row.amount ?? row.hours) && !row.requires_pay_decision) || (clientPayChoices[row.change_index] && clientPayChoices[row.change_index] !== 'client')) && (!clientAdjustmentReasons[row.change_index]?.trim() || clientAdjustmentReasons[row.change_index].length > 1000)) return true;
-    return row.error || !/^\d+(\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) > (row.kind === 'owner_pay' ? 10_000_000 : 1000) || (hasPayConflict(row) && !clientPayChoices[row.change_index]);
+    if (changeRequiresAdjustmentReason(row) && (!clientAdjustmentReasons[row.change_index]?.trim() || clientAdjustmentReasons[row.change_index].length > 1000)) return true;
+    if (row.error) return true;
+    if (row.kind === 'owner_pay') {
+      const value = clientChangeDrafts[row.change_index] ?? row.amount ?? '';
+      return !/^\d+(\.\d{1,2})?$/.test(value) || Number(value) <= 0 || Number(value) > 10_000_000 || (hasPayConflict(row) && !clientPayChoices[row.change_index]);
+    }
+    return !extraHoursReviewState(row).preview.valid;
   });
   const matched = (previewData?.preview.matched || []).map(row => {
     const owner = clientChanges.find(change => change.kind === 'owner_pay' && change.employee_id === row.employee_id && !change.error && !clientDeclines[change.change_index] && !isNoPay(change));
@@ -775,8 +966,9 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
         <select
           aria-label={`Job and rate for ${row.employee_name}`}
           className="mt-1 block min-h-11 w-full min-w-0 max-w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-base"
+          disabled={loading}
           value={rateChoices[row.employee_id] ?? row.selected_wage_rate_id ?? ''}
-          onChange={(event) => setRateChoices((current) => ({ ...current, [row.employee_id]: Number(event.target.value) }))}
+          onChange={(event) => { setRateChoices((current) => ({ ...current, [row.employee_id]: Number(event.target.value) })); setReviewedClientChanges(false); }}
         >
           <option value="">Choose a job and rate</option>
           {row.wage_rate_options.map((option) => <option key={option.id} value={option.id}>{option.label} · {formatCurrency(option.rate)}/hr</option>)}
@@ -910,7 +1102,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           <ul className="list-disc space-y-1 pl-5 text-sm">{previewData.pending_portal_source.changes.map((row, index) => <li className="break-words [overflow-wrap:anywhere]" key={index}>{row.label}: {changeSummary(row)}{row.note ? ` — ${row.note}` : ''}</li>)}</ul>
           {previewData.pending_portal_source.notes && <p className="whitespace-pre-wrap break-words text-sm">{previewData.pending_portal_source.notes}</p>}
           {previewData.pending_portal_source.changes_link_url && <a className="break-all text-sm underline" href={previewData.pending_portal_source.changes_link_url} target="_blank" rel="noopener noreferrer">Client’s tips &amp; loans workbook link</a>}
-          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" disabled={loading} checked={usePendingRevision} onChange={e => { setUsePendingRevision(e.target.checked); setReviewedClientChanges(false); setClientChangeDrafts({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({}); setReviewedOverwrite(false); }} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
+          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" disabled={loading} checked={usePendingRevision} onChange={e => { setUsePendingRevision(e.target.checked); setReviewedClientChanges(false); setClientChangeDrafts({}); setClientExtraRegularDrafts({}); setClientExtraOvertimeDrafts({}); setClientExtraWorkweeks({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({}); setReviewedOverwrite(false); }} />Use this import for the client’s revision {previewData.pending_portal_source.revision}</label>
         </section>}
         {previewData?.portal_source && <section aria-label="Portal change checklist" className="min-w-0 space-y-2 rounded-lg border border-primary-200 bg-primary-50 p-4">
           <h3 className="font-semibold">Client revision {previewData.portal_source.revision} · changes for this period</h3>
@@ -1152,29 +1344,143 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {clientChanges.length > 0 && <section data-attention="client-changes" tabIndex={-1} aria-label="From the client's changes" className="space-y-3 rounded-lg border border-info-200 bg-info-50 p-4">
               <h3 className="font-semibold">From the client’s changes · revision {activeChangePrefill?.revision}</h3>
               <p className="text-sm">Review each person’s figures. You can edit them here before applying. Other submitted changes still need staff review.</p>
-              {clientChanges.map(change => <div key={change.change_index} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
-                {change.requires_pay_decision && <p className="text-sm font-medium text-warning-900">Earlier client pay is no longer selected. Enter new pay for this period, or choose No pay this period and record why. Exclude from payroll below has the same effect: no paycheck for this run.</p>}
-                <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" disabled={loading} checked={isNoPay(change) || !!clientDeclines[change.change_index]} onChange={event => { setClientDeclines(current => ({ ...current, [change.change_index]: event.target.checked })); setReviewedClientChanges(false); setReviewedOverwrite(false); if (change.requires_pay_decision) setSourceRows(current => current.map(row => row.employee_id === change.employee_id ? { ...row, disposition: event.target.checked ? 'excluded' : 'included', disposition_reason: event.target.checked ? noPayReason(change) : '' } : row)); }} />{change.requires_pay_decision ? 'No pay this period for' : 'Don’t apply this change for'} {change.employee_name || 'missing employee'}</label>
-                {change.previous_value && <p className="text-sm text-neutral-600">Previous entry: {change.previous_value} → This revision: {change.amount || change.hours || 'None'}</p>}
-                {!isNoPay(change) && !clientDeclines[change.change_index] && ((Number(clientChangeDrafts[change.change_index] ?? change.amount ?? change.hours) !== Number(change.amount ?? change.hours) && !change.requires_pay_decision) || (clientPayChoices[change.change_index] && clientPayChoices[change.change_index] !== 'client')) && <Input label={`Reason for changing ${change.employee_name}'s entry`} disabled={loading} value={clientAdjustmentReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientAdjustmentReasons(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />}
-                {(isNoPay(change) || clientDeclines[change.change_index]) && <Input label={`Reason for ${change.requires_pay_decision ? 'no pay for' : 'declining'} ${change.employee_name || 'this change'}`} disabled={loading} value={isNoPay(change) ? noPayReason(change) : clientDeclineReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientDeclineReasons(current => ({ ...current, [change.change_index]: event.target.value })); if (change.requires_pay_decision) setSourceRows(current => current.map(row => row.employee_id === change.employee_id && row.disposition === 'excluded' ? { ...row, disposition_reason: event.target.value } : row)); setReviewedClientChanges(false); }} />}
-                {change.error && <p role={clientDeclines[change.change_index] ? undefined : 'alert'} className={clientDeclines[change.change_index] ? 'text-sm text-neutral-600' : 'text-sm text-danger-700'}>{clientDeclines[change.change_index] ? `Will not be applied: ${change.error}` : change.error}</p>}
-                <Input label={change.kind === 'owner_pay' ? `Pay for ${change.employee_name || 'owner'} this period` : `Extra hours for ${change.employee_name || 'employee'}`}
-                  inputMode="decimal" value={clientChangeDrafts[change.change_index] ?? change.amount ?? change.hours ?? ''}
-                  disabled={loading || !!change.error || !!clientDeclines[change.change_index] || isNoPay(change)} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: '' })); setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
-                {change.kind === 'extra_hours' && change.saved_regular_hours !== undefined && <p className="text-xs text-neutral-600">Baseline before client hours: {change.saved_regular_hours} regular hours · {change.saved_overtime_hours || '0'} overtime hours.</p>}
-                {change.kind === 'owner_pay' && (change.saved_period_pay !== undefined || change.workbook_period_pay !== undefined) && <div className="space-y-2 text-sm">
-                  {change.saved_period_pay !== undefined && <p>Existing pay: {formatCurrency(change.saved_period_pay)}</p>}
-                  {change.workbook_period_pay !== undefined && <p>Workbook pay: {formatCurrency(change.workbook_period_pay)}</p>}
-                  {hasPayConflict(change) && <p className="font-medium text-warning-900">These amounts differ. Choose which pay to use.</p>}
-                  {hasPayConflict(change) && <label className="block">Pay choice for {change.employee_name}<select className="mt-1 min-h-11 w-full rounded-md border border-neutral-300 bg-white p-2" value={clientPayChoices[change.change_index] || ''} disabled={!!clientDeclines[change.change_index]} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}>
-                    <option value="">Choose pay</option><option value="client">Use client pay</option>
-                    {change.saved_period_pay !== undefined && <option value="saved">Keep existing pay</option>}
-                    {change.workbook_period_pay !== undefined && <option value="workbook">Use workbook pay</option>}
-                  </select></label>}
-                </div>}
-                <p className="text-xs text-neutral-600">{change.kind === 'owner_pay' ? 'This person only · from the client’s changes' : `${change.wage_rate_label || 'Missing job'} · $${change.wage_rate || '?'} /hr · added to Revel hours, or the baseline above when absent from Revel`}</p>
-              </div>)}
+              {clientChanges.map(change => {
+                const extraState = change.kind === 'extra_hours' ? extraHoursReviewState(change) : null;
+                const rowDisabled = loading || !!change.error || !!clientDeclines[change.change_index] || isNoPay(change);
+                return <div key={change.change_index} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-3">
+                  {change.requires_pay_decision && <p className="text-sm font-medium text-warning-900">Earlier client pay is no longer selected. Enter new pay for this period, or choose No pay this period and record why. Exclude from payroll below has the same effect: no paycheck for this run.</p>}
+                  <label className="flex min-h-11 items-center gap-2 text-sm font-medium"><input type="checkbox" disabled={loading} checked={isNoPay(change) || !!clientDeclines[change.change_index]} onChange={event => { setClientDeclines(current => ({ ...current, [change.change_index]: event.target.checked })); setReviewedClientChanges(false); setReviewedOverwrite(false); if (change.requires_pay_decision) setSourceRows(current => current.map(row => row.employee_id === change.employee_id ? { ...row, disposition: event.target.checked ? 'excluded' : 'included', disposition_reason: event.target.checked ? noPayReason(change) : '' } : row)); }} />{change.requires_pay_decision ? 'No pay this period for' : 'Don’t apply this change for'} {change.employee_name || 'missing employee'}</label>
+                  {change.previous_value && <p className="text-sm text-neutral-600">Previous entry: {change.previous_value} → This revision: {change.amount || change.hours || 'None'}</p>}
+                  {changeRequiresAdjustmentReason(change) && <Input label={`Reason for changing ${change.employee_name}'s entry`} disabled={loading} value={clientAdjustmentReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientAdjustmentReasons(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />}
+                  {(isNoPay(change) || clientDeclines[change.change_index]) && <Input label={`Reason for ${change.requires_pay_decision ? 'no pay for' : 'declining'} ${change.employee_name || 'this change'}`} disabled={loading} value={isNoPay(change) ? noPayReason(change) : clientDeclineReasons[change.change_index] || ''} maxLength={1000} onChange={event => { setClientDeclineReasons(current => ({ ...current, [change.change_index]: event.target.value })); if (change.requires_pay_decision) setSourceRows(current => current.map(row => row.employee_id === change.employee_id && row.disposition === 'excluded' ? { ...row, disposition_reason: event.target.value } : row)); setReviewedClientChanges(false); }} />}
+                  {change.error && <p role={clientDeclines[change.change_index] ? undefined : 'alert'} className={clientDeclines[change.change_index] ? 'text-sm text-neutral-600' : 'text-sm text-danger-700'}>{clientDeclines[change.change_index] ? `Will not be applied: ${change.error}` : change.error}</p>}
+                  {change.kind === 'owner_pay' && (
+                    <Input label={`Pay for ${change.employee_name || 'owner'} this period`}
+                      inputMode="decimal" value={clientChangeDrafts[change.change_index] ?? change.amount ?? ''}
+                      disabled={rowDisabled} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: '' })); setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }} />
+                  )}
+                  {change.kind === 'extra_hours' && extraState && (
+                    <div className="space-y-2">
+                      {change.fallback_reason && <p className="text-xs text-amber-800">{change.fallback_reason}</p>}
+                      {extraState.mode === 'split' && (
+                        <>
+                          {extraState.missingSubmittedSplit && !clientDeclines[change.change_index] && (
+                            <p className="text-xs font-medium text-warning-900">
+                              Client submitted {change.hours} total hours without a regular/overtime split. Enter regular and/or overtime hours before approving.
+                            </p>
+                          )}
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <Input
+                              label={`Regular hours for ${change.employee_name || 'employee'}`}
+                              inputMode="decimal"
+                              value={extraState.regularDraft}
+                              disabled={rowDisabled}
+                              onChange={event => { setClientExtraRegularDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}
+                            />
+                            <Input
+                              label={`Overtime hours for ${change.employee_name || 'employee'}`}
+                              inputMode="decimal"
+                              value={extraState.overtimeDraft}
+                              disabled={rowDisabled}
+                              onChange={event => { setClientExtraOvertimeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      {extraState.mode === 'workweek' && (
+                        <>
+                          <Input
+                            label={`Extra hours for ${change.employee_name || 'employee'}`}
+                            inputMode="decimal"
+                            value={extraState.hoursDraft}
+                            disabled={rowDisabled}
+                            onChange={event => { setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}
+                          />
+                          {(change.workweeks?.length || 0) > 1 ? (
+                            <fieldset disabled={rowDisabled} className="space-y-1">
+                              <legend className="text-xs font-medium text-neutral-700">Workweek for {change.employee_name || 'employee'}</legend>
+                              {!extraState.workweekDraft && !clientDeclines[change.change_index] && (
+                                <p className="text-xs font-medium text-warning-900">Choose which workweek these hours belong to before approving.</p>
+                              )}
+                              <div className="flex flex-wrap gap-2">
+                                {change.workweeks!.map(week => (
+                                  <Button
+                                    key={week.index}
+                                    type="button"
+                                    size="sm"
+                                    variant={extraState.workweekDraft === week.index ? 'primary' : 'outline'}
+                                    aria-pressed={extraState.workweekDraft === week.index}
+                                    disabled={rowDisabled}
+                                    onClick={() => { setClientExtraWorkweeks(current => ({ ...current, [change.change_index]: week.index })); setReviewedClientChanges(false); }}
+                                  >
+                                    Week {week.index} ({week.label})
+                                  </Button>
+                                ))}
+                              </div>
+                            </fieldset>
+                          ) : change.workweeks?.length === 1 ? (
+                            <p className="text-xs text-neutral-700">Workweek: Week 1 ({change.workweeks[0].label})</p>
+                          ) : null}
+                        </>
+                      )}
+                      {extraState.mode === 'straight_time' && (
+                        <>
+                          <Input
+                            label={`Extra hours for ${change.employee_name || 'employee'}`}
+                            inputMode="decimal"
+                            value={extraState.hoursDraft}
+                            disabled={rowDisabled}
+                            onChange={event => { setClientChangeDrafts(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}
+                          />
+                          <p className="text-xs text-neutral-600">1099 contractor · straight time only (no overtime).</p>
+                        </>
+                      )}
+                      {!clientDeclines[change.change_index] && !change.error && (
+                        extraState.preview.valid ? (
+                          <div
+                            role="region"
+                            aria-label={`Resulting hours and gross pay difference for ${change.employee_name || 'employee'}`}
+                            className="space-y-0.5 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-800"
+                          >
+                            <p>
+                              <span className="font-semibold">
+                                {extraState.employeeActiveRowCount > 1 ? `Resulting hours (after change ${extraState.employeeActiveRowIndex} of ${extraState.employeeActiveRowCount}):` : 'Resulting hours:'}
+                              </span>{' '}
+                              {extraState.preview.resultingRegularHours.toFixed(2)} regular · {extraState.preview.resultingOvertimeHours.toFixed(2)} overtime
+                              {' '}({extraState.preview.deltaRegularHours > 0 ? `+${extraState.preview.deltaRegularHours.toFixed(2)} reg` : extraState.preview.deltaRegularHours < 0 ? `${extraState.preview.deltaRegularHours.toFixed(2)} reg` : '0.00 reg'}
+                              {extraState.preview.deltaOvertimeHours !== 0 ? `, ${extraState.preview.deltaOvertimeHours > 0 ? '+' : ''}${extraState.preview.deltaOvertimeHours.toFixed(2)} OT` : ''})
+                            </p>
+                            {extraState.preview.grossPayDelta !== null && (
+                              <p>
+                                <span className="font-semibold">Gross pay difference:</span>{' '}
+                                {extraState.preview.grossPayDelta >= 0 ? '+' : ''}{formatCurrency(extraState.preview.grossPayDelta)}
+                                {extraState.mode === 'straight_time' ? ' (straight time)' : ''}
+                                {extraState.employeeActiveRowCount > 1 && extraState.cumulativeGrossPayDelta !== null
+                                  ? ` · Combined for ${change.employee_name || 'employee'}: ${extraState.cumulativeGrossPayDelta >= 0 ? '+' : ''}${formatCurrency(extraState.cumulativeGrossPayDelta)}`
+                                  : ''}
+                              </p>
+                            )}
+                          </div>
+                        ) : extraState.preview.error ? (
+                          <p className="text-xs text-warning-900">{extraState.preview.error}</p>
+                        ) : null
+                      )}
+                    </div>
+                  )}
+                  {change.kind === 'extra_hours' && change.saved_regular_hours !== undefined && <p className="text-xs text-neutral-600">Baseline before client hours: {change.saved_regular_hours} regular hours · {change.saved_overtime_hours || '0'} overtime hours.</p>}
+                  {change.kind === 'owner_pay' && (change.saved_period_pay !== undefined || change.workbook_period_pay !== undefined) && <div className="space-y-2 text-sm">
+                    {change.saved_period_pay !== undefined && <p>Existing pay: {formatCurrency(change.saved_period_pay)}</p>}
+                    {change.workbook_period_pay !== undefined && <p>Workbook pay: {formatCurrency(change.workbook_period_pay)}</p>}
+                    {hasPayConflict(change) && <p className="font-medium text-warning-900">These amounts differ. Choose which pay to use.</p>}
+                    {hasPayConflict(change) && <label className="block">Pay choice for {change.employee_name}<select className="mt-1 min-h-11 w-full rounded-md border border-neutral-300 bg-white p-2" value={clientPayChoices[change.change_index] || ''} disabled={!!clientDeclines[change.change_index]} onChange={event => { setClientPayChoices(current => ({ ...current, [change.change_index]: event.target.value })); setReviewedClientChanges(false); }}>
+                      <option value="">Choose pay</option><option value="client">Use client pay</option>
+                      {change.saved_period_pay !== undefined && <option value="saved">Keep existing pay</option>}
+                      {change.workbook_period_pay !== undefined && <option value="workbook">Use workbook pay</option>}
+                    </select></label>}
+                  </div>}
+                  <p className="text-xs text-neutral-600">{change.kind === 'owner_pay' ? 'This person only · from the client’s changes' : `${change.wage_rate_label || 'Missing job'} · $${change.wage_rate || '?'} /hr · ${extraState?.mode === 'workweek' ? 'recomputed with 40-hour workweek overtime' : extraState?.mode === 'straight_time' ? 'added as straight-time hours' : 'added to matching regular and overtime buckets'}`}</p>
+                </div>;
+              })}
               <label className="flex min-h-11 items-start gap-2 text-sm font-medium"><input type="checkbox" className="mt-1 shrink-0" disabled={clientChangesInvalid} checked={reviewedClientChanges} onChange={event => setReviewedClientChanges(event.target.checked)} /><span>I checked the owner pay and extra hours from the client’s changes, including any edits above.</span></label>
             </section>}
             {missingPeriodPay.length > 0 && (
@@ -1535,7 +1841,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                   setOpeningWorker(null);
                   setStep('upload');
                   setUsePendingRevision(false); setStaffWorkbook(null);
-    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
+    setReviewedClientChanges(false); setClientChangeDrafts({}); setClientExtraRegularDrafts({}); setClientExtraOvertimeDrafts({}); setClientExtraWorkweeks({}); setClientAdjustmentReasons({}); setClientDeclines({}); setClientDeclineReasons({}); setClientPayChoices({});
                   setPreviewData(null);
                   setSourceRows([]);
                   setReviewedSuggestedMatches(false);

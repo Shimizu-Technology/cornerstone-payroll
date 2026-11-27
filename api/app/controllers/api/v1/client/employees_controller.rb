@@ -16,6 +16,9 @@ module Api
         before_action :set_employee, only: [ :show, :update ]
 
         def index
+          if params[:rates_on].present?
+            return unless authorize_and_resolve_rates_on!
+          end
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
@@ -282,6 +285,47 @@ module Api
         end
 
         # The Contact details page asks for contact fields only.
+        def authorize_and_resolve_rates_on!
+          if current_user.client_viewer?
+            render json: { error: ClientPortalAccess::VIEW_ONLY, code: "client_view_only" }, status: :forbidden
+            return false
+          end
+          unless current_company.portal_payroll_files_enabled?
+            render json: { error: "Payroll submissions are not enabled for this company." }, status: :forbidden
+            return false
+          end
+
+          parsed = parse_bounded_iso_date(params[:rates_on])
+          unless parsed && submittable_period_end_date?(parsed)
+            render json: { error: "rates_on must be the end date of an open payroll submission period (YYYY-MM-DD)" }, status: :unprocessable_entity
+            return false
+          end
+
+          @rates_on = parsed
+          true
+        end
+
+        def parse_bounded_iso_date(value)
+          text = value.to_s.strip
+          return nil unless text.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+
+          parsed = Date.iso8601(text)
+          today = PayrollBusinessClock.today
+          return nil unless parsed.between?(today - 10.years, today + 2.years)
+
+          parsed
+        rescue ArgumentError, Date::Error
+          nil
+        end
+
+        def submittable_period_end_date?(date)
+          catalog = PayrollSubmissions::Catalog.new(company: current_company)
+          serializer = PayrollSubmissions::Serializer.new(current_user: current_user, catalog: catalog)
+          catalog.entries.any? do |entry|
+            entry.end_date == date && serializer.allowed_actions(entry).include?("submit")
+          end
+        end
+
         def contact_page_or_full(employee, contact_context)
           return EmployeeContactProjection.call(employee, context: contact_context) if EmployeeContactProjection.requested?(params)
 
@@ -297,7 +341,7 @@ module Api
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
           data["contractor_ein_last_four"] = employee.contractor_ein.to_s.gsub(/\D/, "").last(4).presence
-          rates_on = PayrollBusinessClock.today
+          rates_on = @rates_on || PayrollBusinessClock.today
           data.merge!(EmployeeCompensationChangeService.snapshot(employee, rates_on).as_json)
           data["wage_rates"] = employee.wage_rates_on(rates_on).map do |rate|
             {

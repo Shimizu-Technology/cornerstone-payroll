@@ -14,7 +14,9 @@ module PayrollSubmissions
       PayrollStandingChange.active.ordered.where(company: @company)
         .preload(:employee_wage_rate, employee: %i[employee_wage_rates employee_wage_rate_versions employee_compensation_changes]).map do |item|
         wage_rate = item.wage_rate_on(@rates_on)
+        contractor = item.employee.payroll_compensation_on(@rates_on).employment_type == "contractor"
         { standing_change_id: item.id, kind: item.kind, employee_id: item.employee_id, employee_name: item.employee.full_name,
+          contractor: (true if contractor),
           employee_wage_rate_id: item.employee_wage_rate_id, wage_rate_label: wage_rate&.label,
           wage_rate: wage_rate&.rate&.to_s("F"), position: item.position,
           label: item.display_label, help_text: item.help_text, required: item.required?, allow_none: item.allow_none?,

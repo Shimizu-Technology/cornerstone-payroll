@@ -165,17 +165,117 @@ it('requires configured answers even when No changes is checked', async () => {
   expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([expect.objectContaining({ standing_change_id: 1, skipped: true })]);
 });
 
-it('adds per-person owner pay and extra hours on an explicitly selected saved job', async () => {
+it('adds per-person owner pay and extra hours split on an explicitly selected saved job for source-reports companies', async () => {
   mocks.employees.mockResolvedValue([{ id: 173, name: 'Jordan Worker', wage_rates: [{ id: 7, label: 'Maintenance', rate: '35.0' }] }]);
   render(<SubmissionForm period={period} onSent={vi.fn()} />);
   await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
   fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
   fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '7' } });
-  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '68' } });
+  fireEvent.change(screen.getByLabelText('Regular hours'), { target: { value: '4' } });
+  fireEvent.change(screen.getByLabelText('Overtime hours'), { target: { value: '2.5' } });
   uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
   await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
-  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([expect.objectContaining({ employee_id: 173, employee_wage_rate_id: 7, hours: '68' })]);
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([
+    expect.objectContaining({ employee_id: 173, employee_wage_rate_id: 7, regular_hours: '4', overtime_hours: '2.5' }),
+  ]);
+});
+
+it('asks which workweek for biweekly computed-overtime periods and auto-selects for weekly single-workweek periods', async () => {
+  mocks.employees.mockResolvedValue([
+    { id: 173, name: 'Jordan Worker', wage_rates: [{ id: 7, label: 'Primary', rate: '20.0' }] },
+    { id: 174, name: 'Casey Contractor', contractor: true, wage_rates: [{ id: 8, label: 'Contract', rate: '20.0' }] },
+  ]);
+  const biweeklyPeriod: PeriodDetail = {
+    ...period,
+    start_date: '2026-06-14',
+    end_date: '2026-06-27',
+    extra_hours_config: {
+      mode: 'workweek',
+      overtime_mode: 'weekly_split',
+      workweeks: [
+        { index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' },
+        { index: 2, start_date: '2026-06-21', end_date: '2026-06-27', label: 'Jun 21–27' },
+      ],
+    },
+  };
+  render(<SubmissionForm period={biweeklyPeriod} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalledWith('2026-06-27'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
+  fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '6.5' } });
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period'));
+  send();
+  expect(mocks.submit).not.toHaveBeenCalled();
+  expect(screen.getByText(/Choose an employee, saved job, workweek/)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Week 2 (Jun 21–27)' }));
+  send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([
+    expect.objectContaining({ employee_id: 173, employee_wage_rate_id: 7, hours: '6.5', workweek: 2 }),
+  ]);
+
+  cleanup();
+  vi.clearAllMocks();
+  mocks.employees.mockResolvedValue([
+    { id: 173, name: 'Jordan Worker', wage_rates: [{ id: 7, label: 'Primary', rate: '20.0' }] },
+    { id: 174, name: 'Casey Contractor', contractor: true, wage_rates: [{ id: 8, label: 'Contract', rate: '20.0' }] },
+  ]);
+  mocks.submit.mockResolvedValue({ data: period, outcome: 'created' });
+  const weeklyPeriod: PeriodDetail = {
+    ...period,
+    extra_hours_config: {
+      mode: 'workweek',
+      overtime_mode: 'weekly_split',
+      workweeks: [{ index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' }],
+    },
+  };
+  render(<SubmissionForm period={weeklyPeriod} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
+  fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '7' } });
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '5' } });
+  expect(screen.queryByRole('button', { name: /Week 1/ })).toBeNull();
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  expect(JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string)).toEqual([
+    expect.objectContaining({ employee_id: 173, employee_wage_rate_id: 7, hours: '5', workweek: 1 }),
+  ]);
+});
+
+it('keeps 1099 contractor extra hours straight time without workweek or OT split fields', async () => {
+  mocks.employees.mockResolvedValue([
+    { id: 174, name: 'Casey Contractor', contractor: true, wage_rates: [{ id: 8, label: 'Contract', rate: '20.0' }] },
+  ]);
+  const biweeklyPeriod: PeriodDetail = {
+    ...period,
+    start_date: '2026-06-14',
+    end_date: '2026-06-27',
+    extra_hours_config: {
+      mode: 'workweek',
+      overtime_mode: 'weekly_split',
+      workweeks: [
+        { index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' },
+        { index: 2, start_date: '2026-06-21', end_date: '2026-06-27', label: 'Jun 21–27' },
+      ],
+    },
+  };
+  render(<SubmissionForm period={biweeklyPeriod} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalledWith('2026-06-27'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '174' } });
+  fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '8' } });
+  expect(screen.queryByRole('button', { name: /Week 1/ })).toBeNull();
+  expect(screen.getByText(/1099 contractor · straight time only/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Hours'), { target: { value: '6.5' } });
+  uploadPdf(); fireEvent.click(screen.getByLabelText('No tips or loans this period')); send();
+  await waitFor(() => expect(mocks.submit).toHaveBeenCalledOnce());
+  const rows = JSON.parse((mocks.submit.mock.calls[0][1] as FormData).get('changes') as string);
+  expect(rows[0]).toMatchObject({ employee_id: 174, employee_wage_rate_id: 8, hours: '6.5' });
+  expect(rows[0].workweek).toBeUndefined();
 });
 
 it('hides unavailable fields from the client', () => {

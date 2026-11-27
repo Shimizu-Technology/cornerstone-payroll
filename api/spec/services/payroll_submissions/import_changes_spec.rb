@@ -15,35 +15,68 @@ RSpec.describe PayrollSubmissions::ImportChanges do
   end
   let(:changes) do
     [ { kind: "owner_pay", employee_id: owner.id, amount: "4500.00" },
-      { kind: "extra_hours", employee_id: worker.id, employee_wage_rate_id: rate.id, wage_rate: "35.0", hours: "68" } ]
+      { kind: "extra_hours", employee_id: worker.id, employee_wage_rate_id: rate.id, wage_rate: "35.0", hours: "68", regular_hours: "68", overtime_hours: "0" } ]
   end
   let(:service) { described_class.new(submission: submission, pay_period: period) }
-  let(:reviewed) { [ { change_index: 0, amount: "4500.00" }, { change_index: 1, hours: "68" } ] }
+  let(:preview_token) { "preview-token-1" }
+  let(:reviewed) { [ { change_index: 0, amount: "4500.00" }, { change_index: 1, regular_hours: "68", overtime_hours: "0", preview_token: preview_token } ] }
   let(:rows) { [ { employee_id: owner.id, workbook_only: true }, { employee_id: worker.id, workbook_only: true, loan_deduction: 200.00, total_tips: 3 } ] }
+
+  def previewed_baselines_for(svc = service, source_rows: rows, token: preview_token)
+    svc.proposals(source_rows: source_rows).each_with_object({}) do |proposal, map|
+      next unless proposal[:kind] == "extra_hours"
+
+      map["#{submission.id}:#{proposal[:change_index]}"] = {
+        "baseline_regular_hours" => proposal[:baseline_regular_hours].to_s,
+        "baseline_overtime_hours" => proposal[:baseline_overtime_hours].to_s,
+        "preview_token" => token
+      }
+    end
+  end
 
   it "does not write on preview and requires explicit complete confirmation" do
     expect { service.proposals }.not_to change(PayrollItem, :count)
     expect(service.proposals.first).to include(amount: "4500.00", employee_id: owner.id)
     expect { service.apply_to(rows, reviewed: reviewed, confirmed: false) }.to raise_error(ArgumentError, /Confirm/)
     expect { service.apply_to(rows, reviewed: reviewed.first(1), confirmed: true) }.to raise_error(ArgumentError, /every/)
-    expect { service.apply_to(rows, reviewed: reviewed.map { |row| row.merge(amount: "4500.001", hours: "1e3") }, confirmed: true) }.to raise_error(ArgumentError, /valid/)
+    bad_owner = [ reviewed.first.merge(amount: "4500.001"), reviewed.last ]
+    expect { service.apply_to(rows, reviewed: bad_owner, confirmed: true, previewed_baselines: previewed_baselines_for) }.to raise_error(ArgumentError, /valid/)
+    bad_hours = [ reviewed.first, reviewed.last.merge(regular_hours: "1e3") ]
+    expect { service.apply_to(rows, reviewed: bad_hours, confirmed: true, previewed_baselines: previewed_baselines_for) }.to raise_error(ArgumentError, /valid/)
+  end
+
+  it "fails closed when stored preview baseline or preview token is missing or mismatched" do
+    expect { service.apply_to(rows, reviewed: reviewed, confirmed: true) }.to raise_error(ArgumentError, /Preview again/)
+    baselines = previewed_baselines_for
+    omitted_token_reviewed = [ reviewed.first, reviewed.last.except(:preview_token) ]
+    expect { service.apply_to(rows, reviewed: omitted_token_reviewed, confirmed: true, previewed_baselines: baselines) }.to raise_error(ArgumentError, /Preview again/)
+    stale_reviewed = [ reviewed.first, reviewed.last.merge(preview_token: "stale-token") ]
+    expect { service.apply_to(rows, reviewed: stale_reviewed, confirmed: true, previewed_baselines: baselines) }.to raise_error(ArgumentError, /Preview again/)
   end
 
   it "uses exact per-person amounts and additive saved-job hours, preserving workbook money" do
     create(:payroll_item, company: company, employee: worker, pay_period: period, hours_worked: 2, overtime_hours: 1)
-    result = service.apply_to(rows, reviewed: reviewed, confirmed: true)
+    result = service.apply_to(rows, reviewed: reviewed, confirmed: true, previewed_baselines: previewed_baselines_for)
     expect(result.first[:period_pay]).to eq("4500.00")
     expect(result.first[:period_pay_evidence]).to include(source_type: "client_submission", submission_id: submission.id)
     expect(result.last).to include(loan_deduction: 200.00, total_tips: 3,
-      client_extra_hours: { hours: "68", employee_wage_rate_id: rate.id, rate: "35.0" })
+      client_extra_hours: include(hours: "68", regular_hours: "68", overtime_hours: "0", employee_wage_rate_id: rate.id, rate: "35.0"))
     expect(PayrollItem.where(employee: owner)).to be_empty
   end
 
   it "lets staff edit values and adds extra hours to Revel instead of the worksheet" do
     rows.last.merge!(workbook_only: false, regular_hours: 5, overtime_hours: 2)
-    result = service.apply_to(rows, reviewed: [ { change_index: 0, amount: "4495.00", reason: "Confirmed correction" }, { change_index: 1, hours: "3.5", reason: "Confirmed hours" } ], confirmed: true)
+    result = service.apply_to(
+      rows,
+      reviewed: [
+        { change_index: 0, amount: "4495.00", reason: "Confirmed correction" },
+        { change_index: 1, regular_hours: "2", overtime_hours: "1.5", reason: "Confirmed hours", preview_token: preview_token }
+      ],
+      confirmed: true,
+      previewed_baselines: previewed_baselines_for
+    )
     expect(result.first[:period_pay]).to eq("4495.00")
-    expect(result.last).to include(regular_hours: 5, overtime_hours: 2, client_extra_hours: { hours: "3.5", employee_wage_rate_id: rate.id, rate: "35.0" })
+    expect(result.last).to include(regular_hours: 5, overtime_hours: 2, client_extra_hours: include(hours: "3.5", regular_hours: "2", overtime_hours: "1.5", employee_wage_rate_id: rate.id, rate: "35.0"))
   end
 
   it "refuses changed or missing rates, inactive employees and excluded retained source rows" do
@@ -62,18 +95,19 @@ RSpec.describe PayrollSubmissions::ImportChanges do
   end
 
   it "includes an employee absent from both files without guessing a job" do
-    result = service.apply_to(rows.first(1), reviewed: reviewed, confirmed: true, source_employee_ids: [ owner.id ])
-    expect(result.last).to include(employee_id: worker.id, client_extra_hours: { hours: "68", employee_wage_rate_id: rate.id, rate: "35.0" })
+    result = service.apply_to(rows.first(1), reviewed: reviewed, confirmed: true, source_employee_ids: [ owner.id ],
+      previewed_baselines: previewed_baselines_for(source_rows: rows.first(1)))
+    expect(result.last).to include(employee_id: worker.id, client_extra_hours: include(hours: "68", regular_hours: "68", overtime_hours: "0", employee_wage_rate_id: rate.id, rate: "35.0"))
   end
 
   it "puts a setup-only worker's client hours on the client's job instead of the equal-rate primary fallback" do
     primary = create(:employee_wage_rate, employee: worker, rate: 35, label: "Hourly rate", is_primary: true)
     fallback = rows.first(1) + [ { employee_id: worker.id, workbook_only: true, payroll_setup_only: true, selected_wage_rate_id: primary.id, wage_rate_needs_review: true } ]
-    result = service.apply_to(fallback, reviewed: reviewed, confirmed: true)
+    result = service.apply_to(fallback, reviewed: reviewed, confirmed: true, previewed_baselines: previewed_baselines_for(source_rows: fallback))
     expect(result.last).to include(selected_wage_rate_id: rate.id, wage_rate_needs_review: false)
 
     staff_choice = rows.first(1) + [ { employee_id: worker.id, workbook_only: true, payroll_setup_only: true, selected_wage_rate_id: primary.id, wage_rate_needs_review: false } ]
-    expect(service.apply_to(staff_choice, reviewed: reviewed, confirmed: true).last).to include(selected_wage_rate_id: primary.id)
+    expect(service.apply_to(staff_choice, reviewed: reviewed, confirmed: true, previewed_baselines: previewed_baselines_for(source_rows: staff_choice)).last).to include(selected_wage_rate_id: primary.id)
   end
 
   it "shows baseline hours on reimport rather than the previously applied total" do
@@ -104,7 +138,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     input.first.merge!(pay_choice: "saved", saved_period_pay: "5000.0")
     expect { service.apply_to(rows, reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
     input.first[:reason] = "Verified alternative pay"
-    expect(service.apply_to(rows, reviewed: input, confirmed: true).first[:period_pay]).to be_nil
+    expect(service.apply_to(rows, reviewed: input, confirmed: true, previewed_baselines: previewed_baselines_for).first[:period_pay]).to be_nil
   end
 
   it "requires a choice between workbook and client owner pay" do
@@ -114,7 +148,7 @@ RSpec.describe PayrollSubmissions::ImportChanges do
     input.first.merge!(pay_choice: "workbook", workbook_period_pay: "4000")
     expect { service.apply_to(rows, reviewed: input, confirmed: true) }.to raise_error(ArgumentError, /reason/)
     input.first[:reason] = "Verified alternative pay"
-    expect(service.apply_to(rows, reviewed: input, confirmed: true).first).to include(period_pay: "4000", period_pay_evidence: { source: "Workbook" })
+    expect(service.apply_to(rows, reviewed: input, confirmed: true, previewed_baselines: previewed_baselines_for).first).to include(period_pay: "4000", period_pay_evidence: { source: "Workbook" })
     expect(service.review_decisions.first).to include(pay_choice: "workbook", applied_value: "4000", reviewed_value: "4500.00")
   end
 
@@ -218,14 +252,15 @@ RSpec.describe 'Configured entry import provenance' do
     hours_field = PayrollStandingChange.create!(company: company, employee: worker, employee_wage_rate: rate, kind: 'extra_hours')
     rows = PayrollSubmissions::ChangeRows.normalize!([
       { kind: 'owner_pay', employee_id: owner.id, standing_change_id: field.id, skipped: true },
-      { kind: 'extra_hours', employee_id: worker.id, standing_change_id: hours_field.id, employee_wage_rate_id: rate.id, hours: '6.5' }
+      { kind: 'extra_hours', employee_id: worker.id, standing_change_id: hours_field.id, employee_wage_rate_id: rate.id, regular_hours: '4', overtime_hours: '2.5' }
     ], company_id: company.id)
     submission = source.submissions.create!(company: company, revision: 1, submitted_at: Time.current,
       content_fingerprint: SecureRandom.hex(32), request_fingerprint: SecureRandom.hex(32), change_rows: rows)
     service = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: period)
-    result = service.apply_to([], reviewed: [ { change_index: 1, hours: '6.5' } ], confirmed: true).sole
-    expect(result).to include(employee_id: worker.id, client_extra_hours: { hours: '6.5', employee_wage_rate_id: rate.id, rate: '20.0' })
-    expect(result[:client_change_evidence]).to include(standing_change_id: hours_field.id, revision: 1)
+    baselines = { "#{submission.id}:1" => { "baseline_regular_hours" => "0.0", "baseline_overtime_hours" => "0.0", "preview_token" => "tok-1" } }
+    result = service.apply_to([], reviewed: [ { change_index: 1, regular_hours: '4', overtime_hours: '2.5', preview_token: 'tok-1' } ], confirmed: true, previewed_baselines: baselines).sole
+    expect(result).to include(employee_id: worker.id, client_extra_hours: include(hours: '6.5', regular_hours: '4', overtime_hours: '2.5', employee_wage_rate_id: rate.id, rate: '20.0'))
+    expect(result[:client_change_evidence]).to include(standing_change_id: hours_field.id, revision: 1, delta_regular_hours: '4.0', delta_overtime_hours: '2.5', gross_pay_delta: '155.00')
   end
 
   it 'requires a reason for a reviewed adjustment and records it' do

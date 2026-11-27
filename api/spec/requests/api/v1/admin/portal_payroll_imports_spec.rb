@@ -933,14 +933,22 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       source.update_columns(change_rows: [
         { "kind" => "owner_pay", "employee_id" => owner.id, "amount" => "4500.00" },
         { "kind" => "extra_hours", "employee_id" => manual_worker.id, "employee_wage_rate_id" => manual_job.id,
-          "wage_rate" => "35.0", "hours" => "68" }
+          "wage_rate" => "35.0", "hours" => "68", "regular_hours" => "68", "overtime_hours" => "0" }
       ])
       source
     end
 
+    def preview_token_for(data, index)
+      rows = Array(data.dig("client_change_prefill", "rows") || data.dig("pending_change_prefill", "rows"))
+      rows.find { |row| row["change_index"] == index }&.fetch("preview_token", nil)
+    end
+
     def reviewed_standing_params(data)
       { import_id: data.fetch("import_id"), confirm_client_changes: true,
-        reviewed_changes: [ { change_index: 0, amount: "4500.00" }, { change_index: 1, hours: "68" } ] }
+        reviewed_changes: [
+          { change_index: 0, amount: "4500.00" },
+          { change_index: 1, regular_hours: "68", overtime_hours: "0", preview_token: preview_token_for(data, 1) }
+        ] }
     end
 
     it "prefills the portal review without writes and atomically applies per-person pay and saved-job hours" do
@@ -974,7 +982,8 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       params = reviewed_standing_params(data).merge(use_submission_id: source.id)
       params[:reviewed_changes][0][:amount] = "4495.00"
       params[:reviewed_changes][0][:reason] = "Client confirmed corrected pay"
-      params[:reviewed_changes][1][:hours] = "67.5"
+      params[:reviewed_changes][1][:regular_hours] = "67.5"
+      params[:reviewed_changes][1][:overtime_hours] = "0"
       params[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: params, as: :json
       expect(response).to have_http_status(:ok), response.body
@@ -988,11 +997,11 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       extra_job = create(:employee_wage_rate, employee: employee, label: "Maintenance", rate: 35)
       source = standing_source
       source.update_columns(change_rows: source.change_rows + [ { "kind" => "extra_hours", "employee_id" => employee.id,
-        "employee_wage_rate_id" => extra_job.id, "wage_rate" => "35.0", "hours" => "3" } ])
+        "employee_wage_rate_id" => extra_job.id, "wage_rate" => "35.0", "hours" => "3", "regular_hours" => "3", "overtime_hours" => "0" } ])
       data = preview(source)
       input = reviewed_standing_params(data).merge(portal_source_id: data.dig("portal_source", "selection_id"),
         wage_rate_choices: { employee.id.to_s => base_job.id })
-      input[:reviewed_changes] << { change_index: 2, hours: "3" }
+      input[:reviewed_changes] << { change_index: 2, regular_hours: "3", overtime_hours: "0", preview_token: preview_token_for(data, 2) }
       post "#{url}/apply_import", params: input, as: :json
       expect(response).to have_http_status(:ok), response.body
       item = run.payroll_items.find_by!(employee: employee)
@@ -1019,7 +1028,8 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       replacement = preview(second, supersedes_package_id: data.dig("source_package", "package_id"), supersession_reason: "Corrected source files")
       expect(response).to have_http_status(:ok), response.body
       input = reviewed_standing_params(replacement).merge(portal_source_id: replacement.dig("portal_source", "selection_id"))
-      input[:reviewed_changes][1][:hours] = "67"
+      input[:reviewed_changes][1][:regular_hours] = "67"
+      input[:reviewed_changes][1][:overtime_hours] = "0"
       input[:reviewed_changes][1][:reason] = "Client confirmed corrected hours"
       post "#{url}/apply_import", params: input, as: :json
       expect(response).to have_http_status(:ok), response.body
@@ -1067,7 +1077,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
         apply_standing(first)
         snapshot = -> { run.payroll_items.order(:employee_id).map { |item| item.attributes.slice("employee_id", "hours_worked", "overtime_hours", "wage_rate_hours", "salary_override", "gross_pay", "net_pay", "loan_deduction", "reported_tips") } }
         original = snapshot.call
-        changes = mode == "skipped" ? source.change_rows.map { |row| row.merge("skipped" => true).except("amount", "hours") } : []
+        changes = mode == "skipped" ? source.change_rows.map { |row| row.merge("skipped" => true).except("amount", "hours", "regular_hours", "overtime_hours") } : []
         second = identical_revision(source, rev: 2, changes: changes)
         data = preview(second)
         expect(response).to have_http_status(:ok), response.body
@@ -1121,7 +1131,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       first = preview(source)
       apply_standing(first)
-      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row["kind"] == "extra_hours" ? row.merge("hours" => "32") : row })
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row["kind"] == "extra_hours" ? row.merge("hours" => "32", "regular_hours" => "32", "overtime_hours" => "0") : row })
       files = -> { source.submission_documents.order(:position).map { |link| portal_upload(link.file_name_snapshot, objects.fetch(link.client_document.file_key), link.client_document.content_type) } }
       pdf, workbook = files.call
       post "#{url}/preview_import", params: { pdf_file: pdf, excel_file: workbook }
@@ -1133,7 +1143,8 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       expect(response).to have_http_status(:ok), response.body
       data = response.parsed_body
       reviewed = reviewed_standing_params(data)[:reviewed_changes]
-      reviewed.last[:hours] = "32"
+      reviewed.last[:regular_hours] = "32"
+      reviewed.last[:overtime_hours] = "0"
       post "#{url}/apply_import", params: { import_id: data["import_id"], use_submission_id: second.id,
         confirm_client_changes: true, reviewed_changes: reviewed }, as: :json
       expect(response).to have_http_status(:ok), response.body
@@ -1149,7 +1160,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       source = standing_source
       first = preview(source)
       apply_standing(first)
-      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("hours" => "32") })
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row["kind"] == "extra_hours" ? row.merge("hours" => "32", "regular_hours" => "32", "overtime_hours" => "0") : row })
       data = preview(second)
       expect(response).to have_http_status(:ok), response.body
       identical_revision(source, rev: 3, changes: source.change_rows)
@@ -1168,14 +1179,15 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     it "opens and applies a third identical-files revision once when the second was only previewed" do
       source = standing_source
       apply_standing(preview(source))
-      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row.merge("hours" => "32") })
+      second = identical_revision(source, rev: 2, changes: source.change_rows.map { |row| row["kind"] == "extra_hours" ? row.merge("hours" => "32", "regular_hours" => "32", "overtime_hours" => "0") : row })
       preview(second)
       expect(response).to have_http_status(:ok), response.body
-      third = identical_revision(source, rev: 3, changes: source.change_rows.map { |row| row.merge("hours" => "50") })
+      third = identical_revision(source, rev: 3, changes: source.change_rows.map { |row| row["kind"] == "extra_hours" ? row.merge("hours" => "50", "regular_hours" => "50", "overtime_hours" => "0") : row })
       data = preview(third)
       expect(response).to have_http_status(:ok), response.body
       reviewed = reviewed_standing_params(data)[:reviewed_changes]
-      reviewed.last[:hours] = "50"
+      reviewed.last[:regular_hours] = "50"
+      reviewed.last[:overtime_hours] = "0"
       apply_standing(data, reviewed)
       item = run.payroll_items.find_by!(employee: manual_worker)
       expect(item.hours_worked).to eq(50)
@@ -1222,13 +1234,14 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
       job = create(:employee_wage_rate, employee: employee, label: "Service", rate: 10, is_primary: true)
       source = standing_source
       changes = source.change_rows + [ { "kind" => "extra_hours", "employee_id" => employee.id,
-        "employee_wage_rate_id" => job.id, "wage_rate" => "10.0", "hours" => "5" } ]
+        "employee_wage_rate_id" => job.id, "wage_rate" => "10.0", "hours" => "5", "regular_hours" => "5", "overtime_hours" => "0" } ]
       source.update_columns(change_rows: changes)
       data = preview(source)
-      reviewed = reviewed_standing_params(data)[:reviewed_changes] + [ { change_index: 2, hours: "5" } ]
+      reviewed = reviewed_standing_params(data)[:reviewed_changes] + [ { change_index: 2, regular_hours: "5", overtime_hours: "0", preview_token: preview_token_for(data, 2) } ]
       apply_standing(data, reviewed)
       latest = corrected_standing(data, changes)
-      apply_standing(latest, reviewed)
+      latest_reviewed = reviewed_standing_params(latest)[:reviewed_changes] + [ { change_index: 2, regular_hours: "5", overtime_hours: "0", preview_token: preview_token_for(latest, 2) } ]
+      apply_standing(latest, latest_reviewed)
       item = run.payroll_items.find_by!(employee: employee)
       expect(item.hours_worked).to eq(5)
       expect(item.wage_rate_hours.sum { |entry| entry["regular_hours"].to_d }).to eq(5)

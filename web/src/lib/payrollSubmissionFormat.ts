@@ -21,7 +21,24 @@ export function changeSummary(row: ChangeRow): string {
   if (row.skipped) return [who, 'Not this period'].filter(Boolean).join(' · ');
   const parts: string[] = [];
   switch (row.kind) {
-    case 'extra_hours': parts.push(`${row.hours} hours`); break;
+    case 'extra_hours': {
+      if (row.regular_hours !== undefined || row.overtime_hours !== undefined) {
+        const reg = Number(row.regular_hours || 0);
+        const ot = Number(row.overtime_hours || 0);
+        const splitParts: string[] = [];
+        if (reg > 0) splitParts.push(`${row.regular_hours} regular`);
+        if (ot > 0) splitParts.push(`${row.overtime_hours} overtime`);
+        parts.push(`${splitParts.join(' + ') || row.hours || '0'} hours`);
+      } else if (row.workweek) {
+        const range = row.workweek_start_date && row.workweek_end_date
+          ? ` (${formatDate(row.workweek_start_date)} – ${formatDate(row.workweek_end_date)})`
+          : '';
+        parts.push(`${row.hours} hours · Week ${row.workweek}${range}`);
+      } else {
+        parts.push(`${row.hours} hours`);
+      }
+      break;
+    }
     case 'paid_leave': parts.push(`${row.hours} hours paid leave`); break;
     case 'owner_pay': parts.push(row.employee_id ? `$${row.amount} for this person` : `$${row.amount} ${row.basis === 'each' ? 'for each owner' : 'total'}`); break;
     case 'new_hire': parts.push(`${row.name}, starting at $${row.starting_wage} ${row.wage_unit === 'salary' ? 'salary' : 'per hour'}`); if (row.start_date) parts.push(`starts ${formatDate(row.start_date)}`); break;
