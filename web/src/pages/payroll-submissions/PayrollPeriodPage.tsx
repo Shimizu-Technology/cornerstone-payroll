@@ -21,11 +21,17 @@ type Audience = 'client' | 'staff';
 
 function submissionReceipt(detail: PeriodDetail): string {
   const sent = detail.submissions.find(row => row.current);
+  const changed = sent?.changes.filter(row => !row.skipped).length || 0;
+  const skipped = sent?.changes.filter(row => row.skipped).length || 0;
+  const descriptor = detail.intake_descriptor;
+  if (descriptor && descriptor.key !== 'mosa_revel') {
+    const fileLabel = descriptor.label || 'Payroll files';
+    const hasFiles = Boolean(sent?.documents.some(doc => doc.role !== 'attachment'));
+    return `Sent. Revision ${detail.current_revision} is with Cornerstone. ${fileLabel} ${hasFiles ? '✓' : 'not included'} · ${changed} changes${skipped ? ` · ${skipped} not this period` : ''}`;
+  }
   const workbook = sent?.workbook_choice === 'none' ? 'No tips or loans'
     : sent?.changes_link_url ? 'Link sent'
     : sent?.documents.some(doc => doc.role === 'changes_workbook') ? 'Workbook ✓' : 'Workbook not included';
-  const changed = sent?.changes.filter(row => !row.skipped).length || 0;
-  const skipped = sent?.changes.filter(row => row.skipped).length || 0;
   return `Sent. Revision ${detail.current_revision} is with Cornerstone. Revel PDF ✓ · ${workbook} · ${changed} changes${skipped ? ` · ${skipped} not this period` : ''}`;
 }
 

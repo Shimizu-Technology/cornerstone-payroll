@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_200000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -3531,7 +3531,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_190000) do
     t.index [ "payroll_submission_document_id" ], name: "idx_intake_document_portal_source"
     t.index [ "storage_reference" ], name: "idx_payroll_intake_documents_storage_reference", unique: true, where: "(storage_reference IS NOT NULL)"
     t.check_constraint "\"position\" >= 0", name: "payroll_intake_documents_position_nonnegative"
-    t.check_constraint "source_role::text = ANY (ARRAY['pasted_email'::character varying::text, 'email_attachment'::character varying::text, 'revel_hours'::character varying::text, 'supplemental_workbook'::character varying::text, 'supporting_document'::character varying::text, 'legacy_source'::character varying::text])", name: "payroll_intake_documents_source_role"
+    t.check_constraint "source_role::text ~ '^[a-z][a-z0-9_]{0,63}$'::text", name: "payroll_intake_documents_source_role"
     t.check_constraint "verification_status::text <> 'verified'::text OR byte_size > 0 AND sha256::text ~ '^[0-9a-f]{64}$'::text AND verified_at IS NOT NULL", name: "payroll_intake_documents_verified_fingerprint"
     t.check_constraint "verification_status::text = ANY (ARRAY['verified'::character varying::text, 'failed'::character varying::text, 'legacy_unverified'::character varying::text])", name: "payroll_intake_documents_verification_status"
   end
@@ -4048,6 +4048,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_190000) do
     t.index [ "client_document_id" ], name: "index_payroll_submission_documents_on_client_document_id"
     t.index [ "company_id" ], name: "index_payroll_submission_documents_on_company_id"
     t.index [ "payroll_submission_id", "client_document_id" ], name: "idx_payroll_submission_documents_once", unique: true
+    t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_payroll_workbook", unique: true, where: "((role)::text = 'payroll_workbook'::text)"
     t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_revel", unique: true, where: "((role)::text = 'revel_payroll'::text)"
     t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_workbook", unique: true, where: "((role)::text = 'changes_workbook'::text)"
     t.check_constraint "role::text ~ '^[a-z][a-z0-9_]{0,63}$'::text", name: "payroll_submission_documents_role"

@@ -13,6 +13,7 @@ module PayrollIntake
     BUILT_IN_ADAPTER_NAMES = %w[
       PayrollIntake::Adapters::SpikeEmail
       PayrollIntake::Adapters::MosaRevel
+      PayrollIntake::Adapters::CornerstoneWorkbook
     ].freeze
 
     class << self

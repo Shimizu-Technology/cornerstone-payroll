@@ -7,7 +7,7 @@ import { SubmissionForm } from './SubmissionForm';
 import type { PeriodDetail, SubmissionRevision } from '@/services/payrollSubmissions';
 import type { ClientDocument } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ submit: vi.fn(), employees: vi.fn() }));
+const mocks = vi.hoisted(() => ({ submit: vi.fn(), employees: vi.fn(), downloadTemplate: vi.fn() }));
 vi.mock('@/services/payrollSubmissions', async original => ({
   ...await original<typeof import('@/services/payrollSubmissions')>(),
   clientPayrollSubmissionsApi: mocks,
@@ -15,7 +15,7 @@ vi.mock('@/services/payrollSubmissions', async original => ({
 const period = { ref: '9', submissions: [] } as unknown as PeriodDetail;
 const pdf = () => new File(['%PDF'], 'revel.pdf', { type: 'application/pdf' });
 const workbook = () => new File(['workbook'], 'tips.XLSX');
-beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.clearAllMocks(); mocks.employees.mockResolvedValue([]); mocks.submit.mockResolvedValue({ data: period, outcome: 'created' }); });
+beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.clearAllMocks(); mocks.employees.mockResolvedValue([]); mocks.submit.mockResolvedValue({ data: period, outcome: 'created' }); mocks.downloadTemplate.mockResolvedValue({ blob: new Blob(['csv']), filename: 'workbook.csv' }); });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const send = () => fireEvent.click(screen.getByRole('button', { name: 'Send to Cornerstone' }));
 const uploadPdf = () => fireEvent.change(screen.getByLabelText('Revel hours report (PDF)'), { target: { files: [pdf()] } });
@@ -272,6 +272,7 @@ it('renders upload slots, labels, accept filters, and required checks from a cus
           portal_label: 'Payroll hours & changes workbook',
           portal_hint: 'Upload the completed Excel or CSV payroll workbook.',
           supports_link: false,
+          template_formats: ['xlsx', 'csv'],
           provides: ['regular_hours', 'overtime_hours', 'reported_tips'],
         },
       ],
@@ -279,11 +280,20 @@ it('renders upload slots, labels, accept filters, and required checks from a cus
     },
   };
 
+  const createObjectURL = vi.fn(() => 'blob:mock-url');
+  const revokeObjectURL = vi.fn();
+  vi.stubGlobal('URL', { ...URL, createObjectURL, revokeObjectURL });
+
   render(<SubmissionForm period={customPeriod} onSent={vi.fn()} />);
   expect(screen.queryByLabelText('Revel hours report (PDF)')).toBeNull();
   expect(screen.queryByLabelText('Attach the workbook')).toBeNull();
   const input = screen.getByLabelText('Payroll hours & changes workbook') as HTMLInputElement;
   expect(input.accept).toBe('.xlsx,.csv');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Download Excel template (.xlsx)' }));
+  await waitFor(() => expect(mocks.downloadTemplate).toHaveBeenCalledWith('9', 'xlsx'));
+  fireEvent.click(screen.getByRole('button', { name: 'Download CSV template (.csv)' }));
+  await waitFor(() => expect(mocks.downloadTemplate).toHaveBeenCalledWith('9', 'csv'));
 
   fireEvent.click(screen.getByLabelText('No changes this period'));
   send();

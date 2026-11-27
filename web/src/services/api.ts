@@ -2058,7 +2058,7 @@ export interface PayrollIntakeDispositionTarget {
 export interface PayrollIntakeDocumentData {
   id: number;
   document_type: 'pasted_text' | 'image' | 'pdf' | 'other';
-  source_role: 'pasted_email' | 'email_attachment' | 'revel_hours' | 'supplemental_workbook' | 'supporting_document' | 'legacy_source';
+  source_role: 'pasted_email' | 'email_attachment' | 'revel_hours' | 'supplemental_workbook' | 'cornerstone_workbook' | 'supporting_document' | 'legacy_source' | (string & {});
   position: number;
   filename?: string | null;
   content_type?: string | null;
@@ -2092,6 +2092,16 @@ export interface PayrollIntakeRowData {
   extracted_total_hours: number;
   regular_hours: number;
   overtime_hours: number;
+  pto_hours?: number;
+  holiday_hours?: number;
+  bonus?: number | null;
+  payroll_components?: Array<{
+    component_type?: string;
+    label: string;
+    amount: string | number;
+    kind: string;
+    tax_treatment: string;
+  }>;
   week1_tips: number;
   week2_tips: number;
   reported_tips: number;
@@ -2152,6 +2162,9 @@ export interface PayrollIntakeApplyRowPayload {
   week2_hours?: number;
   regular_hours: number;
   overtime_hours: number;
+  pto_hours?: number;
+  holiday_hours?: number;
+  bonus?: number | null;
   week1_tips?: number;
   week2_tips?: number;
   reported_tips: number;
@@ -2191,6 +2204,11 @@ export const payrollIntakeImportsApi = {
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/documents/${documentId}/preview`),
   downloadSource: (payPeriodId: number, importId: number, documentId: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/documents/${documentId}/download`),
+  downloadTemplate: (payPeriodId: number, format: 'xlsx' | 'csv', sourceType = 'cornerstone_workbook'): Promise<BlobDownload> =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/template`, {
+      source_type: sourceType,
+      file_format: format,
+    }),
 };
 
 export const punchEntriesApi = {
@@ -2246,6 +2264,7 @@ export interface PayrollIntakeFileSlot {
   portal_label?: string | null;
   portal_hint?: string | null;
   supports_link?: boolean;
+  template_formats?: Array<'xlsx' | 'csv' | (string & {})>;
   provides: string[];
 }
 

@@ -401,78 +401,23 @@ module Api
 
             force_overwrite = params[:force_overwrite].to_s == "true"
             tips_paid_out_from_tips = tip_treatment_for!(source_package, import_record)
-            results = { success: [], skipped: [], errors: [] }
-            applied = false
-            ActiveRecord::Base.transaction(requires_new: true) do
-              # This selection resolves the pending-source gate only inside the
-              # same transaction as successful calculation/apply. Any failure
-              # rolls it back along with every payroll row and status event.
-              selection.period.save! if selection && selection.period.changed?
-              selection&.save! if selection&.new_record?
-              selection&.update!(applied_at: Time.current)
-              client_changes&.apply_period_decisions!(actor: current_user)
-              if matched_data.any?
-                service = PayrollImport::ImportService.new(@pay_period, actor: current_user)
-                results = service.apply!(matched: matched_data, force_overwrite: force_overwrite, tips_paid_out_from_tips: tips_paid_out_from_tips)
-              end
-              raise ActiveRecord::Rollback if results[:errors].any?
-
-              import_record.update!(status: "applied", validation_errors: [],
-                import_origin: PayrollIntake::ImportOrigin.build(
-                  session: source_package,
-                  portal_submission: selection&.payroll_submission,
-                  replaced_hand_edited_hours: hand_edited.any?
-                ),
-                raw_data: import_record.raw_data.to_h.merge("client_change_decisions" => client_changes&.review_decisions || [],
-                  "source_waivers" => source_waivers, "replaced_hand_edited_hours" => hand_edited))
-              disposition_plan.decisions.each do |decision|
-                if decision.included? && unpaid_owners.key?(decision.row.employee_id)
-                  decision.disposition = "excluded"
-                  decision.reason = unpaid_owners[decision.row.employee_id]
-                end
-                if decision.included?
-                  payroll_item = @pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
-                  disposition_plan.apply!(
-                    decision,
-                    status: "applied",
-                    employee: decision.row.employee,
-                    payroll_item: payroll_item
-                  )
-                else
-                  disposition_plan.apply!(decision, status: "skipped")
-                  results[:skipped] << {
-                    employee_id: decision.row.employee_id,
-                    name: decision.row.source_employee_name,
-                    reason: decision.reason
-                  }
-                end
-              end
-              source_package.mark_reviewed!(actor: current_user) if source_package.status == "previewed"
-              source_package.mark_applied!(actor: current_user)
-              @pay_period.clear_intake_stale! if @pay_period.intake_stale_session_id == source_package.id
-              if selection
-                period = selection.period
-                # Keep Imported tied to the actual selected revision; choosing
-                # an old source does not label the newer files as imported.
-                review_notes = client_changes.review_decisions.select { |row| %w[decline no_pay stale_none].include?(row[:decision]) }
-                  .map do |row|
-                    next row[:reason] if row[:decision] == "stale_none"
-
-                    "#{row[:employee_name] || 'Missing employee'}: #{row[:decision] == 'no_pay' ? 'No pay this period' : "Don't apply"} — #{row[:reason]}"
-                  end
-                period.transition!("import", actor: current_user,
-                  submission: selection.payroll_submission, note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + review_notes).join(" "))
-                PayrollSubmissions::Audit.record!(actor: current_user, period: period, action: "payroll_submission_periods#import",
-                  metadata: { pay_period_id: @pay_period.id, submission_id: selection.payroll_submission_id, current_submission_id: selection.current_submission_id,
-                    superseded_reason: selection.superseded_reason, source_route: selection.source_route,
-                    staff_workbook_document_id: selection.staff_workbook_document_id,
-                    client_change_decisions: client_changes.review_decisions,
-                    import_id: import_record.id, source_package_id: source_package.id })
-                PortalNotifications.payroll_period!("payroll_submission_imported", period: period, actor: current_user,
-                  dedupe: "import:#{import_record.id}", metadata: { submission_id: selection.payroll_submission_id, revision: selection.payroll_submission.revision })
-              end
-              applied = true
-            end
+            outcome = PayrollIntake::ApplyService.new(
+              session: source_package,
+              actor: current_user,
+              force_overwrite: force_overwrite
+            ).apply_reviewed_import!(
+              import_record: import_record,
+              matched_data: matched_data,
+              disposition_plan: disposition_plan,
+              tips_paid_out_from_tips: tips_paid_out_from_tips,
+              selection: selection,
+              client_changes: client_changes,
+              source_waivers: source_waivers,
+              hand_edited_hours: hand_edited,
+              unpaid_owners: unpaid_owners
+            )
+            applied = outcome.fetch(:applied)
+            results = outcome.fetch(:results)
 
             unless applied
               import_record.update!(status: "previewed", validation_errors: results[:errors].map { |error| error[:error] })

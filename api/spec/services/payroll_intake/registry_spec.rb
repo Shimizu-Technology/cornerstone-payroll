@@ -5,8 +5,8 @@ require "rails_helper"
 RSpec.describe PayrollIntake::Registry do
   after { described_class.reset! }
 
-  it "registers the built-in descriptors backed by mosa_revel.yml and SpikeEmail" do
-    expect(described_class.keys).to contain_exactly("mosa_revel", "spike_email")
+  it "registers the built-in descriptors backed by mosa_revel.yml, SpikeEmail, and cornerstone_workbook.yml" do
+    expect(described_class.keys).to contain_exactly("mosa_revel", "spike_email", "cornerstone_workbook")
 
     mosa = described_class.fetch("mosa_revel")
     expect(mosa).to have_attributes(

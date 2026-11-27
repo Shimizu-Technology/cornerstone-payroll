@@ -1,8 +1,14 @@
 # frozen_string_literal: true
 
+require "bigdecimal"
 require "set"
 
 module PayrollIntake
+  # Unified apply orchestrator for all payroll intake adapters:
+  # - Cornerstone universal workbook (`cornerstone_workbook`)
+  # - Spike Coffee Roasters email (`spike_email`)
+  # - Reviewed-hours packages such as MoSa Revel (`mosa_revel`) via
+  #   `#apply_reviewed_import!`
   class ApplyService
     def initialize(session:, row_overrides: [], actor: nil, force_overwrite: false, acknowledge_warnings: false)
       @session = session
@@ -35,14 +41,7 @@ module PayrollIntake
 
           session.with_lock(requires_new: true) do
             raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
-            PayrollIntake::WorkweekEvidence.new(
-              pay_period: pay_period,
-              allow_misaligned: effective_settings.allow_misaligned_workweek?,
-              overtime_mode: effective_settings.overtime_mode,
-              workweek_alignment: effective_settings.workweek_alignment
-            ).validate_snapshot!(
-              session.evidence_snapshot.to_h["workweek"]
-            )
+            validate_workweek_snapshot!
 
             disposition_plan = PayrollIntake::DispositionPlan.new(
               session: session,
@@ -152,8 +151,12 @@ module PayrollIntake
                 employee_name: employee.full_name,
                 regular_hours: payroll_item.hours_worked.to_f,
                 overtime_hours: payroll_item.overtime_hours.to_f,
+                pto_hours: payroll_item.pto_hours.to_f,
+                holiday_hours: payroll_item.holiday_hours.to_f,
                 reported_tips: payroll_item.reported_tips.to_f,
-                tips_paid_out: payroll_item.tips_paid_out.to_f
+                tips_paid_out: payroll_item.tips_paid_out.to_f,
+                bonus: payroll_item.bonus.to_f,
+                loan_deduction: payroll_item.loan_deduction.to_f
               }
             rescue ActiveRecord::RecordInvalid, ArgumentError => e
               results[:errors] << { row_id: row.id, source_employee_name: row.source_employee_name, error: e.message }
@@ -166,8 +169,7 @@ module PayrollIntake
             elsif pay_period.intake_stale_session_id == session.id
               pay_period.clear_intake_stale!
             end
-            session.mark_reviewed!(actor: actor) if session.status == "previewed"
-            session.mark_applied!(actor: actor)
+            finalize_session_after_apply!
           end
         end
       end
@@ -175,16 +177,179 @@ module PayrollIntake
       results
     end
 
+    # Unified reviewed-package apply path (used by PayrollImportsController#apply
+    # for MoSa Revel and any reviewed-hours descriptor adapter). The caller holds
+    # the outer Company + PayPeriod lock via `with_import_lock`.
+    def apply_reviewed_import!(import_record:, matched_data:, disposition_plan:, tips_paid_out_from_tips:,
+                               selection: nil, client_changes: nil, source_waivers: [], hand_edited_hours: [],
+                               unpaid_owners: {})
+      raise ArgumentError, "Cannot apply to a non-editable pay period" unless pay_period.can_edit?
+      raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+
+      results = { success: [], skipped: [], errors: [] }
+      applied = false
+
+      ActiveRecord::Base.transaction(requires_new: true) do
+        # This selection resolves the pending-source gate only inside the
+        # same transaction as successful calculation/apply. Any failure
+        # rolls it back along with every payroll row and status event.
+        selection.period.save! if selection && selection.period.changed?
+        selection&.save! if selection&.new_record?
+        selection&.update!(applied_at: Time.current)
+        client_changes&.apply_period_decisions!(actor: actor)
+        if matched_data.any?
+          service = PayrollImport::ImportService.new(pay_period, actor: actor)
+          results = service.apply!(
+            matched: matched_data,
+            force_overwrite: force_overwrite,
+            tips_paid_out_from_tips: tips_paid_out_from_tips
+          )
+        end
+        raise ActiveRecord::Rollback if results[:errors].any?
+
+        import_record.update!(
+          status: "applied",
+          validation_errors: [],
+          import_origin: PayrollIntake::ImportOrigin.build(
+            session: session,
+            portal_submission: selection&.payroll_submission,
+            replaced_hand_edited_hours: hand_edited_hours.any?
+          ),
+          raw_data: import_record.raw_data.to_h.merge(
+            "client_change_decisions" => client_changes&.review_decisions || [],
+            "source_waivers" => source_waivers,
+            "replaced_hand_edited_hours" => hand_edited_hours
+          )
+        )
+
+        disposition_plan.decisions.each do |decision|
+          if decision.included? && unpaid_owners.key?(decision.row.employee_id)
+            decision.disposition = "excluded"
+            decision.reason = unpaid_owners[decision.row.employee_id]
+          end
+          if decision.included?
+            payroll_item = pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
+            disposition_plan.apply!(
+              decision,
+              status: "applied",
+              employee: decision.row.employee,
+              payroll_item: payroll_item
+            )
+          else
+            disposition_plan.apply!(decision, status: "skipped")
+            results[:skipped] << {
+              employee_id: decision.row.employee_id,
+              name: decision.row.source_employee_name,
+              reason: decision.reason
+            }
+          end
+        end
+
+        finalize_session_after_apply!
+        pay_period.clear_intake_stale! if pay_period.intake_stale_session_id == session.id
+
+        if selection
+          record_portal_selection_applied!(
+            selection: selection,
+            client_changes: client_changes,
+            import_record: import_record
+          )
+        end
+
+        applied = true
+      end
+
+      { applied: applied, results: results }
+    end
+
     private
 
     attr_reader :session, :pay_period, :company, :row_overrides, :actor, :force_overwrite, :acknowledge_warnings
+
+    def descriptor
+      @descriptor ||= PayrollIntake::Registry.find(session.source_type)
+    end
+
+    def universal_workbook?
+      session.source_type == "cornerstone_workbook"
+    end
+
+    def resolved_pay_frequency
+      @resolved_pay_frequency ||= pay_period.company_pay_schedule&.frequency.presence ||
+        company.pay_frequency.to_s.presence ||
+        "biweekly"
+    end
+
+    def validate_workweek_snapshot!
+      PayrollIntake::WorkweekEvidence.new(
+        pay_period: pay_period,
+        allow_misaligned: effective_settings.allow_misaligned_workweek?,
+        overtime_mode: effective_settings.overtime_mode,
+        workweek_alignment: effective_settings.workweek_alignment
+      ).validate_snapshot!(
+        session.evidence_snapshot.to_h["workweek"]
+      )
+    end
+
+    def finalize_session_after_apply!
+      session.mark_reviewed!(actor: actor) if session.status == "previewed"
+      session.mark_applied!(actor: actor)
+    end
+
+    def record_portal_selection_applied!(selection:, client_changes:, import_record:)
+      period = selection.period
+      # Keep Imported tied to the actual selected revision; choosing
+      # an old source does not label the newer files as imported.
+      review_notes = client_changes.review_decisions.select { |row| %w[decline no_pay stale_none].include?(row[:decision]) }
+        .map do |row|
+          next row[:reason] if row[:decision] == "stale_none"
+
+          "#{row[:employee_name] || 'Missing employee'}: #{row[:decision] == 'no_pay' ? 'No pay this period' : "Don't apply"} — #{row[:reason]}"
+        end
+      period.transition!(
+        "import",
+        actor: actor,
+        submission: selection.payroll_submission,
+        note: ([ "Imported revision #{selection.payroll_submission.revision} into payroll review." ] + review_notes).join(" ")
+      )
+      PayrollSubmissions::Audit.record!(
+        actor: actor,
+        period: period,
+        action: "payroll_submission_periods#import",
+        metadata: {
+          pay_period_id: pay_period.id,
+          submission_id: selection.payroll_submission_id,
+          current_submission_id: selection.current_submission_id,
+          superseded_reason: selection.superseded_reason,
+          source_route: selection.source_route,
+          staff_workbook_document_id: selection.staff_workbook_document_id,
+          client_change_decisions: client_changes.review_decisions,
+          import_id: import_record.id,
+          source_package_id: session.id
+        }
+      )
+      PortalNotifications.payroll_period!(
+        "payroll_submission_imported",
+        period: period,
+        actor: actor,
+        dedupe: "import:#{import_record.id}",
+        metadata: {
+          submission_id: selection.payroll_submission_id,
+          revision: selection.payroll_submission.revision
+        }
+      )
+    end
 
     def acknowledged?(override)
       acknowledge_warnings || ActiveModel::Type::Boolean.new.cast(override[:acknowledge_warnings])
     end
 
     def employee_for(row, override)
-      employee_id = override[:employee_id].presence || row.employee_id
+      employee_id = if descriptor&.employee_match == "employee_id"
+        row.employee_id
+      else
+        override[:employee_id].presence || row.employee_id
+      end
       return nil if employee_id.blank?
 
       Employee.active.find_by(id: employee_id, company_id: company.id)
@@ -204,15 +369,26 @@ module PayrollIntake
     end
 
     def values_for(row, override)
+      payload = row.source_payload.to_h
+      raw_bonus = if override.key?(:bonus)
+        override[:bonus]
+      elsif payload.key?("bonus")
+        payload["bonus"]
+      end
+
       {
         regular_hours: decimal_override(override, :regular_hours, row.regular_hours),
         overtime_hours: decimal_override(override, :overtime_hours, row.overtime_hours),
         week1_hours: decimal_override(override, :week1_hours, row.week1_hours),
         week2_hours: decimal_override(override, :week2_hours, row.week2_hours),
+        pto_hours: decimal_override(override, :pto_hours, payload["pto_hours"].presence || 0),
+        holiday_hours: decimal_override(override, :holiday_hours, payload["holiday_hours"].presence || 0),
         week1_tips: decimal_override(override, :week1_tips, row.week1_tips),
         week2_tips: decimal_override(override, :week2_tips, row.week2_tips),
         reported_tips: decimal_override(override, :reported_tips, row.reported_tips),
         tips_paid_out: decimal_override(override, :tips_paid_out, row.tips_paid_out),
+        bonus: raw_bonus.nil? || raw_bonus.to_s.strip.empty? ? nil : strict_nonnegative_decimal(raw_bonus, :bonus),
+        payroll_components: Array(payload["payroll_components"]),
         loan_deduction: decimal_override(override, :loan_deduction, row.loan_deduction)
       }
     end
@@ -236,23 +412,23 @@ module PayrollIntake
       mode = resolved_overtime_mode
 
       if mode == "source_reports"
-        combined = BigDecimal(values.fetch(:regular_hours).to_s) + BigDecimal(values.fetch(:overtime_hours).to_s)
+        combined = values.fetch(:regular_hours) + values.fetch(:overtime_hours)
         if row.total_hours.to_d.positive? && !override.key?(:regular_hours) && !override.key?(:overtime_hours) && !reconciles?(combined, row.total_hours)
           raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
         end
         return values
       end
 
-      week1 = BigDecimal(values.fetch(:week1_hours).to_s)
-      week2 = BigDecimal(values.fetch(:week2_hours).to_s)
+      week1 = values.fetch(:week1_hours)
+      week2 = values.fetch(:week2_hours)
       has_weekly = week1.positive? || week2.positive?
 
       if mode == "total_as_regular_warn_over_80" && !has_weekly
-        combined = BigDecimal(values.fetch(:regular_hours).to_s) + BigDecimal(values.fetch(:overtime_hours).to_s)
+        combined = values.fetch(:regular_hours) + values.fetch(:overtime_hours)
         unless reconciles?(combined, row.total_hours)
           raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
         end
-        if BigDecimal(values.fetch(:overtime_hours).to_s) < BigDecimal(row.overtime_hours.to_s)
+        if values.fetch(:overtime_hours) < BigDecimal(row.overtime_hours.to_s)
           raise ArgumentError,
                 "Overtime hours cannot be reduced below #{format('%.2f', row.overtime_hours)} hours in warn-over-80 mode"
         end
@@ -278,7 +454,7 @@ module PayrollIntake
         return values.merge(regular_hours: regular_hours, overtime_hours: overtime_hours)
       end
 
-      if company.pay_frequency.to_s == "weekly"
+      if resolved_pay_frequency == "weekly"
         if week2.positive?
           raise ArgumentError, "Week 2 hours cannot be nonzero on a weekly pay period"
         end
@@ -288,7 +464,7 @@ module PayrollIntake
         unless reconciles?(week1, row.total_hours)
           raise ArgumentError, "Week 1 hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
         end
-        regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(values.fetch(:week1_hours), 0)
+        regular_hours, overtime_hours = PayrollIntake::Adapters::CornerstoneWorkbook.split_for_weekly_hours(week1, 0.to_d)
       else
         weekly_total = week1 + week2
         if week1 > 168 || week2 > 168
@@ -297,10 +473,7 @@ module PayrollIntake
         unless reconciles?(weekly_total, row.total_hours)
           raise ArgumentError, "Week 1 + Week 2 hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
         end
-        regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(
-          values.fetch(:week1_hours),
-          values.fetch(:week2_hours)
-        )
+        regular_hours, overtime_hours = PayrollIntake::Adapters::CornerstoneWorkbook.split_for_weekly_hours(week1, week2)
       end
       unless reconciles?(values.fetch(:regular_hours), regular_hours) && reconciles?(values.fetch(:overtime_hours), overtime_hours)
         raise ArgumentError,
@@ -323,7 +496,7 @@ module PayrollIntake
     end
 
     def repaired_weekly_hours?(row, override)
-      if company.pay_frequency.to_s == "weekly"
+      if resolved_pay_frequency == "weekly"
         return false unless override.key?(:week1_hours)
 
         week1 = decimal_override(override, :week1_hours, row.week1_hours)
@@ -340,10 +513,16 @@ module PayrollIntake
 
     def decimal_override(override, key, fallback)
       value = override.key?(key) ? override[key] : fallback
+      strict_nonnegative_decimal(value, key)
+    end
+
+    def strict_nonnegative_decimal(value, key)
+      raise ArgumentError, "#{key.to_s.humanize} must be a finite non-negative number" if value == true || value == false
+
       number = BigDecimal(value.to_s, exception: false)
       raise ArgumentError, "#{key.to_s.humanize} must be a finite non-negative number" unless number&.finite? && !number.negative?
 
-      number.round(2).to_f
+      number.round(2)
     end
 
     def reconciles?(left, right)
@@ -377,15 +556,21 @@ module PayrollIntake
 
       payroll_item.hours_worked = values[:regular_hours]
       payroll_item.overtime_hours = values[:overtime_hours]
+      payroll_item.pto_hours = values[:pto_hours]
+      payroll_item.holiday_hours = values[:holiday_hours]
       payroll_item.reported_tips = values[:reported_tips]
       payroll_item.tips_paid_out = values[:tips_paid_out]
-      payroll_item.tips = 0.0 if payroll_item.respond_to?(:tips=)
+      payroll_item.tips = 0.to_d if payroll_item.respond_to?(:tips=)
       persist_tip_components!(payroll_item, values)
       payroll_item.loan_deduction = values[:loan_deduction]
+      PayrollBonusInput.import!(payroll_item, values[:bonus], source: "import") unless values[:bonus].nil?
       payroll_item.import_source = session.source_type
       payroll_item.import_origin = "intake"
       record_reviewed_hours_baseline!(payroll_item, values) if payroll_item.tracks_reviewed_hours?
       payroll_item.sync_default_payroll_adjustments!(employee)
+      if universal_workbook? || values[:payroll_components].any?
+        PayrollIntake::ComponentApplier.new(pay_period: pay_period).apply!(payroll_item, values[:payroll_components])
+      end
       payroll_item.calculate!
     end
 
@@ -402,8 +587,8 @@ module PayrollIntake
 
     def persist_tip_components!(payroll_item, values)
       components = [
-        { "label" => "Tips 1", "amount" => values[:week1_tips].to_f.round(2) },
-        { "label" => "Tips 2", "amount" => values[:week2_tips].to_f.round(2) }
+        { "label" => "Tips 1", "amount" => values[:week1_tips].to_d.round(2).to_f },
+        { "label" => "Tips 2", "amount" => values[:week2_tips].to_d.round(2).to_f }
       ].select { |component| component["amount"].positive? }
 
       data = payroll_item.custom_columns_data.is_a?(Hash) ? payroll_item.custom_columns_data.deep_dup : {}
@@ -439,14 +624,21 @@ module PayrollIntake
       payroll_item.salary_override = salary_override
       payroll_item.holiday_hours = 0
       payroll_item.pto_hours = 0
-      payroll_item.bonus = 0
+      unless universal_workbook? && PayrollBonusInput.manual?(payroll_item)
+        payroll_item.bonus = 0
+      end
       payroll_item.non_taxable_pay = 0
       payroll_item.loan_payment = 0
       payroll_item.insurance_payment = 0
       payroll_item.custom_earnings = []
       payroll_item.custom_deductions = []
       payroll_item.payroll_adjustments = [] unless payroll_item.payroll_adjustments_overridden?
-      payroll_item.payroll_item_field_entries.destroy_all
+      if universal_workbook?
+        import_entries = payroll_item.payroll_item_field_entries.select { |entry| entry.source == "import" }
+        payroll_item.payroll_item_field_entries.destroy(*import_entries)
+      else
+        payroll_item.payroll_item_field_entries.destroy_all
+      end
       payroll_item.custom_columns_data = reset_intake_custom_columns(payroll_item.custom_columns_data)
     end
 

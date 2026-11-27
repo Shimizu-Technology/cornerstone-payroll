@@ -363,7 +363,7 @@ module PayrollIntake
       end
 
       def weekly_frequency?
-        company.pay_frequency.to_s == "weekly"
+        (pay_period.company_pay_schedule&.frequency.presence || company.pay_frequency.to_s) == "weekly"
       end
 
       def period_regular_hours_threshold
