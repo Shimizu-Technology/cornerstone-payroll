@@ -458,9 +458,10 @@ module YearEnd
       end
       issues << issue("PAYEES_UNAVAILABLE", @contractor_error) if files?("form_1099") && !contractors_available?
 
+      has_actionable_issues = issues.any? { |entry| !entry[:code].in?(DEMO_EXPECTED_CODES) }
       step(
         "people", "Employees and payees", issues,
-        summary: issues.empty? ? "Every employee#{files?('form_1099') ? ' and 1099 payee' : ''} has a filing ID and address." : "Fix each one below. The list clears as you save.",
+        summary: has_actionable_issues ? "Fix each one below. The list clears as you save." : "Every employee#{files?('form_1099') ? ' and 1099 payee' : ''} has a filing ID and address.",
         data: {
           employees: employees,
           contractors: contractors,

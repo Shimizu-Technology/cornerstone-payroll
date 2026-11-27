@@ -26,14 +26,18 @@ export function TippedOccupationCodeSelect({ codes, value, onChange }: {
   }
 
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" onBlur={(event) => {
+      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+      setOpen(false);
+      setQuery('');
+      setActive(-1);
+    }}>
       <Input label="Treasury occupation code" placeholder="Search by code or occupation" role="combobox"
         autoComplete="off" aria-autocomplete="list" aria-expanded={open}
         aria-controls={open ? listId : undefined} aria-activedescendant={activeId}
-        value={open ? query : value}
+        value={query}
         onFocus={() => { setQuery(''); setActive(-1); setOpen(true); }}
         onClick={() => setOpen(true)}
-        onBlur={() => { setOpen(false); setQuery(''); setActive(-1); }}
         onChange={(event) => { onChange(''); setQuery(event.target.value); setActive(-1); setOpen(true); }}
         onKeyDown={(event) => {
           if (event.key === 'Escape' && open) {
@@ -52,10 +56,14 @@ export function TippedOccupationCodeSelect({ codes, value, onChange }: {
             if (options[active]) choose(options[active][0]);
           }
         }} />
-      {!open && value && <p className="mt-1 break-words text-sm text-neutral-600">{codes[value]}</p>}
+      {!open && value && <p className="mt-1 break-words text-sm text-neutral-600">{value} · {codes[value]}</p>}
       {open && (
         <>
-          <ul id={listId} role="listbox" aria-label="Treasury occupations"
+          <ul id={listId} role="listbox" aria-label="Treasury occupations" tabIndex={-1}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) event.currentTarget.focus({ preventScroll: true });
+            }}
+            onTouchStart={(event) => event.currentTarget.focus({ preventScroll: true })}
             className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-neutral-200 bg-white">
             {options.map(([code, name], index) => (
               <li key={code} id={`${listId}-${code}`} role="option" aria-selected={code === value}

@@ -69,6 +69,12 @@ module Api
         def destroy
           write do
             occupation = @employee.employee_tipped_occupations.find(params[:id])
+            years = occupation.effective_from.year..occupation.effective_to&.year
+            filed_year = PayrollFilingRecord.where(company_id: current_company.id, filing_type: "w2_gu_w3_ss", tax_year: years).minimum(:tax_year)
+            if filed_year
+              raise InvalidInput, "This entry overlaps a W-2 filing for #{filed_year}. Use End or Change to preserve its history."
+            end
+
             occupation.destroy!
             audit_change("remove", occupation)
           end
@@ -78,7 +84,7 @@ module Api
         def bulk_set
           code = validated_code
           year = Integer(params.require(:tax_year).to_s, 10, exception: false)
-          unless year && year >= 2026 && W2GuAggregator::SS_WAGE_BASE_BY_YEAR.key?(year)
+          unless year && year >= 2026 && (W2GuAggregator::SS_WAGE_BASE_BY_YEAR.key?(year) || AnnualTaxConfig.for_year(year)&.ss_wage_base)
             raise InvalidInput, "Choose a supported tax year."
           end
 

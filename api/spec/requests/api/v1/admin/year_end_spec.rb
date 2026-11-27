@@ -848,6 +848,35 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(AuditLog.where(user: admin, record_id: employee.id, action: "employee_tipped_occupation#end")).to exist
     end
 
+    it "blocks removal for a filed W-2 year within the entry's range" do
+      open_entry = create(:employee_tipped_occupation, employee: employee, occupation_code: "101", effective_from: Date.new(2025, 6, 1))
+      historical_entry = create(:employee_tipped_occupation, employee: employee, occupation_code: "102",
+        effective_from: Date.new(2025, 6, 1), effective_to: Date.new(2025, 12, 31))
+      PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", tax_year: 2026,
+        status: "submitted", submitted_at: Time.current, confirmation_number: "TEST-W2", source_fingerprint: "a" * 64)
+      path = "/api/v1/admin/employees/#{employee.id}/tipped_occupations"
+
+      delete "#{path}/#{open_entry.id}"
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(response.parsed_body.fetch("error")).to include("2026", "Use End or Change")
+      expect(employee.employee_tipped_occupations.exists?(open_entry.id)).to be(true)
+      expect(AuditLog.where(record_id: employee.id, action: "employee_tipped_occupation#remove")).to be_empty
+
+      delete "#{path}/#{historical_entry.id}"
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.employee_tipped_occupations.exists?(historical_entry.id)).to be(false)
+    end
+
+    it "accepts bulk assignments for a later year with a configured wage base" do
+      create(:annual_tax_config, tax_year: 2027)
+      pay(company, Date.new(2027, 5, 7), worker: employee, reported_tips: 200, cash_tips_reported: 200,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+
+      post "/api/v1/admin/year_end/tipped_occupations", params: { tax_year: 2027, occupation_code: "102", employee_ids: [ employee.id ] }
+      expect(response).to have_http_status(:created), response.body
+      expect(employee.employee_tipped_occupations.sole.effective_from).to eq(Date.new(2027, 1, 1))
+    end
+
     it "returns JSON for a missing required field" do
       post "/api/v1/admin/employees/#{employee.id}/tipped_occupations", params: { occupation_code: "102" }
       expect(response).to have_http_status(:bad_request)
