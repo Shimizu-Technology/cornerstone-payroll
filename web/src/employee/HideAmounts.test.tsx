@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -438,7 +438,8 @@ describe('Employee app masked pay amounts by default (Track K)', () => {
     const latest = await screen.findByRole('region', { name: 'Latest pay' });
     await within(latest).findByRole('button', { name: 'Show amounts' });
     expect(screen.getByText(explainerText)).toBeTruthy();
-    expect(localStorage.getItem(HIDE_AMOUNTS_EXPLAINED_KEY)).toBe('true');
+    // The explainer flag is written in an effect after the explainer renders.
+    await waitFor(() => expect(localStorage.getItem(HIDE_AMOUNTS_EXPLAINED_KEY)).toBe('true'));
 
     // Navigating to Pay during the same first session dismisses the explainer without needing a toggle click.
     await userEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Pay' }));
