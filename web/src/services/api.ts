@@ -1757,19 +1757,37 @@ export const payPeriodsApi = {
   resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   // Match the current review's files again, e.g. after reactivating a worker or setting up a loan.
-  rematchImport: (id: number, reason?: string): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/rematch_import`, reason ? { reason } : undefined),
+  rematchImport: (id: number, reason?: string, sourceType?: string): Promise<ImportPreviewResponse> => {
+    const payload = {
+      ...(reason ? { reason } : {}),
+      ...(sourceType ? { source_type: sourceType } : {}),
+    };
+    return api.post<ImportPreviewResponse>(
+      `/admin/pay_periods/${id}/rematch_import`,
+      Object.keys(payload).length > 0 ? payload : undefined,
+    );
+  },
   // Sets up (or resumes) the Employee Loan for an installment the review found in the workbook.
-  setUpImportInstallmentLoan: (id: number, data: { import_id: number; employee_id: number; name?: string; starting_balance?: string; payment_amount?: string; first_deduction_date?: string }): Promise<{ loan_id: number; already_set_up: boolean }> =>
+  setUpImportInstallmentLoan: (id: number, data: { import_id: number; employee_id: number; source_type?: string; name?: string; starting_balance?: string; payment_amount?: string; first_deduction_date?: string }): Promise<{ loan_id: number; already_set_up: boolean }> =>
     api.post<{ loan_id: number; already_set_up: boolean }>(`/admin/pay_periods/${id}/import_installment_loan`, data),
-  currentImport: (id: number): Promise<ImportPreviewResponse> =>
-    api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
+  currentImport: (id: number, sourceType?: string): Promise<ImportPreviewResponse> => {
+    const query = sourceType ? `?source_type=${encodeURIComponent(sourceType)}` : '';
+    return api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import${query}`);
+  },
   // Takes one file out of an import still in review; the reason is recorded on the new version.
-  removeImportSource: (id: number, sourceRole: string, reason: string): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/remove_import_source`, { source_role: sourceRole, reason }),
+  removeImportSource: (id: number, sourceRole: string, reason: string, sourceType?: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/remove_import_source`, {
+      source_role: sourceRole,
+      reason,
+      ...(sourceType ? { source_type: sourceType } : {}),
+    }),
   // Saves how the tips in an older MoSa workbook were paid; apply uses only the saved choice.
-  saveImportTipTreatment: (id: number, importId: number, tipsPaidOutFromTips: boolean): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/import_tip_treatment`, { import_id: importId, tips_paid_out_from_tips: tipsPaidOutFromTips }),
+  saveImportTipTreatment: (id: number, importId: number, tipsPaidOutFromTips: boolean, sourceType?: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/import_tip_treatment`, {
+      import_id: importId,
+      tips_paid_out_from_tips: tipsPaidOutFromTips,
+      ...(sourceType ? { source_type: sourceType } : {}),
+    }),
   applyImport: (
     id: number,
     data: {
@@ -2058,7 +2076,7 @@ export interface PayrollIntakeDispositionTarget {
 export interface PayrollIntakeDocumentData {
   id: number;
   document_type: 'pasted_text' | 'image' | 'pdf' | 'other';
-  source_role: 'pasted_email' | 'email_attachment' | 'revel_hours' | 'supplemental_workbook' | 'supporting_document' | 'legacy_source';
+  source_role: 'pasted_email' | 'email_attachment' | 'revel_hours' | 'supplemental_workbook' | 'cornerstone_workbook' | 'supporting_document' | 'legacy_source' | (string & {});
   position: number;
   filename?: string | null;
   content_type?: string | null;
@@ -2092,6 +2110,16 @@ export interface PayrollIntakeRowData {
   extracted_total_hours: number;
   regular_hours: number;
   overtime_hours: number;
+  pto_hours?: number;
+  holiday_hours?: number;
+  bonus?: number | null;
+  payroll_components?: Array<{
+    component_type?: string;
+    label: string;
+    amount: string | number;
+    kind: string;
+    tax_treatment: string;
+  }>;
   week1_tips: number;
   week2_tips: number;
   reported_tips: number;
@@ -2152,6 +2180,9 @@ export interface PayrollIntakeApplyRowPayload {
   week2_hours?: number;
   regular_hours: number;
   overtime_hours: number;
+  pto_hours?: number;
+  holiday_hours?: number;
+  bonus?: number | null;
   week1_tips?: number;
   week2_tips?: number;
   reported_tips: number;
@@ -2191,6 +2222,11 @@ export const payrollIntakeImportsApi = {
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/documents/${documentId}/preview`),
   downloadSource: (payPeriodId: number, importId: number, documentId: number) =>
     api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/${importId}/documents/${documentId}/download`),
+  downloadTemplate: (payPeriodId: number, format: 'xlsx' | 'csv', sourceType = 'cornerstone_workbook'): Promise<BlobDownload> =>
+    api.getBlobWithParams(`/admin/pay_periods/${payPeriodId}/payroll_intake_imports/template`, {
+      source_type: sourceType,
+      file_format: format,
+    }),
 };
 
 export const punchEntriesApi = {
@@ -2246,6 +2282,7 @@ export interface PayrollIntakeFileSlot {
   portal_label?: string | null;
   portal_hint?: string | null;
   supports_link?: boolean;
+  template_formats?: Array<'xlsx' | 'csv' | (string & {})>;
   provides: string[];
 }
 
@@ -2422,6 +2459,7 @@ export interface ImportPreviewResponse {
   pay_period?: { start_date: string; end_date: string };
   source_package: {
     id: number;
+    source_type?: string;
     package_id: string;
     package_revision: number;
     package_schema_version: string;

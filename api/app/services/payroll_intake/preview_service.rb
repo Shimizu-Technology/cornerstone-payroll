@@ -17,7 +17,8 @@ module PayrollIntake
 
     SOURCE_ADAPTERS = {
       "spike_email" => PayrollIntake::Adapters::SpikeEmail,
-      "mosa_revel" => PayrollIntake::Adapters::MosaRevel
+      "mosa_revel" => PayrollIntake::Adapters::MosaRevel,
+      "cornerstone_workbook" => PayrollIntake::Adapters::CornerstoneWorkbook
     }.freeze
 
     def self.source_reports_overtime?(source_type, company: nil, pay_period: nil)

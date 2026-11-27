@@ -148,6 +148,7 @@ Rails.application.routes.draw do
         end
         resources :payroll_submission_periods, only: [ :index, :show ], param: :ref do
           member do
+            get :template
             post :submissions
             post :decision
             post :messages
@@ -631,6 +632,7 @@ Rails.application.routes.draw do
 
           resources :payroll_intake_imports, only: [ :index, :show ] do
             collection do
+              get :template
               post :preview
             end
             member do

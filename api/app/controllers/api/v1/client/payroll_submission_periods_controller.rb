@@ -4,8 +4,51 @@ module Api
   module V1
     module Client
       class PayrollSubmissionPeriodsController < BaseController
-        before_action :require_payroll_files, only: :submissions
+        before_action :require_payroll_files, only: %i[submissions template]
         include PayrollSubmissionPeriodActions
+
+        # GET /api/v1/client/payroll_submission_periods/:ref/template?file_format=xlsx|csv
+        def template
+          descriptor = payroll_catalog_company.portal_submittable_intake_descriptor
+          file_format = (params[:file_format].presence || params[:format].presence || "xlsx").to_s.downcase
+
+          case descriptor&.key
+          when "cornerstone_workbook"
+            unless file_format.in?(%w[xlsx csv])
+              return render json: { error: "Unsupported template format '#{file_format}'. Use xlsx or csv." }, status: :unprocessable_entity
+            end
+
+            generator = PayrollIntake::UniversalWorkbook::Template.new(
+              company: payroll_catalog_company,
+              pay_period: payroll_catalog.live_pay_period(@entry),
+              start_date: @entry.start_date,
+              end_date: @entry.end_date,
+              pay_date: payroll_catalog.pay_date_for(@entry)
+            )
+            payload = file_format == "csv" ? generator.generate_csv : generator.generate_xlsx
+            send_data payload,
+                      filename: generator.filename(format: file_format),
+                      type: generator.content_type(format: file_format),
+                      disposition: "attachment"
+          when "mosa_revel"
+            unless file_format == "xlsx"
+              return render json: { error: "MoSa change workbook template is available in xlsx format only." }, status: :unprocessable_entity
+            end
+
+            pay_period = payroll_catalog.live_pay_period(@entry)
+            unless pay_period
+              return render json: { error: "This pay period is not ready for a change workbook download yet." }, status: :unprocessable_entity
+            end
+
+            generator = PayrollImport::MosaSupplementalTemplate.new(pay_period)
+            send_data generator.generate,
+                      filename: generator.filename,
+                      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      disposition: "attachment"
+          else
+            render json: { error: "No downloadable payroll template is configured for this client." }, status: :unprocessable_entity
+          end
+        end
 
         # Send a new revision: descriptor-defined payroll files, changes, notes, attachments.
         def submissions
