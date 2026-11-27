@@ -852,7 +852,12 @@ export const clientEmployeesApi = {
     group_by?: string;
     /** "contact" returns contact-only records for the Contact details page. */
     view?: 'contact';
-    /** Resolve compensation and saved wage rates as of this ISO date (YYYY-MM-DD). */
+    /**
+     * Resolve compensation and saved wage rates as of the end date of a
+     * currently open payroll submission period (YYYY-MM-DD). Not a general
+     * historical lookup: other valid or out-of-range dates return 422, and
+     * client viewers or companies without payroll submissions enabled receive 403.
+     */
     rates_on?: string;
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
@@ -1810,7 +1815,7 @@ export const payPeriodsApi = {
       no_tips_or_loans?: boolean;
       wage_rate_choices?: Record<string, number>;
       confirm_client_changes?: boolean;
-      reviewed_changes?: { change_index: number; amount?: string; hours?: string; regular_hours?: string; overtime_hours?: string; workweek?: number; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
+      reviewed_changes?: { change_index: number; amount?: string; hours?: string; regular_hours?: string; overtime_hours?: string; workweek?: number; baseline_regular_hours?: string; baseline_overtime_hours?: string; decision?: string; reason?: string; pay_choice?: string; saved_period_pay?: string; workbook_period_pay?: string }[];
     },
   ): Promise<ImportApplyResponse> =>
     api.post<ImportApplyResponse>(`/admin/pay_periods/${id}/apply_import`, data),

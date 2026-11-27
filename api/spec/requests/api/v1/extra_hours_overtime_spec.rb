@@ -567,6 +567,66 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       expect(item.gross_pay).to eq(BigDecimal("0.63"))
       expect(item.custom_columns_data.dig("client_change_evidence", "gross_pay_delta")).to eq("0.52")
     end
+
+    it "applies two approved workweek extra-hours rows for the same employee cumulatively" do
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: workbook_upload(week1: "38.00", week2: "35.00"),
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: primary_rate.id, hours: "4.00", workweek: 1 },
+               { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: primary_rate.id, hours: "6.50", workweek: 2 }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: submission_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, hours: "4.00", workweek: 1, baseline_regular_hours: "73.0", baseline_overtime_hours: "0.0", decision: "apply" },
+               { change_index: 1, hours: "6.50", workweek: 2, baseline_regular_hours: "73.0", baseline_overtime_hours: "0.0", decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item = pay_period.reload.payroll_items.find_by!(employee: employee)
+      # Week 1: 38 + 4 = 42 (40 reg / 2 OT); Week 2: 35 + 6.5 = 41.5 (40 reg / 1.5 OT)
+      # Combined: 80.00 reg @ $20 ($1,600) + 3.50 OT @ $30 ($105) = $1,705.00 (+$245.00 over $1,460.00 baseline)
+      expect(item.hours_worked).to eq(BigDecimal("80.00"))
+      expect(item.overtime_hours).to eq(BigDecimal("3.50"))
+      expect(item.gross_pay).to eq(BigDecimal("1705.00"))
+      expect(item.custom_columns_data["client_change_evidence"]).to include(
+        "delta_regular_hours" => "7.0",
+        "delta_overtime_hours" => "3.5",
+        "gross_pay_delta" => "245.00",
+        "applied_regular_hours" => "80.0",
+        "applied_overtime_hours" => "3.5"
+      )
+      expect(item.custom_columns_data.dig("client_change_evidence", "entries").size).to eq(2)
+    end
+
+    it "rejects workweek resolution when stored baseline differs from weekly split by even 0.01h" do
+      expect do
+        PayrollIntake::ExtraHoursPolicy.resolve_deltas!(
+          mode: "workweek",
+          baseline_regular: BigDecimal("39.99"),
+          baseline_overtime: BigDecimal("0.00"),
+          rate: BigDecimal("20.00"),
+          hours: "0.01",
+          workweek: 1,
+          baseline_week1: BigDecimal("40.00"),
+          baseline_week2: BigDecimal("0.00")
+        )
+      end.to raise_error(ArgumentError, /Weekly hours baseline no longer matches/)
+    end
   end
 
   describe "weekly universal workbook (single workweek — no choice needed)" do
@@ -983,6 +1043,127 @@ RSpec.describe "Extra hours overtime handling (issue #665)", type: :request do
       expect(item.hours_worked).to eq(BigDecimal("40.00"))
       expect(item.overtime_hours).to eq(BigDecimal("2.00"))
       expect(item.custom_columns_data.dig("client_change_evidence", "gross_pay_delta")).to eq("60.38")
+    end
+
+    it "rejects applying a regular/OT split when worksheet hours changed between preview and apply" do
+      manual_worker = create(:employee, company: company, first_name: "Drift", last_name: "Worker", pay_rate: 20.00)
+      manual_job = create(:employee_wage_rate, employee: manual_worker, label: "Maintenance", rate: 20.00, is_primary: true)
+      item = create(:payroll_item, company: company, pay_period: pay_period, employee: manual_worker,
+                    pay_rate: 20.00, hours_worked: 30.0, overtime_hours: 0.0, import_source: nil)
+
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             revel_payroll: revel_pdf_upload(regular: 40, overtime: 0),
+             workbook_choice: "none",
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: manual_worker.id, employee_wage_rate_id: manual_job.id, regular_hours: "4", overtime_hours: "0" }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: submission_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      prefill = response.parsed_body.dig("client_change_prefill", "rows").sole
+      expect(prefill).to include("baseline_regular_hours" => "30.0", "resulting_regular_hours" => "34.0")
+      import_id = response.parsed_body.fetch("import_id")
+      selection_id = response.parsed_body.dig("portal_source", "selection_id")
+
+      # Worksheet changes from 30 -> 31 regular between preview and apply
+      stub_portal_user(Api::V1::Admin::PayrollItemsController, staff, company)
+      patch "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_items/#{item.id}",
+            params: { payroll_item: { hours_worked: 31 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      # Stale apply is rejected (both when echoing preview baseline and via stored preview baseline)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: import_id,
+             portal_source_id: selection_id,
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, regular_hours: "4", overtime_hours: "0", baseline_regular_hours: "30.0", baseline_overtime_hours: "0.0", decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Worksheet hours changed", "Preview again")
+      expect(item.reload.hours_worked).to eq(BigDecimal("31.00"))
+
+      # Reopening current preview refreshes baseline to 31 -> 35 and succeeds
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/current_import"
+      expect(response).to have_http_status(:ok), response.body
+      refreshed = response.parsed_body.dig("client_change_prefill", "rows").sole
+      expect(refreshed).to include("baseline_regular_hours" => "31.0", "resulting_regular_hours" => "35.0")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: import_id,
+             portal_source_id: selection_id,
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, regular_hours: "4", overtime_hours: "0", baseline_regular_hours: "31.0", baseline_overtime_hours: "0.0", decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.hours_worked).to eq(BigDecimal("35.00"))
+    end
+
+    it "applies two approved split extra-hours rows for the same employee cumulatively across jobs" do
+      second_job = create(:employee_wage_rate, employee: employee, label: "Bar", rate: 30.00)
+
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             revel_payroll: revel_pdf_upload(regular: 70, overtime: 2),
+             workbook_choice: "none",
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: job.id, regular_hours: "2", overtime_hours: "0.5" },
+               { kind: "extra_hours", employee_id: employee.id, employee_wage_rate_id: second_job.id, regular_hours: "1", overtime_hours: "1.5" }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: submission_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             wage_rate_choices: { employee.id.to_s => job.id },
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, regular_hours: "2", overtime_hours: "0.5", baseline_regular_hours: "70.0", baseline_overtime_hours: "2.0", decision: "apply" },
+               { change_index: 1, regular_hours: "1", overtime_hours: "1.5", baseline_regular_hours: "70.0", baseline_overtime_hours: "2.0", decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item = pay_period.reload.payroll_items.find_by!(employee: employee)
+      # Baseline: 70 reg ($1,400) + 2 OT ($60) = $1,460.00
+      # Row 0 (Job A @ $20): +2 reg ($40) + 0.5 OT ($15) = +$55.00
+      # Row 1 (Job B @ $30): +1 reg ($30) + 1.5 OT ($67.50) = +$97.50
+      # Total: 73.00 reg / 4.00 OT / $1,612.50 gross (+$152.50)
+      expect(item.hours_worked).to eq(BigDecimal("73.00"))
+      expect(item.overtime_hours).to eq(BigDecimal("4.00"))
+      expect(item.gross_pay).to eq(BigDecimal("1612.50"))
+      expect(item.wage_rate_hours).to contain_exactly(
+        include("employee_wage_rate_id" => job.id, "regular_hours" => 72.0, "overtime_hours" => 2.5),
+        include("employee_wage_rate_id" => second_job.id, "regular_hours" => 1.0, "overtime_hours" => 1.5)
+      )
+      expect(item.custom_columns_data["client_change_evidence"]).to include(
+        "delta_regular_hours" => "3.0",
+        "delta_overtime_hours" => "2.0",
+        "gross_pay_delta" => "152.50"
+      )
+      expect(item.custom_columns_data.dig("client_change_evidence", "entries").size).to eq(2)
     end
   end
 end

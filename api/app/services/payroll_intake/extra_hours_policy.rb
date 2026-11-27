@@ -272,8 +272,8 @@ module PayrollIntake
           end
 
           new_reg, new_ot = PayrollIntake::Adapters::CornerstoneWorkbook.split_for_weekly_hours(new_w1, new_w2)
-          delta_reg = (new_reg - base_reg).round(2)
-          delta_ot = (new_ot - base_ot).round(2)
+          delta_reg = (new_reg - expected_reg).round(2)
+          delta_ot = (new_ot - expected_ot).round(2)
           gross_delta = line_gross_delta(
             line_base_reg: line_base_reg,
             line_base_ot: line_base_ot,
@@ -466,7 +466,7 @@ module PayrollIntake
       end
 
       def reconciles?(left, right)
-        (BigDecimal(left.to_s) - BigDecimal(right.to_s)).abs <= RECONCILIATION_TOLERANCE
+        BigDecimal(left.to_s).round(2) == BigDecimal(right.to_s).round(2)
       end
 
       def decimal_or_zero(value)

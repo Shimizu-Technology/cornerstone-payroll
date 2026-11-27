@@ -386,8 +386,18 @@ module Api
             end
 
             if selection
-              matched_data = client_changes.apply_to(matched_data, reviewed: params.permit(reviewed_changes: [ :change_index, :amount, :hours, :regular_hours, :overtime_hours, :workweek, :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay ])[:reviewed_changes],
-                  confirmed: params[:confirm_client_changes], dispositions: disposition_plan.decisions, source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] })
+              matched_data = client_changes.apply_to(
+                matched_data,
+                reviewed: params.permit(reviewed_changes: [
+                  :change_index, :amount, :hours, :regular_hours, :overtime_hours, :workweek,
+                  :baseline_regular_hours, :baseline_overtime_hours,
+                  :decision, :reason, :pay_choice, :saved_period_pay, :workbook_period_pay
+                ])[:reviewed_changes],
+                confirmed: params[:confirm_client_changes],
+                dispositions: disposition_plan.decisions,
+                source_employee_ids: import_record.matched_data.map { |row| row["employee_id"] },
+                previewed_baselines: import_record.raw_data.to_h.fetch("previewed_extra_hours_baselines", {})
+              )
             end
 
             unpaid_owners = client_changes&.unpaid_owners || {}
@@ -569,14 +579,17 @@ module Api
           selection ||= import_record.submission_imports.order(id: :desc).first
           source = selection&.payroll_submission || pending_portal_period&.current_submission
           preview[:source_warnings] += workbook_warnings(source_package, source)
+          client_prefill = selection ? change_prefill(selection.payroll_submission, preview[:matched], source_package: source_package) : nil
+          pending_prefill = !selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched], source_package: source_package) : nil
+          persist_previewed_extra_hours_baselines!(import_record, client_prefill || pending_prefill)
           {
             import_id: import_record.id, preview: preview, source_package: source_package_json(source_package),
             pay_period: { start_date: @pay_period.start_date, end_date: @pay_period.end_date },
             duplicate: package_result[:duplicate], portal_source: portal_source_json(selection),
             pending_portal_source: pending_portal_source_json,
             loan_setup: loan_setup_access,
-            client_change_prefill: (selection ? change_prefill(selection.payroll_submission, preview[:matched], source_package: source_package) : nil),
-            pending_change_prefill: (!selection && pending_portal_period&.pending_source_review? ? change_prefill(pending_portal_period.current_submission, preview[:matched], source_package: source_package) : nil)
+            client_change_prefill: client_prefill,
+            pending_change_prefill: pending_prefill
           }
         end
 
@@ -678,6 +691,29 @@ module Api
           changes = PayrollSubmissions::ImportChanges.new(submission: submission, pay_period: @pay_period, session: source_package)
           { submission_id: submission.id, revision: submission.revision, rows: changes.proposals(source_rows: rows.map(&:deep_symbolize_keys)), removals: changes.removals,
             manual_review_warnings: changes.manual_review_warnings }
+        end
+
+        def persist_previewed_extra_hours_baselines!(import_record, prefill)
+          return unless import_record&.status == "previewed" && prefill.present?
+
+          submission_id = prefill[:submission_id]
+          baselines = Array(prefill[:rows]).each_with_object({}) do |row, map|
+            next unless row[:kind] == "extra_hours"
+
+            map["#{submission_id}:#{row[:change_index]}"] = {
+              "baseline_regular_hours" => row[:baseline_regular_hours].to_s,
+              "baseline_overtime_hours" => row[:baseline_overtime_hours].to_s
+            }
+          end
+          return if baselines.empty?
+
+          raw = import_record.raw_data.is_a?(Hash) ? import_record.raw_data.deep_dup : {}
+          existing = raw["previewed_extra_hours_baselines"].to_h
+          merged = existing.merge(baselines)
+          return if merged == existing
+
+          raw["previewed_extra_hours_baselines"] = merged
+          import_record.update_columns(raw_data: raw)
         end
 
         def pay_run_selection!(record)

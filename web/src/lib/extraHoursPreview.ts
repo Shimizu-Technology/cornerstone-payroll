@@ -24,6 +24,8 @@ export interface ExtraHoursPreviewResult {
   deltaOvertimeHours: number;
   resultingRegularHours: number;
   resultingOvertimeHours: number;
+  resultingWeek1Hours?: number;
+  resultingWeek2Hours?: number;
   grossPayDelta: number | null;
 }
 
@@ -230,6 +232,19 @@ export function computeExtraHoursPreview(params: {
 
   const baseW1 = parseDecimalHundredths(params.baselineWeek1Hours) ?? 0;
   const baseW2 = parseDecimalHundredths(params.baselineWeek2Hours) ?? 0;
+  const expectedBase = splitWeeklyHundredths(baseW1, baseW2);
+  if (expectedBase.regular !== baseReg || expectedBase.overtime !== baseOt) {
+    return {
+      valid: false,
+      error: 'Weekly hours baseline does not match saved regular/overtime hours. Reopen the preview before applying.',
+      totalHours: hours / 100,
+      deltaRegularHours: 0,
+      deltaOvertimeHours: 0,
+      resultingRegularHours: baseReg / 100,
+      resultingOvertimeHours: baseOt / 100,
+      grossPayDelta: null,
+    };
+  }
   const newW1 = week === 1 ? baseW1 + hours : baseW1;
   const newW2 = week === 2 ? baseW2 + hours : baseW2;
   if (newW1 > MAX_WEEK_HOURS_HUNDREDTHS || newW2 > MAX_WEEK_HOURS_HUNDREDTHS) {
@@ -246,8 +261,8 @@ export function computeExtraHoursPreview(params: {
   }
 
   const { regular: newReg, overtime: newOt } = splitWeeklyHundredths(newW1, newW2);
-  const deltaReg = newReg - baseReg;
-  const deltaOt = newOt - baseOt;
+  const deltaReg = newReg - expectedBase.regular;
+  const deltaOt = newOt - expectedBase.overtime;
   const grossDelta = rateDecimal === null ? null : lineGrossDelta(lineBaseReg, lineBaseOt, deltaReg, deltaOt, rateDecimal);
   return {
     valid: true,
@@ -256,6 +271,8 @@ export function computeExtraHoursPreview(params: {
     deltaOvertimeHours: deltaOt / 100,
     resultingRegularHours: newReg / 100,
     resultingOvertimeHours: newOt / 100,
+    resultingWeek1Hours: newW1 / 100,
+    resultingWeek2Hours: newW2 / 100,
     grossPayDelta: grossDelta,
   };
 }
