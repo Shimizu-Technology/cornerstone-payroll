@@ -638,11 +638,20 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     const regularDraft = clientExtraRegularDrafts[row.change_index] ?? row.regular_hours ?? '';
     const overtimeDraft = clientExtraOvertimeDrafts[row.change_index] ?? row.overtime_hours ?? '';
     const workweekDraft = clientExtraWorkweeks[row.change_index] ?? row.workweek ?? (row.workweeks?.length === 1 ? 1 : undefined);
+    const selectedJobId = row.employee_id ? rateChoices[row.employee_id] : undefined;
+    const lineBaselineRegular = selectedJobId !== undefined
+      ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_regular_hours ?? row.saved_regular_hours ?? '0') : '0')
+      : row.baseline_line_regular_hours;
+    const lineBaselineOvertime = selectedJobId !== undefined
+      ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0') : '0')
+      : row.baseline_line_overtime_hours;
     const preview = computeExtraHoursPreview({
       mode,
       rate: row.wage_rate,
       baselineRegularHours: row.baseline_regular_hours ?? row.saved_regular_hours ?? '0',
       baselineOvertimeHours: row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0',
+      baselineLineRegularHours: lineBaselineRegular,
+      baselineLineOvertimeHours: lineBaselineOvertime,
       baselineWeek1Hours: row.baseline_week1_hours ?? '0',
       baselineWeek2Hours: row.baseline_week2_hours ?? '0',
       hours: hoursDraft,

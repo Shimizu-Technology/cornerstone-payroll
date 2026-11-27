@@ -29,6 +29,12 @@ module Api
             employees = employees.eligible_for_payroll_run(period, explicitly_selected: true)
             # The pay-run worksheet shows the rates that payroll will use.
             @rates_on = period.end_date
+          elsif params[:rates_on].present?
+            text = params[:rates_on].to_s.strip
+            parsed = text.match?(/\A\d{4}-\d{2}-\d{2}\z/) ? (Date.iso8601(text) rescue nil) : nil
+            return render json: { error: "rates_on must be an ISO date (YYYY-MM-DD)" }, status: :unprocessable_entity unless parsed
+
+            @rates_on = parsed
           end
           employees = apply_filters(employees)
           needs_contact_details_count = employees.needs_contact_details(flagged_emails: contact_context[:flagged_emails]).count

@@ -16,6 +16,10 @@ module Api
         before_action :set_employee, only: [ :show, :update ]
 
         def index
+          if params[:rates_on].present?
+            @rates_on = parse_iso_date(params[:rates_on])
+            return render json: { error: "rates_on must be an ISO date (YYYY-MM-DD)" }, status: :unprocessable_entity unless @rates_on
+          end
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           employees = Employee.where(company_id: current_company_id)
           employees = apply_filters(employees)
@@ -282,6 +286,15 @@ module Api
         end
 
         # The Contact details page asks for contact fields only.
+        def parse_iso_date(value)
+          text = value.to_s.strip
+          return nil unless text.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+
+          Date.iso8601(text)
+        rescue ArgumentError
+          nil
+        end
+
         def contact_page_or_full(employee, contact_context)
           return EmployeeContactProjection.call(employee, context: contact_context) if EmployeeContactProjection.requested?(params)
 
@@ -297,7 +310,7 @@ module Api
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: false)
           data["ssn_last_four"] = employee.ssn_last_four
           data["contractor_ein_last_four"] = employee.contractor_ein.to_s.gsub(/\D/, "").last(4).presence
-          rates_on = PayrollBusinessClock.today
+          rates_on = @rates_on || PayrollBusinessClock.today
           data.merge!(EmployeeCompensationChangeService.snapshot(employee, rates_on).as_json)
           data["wage_rates"] = employee.wage_rates_on(rates_on).map do |rate|
             {

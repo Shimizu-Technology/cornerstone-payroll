@@ -591,6 +591,7 @@ export const employeesApi = {
   list: (params?: {
     company_id?: number;
     eligible_pay_period_id?: number;
+    rates_on?: string;
     status?: string;
     department_id?: number;
     employment_type?: string;
@@ -851,6 +852,8 @@ export const clientEmployeesApi = {
     group_by?: string;
     /** "contact" returns contact-only records for the Contact details page. */
     view?: 'contact';
+    /** Resolve compensation and saved wage rates as of this ISO date (YYYY-MM-DD). */
+    rates_on?: string;
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
@@ -2451,6 +2454,8 @@ export type ClientChangePrefillRow = {
   fallback_reason?: string;
   baseline_regular_hours?: string;
   baseline_overtime_hours?: string;
+  baseline_line_regular_hours?: string;
+  baseline_line_overtime_hours?: string;
   baseline_week1_hours?: string;
   baseline_week2_hours?: string;
   delta_regular_hours?: string;

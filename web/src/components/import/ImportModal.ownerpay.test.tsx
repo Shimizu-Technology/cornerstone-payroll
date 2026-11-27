@@ -558,3 +558,50 @@ it('shows straight-time preview with 0 OT for 1099 contractors', () => {
   expect(previewBox.textContent).toContain('(straight time)');
   expect(screen.getByText(/1099 contractor · straight time only/)).toBeTruthy();
 });
+
+it('shows exact gross pay delta for rates with more than two decimals ($20.125/hr -> +$60.38) and per-line rounding ($10.50 -> +$0.52)', () => {
+  const data = preview([]);
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '2',
+        extra_hours_mode: 'split',
+        regular_hours: '0',
+        overtime_hours: '2',
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Service',
+        wage_rate: '20.125',
+        baseline_regular_hours: '40.0',
+        baseline_overtime_hours: '0.0',
+      },
+      {
+        change_index: 1,
+        kind: 'extra_hours',
+        employee_id: 99,
+        employee_name: 'Jordan Worker',
+        hours: '0.05',
+        extra_hours_mode: 'split',
+        regular_hours: '0.05',
+        overtime_hours: '0',
+        employee_wage_rate_id: 8,
+        wage_rate_label: 'Primary',
+        wage_rate: '10.50',
+        baseline_regular_hours: '0.01',
+        baseline_overtime_hours: '0.00',
+        baseline_line_regular_hours: '0.01',
+        baseline_line_overtime_hours: '0.00',
+      },
+    ],
+  };
+  open(data);
+  const fractionalRateBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Avery Server' });
+  expect(fractionalRateBox.textContent).toContain('+$60.38');
+  const roundingBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Jordan Worker' });
+  expect(roundingBox.textContent).toContain('+$0.52');
+});

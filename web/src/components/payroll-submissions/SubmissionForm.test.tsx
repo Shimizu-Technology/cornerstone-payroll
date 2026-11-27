@@ -188,6 +188,8 @@ it('asks which workweek for biweekly computed-overtime periods and auto-selects 
   ]);
   const biweeklyPeriod: PeriodDetail = {
     ...period,
+    start_date: '2026-06-14',
+    end_date: '2026-06-27',
     extra_hours_config: {
       mode: 'workweek',
       overtime_mode: 'weekly_split',
@@ -198,7 +200,7 @@ it('asks which workweek for biweekly computed-overtime periods and auto-selects 
     },
   };
   render(<SubmissionForm period={biweeklyPeriod} onSent={vi.fn()} />);
-  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalledWith('2026-06-27'));
   fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
   fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '7' } });
@@ -250,6 +252,8 @@ it('keeps 1099 contractor extra hours straight time without workweek or OT split
   ]);
   const biweeklyPeriod: PeriodDetail = {
     ...period,
+    start_date: '2026-06-14',
+    end_date: '2026-06-27',
     extra_hours_config: {
       mode: 'workweek',
       overtime_mode: 'weekly_split',
@@ -260,7 +264,7 @@ it('keeps 1099 contractor extra hours straight time without workweek or OT split
     },
   };
   render(<SubmissionForm period={biweeklyPeriod} onSent={vi.fn()} />);
-  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalledWith('2026-06-27'));
   fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '174' } });
   fireEvent.change(screen.getByLabelText('Saved job and rate'), { target: { value: '8' } });

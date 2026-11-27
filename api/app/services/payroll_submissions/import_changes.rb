@@ -287,6 +287,8 @@ module PayrollSubmissions
       rate = change[:wage_rate]
       base_reg = change[:baseline_regular_hours] || "0"
       base_ot = change[:baseline_overtime_hours] || "0"
+      line_base_reg = change[:baseline_line_regular_hours]
+      line_base_ot = change[:baseline_line_overtime_hours]
       reason = input[:reason].to_s.strip
 
       resolved = case mode
@@ -296,6 +298,8 @@ module PayrollSubmissions
           mode: "straight_time",
           baseline_regular: base_reg,
           baseline_overtime: base_ot,
+          line_baseline_regular: line_base_reg,
+          line_baseline_overtime: line_base_ot,
           rate: rate,
           hours: hours_input,
           overtime_hours: input[:overtime_hours]
@@ -321,6 +325,8 @@ module PayrollSubmissions
           mode: "split",
           baseline_regular: base_reg,
           baseline_overtime: base_ot,
+          line_baseline_regular: line_base_reg,
+          line_baseline_overtime: line_base_ot,
           rate: rate,
           regular_hours: input[:regular_hours],
           overtime_hours: input[:overtime_hours]
@@ -357,6 +363,8 @@ module PayrollSubmissions
           mode: "workweek",
           baseline_regular: base_reg,
           baseline_overtime: base_ot,
+          line_baseline_regular: line_base_reg,
+          line_baseline_overtime: line_base_ot,
           rate: rate,
           hours: input[:hours],
           workweek: chosen_week,
