@@ -41,7 +41,8 @@ RSpec.describe "Live finance guards in payroll test context", type: :request do
       business_counts = -> { [ Invoice.count, Expense.count, InvoiceRecipient.count, InvoiceBillingProfile.count, ExpenseVendor.count, InvoiceChatSession.count, FinanceBook.count, FinanceApiToken.count ] }
       expect { public_send(method, path, params: {}, headers: expected_headers) }.not_to change(&business_counts)
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body.fetch("error")).to include("finance book contains live records", "Select a live client")
+      expect(response.parsed_body.fetch("code")).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+      expect(response.parsed_body.fetch("error")).to include("practice company (test workspace)", "live finance books", "Switch to a live client")
     end
   end
 

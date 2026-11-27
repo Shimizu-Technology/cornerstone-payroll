@@ -292,7 +292,8 @@ RSpec.describe "W-2GU official copies", type: :request do
       download("drt")
 
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
+      expect(response.parsed_body["code"]).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+      expect(response.parsed_body["error"]).to include("practice company (test workspace)", "turned off")
       expect(response.body).not_to include("123-45-6789")
       expect(copy_logs).to be_empty
     end

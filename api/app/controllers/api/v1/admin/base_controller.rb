@@ -157,11 +157,11 @@ module Api
           message = if current_company.demo?
             Company::DEMO_UNAVAILABLE_MESSAGE
           elsif finance_request?
-            "You are in a payroll test workspace. This finance book contains live records, so changes are unavailable. Select a live client to continue."
+            "A practice company (test workspace) is selected, so changes to live finance books are turned off. Switch to a live client to continue."
           else
-            "This action is unavailable in a test workspace. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
+            "A practice company (test workspace) is selected, so this option is turned off. Test workspaces cannot issue checks, move money, commit payroll, or produce filing-ready records."
           end
-          render json: { error: message }, status: :forbidden
+          render json: { error: message, code: Company::CONTAINED_COMPANY_RESTRICTED_CODE }, status: :forbidden
         end
 
         def require_capability!(capability, error: nil)
