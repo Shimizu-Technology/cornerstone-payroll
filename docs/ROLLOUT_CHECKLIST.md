@@ -164,11 +164,9 @@ Direct deletion of payroll rows is not an approved rollback and is not safely re
 |--------|-------|
 | Total pay periods | 26 (PP00–PP25) |
 | Coverage | 2024-12-30 to 2025-12-27 |
-| Total employees | 81 (46 original + 35 backfilled) |
-| Total gross wages | ~$500,000 |
-| Total tips | ~$80,000 |
-| Total DRT withholding | ~$20,000 |
-| Total net pay | ~$400,000 |
+| Financial discrepancies | $0.00 across all 26 periods |
+
+*(Client-specific headcount and annual dollar totals are kept outside this public repository.)*
 
 ---
 

@@ -23,7 +23,6 @@ Internal Cornerstone context:
 - `Brain-Dump/work/shimizu-tech/Cornerstone/2) Meeting with Mom to go over loans.md`
 - `Brain-Dump/work/shimizu-tech/Cornerstone/3) Meeting with mom and Auntie Daena to go over payroll.md`
 - `Brain-Dump/work/shimizu-tech/Cornerstone/1) Meeting-with-Cornerstone-CEO-Quarterly-Returns.md`
-- `docs/MOSA_LOANS_AND_IMPORT_WORKFLOW_PLAN_2026-05-20.md`
 
 External payroll-system reference patterns:
 
@@ -128,7 +127,7 @@ An employee assignment should define:
 Examples:
 
 ```text
-Employee: Mo
+Employee: Employee A
 Payroll Field: Auto Loan
 Kind: Deduction
 Treatment: Post-tax
@@ -137,7 +136,7 @@ Linked loan: Auto Loan #123
 ```
 
 ```text
-Employee: Sara
+Employee: Employee B
 Payroll Field: Rent from Employee C
 Kind: Addition
 Treatment: Non-taxable addition
@@ -145,7 +144,7 @@ Default: $250.00/check
 ```
 
 ```text
-Employee: Charlie
+Employee: Employee C
 Payroll Field: Rent to Employee B
 Kind: Deduction
 Treatment: Post-tax deduction
@@ -153,7 +152,7 @@ Default: $250.00/check
 ```
 
 ```text
-Employee: Employee A
+Employee: Employee D
 Payroll Field: 401(k)
 Kind: Deduction
 Treatment: Pre-tax deduction

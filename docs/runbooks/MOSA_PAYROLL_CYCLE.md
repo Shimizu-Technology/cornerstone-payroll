@@ -12,7 +12,7 @@ Use your own login. Every import, entry, approval, preview download and commit i
 - **Pay schedule:** biweekly, Monday to Sunday, paid Thursday (4 days after the period ends), starting with the period that begins November 16, 2026. New pay runs suggest these dates.
 - **Overtime workweek:** Monday 12:00 AM, matching the pay periods.
 - **Next check number:** 22026, after run #117 printed through 22025.
-- **Expected entries** (Standing Changes): Owner A's pay, Owner B's pay and Jordan Parker's maintenance hours. Each is required, with **None this period** allowed.
+- **Expected entries** (Standing Changes): Owner 1's pay, Owner 2's pay, and maintenance hours. Each is required, with **None this period** allowed.
 - **Require client approval before payroll commit:** off.
 
 ## Before you start
@@ -68,7 +68,7 @@ For a review that came from a client portal revision, reactivating reopens that 
 
 If someone's saved hours were changed by hand after an earlier import, and the new Revel hours would change them, the review shows **Revel hours will replace hours entered by hand (n)** with old → new hours per person. Tick **Replace the hand-entered hours with the Revel hours above.** only if the Revel figures are right. Otherwise fix the source first.
 
-Owner pay you entered (Mo's and Sarah's period pay) doesn't trigger this prompt.
+Owner pay you entered (Owner 1's and Owner 2's period pay) doesn't trigger this prompt.
 
 ### Loans: one-time vs installment
 
@@ -91,7 +91,7 @@ When **Needs your action** is empty, choose **Apply Import (N employees)**. Appl
 
 ## 3. Expected entries and missing regulars
 
-The **Expected entries** panel on the pay run lists the entries MoSa needs every period. These are set per client in **Standing Changes** (labels, help text, the employee, owner pay or extra hours, **Required each period**, **Allow None this period**, and order). For MoSa they are Mo's pay, Sarah's pay and Jordan's hours. Addison isn't in Revel.
+The **Expected entries** panel on the pay run lists the entries MoSa needs every period. These are set per client in **Standing Changes** (labels, help text, the employee, owner pay or extra hours, **Required each period**, **Allow None this period**, and order). For MoSa they are Owner 1's pay, Owner 2's pay, and a maintenance worker's hours (not in Revel).
 
 For each entry:
 
@@ -105,7 +105,7 @@ For each entry:
 - **Enter pay for Name** adds them to the hours worksheet so you can enter hours, then calculate.
 - **Not paid this period** records that they're intentionally not paid this run. You can add an optional note. **Undo not paid for Name** reverses it.
 
-**Removing someone and adding them back.** If a worker's hours haven't arrived (Addison, for example), remove them with **⋯ → Edit payroll → Remove from Payroll**. They show as **Excluded this period**, and in **Removed from this run** on the Hours step. When the hours arrive, unapprove if needed (**Unapprove to add someone back**), then choose **Add back to this run** (or **Add back** on the Hours step).
+**Removing someone and adding them back.** If a worker's hours haven't arrived (a non-Revel worker, for example), remove them with **⋯ → Edit payroll → Remove from Payroll**. They show as **Excluded this period**, and in **Removed from this run** on the Hours step. When the hours arrive, unapprove if needed (**Unapprove to add someone back**), then choose **Add back to this run** (or **Add back** on the Hours step).
 
 Adding someone back brings back what the current import applied for them, except hours:
 
@@ -238,6 +238,6 @@ Every change is recorded in the employee's status history and the audit log.
 
 ## Related
 
-- [Manual preview fallback](MANUAL_PREVIEW_CHECKS_AND_STUBS.md), superseded by **Download preview**
+- [Preview checks and pay stubs](PREVIEW_CHECKS_AND_STUBS.md)
 - [Role and permission matrix](../ROLE_PERMISSION_MATRIX_2026-05-14.md)
 - [MoSa rollout cycle runbook](../rollout/02-MOSA-CYCLE-RUNBOOK.md), for parallel-run and cutover evidence
