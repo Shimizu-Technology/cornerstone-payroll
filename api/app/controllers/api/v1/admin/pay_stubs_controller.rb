@@ -262,7 +262,7 @@ module Api
                                         .where(company_id: employee.company_id)
                                         .select(:id)
                          })
-                         .order("pay_periods.pay_date DESC")
+                         .newest_printed_first
                          .limit(params[:limit] || 12)
 
           render json: {

@@ -153,7 +153,7 @@ class PayrollRegisterPdfGenerator
       [ "1099 Contractor Count", s[:contractor_count].to_s ],
       [ "Regular Hours",        decimal(s[:worked_hours]) ],
       [ "Overtime Hours",       decimal(s[:total_overtime_hours]) ],
-      [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(Array(report[:employees]).sum(0.to_d) { |worker| %i[hours_worked overtime_hours holiday_hours pto_hours].sum(0.to_d) { |key| worker[key].to_d } }) ],
+      [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(s[:combined_hours]) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],
       [ "Non-Taxable Additions", fmt(payroll_workers.select { |worker| worker[:employment_type] != "contractor" }.sum(0.to_d) { |worker| PayrollRegisterReconciliation.non_taxable_additions(worker) }) ],
       [ "Bonus",                fmt(s[:total_bonus]) ],
@@ -559,7 +559,7 @@ class PayrollRegisterPdfGenerator
 
   def worker_table_totals(workers)
     {
-      total_hours: sum_workers(workers, :hours_worked),
+      worked_hours: sum_workers(workers, :hours_worked),
       total_overtime_hours: sum_workers(workers, :overtime_hours),
       total_gross: sum_workers(workers, :gross_pay),
       total_bonus: sum_workers(workers, :bonus),
@@ -653,7 +653,7 @@ class PayrollRegisterPdfGenerator
     when :gross_pay
       fmt(summary[:total_gross])
     when :hours_worked
-      decimal(summary[:total_hours])
+      decimal(summary[:worked_hours])
     when :overtime_hours
       decimal(summary[:total_overtime_hours])
     when :bonus

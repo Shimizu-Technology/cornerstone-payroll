@@ -89,10 +89,11 @@ class ImportedPayrollRegister
       worker_classification: employee&.employment_type&.humanize || "Imported worker",
       pay_rate: nil,
       scheduled_hours: nil,
-      hours_worked: money(paycheck.hours_total),
+      hours_worked: regular_hours(paycheck),
       overtime_hours: component_amount(paycheck.hours_breakdown, UnifiedPayrollReporting::OVERTIME_HOURS),
       holiday_hours: component_amount(paycheck.hours_breakdown, /holiday/i),
       pto_hours: component_amount(paycheck.hours_breakdown, /pto|paid time/i),
+      combined_hours: money(paycheck.hours_total),
       reported_tips: paycheck.source_metadata.to_h.dig("verified_amounts", "reported_tips")&.to_d || component_amount(paycheck.earnings_breakdown, /tip/i),
       tips_paid_out: paycheck.source_metadata.to_h.dig("verified_amounts", "tips_paid_out").to_d,
       bonus: component_amount(paycheck.earnings_breakdown, /bonus/i),
@@ -142,6 +143,11 @@ class ImportedPayrollRegister
     {
       employee_count: employees.length,
       contractor_count: contractors.length,
+      # As in the native register: total_hours is combined hours, worked_hours regular hours.
+      total_hours: sum(employees, :combined_hours),
+      worked_hours: sum(employees, :hours_worked),
+      combined_hours: sum(employees, :combined_hours),
+      total_overtime_hours: sum(employees, :overtime_hours),
       total_gross: sum(employees, :gross_pay),
       total_reported_tips: sum(employees, :reported_tips),
       total_tips_paid_out: sum(employees, :tips_paid_out),
@@ -198,6 +204,17 @@ class ImportedPayrollRegister
 
   def roth_amount(paycheck)
     verified_amount(paycheck, "roth_retirement") || component_amount(paycheck.after_tax_deduction_breakdown, /roth/i)
+  end
+
+  # Hours on a regular line, as UnifiedPayrollReporting counts them. A source
+  # with no regular line keeps the hours it doesn't record as another kind,
+  # so a row's hours still add up to the imported total.
+  def regular_hours(paycheck)
+    regular = normalized_lines(paycheck.hours_breakdown).select { |line| line[:label].squish.match?(UnifiedPayrollReporting::REGULAR_HOURS) }
+    return money(regular.sum(0.to_d) { |line| line[:amount].to_d }) if regular.any?
+
+    other = [ UnifiedPayrollReporting::OVERTIME_HOURS, /holiday/i, /pto|paid time/i ].sum(0.to_d) { |pattern| component_amount(paycheck.hours_breakdown, pattern).to_d }
+    money([ paycheck.hours_total.to_d - other, 0.to_d ].max)
   end
 
   def component_amount(lines, pattern)
