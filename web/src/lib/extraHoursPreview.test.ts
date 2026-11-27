@@ -115,4 +115,80 @@ describe('computeExtraHoursPreview', () => {
     expect(result.valid).toBe(false);
     expect(result.error).toContain('regular hours');
   });
+
+  it('rounds per resulting earnings line so preview matches saved gross to the exact cent (0.01h + 0.05h @ $10.50 -> +$0.52)', () => {
+    const split = computeExtraHoursPreview({
+      mode: 'split',
+      rate: '10.50',
+      baselineRegularHours: '0.01',
+      baselineOvertimeHours: '0.00',
+      regularHours: '0.05',
+      overtimeHours: '0',
+    });
+    expect(split.grossPayDelta).toBe(0.52);
+
+    const workweek = computeExtraHoursPreview({
+      mode: 'workweek',
+      rate: '10.50',
+      baselineRegularHours: '0.01',
+      baselineOvertimeHours: '0.00',
+      baselineWeek1Hours: '0.01',
+      baselineWeek2Hours: '0.00',
+      hours: '0.05',
+      workweek: 1,
+      workweekCount: 2,
+    });
+    expect(workweek.grossPayDelta).toBe(0.52);
+
+    const contractor = computeExtraHoursPreview({
+      mode: 'straight_time',
+      rate: '10.50',
+      baselineRegularHours: '0.01',
+      baselineOvertimeHours: '0.00',
+      hours: '0.05',
+    });
+    expect(contractor.grossPayDelta).toBe(0.52);
+
+    // Separate job line starting at 0h rounds its own line independently: round(0.05 * 10.50) = 0.53
+    const separateJob = computeExtraHoursPreview({
+      mode: 'split',
+      rate: '10.50',
+      baselineRegularHours: '0.01',
+      baselineOvertimeHours: '0.00',
+      baselineLineRegularHours: '0.00',
+      baselineLineOvertimeHours: '0.00',
+      regularHours: '0.05',
+      overtimeHours: '0',
+    });
+    expect(separateJob.grossPayDelta).toBe(0.53);
+  });
+
+  it('parses hourly rates with up to 6 decimal places ($20.125/hr, 2 OT -> +$60.38)', () => {
+    const result = computeExtraHoursPreview({
+      mode: 'split',
+      rate: '20.125',
+      baselineRegularHours: '40.00',
+      baselineOvertimeHours: '0.00',
+      regularHours: '0',
+      overtimeHours: '2',
+    });
+    expect(result).toEqual({
+      valid: true,
+      totalHours: 2,
+      deltaRegularHours: 0,
+      deltaOvertimeHours: 2,
+      resultingRegularHours: 40,
+      resultingOvertimeHours: 2,
+      grossPayDelta: 60.38,
+    });
+
+    const sixDecimals = computeExtraHoursPreview({
+      mode: 'straight_time',
+      rate: '20.123456',
+      baselineRegularHours: '0',
+      baselineOvertimeHours: '0',
+      hours: '10',
+    });
+    expect(sixDecimals.grossPayDelta).toBe(201.23);
+  });
 });

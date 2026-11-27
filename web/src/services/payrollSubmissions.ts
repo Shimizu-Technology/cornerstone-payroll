@@ -134,8 +134,8 @@ export const clientPayrollSubmissionsApi = {
     api.post<Detail>(`/client/payroll_submission_periods/${encode(ref)}/decision`, data),
   threads: clientPortalThreadsApi,
   documents: clientDocumentsApi,
-  employees: (): Promise<PickerEmployee[]> =>
-    loadAllEmployees(page => clientEmployeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page })),
+  employees: (ratesOn?: string): Promise<PickerEmployee[]> =>
+    loadAllEmployees(page => clientEmployeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page, ...(ratesOn ? { rates_on: ratesOn } : {}) })),
 };
 
 export const adminPayrollSubmissionsApi = {
@@ -150,8 +150,8 @@ export const adminPayrollSubmissionsApi = {
     api.post<void>(`/admin/payroll_submission_periods/${encode(ref)}/seen`, { foreground: true, displayed_event_id: displayedEventId }, { notifyMaintenance: false }),
   threads: adminPortalThreadsApi,
   documents: adminClientDocumentsApi,
-  employees: (): Promise<PickerEmployee[]> =>
-    loadAllEmployees(page => employeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page })),
+  employees: (ratesOn?: string): Promise<PickerEmployee[]> =>
+    loadAllEmployees(page => employeesApi.list({ status: 'active', per_page: EMPLOYEE_PAGE_SIZE, sort_by: 'name', page, ...(ratesOn ? { rates_on: ratesOn } : {}) })),
 };
 
 export type PayrollSubmissionsApi = typeof clientPayrollSubmissionsApi | typeof adminPayrollSubmissionsApi;

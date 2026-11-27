@@ -111,12 +111,12 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
   const loadEmployees = useCallback(async (): Promise<void> => {
     setEmployeeState('loading');
     try {
-      setEmployees(await clientPayrollSubmissionsApi.employees());
+      setEmployees(await clientPayrollSubmissionsApi.employees(period.end_date || undefined));
       setEmployeeState('ready');
     } catch {
       setEmployeeState('error');
     }
-  }, []);
+  }, [period.end_date]);
   useEffect(() => { void loadEmployees(); }, [loadEmployees]);
 
   const setSlotFile = (portalRole: string, file: File | null): void => {

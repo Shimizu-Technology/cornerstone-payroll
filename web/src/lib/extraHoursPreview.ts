@@ -1,4 +1,8 @@
+import Decimal from 'decimal.js';
+
 const DECIMAL_RE = /^\d{1,9}(\.\d{1,2})?$/;
+// Matches employees.pay_rate (precision 18, scale 6) and employee_wage_rates.rate (precision 12, scale 6).
+const RATE_DECIMAL_RE = /^\d{1,12}(\.\d{1,6})?$/;
 const HOURS_PER_WEEK_BEFORE_OT_HUNDREDTHS = 4000; // 40.00 hours
 const MAX_WEEK_HOURS_HUNDREDTHS = 16800; // 168.00 hours
 const MAX_EXTRA_HOURS_HUNDREDTHS = 100000; // 1000.00 hours
@@ -32,6 +36,18 @@ export function parseDecimalHundredths(value: string | number | undefined | null
   return Number(whole) * 100 + Number(padded);
 }
 
+export function parseRateDecimal(value: string | number | undefined | null): Decimal | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  if (!text || !RATE_DECIMAL_RE.test(text)) return null;
+  try {
+    const parsed = new Decimal(text);
+    return parsed.isFinite() && parsed.gte(0) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function formatHoursHundredths(hundredths: number): string {
   const sign = hundredths < 0 ? '-' : '';
   const abs = Math.abs(Math.round(hundredths));
@@ -53,11 +69,29 @@ export function splitWeeklyHundredths(week1: number, week2: number): { regular: 
   return { regular: reg1 + reg2, overtime: ot1 + ot2 };
 }
 
-function roundCentsFromExact(hoursHundredths: number, rateCents: number, multiplierTenths: number): number {
-  // hours = hoursHundredths / 100, rate = rateCents / 100, multiplier = multiplierTenths / 10
-  // cents = (hoursHundredths * rateCents * multiplierTenths) / 1000
-  const numerator = hoursHundredths * rateCents * multiplierTenths;
-  return Math.round(numerator / 1000);
+function lineAmount(hoursHundredths: number, rate: Decimal, multiplier: string): Decimal {
+  return new Decimal(hoursHundredths)
+    .div(100)
+    .mul(rate)
+    .mul(multiplier)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+}
+
+// Matches PayrollEarningsRounding.line_amount on HourlyPayrollCalculator:
+// each payable earnings line is rounded half-up to cents, so the gross delta
+// is rounded(new line) - rounded(old line) per line.
+function lineGrossDelta(
+  lineBaseRegHundredths: number,
+  lineBaseOtHundredths: number,
+  deltaRegHundredths: number,
+  deltaOtHundredths: number,
+  rate: Decimal,
+): number {
+  const oldReg = lineAmount(lineBaseRegHundredths, rate, '1');
+  const newReg = lineAmount(lineBaseRegHundredths + deltaRegHundredths, rate, '1');
+  const oldOt = lineAmount(lineBaseOtHundredths, rate, '1.5');
+  const newOt = lineAmount(lineBaseOtHundredths + deltaOtHundredths, rate, '1.5');
+  return newReg.minus(oldReg).plus(newOt.minus(oldOt)).toNumber();
 }
 
 export function computeExtraHoursPreview(params: {
@@ -65,6 +99,8 @@ export function computeExtraHoursPreview(params: {
   rate?: string | number | null;
   baselineRegularHours?: string | number | null;
   baselineOvertimeHours?: string | number | null;
+  baselineLineRegularHours?: string | number | null;
+  baselineLineOvertimeHours?: string | number | null;
   baselineWeek1Hours?: string | number | null;
   baselineWeek2Hours?: string | number | null;
   hours?: string;
@@ -75,7 +111,13 @@ export function computeExtraHoursPreview(params: {
 }): ExtraHoursPreviewResult {
   const baseReg = parseDecimalHundredths(params.baselineRegularHours) ?? 0;
   const baseOt = parseDecimalHundredths(params.baselineOvertimeHours) ?? 0;
-  const rateCents = parseDecimalHundredths(params.rate);
+  const lineBaseReg = params.baselineLineRegularHours !== undefined && params.baselineLineRegularHours !== null
+    ? (parseDecimalHundredths(params.baselineLineRegularHours) ?? baseReg)
+    : baseReg;
+  const lineBaseOt = params.baselineLineOvertimeHours !== undefined && params.baselineLineOvertimeHours !== null
+    ? (parseDecimalHundredths(params.baselineLineOvertimeHours) ?? baseOt)
+    : baseOt;
+  const rateDecimal = parseRateDecimal(params.rate);
 
   if (params.mode === 'straight_time') {
     const hours = parseDecimalHundredths(params.hours);
@@ -91,7 +133,7 @@ export function computeExtraHoursPreview(params: {
         grossPayDelta: null,
       };
     }
-    const grossCents = rateCents === null ? null : roundCentsFromExact(hours, rateCents, 10);
+    const grossDelta = rateDecimal === null ? null : lineGrossDelta(lineBaseReg, lineBaseOt, hours, 0, rateDecimal);
     return {
       valid: true,
       totalHours: hours / 100,
@@ -99,7 +141,7 @@ export function computeExtraHoursPreview(params: {
       deltaOvertimeHours: 0,
       resultingRegularHours: (baseReg + hours) / 100,
       resultingOvertimeHours: baseOt / 100,
-      grossPayDelta: grossCents === null ? null : grossCents / 100,
+      grossPayDelta: grossDelta,
     };
   }
 
@@ -145,9 +187,7 @@ export function computeExtraHoursPreview(params: {
         grossPayDelta: null,
       };
     }
-    const grossCents = rateCents === null
-      ? null
-      : roundCentsFromExact(reg, rateCents, 10) + roundCentsFromExact(ot, rateCents, 15);
+    const grossDelta = rateDecimal === null ? null : lineGrossDelta(lineBaseReg, lineBaseOt, reg, ot, rateDecimal);
     return {
       valid: true,
       totalHours: total / 100,
@@ -155,7 +195,7 @@ export function computeExtraHoursPreview(params: {
       deltaOvertimeHours: ot / 100,
       resultingRegularHours: (baseReg + reg) / 100,
       resultingOvertimeHours: (baseOt + ot) / 100,
-      grossPayDelta: grossCents === null ? null : grossCents / 100,
+      grossPayDelta: grossDelta,
     };
   }
 
@@ -208,9 +248,7 @@ export function computeExtraHoursPreview(params: {
   const { regular: newReg, overtime: newOt } = splitWeeklyHundredths(newW1, newW2);
   const deltaReg = newReg - baseReg;
   const deltaOt = newOt - baseOt;
-  const grossCents = rateCents === null
-    ? null
-    : roundCentsFromExact(deltaReg, rateCents, 10) + roundCentsFromExact(deltaOt, rateCents, 15);
+  const grossDelta = rateDecimal === null ? null : lineGrossDelta(lineBaseReg, lineBaseOt, deltaReg, deltaOt, rateDecimal);
   return {
     valid: true,
     totalHours: hours / 100,
@@ -218,6 +256,6 @@ export function computeExtraHoursPreview(params: {
     deltaOvertimeHours: deltaOt / 100,
     resultingRegularHours: newReg / 100,
     resultingOvertimeHours: newOt / 100,
-    grossPayDelta: grossCents === null ? null : grossCents / 100,
+    grossPayDelta: grossDelta,
   };
 }

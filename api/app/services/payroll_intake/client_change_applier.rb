@@ -59,10 +59,6 @@ module PayrollIntake
       baseline_allocations = payroll_item.wage_rate_hours.deep_dup
       allocations = payroll_item.wage_rate_hours.deep_dup
 
-      resolved = resolve_client_hours_deltas!(payroll_item, employee, row, input, rate)
-      delta_regular = resolved.fetch(:delta_regular_hours)
-      delta_overtime = resolved.fetch(:delta_overtime_hours)
-
       if allocations.empty? && [ payroll_item.hours_worked, payroll_item.overtime_hours, payroll_item.holiday_hours, payroll_item.pto_hours ].any? { |hours| hours.to_d.positive? }
         base = if use_selected_wage_rate_for_existing && row[:selected_wage_rate_id].present?
           period_rates.find { |candidate| candidate.id.to_s == row[:selected_wage_rate_id].to_s }
@@ -102,6 +98,18 @@ module PayrollIntake
         }
         allocations << entry
       end
+
+      resolved = resolve_client_hours_deltas!(
+        payroll_item,
+        employee,
+        row,
+        input,
+        rate,
+        line_baseline_regular: entry["regular_hours"].to_d,
+        line_baseline_overtime: entry["overtime_hours"].to_d
+      )
+      delta_regular = resolved.fetch(:delta_regular_hours)
+      delta_overtime = resolved.fetch(:delta_overtime_hours)
 
       entry["regular_hours"] = (entry["regular_hours"].to_d + delta_regular).to_f
       entry["overtime_hours"] = (entry["overtime_hours"].to_d + delta_overtime).to_f
@@ -159,12 +167,14 @@ module PayrollIntake
 
     attr_reader :pay_period
 
-    def resolve_client_hours_deltas!(payroll_item, employee, row, input, rate)
+    def resolve_client_hours_deltas!(payroll_item, employee, row, input, rate, line_baseline_regular:, line_baseline_overtime:)
       if ExtraHoursPolicy.contractor?(employee, as_of: pay_period.end_date)
         return ExtraHoursPolicy.resolve_deltas!(
           mode: "straight_time",
           baseline_regular: payroll_item.hours_worked,
           baseline_overtime: payroll_item.overtime_hours,
+          line_baseline_regular: line_baseline_regular,
+          line_baseline_overtime: line_baseline_overtime,
           rate: rate.rate,
           hours: input[:hours],
           regular_hours: input[:regular_hours],
@@ -185,6 +195,8 @@ module PayrollIntake
           mode: "workweek",
           baseline_regular: payroll_item.hours_worked,
           baseline_overtime: payroll_item.overtime_hours,
+          line_baseline_regular: line_baseline_regular,
+          line_baseline_overtime: line_baseline_overtime,
           rate: rate.rate,
           hours: input[:hours],
           workweek: input[:workweek],
@@ -199,6 +211,8 @@ module PayrollIntake
           mode: "split",
           baseline_regular: payroll_item.hours_worked,
           baseline_overtime: payroll_item.overtime_hours,
+          line_baseline_regular: line_baseline_regular,
+          line_baseline_overtime: line_baseline_overtime,
           rate: rate.rate,
           regular_hours: input[:regular_hours],
           overtime_hours: input[:overtime_hours]

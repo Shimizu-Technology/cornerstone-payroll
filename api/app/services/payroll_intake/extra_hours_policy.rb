@@ -144,10 +144,20 @@ module PayrollIntake
           !has_submitted_split
         end
 
+        line_baseline = resolve_line_baseline(
+          employee: employee,
+          pay_period: pay_period,
+          baseline: baseline,
+          source_row: source_row,
+          existing_item: existing_item,
+          rate: rate
+        )
+
         projection = if !needs_classification && rate&.rate
           compute_projection(
             mode: mode,
             baseline: baseline,
+            line_baseline: line_baseline,
             workweeks: workweeks,
             rate: rate.rate.to_d,
             hours: change_row["hours"],
@@ -170,6 +180,8 @@ module PayrollIntake
           fallback_reason: fallback_reason,
           baseline_regular_hours: baseline[:regular_hours].to_s("F"),
           baseline_overtime_hours: baseline[:overtime_hours].to_s("F"),
+          baseline_line_regular_hours: line_baseline[:regular_hours].to_s("F"),
+          baseline_line_overtime_hours: line_baseline[:overtime_hours].to_s("F"),
           baseline_week1_hours: mode == "workweek" ? baseline[:week1_hours].to_s("F") : nil,
           baseline_week2_hours: mode == "workweek" ? baseline[:week2_hours].to_s("F") : nil,
           delta_regular_hours: projection&.dig(:delta_regular_hours)&.to_s("F"),
@@ -184,9 +196,12 @@ module PayrollIntake
       # when inputs are invalid or exceed weekly/total caps.
       def resolve_deltas!(mode:, baseline_regular:, baseline_overtime:, rate:,
                           hours: nil, regular_hours: nil, overtime_hours: nil,
-                          workweek: nil, workweeks: [], baseline_week1: 0.to_d, baseline_week2: 0.to_d)
+                          workweek: nil, workweeks: [], baseline_week1: 0.to_d, baseline_week2: 0.to_d,
+                          line_baseline_regular: nil, line_baseline_overtime: nil)
         base_reg = BigDecimal(baseline_regular.to_s.presence || "0").round(2)
         base_ot = BigDecimal(baseline_overtime.to_s.presence || "0").round(2)
+        line_base_reg = line_baseline_regular.nil? ? base_reg : BigDecimal(line_baseline_regular.to_s.presence || "0").round(2)
+        line_base_ot = line_baseline_overtime.nil? ? base_ot : BigDecimal(line_baseline_overtime.to_s.presence || "0").round(2)
         hourly_rate = BigDecimal(rate.to_s)
 
         case mode.to_s
@@ -195,6 +210,13 @@ module PayrollIntake
           raise ArgumentError, "1099 contractors do not receive overtime hours." if ot_check.positive?
 
           total = parse_positive_hours!(hours.presence || regular_hours, label: "hours")
+          gross_delta = line_gross_delta(
+            line_base_reg: line_base_reg,
+            line_base_ot: line_base_ot,
+            delta_reg: total,
+            delta_ot: 0.to_d,
+            rate: hourly_rate
+          )
           {
             hours_mode: "straight_time",
             hours: total,
@@ -202,7 +224,7 @@ module PayrollIntake
             delta_overtime_hours: 0.to_d,
             resulting_regular_hours: (base_reg + total).round(2),
             resulting_overtime_hours: base_ot,
-            gross_pay_delta: (total * hourly_rate).round(2)
+            gross_pay_delta: gross_delta
           }
         when "split"
           reg = parse_nonnegative_hours!(regular_hours.presence || "0", label: "regular hours")
@@ -212,7 +234,13 @@ module PayrollIntake
             raise ArgumentError, "Enter regular hours and/or overtime hours greater than zero (up to #{MAX_EXTRA_HOURS.to_i} total)."
           end
 
-          gross_delta = ((reg * hourly_rate).round(2) + (ot * hourly_rate * OVERTIME_MULTIPLIER).round(2)).round(2)
+          gross_delta = line_gross_delta(
+            line_base_reg: line_base_reg,
+            line_base_ot: line_base_ot,
+            delta_reg: reg,
+            delta_ot: ot,
+            rate: hourly_rate
+          )
           {
             hours_mode: "split",
             hours: total,
@@ -246,7 +274,13 @@ module PayrollIntake
           new_reg, new_ot = PayrollIntake::Adapters::CornerstoneWorkbook.split_for_weekly_hours(new_w1, new_w2)
           delta_reg = (new_reg - base_reg).round(2)
           delta_ot = (new_ot - base_ot).round(2)
-          gross_delta = ((delta_reg * hourly_rate).round(2) + (delta_ot * hourly_rate * OVERTIME_MULTIPLIER).round(2)).round(2)
+          gross_delta = line_gross_delta(
+            line_base_reg: line_base_reg,
+            line_base_ot: line_base_ot,
+            delta_reg: delta_reg,
+            delta_ot: delta_ot,
+            rate: hourly_rate
+          )
           week_meta = workweeks.find { |candidate| candidate[:index] == week_index }
 
           {
@@ -351,11 +385,54 @@ module PayrollIntake
         }
       end
 
-      def compute_projection(mode:, baseline:, workweeks:, rate:, hours:, regular_hours:, overtime_hours:, workweek:)
+      def line_gross_delta(line_base_reg:, line_base_ot:, delta_reg:, delta_ot:, rate:)
+        old_reg = PayrollEarningsRounding.line_amount(line_base_reg * rate)
+        new_reg = PayrollEarningsRounding.line_amount((line_base_reg + delta_reg) * rate)
+        old_ot = PayrollEarningsRounding.line_amount(line_base_ot * rate * OVERTIME_MULTIPLIER)
+        new_ot = PayrollEarningsRounding.line_amount((line_base_ot + delta_ot) * rate * OVERTIME_MULTIPLIER)
+        ((new_reg - old_reg) + (new_ot - old_ot)).round(2)
+      end
+
+      def resolve_line_baseline(employee:, pay_period:, baseline:, source_row:, existing_item:, rate:)
+        return { regular_hours: baseline[:regular_hours], overtime_hours: baseline[:overtime_hours] } unless rate
+
+        source = source_row&.to_h&.deep_symbolize_keys
+        if source.present? && !source[:workbook_only]
+          selected_id = source[:selected_wage_rate_id]
+          same_job = if selected_id.present?
+            selected_id.to_s == rate.id.to_s
+          else
+            primary = employee&.primary_wage_rate_on(pay_period.end_date)
+            primary.nil? || primary.id.to_s == rate.id.to_s
+          end
+          return same_job ? { regular_hours: baseline[:regular_hours], overtime_hours: baseline[:overtime_hours] } : { regular_hours: 0.to_d, overtime_hours: 0.to_d }
+        end
+
+        previous = existing_item&.custom_columns_data.to_h["client_change_evidence"].to_h
+        allocations = if previous["kind"] == "extra_hours" && previous.key?("baseline_allocations")
+          Array(previous["baseline_allocations"])
+        else
+          Array(existing_item&.wage_rate_hours)
+        end
+        if allocations.any?
+          entry = allocations.find { |allocation| allocation["employee_wage_rate_id"].to_s == rate.id.to_s && allocation["rate"].to_d == rate.rate }
+          return {
+            regular_hours: decimal_or_zero(entry&.dig("regular_hours")),
+            overtime_hours: decimal_or_zero(entry&.dig("overtime_hours"))
+          }
+        end
+
+        same_rate = existing_item.nil? || existing_item.pay_rate.to_d == rate.rate
+        same_rate ? { regular_hours: baseline[:regular_hours], overtime_hours: baseline[:overtime_hours] } : { regular_hours: 0.to_d, overtime_hours: 0.to_d }
+      end
+
+      def compute_projection(mode:, baseline:, line_baseline:, workweeks:, rate:, hours:, regular_hours:, overtime_hours:, workweek:)
         resolve_deltas!(
           mode: mode,
           baseline_regular: baseline[:regular_hours],
           baseline_overtime: baseline[:overtime_hours],
+          line_baseline_regular: line_baseline[:regular_hours],
+          line_baseline_overtime: line_baseline[:overtime_hours],
           rate: rate,
           hours: hours,
           regular_hours: regular_hours,
