@@ -1276,7 +1276,7 @@ DROP TRIGGER IF EXISTS admin_overrides_no_truncate ON admin_overrides;
 CREATE TRIGGER admin_overrides_no_truncate BEFORE TRUNCATE ON admin_overrides
   FOR EACH STATEMENT EXECUTE FUNCTION reject_admin_override_mutation();
 
--- 20261127170000_create_payroll_item_bridge_overlap_dispositions.rb
+-- 20261127200000_create_payroll_item_bridge_overlap_dispositions.rb
 CREATE OR REPLACE FUNCTION prevent_payroll_item_bridge_overlap_disposition_mutation()
 RETURNS trigger AS $$
 BEGIN
