@@ -50,17 +50,21 @@ module DeliveryConsents
       end
     end
 
-    # Per kind, how the company's active employees answered.
+    # Per kind, how the company's active employees answered. The employees are
+    # read once, so every kind counts the same people; 1099 contractors don't
+    # get a W-2GU and are left out of its counts.
     def self.company_counts(company_id)
-      answers = by_employee(company_id, Employee.active.where(company_id: company_id).pluck(:id)).values
+      employees = Employee.active.where(company_id: company_id).pluck(:id, :employment_type)
+      answers = by_employee(company_id, employees.map(&:first))
 
       DeliveryDisclosure::KINDS.index_with do |kind|
-        tally = answers.map { |row| row.dig(kind, :answer) }.tally
+        counted = employees.reject { |_id, type| kind == "w2gu" && type == "contractor" }.map(&:first)
+        tally = counted.map { |id| answers.dig(id, kind, :answer) }.tally
         {
           paperless: tally.fetch(PAPERLESS, 0),
           keep_paper: tally.fetch(KEEP_PAPER, 0),
           not_answered: tally.fetch(NOT_ANSWERED, 0),
-          total: answers.size
+          total: counted.size
         }
       end
     end

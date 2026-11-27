@@ -86,7 +86,7 @@ function ConsentCard({
   isPrintTarget,
   onPrint,
   onUpdated,
-  onReload,
+  onRefresh,
 }: {
   item: DeliveryConsentItem;
   canConsent: boolean;
@@ -94,7 +94,8 @@ function ConsentCard({
   isPrintTarget: boolean;
   onPrint: () => void;
   onUpdated: (next: DeliveryConsentsState, message: string) => void;
-  onReload: () => void;
+  /** Loads the latest wording in place, so this card and its message stay on screen. */
+  onRefresh: () => void;
 }): ReactElement {
   const { api, state, reportError } = useReadySession();
   const { stepUp, openAccountSettings } = useEmployeeAuth();
@@ -181,7 +182,12 @@ function ConsentCard({
       } else {
         setError(consentErrorMessage(failure, "Couldn't save your consent. Try again in a minute."));
         if (failure instanceof EmployeeApiError && failure.kind === 'disclosure_outdated') {
-          onReload();
+          // Agreeing (and the W-2GU PDF check) covered the old text: start again on the new wording.
+          setAcknowledged(false);
+          setChallenge(null);
+          setProofCode('');
+          setPdfNotice(null);
+          onRefresh();
         }
       }
     } finally {
@@ -443,7 +449,7 @@ function ConsentCard({
 }
 
 function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[] }): ReactElement | null {
-  const { isFormer, isViewOnly } = useReadySession();
+  const { api, state: session, isFormer, isViewOnly } = useReadySession();
   const { state, reload, update } = useEmployeeData<DeliveryConsentsState>(
     'delivery-consents',
     (api, linkId, signal) => api.deliveryConsents(linkId, signal),
@@ -493,7 +499,9 @@ function DeliveryConsentCards({ kinds }: { kinds: readonly DeliveryConsentKind[]
           canWithdraw={canWithdraw}
           isPrintTarget={printingKind === item.kind}
           onPrint={() => setPrintingKind(item.kind)}
-          onReload={reload}
+          onRefresh={() => {
+            void api.deliveryConsents(session.link.id).then(update, reload);
+          }}
           onUpdated={(next, message) => {
             update(next);
             setNotice(message);

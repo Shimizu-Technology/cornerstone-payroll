@@ -157,8 +157,11 @@ function AppRoutes({ viewAs }: { viewAs?: ViewOnlyGrant | null }): ReactElement 
   if (path === '/sign-up/done') return <FinishSignUpScreen />;
   if (path === '/claim' || path === '/add-access') return <LinkCheckScreen mode="claim" />;
   if (path === '/reactivate') return <LinkCheckScreen mode="reactivate" />;
+  // After /claim or /reactivate, open the employer just added (chooseLink still
+  // checks it's one of this login's usable links).
+  const claimedLinkId = (location.state as { linkId?: unknown } | null)?.linkId;
   return (
-    <EmployeeSessionProvider viewOnly={Boolean(viewAs)}>
+    <EmployeeSessionProvider viewOnly={Boolean(viewAs)} initialLinkId={!viewAs && typeof claimedLinkId === 'string' ? claimedLinkId : null}>
       <SignedInApp viewAs={viewAs} />
     </EmployeeSessionProvider>
   );

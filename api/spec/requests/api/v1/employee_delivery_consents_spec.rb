@@ -637,6 +637,7 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       keep_paper_for.call(gone, gone_link)
       gone.update!(status: "terminated", termination_date: Date.new(2026, 11, 1))
       create(:employee, company: create(:company)) # another company is never counted
+      create(:employee, :contractor, company: company) # counted for pay statements; 1099 contractors get no W-2GU
 
       staff_headers = bearer(staff_user.clerk_id, fva: [ 0, 0 ], two_factor_enabled: true).merge("X-Company-Id" => company.id.to_s)
       get "/api/v1/admin/employees/#{paper.id}", headers: staff_headers
@@ -645,9 +646,10 @@ RSpec.describe "Employee electronic-delivery consents", :portal_notifications, t
       expect(summary["items"].first).to include("kind" => "pay_statements", "status" => "not_consented", "answer" => "keep_paper",
         "paper_continues" => true)
       expect(summary["items"].first["paper_chosen_at"]).to be_present
-      # Active employees: the shared example employee, consented, paper, withdrawn and the one without an account.
+      # Active employees: the shared example employee, consented, paper, withdrawn, the one without an
+      # account and the contractor, who isn't counted for W-2GU.
       expect(summary["company_counts"]).to eq(
-        "pay_statements" => { "paperless" => 1, "keep_paper" => 2, "not_answered" => 2, "total" => 5 },
+        "pay_statements" => { "paperless" => 1, "keep_paper" => 2, "not_answered" => 3, "total" => 6 },
         "w2gu" => { "paperless" => 0, "keep_paper" => 0, "not_answered" => 5, "total" => 5 }
       )
 

@@ -14,7 +14,9 @@ type Answer = 'paperless' | 'keep_paper' | 'not_answered';
 
 const DISCLOSURE_TEXT = 'Purpose and scope\nElectronic pay statements under Guam UETA.\n\nRight to withdraw consent\nWithdraw in one tap.';
 
-function consents({ pay = 'not_answered', w2 = 'not_answered' }: { pay?: Answer; w2?: Answer } = {}) {
+function consents({ pay = 'not_answered', w2 = 'not_answered', version = '2026-11-25-draft-1', text = DISCLOSURE_TEXT }: {
+  pay?: Answer; w2?: Answer; version?: string; text?: string;
+} = {}) {
   const item = (kind: 'pay_statements' | 'w2gu', answer: Answer) => ({
     kind,
     status: answer === 'paperless' ? 'consented' : 'not_consented',
@@ -32,9 +34,9 @@ function consents({ pay = 'not_answered', w2 = 'not_answered' }: { pay?: Answer;
       : null,
     last_withdrawn_at: null,
     disclosure: {
-      version: '2026-11-25-draft-1',
+      version,
       title: kind === 'w2gu' ? 'Electronic Form W-2GU Delivery Consent' : 'Electronic Pay Statement Delivery Consent',
-      text: DISCLOSURE_TEXT,
+      text,
       digest: 'a'.repeat(64),
       published_at: '2026-11-25T00:00:00Z',
       draft_marker: false,
@@ -71,6 +73,12 @@ function session({ deliveryConsent = true, status = 'active' }: { deliveryConsen
 const posts = (fetchMock: ReturnType<typeof respond>) => fetchMock.mock.calls
   .filter(([, init]) => init?.method === 'POST')
   .map(([url, init]) => ({ path: new URL(String(url), 'http://localhost').pathname.replace(/^\/api\/v1/, ''), body: JSON.parse(String(init?.body ?? '{}')) as unknown }));
+
+const REVERIFY = () => Response.json({
+  clerk_error: { type: 'forbidden', reason: 'reverification-error', metadata: { reverification: { level: 'second_factor', afterMinutes: 10 } } },
+}, { status: 403 });
+const verified = (init?: RequestInit) => new Headers(init?.headers).get('Authorization') === 'Bearer dev-preview-token-verified';
+const UPDATED_TEXT = 'Purpose and scope\nUpdated wording for electronic pay statements.';
 
 const signedIn = (): void => sessionStorage.setItem('employee-dev-preview-signed-in', 'true');
 
@@ -267,6 +275,127 @@ describe('"Go paperless?" step', () => {
   });
 });
 
+describe('when the disclosure changes while agreeing', () => {
+  it('on the step: clears the agreement, opens the new wording, and records consent only to it', async () => {
+    openAt('/go-paperless');
+    let version = '2026-11-25-draft-1';
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', respond({
+      ...session(),
+      'GET /employee/delivery_consents': () => Response.json(
+        version === 'v2' ? consents({ version: 'v2', text: UPDATED_TEXT }) : consents(),
+      ),
+      'POST /employee/delivery_consents': (init) => {
+        if (!verified(init)) return REVERIFY();
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.disclosure_version !== 'v2') {
+          version = 'v2';
+          return Response.json({ error: 'Updated', code: 'disclosure_outdated' }, { status: 422 });
+        }
+        return Response.json(consents({ pay: 'paperless', version: 'v2', text: UPDATED_TEXT }), { status: 201 });
+      },
+    }));
+    render(<EmployeeApp />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Yes, go paperless' }));
+    const form = screen.getByRole('form', { name: 'Go paperless' });
+    await userEvent.click(within(form).getByRole('checkbox'));
+    await userEvent.click(within(form).getByRole('button', { name: 'Go paperless' }));
+    await userEvent.click(within(await screen.findByTestId('dev-preview-step-up')).getByRole('button', { name: 'Confirm' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('The disclosure was just updated. Read the new wording below, then check the box again to agree.');
+    expect(document.body.textContent).not.toMatch(/Reload this page/);
+    const updated = await within(form).findByText('Updated wording for electronic pay statements.');
+    expect(updated.closest('[hidden]')).toBeNull();
+    expect((within(form).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    expect((within(form).getByRole('button', { name: 'Go paperless' }) as HTMLButtonElement).disabled).toBe(true);
+
+    await userEvent.click(within(form).getByRole('checkbox'));
+    await userEvent.click(within(form).getByRole('button', { name: 'Go paperless' }));
+    expect(await homeHeading()).toBeTruthy();
+    expect(bodies.map((body) => body.disclosure_version)).toEqual(['2026-11-25-draft-1', 'v2']);
+  });
+
+  it('on the My info card: clears the agreement and keeps the message with the new wording', async () => {
+    openAt('/my-info');
+    let version = '2026-11-25-draft-1';
+    const bodies: Record<string, unknown>[] = [];
+    vi.stubGlobal('fetch', respond({
+      ...session(),
+      '/employee/profile': () => Response.json({ legal_name: 'Jordan Reyes', email: 'jordan@example.test' }),
+      'GET /employee/delivery_consents': () => Response.json(
+        version === 'v2' ? consents({ version: 'v2', text: UPDATED_TEXT }) : consents(),
+      ),
+      'POST /employee/delivery_consents': (init) => {
+        if (!verified(init)) return REVERIFY();
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        bodies.push(body);
+        if (body.disclosure_version !== 'v2') {
+          version = 'v2';
+          return Response.json({ error: 'Updated', code: 'disclosure_outdated' }, { status: 422 });
+        }
+        return Response.json(consents({ pay: 'paperless', version: 'v2', text: UPDATED_TEXT }), { status: 201 });
+      },
+    }));
+    render(<EmployeeApp />);
+
+    const card = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    await userEvent.click(within(card).getByRole('checkbox'));
+    await userEvent.click(within(card).getByRole('button', { name: 'Consent to electronic pay statements' }));
+    await userEvent.click(within(await screen.findByTestId('dev-preview-step-up')).getByRole('button', { name: 'Confirm' }));
+
+    const refreshed = await screen.findByRole('region', { name: 'Electronic pay statements' });
+    expect(await within(refreshed).findByText('Updated wording for electronic pay statements.')).toBeTruthy();
+    expect(within(refreshed).getByRole('alert').textContent).toContain('check the box again to agree');
+    expect((within(refreshed).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
+    expect((within(refreshed).getByRole('button', { name: 'Consent to electronic pay statements' }) as HTMLButtonElement).disabled).toBe(true);
+
+    await userEvent.click(within(refreshed).getByRole('checkbox'));
+    await userEvent.click(within(refreshed).getByRole('button', { name: 'Consent to electronic pay statements' }));
+    expect(await screen.findByText(/Consent recorded for electronic pay statements/)).toBeTruthy();
+    expect(bodies.map((body) => body.disclosure_version)).toEqual(['2026-11-25-draft-1', 'v2']);
+  });
+});
+
+describe('after adding access on a login with two employers', () => {
+  it('asks "Go paperless?" for the employer just added, without the employer picker', async () => {
+    openAt('/claim');
+    sessionStorage.setItem('employee-invite-token', 'abcdefghijklmnop1234');
+    const askedFor: (string | null)[] = [];
+    vi.stubGlobal('fetch', respond({
+      '/public/employee_terms': () => Response.json({ version: 'terms-1', title: 'Employee App Terms', terms_url: '/terms', privacy_url: '/privacy' }),
+      'POST /employee/links/claim': (init) => (verified(init)
+        ? Response.json({ link: { id: 5, company_name: 'Second Shop', status: 'active' } }, { status: 201 })
+        : REVERIFY()),
+      '/employee/links': () => Response.json({ links: [
+        { id: 3, company_name: 'Harbor Finch', status: 'active' },
+        { id: 5, company_name: 'Second Shop', status: 'active' },
+      ] }),
+      '/employee/context': () => Response.json({
+        first_name: 'Jordan', status: 'active', features: { stubs: false, tax_forms: true, profile_requests: false, delivery_consent: true },
+      }),
+      'GET /employee/delivery_consents': (init) => {
+        askedFor.push(new Headers(init?.headers).get('X-Employee-Link-Id'));
+        return Response.json(consents());
+      },
+    }));
+    render(<EmployeeApp />);
+
+    await userEvent.selectOptions(await screen.findByLabelText('Month'), '4');
+    await userEvent.type(screen.getByLabelText('Day'), '7');
+    await userEvent.type(screen.getByLabelText('Year'), '1990');
+    await userEvent.type(screen.getByLabelText('Last 4 of your Social Security number'), '1234');
+    await userEvent.click(await screen.findByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: 'Add access' }));
+    await userEvent.click(within(await screen.findByTestId('dev-preview-step-up')).getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByRole('button', { name: 'Yes, go paperless' })).toBeTruthy();
+    expect(window.location.pathname).toBe('/go-paperless');
+    expect(askedFor).toEqual(['5']);
+  });
+});
+
 describe('Home cards', () => {
   it('asks about pay stubs until answered, and "Not now" hides the card for the rest of the visit', async () => {
     openAt('/');
@@ -353,6 +482,8 @@ describe('Home cards', () => {
       expect(within(card).getByRole('link', { name: 'Choose for W-2GU' }).getAttribute('href')).toBe('/taxes');
       await userEvent.click(within(card).getByRole('button', { name: 'Not now: Get your W-2GU online?' }));
       expect(w2Card()).toBeNull();
+      // No other card: focus goes to the page heading rather than getting lost.
+      await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Hi, Jordan' })));
     });
 
     it('still shows on January 31 for last year’s form, and is gone on February 1', async () => {
@@ -361,6 +492,18 @@ describe('Home cards', () => {
       cleanup();
       await at('2027-01-31T14:00:00Z'); // 00:00 on Feb 1 in Guam
       expect(w2Card()).toBeNull();
+    });
+
+    it('moves focus to the remaining card when one is dismissed', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-12-15T02:00:00Z'));
+      openAt('/');
+      vi.stubGlobal('fetch', respond({ ...session(), 'GET /employee/delivery_consents': () => Response.json(consents()) }));
+      render(<EmployeeApp />);
+      const card = await screen.findByRole('region', { name: 'Choose how you get pay stubs' });
+      await screen.findByRole('region', { name: 'Get your W-2GU online?' });
+      await userEvent.click(within(card).getByRole('button', { name: 'Not now: Choose how you get pay stubs' }));
+      await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Choose for W-2GU' })));
     });
 
     it('is hidden in season once the employee answered for W-2GU', async () => {
