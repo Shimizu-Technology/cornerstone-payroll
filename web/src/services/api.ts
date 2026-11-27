@@ -7141,3 +7141,26 @@ export interface PayrollCorrectionPreflight {
 export interface PayrollCorrectionPayment {
   id: number; check_number: string | null; payee: string; amount: number; status: string; already_voided: boolean;
 }
+
+export interface TippedOccupation {
+  id: number;
+  occupation_code: string;
+  effective_from: string;
+  effective_to: string | null;
+}
+
+type TippedOccupationHistory = { data: TippedOccupation[]; codes: Record<string, string> };
+type TippedOccupationInput = { occupation_code: string; effective_from: string; effective_to?: string; replace_id?: number };
+
+export const tippedOccupationsApi = {
+  catalog: (companyId: number) =>
+    api.get<{ codes: Record<string, string> }>('/admin/tipped_occupation_codes', undefined, { companyId }),
+  history: (employeeId: number, companyId: number) =>
+    api.get<TippedOccupationHistory>(`/admin/employees/${employeeId}/tipped_occupations`, undefined, { companyId }),
+  save: (employeeId: number, companyId: number, input: TippedOccupationInput) =>
+    api.post<TippedOccupationHistory>(`/admin/employees/${employeeId}/tipped_occupations`, input, { companyId }),
+  remove: (employeeId: number, occupationId: number, companyId: number) =>
+    api.delete<TippedOccupationHistory>(`/admin/employees/${employeeId}/tipped_occupations/${occupationId}`, { companyId }),
+  bulkSet: (companyId: number, input: TippedOccupationInput & { tax_year: number; employee_ids: number[] }) =>
+    api.post<{ count: number }>('/admin/year_end/tipped_occupations', input, { companyId }),
+};
