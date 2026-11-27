@@ -234,14 +234,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await route.fulfill({ response, json: body });
     });
     await page.goto('/app');
-    const recentPayrollLink = page.getByRole('link', { name: /^Open payroll / }).first();
+    const recentPayrollLink = page.getByRole('link', { name: 'Open payroll Keyboard test payroll' });
+    const destination = `/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work`;
     await expect(recentPayrollLink).toBeVisible();
-    const destination = await recentPayrollLink.getAttribute('href');
-    expect(destination).toMatch(new RegExp(`^/companies/${fixture.company_id}/pay-runs/\\d+/overview`));
+    await expect(recentPayrollLink).toHaveAttribute('href', destination);
 
     await recentPayrollLink.focus();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(new RegExp(`${destination?.replace('/overview', '/work').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    await expect(page).toHaveURL((url) => url.pathname === destination);
     await expect(page.getByRole('heading', { name: /[A-Z][a-z]{2} \d+/  })).toBeVisible();
   });
 
