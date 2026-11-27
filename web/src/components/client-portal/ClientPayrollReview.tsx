@@ -8,7 +8,6 @@ import { clientPayPeriodsApi } from '@/services/api';
 import { formatCurrency } from '@/lib/utils';
 import { formatGuam } from '@/lib/payrollSubmissionFormat';
 import type { PayPeriod } from '@/types';
-import { ViewOnlyNotice } from './ViewOnlyNotice';
 import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
@@ -76,7 +75,7 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
     ? 'Your Cornerstone account team was notified by email.'
     : review?.notification_status === 'queued' || (review?.notification_status == null && review?.notification_queued)
       ? 'Notification requested for your Cornerstone account team.'
-      : 'Recorded. Cornerstone will see it in Client Inbox.';
+      : 'Recorded. Your Cornerstone payroll team has it.';
   return <Card className="border-primary-200">
     <CardContent className="space-y-4 pt-6 [&_button]:min-h-11">
       <div>
@@ -103,7 +102,6 @@ export function ClientPayrollReview({ payPeriod, companyId, onDone }: {
         <p className="whitespace-pre-wrap break-words">{review.change_request_note}</p>
         <p>{decisionNotificationCopy} You’ll receive a new revision to review after the changes.</p>
       </div>}
-      {viewOnly && canReview && review?.status === 'pending' && <ViewOnlyNotice />}
       {canDecide && <div className="max-w-3xl space-y-4">
         <label className="block text-sm font-medium" htmlFor="review-note">Note for Cornerstone (required to request changes)</label>
         <Textarea id="review-note" value={note} onChange={event => setNote(event.target.value)} maxLength={2000} disabled={busy} />

@@ -183,7 +183,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     });
   }
 
-  test('fully hides and restores the desktop sidebar without changing mobile navigation', async ({ browser }): Promise<void> => {
+  test('collapses the desktop sidebar to a rail and restores it without changing mobile navigation', async ({ browser }): Promise<void> => {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       extraHTTPHeaders: {
@@ -197,21 +197,22 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     const sidebar = page.locator('aside');
     await expect(sidebar).toBeVisible();
     await page.getByRole('button', { name: 'Collapse sidebar' }).click();
-    await expect(sidebar).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
-    expect(await page.getByTestId('app-shell').evaluate((root) => getComputedStyle(root).getPropertyValue('--sidebar-width'))).toBe('0rem');
+    await expect(sidebar).toBeVisible();
+    await expect(sidebar).toHaveCSS('width', '64px');
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    expect(await page.getByTestId('app-shell').evaluate((root) => getComputedStyle(root).getPropertyValue('--sidebar-width'))).toBe('4rem');
     expect(await page.evaluate(() => localStorage.getItem('sidebar-collapsed'))).toBe('true');
 
     await page.reload();
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
-    await page.getByRole('button', { name: 'Show sidebar' }).click();
-    await expect(sidebar).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
+    await page.getByRole('button', { name: 'Expand sidebar' }).click();
+    await expect(sidebar).toHaveCSS('width', '288px');
     expect(await page.evaluate(() => localStorage.getItem('sidebar-collapsed'))).toBe('false');
 
     await page.keyboard.press('Control+b');
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Expand sidebar' })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible();
     await page.getByRole('button', { name: 'Open navigation' }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -233,14 +234,14 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
       await route.fulfill({ response, json: body });
     });
     await page.goto('/app');
-    const recentPayrollLink = page.getByRole('link', { name: /^Open payroll / }).first();
+    const recentPayrollLink = page.getByRole('link', { name: 'Open payroll Keyboard test payroll' });
+    const destination = `/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work`;
     await expect(recentPayrollLink).toBeVisible();
-    const destination = await recentPayrollLink.getAttribute('href');
-    expect(destination).toMatch(new RegExp(`^/companies/${fixture.company_id}/pay-runs/\\d+/overview`));
+    await expect(recentPayrollLink).toHaveAttribute('href', destination);
 
     await recentPayrollLink.focus();
     await page.keyboard.press('Enter');
-    await expect(page).toHaveURL(new RegExp(`${destination?.replace('/overview', '/work').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+    await expect(page).toHaveURL((url) => url.pathname === destination);
     await expect(page.getByRole('heading', { name: /[A-Z][a-z]{2} \d+/  })).toBeVisible();
   });
 
@@ -391,7 +392,7 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await expect(accountantPage.getByRole('link', { name: 'Timecard OCR' })).toBeVisible();
     await expect(accountantPage.getByRole('link', { name: 'Activity History' })).toBeVisible();
     await expect(accountantPage.getByRole('link', { name: 'Pay Schedule' })).toHaveCount(0);
-    await expect(accountantPage.getByRole('link', { name: 'Client Changes' })).toHaveCount(0);
+    await expect(accountantPage.getByRole('link', { name: 'Change Requests' })).toHaveCount(0);
 
     await accountantPage.goto('/pay-schedule-settings');
     await expect(accountantPage).toHaveURL(/\/app$/);
@@ -895,7 +896,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
 
     await page.goto(`/companies/${fixture.company_id}/pay-runs`);
     await expect(page.getByRole('heading', { name: 'Pay Periods' })).toBeVisible();
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click();
+    await page.getByRole('button', { name: /^More actions for / }).first().click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Edit', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'Edit Pay Period' })).toBeVisible();
     await page.evaluate((path): void => {
       window.history.pushState({}, '', path);
@@ -985,7 +987,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
     const delayedRow = page.getByRole('row').filter({ hasText: 'Jun 21 – Jul 4, 2026' });
     await expect(delayedRow).toBeVisible();
-    await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await delayedRow.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Approve', exact: true }).click();
     await approvalStarted;
 
     await page.getByRole('button', { name: /Synthetic Payroll Company/ }).click();
@@ -1062,7 +1065,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.goto(`/companies/${fixture.company_id}/pay-runs?status=calculated`);
     const delayedRow = page.getByRole('row').filter({ hasText: 'Jul 5 – 18, 2026' });
     await expect(delayedRow).toBeVisible();
-    await delayedRow.getByRole('button', { name: 'Approve', exact: true }).click();
+    await delayedRow.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Approve', exact: true }).click();
     await approvalStarted;
 
     await page.getByRole('button', { name: /^Draft \(/ }).click();
@@ -1575,7 +1579,8 @@ test.describe('Gate 0 deterministic payroll release lane', () => {
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);
 
-    await workflowRow.getByRole('button', { name: 'Enter Hours', exact: true }).click();
+    await workflowRow.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Enter Hours', exact: true }).click();
     await expect(page).toHaveURL(`/companies/${fixture.company_id}/pay-runs/${fixture.workflow_pay_period_id}/work?return_to=${encodeURIComponent(queueReturnTo)}`);
     await page.getByRole('link', { name: 'Back', exact: true }).click();
     await expect(page).toHaveURL(queueUrl);

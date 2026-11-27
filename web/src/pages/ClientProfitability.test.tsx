@@ -9,6 +9,7 @@ import { ReportView } from '@/components/client-profitability/ReportView';
 import { ClientProfitability } from './ClientProfitability';
 
 const state = vi.hoisted(() => ({
+  isSuperAdmin: false,
   overview: vi.fn(),
   updateSettings: vi.fn(),
   refresh: vi.fn(),
@@ -22,6 +23,7 @@ const state = vi.hoisted(() => ({
   exportCsv: vi.fn(),
 }));
 
+vi.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => ({ isSuperAdmin: state.isSuperAdmin }) }));
 vi.mock('@/services/clientProfitability', () => ({ clientProfitabilityApi: state }));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title }: { title: string }) => <h1>{title}</h1> }));
 
@@ -75,7 +77,8 @@ function renderPage(path = '/reports/client-profitability') {
 
 describe('ClientProfitability', () => {
   beforeEach(() => {
-    Object.values(state).forEach((mock) => mock.mockReset());
+    state.isSuperAdmin = false;
+    Object.values(state).forEach((mock) => { if (typeof mock !== 'boolean') mock.mockReset(); });
     state.report.mockResolvedValue(report());
   });
   afterEach(cleanup);
@@ -87,11 +90,27 @@ describe('ClientProfitability', () => {
     }));
     renderPage();
     expect(await screen.findByText('Cornerstone Tax isn’t connected yet')).toBeTruthy();
-    expect(screen.getByText(/Still missing: CORNERSTONE_TAX_API_URL, PAYROLL_WORK_HOURS_SECRET/)).toBeTruthy();
+    expect(screen.queryByText('Connection diagnostics')).toBeNull();
     expect((screen.getByRole('button', { name: /Refresh hours from Tax/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(state.report).not.toHaveBeenCalled();
     // The app layout supplies the one <main> landmark.
     expect(screen.queryByRole('main')).toBeNull();
+  });
+
+  it('lets a super admin open connection diagnostics and read the setup guidance', async () => {
+    state.isSuperAdmin = true;
+    state.overview.mockResolvedValue(overview({
+      connection: { connected: false, missing: ['CORNERSTONE_TAX_API_URL', 'PAYROLL_WORK_HOURS_SECRET'], problem: null, tax_host: null },
+      has_hours: false,
+    }));
+    renderPage();
+
+    const summary = await screen.findByText('Connection diagnostics');
+    await userEvent.click(summary);
+    const details = summary.closest('details')!;
+    expect(details.open).toBe(true);
+    expect(within(details).getByText('Add the Cornerstone Tax web address to Payroll.')).toBeTruthy();
+    expect(within(details).getByText('Set the same connection credential in both apps.')).toBeTruthy();
   });
 
   it('shows clients, drills into people and tasks, and re-asks with the toggles', async () => {

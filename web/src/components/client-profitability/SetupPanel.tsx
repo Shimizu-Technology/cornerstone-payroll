@@ -11,7 +11,7 @@ import {
 import { formatDate, formatDateTime, hours, monthLabel, recentMonths } from './format';
 import { SelectField } from './SelectField';
 
-export function ConnectionSteps({ overview }: { overview: ProfitabilityOverview }) {
+export function ConnectionSteps({ overview, showDiagnostics }: { overview: ProfitabilityOverview; showDiagnostics: boolean }) {
   const { connection } = overview;
   return (
     <section aria-labelledby="connect-heading" className="rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-6">
@@ -20,18 +20,20 @@ export function ConnectionSteps({ overview }: { overview: ProfitabilityOverview 
         Cornerstone Tax isn’t connected yet
       </h2>
       <p className="mt-2 text-sm leading-6 text-amber-950">
-        This report reads staff hours from Cornerstone Tax. Nothing is pulled until Leon finishes these steps on the servers:
+        Connect Cornerstone Tax to bring staff hours into this report.
       </p>
-      <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-amber-950">
-        <li>Make one long random secret and set it as <code className="rounded bg-white px-1">PAYROLL_WORK_HOURS_SECRET</code> on <strong>both</strong> the Tax and Payroll servers.</li>
-        <li>On Payroll, set <code className="rounded bg-white px-1">CORNERSTONE_TAX_API_URL</code> to Tax’s web address (it must start with https://).</li>
-        <li>Below, choose the client in Payroll that runs Cornerstone’s own staff payroll.</li>
-        <li>Refresh hours from Tax, then link Tax clients and staff to Payroll.</li>
-      </ol>
-      {connection.missing.length > 0 && (
-        <p className="mt-3 text-sm text-amber-950">Still missing: {connection.missing.join(', ')}</p>
+      <p className="mt-1 text-sm text-amber-950">Shimizu Technology finishes this connection.</p>
+      {showDiagnostics && (
+        <details className="mt-3 text-sm text-amber-950">
+          <summary className="cursor-pointer font-semibold">Connection diagnostics</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {connection.missing.includes('CORNERSTONE_TAX_API_URL') && <li>Add the Cornerstone Tax web address to Payroll.</li>}
+            {connection.missing.includes('PAYROLL_WORK_HOURS_SECRET') && <li>Set the same connection credential in both apps.</li>}
+            {connection.problem && <li>Check that the Cornerstone Tax address is a valid HTTPS URL.</li>}
+            <li>Once connected, refresh hours and link Tax clients and staff to Payroll.</li>
+          </ul>
+        </details>
       )}
-      {connection.problem && <p className="mt-1 text-sm text-amber-950">{connection.problem}</p>}
     </section>
   );
 }

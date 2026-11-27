@@ -255,6 +255,7 @@ export default function PayrollReminders() {
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
                 type="email"
+                aria-label="Reminder recipient email"
                 placeholder="name@company.com"
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}

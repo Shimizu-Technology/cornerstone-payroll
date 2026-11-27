@@ -34,8 +34,10 @@ const settingValueLabels: Record<string, Record<string, string>> = {
 };
 
 function settingLabel(value: string, fieldId?: string) {
-  return (fieldId ? settingValueLabels[fieldId]?.[value] : undefined)
-    ?? value.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
+  const fieldLabel = fieldId ? settingValueLabels[fieldId]?.[value] : undefined;
+  if (fieldLabel) return fieldLabel;
+  if (value === 'intake_adapter') return 'Upload payroll files';
+  return value.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
 
 function draftFor(data: OperatingProfileResponse): Settings {
@@ -107,7 +109,7 @@ function SettingControl({ field, value, editable, locked, onChange }: {
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between">
-        <Label htmlFor={locked ? undefined : id}>{field.label}{field.id === 'offering' ? ' preset' : ''}</Label>
+        <Label htmlFor={locked ? undefined : id}>{field.id === 'intake_adapter' ? 'Payroll file format' : field.label}{field.id === 'offering' ? ' preset' : ''}</Label>
         <Help field={field} />
       </div>
       {locked ? (
@@ -121,7 +123,7 @@ function SettingControl({ field, value, editable, locked, onChange }: {
             const mode = event.target.value;
             onChange(mode === 'inherit' ? null : mode === 'single' ? [] : '');
           }}>
-            <option value="inherit">Inherit adapter defaults</option>
+            <option value="inherit">Use defaults for this file format</option>
             <option value="single">Allow a single file</option>
             <option value="list">Require specific source roles</option>
           </Select>
@@ -170,7 +172,7 @@ function readinessWarnings(values: Settings, connectedSourceActive: boolean) {
     warnings.push('Payroll portals is selected with the client portal off.');
   }
   if (values.hours_source === 'intake_adapter' && !values.intake_adapter) {
-    warnings.push('Choose an intake adapter for this hours source.');
+    warnings.push('Choose a payroll file format for this hours source.');
   }
   return warnings;
 }
@@ -250,11 +252,11 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
 
   return (
     <>
-      <Header title="How this client runs" contextValue={profile.client_name} contextLabel="Client" mobileSticky={false}
+      <Header title="How this client runs" mobileSticky={false}
         description="Configure this client’s payroll workflow, portal access, and filing defaults." />
       <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6 lg:p-8">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="info">{profile.effective.persisted ? `Active version ${profile.effective.version}` : 'Legacy baseline'}</Badge>
+          <Badge variant="info">{profile.effective.persisted ? `Active version ${profile.effective.version}` : 'Default payroll settings'}</Badge>
           {(profile.history[0]?.effective_on ?? '') > profile.as_of && <Badge variant="outline">Editing scheduled version {profile.history[0].version}</Badge>}
         </div>
         {!hasEdits && <Alert tone="info">You have read-only access to this operating profile.</Alert>}

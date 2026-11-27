@@ -1008,7 +1008,7 @@ export function InvoiceCenter() {
             <div className="flex flex-col gap-3 border-b border-neutral-200 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div><h2 className="font-semibold text-neutral-950">Invoices</h2><p className="text-sm text-neutral-500">{selectedBusiness ? `Issued by ${selectedBusiness.name}` : 'All senders in this book'}</p></div>
               <div className="flex flex-col gap-2 sm:flex-row">
-                <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search number or customer" className="pl-9 sm:w-64" /></div>
+                <div className="relative"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" /><Input aria-label="Search invoices" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search number or customer" className="pl-9 sm:w-64" /></div>
                 <select aria-label="Filter invoices by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} className={controlClassName('sm:w-auto')}>
                   <option value="active">Active</option><option value="draft">Draft</option><option value="open">Open</option><option value="overdue">Overdue</option><option value="partially_paid">Partially paid</option><option value="paid">Paid</option><option value="voided">Voided</option><option value="uncollectible">Uncollectible</option><option value="archived">Archived</option><option value="all">All</option>
                 </select>

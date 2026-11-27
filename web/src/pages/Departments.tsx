@@ -19,7 +19,6 @@ import {
 import { departmentsApi, clientDepartmentsApi, ApiError } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
 import type { Department } from '@/types';
-import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
 import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 
 // Fallback company ID for development when auth is disabled
@@ -181,7 +180,6 @@ export function Departments() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
-        {viewOnly && <ViewOnlyNotice className="mb-4" />}
         {/* Error State */}
         {error && (
           <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error}><AlertCircle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />

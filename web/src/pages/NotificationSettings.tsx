@@ -101,7 +101,7 @@ export function NotificationSettings(): ReactElement {
 
   return (
     <div>
-      <Header title="Notifications" description="Choose how Cornerstone Payroll emails you about portal activity." mobileSticky={false} />
+      <Header organizationWide title="Notifications" description="Choose how Cornerstone Payroll emails you about portal activity." mobileSticky={false} />
       <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6 lg:p-8">
         {loadError && (
           <div className="space-y-3">
@@ -151,9 +151,7 @@ export function NotificationSettings(): ReactElement {
                     </li>
                   ))}
                 </ul>
-                {saveError && <ActionFeedback tone="error" message={saveError} />}
                 {saved && <ActionFeedback tone="success" message="Notification settings saved." />}
-                <Button onClick={() => void save()} disabled={!dirty || saving} loading={saving} loadingLabel="Saving…">Save settings</Button>
               </CardContent>
             </Card>
 
@@ -224,6 +222,15 @@ export function NotificationSettings(): ReactElement {
           </>
         )}
       </div>
+      {settings && (
+        <div className={`border-t border-neutral-200 bg-white px-4 py-3 sm:px-6 ${dirty ? 'sticky bottom-0 z-20' : ''}`}>
+          <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3">
+            {dirty && <p className="text-sm font-medium text-neutral-700">Unsaved notification settings</p>}
+            <Button onClick={() => void save()} disabled={!dirty || saving} loading={saving} loadingLabel="Saving…">Save settings</Button>
+          </div>
+          {saveError && <ActionFeedback tone="error" message={saveError} />}
+        </div>
+      )}
     </div>
   );
 }

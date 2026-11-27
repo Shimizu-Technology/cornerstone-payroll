@@ -14,17 +14,17 @@ interface HeaderProps {
   organizationWide?: boolean;
 }
 
-export function Header({ title, description, subtitle, actions, contextLabel, contextValue, mobileSticky = true, organizationWide = false }: HeaderProps) {
+export function Header({ title, description, subtitle, actions, contextLabel, contextValue, mobileSticky = false, organizationWide = false }: HeaderProps) {
   const helperText = description ?? subtitle;
   const { activeCompany } = useCompany();
   const displayedContext = contextValue || (organizationWide ? undefined : activeCompany?.name);
   const displayedLabel = contextValue ? contextLabel || 'Workspace' : 'Client';
 
   return (
-    <div className={`${mobileSticky ? 'sticky top-0' : 'sm:sticky sm:top-0'} z-10 border-b border-neutral-200/70 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8`}>
+    <div className={`${mobileSticky ? 'sticky top-0' : 'lg:sticky lg:top-0'} z-10 border-b border-neutral-200/70 bg-white/85 px-4 py-4 backdrop-blur-xl sm:px-6 sm:py-6 lg:px-8`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <div className={`mb-1.5 flex-wrap items-center gap-2 ${displayedLabel === 'Client' ? 'hidden lg:flex' : 'flex'}`}>
             {displayedContext && (
               <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary-100 bg-primary-50/80 px-2.5 py-1 text-xs font-semibold text-neutral-700 shadow-sm shadow-primary-100/40">
                 <Building2 className="h-3.5 w-3.5 shrink-0 text-primary-700" />

@@ -4,6 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { LinkQueue } from '@/components/client-profitability/LinkQueue';
 import { ReportView } from '@/components/client-profitability/ReportView';
 import { ConnectionSteps, SetupPanel } from '@/components/client-profitability/SetupPanel';
+import { useOptionalAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { clientProfitabilityApi, type ProfitabilityOverview, type WorkHourImportStatus } from '@/services/clientProfitability';
 
@@ -21,6 +22,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 ];
 
 export function ClientProfitability() {
+  const showDiagnostics = useOptionalAuth()?.isSuperAdmin === true;
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('tab');
   const [overview, setOverview] = useState<ProfitabilityOverview | null>(null);
@@ -94,7 +96,7 @@ export function ClientProfitability() {
         {!overview && !error && <p role="status" className="text-sm text-neutral-600">Loading…</p>}
         {overview && (
           <>
-            {!overview.connection.connected && <ConnectionSteps overview={overview} />}
+            {!overview.connection.connected && <ConnectionSteps overview={overview} showDiagnostics={showDiagnostics} />}
             <nav aria-label="Client profitability sections" className="-mx-4 overflow-x-auto px-4">
               <div className="inline-flex min-w-max gap-1 rounded-full border border-neutral-200 bg-white p-1">
                 {TABS.map((entry) => (

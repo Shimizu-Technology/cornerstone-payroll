@@ -6,7 +6,7 @@ import { PayrollCalculationIssues, type PayrollCalculationFailure } from '@/comp
 import { useFeedback, useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type ReactElement } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
-import { AlertCircle, LockKeyhole, Search } from 'lucide-react';
+import { AlertCircle, Ellipsis, LockKeyhole, Search } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -35,6 +35,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TrainingWorkflowGuide } from '@/components/test-workspaces/TestWorkspaceGuides';
 import { formatCurrency, formatGuamDateTimeShort, payPeriodStatusConfig } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteCompany } from '@/lib/company-write-access';
@@ -148,6 +149,8 @@ function PayPeriodMobileCard({
 export function PayPeriods() {
   const canManageCheckSettings = useSelectedCompanyCapability('manage_client_check_settings');
   const location = useLocation();
+  const { isAdmin } = useAuth();
+  const [actionPeriodKey, setActionPeriodKey] = useState<string | null>(null);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { activeCompanyId, activeCompany } = useCompany();
@@ -839,7 +842,7 @@ export function PayPeriods() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
-        <TaxYearWarning companyId={activeCompanyId} />
+        <TaxYearWarning companyId={activeCompanyId} showSettingsLink={isAdmin} />
         {historyAvailable && recordedHistoryCount === null && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryNotice companyId={activeCompanyId} />}
         {recordedHistoryCount !== null && activeCompanyId && !readOnlyWorkspace && <PriorProviderHistoryRecordedNotice companyId={activeCompanyId} periodCount={recordedHistoryCount} />}
         {trainingReplayWorkspace && (
@@ -893,7 +896,7 @@ export function PayPeriods() {
         )}
 
         {/* Status filter tabs */}
-        <div className="mb-4 flex gap-2 overflow-x-auto pb-1 sm:flex-wrap">
+        <div className="mb-4 flex flex-wrap gap-2 pb-1">
           <Button
             variant={statusFilter === undefined ? 'primary' : 'outline'}
             size="sm"
@@ -917,6 +920,7 @@ export function PayPeriods() {
           <div className="relative w-full max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-600" />
             <Input
+              aria-label="Search pay periods"
               placeholder="Search pay periods..."
               value={searchTerm}
               onChange={(e) => updateViewParam('search', e.target.value, true)}
@@ -937,6 +941,7 @@ export function PayPeriods() {
               <option value="prior_provider">Prior-provider history</option>
             </Select>
             <Select
+              aria-label="Sort pay periods by"
               value={sortBy}
               onChange={(e) => updateViewParam('sort', e.target.value)}
               className="w-full sm:w-44"
@@ -961,6 +966,7 @@ export function PayPeriods() {
               {years.map((year) => <option key={year} value={year}>{year}</option>)}
             </Select>
             <Select
+              aria-label="Sort direction"
               value={sortDirection}
               onChange={(e) => updateViewParam('direction', e.target.value)}
               className="w-full sm:w-32"
@@ -1008,18 +1014,17 @@ export function PayPeriods() {
                 ))}
               </div>
               <div className="hidden sm:block">
-                <Table stickyHeader containerClassName="max-h-[32rem]">
+                <Table stickyHeader containerClassName="max-h-[32rem]" className="[&_td]:px-3 [&_th]:px-3">
                   <TableHeader>
                 <TableRow>
-                  <TableHead stickyLeft className="w-[240px] min-w-[240px] bg-neutral-50">Pay Period</TableHead>
+                  <TableHead stickyLeft className="min-w-[165px] bg-neutral-50">Pay Period</TableHead>
                   <TableHead>Pay Date</TableHead>
-                  <TableHead>Purpose</TableHead>
                   <TableHead>Employees</TableHead>
                   <TableHead>Gross Pay</TableHead>
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Processed</TableHead>
-                  <TableHead className="sticky right-0 z-20 w-[280px] min-w-[280px] border-l border-neutral-200 bg-neutral-50 text-right">Actions</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-[140px] min-w-[140px] border-l border-neutral-200 bg-neutral-50 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1030,17 +1035,10 @@ export function PayPeriods() {
                   const commitBlocked = trainingReplayWorkspace || Boolean(period.parallel_run);
                   return (
                     <TableRow key={period.key} className={rowTone}>
-                      <TableCell stickyLeft className={`w-[240px] min-w-[240px] ${rowTone}`}>
+                      <TableCell stickyLeft className={`min-w-[165px] ${rowTone}`}>
                         <span className="font-medium text-neutral-900">
                           {formatDateRange(period.start_date, period.end_date)}
                         </span>
-                      </TableCell>
-                      <TableCell className={rowTone}>
-                        <span className="text-sm text-neutral-700">
-                          {formatDate(period.pay_date, { includeWeekday: true })}
-                        </span>
-                      </TableCell>
-                      <TableCell className={rowTone}>
                         <div className="flex flex-col items-start gap-1">
                           <Badge variant={period.run_purpose === 'regular' ? 'default' : 'warning'}>
                             {RUN_PURPOSE_LABELS[period.run_purpose] || period.run_purpose}
@@ -1052,6 +1050,11 @@ export function PayPeriods() {
                           {period.test_workspace_role === 'baseline' && <span className="inline-flex items-center"><Badge variant="warning">Locked reference history</Badge><HelpTip label="locked reference history">Copied payrolls preserve year-to-date totals and cannot be edited.</HelpTip></span>}
                           {period.test_workspace_role === 'practice' && <span className="inline-flex items-center"><Badge variant="info">Practice payroll</Badge><HelpTip label="practice payroll">A real completed payroll recreated for training, with original inputs but no copied result.</HelpTip></span>}
                         </div>
+                      </TableCell>
+                      <TableCell className={rowTone}>
+                        <span className="text-sm text-neutral-700">
+                          {formatDate(period.pay_date, { includeWeekday: true })}
+                        </span>
                       </TableCell>
                       <TableCell className={rowTone}>
                         <span className="text-sm text-neutral-700">
@@ -1100,60 +1103,56 @@ export function PayPeriods() {
                           <span className="text-sm text-neutral-600">Not processed</span>
                         )}
                       </TableCell>
-                      <TableCell className={`sticky right-0 z-10 w-[280px] min-w-[280px] border-l border-neutral-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
-                        <div className="flex max-w-[232px] flex-wrap items-center justify-end gap-2 [&_button]:min-h-11">
-                          <div className="flex items-center gap-1 text-sm">
-                            <button
-                              className="text-neutral-600 hover:text-neutral-800 hover:underline"
-                              onClick={() => navigate(recordDestination(period, 'overview'))}
-                            >
-                              View
-                            </button>
-                            {!periodReadOnly && period.capabilities.edit && <><span className="text-neutral-300">·</span><button className="text-neutral-600 hover:text-neutral-800 hover:underline" onClick={() => openEditModal(period as PayPeriod)}>Edit</button></>}
-                            {!periodReadOnly && period.capabilities.delete && <><span className="text-neutral-300">·</span><button className="text-danger-700 hover:text-danger-800 hover:underline" onClick={() => openDeleteDialog(period.id)} disabled={actionInFlight !== null}>Delete</button></>}
-                          </div>
-
-                          {!periodReadOnly && period.capabilities.enter_hours && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => navigate(recordDestination(period, 'work'))}
-                            >
-                              Enter Hours
+                      <TableCell className={`sticky right-0 z-10 w-[140px] min-w-[140px] border-l border-neutral-200 text-right shadow-[-12px_0_18px_-14px_rgba(15,23,42,0.45)] ${rowTone}`}>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="outline" size="sm" onClick={() => navigate(recordDestination(period, 'overview'))}>View</Button>
+                          {!periodReadOnly && (period.capabilities.edit || period.capabilities.delete
+                            || period.capabilities.enter_hours || (period.capabilities.run && period.status === 'calculated')
+                            || (!commitBlocked && period.capabilities.commit)) && (
+                            <Button variant="ghost" size="sm" aria-label={`More actions for ${formatDateRange(period.start_date, period.end_date)}`}
+                              onClick={() => setActionPeriodKey(period.key)}>
+                              <Ellipsis className="h-4 w-4" aria-hidden="true" />
                             </Button>
                           )}
-                          {!periodReadOnly && period.capabilities.run && period.status === 'calculated' && (
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleRunPayroll(period.id)}
-                                disabled={actionInFlight !== null}
-                              >
-                                Recalculate
-                              </Button>
-                              {period.capabilities.approve && <Button
-                                size="sm"
-                                onClick={() => handleApprove(period.id)}
-                                disabled={actionInFlight !== null}
-                              >
-                                Approve
-                              </Button>}
-                            </div>
-                          )}
-                          {!periodReadOnly && period.parallel_run && <span className="inline-flex items-center"><Badge variant="info">Parallel · cannot commit</Badge><HelpTip label="parallel payroll">This payroll is for comparison only. It cannot trigger payment, checks, filing, or a live commit.</HelpTip></span>}
-                          {!periodReadOnly && !commitBlocked && period.capabilities.commit && (
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              onClick={() => handleCommit(period.id)}
-                              disabled={actionInFlight !== null}
-                            >
-                              Commit
-                            </Button>
-                          )}
-                          {periodReadOnly && <Badge variant="default"><LockKeyhole className="mr-2 h-3 w-3" />Read only</Badge>}
                         </div>
+                        {period.parallel_run && <Badge variant="info">Cannot commit</Badge>}
+                        {periodReadOnly && <Badge variant="default">Read only</Badge>}
+                        {actionPeriodKey === period.key && !periodReadOnly && (
+                          <Dialog open onOpenChange={(open) => { if (!open) setActionPeriodKey(null); }}>
+                            <DialogContent>
+                              <DialogTitle>Pay period actions</DialogTitle>
+                              <DialogDescription>{formatDateRange(period.start_date, period.end_date)}</DialogDescription>
+                              <div className="mt-4 flex flex-wrap gap-2 text-left">
+                                {period.capabilities.enter_hours && <Button variant="outline" onClick={() => {
+                                  setActionPeriodKey(null);
+                                  navigate(recordDestination(period, 'work'));
+                                }}>Enter Hours</Button>}
+                                {period.capabilities.edit && <Button variant="outline" onClick={() => {
+                                  setActionPeriodKey(null);
+                                  openEditModal(period as PayPeriod);
+                                }}>Edit</Button>}
+                                {period.capabilities.run && period.status === 'calculated' && <>
+                                  <Button variant="outline" disabled={actionInFlight !== null} onClick={() => {
+                                    setActionPeriodKey(null);
+                                    void handleRunPayroll(period.id);
+                                  }}>Recalculate</Button>
+                                  {period.capabilities.approve && <Button disabled={actionInFlight !== null} onClick={() => {
+                                    setActionPeriodKey(null);
+                                    void handleApprove(period.id);
+                                  }}>Approve</Button>}
+                                </>}
+                                {!commitBlocked && period.capabilities.commit && <Button disabled={actionInFlight !== null} onClick={() => {
+                                  setActionPeriodKey(null);
+                                  void handleCommit(period.id);
+                                }}>Commit</Button>}
+                                {period.capabilities.delete && <Button variant="danger" disabled={actionInFlight !== null} onClick={() => {
+                                  setActionPeriodKey(null);
+                                  openDeleteDialog(period.id);
+                                }}>Delete</Button>}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
