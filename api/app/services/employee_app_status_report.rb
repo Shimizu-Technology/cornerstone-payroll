@@ -19,7 +19,10 @@ class EmployeeAppStatusReport
   APP_OPEN_ACTION = "employee_portal/context#show"
   # Employee app requests have been audited since #564 (employee link lifecycle).
   APP_OPENS_RECORDED_SINCE = Date.new(2026, 11, 25)
+  # 1099 contractors get no W-2GU, so they have no W-2GU answer to give.
+  NOT_APPLICABLE = "not_applicable"
   ANSWER_LABELS = {
+    NOT_APPLICABLE => "Not applicable (1099)",
     DeliveryConsents::Answers::PAPERLESS => "Paperless",
     DeliveryConsents::Answers::KEEP_PAPER => "Keep paper",
     DeliveryConsents::Answers::NOT_ANSWERED => "Not answered"
@@ -136,7 +139,7 @@ class EmployeeAppStatusReport
           current: accepted.present? && accepted.terms_version == current_terms&.version
         },
         pay_statements: answer_payload(answers.dig(employee.id, "pay_statements")),
-        w2gu: answer_payload(answers.dig(employee.id, "w2gu"))
+        w2gu: employee.contractor? ? { answer: NOT_APPLICABLE, answered_at: nil } : answer_payload(answers.dig(employee.id, "w2gu"))
       }
     end
   end
