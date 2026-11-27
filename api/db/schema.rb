@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -948,6 +948,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
     t.check_constraint "digest::text ~ '^[0-9a-f]{64}$'::text", name: "delivery_disclosures_digest_check"
     t.check_constraint "kind::text = ANY (ARRAY['pay_statements'::character varying::text, 'w2gu'::character varying::text])", name: "delivery_disclosures_kind_check"
     t.check_constraint "status::text = ANY (ARRAY['draft'::character varying::text, 'approved'::character varying::text])", name: "delivery_disclosures_status_check"
+  end
+
+  create_table "demo_shape_conversions", force: :cascade do |t|
+    t.bigint "organization_id", null: false
+    t.bigint "company_id", null: false
+    t.bigint "actor_id", null: false
+    t.jsonb "before_company_shape", null: false
+    t.jsonb "before_link_environments", default: {}, null: false
+    t.jsonb "after_company_shape", null: false
+    t.datetime "converted_at", null: false
+    t.datetime "reverted_at"
+    t.bigint "reverted_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index [ "company_id" ], name: "idx_demo_shape_conversions_active_company", unique: true, where: "(reverted_at IS NULL)"
+    t.index [ "company_id" ], name: "index_demo_shape_conversions_on_company_id"
+    t.index [ "organization_id" ], name: "index_demo_shape_conversions_on_organization_id"
   end
 
   create_table "department_ytd_totals", force: :cascade do |t|
@@ -5488,13 +5505,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
   add_foreign_key "delivery_consents", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_delivery_consents_employee", on_delete: :restrict
   add_foreign_key "delivery_consents", "users", column: "withdrawn_by_user_id", on_delete: :nullify
   add_foreign_key "delivery_consents", "users", on_delete: :restrict
+  add_foreign_key "demo_shape_conversions", "companies"
+  add_foreign_key "demo_shape_conversions", "organizations"
+  add_foreign_key "demo_shape_conversions", "users", column: "actor_id"
+  add_foreign_key "demo_shape_conversions", "users", column: "reverted_by_id"
   add_foreign_key "department_ytd_totals", "departments"
   add_foreign_key "department_ytd_totals", "departments", column: [ "department_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_department_ytd_totals_company_parent"
   add_foreign_key "departments", "companies"
   add_foreign_key "direct_deposit_payment_confirmations", "payroll_items"
   add_foreign_key "direct_deposit_payment_confirmations", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_direct_deposit_payment_confirmations_company_parent"
   add_foreign_key "direct_deposit_payment_confirmations", "users"
-  add_foreign_key "employee_account_links", "companies", column: [ "company_id", "payroll_environment" ], primary_key: [ "id", "payroll_environment" ], name: "fk_employee_account_links_live_company"
+  add_foreign_key "employee_account_links", "companies", column: [ "company_id", "payroll_environment" ], primary_key: [ "id", "payroll_environment" ], name: "fk_employee_account_links_live_company", deferrable: :immediate
   add_foreign_key "employee_account_links", "employees", column: [ "employee_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_employee_account_links_employee"
   add_foreign_key "employee_account_links", "users"
   add_foreign_key "employee_account_links", "users", column: "claim_user_id"
