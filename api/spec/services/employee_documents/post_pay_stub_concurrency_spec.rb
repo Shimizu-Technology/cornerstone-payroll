@@ -83,16 +83,31 @@ RSpec.describe EmployeeDocuments::PostPayStub, :postgres_concurrency do
   end
 
   it "posts a later stub while an earlier check's replacement refreshes its YTD, without a deadlock" do
-    allow(R2StorageService).to receive(:new).and_return(instance_double(R2StorageService, upload: true, delete: true))
+    storage = instance_double(R2StorageService, delete: true)
+    allow(R2StorageService).to receive(:new).and_return(storage)
     posting_generated = Queue.new
     release_posting = Queue.new
+    replacement_finished = Queue.new
     allow_any_instance_of(PayStubGenerator).to receive(:generate).and_wrap_original do |original, *args|
       if Thread.current[:stub_posting]
         Thread.current[:stub_posting] = false
+        Thread.current[:await_replacement] = true
         posting_generated << true
         release_posting.pop
       end
       original.call(*args)
+    end
+    # The first upload runs after the posting's locks are released. Holding it
+    # until the replacement commits fixes which transaction takes the company
+    # lock next, so the first PDF is always stale and the retry posts the
+    # refreshed YTD. Otherwise PostgreSQL picks, and a call that is
+    # interrupted more than once leaves the stub to the next sweep.
+    allow(storage).to receive(:upload) do
+      if Thread.current[:await_replacement]
+        Thread.current[:await_replacement] = false
+        replacement_finished.pop
+      end
+      true
     end
     results = Queue.new
     backend = Queue.new
@@ -120,13 +135,20 @@ RSpec.describe EmployeeDocuments::PostPayStub, :postgres_concurrency do
     end
     wait_for_database_lock!(backend.pop)
     release_posting << true
-    [ posting, replacement ].each { |thread| Timeout.timeout(15) { thread.join } }
+    Timeout.timeout(15) { replacement.join }
+    replacement_finished << true
+    Timeout.timeout(15) { posting.join }
 
     expect(2.times.map { results.pop }).to contain_exactly([ :ok, :posting ], [ :ok, :replacement ])
     expect(EmployeeDocument.where(payroll_item_id: later.id).pluck(:revision)).to eq([ 1 ])
     expect(later.reload.ytd_gross).to eq(2_400)
+    expect(storage).to have_received(:upload).twice
+    expect(storage).to have_received(:delete).once
+    expect(EmployeeDocument.find_by!(payroll_item_id: later.id).payroll_facts_sha256)
+      .to eq(PayStubGenerator.new(later, employee_copy: true).employee_payroll_facts_sha256)
   ensure
     release_posting << true
+    replacement_finished << true
     posting&.join(15)
     replacement&.join(15)
   end
