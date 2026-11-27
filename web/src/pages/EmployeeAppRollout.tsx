@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useCompany } from '@/contexts/CompanyContext';
-import { employeeAppRolloutPath, employeeAppSettingsPath, employeeContactDetailsPath, employeePath } from '@/lib/routes';
+import { employeeAppRolloutPath, employeeAppSettingsPath, employeeAppStatusPath, employeeContactDetailsPath, employeePath } from '@/lib/routes';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { ViewOnlyNotice } from '@/components/client-portal/ViewOnlyNotice';
 import { useClientViewOnly } from '@/hooks/useClientViewOnly';
@@ -65,8 +65,11 @@ function CompanyRollout({ companyId, companyName, audience, showSettings, viewOn
 
   return (
     <div>
-      <Header title={audience === 'client' ? 'Employee app' : 'Employee app rollout'} mobileSticky={false} actions={showSettings && (
-        <Link className={textLink} to={employeeAppSettingsPath(companyId)}>Branding and Help settings</Link>
+      <Header title={audience === 'client' ? 'Employee app' : 'Employee app rollout'} mobileSticky={false} actions={(
+        <div className="flex flex-wrap gap-x-4">
+          <Link className={textLink} to={employeeAppStatusPath(companyId)}>Who has signed in</Link>
+          {showSettings && <Link className={textLink} to={employeeAppSettingsPath(companyId)}>Branding and Help settings</Link>}
+        </div>
       )} />
       <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6 lg:p-8">
         {loadError && <div className="flex flex-wrap items-center gap-2"><p role="alert" className="text-sm text-danger-700">{loadError}</p><Button type="button" variant="outline" onClick={() => setAttempt((value) => value + 1)}>Try again</Button></div>}
