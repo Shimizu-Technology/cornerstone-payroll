@@ -68,7 +68,8 @@ RSpec.describe "Api::V1::Admin::AnnualRetirementLimits", type: :request do
       post path, params: { annual_retirement_limit: values.merge(tax_year: 2098) }
     end.not_to change(AnnualRetirementLimit, :count)
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to include("unavailable in a test workspace")
+    expect(response.parsed_body.fetch("code")).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+    expect(response.parsed_body.fetch("error")).to include("practice company (test workspace)", "turned off")
     patch "#{path}/#{limit.id}", params: { annual_retirement_limit: values.merge(elective_deferral_limit: 24_600) }
     expect(response).to have_http_status(:forbidden)
     expect(limit.reload.elective_deferral_limit).to eq(24_500)

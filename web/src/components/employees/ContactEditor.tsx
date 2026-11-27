@@ -244,6 +244,8 @@ export interface ContactEditorProps {
   onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
   onToggleSamePerson: (checked: boolean) => void;
   onConfirmSamePerson: () => void;
+  onConfirmAddressReplacement?: () => void;
+  onCancelAddressReplacement?: () => void;
   onKeepMine: () => void;
   onUseTheirs: () => void;
   onCancel: () => void;
@@ -253,7 +255,7 @@ export interface ContactEditorProps {
 
 export function ContactEditor({
   employee, draft, phoneValue, state, canEdit, dirty, onFieldChange, onKeyDown, onToggleSamePerson,
-  onConfirmSamePerson, onKeepMine, onUseTheirs, onCancel, onSave, className,
+  onConfirmSamePerson, onConfirmAddressReplacement, onCancelAddressReplacement, onKeepMine, onUseTheirs, onCancel, onSave, className,
 }: ContactEditorProps): ReactElement {
   const name = `${employee.first_name} ${employee.last_name}`;
   const disabled = !canEdit || state.saving;
@@ -310,24 +312,60 @@ export function ContactEditor({
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <p className="mr-auto hidden text-xs text-neutral-500 [@media(hover:hover)_and_(pointer:fine)]:block">Press Enter to save.</p>
-        <Button variant="outline" size="sm" aria-label={`Cancel editing ${name}`} disabled={state.saving} onClick={onCancel} className="min-h-11 flex-1 sm:flex-none lg:min-h-0">
-          Cancel
-        </Button>
-        <Button
-          size="sm"
-          aria-label={`Save ${name}`}
-          disabled={!canSave}
-          loading={state.saving}
-          loadingLabel="Saving"
-          onClick={onSave}
-          className="min-h-11 flex-1 sm:flex-none lg:min-h-0"
-        >
-          <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
-          Save
-        </Button>
-      </div>
+      {state.confirmingAddressReplacement && (
+        <div role="alert" className="rounded-lg border border-warning-300 bg-warning-50 p-4 text-sm text-warning-950">
+          <p className="flex items-start gap-2 font-medium">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-700" aria-hidden="true" />
+            <span>This employee has a pending address request. Saving will replace it.</span>
+          </p>
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={state.saving}
+              onClick={onCancelAddressReplacement}
+              className="min-h-11 flex-1 sm:flex-none lg:min-h-0"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="primary"
+              disabled={!canSave}
+              loading={state.saving}
+              loadingLabel="Saving"
+              onClick={onConfirmAddressReplacement}
+              className="min-h-11 flex-1 sm:flex-none lg:min-h-0"
+            >
+              <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+              Save
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!state.confirmingAddressReplacement && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <p className="mr-auto hidden text-xs text-neutral-500 [@media(hover:hover)_and_(pointer:fine)]:block">Press Enter to save.</p>
+          <Button variant="outline" size="sm" aria-label={`Cancel editing ${name}`} disabled={state.saving} onClick={onCancel} className="min-h-11 flex-1 sm:flex-none lg:min-h-0">
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            aria-label={`Save ${name}`}
+            disabled={!canSave}
+            loading={state.saving}
+            loadingLabel="Saving"
+            onClick={onSave}
+            className="min-h-11 flex-1 sm:flex-none lg:min-h-0"
+          >
+            <Save className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
+            Save
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

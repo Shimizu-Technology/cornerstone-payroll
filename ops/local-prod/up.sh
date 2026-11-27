@@ -9,6 +9,10 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PHASE="${LOCAL_PROD_RLS_PHASE:-enforced}"
 [[ "$PHASE" == enforced || "$PHASE" == shadow ]] || die "LOCAL_PROD_RLS_PHASE must be enforced or shadow"
+VIEW_AS_READY_VALUE="${LOCAL_PROD_VIEW_AS_READY:-true}"
+[[ "$VIEW_AS_READY_VALUE" == true || "$VIEW_AS_READY_VALUE" == false ]] || die "LOCAL_PROD_VIEW_AS_READY must be true or false"
+DEMO_EMAIL_ALLOWLIST_VALUE="${LOCAL_PROD_DEMO_EMAIL_ALLOWLIST:-demo.client+clerk_test@example.com,demo.employee+clerk_test@example.com,demo.manager+clerk_test@example.com,demo.viewer+clerk_test@example.com}"
+[[ "$DEMO_EMAIL_ALLOWLIST_VALUE" != *"'"* && "$DEMO_EMAIL_ALLOWLIST_VALUE" != *$'\n'* ]] || die "LOCAL_PROD_DEMO_EMAIL_ALLOWLIST must not contain single quotes or newlines"
 [[ $# -eq 0 ]] || die "up.sh takes no arguments (see README.md)"
 
 on_exit() {
@@ -94,6 +98,8 @@ write_envs() {
     echo "RESEND_FROM_EMAIL='Cornerstone Payroll <payroll@$ROOT_DOMAIN>'"
     echo "MAILER_FROM_EMAIL='payroll@$ROOT_DOMAIN'"
     echo "PORTAL_EMAIL_NOTIFICATIONS_ENABLED='true'"
+    echo "DEMO_EMAIL_ALLOWLIST='$DEMO_EMAIL_ALLOWLIST_VALUE'"
+    echo "VIEW_AS_READY='$VIEW_AS_READY_VALUE'"
     echo "DATABASE_URL='$owner_url'"
     echo "CACHE_DATABASE_URL='$owner_url'"
     echo "QUEUE_DATABASE_URL='$owner_url'"
@@ -204,9 +210,33 @@ runtime_role_sql() {
   done <"$API_DIR/db/rls_runtime_role.sql"
 }
 
+ensure_auxiliary_schemas() {
+  log "ensuring Solid Cache, Solid Queue and Solid Cable schemas are loaded"
+  rails_maint runner '
+    [
+      [:cache, "solid_cache_entries", "db/cache_schema.rb"],
+      [:queue, "solid_queue_jobs", "db/queue_schema.rb"],
+      [:cable, "solid_cable_messages", "db/cable_schema.rb"],
+    ].each do |db_name, table, schema_rel|
+      schema_file = Rails.root.join(schema_rel)
+      next unless schema_file.exist?
+
+      ActiveRecord::Base.establish_connection(db_name)
+      next if ActiveRecord::Base.connection.table_exists?(table)
+
+      puts "[local-prod] loading #{schema_rel} into #{db_name} database"
+      load(schema_file)
+      unless ActiveRecord::Base.connection.table_exists?(table)
+        raise "Expected #{table} to exist after loading #{schema_rel}"
+      end
+    end
+  ' >"$LOGS/auxiliary_schemas.log" 2>&1 || die "loading Solid Cache/Queue/Cable schemas failed (see $LOGS/auxiliary_schemas.log)"
+}
+
 prepare_database() {
   log "migrating with db:safe_prepare (owner connection)"
   rails_maint db:safe_prepare >"$LOGS/prepare.log" 2>&1 || die "db:safe_prepare failed (see $LOGS/prepare.log)"
+  ensure_auxiliary_schemas
 
   if [[ "$(owner_psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'payroll_app'")" != 1 ]]; then
     log "creating payroll_app with db/rls_runtime_role.sql"
