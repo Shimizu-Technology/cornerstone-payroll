@@ -1883,6 +1883,8 @@ export interface PayrollItem {
   earnings_statement_eligible?: boolean;
   payment_confirmation?: DirectDepositItem['payment_confirmation'];
   check_date?: string | null;
+  /** The date the check and its stub print: check_date, else the run's pay date. */
+  effective_check_date?: string | null;
   check_memo?: string | null;
   check_printed_at?: string | null;
   check_prepared_at?: string | null;

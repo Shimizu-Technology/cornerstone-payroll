@@ -274,7 +274,7 @@ describe('EmployeeWorkspace imported setup certification', () => {
         pay_date: '2025-09-19', period_description: 'Prior native payroll' },
       { ...native, key: 'imported:9', record_type: 'imported', payroll_item_id: null,
         pay_period_id: null, historical_pay_period_id: 9, pay_date: '2025-08-19',
-        period_description: 'Prior imported payroll',
+        period_description: 'Prior imported payroll', basis_label: 'As imported',
         source: { system: 'quickbooks_online', label: 'QuickBooks', locked: true } },
     ] } });
     const returnTo = '/companies/1/pay-runs/5/work';
@@ -294,6 +294,8 @@ describe('EmployeeWorkspace imported setup certification', () => {
     fireEvent.change(source, { target: { value: 'quickbooks' } });
     expect(screen.getByRole('group', { name: 'Pay history for Aug 19, 2025' })).toBeTruthy();
     expect(screen.queryByRole('group', { name: 'Pay history for Sep 19, 2025' })).toBeNull();
+    // The imported row says it is as imported, on phone and desktop.
+    expect(screen.getAllByText('As imported')).toHaveLength(2);
     expect(year).toHaveProperty('value', '2025');
     const href = screen.getByRole('link', { name: 'Overview' }).getAttribute('href')!;
     const destination = new URL(href, 'https://payroll.example');

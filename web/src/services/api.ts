@@ -2665,7 +2665,10 @@ export interface PayrollRegisterReport {
     summary: {
       employee_count: number;
       contractor_count?: number;
+      /** Combined hours (regular + OT + holiday + PTO), as in ytd_summary. */
       total_hours?: number;
+      worked_hours?: number;
+      combined_hours?: number;
       total_overtime_hours?: number;
       total_gross: number;
       total_reported_tips?: number;

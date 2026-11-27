@@ -21,7 +21,8 @@ module Api
               payroll_item_id: @payroll_item.id,
               employee_name: @payroll_item.employee.full_name,
               pay_period: @payroll_item.pay_period.period_description,
-              pay_date: @payroll_item.pay_period.pay_date,
+              # The date the stub prints (the check's own date, else the run's).
+              pay_date: @payroll_item.check_date || @payroll_item.pay_period.pay_date,
               net_pay: @payroll_item.net_pay,
               generated: existing_key.present?,
               storage_key: existing_key || storage_key
@@ -273,7 +274,7 @@ module Api
               {
                 payroll_item_id: item.id,
                 pay_period: item.pay_period.period_description,
-                pay_date: item.pay_period.pay_date,
+                pay_date: item.check_date || item.pay_period.pay_date,
                 net_pay: item.net_pay,
                 storage_key: pay_stub_key(item)
               }

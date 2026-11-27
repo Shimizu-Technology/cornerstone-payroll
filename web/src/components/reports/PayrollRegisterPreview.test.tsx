@@ -26,7 +26,9 @@ const report = {
   summary: {
     employee_count: 1,
     contractor_count: 0,
-    total_hours: 80,
+    total_hours: 92,
+    worked_hours: 80,
+    combined_hours: 92,
     total_overtime_hours: 5,
     total_gross: 2_100,
     total_bonus: 100,
@@ -75,7 +77,8 @@ describe('PayrollRegisterPreviewContent', () => {
   it("shows Mark's requested totals and separates straight from installment loans", () => {
     render(<PayrollRegisterPreviewContent report={report} />);
 
-    expect(screen.getByText('Total hours').nextElementSibling?.textContent).toBe('80.00');
+    expect(screen.getByText('Regular hours').nextElementSibling?.textContent).toBe('80.00');
+    expect(screen.getByText('Combined hours').nextElementSibling?.textContent).toBe('92.00');
     expect(screen.getByText('Total OT hours').nextElementSibling?.textContent).toBe('5.00');
     expect(screen.getAllByText('Bonus')[0].nextElementSibling?.textContent).toBe('$100.00');
     expect(screen.getByText('Straight loans').nextElementSibling?.textContent).toBe('$25.00');

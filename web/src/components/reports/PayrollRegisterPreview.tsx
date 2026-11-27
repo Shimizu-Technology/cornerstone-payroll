@@ -447,7 +447,8 @@ function DetailedRegisterPreview({ report }: { report: PayrollRegister }) {
     ?? report.contractors.reduce((total, contractor) => total + Number(contractor.net_pay ?? 0), 0);
   const summaryItems = [
     ['Workers', (report.summary.employee_count + contractorCount).toLocaleString()],
-    ['Total hours', decimal(report.summary.total_hours)],
+    ['Regular hours', decimal(report.summary.worked_hours ?? 0)],
+    ['Combined hours', decimal(report.summary.combined_hours ?? report.summary.total_hours)],
     ['Total OT hours', decimal(report.summary.total_overtime_hours)],
     ['W-2 gross', currency(report.summary.total_gross)],
     ['1099 gross', currency(contractorGross)],

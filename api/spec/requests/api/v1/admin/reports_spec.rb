@@ -2105,6 +2105,19 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         net_pay: 823.5)
     end
 
+    it "lists pay history by the date each row shows, the check's own date when it has one" do
+      later_run = create(:pay_period, :committed, company: company,
+        start_date: Date.new(2026, 5, 15), end_date: Date.new(2026, 5, 28), pay_date: Date.new(2026, 5, 30))
+      # Paid by a check dated before the earlier run's pay date.
+      early_check = create(:payroll_item, pay_period: later_run, employee: employee, company: company,
+        gross_pay: 500, net_pay: 400, check_date: Date.new(2026, 5, 12))
+
+      get "/api/v1/admin/reports/employee_pay_history", params: { year: 2026, employee_id: employee.id }
+      history = response.parsed_body.dig("report", "history").select { |row| row["record_type"] == "native" }
+      expect(history.map { |row| [ row["payroll_item_id"], row["pay_date"] ] })
+        .to eq([ [ native_item.id, "2026-05-16" ], [ early_check.id, "2026-05-12" ] ])
+    end
+
     it "reconciles withholding and combined hours across native and imported pay history and exports" do
       native_item.update!(withholding_tax: 120.11, additional_withholding: 50.22,
         hours_worked: 30.11, overtime_hours: 5.22, holiday_hours: 1.33, pto_hours: 2.44)
@@ -2149,10 +2162,11 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
         "Source", "Record Type", "Pay Date", "Period", "Regular Hours", "Overtime Hours", "Holiday Hours", "PTO Hours",
         "Reported Tips", "Tips Paid Out", "Bonus", "Custom Earnings", "Custom Deductions", "Gross Pay",
         "Guam income tax", "Additional Guam income tax (W-4 4c)", "Guam income tax withheld", "SS Tax", "Medicare Tax",
-        "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours"
+        "Total Deductions", "Net Pay", "Check Number", "Payment method", "Combined Hours", "Basis"
       ])
       expect(csv["Guam income tax"].map(&:to_d)).to eq([ 120.11, 90, -10 ].map(&:to_d))
       expect(csv["Regular Hours"]).to eq([ "30.11", "30.0", nil ])
+      expect(csv["Basis"]).to eq([ nil, "As imported, before 1 recorded adjustment", nil ])
       expect(csv["Guam income tax withheld"].map(&:to_d)).to eq(withholding.map(&:to_d))
       expect(csv["Combined Hours"].map(&:to_d)).to eq(hours.map(&:to_d))
 
@@ -2216,12 +2230,14 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       get "/api/v1/admin/reports/ytd_summary_pdf", params: params
       expect(response).to have_http_status(:ok)
       pdf = PDF::Reader.new(StringIO.new(response.body)).pages.map(&:text).join(" ").squish
-      expect(pdf).to include("Regular hours 60.11", "Total hours 79.10", "Combined hours 79.10")
+      expect(pdf).to include("Regular hours 60.11", "Combined hours 79.10")
+      expect(pdf).not_to include("Total hours")
 
       get "/api/v1/admin/reports/ytd_summary_xlsx", params: params
       expect(response).to have_http_status(:ok)
       workbook = Roo::Excelx.new(StringIO.new(response.body))
-      expect(workbook.sheet("Company Totals").to_a.to_h).to include("Worked hours" => 60.11, "Combined hours" => 79.1)
+      expect(workbook.sheet("Company Totals").to_a.to_h).to include("Regular hours" => 60.11, "Combined hours" => 79.1)
+      expect(workbook.sheet("Company Totals").to_a.to_h.keys).not_to include("Total hours", "Worked hours")
       expect(workbook.sheet("Payroll Summary").row(1)).to eq(csv.headers)
     end
 
@@ -4025,7 +4041,7 @@ RSpec.describe "Api::V1::Admin::Reports", type: :request do
       }
       expect(response).to have_http_status(:ok)
       rows = CSV.parse(response.body)
-      expect(rows.first[21..]).to eq([ "Check Number", "Payment method", "Combined Hours" ])
+      expect(rows.first[21..]).to eq([ "Check Number", "Payment method", "Combined Hours", "Basis" ])
       expect(rows[1][21, 2]).to eq([ nil, "Direct deposit" ])
     end
 

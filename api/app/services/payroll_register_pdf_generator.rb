@@ -151,7 +151,7 @@ class PayrollRegisterPdfGenerator
     rows = [
       [ "W-2 Employee Count",  s[:employee_count].to_s ],
       [ "1099 Contractor Count", s[:contractor_count].to_s ],
-      [ "Regular Hours",        decimal(s[:total_hours]) ],
+      [ "Regular Hours",        decimal(s[:worked_hours]) ],
       [ "Overtime Hours",       decimal(s[:total_overtime_hours]) ],
       [ "Combined Hours (Regular + OT + Holiday + PTO)", decimal(Array(report[:employees]).sum(0.to_d) { |worker| %i[hours_worked overtime_hours holiday_hours pto_hours].sum(0.to_d) { |key| worker[key].to_d } }) ],
       [ "Total Gross Pay",      fmt(s[:total_gross]) ],

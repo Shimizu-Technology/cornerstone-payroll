@@ -1685,8 +1685,11 @@ module Api
             # The YTD the paycheck's statement prints, not the calculation snapshot.
             ytd_gross: statement_ytd.call(item).gross,
             ytd_net: statement_ytd.call(item).net,
-            # The date the check and its stub print; the run's pay date unless this check has its own.
-            check_date: (item.check_date || item.pay_period.pay_date)&.iso8601,
+            # check_date is the item's own override (nil uses the run's pay
+            # date), as the edit form saves it. effective_check_date is the
+            # date the check and its stub print.
+            check_date: item.check_date,
+            effective_check_date: (item.check_date || item.pay_period.pay_date)&.iso8601,
             wage_rate_hours: item.wage_rate_hours
           }
         end

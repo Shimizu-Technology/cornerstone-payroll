@@ -1425,7 +1425,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                   <details className="mt-3 border-t border-neutral-100 pt-3 text-sm">
                     <summary className="cursor-pointer font-semibold text-primary-700">More pay details</summary>
                     <dl className="mt-3 grid grid-cols-2 gap-3">
-                      <div><dt>Hours</dt><dd>{history.hours_worked ?? '—'}</dd></div>
+                      <div><dt>Regular hours</dt><dd>{history.hours_worked ?? '—'}</dd></div>
                       <div><dt>OT hours</dt><dd>{history.overtime_hours ?? '—'}</dd></div>
                       <div><dt>Custom earnings</dt><dd>{fmt(history.custom_earnings_total ?? 0)}</dd></div>
                       <div><dt>Custom deductions</dt><dd>{fmt(history.custom_deductions_total ?? 0)}</dd></div>
@@ -1445,7 +1445,7 @@ export function EmployeePayHistoryPanel(): ReactNode {
                     <th className="pb-2 pr-4 font-medium">Pay Date</th>
                     <th className="pb-2 pr-4 font-medium">Period</th>
                     <th className="pb-2 pr-4 font-medium">Source</th>
-                    <th className="pb-2 pr-4 font-medium text-right">Hours</th>
+                    <th className="pb-2 pr-4 font-medium text-right">Regular Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">OT Hours</th>
                     <th className="pb-2 pr-4 font-medium text-right">Custom Earn.</th>
                     <th className="pb-2 pr-4 font-medium text-right">Gross Pay</th>
