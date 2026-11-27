@@ -257,3 +257,21 @@ it('shows the true future opens-on date plus the manager note for a viewer on an
   renderAt('client');
   expect(await screen.findByText('Opens for files on Dec 5, 2026. Only client managers can send payroll files.')).toBeTruthy();
 });
+
+it('shows neutral copy to a client manager when an open period is not taking files', async () => {
+  mocks.viewOnly = false;
+  mocks.get.mockResolvedValue({
+    data: period({
+      status: 'in_review',
+      status_label: 'In review',
+      open_for_files: true,
+      opens_on: '2026-11-15',
+      current_revision: null,
+      submissions: [],
+      allowed_actions: ['message'],
+    }),
+  });
+  renderAt('client');
+  expect(await screen.findByText("This period isn't taking files right now.")).toBeTruthy();
+  expect(screen.queryByText('Only client managers can send payroll files.')).toBeNull();
+});

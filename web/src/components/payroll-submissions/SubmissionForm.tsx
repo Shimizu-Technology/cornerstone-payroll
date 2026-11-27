@@ -74,7 +74,8 @@ function FieldError({ messages }: { messages?: string[] }): ReactElement | null 
 export function SubmissionForm({ period, current, onSent, onCancel }: {
   period: PeriodDetail; current?: SubmissionRevision; onSent: (detail: PeriodDetail, outcome: string) => void; onCancel?: () => void;
 }): ReactElement {
-  const descriptor = period.intake_descriptor ?? DEFAULT_MOSA_DESCRIPTOR;
+  const explicitDescriptor = period.intake_descriptor ?? null;
+  const descriptor = explicitDescriptor ?? DEFAULT_MOSA_DESCRIPTOR;
   const extraHoursConfig = resolveExtraHoursConfig(period, descriptor);
   const singleWorkweek = extraHoursConfig.mode === 'workweek' && extraHoursConfig.workweeks.length === 1;
   const portalSlots = descriptor.files.filter((slot): slot is PayrollIntakeFileSlot & { portal_role: string } => Boolean(slot.portal_role));
@@ -412,9 +413,11 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
         )}
         {!noChanges && <>
           <p className="text-sm text-neutral-600">
-            {descriptor.key === 'mosa_revel'
+            {explicitDescriptor?.key === 'mosa_revel'
               ? 'Only list what is different from the Revel report. Cornerstone reviews every change before it reaches payroll.'
-              : 'Only list anything not already included in the payroll workbook. Cornerstone reviews every change before it reaches payroll.'}
+              : explicitDescriptor?.key === 'cornerstone_workbook'
+                ? 'Only list anything not already included in the payroll workbook. Cornerstone reviews every change before it reaches payroll.'
+                : 'Only list anything not already included in your payroll files. Cornerstone reviews every change before it reaches payroll.'}
           </p>
           {employeeState === 'loading' && <p role="status" className="text-sm text-neutral-600">Loading employees…</p>}
           {employeeState === 'error' && <div role="alert" className="flex flex-col gap-2 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-800 sm:flex-row sm:items-center sm:justify-between">
@@ -425,11 +428,13 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
             {rows.filter(row => !row.standing_change_id).map((row, index) => {
               const meta = CHANGE_KINDS.find(k => k.kind === row.kind)!;
               const hint = row.kind === 'extra_hours'
-                ? descriptor.key === 'mosa_revel'
+                ? explicitDescriptor?.key === 'mosa_revel'
                   ? 'Hours not in the Revel report'
-                  : descriptor.key === 'cornerstone_workbook'
+                  : explicitDescriptor?.key === 'cornerstone_workbook'
                     ? 'Hours not in the uploaded workbook'
-                    : `Hours not in ${descriptor.label || 'your payroll file'}`
+                    : explicitDescriptor?.label
+                      ? `Hours not in ${explicitDescriptor.label}`
+                      : 'Hours not in your payroll files'
                 : meta.hint;
               return <li key={row.key} className="rounded-lg border border-neutral-200 bg-neutral-50 p-3">
                 <div className="mb-2 flex items-start justify-between gap-2"><p className="font-semibold text-neutral-900">{index + 1}. {meta.label}</p>

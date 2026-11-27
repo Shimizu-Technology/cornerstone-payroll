@@ -504,3 +504,53 @@ it('formats extra-hours rates with two decimals, uses intake-driven hints, and h
   fireEvent.change(screen.getByLabelText('Employee'), { target: { value: '173' } });
   expect(screen.getByRole('option', { name: 'Cook · $17.50/hr' })).toBeTruthy();
 });
+
+it('uses neutral payroll-files wording when intake_descriptor is missing and keeps Revel wording for mosa_revel', async () => {
+  render(<SubmissionForm period={period} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  expect(screen.getByText(/Only list anything not already included in your payroll files\./)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  expect(screen.getByText('Hours not in your payroll files')).toBeTruthy();
+  expect(screen.queryByText('Hours not in the Revel report')).toBeNull();
+
+  cleanup();
+  const revelPeriod: PeriodDetail = {
+    ...period,
+    intake_descriptor: {
+      key: 'mosa_revel',
+      label: 'Revel hours + Cornerstone workbook',
+      source_label: 'Revel Payroll + Cornerstone Workbook',
+      extraction: 'deterministic',
+      accepts_pasted_text: false,
+      tracks_reviewed_hours: true,
+      employee_match: 'name_fuzzy',
+      reports_overtime: true,
+      tips_default: 'paid_in_check',
+      overtime_mode: 'source_reports',
+      workweek_alignment: 'warn_if_offset',
+      required_sources: ['revel_hours'],
+      files: [{
+        role: 'revel_hours',
+        label: 'Revel hours PDF',
+        hint: 'Hours worked, including overtime, from Revel.',
+        accept: ['.pdf'],
+        content_type: 'application/pdf',
+        max: 1,
+        required: true,
+        required_by_default: true,
+        waivable: null,
+        portal_role: 'revel_payroll',
+        portal_label: 'Revel hours report (PDF)',
+        portal_hint: 'Hours worked, including overtime, from Revel.',
+        supports_link: false,
+        provides: ['regular_hours', 'overtime_hours'],
+      }],
+      portal: { submittable: true, role_map: { revel_payroll: 'revel_hours' } },
+    },
+  };
+  render(<SubmissionForm period={revelPeriod} onSent={vi.fn()} />);
+  await waitFor(() => expect(mocks.employees).toHaveBeenCalled());
+  expect(screen.getByText(/Only list what is different from the Revel report\./)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Add change' }));
+  expect(screen.getByText('Hours not in the Revel report')).toBeTruthy();
+});

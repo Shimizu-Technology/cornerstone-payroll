@@ -233,34 +233,36 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
               <p className="text-sm text-neutral-600">{query ? 'No matching employees.' : 'No employees ready for this delivery method.'}</p>
             ) : (
               <div className="space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy || matches.every((employee) => selectedIds.includes(employee.id)) || selectedIds.length >= rollout.max_wave_size}
-                      onClick={() => {
-                        setSelected((previous) => {
-                          const currentValid = previous.filter((id) => eligible.some((candidate) => candidate.id === id));
-                          const next = [...currentValid];
-                          for (const employee of matches) {
-                            if (next.length >= rollout.max_wave_size) break;
-                            if (!next.includes(employee.id)) next.push(employee.id);
-                          }
-                          return next;
-                        });
-                      }}
-                    >
-                      Select all ready ({Math.min(matches.length, rollout.max_wave_size)})
-                    </Button>
-                    {selectedIds.length > 0 && (
-                      <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setSelected([])}>
-                        Clear selection
+                {audience !== 'admin' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || matches.every((employee) => selectedIds.includes(employee.id)) || selectedIds.length >= rollout.max_wave_size}
+                        onClick={() => {
+                          setSelected((previous) => {
+                            const currentValid = previous.filter((id) => eligible.some((candidate) => candidate.id === id));
+                            const next = [...currentValid];
+                            for (const employee of matches) {
+                              if (next.length >= rollout.max_wave_size) break;
+                              if (!next.includes(employee.id)) next.push(employee.id);
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        Select all ready ({Math.min(matches.length, rollout.max_wave_size)})
                       </Button>
-                    )}
+                      {selectedIds.length > 0 && (
+                        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setSelected([])}>
+                          Clear selection
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
                 <ul className="max-h-72 divide-y divide-neutral-100 overflow-auto rounded-xl border border-neutral-200">
                   {matches.map((employee) => {
                     const checked = selected.includes(employee.id);

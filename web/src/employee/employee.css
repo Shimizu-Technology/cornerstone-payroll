@@ -377,13 +377,15 @@ body {
   min-width: 0;
 }
 
-.emp-home-grid > .emp-column:not(.emp-wide-only) {
-  display: contents;
-}
+@media (max-width: 1023px) {
+  .emp-home-grid > .emp-column:not(.emp-wide-only) {
+    display: contents;
+  }
 
-.emp-home-latest { order: 1; }
-.emp-home-ytd { order: 2; }
-.emp-home-recent { order: 3; }
+  .emp-home-latest { order: 1; }
+  .emp-home-ytd { order: 2; }
+  .emp-home-recent { order: 3; }
+}
 
 /* Secondary columns that only earn their space on a wide screen. */
 .emp-wide-only {

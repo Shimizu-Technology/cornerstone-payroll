@@ -203,7 +203,7 @@ export function PayrollPeriodPage({ audience }: { audience: Audience }): ReactEl
                   : `Opens for files on ${formatDate(period.opens_on)}. Only client managers can send payroll files.`
                 : !period.open_for_files
                   ? `This period opens for files on ${formatDate(period.opens_on)}.`
-                  : 'Only client managers can send payroll files.'}
+                  : "This period isn't taking files right now."}
           </p>
         )}
 

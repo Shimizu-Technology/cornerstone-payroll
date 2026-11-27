@@ -172,9 +172,9 @@ test('client can find and review every payroll amount on a narrow phone before a
     await expect(mobileDetails.getByText(amount, { exact: true }).first()).toBeVisible();
   }
   await expect(page.getByRole('button', { name: 'Approve this revision' })).toBeDisabled();
-  const detailsBottom = await mobileDetails.evaluate((node) => node.getBoundingClientRect().bottom + window.scrollY);
-  const approvalTop = await page.getByRole('heading', { name: 'Review preview' }).evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
-  expect(approvalTop).toBeGreaterThan(detailsBottom);
+  const detailsTop = await mobileDetails.evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
+  const approvalBottom = await page.getByRole('heading', { name: 'Review preview' }).evaluate((node) => node.getBoundingClientRect().bottom + window.scrollY);
+  expect(approvalBottom).toBeLessThan(detailsTop);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await mobileDetails.getByText('Mo Example').scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('client-approval-320.png'), fullPage: true });

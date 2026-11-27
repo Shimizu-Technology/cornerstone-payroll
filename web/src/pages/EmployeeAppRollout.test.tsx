@@ -186,7 +186,7 @@ describe('Employee app rollout', () => {
     expect(label.className).toContain('inline-flex');
   });
 
-  it('supports Select all ready and Clear selection in Invite a group up to max_wave_size', async () => {
+  it('supports Select all ready and Clear selection in Invite a group for the client audience up to max_wave_size', async () => {
     mocks.get.mockResolvedValue({ data: { ...rollout, max_wave_size: 2 } });
     const user = userEvent.setup();
     render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
@@ -199,5 +199,17 @@ describe('Employee app rollout', () => {
 
     await user.click(screen.getByRole('button', { name: 'Clear selection' }));
     expect(screen.getByText('0 selected')).toBeTruthy();
+  });
+
+  it('does not render client bulk-selection controls for the admin audience', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, max_wave_size: 2 } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+
+    await screen.findByRole('checkbox', { name: /Sample One/ });
+    expect(screen.queryByRole('button', { name: /Select all ready/ })).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Clear selection' })).toBeNull();
   });
 });
