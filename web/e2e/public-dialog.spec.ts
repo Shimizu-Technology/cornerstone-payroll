@@ -38,11 +38,15 @@ test('Clerk step-up modal opened over a Dialog remains interactive while backgro
   const appDialog = page.getByRole('dialog', { name: 'Step-up inside dialog test' });
   await expect(appDialog).toBeVisible();
 
-  // The page behind the dialog is marked inert.
+  // The page behind the dialog (including any embedded Clerk component) is marked inert.
   const backgroundIsInert = await page.getByTestId('background-page-btn').evaluate(
     (el) => Boolean(el.closest('[inert]')),
   );
   expect(backgroundIsInert).toBe(true);
+  const embeddedClerkIsInert = await page.getByTestId('embedded-clerk-profile').evaluate(
+    (el) => Boolean(el.closest('[inert]')),
+  );
+  expect(embeddedClerkIsInert).toBe(true);
 
   await appDialog.getByRole('button', { name: 'Turn on' }).click();
 

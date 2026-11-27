@@ -205,3 +205,92 @@ it('exempts Clerk-marked roots even when inserted outside an explicit step-up wi
   expect(clerkRoot.querySelector('input')?.closest('[inert]')).toBeNull();
   clerkRoot.remove();
 });
+
+it('still marks #root inert when an embedded Clerk component like UserProfile lives inside the app root', async () => {
+  const user = userEvent.setup();
+  const appRoot = document.createElement('div');
+  appRoot.id = 'root';
+  document.body.appendChild(appRoot);
+  const onClose = vi.fn();
+
+  try {
+    const view = (open: boolean): React.ReactElement => (
+      <main>
+        <button type="button">Open dialog</button>
+        <div className="cl-rootBox cl-userProfile-root">
+          <button type="button">Manage security</button>
+        </div>
+        <Dialog open={open} onOpenChange={onClose}>
+          <DialogContent>
+            <DialogTitle>Security confirmation</DialogTitle>
+            <button type="button">Confirm</button>
+          </DialogContent>
+        </Dialog>
+      </main>
+    );
+    const { rerender } = render(view(false), { container: appRoot });
+    const opener = appRoot.querySelector<HTMLButtonElement>('button')!;
+    opener.focus();
+    rerender(view(true));
+
+    // #root must be inert even though it contains a Clerk <UserProfile> tree.
+    expect(appRoot.hasAttribute('inert')).toBe(true);
+    expect(appRoot.querySelector('.cl-userProfile-root')?.closest('[inert]')).toBe(appRoot);
+
+    // Starting a step-up must NEVER un-inert #root, while a body-level Clerk modal IS interactive.
+    const releaseStepUp = beginStepUpOverlay();
+    expect(appRoot.hasAttribute('inert')).toBe(true);
+
+    const clerkPortal = document.createElement('div');
+    clerkPortal.setAttribute('data-floating-ui-portal', '');
+    clerkPortal.innerHTML = `
+      <div class="cl-modalBackdrop">
+        <div class="cl-modalContent" role="dialog" aria-modal="true" aria-label="Verification required">
+          <input aria-label="Verification code" />
+        </div>
+      </div>
+    `;
+    document.body.appendChild(clerkPortal);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(clerkPortal.hasAttribute('inert')).toBe(false);
+    expect(appRoot.hasAttribute('inert')).toBe(true);
+
+    clerkPortal.remove();
+    releaseStepUp();
+
+    // Embedded Clerk markup in #root must not block Escape from dismissing the dialog.
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledWith(false);
+  } finally {
+    appRoot.remove();
+  }
+});
+
+it('never exempts a non-#root container that holds the dialog opener even if it embeds a Clerk component', () => {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+
+  try {
+    const view = (open: boolean): React.ReactElement => (
+      <div className="cl-userProfile-root">
+        <button type="button">Trigger</button>
+        <Dialog open={open} onOpenChange={vi.fn()}>
+          <DialogContent>
+            <DialogTitle>Opener host check</DialogTitle>
+            <button type="button">OK</button>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+    const { rerender } = render(view(false), { container: host });
+    const opener = host.querySelector<HTMLButtonElement>('button')!;
+    opener.focus();
+    rerender(view(true));
+
+    expect(host.hasAttribute('inert')).toBe(true);
+    expect(host.querySelector('.cl-userProfile-root')?.closest('[inert]')).toBe(host);
+  } finally {
+    host.remove();
+  }
+});
