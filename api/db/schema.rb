@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -4033,7 +4033,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_160000) do
     t.index [ "payroll_submission_id", "client_document_id" ], name: "idx_payroll_submission_documents_once", unique: true
     t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_revel", unique: true, where: "((role)::text = 'revel_payroll'::text)"
     t.index [ "payroll_submission_id" ], name: "idx_payroll_submission_documents_one_workbook", unique: true, where: "((role)::text = 'changes_workbook'::text)"
-    t.check_constraint "role::text = ANY (ARRAY['revel_payroll'::character varying::text, 'changes_workbook'::character varying::text, 'attachment'::character varying::text])", name: "payroll_submission_documents_role"
+    t.check_constraint "role::text ~ '^[a-z][a-z0-9_]{0,63}$'::text", name: "payroll_submission_documents_role"
   end
 
   create_table "payroll_submission_drafts", force: :cascade do |t|

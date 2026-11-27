@@ -24,7 +24,8 @@ module PayrollSubmissions
     end
 
     def call
-      unless @company.payroll_intake_source_enabled?("mosa_revel")
+      descriptor = portal_descriptor
+      unless descriptor
         raise FileSet::Invalid, { "company" => [ "Payroll files are not enabled for this client" ] }
       end
       raise Closed, "This period opens for files on #{@entry.end_date.strftime('%b %-d, %Y')}." unless @catalog.open_for_files?(@entry)
@@ -33,7 +34,7 @@ module PayrollSubmissions
       raise FileSet::Invalid, { "idempotency_key" => [ "is too long" ] } if key && key.length > 128
 
       answers = normalized_answers
-      files = FileSet.new(company_id: @company.id, files: incoming_files).prepare!
+      files = FileSet.new(company_id: @company.id, files: incoming_files(descriptor), descriptor: descriptor).prepare!
       keep_ids = keep_document_ids
       request_answers = answers
       request_answers = answers.merge(excel_attachments_supporting: true) if ActiveModel::Type::Boolean.new.cast(@params[:excel_attachments_supporting])
@@ -88,17 +89,18 @@ module PayrollSubmissions
           workbook_choice: answers[:workbook_choice], no_changes: answers[:no_changes], change_rows: answers[:change_rows], changes_link_url: answers[:changes_link_url],
           notes: answers[:notes], content_fingerprint: content, request_fingerprint: request_fingerprint, idempotency_key: key
         )
-        # Revel PDF first, then the workbook, then attachments, kept and new alike.
-        rank = PayrollSubmissionDocument::ROLES.each_with_index.to_h
+        # Descriptor portal roles first in declaration order, then supporting attachments.
+        ordered_roles = (descriptor.portal_roles + [ "attachment" ]).uniq
+        rank = ordered_roles.each_with_index.to_h
         entries = kept.map { |previous| [ :kept, previous ] } + files.prepared.map { |item| [ :new, item ] }
         new_documents = []
-        entries.sort_by.with_index { |(_, item), index| [ rank.fetch(item.role), index ] }.each.with_index(1) do |(kind, item), position|
+        entries.sort_by.with_index { |(_, item), index| [ rank.fetch(item.role, ordered_roles.length), index ] }.each.with_index(1) do |(kind, item), position|
           if kind == :kept
             submission.submission_documents.create!(company_id: @company.id, client_document_id: item.client_document_id,
               role: item.role, position: position, sha256: item.sha256,
               file_name_snapshot: item.file_name_snapshot, file_size_snapshot: item.file_size_snapshot)
           else
-            document = files.create_document!(item, actor: @actor, title: title_for(item, period, submission.revision),
+            document = files.create_document!(item, actor: @actor, title: title_for(item, period, submission.revision, descriptor),
               category: "payroll_source", visible_to_client: true)
             submission.submission_documents.create!(company_id: @company.id, client_document: document, role: item.role,
               position: position, sha256: item.sha256, file_name_snapshot: item.file.original_filename,
@@ -155,7 +157,7 @@ module PayrollSubmissions
       notes = @params[:notes].to_s.strip.presence
       raise FileSet::Invalid, { "notes" => [ "Keep notes under 5,000 characters" ] } if notes && notes.length > 5000
 
-      { workbook_choice: @params[:workbook_choice].to_s, no_changes: no_changes, change_rows: rows, changes_link_url: link, notes: notes }
+      { workbook_choice: @params[:workbook_choice].to_s.strip.presence, no_changes: no_changes, change_rows: rows, changes_link_url: link, notes: notes }
     end
 
     def keep_document_ids
@@ -164,10 +166,16 @@ module PayrollSubmissions
       raise FileSet::Invalid, { "keep_document_ids" => [ "Only files from the current revision can be carried forward" ] }
     end
 
-    def incoming_files
+    def portal_descriptor
+      @portal_descriptor ||= @company.portal_submittable_intake_descriptor
+    end
+
+    def incoming_files(descriptor)
       files = []
-      files << [ "revel_payroll", @params[:revel_payroll] ] if @params[:revel_payroll].present?
-      files << [ "changes_workbook", @params[:changes_workbook] ] if @params[:changes_workbook].present?
+      descriptor.portal_roles.each do |portal_role|
+        upload = @params[portal_role] || @params[portal_role.to_sym]
+        files << [ portal_role, upload ] if upload.present?
+      end
       Array(@params[:attachments]).compact_blank.each { |file| files << [ "attachment", file ] }
       files
     end
@@ -183,28 +191,55 @@ module PayrollSubmissions
     end
 
     def validate_roles!(kept, prepared, answers:)
+      descriptor = portal_descriptor
+      required_roles = @company.payroll_intake_required_sources(descriptor.key)
       roles = kept.map(&:role) + prepared.map(&:role)
       errors = {}
-      choice = answers[:workbook_choice]
-      workbook = roles.include?("changes_workbook")
-      link = answers[:changes_link_url].present?
-      unless %w[attach link none].include?(choice)
-        errors["workbook_choice"] = [ "Choose a workbook, a link, or no tips or loans this period" ]
+
+      linkable_slot = descriptor.files.find { |slot| slot.portal_role.present? && slot.supports_link }
+      if linkable_slot
+        workbook_role = linkable_slot.portal_role
+        choice = answers[:workbook_choice]
+        workbook = roles.include?(workbook_role)
+        link = answers[:changes_link_url].present?
+        unless %w[attach link none].include?(choice)
+          errors["workbook_choice"] = [ "Choose a workbook, a link, or no tips or loans this period" ]
+        end
+        errors[workbook_role] = [ workbook_role == "changes_workbook" ? "Attach the tips & loans workbook" : "Attach the #{linkable_slot.portal_label || linkable_slot.label}" ] if choice == "attach" && !workbook
+        errors["changes_link_url"] = [ "Enter a full https:// link" ] if choice == "link" && !link
+        if (workbook && choice != "attach") || (link && choice != "link")
+          errors["workbook_choice"] = [ "Choose exactly one: attach the workbook, send a link, or no tips or loans" ]
+        end
+        new_excel = prepared.any? { |item| item.role == "attachment" && File.extname(item.file.original_filename).downcase.in?(%w[.xls .xlsx]) }
+        new_workbook = prepared.any? { |item| item.role == workbook_role }
+        supporting = ActiveModel::Type::Boolean.new.cast(@params[:excel_attachments_supporting])
+        if new_excel && !new_workbook && !supporting
+          errors["attachment"] = [ "Is this the tips & loans workbook? Move the Excel file to the workbook slot or confirm it is supporting material." ]
+        end
       end
-      errors["changes_workbook"] = [ "Attach the tips & loans workbook" ] if choice == "attach" && !workbook
-      errors["changes_link_url"] = [ "Enter a full https:// link" ] if choice == "link" && !link
-      if (workbook && choice != "attach") || (link && choice != "link")
-        errors["workbook_choice"] = [ "Choose exactly one: attach the workbook, send a link, or no tips or loans" ]
+
+      descriptor.files.each do |slot|
+        portal_role = slot.portal_role
+        next if portal_role.blank?
+
+        count = roles.count(portal_role)
+        max_allowed = slot.max || 1
+        required = required_roles.include?(slot.role)
+
+        if count.zero? && required && !slot.supports_link && slot.waivable.blank?
+          errors[portal_role] = [
+            portal_role == "revel_payroll" ? "Attach the Revel payroll PDF" : "Attach the #{slot.portal_label || slot.label}"
+          ]
+        elsif count > max_allowed
+          errors[portal_role] = [
+            case portal_role
+            when "revel_payroll" then "Send one Revel payroll PDF per revision"
+            when "changes_workbook" then "Send one tips & loans workbook per revision"
+            else "Send at most #{max_allowed} #{slot.portal_label || slot.label} per revision"
+            end
+          ]
+        end
       end
-      new_excel = prepared.any? { |item| item.role == "attachment" && File.extname(item.file.original_filename).downcase.in?(%w[.xls .xlsx]) }
-      new_workbook = prepared.any? { |item| item.role == "changes_workbook" }
-      supporting = ActiveModel::Type::Boolean.new.cast(@params[:excel_attachments_supporting])
-      if new_excel && !new_workbook && !supporting
-        errors["attachment"] = [ "Is this the tips & loans workbook? Move the Excel file to the workbook slot or confirm it is supporting material." ]
-      end
-      errors["revel_payroll"] = [ "Attach the Revel payroll PDF" ] if roles.count("revel_payroll").zero?
-      errors["revel_payroll"] = [ "Send one Revel payroll PDF per revision" ] if roles.count("revel_payroll") > 1
-      errors["changes_workbook"] = [ "Send one tips & loans workbook per revision" ] if roles.count("changes_workbook") > 1
       raise FileSet::Invalid, errors if errors.any?
     end
 
@@ -216,11 +251,13 @@ module PayrollSubmissions
       Digest::SHA256.hexdigest(JSON.generate(parts.transform_values { |value| value.is_a?(Hash) ? value.sort.to_h : value }))
     end
 
-    def title_for(item, period, revision)
+    def title_for(item, period, revision, descriptor = portal_descriptor)
       case item.role
       when "revel_payroll" then "Revel payroll · #{period.label} · revision #{revision}"
       when "changes_workbook" then "Payroll changes workbook · #{period.label} · revision #{revision}"
-      else item.file.original_filename
+      else
+        slot = descriptor&.file_slot_for_portal_role(item.role)
+        slot ? "#{slot.label} · #{period.label} · revision #{revision}" : item.file.original_filename
       end
     end
   end

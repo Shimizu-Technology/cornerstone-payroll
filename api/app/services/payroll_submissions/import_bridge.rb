@@ -40,21 +40,27 @@ module PayrollSubmissions
         if submission != current && @superseded_reason.blank?
           raise ArgumentError, "This revision is superseded. Explicitly choose it and record why before opening import review."
         end
-        documents = source_documents!(submission)
-        files = documents.map { |link| upload_for!(link) }
-        link_only = submission.changes_link_url.present? && documents.none? { |link| link.role == "changes_workbook" }
+        descriptor = portal_descriptor
+        documents = source_documents!(submission, descriptor)
+        files = documents.map { |link| upload_for!(link, descriptor) }
+        linkable_portal_role = descriptor.files.find(&:supports_link)&.portal_role || "changes_workbook"
+        link_only = submission.changes_link_url.present? && documents.none? { |link| link.role == linkable_portal_role }
         carried_staff = nil
         if @options[:staff_workbook].present?
           raise ArgumentError, "A staff workbook may only supplement a revision with a workbook link and no workbook file" unless link_only
 
-          validated = FileSet.new(company_id: @run.company_id, files: [ [ "changes_workbook", @options[:staff_workbook] ] ]).prepare!
+          validated = FileSet.new(
+            company_id: @run.company_id,
+            files: [ [ linkable_portal_role, @options[:staff_workbook] ] ],
+            descriptor: descriptor
+          ).prepare!
           files << validated.prepared.sole.file
         elsif link_only && (carried_staff = staff_workbook_in_review(submission))
           # Reopening the same revision, for example after a worker was
           # reactivated, keeps the workbook staff already attached from the link.
           files << carried_upload!(carried_staff.staff_workbook_document)
         end
-        result = PayrollIntake::PreviewService.new(pay_period: @run, source_type: "mosa_revel", actor: @actor,
+        result = PayrollIntake::PreviewService.new(pay_period: @run, source_type: descriptor.key, actor: @actor,
           files: files, portal_documents: documents, portal_submission: submission,
           **@options.slice(:supersedes_package_id, :supersession_reason)).call
         retained_keys = result[:session].documents.filter_map(&:storage_reference) unless result[:duplicate]
@@ -75,15 +81,36 @@ module PayrollSubmissions
 
     private
 
-    def source_documents!(submission)
+    def portal_descriptor
+      @run.company.portal_submittable_intake_descriptor || PayrollIntake::Registry.fetch("mosa_revel")
+    end
+
+    def source_documents!(submission, descriptor)
       links = submission.submission_documents.includes(:client_document).to_a
       roles = links.map(&:role)
-      unless roles.count("revel_payroll") == 1 && roles.count("changes_workbook") <= 1 &&
-        (roles - PayrollSubmissionDocument::ROLES).empty?
-        raise ArgumentError, "A portal revision needs exactly one Revel PDF and at most one changes workbook"
+      allowed_roles = (descriptor.portal_roles + [ "attachment" ]).uniq
+      required_roles = @run.company.payroll_intake_required_sources(descriptor.key)
+
+      invalid = (roles - allowed_roles).any? || descriptor.files.any? do |slot|
+        portal_role = slot.portal_role
+        next false if portal_role.blank?
+
+        count = roles.count(portal_role)
+        max_allowed = slot.max || 1
+        must_be_present = required_roles.include?(slot.role) && !slot.supports_link && slot.waivable.blank?
+        (must_be_present && count.zero?) || count > max_allowed
       end
+
+      if invalid
+        if descriptor.key == "mosa_revel"
+          raise ArgumentError, "A portal revision needs exactly one Revel PDF and at most one changes workbook"
+        end
+        raise ArgumentError, "Portal revision files do not match the #{descriptor.label} requirements"
+      end
+
       # Supporting attachments remain evidence, never importer inputs.
-      links.reject { |link| link.role == "attachment" }.sort_by { |link| link.role == "revel_payroll" ? 0 : 1 }
+      order = descriptor.portal_roles
+      links.reject { |link| link.role == "attachment" }.sort_by { |link| order.index(link.role) || order.length }
     end
 
     # The selection of this revision in the open review that holds a staff-attached workbook.
@@ -110,7 +137,7 @@ module PayrollSubmissions
       ActionDispatch::Http::UploadedFile.new(tempfile: tempfile, filename: document.filename, type: document.content_type)
     end
 
-    def upload_for!(link)
+    def upload_for!(link, descriptor)
       document = link.client_document
       unless document.company_id == @run.company_id && document.visible_to_client && !document.archived?
         raise ArgumentError, "Portal source must be visible and unarchived before import"
@@ -124,7 +151,12 @@ module PayrollSubmissions
         raise ArgumentError, "Portal source checksum or size does not match its submission snapshot"
       end
       ext = File.extname(link.file_name_snapshot).downcase
-      valid = link.role == "revel_payroll" ? ext == ".pdf" : %w[.xls .xlsx].include?(ext)
+      slot = descriptor.file_slot_for_portal_role(link.role)
+      valid = if slot
+        slot.matches?(filename: link.file_name_snapshot, content_type: document.content_type)
+      else
+        link.role == "revel_payroll" ? ext == ".pdf" : %w[.xls .xlsx].include?(ext)
+      end
       raise ArgumentError, "Portal file does not match its source role" unless valid
 
       tempfile = Tempfile.new([ "portal-import-", ext ])

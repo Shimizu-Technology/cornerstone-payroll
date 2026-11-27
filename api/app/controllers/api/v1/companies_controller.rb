@@ -53,6 +53,16 @@ module Api
           total_employees: total_employee_counts.fetch(company.id, 0),
           pay_frequency: company.pay_frequency,
           payroll_intake_source_types: company.payroll_intake_source_types,
+          portal_payroll_files_enabled: company.portal_payroll_files_enabled?,
+          payroll_intake_adapters: company.payroll_intake_descriptors.map do |descriptor|
+            effective = PayrollIntake::EffectiveSettings.for(company: company, source_type: descriptor.key)
+            descriptor.serialize(
+              required_sources: effective.required_sources,
+              tips_default: effective.tips_default,
+              overtime_mode: effective.overtime_mode,
+              workweek_alignment: effective.workweek_alignment
+            )
+          end,
           historical_payroll_enabled: company.historical_payroll_enabled,
           client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),

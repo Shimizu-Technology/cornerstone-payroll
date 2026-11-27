@@ -26,13 +26,13 @@ import { NumericInput } from '@/components/ui/numeric-input';
 import { Select } from '@/components/ui/select';
 import { changeSummary } from '@/lib/payrollSubmissionFormat';
 import { cn, formatCurrency, formatGuamDateTime } from '@/lib/utils';
-import { carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, MOSA_SOURCE_ACCEPT, noticeTitle, sameSourceFiles } from '@/lib/importSources';
+import { acceptMapForDescriptor, carryRowOutcomes, defaultDisposition, fileSha256, importSourceFiles, noticeTitle, pickersForDescriptor, sameSourceFiles } from '@/lib/importSources';
 import { EmployeeStatusTransitionDialog } from '@/components/employees/EmployeeStatusTransitionDialog';
 import { ImportSourcePanel } from './ImportSourcePanel';
 import { ImportSourceChecklist } from './ImportSourceChecklist';
 import { InstallmentLoanSetup, type InstallmentLoanSubmission } from './InstallmentLoanSetup';
 import { ApiError, employeesApi, payrollIntakeImportsApi, payPeriodsApi, payrollItemsApi } from '@/services/api';
-import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeImportData } from '@/services/api';
+import type { ImportPreviewResponse, ImportPreviewRow, MosaSourceRow, PayrollIntakeDescriptor, PayrollIntakeImportData } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 
 interface ImportModalProps {
@@ -41,6 +41,7 @@ interface ImportModalProps {
   onOpenChange: (open: boolean) => void;
   payPeriodId: number;
   companyId: number;
+  descriptor?: PayrollIntakeDescriptor | null;
   onSourcePreviewed?: () => void;
   onImportComplete: (payPeriod: PayPeriod & { payroll_items?: PayrollItem[] }) => void;
   // Payroll staff can reactivate a matched inactive worker from the review.
@@ -52,13 +53,11 @@ interface ImportModalProps {
 type Step = 'upload' | 'preview' | 'applying' | 'done';
 type EditableSourceRow = MosaSourceRow;
 
-// The two MoSa files. Either can be sent first; the package keeps the other.
-const SOURCE_PICKERS = [
-  { role: 'revel_hours', label: 'Revel hours PDF', hint: 'The original Revel report. Its regular and overtime hours are imported; Revel pay rates and pay amounts are ignored. Its dates must match this payroll.' },
-  { role: 'supplemental_workbook', label: 'Tips & loans workbook', hint: 'The Cornerstone change workbook with tips, loans, owner pay and one-time items.' },
-] as const;
-
-export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, onSourcePreviewed, onImportComplete, canReactivateWorkers = false, canRehireWorkers = false }: ImportModalProps) {
+export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, companyId, descriptor, onSourcePreviewed, onImportComplete, canReactivateWorkers = false, canRehireWorkers = false }: ImportModalProps) {
+  const activeSourceType = descriptor?.key || 'mosa_revel';
+  const sourcePickers = pickersForDescriptor(descriptor);
+  const acceptByRole = acceptMapForDescriptor(descriptor);
+  const defaultTipsPaidOut = descriptor?.tips_default === 'already_paid_out';
   const [step, setStep] = useState<Step>(initialPreview ? 'preview' : 'upload');
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [excelFile, setExcelFile] = useState<File | null>(null);
@@ -67,7 +66,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [previewData, setPreviewData] = useState<ImportPreviewResponse | null>(initialPreview || null);
   const [sourceRows, setSourceRows] = useState<EditableSourceRow[]>(() => initialPreview?.preview.source_rows.map(row => ({ ...row, disposition: row.row_kind === 'matched' && row.errors.length === 0 ? 'included' : 'pending' })) || []);
   const [rateChoices, setRateChoices] = useState<Record<string, number>>({});
-  const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(false);
+  const [tipsPaidOutFromTips, setTipsPaidOutFromTips] = useState(defaultTipsPaidOut);
   const [reviewedClientChanges, setReviewedClientChanges] = useState(false);
   const [clientChangeDrafts, setClientChangeDrafts] = useState<Record<number, string>>({});
   const [clientDeclines, setClientDeclines] = useState<Record<number, boolean>>({});
@@ -117,7 +116,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     setPreviewData(null);
     setSourceRows([]);
     setRateChoices({});
-    setTipsPaidOutFromTips(false);
+    setTipsPaidOutFromTips(defaultTipsPaidOut);
     setReviewedSuggestedMatches(false);
     setReviewedOverwrite(false);
     setConfirmHoursOverwrite(false);
@@ -139,7 +138,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   };
 
   const refreshCurrentPackage = () => payrollIntakeImportsApi.list(payPeriodId).then((history) => {
-    setCurrentPackage(history.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
+    setCurrentPackage(history.imports.find((entry) => entry.source_type === activeSourceType && entry.current) || null);
   }).catch(() => undefined);
 
   useEffect(() => {
@@ -148,12 +147,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
     let active = true;
     payrollIntakeImportsApi.list(payPeriodId).then((response) => {
       if (!active) return;
-      setCurrentPackage(response.imports.find((entry) => entry.source_type === 'mosa_revel' && entry.current) || null);
+      setCurrentPackage(response.imports.find((entry) => entry.source_type === activeSourceType && entry.current) || null);
     }).catch((err) => {
       if (active) setError(err instanceof Error ? err.message : 'Could not load retained source history');
     });
     return () => { active = false; };
-  }, [open, payPeriodId, setError]);
+  }, [open, payPeriodId, activeSourceType, setError]);
 
   useEffect(() => {
     let active = true;
@@ -953,7 +952,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <legend className="text-sm font-semibold text-neutral-950">Files for this payroll</legend>
               <p className="text-sm text-neutral-600">Add either file now and the other one later. The import is applied once both are in, or once you confirm there are no tips or loans.</p>
               <ul className="space-y-3">
-                {SOURCE_PICKERS.map((picker) => {
+                {sourcePickers.map((picker) => {
                   const chosen = picker.role === 'revel_hours' ? pdfFile : excelFile;
                   const kept = currentRoles.has(picker.role) ? currentPackage?.documents.find((document) => document.source_role === picker.role) : undefined;
                   return (
@@ -973,11 +972,11 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                             id={`import-source-${picker.role}`}
                             ref={picker.role === 'revel_hours' ? pdfInputRef : excelInputRef}
                             type="file"
-                            accept={MOSA_SOURCE_ACCEPT[picker.role]}
+                            accept={picker.accept || acceptByRole[picker.role]}
                             onChange={(event) => {
                               const file = event.target.files?.[0] || null;
                               if (picker.role === 'revel_hours') setPdfFile(file);
-                              else { setExcelFile(file); setTipsPaidOutFromTips(false); }
+                              else { setExcelFile(file); setTipsPaidOutFromTips(defaultTipsPaidOut); }
                             }}
                             className="mt-2 block w-full text-sm text-neutral-600 file:mr-3 file:min-h-11 file:rounded-md file:border-0 file:bg-primary-50 file:px-4 file:text-sm file:font-medium file:text-primary-700 hover:file:bg-primary-100"
                           />
@@ -994,7 +993,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950">
                 <p className="text-sm font-semibold">
                   {currentOpen
-                    ? `This replaces the ${SOURCE_PICKERS.filter((picker) => newRoles.includes(picker.role) && currentRoles.has(picker.role)).map((picker) => picker.label).join(' and ')} in import version ${currentPackage.package_revision}.`
+                    ? `This replaces the ${sourcePickers.filter((picker) => newRoles.includes(picker.role) && currentRoles.has(picker.role)).map((picker) => picker.label).join(' and ')} in import version ${currentPackage.package_revision}.`
                     : `Import version ${currentPackage.package_revision} was already applied. These files make a corrected version.`}
                 </p>
                 <Input
@@ -1034,6 +1033,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             {packageSources.length > 0 ? (
               <ImportSourceChecklist
                 sources={packageSources}
+                acceptByRole={acceptByRole}
                 summary={`Import version ${previewData.source_package.package_revision} · reference ${previewData.source_package.package_id.slice(0, 8)} · ${previewData.source_package.verified_source_count} of ${previewData.source_package.source_count} file${previewData.source_package.source_count === 1 ? '' : 's'} retained and verified`}
                 onAdd={previewData.portal_source ? undefined : (role, file) => void addSourceFile(role, file)}
                 onRemove={canRemoveSources ? removeSourceFile : undefined}

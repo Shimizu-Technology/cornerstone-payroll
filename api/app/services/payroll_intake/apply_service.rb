@@ -35,7 +35,12 @@ module PayrollIntake
 
           session.with_lock(requires_new: true) do
             raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
-            PayrollIntake::WorkweekEvidence.new(pay_period: pay_period).validate_snapshot!(
+            PayrollIntake::WorkweekEvidence.new(
+              pay_period: pay_period,
+              allow_misaligned: effective_settings.allow_misaligned_workweek?,
+              overtime_mode: effective_settings.overtime_mode,
+              workweek_alignment: effective_settings.workweek_alignment
+            ).validate_snapshot!(
               session.evidence_snapshot.to_h["workweek"]
             )
 
@@ -212,10 +217,54 @@ module PayrollIntake
       }
     end
 
+    def effective_settings
+      @effective_settings ||= PayrollIntake::EffectiveSettings.for(
+        company: company,
+        pay_period: pay_period,
+        source_type: session.source_type
+      )
+    end
+
+    def resolved_overtime_mode
+      session.evidence_snapshot.to_h.dig("intake_settings", "overtime_mode").presence ||
+        session.evidence_snapshot.to_h["overtime_mode"].presence ||
+        effective_settings.overtime_mode
+    end
+
     def validated_values_for(row, override)
       values = values_for(row, override)
-      weekly_total = values.fetch(:week1_hours) + values.fetch(:week2_hours)
-      if values.fetch(:week1_hours) > 168 || values.fetch(:week2_hours) > 168
+      mode = resolved_overtime_mode
+
+      if mode == "source_reports"
+        combined = BigDecimal(values.fetch(:regular_hours).to_s) + BigDecimal(values.fetch(:overtime_hours).to_s)
+        if row.total_hours.to_d.positive? && !override.key?(:regular_hours) && !override.key?(:overtime_hours) && !reconciles?(combined, row.total_hours)
+          raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+        end
+        return values
+      end
+
+      week1 = BigDecimal(values.fetch(:week1_hours).to_s)
+      week2 = BigDecimal(values.fetch(:week2_hours).to_s)
+      has_weekly = week1.positive? || week2.positive?
+
+      if mode == "total_as_regular_warn_over_80" && !has_weekly
+        combined = BigDecimal(values.fetch(:regular_hours).to_s) + BigDecimal(values.fetch(:overtime_hours).to_s)
+        unless reconciles?(combined, row.total_hours)
+          raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+        end
+        return values
+      end
+
+      if mode == "daily_records" && !has_weekly && Array(row.source_payload.to_h["daily_hours"] || row.source_payload.to_h["days"]).any?
+        combined = BigDecimal(values.fetch(:regular_hours).to_s) + BigDecimal(values.fetch(:overtime_hours).to_s)
+        unless reconciles?(combined, row.total_hours)
+          raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+        end
+        return values
+      end
+
+      weekly_total = week1 + week2
+      if week1 > 168 || week2 > 168
         raise ArgumentError, "Week 1 and Week 2 hours cannot exceed 168 hours"
       end
       unless reconciles?(weekly_total, row.total_hours)
@@ -224,7 +273,7 @@ module PayrollIntake
 
       regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(
         values.fetch(:week1_hours),
-        values.fetch(:week2_hours)
+        company.pay_frequency.to_s == "weekly" ? 0 : values.fetch(:week2_hours)
       )
       unless reconciles?(values.fetch(:regular_hours), regular_hours) && reconciles?(values.fetch(:overtime_hours), overtime_hours)
         raise ArgumentError,

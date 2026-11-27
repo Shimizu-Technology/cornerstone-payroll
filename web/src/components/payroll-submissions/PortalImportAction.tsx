@@ -18,7 +18,7 @@ export function PortalImportAction({ period, companyId, onApplied }: { period: P
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolve, setResolve] = useState(false);
-  const [tipsPaid, setTipsPaid] = useState(false);
+  const [tipsPaid, setTipsPaid] = useState(period.intake_descriptor?.tips_default === 'already_paid_out');
   const [staffWorkbook, setStaffWorkbook] = useState<File | null>(null);
   const selected = period.submissions.find(row => row.id === selectedId);
   if (!period.pay_period_id || !selected) return <p className="text-sm text-neutral-700">Create a matching pay run before opening these files in import review.</p>;

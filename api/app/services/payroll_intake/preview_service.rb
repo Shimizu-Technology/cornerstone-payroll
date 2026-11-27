@@ -20,7 +20,15 @@ module PayrollIntake
       "mosa_revel" => PayrollIntake::Adapters::MosaRevel
     }.freeze
 
-    def self.source_reports_overtime?(source_type)
+    def self.source_reports_overtime?(source_type, company: nil, pay_period: nil)
+      if company
+        return PayrollIntake::EffectiveSettings.for(
+          company: company,
+          pay_period: pay_period,
+          source_type: source_type
+        ).source_reports_overtime?
+      end
+
       descriptor = PayrollIntake::Registry.find(source_type)
       return descriptor.reports_overtime? if descriptor
 
@@ -96,7 +104,8 @@ module PayrollIntake
             package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
             supersedes: predecessor,
             supersession_reason: supersession_reason,
-            evidence_snapshot: normalized.fetch(:evidence).merge("workweek" => workweek_evidence)
+            evidence_snapshot: normalized.fetch(:evidence)
+              .merge("workweek" => workweek_evidence, "intake_settings" => effective_settings.to_evidence)
               .merge(import_hash == source_files_hash ? {} : { "source_import_hash" => source_files_hash })
               .merge(@revision_evidence || {})
               .merge(@source_changes ? { "source_changes" => @source_changes } : {}),
@@ -541,9 +550,20 @@ module PayrollIntake
       normalized.merge(warnings: warnings)
     end
 
+    def effective_settings
+      @effective_settings ||= PayrollIntake::EffectiveSettings.for(
+        company: company,
+        pay_period: pay_period,
+        source_type: source_type
+      )
+    end
+
     def capture_workweek_evidence!
       @workweek_evidence = PayrollIntake::WorkweekEvidence.new(
-        pay_period: pay_period, allow_misaligned: self.class.source_reports_overtime?(source_type)
+        pay_period: pay_period,
+        allow_misaligned: effective_settings.allow_misaligned_workweek?,
+        overtime_mode: effective_settings.overtime_mode,
+        workweek_alignment: effective_settings.workweek_alignment
       ).capture!
     end
 

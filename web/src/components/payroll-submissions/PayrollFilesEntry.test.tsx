@@ -1,18 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 6, payroll_intake_source_types: mocks.enabled ? ['mosa_revel'] : [] } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 6, payroll_intake_source_types: mocks.enabled ? ['mosa_revel'] : [], portal_payroll_files_enabled: mocks.portalEnabled } }) }));
 import { MemoryRouter } from 'react-router';
 import { PayrollFilesEntry } from './PayrollFilesEntry';
 import { currentSubmissionPeriod } from '@/lib/payrollSubmissionFormat';
 import type { PeriodSummary } from '@/services/payrollSubmissions';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), enabled: true }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), enabled: true, portalEnabled: undefined as boolean | undefined }));
 vi.mock('@/services/payrollSubmissions', async original => ({
   ...await original<typeof import('@/services/payrollSubmissions')>(),
   clientPayrollSubmissionsApi: { list: mocks.list },
 }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.enabled = true; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.enabled = true; mocks.portalEnabled = undefined; });
 
 const period = (overrides: Partial<PeriodSummary>): PeriodSummary => ({
   ref: '2026-10-19_2026-11-01', id: null, start_date: '2026-10-19', end_date: '2026-11-01', label: 'Oct 19 – Nov 1, 2026', pay_date: '2026-11-05',
@@ -90,4 +90,12 @@ it('hides the card and makes no intake request for a fixed-pay client', () => {
   renderEntry();
   expect(screen.queryByRole('region')).toBeNull();
   expect(mocks.list).not.toHaveBeenCalled();
+});
+
+it('shows the card when a non-MoSa descriptor enables portal payroll files', async () => {
+  mocks.enabled = false;
+  mocks.portalEnabled = true;
+  mocks.list.mockResolvedValue({ data: [period({})], meta: { derives_from_schedule: true } });
+  renderEntry();
+  expect(await screen.findByRole('link', { name: 'Send payroll files' })).toBeTruthy();
 });

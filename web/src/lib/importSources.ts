@@ -1,4 +1,159 @@
-import type { ImportSourceDocument, MosaSourceRow } from '@/services/api';
+import type { CompanyListItem, ImportSourceDocument, MosaSourceRow, PayrollIntakeDescriptor, PayrollIntakeFileSlot } from '@/services/api';
+
+// Default MoSa descriptor fallback used only when a caller or legacy test
+// fixture omits the server-serialized descriptor payload.
+export const DEFAULT_MOSA_DESCRIPTOR: PayrollIntakeDescriptor = {
+  key: 'mosa_revel',
+  label: 'Revel hours + Cornerstone workbook',
+  source_label: 'MoSa Revel hours and payroll changes',
+  parser_version: 'mosa_revel:v1',
+  extraction: 'deterministic',
+  accepts_pasted_text: false,
+  tracks_reviewed_hours: true,
+  employee_match: 'name_fuzzy',
+  idempotency: 'files_period_roster_loans_and_workweek',
+  reports_overtime: true,
+  tips_default: 'paid_in_check',
+  overtime_mode: 'source_reports',
+  workweek_alignment: 'warn_if_offset',
+  required_sources: ['revel_hours', 'supplemental_workbook'],
+  files: [
+    {
+      role: 'revel_hours',
+      label: 'Revel hours PDF',
+      hint: 'The original Revel report. Its regular and overtime hours are imported; Revel pay rates and pay amounts are ignored. Its dates must match this payroll.',
+      accept: ['.pdf'],
+      content_type: 'application/pdf',
+      max: 1,
+      required: true,
+      required_by_default: true,
+      waivable: null,
+      portal_role: 'revel_payroll',
+      portal_label: 'Revel hours report (PDF)',
+      portal_hint: 'Hours worked, including overtime, from Revel.',
+      supports_link: false,
+      provides: ['regular_hours', 'overtime_hours'],
+    },
+    {
+      role: 'supplemental_workbook',
+      label: 'Tips & loans workbook',
+      hint: 'The Cornerstone change workbook with tips, loans, owner pay and one-time items.',
+      accept: ['.xlsx', '.xls'],
+      content_type: null,
+      max: 1,
+      required: true,
+      required_by_default: true,
+      waivable: 'No tips or loans this period',
+      portal_role: 'changes_workbook',
+      portal_label: 'Tips & loans workbook (Excel)',
+      portal_hint: 'Tips to report and loan deductions for this payroll.',
+      supports_link: true,
+      provides: ['reported_tips', 'tips_already_paid', 'loan_one_time', 'loan_installment', 'one_time_earnings', 'owner_pay'],
+    },
+  ],
+  portal: {
+    submittable: true,
+    role_map: {
+      revel_payroll: 'revel_hours',
+      changes_workbook: 'supplemental_workbook',
+    },
+  },
+};
+
+export const DEFAULT_SPIKE_DESCRIPTOR: PayrollIntakeDescriptor = {
+  key: 'spike_email',
+  label: 'Spike Coffee Roasters email',
+  source_label: 'Spike Coffee Roasters email',
+  parser_version: 'spike_email:v3',
+  extraction: 'text_and_ai',
+  accepts_pasted_text: true,
+  tracks_reviewed_hours: false,
+  employee_match: 'name_fuzzy',
+  idempotency: 'files_and_workweek',
+  reports_overtime: false,
+  tips_default: 'already_paid_out',
+  overtime_mode: 'weekly_split',
+  workweek_alignment: 'aligned',
+  required_sources: [],
+  files: [],
+  portal: {
+    submittable: false,
+    role_map: {},
+  },
+};
+
+export function acceptStringForSlot(slot: PayrollIntakeFileSlot, includeContentType = false): string {
+  const parts: string[] = [];
+  if (includeContentType && slot.content_type) parts.push(slot.content_type);
+  slot.accept.forEach((ext) => {
+    if (!parts.includes(ext)) parts.push(ext);
+  });
+  return parts.join(',');
+}
+
+export function acceptMapForDescriptor(descriptor?: PayrollIntakeDescriptor | null): Record<string, string> {
+  if (!descriptor?.files?.length) return MOSA_SOURCE_ACCEPT;
+  return Object.fromEntries(descriptor.files.map((slot) => [slot.role, acceptStringForSlot(slot)]));
+}
+
+export function pickersForDescriptor(descriptor?: PayrollIntakeDescriptor | null): Array<{
+  role: string;
+  label: string;
+  hint: string;
+  accept: string;
+  required: boolean;
+  waivable: string | null;
+}> {
+  const effective = descriptor?.files?.length ? descriptor : DEFAULT_MOSA_DESCRIPTOR;
+  return effective.files.map((slot) => ({
+    role: slot.role,
+    label: slot.label,
+    hint: slot.hint || '',
+    accept: acceptStringForSlot(slot),
+    required: slot.required,
+    waivable: slot.waivable || null,
+  }));
+}
+
+export function portalRoleLabel(role: string, descriptor?: PayrollIntakeDescriptor | null): string {
+  if (role === 'attachment') return 'Attachment';
+  const slot = descriptor?.files?.find((candidate) => candidate.portal_role === role);
+  if (slot) {
+    if (role === 'revel_payroll') return 'Revel payroll PDF';
+    if (role === 'changes_workbook') return 'Changes workbook';
+    return slot.portal_label || slot.label;
+  }
+  if (role === 'revel_payroll') return 'Revel payroll PDF';
+  if (role === 'changes_workbook') return 'Changes workbook';
+  return role.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+export function hasPortalSubmittableAdapter(company?: Pick<CompanyListItem, 'portal_payroll_files_enabled' | 'payroll_intake_adapters' | 'payroll_intake_source_types'> | null): boolean {
+  if (!company) return false;
+  if (typeof company.portal_payroll_files_enabled === 'boolean') return company.portal_payroll_files_enabled;
+  if (company.payroll_intake_adapters?.length) {
+    return company.payroll_intake_adapters.some((adapter) => adapter.portal?.submittable);
+  }
+  return Boolean(company.payroll_intake_source_types?.includes('mosa_revel'));
+}
+
+export function intakeAdaptersForPayPeriod(
+  adapters?: PayrollIntakeDescriptor[] | null,
+  sourceTypes?: string[] | null,
+): PayrollIntakeDescriptor[] {
+  if (adapters?.length) return adapters;
+  return (sourceTypes || []).flatMap((key) => {
+    if (key === 'mosa_revel') return [DEFAULT_MOSA_DESCRIPTOR];
+    if (key === 'spike_email') return [DEFAULT_SPIKE_DESCRIPTOR];
+    return [];
+  });
+}
+
+export function intakeMenuLabel(descriptor: PayrollIntakeDescriptor): string {
+  if (descriptor.key === 'mosa_revel') return 'Import (MoSa)';
+  if (descriptor.key === 'spike_email') return 'Import Spike Email';
+  return `Import (${descriptor.label})`;
+}
 
 // The retained files import review can show beside the review: the Revel
 // hours PDF and the optional payroll change workbook.

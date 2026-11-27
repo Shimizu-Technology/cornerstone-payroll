@@ -15,6 +15,7 @@ import { useParams, useLocation, useSearchParams } from 'react-router';
 import { Button } from '@/components/ui/button';
 
 import { formatDate, payPeriodStatusConfig } from '@/lib/utils';
+import { intakeAdaptersForPayPeriod } from '@/lib/importSources';
 import { payrollTaxSummary } from '@/lib/payroll-tax-summary';
 import { capturedSourceHoursLocked, worksheetHoursInvalid, worksheetPayBasisHold } from '@/lib/captured-source-worksheet';
 import { parsePayRunId } from '@/lib/pay-run-filters';
@@ -117,6 +118,7 @@ export function usePayRunController({
   }, [payPeriod?.payroll_review?.id]);
   const [adoptingConfirmedWorkweek, setAdoptingConfirmedWorkweek] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [activeImportDescriptorKey, setActiveImportDescriptorKey] = useState<string | null>(null);
   const [payrollIntakeImportOpen, setPayrollIntakeImportOpen] = useState(false);
   const [timeTrackingImportOpen, setTimeTrackingImportOpen] = useState(false);
   const [timeTrackingAutoPreview, setTimeTrackingAutoPreview] = useState(false);
@@ -1204,8 +1206,21 @@ export function usePayRunController({
   const statusConfig = payPeriodStatusConfig[payPeriod.status];
 
   const canEditPayPeriod = !isCommitted && !isVoided && !savedImportReloadRequired;
-  const canImportMosa = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('mosa_revel');
-  const canImportSpikeIntake = canEditPayPeriod && (payPeriod.payroll_intake_source_types || []).includes('spike_email');
+  const enabledIntakeAdapters = canEditPayPeriod
+    ? intakeAdaptersForPayPeriod(payPeriod.payroll_intake_adapters, payPeriod.payroll_intake_source_types)
+    : [];
+  const reviewedHoursAdapter = enabledIntakeAdapters.find((adapter) => adapter.tracks_reviewed_hours) || null;
+  const activeIntakeAdapter = enabledIntakeAdapters.find((adapter) => adapter.key === activeImportDescriptorKey)
+    || enabledIntakeAdapters.find((adapter) => !adapter.tracks_reviewed_hours)
+    || null;
+  const canImportMosa = Boolean(reviewedHoursAdapter);
+  const canImportSpikeIntake = enabledIntakeAdapters.some((adapter) => !adapter.tracks_reviewed_hours);
+  const openIntakeAdapter = (adapterKey: string) => {
+    const adapter = enabledIntakeAdapters.find((candidate) => candidate.key === adapterKey);
+    setActiveImportDescriptorKey(adapterKey);
+    if (adapter?.tracks_reviewed_hours) setImportModalOpen(true);
+    else setPayrollIntakeImportOpen(true);
+  };
   const activeTimeTrackingSources = payPeriod.time_tracking?.active_source_types || [];
   const canImportTimeTracking = isDraft && canEditPayPeriod && activeTimeTrackingSources.length > 0;
   const canLinkAireRecord = isCommitted && !isVoided && ((payPeriod.time_tracking?.active_source_capabilities || []).includes('finalized_batch_v2') || activeTimeTrackingSources.includes('aire_services'));
@@ -1652,9 +1667,9 @@ export function usePayRunController({
     reviewDialogs: { companyId, currentPath, loadPayPeriod, payPeriod, payRunId, paymentMethodItem, reviewingItem, setPaymentMethodItem, setReviewingItem },
     summary: { payRunId, contractorItems, hasCorrectionPayBasisHold, payrollItems, totalContractorPay, totalDRTDeposit, totalDeductions, totalGross, totalNet },
     processing: { onPreviewDownloaded: (revision: number) => setPayPeriod(current => current?.id === payRunId && current.company_id === companyId
-      ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, processingAction, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
+      ? { ...current, last_preview_download: { revision, downloaded_at: new Date().toISOString() } } : current), hasManualHours: Object.values(hoursMap).some(entry => toNumber(entry.regular) + toNumber(entry.overtime) > 0), calculationFailures, canEditPayPeriod, canImportMosa, canImportSpikeIntake, canImportTimeTracking, canLinkAireRecord, companyId, correctionCalculationHeld, enabledIntakeAdapters, financialActionsHeld, handleApprove, handleRunPayroll, handleUnapprove, hasLinkedAireRecord, hasPendingCalculationChanges, hasStagedWorksheetChanges, isApproved, isCalculated, isCommitted, isDraft, isVoided, openIntakeAdapter, openPayDateCorrection, payPeriod, payRunId, payrollItems, processing, processingAction, returnTo, savedImportReloadRequired, setAireRecordsOpen, setCommitPeriodId, setImportModalOpen, setPayrollIntakeImportOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, standaloneLoanConflicts },
     feedback: { calculationFailures, calculationNotice, calendarRefreshError, companyId, currentPath, documentBlockedEmployees, employees, error, errorFeedbackAttempt, payPeriod, payrollItems, processing, reloadSavedSourceImport, savedImportReloadRequired, timeTrackingImportOpen, worksheetRefreshWarning },
-    blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, reloadClientReview, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
+    blockers: { adoptingConfirmedWorkweek, canImportMosa, canImportSpikeIntake, clientApprovalLoading, enabledIntakeAdapters, handleAdoptConfirmedWorkweek, hasPendingCalculationChanges, openClientApproval, openIntakeAdapter, reloadClientReview, payPeriod, setImportModalOpen, setPayrollIntakeImportOpen },
     source: { sourceCoverageProcessing: processing, onReviewSourceCoverage: isDraft || isCalculated ? () => { if (!processing) void handleRunPayroll(); } : undefined, aireSourceRefreshToken, companyId, currentAireRecord, hoursMap, invalidateAireSource, loadPayPeriod, payPeriod, setTimeTrackingAutoPreview, setTimeTrackingImportOpen },
     metadata: { formatCorrectionPayDate, isApproved, isCalculated, isCommitted, isCorrection, isVoided, payDateCorrections, payPeriod, processedBy, statusConfig },
     refreshDialog: { error, handleRefreshSetup, processing, refreshBaseSalary, refreshRecurring, refreshSetupOpen, setRefreshBaseSalary, setRefreshRecurring, setRefreshSetupOpen, sourceCoverageOpen },
@@ -1675,7 +1690,7 @@ export function usePayRunController({
     reports: { companyId, finalRecordRefreshToken, isCommitted, isDraft, payPeriod, payRunId, payrollItems },
     timecardHistory: { isDraft, payPeriod },
     corrections: { commitRouteGenerationRef, correctionRouteGeneration, isCommitted, isCorrection, isVoided, loadPayPeriod, payPeriod, payRunId, returnTo, setCheckPrintRefreshToken, setPayPeriod, setPayrollItems },
-    dialogs: { activeCompany, aireRecordsOpen, clientApprovalConfirmed, clientApprovalEvidence, clientApprovalLoading, clientApprovalNotes, clientApprovalOpen, clientApproverId, clientApprovers, commitPeriodId, companyId, correctingItem, editingItem, employeeLookup, employees, handleCommit, handleCorrectPayDate, handleImportComplete, handlePayrollItemSaved, importModalOpen, invalidateAireSource, isApproved, isVoided, linkedAireRecords, loadPayPeriod, loadSupplementals, payDateCorrectionDate, payDateCorrectionOpen, payDateCorrectionReason, payDateCorrectionSubmitting, payPeriod, payRunId, payrollIntakeImportOpen, payrollItems, processing, recordClientApproval, reloadSavedSourceImport, replacingItem, reportablePayrollItems, setAdditionalEmployeeIds, setAireRecordsOpen, setClientApprovalConfirmed, setClientApprovalEvidence, setClientApprovalNotes, setClientApprovalOpen, setClientApproverId, setCommitPeriodId, setCorrectingItem, setEditingItem, setEmployees, setHoursMap, setImportModalOpen, setPayDateCorrectionDate, setPayDateCorrectionOpen, setPayDateCorrectionReason, setPayPeriod, setPayrollIntakeImportOpen, setPayrollItems, setReplacingItem, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, timeTrackingAutoPreview, timeTrackingImportOpen, totalNet }
+    dialogs: { activeCompany, activeIntakeAdapter, aireRecordsOpen, clientApprovalConfirmed, clientApprovalEvidence, clientApprovalLoading, clientApprovalNotes, clientApprovalOpen, clientApproverId, clientApprovers, commitPeriodId, companyId, correctingItem, editingItem, employeeLookup, employees, handleCommit, handleCorrectPayDate, handleImportComplete, handlePayrollItemSaved, importModalOpen, invalidateAireSource, isApproved, isVoided, linkedAireRecords, loadPayPeriod, loadSupplementals, payDateCorrectionDate, payDateCorrectionOpen, payDateCorrectionReason, payDateCorrectionSubmitting, payPeriod, payRunId, payrollIntakeImportOpen, payrollItems, processing, recordClientApproval, reloadSavedSourceImport, replacingItem, reportablePayrollItems, reviewedHoursAdapter, setAdditionalEmployeeIds, setAireRecordsOpen, setClientApprovalConfirmed, setClientApprovalEvidence, setClientApprovalNotes, setClientApprovalOpen, setClientApproverId, setCommitPeriodId, setCorrectingItem, setEditingItem, setEmployees, setHoursMap, setImportModalOpen, setPayDateCorrectionDate, setPayDateCorrectionOpen, setPayDateCorrectionReason, setPayPeriod, setPayrollIntakeImportOpen, setPayrollItems, setReplacingItem, setTimeTrackingAutoPreview, setTimeTrackingImportOpen, timeTrackingAutoPreview, timeTrackingImportOpen, totalNet }
   } };
 }
 

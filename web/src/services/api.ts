@@ -2229,10 +2229,63 @@ export interface DeleteDraftCorrectionRunResponse {
   correction_event: import('@/types').PayPeriodCorrectionEvent;
 }
 
+export interface PayrollIntakeFileSlot {
+  role: string;
+  label: string;
+  hint?: string | null;
+  accept: string[];
+  content_type?: string | null;
+  max?: number | null;
+  required: boolean;
+  required_by_default: boolean;
+  waivable?: string | null;
+  portal_role?: string | null;
+  portal_label?: string | null;
+  portal_hint?: string | null;
+  supports_link?: boolean;
+  provides: string[];
+}
+
+export interface PayrollIntakeDescriptor {
+  key: string;
+  label: string;
+  source_label: string;
+  parser_version: string;
+  extraction: string;
+  accepts_pasted_text: boolean;
+  tracks_reviewed_hours: boolean;
+  employee_match: string;
+  idempotency: string;
+  reports_overtime: boolean;
+  tips_default: 'paid_in_check' | 'already_paid_out' | string;
+  overtime_mode: 'source_reports' | 'weekly_split' | 'total_as_regular_warn_over_80' | 'daily_records' | string;
+  workweek_alignment: 'aligned' | 'warn_if_offset' | string;
+  required_sources: string[];
+  files: PayrollIntakeFileSlot[];
+  portal: {
+    submittable: boolean;
+    role_map: Record<string, string>;
+  };
+}
+
+export interface PayrollIntakeProfile {
+  company_id: number;
+  as_of: string;
+  hours_source: string;
+  intake_adapter: string | null;
+  settings: {
+    tips_default: string;
+    overtime_mode: string;
+    workweek_alignment: string;
+  };
+  adapters: PayrollIntakeDescriptor[];
+}
+
 // Import types
 export interface ImportPackageSource {
   role: 'revel_hours' | 'supplemental_workbook' | string;
   label: string;
+  accept?: string[];
   required: boolean;
   present: boolean;
   filename?: string | null;
@@ -4180,6 +4233,8 @@ export const printerProfilesApi = {
 export interface CompanyListItem {
   creator?: RecordCreatorInfo | null;
   payroll_intake_source_types?: string[];
+  portal_payroll_files_enabled?: boolean;
+  payroll_intake_adapters?: PayrollIntakeDescriptor[];
   client_capabilities?: string[];
   client_management?: boolean;
   id: number;
@@ -4482,6 +4537,10 @@ export const companiesApi = {
   },
   get: (id: number, companyId?: number) =>
     api.get<{ company: CompanyDetail }>(`/admin/companies/${id}`, undefined, { companyId }),
+  intakeProfile: (id: number, on?: string, companyId?: number) => {
+    const query = on ? `?on=${encodeURIComponent(on)}` : '';
+    return api.get<PayrollIntakeProfile>(`/admin/companies/${id}/intake_profile${query}`, undefined, { companyId: companyId ?? id });
+  },
   create: (data: CompanyFormData) =>
     api.post<{ company: CompanyDetail }>('/admin/companies', { company: data }),
   update: (id: number, data: Partial<CompanyFormData>, companyId?: number) =>

@@ -12,7 +12,13 @@ module PayrollIntake
     def call
       features = CompanyFeatures.for(@company, on: @as_of)
       adapters = PayrollIntake::Registry.for_company(@company).map do |descriptor|
-        descriptor.serialize(required_sources: @company.payroll_intake_required_sources(descriptor.key))
+        effective = PayrollIntake::EffectiveSettings.for(company: @company, source_type: descriptor.key, on: @as_of)
+        descriptor.serialize(
+          required_sources: effective.required_sources,
+          tips_default: effective.tips_default,
+          overtime_mode: effective.overtime_mode,
+          workweek_alignment: effective.workweek_alignment
+        )
       end
 
       {
