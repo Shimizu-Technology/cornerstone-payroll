@@ -1236,7 +1236,7 @@ RSpec.describe "Portal-origin MoSa import review", type: :request do
     end
 
     %w[skipped dropped].each do |mode|
-      it "removes absent Addison's earlier hours when #{mode}, even with no active proposals" do
+      it "removes absent Jordan's earlier hours when #{mode}, even with no active proposals" do
         source = standing_source
         data = preview(source)
         apply_standing(data)

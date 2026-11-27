@@ -439,7 +439,7 @@ class E2eReleaseFixture
         department: department,
         first_name: "Riley",
         last_name: "Marlowe",
-        email: "rosie@example.test",
+        email: "riley@example.test",
         ssn: "900-00-0008",
         pay_rate: 19.25,
         hire_date: Date.new(2026, 8, 30)
