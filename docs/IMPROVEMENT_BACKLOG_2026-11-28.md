@@ -20,7 +20,7 @@ Leon asked for a thorough review of the app, compared with how ADP and Gusto han
 
 ## 2. Still-open risks from the review
 
-The review flagged six "fix first" risks. Wave A closed three of them (FX-3, FX-6 and half of FX-4). Three need Wave B or C work. They aren't urgent enough to interrupt the lifecycle work, but they should come first when this backlog opens.
+The review flagged six "fix first" risks. Wave A closed FX-3 and FX-6 and part of FX-4. The other four, including the rest of FX-4, need Wave B or C work. They aren't urgent enough to interrupt the lifecycle work, but they should come first when this backlog opens.
 
 | ID | Risk | Fixed by |
 |---|---|---|
