@@ -505,7 +505,8 @@ RSpec.describe "1099 payees, sign-off and official copies", type: :request do
       allow_any_instance_of(Api::V1::Admin::YearEndController).to receive(:current_user).and_return(admin)
       mark_ready
       expect(response).to have_http_status(:forbidden)
-      expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
+      expect(response.parsed_body["code"]).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+      expect(response.parsed_body["error"]).to include("practice company (test workspace)", "turned off")
       expect(step("form_1099_ready").dig("data", "unavailable_reason")).to eq("Not available in a practice copy.")
     end
   end

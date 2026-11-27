@@ -37,6 +37,7 @@ import { employeesApi, payrollItemsApi, payPeriodsApi } from '@/services/api';
 import type { Employee, PayPeriod, PayrollItem } from '@/types';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { payrollTaxSummary, type PayrollComponentDisclosure } from '@/lib/payroll-tax-summary';
+import { GUAM_INCOME_TAX } from '@/lib/payrollLabels';
 import { payRunPaymentDisplay } from '@/lib/payroll-payment-label';
 import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from '@/components/payroll/PayrollResultBreakdown';
 
@@ -192,7 +193,7 @@ export function PayrollItemDetail({ record, embedded = false }: PayrollItemDetai
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Metric icon={Banknote} label="Gross pay" value={formatCurrency(Number(payrollItem.gross_pay || 0))} detail={`${Number(payrollItem.total_hours || 0).toFixed(2)} total hours`} />
-          <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail="FIT, Social Security, and Medicare" />
+          <Metric icon={ShieldCheck} label="Employee taxes" value={formatCurrency(taxes)} detail={`${GUAM_INCOME_TAX}, Social Security, and Medicare`} />
           <Metric icon={ReceiptText} label="Other deductions" value={formatCurrency(Number(payrollItem.total_deductions || 0) - taxes)} detail="Retirement, loans, insurance, and fields" />
           <Metric icon={CheckCircle2} label="Net pay" value={formatCurrency(Number(payrollItem.net_pay || 0))} detail={statementOnly ? paymentDisplay.description : isDirectDeposit ? bankPaymentDescription : payrollItem.check_number ? `Check #${payrollItem.check_number}` : 'Check not assigned'} />
         </div>

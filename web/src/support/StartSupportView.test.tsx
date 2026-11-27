@@ -8,7 +8,10 @@ import { StartSupportView } from './StartSupportView';
 
 const api = vi.hoisted(() => ({ get: vi.fn() }));
 vi.mock('@/services/api', () => ({ default: api, getApiBaseUrl: () => 'http://api.test' }));
-vi.mock('@/lib/useStepUpRequest', () => ({ useStepUpRequest: () => vi.fn() }));
+vi.mock('@/lib/useStepUpRequest', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/useStepUpRequest')>(),
+  useStepUpRequest: () => vi.fn(),
+}));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 3, activeCompany: { id: 3, name: 'Example Bakery' } }) }));
 vi.mock('@/components/layout/Header', () => ({
   Header: ({ title, description }: { title: string; description?: ReactNode }) => <header><h1>{title}</h1><p>{description}</p></header>,

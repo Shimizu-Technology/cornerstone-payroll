@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { ADDITIONAL_GUAM_INCOME_TAX } from '@/lib/payrollLabels';
 import { PayrollResultBreakdown, PaycheckRetirementContext, PaycheckWithholdingContext } from './PayrollResultBreakdown';
 import type { PayrollItem } from '../../types';
 
@@ -18,12 +19,12 @@ describe('saved paycheck explanation', () => {
     const html = renderToStaticMarkup(<PayrollResultBreakdown disclosure={{
       earnings: [{ label: 'Bonus', amount: 250, source: 'one_time' }, { label: 'Doctor bonus', amount: 100, source: 'employee_default' }],
       other_pay: [{ label: 'Mileage', amount: 100 }],
-      taxes: [{ label: 'Medicare (base)', amount: 14.5 }, { label: 'Additional Medicare', amount: 4.5 }, { label: 'Additional W-4 withholding', amount: 25 }],
+      taxes: [{ label: 'Medicare (base)', amount: 14.5 }, { label: 'Additional Medicare', amount: 4.5 }, { label: ADDITIONAL_GUAM_INCOME_TAX, amount: 25 }],
       deductions: [{ label: 'Loan', amount: 50, treatment: 'post_tax' }],
       employer_contributions: [{ label: 'Employer retirement', amount: 40 }],
       reconciliation: { gross_pay: 1350, other_pay: 100, employee_taxes: 44, other_deductions: 50, net_pay: 1356 },
     }} />);
-    for (const label of ['One-time bonus', 'Recurring setup', 'Additional W-4 withholding', 'Employer contributions', 'After-tax deduction', '$1,356.00']) expect(html).toContain(label);
+    for (const label of ['One-time bonus', 'Recurring setup', ADDITIONAL_GUAM_INCOME_TAX, 'Employer contributions', 'After-tax deduction', '$1,356.00']) expect(html).toContain(label);
   });
 
   it('explains the retirement cap and election retained on the paycheck', () => {

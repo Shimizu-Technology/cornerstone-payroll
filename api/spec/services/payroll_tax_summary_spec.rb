@@ -32,6 +32,13 @@ RSpec.describe PayrollTaxSummary do
     expect(item.additional_withholding).to eq(25.to_d)
     summary = described_class.new(item)
     expect(summary.total).to eq(item.total_deductions)
+    expect(summary.lines.map { |line| line[:label] }).to eq([
+      PayrollLabels::INCOME_TAX,
+      PayrollLabels::ADDITIONAL_WITHHOLDING,
+      "Social Security",
+      "Medicare (base)",
+      "Additional Medicare"
+    ])
     expect(summary.lines.sum { |line| line[:amount].to_d }).to eq(summary.total)
     expect(summary.total).to eq(item.gross_pay - item.net_pay)
   end
