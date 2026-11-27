@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { NumericInput } from './numeric-input';
 import { Dialog, DialogContent, DialogTitle } from './dialog';
+import { beginStepUpOverlay } from './dialog-overlay';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
 
@@ -110,4 +111,97 @@ it('returns to the explicit opener when unmounted before initial focus runs', as
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(opener.current?.closest('[inert]')).toBeNull();
   expect(document.activeElement).toBe(opener.current);
+});
+
+it('keeps portals inserted during a step-up interactive while keeping unrelated background inert', async () => {
+  const user = userEvent.setup();
+  const background = document.createElement('div');
+  background.innerHTML = '<button type="button">Background action</button>';
+  document.body.appendChild(background);
+  const onDialogClose = vi.fn();
+
+  render(
+    <Dialog open onOpenChange={onDialogClose}>
+      <DialogContent>
+        <DialogTitle>Turn on employee app</DialogTitle>
+        <button type="button">Turn on</button>
+      </DialogContent>
+    </Dialog>,
+  );
+
+  // Unrelated background elements are inert while the dialog is open.
+  expect(background.hasAttribute('inert')).toBe(true);
+  const unrelatedLate = document.createElement('div');
+  document.body.appendChild(unrelatedLate);
+  await waitFor(() => expect(unrelatedLate.hasAttribute('inert')).toBe(true));
+
+  // Simulate Clerk opening a verification modal portal during a step-up.
+  const releaseStepUp = beginStepUpOverlay();
+  const clerkPortal = document.createElement('div');
+  const submitted = vi.fn();
+  clerkPortal.innerHTML = `
+    <div class="cl-modalBackdrop">
+      <div class="cl-modalContent" role="dialog" aria-modal="true" aria-label="Verification required">
+        <input aria-label="Password" type="password" />
+        <button type="button">Continue</button>
+      </div>
+    </div>
+  `;
+  const continueButton = clerkPortal.querySelector('button')!;
+  continueButton.addEventListener('click', submitted);
+  document.body.appendChild(clerkPortal);
+
+  // Flush MutationObserver microtasks and verify the step-up portal is never made inert.
+  await act(async () => { await Promise.resolve(); });
+  expect(clerkPortal.hasAttribute('inert')).toBe(false);
+  expect(clerkPortal.querySelector('.cl-modalContent')?.closest('[inert]')).toBeNull();
+
+  const passwordInput = clerkPortal.querySelector<HTMLInputElement>('input[aria-label="Password"]')!;
+  await user.click(passwordInput);
+  await user.type(passwordInput, 'synthetic-pass');
+  expect(passwordInput.value).toBe('synthetic-pass');
+
+  // Escape inside the Clerk modal must not dismiss the underlying app dialog.
+  await user.keyboard('{Escape}');
+  expect(onDialogClose).not.toHaveBeenCalled();
+
+  await user.click(continueButton);
+  expect(submitted).toHaveBeenCalledTimes(1);
+
+  // Clean up the step-up overlay and confirm subsequent non-Clerk nodes are still inerted.
+  clerkPortal.remove();
+  releaseStepUp();
+  const postStepUpUnrelated = document.createElement('div');
+  document.body.appendChild(postStepUpUnrelated);
+  await waitFor(() => expect(postStepUpUnrelated.hasAttribute('inert')).toBe(true));
+  expect(background.hasAttribute('inert')).toBe(true);
+
+  // Dialog Escape resumes working once the Clerk overlay is gone.
+  await user.keyboard('{Escape}');
+  expect(onDialogClose).toHaveBeenCalledWith(false);
+
+  background.remove();
+  unrelatedLate.remove();
+  postStepUpUnrelated.remove();
+});
+
+it('exempts Clerk-marked roots even when inserted outside an explicit step-up window', async () => {
+  render(
+    <Dialog open onOpenChange={vi.fn()}>
+      <DialogContent>
+        <DialogTitle>Confirm rollback</DialogTitle>
+        <button type="button">Confirm</button>
+      </DialogContent>
+    </Dialog>,
+  );
+
+  const clerkRoot = document.createElement('div');
+  clerkRoot.className = 'cl-rootBox cl-userVerification-root';
+  clerkRoot.innerHTML = '<input aria-label="Code" />';
+  document.body.appendChild(clerkRoot);
+
+  await act(async () => { await Promise.resolve(); });
+  expect(clerkRoot.hasAttribute('inert')).toBe(false);
+  expect(clerkRoot.querySelector('input')?.closest('[inert]')).toBeNull();
+  clerkRoot.remove();
 });

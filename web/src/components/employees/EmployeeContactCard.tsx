@@ -22,6 +22,7 @@ import {
   effectiveDraft,
   extractConflictPayload,
   extractContactValidation,
+  hasAddressChanges,
   hasAnyChangedField,
   keepMineRow,
   rowSaveRequest,
@@ -138,6 +139,7 @@ export function EmployeeContactCard({
       saved: false,
       error: null,
       conflict: null,
+      confirmingAddressReplacement: false,
       fieldErrors: { ...prev.fieldErrors, [field]: [] },
       ...(field === 'email' ? { samePersonRequired: false, samePersonChecked: false } : {}),
     }));
@@ -148,16 +150,33 @@ export function EmployeeContactCard({
     closeEditor();
   };
 
-  const save = async (options: { confirmSamePerson?: boolean; row?: RowFieldDrafts; against?: ContactEmployee } = {}): Promise<void> => {
+  const save = async (options: {
+    confirmSamePerson?: boolean;
+    confirmReplaceAddress?: boolean;
+    row?: RowFieldDrafts;
+    against?: ContactEmployee;
+  } = {}): Promise<void> => {
     if (!canEdit) return;
     const row = options.row ?? drafts;
-    const request = rowSaveRequest(row, options.against ?? record);
+    const targetRecord = options.against ?? record;
+    const request = rowSaveRequest(row, targetRecord);
     const changedKeys = Object.keys(request.changes) as ContactField[];
     const confirmSamePerson = Boolean(options.confirmSamePerson || (state.samePersonRequired && state.samePersonChecked));
     if (changedKeys.length === 0 && !confirmSamePerson) return;
 
+    if (
+      audience === 'admin'
+      && targetRecord.contact_details_status?.has_pending_address_request
+      && hasAddressChanges(request.changes)
+      && !options.confirmReplaceAddress
+    ) {
+      setState((prev) => ({ ...prev, confirmingAddressReplacement: true, error: null }));
+      return;
+    }
+
     setState((prev) => ({
       ...prev, saving: true, saved: false, submittedAddressRequestId: undefined, pendingAddressRequestId: undefined,
+      confirmingAddressReplacement: false,
       error: null, fieldErrors: {}, conflict: null,
     }));
 
@@ -222,7 +241,7 @@ export function EmployeeContactCard({
     setRecord(server);
     setDrafts(row);
     shareRecord(server);
-    void save({ row, against: server });
+    void save({ row, against: server, confirmReplaceAddress: true });
   };
 
   // Use theirs: show the newer record and drop the edits that collided. The
@@ -242,7 +261,7 @@ export function EmployeeContactCard({
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key !== 'Enter' || event.shiftKey) return;
     event.preventDefault();
-    if (!state.saving && (dirty || (state.samePersonRequired && state.samePersonChecked))) void save();
+    if (!state.saving && !state.confirmingAddressReplacement && (dirty || (state.samePersonRequired && state.samePersonChecked))) void save();
   };
 
   const badge = contactStatusBadge(record);
@@ -279,6 +298,8 @@ export function EmployeeContactCard({
             onKeyDown={handleKeyDown}
             onToggleSamePerson={(checked) => setState((prev) => ({ ...prev, samePersonChecked: checked }))}
             onConfirmSamePerson={() => void save({ confirmSamePerson: true })}
+            onConfirmAddressReplacement={() => void save({ confirmReplaceAddress: true })}
+            onCancelAddressReplacement={() => setState((prev) => ({ ...prev, confirmingAddressReplacement: false }))}
             onKeepMine={keepMine}
             onUseTheirs={chooseTheirs}
             onCancel={cancel}
