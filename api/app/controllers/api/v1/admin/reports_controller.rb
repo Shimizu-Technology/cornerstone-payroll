@@ -2781,9 +2781,12 @@ module Api
           selected_items = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :native }
           selected_historical = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :imported }
           selected_adjustments = entries.filter_map { |entry| entry.fetch(:record) if entry.fetch(:type) == :adjustment }
+          documents = EmployeeDocument.posted_by_payroll_item(employee.company_id, selected_items.map(&:id))
           history = entries.map do |entry|
             case entry.fetch(:type)
-            when :native then pay_history_item(entry.fetch(:record))
+            when :native
+              item = entry.fetch(:record)
+              pay_history_item(item).merge(stub_corrected: documents[item.id]&.correction_label? || false)
             when :imported then unified.history_row(entry.fetch(:record))
             else unified.adjustment_history_row(entry.fetch(:record))
             end

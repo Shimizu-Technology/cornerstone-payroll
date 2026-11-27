@@ -7,8 +7,12 @@ module EmployeeDocuments
         (latest&.revision || 0) + 1
       end
 
+      def same_item_predecessor?
+        predecessor && latest&.id == predecessor.id
+      end
+
       def signature
-        [ latest&.id, original&.id, predecessor&.id, revision, fingerprint, payment_line ]
+        [ latest&.id, original&.id, predecessor&.id, revision, fingerprint, payment_line, predecessor&.status, predecessor&.withdrawal_reason ]
       end
     end
 
@@ -40,6 +44,9 @@ module EmployeeDocuments
       return unless prepared
 
       posting, bytes = prepared
+      figures = PrintedFigures.digest(bytes)
+      comparison = posting.latest || posting.predecessor
+      previous_figures = predecessor_figures(comparison) if comparison
       recorded = false
       staged = FreezePdf.stage(bytes: bytes, source: @item, revision: posting.revision)
       checked_at = Time.current
@@ -48,7 +55,7 @@ module EmployeeDocuments
         next unless current
         next :stale unless current.signature == posting.signature
 
-        document = record_posting(staged, current, period, checked_at)
+        document = record_posting(staged, current, period, checked_at, figures, previous_figures)
         EmployeeDocument.current_transaction.after_rollback { FreezePdf.remove_uncommitted_object(staged.key) }
         recorded = true
         document
@@ -106,15 +113,29 @@ module EmployeeDocuments
         fingerprint: fingerprint, payment_line: PayrollPaymentLabel.statement_line(@item))
     end
 
-    def record_posting(staged, posting, period, checked_at)
+    def predecessor_figures(predecessor)
+      PrintedFigures.for_document(predecessor)
+    rescue PrintedFigures::Unreadable
+      nil
+    end
+
+    def record_posting(staged, posting, period, checked_at, figures, previous_figures)
+      classification = RevisionClassification.compare(figures: figures, previous_figures: previous_figures,
+        predecessor: posting.predecessor, same_item: posting.same_item_predecessor?, prior_label: posting.latest&.correction_label?)
       document = FreezePdf.record_staged!(staged, source: @item, posted_at: Time.current, revision: posting.revision,
         predecessor: posting.predecessor, payment_line: posting.payment_line,
-        payroll_facts: { payroll_facts_sha256: posting.fingerprint, payroll_facts_checked_at: checked_at })
+        payroll_facts: { payroll_facts_sha256: posting.fingerprint, payroll_facts_checked_at: checked_at,
+          **figures.attributes, **classification })
       posting.latest&.update!(status: :replaced)
       # A delta correction is a separate payment. Its original stays active
       # while the underlying original payroll obligation remains in force.
       posting.original&.update!(status: :replaced) unless @item.correction_entry?
-      enqueue_employee_pay_stub_notice(document) if posting.predecessor.nil? && @notice_since && period.pay_date >= @notice_since
+      if (posting.predecessor && (posting.latest.nil? || classification[:money_changed] != false)) ||
+        (posting.predecessor.nil? && @notice_since && period.pay_date >= @notice_since)
+        enqueue_employee_pay_stub_notice(document)
+      elsif posting.latest && move_unsent_notice(posting.latest, document)
+        dispatch_after_commit
+      end
       document
     end
 
@@ -157,8 +178,27 @@ module EmployeeDocuments
       @item.net_pay.to_d.positive? && @item.effective_payment_delivery_method == "paper_check" && @item.check_number.blank?
     end
 
-    def enqueue_employee_pay_stub_notice(_document)
-      # D11 will enqueue the notice after the first posting commits.
+    def enqueue_employee_pay_stub_notice(document)
+      # Initial availability notices remain reserved for D11.
+      return unless document.correction_label?
+
+      EmployeeDocumentNotice.create!(company_id: document.company_id, employee_document: document,
+        employee_id: @item.employee_id, kind: TaxFormNotice::PAY_STUB_CORRECTED, status: "pending")
+      dispatch_after_commit
+    end
+
+    def move_unsent_notice(previous, document)
+      scope = EmployeeDocumentNotice.where(company_id: document.company_id, employee_document_id: previous.id)
+      notice = TaxFormNotice.unsent(scope, kind: TaxFormNotice::PAY_STUB_CORRECTED).lock.first
+      return unless notice
+
+      # Preserve attempts, retry time and the provider idempotency key.
+      notice.update_columns(employee_document_id: document.id)
+    end
+
+    def dispatch_after_commit
+      company_id = @item.company_id
+      EmployeeDocument.current_transaction.after_commit { DispatchEmployeeTaxFormNoticesJob.perform_later(company_id) }
     end
   end
 end

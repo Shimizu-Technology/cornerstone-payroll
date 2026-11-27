@@ -2899,6 +2899,7 @@ export interface PayrollSourceSummary {
 }
 
 export interface EmployeePayHistoryRecord {
+  stub_corrected?: boolean;
   period_start?: string;
   period_end?: string;
   total_hours?: number;
@@ -3912,6 +3913,7 @@ export const reportsApi = {
 };
 
 export interface ClientPayStub {
+  corrected?: boolean;
   start_date?: string;
   end_date?: string;
   id: number;
@@ -4039,6 +4041,7 @@ export const transmittalApi = {
 
 // Pay Stubs (Admin API)
 export interface PayStubInfo {
+  corrected?: boolean;
   payroll_item_id: number;
   employee_name: string;
   pay_period?: string;
