@@ -764,6 +764,32 @@ RSpec.describe "Year-end checklist", type: :request do
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026, notes: "Year-end review" }
     end
 
+    it "uses role defaults only after an explicit bulk write and accepts a per-employee override" do
+      role = CompanyJobRole.create!(company: company, name: "Server", occupation_code: "102")
+      employee.update!(company_job_role: role, job_title: role.name)
+      second = create(:employee, company: company)
+      [ employee, second ].each do |worker|
+        pay(company, Date.new(2026, 5, 8), worker: worker, reported_tips: 200, cash_tips_reported: 200,
+          social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+      end
+      path = "/api/v1/admin/year_end/tipped_occupations"
+      input = { tax_year: 2026, use_role_code: true, employee_ids: [ employee.id, second.id ] }
+      post path, params: input, as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_tipped_occupations).to be_empty
+      expect(response.parsed_body.fetch("error")).to include(second.full_name)
+      post path, params: input.merge(overrides: { second.id.to_s => "000" },
+        expected_role_codes: { employee.id.to_s => "000" }), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Role codes changed", employee.full_name)
+
+      post path, params: input.merge(overrides: { second.id.to_s => "000" }), as: :json
+      expect(response).to have_http_status(:created), response.body
+      expect(employee.employee_tipped_occupations.sole.occupation_code).to eq("102")
+      expect(second.employee_tipped_occupations.sole.occupation_code).to eq("000")
+      expect(second.employee_tipped_occupations.sole.effective_to).to be_nil
+    end
+
     it "sets an audited Box 14b code in bulk, enables sign-off, and invalidates readiness after a change" do
       item = pay(company, Date.new(2026, 5, 8), worker: employee, reported_tips: 200, cash_tips_reported: 200,
         social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
