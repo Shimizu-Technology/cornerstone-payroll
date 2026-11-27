@@ -26,7 +26,16 @@ const sectionLabels: Record<string, string> = {
   platform: 'Platform features',
 };
 
-function settingLabel(value: string) {
+const settingValueLabels: Record<string, Record<string, string>> = {
+  'client_portal.employee_lifecycle_mode': {
+    approval_first: 'Cornerstone approves first',
+    client_managed: 'Client manages, Cornerstone verifies',
+  },
+};
+
+function settingLabel(value: string, fieldId?: string) {
+  const fieldLabel = fieldId ? settingValueLabels[fieldId]?.[value] : undefined;
+  if (fieldLabel) return fieldLabel;
   if (value === 'intake_adapter') return 'Upload payroll files';
   return value.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
@@ -106,7 +115,7 @@ function SettingControl({ field, value, editable, locked, onChange }: {
       {locked ? (
         <div className="flex min-h-11 items-center gap-2 text-sm text-neutral-600">
           <LockKeyhole className="size-4 shrink-0" aria-hidden="true" />
-          <span>{field.type === 'boolean' ? 'Off' : text} · Available in Milestone {field.locked_until_milestone}</span>
+          <span>{field.type === 'boolean' ? 'Off' : field.type === 'enum' ? settingLabel(text, field.id) : text} · Available in Milestone {field.locked_until_milestone}</span>
         </div>
       ) : field.type === 'nullable_string_array' ? (
         <div className="space-y-2">
@@ -132,7 +141,7 @@ function SettingControl({ field, value, editable, locked, onChange }: {
       ) : (field.type === 'enum' || field.type === 'nullable_enum') && Array.isArray(allowed) ? (
         <Select {...props} value={text} onChange={(event) => onChange(event.target.value || null)}>
           {field.type === 'nullable_enum' && <option value="">None</option>}
-          {allowed.map((option) => <option key={String(option)} value={String(option)}>{settingLabel(String(option))}</option>)}
+          {allowed.map((option) => <option key={String(option)} value={String(option)}>{settingLabel(String(option), field.id)}</option>)}
         </Select>
       ) : (
         <Input {...props} value={text} type={field.type === 'integer' ? 'number' : 'text'}

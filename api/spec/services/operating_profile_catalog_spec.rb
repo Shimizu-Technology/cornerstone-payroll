@@ -32,18 +32,25 @@ RSpec.describe OperatingProfileCatalog do
       end
     end
 
-    it "covers every configurable review_first group and excludes always-reviewed groups" do
+    it "covers every configurable review_first group, marks them deprecated, and excludes always-reviewed groups" do
       described_class::CONFIGURABLE_REVIEW_FIRST_GROUPS.each do |group|
-        expect(described_class.find("client_portal.review_first.#{group}")).to be_present
+        entry = described_class.find("client_portal.review_first.#{group}")
+        expect(entry).to be_present
+        expect(entry).to be_deprecated
+        expect(entry.as_json[:deprecated]).to be(true)
       end
 
       described_class::ALWAYS_REVIEWED_GROUPS.each do |group|
         expect(described_class.find("client_portal.review_first.#{group}")).to be_nil
       end
+
+      expect(described_class.fetch("client_portal.employee_lifecycle_mode")).not_to be_deprecated
+      expect(described_class.fetch("client_portal.employee_lifecycle_mode").as_json[:deprecated]).to be(false)
     end
 
-    it "defaults all M4-M6 toggles to false" do
+    it "locks forthcoming M4-M6 toggles and lifecycle mode to their safe defaults with real milestones" do
       expected_toggles = %w[
+        client_portal.employee_lifecycle_mode
         employee_portal_enabled
         employee_portal.features.stubs
         employee_portal.features.tax_forms
@@ -58,11 +65,23 @@ RSpec.describe OperatingProfileCatalog do
       ]
 
       expect(described_class::M4_TO_M6_TOGGLE_IDS).to match_array(expected_toggles)
+      expect(described_class.locked_keys).to include("client_portal.employee_lifecycle_mode")
 
       expected_toggles.each do |toggle_id|
         entry = described_class.fetch(toggle_id)
-        expect(entry.type).to eq("boolean"), "#{toggle_id} must be boolean"
-        expect(entry.default).to be(false), "#{toggle_id} must default to false"
+        expect(described_class.locked_milestone_for(entry)).to be_a(Integer).and be >= 4
+        expect(entry.as_json[:locked_until_milestone]).to eq(described_class.locked_milestone_for(entry))
+
+        if toggle_id == "client_portal.employee_lifecycle_mode"
+          expect(entry.type).to eq("enum")
+          expect(entry.default).to eq("approval_first")
+          expect(entry.allowed).to eq(%w[approval_first client_managed])
+          expect(described_class.locked_default_for(toggle_id)).to eq("approval_first")
+        else
+          expect(entry.type).to eq("boolean"), "#{toggle_id} must be boolean"
+          expect(entry.default).to be(false), "#{toggle_id} must default to false"
+          expect(described_class.locked_default_for(toggle_id)).to be(false)
+        end
       end
     end
 

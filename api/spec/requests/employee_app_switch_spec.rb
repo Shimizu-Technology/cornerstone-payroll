@@ -332,7 +332,8 @@ RSpec.describe "Employee app switch (M4-9d)", type: :request do
         newest = ClientOperatingProfile.for_date(company.id, PayrollBusinessClock.today)
         expect(newest.id).not_to eq(current.id)
         expect(newest.employee_portal_enabled).to be(false)
-        expect(CompanyFeatures::LOCKED_OFF.map { |key| newest.option_value(key) }).to all(be(false))
+        expect(CompanyFeatures::LOCKED_OFF.to_h { |key| [ key, newest.option_value(key) ] })
+          .to eq(CompanyFeatures::LOCKED_OFF.index_with { |key| OperatingProfileCatalog.locked_default_for(key) })
       end
     end
 

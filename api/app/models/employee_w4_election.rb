@@ -15,7 +15,7 @@ class EmployeeW4Election < ApplicationRecord
     w4_effective_on
   ].freeze
   SNAPSHOT_ATTRIBUTES = PROFILE_ATTRIBUTES - [ :w4_effective_on ]
-  SOURCES = %w[default_withholding staff client_approved employee_creation legacy_profile quickbooks_history].freeze
+  SOURCES = %w[default_withholding staff client_approved client_direct employee_creation legacy_profile quickbooks_history].freeze
 
   EFFECTIVE_BEFORE_SIGNATURE_MESSAGE = "Set the effective date on or after the date the W-4 was signed.".freeze
 
@@ -57,7 +57,7 @@ class EmployeeW4Election < ApplicationRecord
   end
 
   def effective_before_signature?
-    source.in?(%w[staff client_approved employee_creation]) &&
+    source.in?(%w[staff client_approved client_direct employee_creation]) &&
       effective_on && w4_signed_on && effective_on < w4_signed_on
   end
 

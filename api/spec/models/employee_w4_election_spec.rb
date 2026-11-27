@@ -14,7 +14,7 @@ RSpec.describe EmployeeW4Election do
       )
     end
 
-    %w[employee_creation client_approved staff].each do |source_name|
+    %w[employee_creation client_approved client_direct staff].each do |source_name|
       context "with source #{source_name}" do
         let(:source) { source_name }
 

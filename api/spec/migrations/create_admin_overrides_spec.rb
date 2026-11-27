@@ -8,6 +8,7 @@ RSpec.describe CreateAdminOverrides do
     it "preserves #{enforced ? 'enforced' : 'shadow'} RLS on the new override table" do
       connection = ApplicationRecord.connection
       connection.transaction(requires_new: true) do
+        connection.execute("ALTER TABLE employee_readiness_overrides DROP CONSTRAINT IF EXISTS fk_employee_readiness_overrides_admin_override")
         connection.execute("DROP TABLE admin_overrides")
         connection.execute("ALTER TABLE pay_periods DROP COLUMN rollback_review_required")
         connection.execute("ALTER TABLE employee_account_links #{enforced ? 'ENABLE' : 'DISABLE'} ROW LEVEL SECURITY")
@@ -21,6 +22,10 @@ RSpec.describe CreateAdminOverrides do
         expect(RlsDatabase.policy_mismatches(connection, [ "admin_overrides" ])).to be_empty
         raise ActiveRecord::Rollback
       end
+
+      expect(
+        connection.foreign_key_exists?(:employee_readiness_overrides, name: "fk_employee_readiness_overrides_admin_override")
+      ).to be(true)
     end
   end
 end
