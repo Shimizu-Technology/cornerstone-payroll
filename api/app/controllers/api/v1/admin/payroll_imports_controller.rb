@@ -23,7 +23,7 @@ module Api
         # GET /api/v1/admin/pay_periods/:pay_period_id/current_import
         # Reopens the latest unapplied MoSa review without requiring another upload.
         def current
-          source_package = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          source_package = PayrollImport::CurrentReview.source_package_for(@pay_period, source_type: params[:source_type].presence)
           import_record = PayrollImport::CurrentReview.import_record_for(@pay_period, source_package)
           unless source_package && import_record
             return render json: { error: "There is no current MoSa import waiting for review." }, status: :not_found
