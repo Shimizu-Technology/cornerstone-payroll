@@ -29,6 +29,8 @@ export interface SupportGrant {
   company_id: number;
   expires_at: string;
   employee_url: string | null;
+  /** The staff site's origin, sent for employee-app views so End can return there. */
+  staff_url?: string | null;
   link?: unknown;
 }
 
@@ -43,4 +45,15 @@ export function supportRequest(
       ...(clerkToken ? { Authorization: `Bearer ${clerkToken}` } : {}),
     },
   });
+}
+
+/** Where End sends staff: the staff site's dashboard when the grant names a valid one, otherwise `fallback`. */
+export function supportExitDestination(grant: Pick<SupportGrant, 'staff_url'> | null, fallback: string): string {
+  if (!grant?.staff_url) return fallback;
+  try {
+    const url = new URL('/app', grant.staff_url);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : fallback;
+  } catch {
+    return fallback;
+  }
 }

@@ -135,8 +135,18 @@ module Api
       def grant_payload(grant, name)
         {
           name: name, company_id: grant.company_id, expires_at: grant.expires_at.iso8601,
-          employee_url: (grant.employee_origin if grant.employee_view?)
+          employee_url: (grant.employee_origin if grant.employee_view?),
+          # Where End returns staff from an employee-app view: the staff site,
+          # not the employee host, which would show the employee sign-in screens.
+          staff_url: (staff_origin if grant.employee_view?)
         }
+      end
+
+      def staff_origin
+        uri = URI.parse(ENV["FRONTEND_URL"].to_s.strip)
+        "#{uri.scheme}://#{uri.authority}" if uri.is_a?(URI::HTTP) && uri.host.present?
+      rescue URI::InvalidURIError
+        nil
       end
 
       def allow_client_subdomain_token?

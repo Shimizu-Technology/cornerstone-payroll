@@ -58,7 +58,7 @@ The seed (`rake demo:seed`) creates two employers. Harbor Finch Kitchen is the m
 | Employee 04 | Kitchen | Terminated in the seed before the app, with no termination-era link. Shows in staff lists only; can't be invited. |
 | Employee 11 | Catering | Catering-only employee, used for the wrong-company tests. |
 
-Employee 04 was terminated before any app access existed, so they can't test former access: only an active employee can be invited (`api/app/services/employee_links/invite.rb:34`). Employee 03 covers former access instead.
+Employee 04 was terminated before any app access existed, so they can't test former access: only an active employee can be invited (`api/app/services/employee_links/invite.rb:38`). Employee 03 covers former access instead.
 
 ### Before you start
 
@@ -154,7 +154,7 @@ Needs the support-view permission on your staff login. It works in production on
 | A8.1 | Desktop [critical] | Client settings → **Sign in as**. Choose **Client portal**, pick Client Manager, enter a reason, **Start view-only session**. | A fresh second-step check, then Client Manager's client portal with a "View only" banner and an **End** button. It says the session lasts up to 30 minutes and the client can see it in their support log. | ☐ Pass ☐ Fail | |
 | A8.2 | Desktop [critical] | In that session try to save anything (edit a contact on **Contact Details**, approve a change). | Refused. Nothing changes. | ☐ Pass ☐ Fail | |
 | A8.3 | Desktop | Choose **End**. | Back on your own staff view. | ☐ Pass ☐ Fail | |
-| A8.4 | Desktop | Start **Sign in as** with **Employee app** for a demo employee. | A fresh second-step check, then Employee 01's employee app in a view-only session on the Kitchen's own site. Demo companies are allowed (`api/app/models/view_as_grant.rb:62-65`) once the Kitchen has the employee app and its subdomain on. Saving anything is refused. | ☐ Pass ☐ Fail | |
+| A8.4 | Desktop | Start **Sign in as** with **Employee app** for a demo employee. | A fresh second-step check, then Employee 01's employee app in a view-only session on the Kitchen's own site. Demo companies are allowed (`api/app/models/view_as_grant.rb:60-65`) once the Kitchen has the employee app and its subdomain on. Saving anything is refused. | ☐ Pass ☐ Fail | |
 | A8.5 | Desktop | Try **Sign in as** on another Cornerstone staff user. | Staff users aren't offered as targets. | ☐ Pass ☐ Fail | |
 | A8.6 | Desktop | Leave a session open past 30 minutes. | It ends on its own; the next page load refuses the grant. | ☐ Pass ☐ Fail | |
 

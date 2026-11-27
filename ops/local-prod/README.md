@@ -103,7 +103,7 @@ It asks for the Mac's login password at `Password:` in Terminal (this is `sudo`,
 
 ## Known differences from production
 
-- **Two-step sign-in is off** (`REQUIRE_MFA=false`). The Clerk development instance has no authenticator app or backup codes turned on, and the Backend API can't change that. So the switch page's MFA check shows *waived*, as in production before the MFA rollout. To turn it on, enable Authenticator app (and the `two_factor_enabled` session-token claim) for "Cornerstone Payroll Local" in the Clerk dashboard. Then set `REQUIRE_MFA=true`, `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` in `up.sh`'s common environment.
+- **Two-step sign-in is off** (`REQUIRE_MFA=false`). The Clerk development instance has no authenticator app or backup codes turned on, and the Backend API can't change that. So the switch page's MFA check shows *waived*, as in production before the MFA rollout. To turn it on, enable Authenticator app (and the `two_factor_enabled` session-token claim) for "Cornerstone Payroll Local" in the Clerk dashboard. Then run `up.sh` with `LOCAL_PROD_REQUIRE_MFA=true`, and add `CLERK_MFA_ATTESTED_INSTANCE_ID` and `CLERK_MFA_EVIDENCE_REF` to `up.sh`'s common environment for the readiness check. With it on and no second factor available, every sign-in (staff, client and employee) stops at two-step setup, which is how the gate itself can be checked.
 - **`production:readiness` fails these lines on purpose:**
   - "this is a hosted deployment, not a local production copy";
   - live Clerk keys (`pk_live_`);

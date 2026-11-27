@@ -111,7 +111,9 @@ RSpec.describe "Track B demo flag expand phase", type: :model do
     end
 
     it "supports demo client logins on new-shape demos while still enforcing DemoOutbound and live/demo separation" do
-      expect(build(:user, company: live_demo, organization: organization, role: "client", email: "outside@client.example")).not_to be_valid
+      outside = build(:user, company: live_demo, organization: organization, role: "client", email: "outside@client.example")
+      expect(outside).not_to be_valid
+      expect(outside.errors.full_messages).to include(a_string_starting_with("Email isn't approved for demo companies"))
 
       demo_user = create(:user, company: live_demo, organization: organization, role: "client", email: allowlisted_email)
       CompanyAssignment.create!(user: demo_user, company: live_demo)

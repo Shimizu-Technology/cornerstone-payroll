@@ -248,6 +248,19 @@ RSpec.describe "View-only support sessions", type: :request do
     expect(response).to have_http_status(:forbidden)
   end
 
+  it "tells an employee-app view where End returns staff, and leaves it out of client portal views" do
+    saved = ENV["FRONTEND_URL"]
+    ENV["FRONTEND_URL"] = "https://payroll-fixture.example.com/app"
+    enable_employee_surface!
+    token_for(employee, type: "employee")
+    expect(response.parsed_body).to include("staff_url" => "https://payroll-fixture.example.com")
+
+    token_for(client)
+    expect(response.parsed_body).to include("staff_url" => nil)
+  ensure
+    ENV["FRONTEND_URL"] = saved
+  end
+
   it "opens the unlinked former worker on the employee host and leaves payroll and delivery untouched" do
     enable_employee_surface!
     employee.update!(status: "inactive", termination_date: PayrollBusinessClock.today - 7.days)

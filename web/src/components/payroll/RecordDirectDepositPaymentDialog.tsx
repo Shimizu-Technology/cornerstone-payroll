@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { guamBusinessDate } from '@/lib/payrollBusinessDate';
+import { formatCurrency } from '@/lib/utils';
 
 interface DepositItem {
   id: number;
@@ -51,7 +52,7 @@ export function RecordDirectDepositPaymentDialog({ item, readOnly = false, onClo
       <DialogHeader>
         <DialogTitle>Confirm bank payment</DialogTitle>
         <DialogDescription>
-          {item.employee_name} · ${item.net_pay.toFixed(2)} net. Record this only after verifying the transfer completed at the bank. Cornerstone does not send the transfer.
+          {item.employee_name} · {formatCurrency(item.net_pay)} net. Record this only after verifying the transfer completed at the bank. Cornerstone does not send the transfer.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-4">

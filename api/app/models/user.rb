@@ -353,10 +353,14 @@ class User < ApplicationRecord
     return if company.blank? || !company.contained? || staff_member? || (client? && practice_company_id == company_id)
     # A demo company's client and employee-app logins are its own: only
     # allow-listed addresses (private configuration), never a practice login.
-    return if (client? || portal_employee?) && company.demo? && practice_company_id.nil? &&
-      (closing_demo_login? || DemoOutbound.allowed?(email))
+    demo_login = (client? || portal_employee?) && company.demo? && practice_company_id.nil?
+    return if demo_login && (closing_demo_login? || DemoOutbound.allowed?(email))
 
-    errors.add(:company, "requires a practice-only client login or payroll staff")
+    if demo_login
+      errors.add(:email, "isn't approved for demo companies. Demo client and employee logins can use only an approved demo address.")
+    else
+      errors.add(:company, "requires a practice-only client login or payroll staff")
+    end
   end
 
   # Saving an existing demo login without changing who it is or turning it

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { leaveSupportView, supportRequest, type SupportGrant } from './grant';
+import { leaveSupportView, supportExitDestination, supportRequest, type SupportGrant } from './grant';
 
 export function useSupportView(base: string, getToken: () => Promise<string | null>, destination: string) {
   const [grant, setGrant] = useState<SupportGrant | null>(null);
@@ -7,6 +7,9 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
   const [endError, setEndError] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  // Resolved once the grant loads, so Leave still reaches the staff site after
+  // the 30-minute expiry clears the grant.
+  const [exitTo, setExitTo] = useState(destination);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -33,6 +36,7 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
           return;
         }
         setGrant(next);
+        setExitTo(supportExitDestination(next, destination));
         expiry = window.setTimeout(() => {
           setGrant(null);
           setLoadError('This support view has ended.');
@@ -49,7 +53,7 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
       window.clearTimeout(timeout);
       window.clearTimeout(expiry);
     };
-  }, [base, getToken, attempt]);
+  }, [base, getToken, attempt, destination]);
 
   const end = async () => {
     setEnding(true);
@@ -57,7 +61,7 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
     try {
       const response = await supportRequest(base, await getToken(), 'DELETE', AbortSignal.timeout(15_000));
       if (!response.ok) throw new Error('Could not end this support view.');
-      leaveSupportView(destination);
+      leaveSupportView(exitTo);
     } catch {
       setEndError('Could not end this support view. Try again.');
       setEnding(false);
@@ -67,6 +71,6 @@ export function useSupportView(base: string, getToken: () => Promise<string | nu
   return {
     grant, loadError, endError, ending, end,
     retry: () => { setLoadError(null); setAttempt((count) => count + 1); },
-    leave: () => leaveSupportView(destination),
+    leave: () => leaveSupportView(exitTo),
   };
 }
