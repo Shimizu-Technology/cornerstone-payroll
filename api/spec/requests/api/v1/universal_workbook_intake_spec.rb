@@ -316,5 +316,96 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       expect(item.hours_worked).to eq(BigDecimal("80.00"))
       expect(session.reload.status).to eq("applied")
     end
+
+    it "rolls back all rows on mid-apply failure, keeps the session previewed, and succeeds on retry" do
+      employee_02 = create(:employee, company: company, first_name: "Employee", last_name: "02", pay_rate: 22.00)
+      session = PayrollIntakeSession.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: staff,
+        source_type: "mosa_revel",
+        status: "previewed",
+        import_hash: SecureRandom.hex(32),
+        parser_version: "mosa_revel:v1",
+        package_id: SecureRandom.uuid,
+        package_revision: 1
+      )
+      [ employee_01, employee_02 ].each_with_index do |emp, idx|
+        PayrollIntakeRow.create!(
+          payroll_intake_session: session,
+          employee: emp,
+          position: idx,
+          source_employee_name: emp.full_name,
+          regular_hours: BigDecimal("80.00"),
+          overtime_hours: BigDecimal("0.00"),
+          reported_tips: BigDecimal("0.00"),
+          tips_paid_out: BigDecimal("0.00"),
+          source_payload: { "row_kind" => "matched" },
+          disposition: "included",
+          dispositioned_at: Time.current,
+          dispositioned_by: staff
+        )
+      end
+      import_record = PayrollImportRecord.create!(
+        pay_period: pay_period,
+        payroll_intake_session: session,
+        status: "previewed",
+        matched_data: [ employee_01, employee_02 ].map do |emp|
+          {
+            "employee_id" => emp.id,
+            "employee_name" => emp.full_name,
+            "match_status" => "matched",
+            "regular_hours" => 80.0,
+            "overtime_hours" => 0.0,
+            "tips" => 0.0,
+            "loan_deduction" => 0.0
+          }
+        end,
+        raw_data: {
+          "tips_paid_out_from_tips" => false,
+          "low_confidence_matches" => []
+        }
+      )
+
+      verifier = instance_double(PayrollIntake::SourcePackageVerifier, verify!: true)
+      allow(PayrollIntake::SourcePackageVerifier).to receive(:new).with(session: session).and_return(verifier)
+      completeness = instance_double(
+        PayrollIntake::SourceCompleteness,
+        waivable_missing_roles: [],
+        missing_required_roles: []
+      )
+      allow(PayrollIntake::SourceCompleteness).to receive(:new).and_return(completeness)
+
+      # Force the second employee's calculation to fail after the first saves
+      fail_second = true
+      allow_any_instance_of(PayrollItem).to receive(:calculate!).and_wrap_original do |original, *args|
+        if fail_second && original.receiver.employee_id == employee_02.id
+          raise ArgumentError, "Simulated calculation failure for second employee"
+        end
+
+        original.call(*args)
+      end
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: import_record.id },
+           as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(pay_period.reload.payroll_items).to be_empty
+      expect(session.reload.status).to eq("previewed")
+      expect(import_record.reload.status).to eq("previewed")
+
+      # Clear the failure and retry the exact same review
+      fail_second = false
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: import_record.id },
+           as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "success").length).to eq(2)
+      expect(pay_period.reload.payroll_items.pluck(:employee_id)).to contain_exactly(employee_01.id, employee_02.id)
+      expect(session.reload.status).to eq("applied")
+      expect(import_record.reload.status).to eq("applied")
+    end
   end
 end
