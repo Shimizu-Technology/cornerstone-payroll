@@ -20,6 +20,7 @@ import type { IdentityCheck } from './contracts';
 import { useBrand, useEmployeeAuth } from './contexts';
 import { CantSignIn } from './help';
 import { useDocumentTitle, useSignOut } from './hooks';
+import { PAPERLESS_PATH } from './paperlessState';
 import { birthDate, currentInviteToken, forgetInviteToken, normalizeCode, rateLimitedText, takeInviteToken } from './signupState';
 import { BrandMark, EmpButton, Field, FormMessage } from './ui';
 
@@ -417,7 +418,7 @@ export function SignUpAccountScreen(): ReactElement {
   );
 }
 
-/** Signed in after Clerk sign-up: /auth/me binds the invited link, then Home opens. */
+/** Signed in after Clerk sign-up: /auth/me binds the invited link, then "Go paperless?" asks once before Home. */
 export function FinishSignUpScreen(): ReactElement {
   const { getToken } = useEmployeeAuth();
   const brand = useBrand();
@@ -432,7 +433,7 @@ export function FinishSignUpScreen(): ReactElement {
     let current = true;
     setFailed(null);
     api.bindAccount().then(() => {
-      if (current) navigate('/', { replace: true });
+      if (current) navigate(PAPERLESS_PATH, { replace: true });
     }, (error: unknown) => {
       if (!current) return;
       const failure = failureOf(error);
@@ -516,9 +517,11 @@ export function LinkCheckScreen({ mode }: { mode: 'claim' | 'reactivate' }): Rea
     setWorking(true);
     setFailure(null);
     try {
-      await stepUp(() => (mode === 'claim' ? api.claimLink(checked, termsVersion) : api.reactivate(checked, termsVersion)));
+      const link = await stepUp(() => (mode === 'claim' ? api.claimLink(checked, termsVersion) : api.reactivate(checked, termsVersion)));
       forgetInviteToken();
-      navigate('/', { replace: true });
+      // Asked once on the way in, for the employer just added; the step goes
+      // straight to Home when there's already an answer.
+      navigate(PAPERLESS_PATH, { replace: true, state: link ? { linkId: link.id } : null });
     } catch (error) {
       const result = failureOf(error);
       if (result === 'terms_updated') {

@@ -1435,6 +1435,35 @@ select.emp-input {
 }
 
 /* ---------- Electronic delivery consent (M4-6) ---------- */
+/* "Go paperless?" step and the Home cards that ask until there's an answer. */
+.emp-paperless {
+  max-width: 36rem;
+}
+
+.emp-paperless-points {
+  display: grid;
+  gap: 6px;
+  padding-left: 1.25rem;
+  color: #334155;
+  list-style: disc;
+}
+
+.emp-paperless-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.emp-ask-cards {
+  display: grid;
+  gap: 12px;
+}
+
+.emp-ask-card-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .emp-disclosure-toggle {
   display: inline-flex;
   align-items: center;
