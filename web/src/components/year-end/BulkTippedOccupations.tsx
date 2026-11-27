@@ -38,18 +38,20 @@ export function BulkTippedOccupations({ companyId, year, employees, onSaved }: {
 
   async function apply() {
     const employeesLabel = `${targets.length} ${targets.length === 1 ? 'employee' : 'employees'}`;
-    if (!codes || !window.confirm(`Set ${code} · ${codes[code]} for ${employeesLabel} from ${date} through the end of ${year}?`)) return;
+    if (!codes || !window.confirm(`Set ${code} · ${codes[code]} for ${employeesLabel} starting ${date}? Each code stays in effect unless a later entry is already scheduled.`)) return;
 
     setBusy(true);
     setError('');
     try {
-      await tippedOccupationsApi.bulkSet(companyId, {
+      const result = await tippedOccupationsApi.bulkSet(companyId, {
         tax_year: year, employee_ids: targets, occupation_code: code, effective_from: date,
       });
       if (stillMounted()) {
         setSelected([]);
         setCodes(undefined);
-        await onSaved(`Saved the tipped occupation code for ${employeesLabel}.`);
+        const capped = result.capped_count;
+        const note = capped > 0 ? ` For ${capped} ${capped === 1 ? 'employee' : 'employees'}, the code ends the day before the next scheduled entry.` : '';
+        await onSaved(`Saved the tipped occupation code for ${employeesLabel}.${note}`);
       }
     } catch (err) {
       if (stillMounted()) setError(err instanceof Error ? err.message : 'Could not save occupation codes.');
@@ -84,7 +86,7 @@ export function BulkTippedOccupations({ companyId, year, employees, onSaved }: {
             </ul>
             <TippedOccupationCodeSelect codes={codes} value={code} onChange={setCode} />
             <Input type="date" label="Effective start date" value={date} required min={`${year}-01-01`} max={`${year}-12-31`}
-              helperText={`The code applies through December 31, ${year}.`} onChange={(event) => setDate(event.target.value)} />
+              onChange={(event) => setDate(event.target.value)} />
             <div className="flex flex-wrap gap-2">
               <Button type="submit" size="sm" loading={busy} disabled={!code || targets.length === 0}>Apply to {targets.length} selected</Button>
               <Button type="button" variant="outline" size="sm" onClick={() => { setCodes(undefined); setSelected([]); setError(''); }}>Cancel</Button>

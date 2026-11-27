@@ -54,10 +54,9 @@ module YearEnd
                               PAYEE_IDENTITY_UNRESOLVED PAYEE_DUPLICATE_TIN FORM_1099_NOT_MARKED_READY].freeze
     # Employer items only the W-2 filing needs; they never hold up the 1099s.
     W2_ONLY_EMPLOYER_CODES = %w[EMPLOYER_CONTACT_NAME_MISSING EMPLOYER_EFILE_INVALID].freeze
-    # Expected demo preflight notices for fictional 9xx SSNs and reserved demo
-    # EIN prefixes (e.g. 07-): shown in the checklist without loosening the
-    # official EFW2 validator or blocking sign-off.
-    DEMO_EXPECTED_CODES = %w[DEMO_RESERVED_SSN_EXPECTED DEMO_RESERVED_EIN_EXPECTED].freeze
+    # Expected preflight notices for demo identifiers and placeholder names.
+    # The checklist shows them without blocking sign-off.
+    DEMO_EXPECTED_CODES = %w[DEMO_RESERVED_SSN_EXPECTED DEMO_RESERVED_EIN_EXPECTED DEMO_PLACEHOLDER_NAME_EXPECTED].freeze
     DEMO_RESERVED_SSN_PATTERN = /\A9\d{2}(?!00)\d{2}(?!0000)\d{4}\z/
 
     def call
@@ -182,6 +181,11 @@ module YearEnd
           next
         end
 
+        employee = employees_by_id[problem[:employee_id]]
+        if company.demo? && problem[:code] == :employee_name_invalid && employee&.first_name == "Employee" && employee.last_name.to_s.match?(/\A\d+\z/)
+          next issue("DEMO_PLACEHOLDER_NAME_EXPECTED", "Expected demo e-file preflight error: #{message}.", employee_id: employee.id, expected_for_demo: true)
+        end
+
         issue("EMPLOYEE_EFILE_INVALID", message, employee_id: problem[:employee_id])
       end
       if demo_reserved_ssn_employee_ids.any?
@@ -197,8 +201,8 @@ module YearEnd
     end
 
     # Runs for every operating company (live clients and demos), never practice copies.
-    # The official EFW2 validator is never loosened; demo 9xx SSNs are grouped
-    # into one labeled expected preflight error above.
+    # The official EFW2 validator stays strict. Demo placeholders are labeled
+    # as expected preflight issues above.
     def efile_preflight?
       year == 2026 && files?("w2_gu") && !company.practice_copy?
     end

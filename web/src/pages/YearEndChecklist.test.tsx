@@ -558,6 +558,7 @@ describe('Year-end checklist', () => {
 
     const region = await screen.findByRole('region', { name: /Review warnings/ });
     expect(within(region).getByText('Fix before filing')).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Ben Reyes' }).getAttribute('href')).toMatch(/#tipped-occupations$/);
     expect(within(region).getAllByRole('button', { name: 'Mark reviewed' })).toHaveLength(1);
     expect(within(region).getByRole('button', { name: 'Mark reviewed' })).toHaveProperty('disabled', true);
     fireEvent.change(within(region).getByLabelText('What did you check and confirm?'), { target: { value: 'Salaried manager; not qualified overtime.' } });

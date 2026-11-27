@@ -79,6 +79,7 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
   const canSetCodes = hasConfigurationAccess && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [showAll, setShowAll] = useState(false);
   const employees = showAll ? warning.employees : warning.employees.slice(0, SHOWN_EMPLOYEES);
+  const profileAnchor = warning.code === 'tipped_occupation_code_missing' ? '#tipped-occupations' : '';
   const returnTo = encodeURIComponent(`${location.pathname}${location.search}#step-review_warnings`);
 
   return (
@@ -99,7 +100,7 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
           <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
             {employees.map((employee) => (
               <li key={employee.employee_id}>
-                <Link to={`${employee.edit_path}?return_to=${returnTo}`} className="inline-flex min-h-9 items-center font-medium text-primary-700 underline [overflow-wrap:anywhere]">
+                <Link to={`${employee.edit_path}?return_to=${returnTo}${profileAnchor}`} className="inline-flex min-h-9 items-center font-medium text-primary-700 underline [overflow-wrap:anywhere]">
                   {employee.name ?? `Employee ${employee.employee_id}`}
                 </Link>
                 {employee.history_review && (
