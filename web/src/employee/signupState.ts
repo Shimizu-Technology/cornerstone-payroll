@@ -1,3 +1,5 @@
+import { redirectTarget } from './routing';
+
 // Sign-up helpers kept out of signup.tsx so it exports only components.
 
 // An invite link (/activate#token=…, /claim#token=…, /reactivate#token=…,
@@ -59,6 +61,50 @@ export function forgetInviteToken(): void {
   inviteToken = null;
   try {
     storage()?.removeItem(STORAGE_KEY);
+  } catch {
+    // Nothing stored.
+  }
+  forgetSignInReturn();
+}
+
+// Where sign-in returns to (/claim, /reactivate or a deep link). Kept in this
+// tab's sessionStorage too, because Clerk's new-device step (#/client-trust)
+// drops the router state and a phone may reload the tab while the person
+// copies the emailed code. Always re-checked through redirectTarget.
+const RETURN_KEY = 'employee-sign-in-return';
+
+/** The return path from router state, else the one this tab kept; Home when neither is usable. */
+export function signInReturn(state: unknown): string {
+  const fromState = redirectTarget(state);
+  if (fromState !== '/') {
+    try {
+      storage()?.setItem(RETURN_KEY, fromState);
+    } catch {
+      // Storage blocked: the router state still covers this page.
+    }
+    return fromState;
+  }
+  let stored: string | null = null;
+  try {
+    stored = storage()?.getItem(RETURN_KEY) ?? null;
+  } catch {
+    stored = null;
+  }
+  return redirectTarget({ from: stored });
+}
+
+export function forgetSignInReturn(): void {
+  try {
+    storage()?.removeItem(RETURN_KEY);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+/** Clears the kept return path once the signed-in app has reached it. */
+export function arrivedAt(path: string): void {
+  try {
+    if (storage()?.getItem(RETURN_KEY)?.split(/[?#]/)[0] === path) storage()?.removeItem(RETURN_KEY);
   } catch {
     // Nothing stored.
   }

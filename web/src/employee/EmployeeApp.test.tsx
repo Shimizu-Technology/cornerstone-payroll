@@ -466,6 +466,29 @@ describe('employee app shell', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/employee/tax_forms'))).toBe(false);
   });
 
+  it('returns a signed-in /sign-in to the invite this tab kept, after the new-device step cleared router state', async () => {
+    signedIn();
+    sessionStorage.setItem('employee-sign-in-return', '/claim');
+    window.history.pushState({}, '', '/sign-in#/client-trust');
+    vi.stubGlobal('fetch', respond({}));
+    render(<EmployeeApp />);
+
+    await vi.waitFor(() => expect(window.location.pathname).toBe('/claim'));
+    // Reaching it uses it up.
+    expect(sessionStorage.getItem('employee-sign-in-return')).toBeNull();
+  });
+
+  it('never follows a kept return path that leaves the site', async () => {
+    signedIn();
+    sessionStorage.setItem('employee-sign-in-return', '//evil.example/x');
+    window.history.pushState({}, '', '/sign-in');
+    vi.stubGlobal('fetch', respond({}));
+    render(<EmployeeApp />);
+
+    await vi.waitFor(() => expect(window.location.pathname).not.toBe('/sign-in'));
+    expect(window.location.pathname).toBe('/');
+  });
+
   it('sends a signed-out deep link to sign-in and back', async () => {
     window.history.pushState({}, '', '/taxes');
     vi.stubGlobal('fetch', respond({

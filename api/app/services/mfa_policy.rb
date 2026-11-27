@@ -8,6 +8,9 @@ class MfaPolicy
   ENROLLMENT_REQUIRED_CODE = "mfa_enrollment_required"
   ENROLLMENT_REQUIRED_MESSAGE = "Set up two-step sign-in before accessing payroll."
   STEP_UP_MAX_AGE_MINUTES = 10
+  # How far ahead of this server's clock a token's iat may be and still count
+  # as just issued: Clerk's own nbf allowance (nbf = iat - 10 s).
+  MAX_CLOCK_SKEW_SECONDS = 10
   ENROLLMENT_CLAIM = "two_factor_enabled"
   TRUTHY_VALUES = %w[1 true t yes y on].freeze
 
@@ -94,15 +97,16 @@ class MfaPolicy
 
   # A missing or non-integer iat can't date the verification. Clerk sets nbf
   # 10 seconds before iat to absorb clock skew, and request authentication
-  # has already checked nbf, so an iat no further ahead of this server's clock
-  # than that gap means the token was just issued. Any other future iat can't
-  # date it.
+  # has already checked nbf, so an iat at most MAX_CLOCK_SKEW_SECONDS ahead of
+  # this server's clock, with its nbf passed, means the token was just issued.
+  # Any other future iat can't date it.
   def self.token_age_seconds(payload, now)
     iat = payload["iat"]
     return nil unless iat.is_a?(Integer)
 
     elapsed = now.to_i - iat
     return elapsed unless elapsed.negative?
+    return nil if -elapsed > MAX_CLOCK_SKEW_SECONDS
 
     nbf = payload["nbf"]
     0 if nbf.is_a?(Integer) && nbf < iat && nbf <= now.to_i
