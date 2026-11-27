@@ -431,7 +431,7 @@ module Api
 
         def quarterly_compliance_packet_swica_ascii
           # The ASCII wage file is an electronic filing; a demo never produces one outside DEPLOYMENT_ENV=local.
-          return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE }, status: :forbidden if current_company&.demo? && !LocalDeployment.local?
+          return render json: { error: Company::DEMO_UNAVAILABLE_MESSAGE, code: Company::CONTAINED_COMPANY_RESTRICTED_CODE }, status: :forbidden if current_company&.demo? && !LocalDeployment.local?
 
           report_data, error_response = build_quarterly_compliance_packet_data
           return error_response if error_response

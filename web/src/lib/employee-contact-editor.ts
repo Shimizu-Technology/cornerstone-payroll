@@ -14,6 +14,11 @@ import type {
 
 export const CONTACT_FIELDS = ['email', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'zip'] as const;
 export type ContactField = (typeof CONTACT_FIELDS)[number];
+export const ADDRESS_FIELDS: readonly ContactField[] = ['address_line1', 'address_line2', 'city', 'state', 'zip'];
+
+export function hasAddressChanges(changes: ContactDraftPatch): boolean {
+  return ADDRESS_FIELDS.some((field) => changes[field] !== undefined);
+}
 
 export const FIELD_LABELS: Record<ContactField, string> = {
   email: 'Email',
@@ -54,6 +59,7 @@ export interface RowSaveState {
   warnings: EmployeeContactWarning[];
   samePersonRequired: boolean;
   samePersonChecked: boolean;
+  confirmingAddressReplacement?: boolean;
   conflict: RowConflictState | null;
 }
 
@@ -65,6 +71,7 @@ export const INITIAL_ROW_STATE: RowSaveState = {
   warnings: [],
   samePersonRequired: false,
   samePersonChecked: false,
+  confirmingAddressReplacement: false,
   conflict: null,
 };
 

@@ -38,6 +38,7 @@ import {
   effectiveDraft,
   extractConflictPayload,
   extractContactValidation,
+  hasAddressChanges,
   hasAnyChangedField,
   rowSaveRequest,
   type ContactDraftMap,
@@ -266,6 +267,7 @@ export function EmployeeContactDetails({
           saved: false,
           error: null,
           conflict: null,
+          confirmingAddressReplacement: false,
           fieldErrors: { ...current.fieldErrors, [field]: [] },
           ...(field === 'email' ? { samePersonRequired: false, samePersonChecked: false } : {}),
         },
@@ -323,7 +325,12 @@ export function EmployeeContactDetails({
 
   const saveRow = async (
     employee: ContactEmployee,
-    options: { explicitConfirmSamePerson?: boolean; overrideBaselineEmployee?: ContactEmployee; overrideChanges?: ContactDraftPatch } = {},
+    options: {
+      explicitConfirmSamePerson?: boolean;
+      confirmReplaceAddress?: boolean;
+      overrideBaselineEmployee?: ContactEmployee;
+      overrideChanges?: ContactDraftPatch;
+    } = {},
   ): Promise<void> => {
     if (!canEdit) return;
     const baseEmployee = options.overrideBaselineEmployee ?? employee;
@@ -354,6 +361,23 @@ export function EmployeeContactDetails({
     const changedKeys = Object.keys(changes) as ContactField[];
     if (changedKeys.length === 0 && !confirmSamePerson) return;
 
+    if (
+      !isClient
+      && baseEmployee.contact_details_status?.has_pending_address_request
+      && hasAddressChanges(changes)
+      && !options.confirmReplaceAddress
+    ) {
+      setRowStates((prev) => ({
+        ...prev,
+        [employee.id]: {
+          ...(prev[employee.id] ?? INITIAL_ROW_STATE),
+          confirmingAddressReplacement: true,
+          error: null,
+        },
+      }));
+      return;
+    }
+
     setRowStates((prev) => ({
       ...prev,
       [employee.id]: {
@@ -362,6 +386,7 @@ export function EmployeeContactDetails({
         saved: false,
         submittedAddressRequestId: undefined,
         pendingAddressRequestId: undefined,
+        confirmingAddressReplacement: false,
         error: null,
         fieldErrors: {},
         conflict: null,
@@ -488,6 +513,7 @@ export function EmployeeContactDetails({
     void saveRow(employee, {
       overrideBaselineEmployee: conflict.serverEmployee,
       overrideChanges: conflict.userChanges,
+      confirmReplaceAddress: true,
     });
   };
 
@@ -520,7 +546,7 @@ export function EmployeeContactDetails({
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       const state = rowStates[employee.id] ?? INITIAL_ROW_STATE;
-      if (!state.saving && (hasAnyChangedField(drafts[employee.id]) || (state.samePersonRequired && state.samePersonChecked))) {
+      if (!state.saving && !state.confirmingAddressReplacement && (hasAnyChangedField(drafts[employee.id]) || (state.samePersonRequired && state.samePersonChecked))) {
         void saveRow(employee);
       }
     }
@@ -548,6 +574,11 @@ export function EmployeeContactDetails({
         onKeyDown={(event) => handleRowKeyDown(event, employee)}
         onToggleSamePerson={(checked) => toggleSamePersonCheck(employee.id, checked)}
         onConfirmSamePerson={() => void saveRow(employee, { explicitConfirmSamePerson: true })}
+        onConfirmAddressReplacement={() => void saveRow(employee, { confirmReplaceAddress: true })}
+        onCancelAddressReplacement={() => setRowStates((prev) => ({
+          ...prev,
+          [employee.id]: { ...(prev[employee.id] ?? INITIAL_ROW_STATE), confirmingAddressReplacement: false },
+        }))}
         onKeepMine={() => handleKeepMyVersion(employee)}
         onUseTheirs={() => handleDiscardMyVersion(employee)}
         onCancel={() => cancelRow(employee)}

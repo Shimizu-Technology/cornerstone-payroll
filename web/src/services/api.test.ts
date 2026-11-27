@@ -551,6 +551,12 @@ describe('actionable API errors', () => {
     expect(apiErrorMessage({ code: 'mfa_enrollment_required', error: 'Set up two-step sign-in to make this change.' }, 403))
       .toBe('Set up two-step sign-in to make this change.');
   });
+  it('preserves contained company 403 refusals without suggesting an access problem', () => {
+    const demoMessage = 'A demo company is selected, so this option is turned off. Switch to a live client to use it.';
+    expect(apiErrorMessage({ code: 'contained_company_restricted', error: demoMessage }, 403)).toBe(demoMessage);
+    const practiceMessage = 'A practice company (test workspace) is selected, so this option is turned off.';
+    expect(apiErrorMessage({ code: 'contained_company_restricted', error: practiceMessage }, 403)).toBe(practiceMessage);
+  });
   it.each([
     'This person already created their account. Ask them to sign in to finish.',
     'This person already created their account, but that sign-up can no longer finish. Reset their sign-up to send a new invite.',

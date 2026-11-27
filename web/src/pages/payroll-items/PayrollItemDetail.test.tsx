@@ -51,6 +51,8 @@ describe('PayrollItemDetail payment labels', () => {
     renderDetail(baseItem);
     await screen.findByText('Payment context');
     expect(screen.queryByRole('note', { name: 'Payroll history review required' })).toBeNull();
+    expect(screen.getByText('Guam income tax, Social Security, and Medicare')).toBeTruthy();
+    expect(screen.queryByText('FIT, Social Security, and Medicare')).toBeNull();
   });
 
   it('keeps the direct payroll-item route readable for a workspace reviewer', async () => {

@@ -53,6 +53,7 @@ So a staging or shared test instance is never repointed.
 
 `up.sh` follows the RLS runbook:
 - `db:safe_prepare` on the owner connection;
+- idempotent loading of `db/cache_schema.rb`, `db/queue_schema.rb` and `db/cable_schema.rb` into their configured databases when their tables are not yet present (`solid_cache_entries`, `solid_queue_jobs`, `solid_cable_messages`);
 - `db/rls_runtime_role.sql` (with the interactive `\password` replaced by a generated password);
 - `rls:install` (shadow), then the seed;
 - `rls:enforce` (all protected tables enabled and forced).
@@ -86,6 +87,8 @@ The employee app switch, subdomains and invitations stay off. Turn them on in th
 
 - **Staff:** `payroll.admin+clerk_test@example.com`. The password is `LP_STAFF_PASSWORD` in `secrets.env`.
 - **Other `+clerk_test` addresses:** use email code `424242`.
+- **Demo allow-list (`DEMO_EMAIL_ALLOWLIST`):** `up.sh` sets a safe fictional default list (`demo.client+clerk_test@example.com,demo.employee+clerk_test@example.com,demo.manager+clerk_test@example.com,demo.viewer+clerk_test@example.com`) so demo client logins and demo employee invitations can be tested. Override with `LOCAL_PROD_DEMO_EMAIL_ALLOWLIST='...'` before running `up.sh`.
+- **Sign in as (`VIEW_AS_READY`):** `up.sh` sets `VIEW_AS_READY=true` by default (override with `LOCAL_PROD_VIEW_AS_READY=false`) so super admins granted `users.view_as_allowed=true` can test view-only support sessions.
 - **Sessions:** Clerk keeps them per host, so the staff site and each employee address sign in separately.
 
 ## Trusting the certificate (once per Mac)

@@ -190,7 +190,8 @@ RSpec.describe "Demo company staff and client access", type: :request do
         end
       end
       expect(TestWorkspaceAccessPolicy.allowed?(user: accountant, company: demo, request_method: "POST", capability: :manage_client_configuration)).to be(true)
-      expect(Company::DEMO_UNAVAILABLE_MESSAGE).not_to match(/demo/i)
+      expect(Company::DEMO_UNAVAILABLE_MESSAGE).to match(/demo company/i)
+      expect(Company::DEMO_UNAVAILABLE_MESSAGE).not_to match(/access|administrator/i)
     end
 
     it "leaves the organization-wide placeholder list out of a demo-scoped shared-email report" do

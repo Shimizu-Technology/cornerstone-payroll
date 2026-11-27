@@ -106,9 +106,11 @@ module Api
           selected_id = request.headers["X-Company-Id"].to_s
           unless selected_id.present? && authorized_explicit_company_id(selected_id) == target_company.id &&
               !target_company.contained?
-            return render json: {
-              error: target_company.demo? ? Company::DEMO_UNAVAILABLE_MESSAGE : "Open the live client you want to clear, then clear its emails from there. Test workspaces can't clear emails."
-            }, status: :forbidden
+            payload = {
+              error: target_company.demo? ? Company::DEMO_UNAVAILABLE_MESSAGE : "A practice company (test workspace) is selected, so clearing shared emails is turned off. Switch to a live client to clear its emails."
+            }
+            payload[:code] = Company::CONTAINED_COMPANY_RESTRICTED_CODE if target_company.contained?
+            return render json: payload, status: :forbidden
           end
 
           unless current_user.can_access_company?(target_company.id) &&

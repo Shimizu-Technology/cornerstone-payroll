@@ -1,6 +1,12 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
+import {
+  isClerkOverlayElement,
+  isClerkPortalRoot,
+  isStepUpOverlayActive,
+  onStepUpOverlayStart,
+} from './dialog-overlay';
 
 interface DialogContextValue {
   generatedTitleId: string;
@@ -26,17 +32,105 @@ const FOCUSABLE_SELECTOR = [
 
 interface DocumentDialogState {
   backgroundInertValues: Map<HTMLElement, string | null>;
+  exemptPortals: Set<HTMLElement>;
   restoreTarget: HTMLElement | null;
   observer: MutationObserver;
+  unsubscribeStepUp: () => void;
   portals: Array<{ element: HTMLElement; restoreTarget: HTMLElement | null }>;
 }
 
 const documentDialogStates = new WeakMap<Document, DocumentDialogState>();
 
-function setBackgroundInert(state: DocumentDialogState, element: HTMLElement): void {
-  if (element.hasAttribute('data-dialog-portal') || element.hasAttribute('data-feedback-portal') || state.backgroundInertValues.has(element)) return;
+function isAppOrOpenerContainer(state: DocumentDialogState | undefined, element: HTMLElement): boolean {
+  if (element.id === 'root') return true;
+  if (!state) return false;
+  if (state.restoreTarget && element.contains(state.restoreTarget)) return true;
+  return state.portals.some(({ restoreTarget }) => Boolean(restoreTarget && element.contains(restoreTarget)));
+}
+
+function isExemptBodyChild(state: DocumentDialogState, element: HTMLElement, documentValue: Document): boolean {
+  if (
+    element.hasAttribute('data-dialog-portal')
+    || element.hasAttribute('data-feedback-portal')
+  ) {
+    return true;
+  }
+  if (isAppOrOpenerContainer(state, element)) return false;
+  if (state.exemptPortals.has(element)) return true;
+  if (isClerkPortalRoot(element)) {
+    state.exemptPortals.add(element);
+    return true;
+  }
+  if (isStepUpOverlayActive(documentValue)) {
+    state.exemptPortals.add(element);
+    return true;
+  }
+  return false;
+}
+
+function uninertExemptElements(state: DocumentDialogState, documentValue: Document): void {
+  state.backgroundInertValues.forEach((previousValue, element) => {
+    if (isAppOrOpenerContainer(state, element)) return;
+    if (state.exemptPortals.has(element) || isClerkPortalRoot(element)) {
+      state.exemptPortals.add(element);
+      state.backgroundInertValues.delete(element);
+      if (previousValue === null) element.removeAttribute('inert');
+      else element.setAttribute('inert', previousValue);
+    }
+  });
+  // Also track any already-mounted Clerk / floating-ui portal root not yet in exemptPortals.
+  Array.from(documentValue.body.children).forEach((child) => {
+    if (child instanceof HTMLElement && !isAppOrOpenerContainer(state, child) && isClerkPortalRoot(child)) {
+      state.exemptPortals.add(child);
+    }
+  });
+}
+
+function setBackgroundInert(state: DocumentDialogState, element: HTMLElement, documentValue: Document): void {
+  if (isExemptBodyChild(state, element, documentValue) || state.backgroundInertValues.has(element)) return;
   state.backgroundInertValues.set(element, element.getAttribute('inert'));
   element.setAttribute('inert', '');
+}
+
+function topBodyChildOf(target: Element): HTMLElement | null {
+  const body = target.ownerDocument?.body;
+  if (!body) return null;
+  let current: Element | null = target;
+  while (current && current.parentElement !== body) {
+    current = current.parentElement;
+  }
+  return current instanceof HTMLElement ? current : null;
+}
+
+function isTargetInExternalOverlay(state: DocumentDialogState | undefined, target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest('[inert]')) return false;
+  if (state) {
+    for (const portal of state.exemptPortals) {
+      if (portal.isConnected && portal.contains(target)) return true;
+    }
+  }
+  const bodyChild = topBodyChildOf(target);
+  if (!bodyChild || isAppOrOpenerContainer(state, bodyChild)) return false;
+  return isClerkPortalRoot(bodyChild) || isClerkOverlayElement(target);
+}
+
+function hasLiveExternalOverlay(state: DocumentDialogState | undefined, documentValue: Document): boolean {
+  if (!state) return false;
+  for (const portal of state.exemptPortals) {
+    if (!portal.isConnected) {
+      state.exemptPortals.delete(portal);
+      continue;
+    }
+    if (!isAppOrOpenerContainer(state, portal) && portal.childElementCount > 0) return true;
+  }
+  return Array.from(documentValue.body.children).some((child) => (
+    child instanceof HTMLElement
+    && !child.hasAttribute('data-dialog-portal')
+    && !child.hasAttribute('data-feedback-portal')
+    && !isAppOrOpenerContainer(state, child)
+    && isClerkPortalRoot(child)
+  ));
 }
 
 function updatePortalInert(state: DocumentDialogState): void {
@@ -51,19 +145,25 @@ function acquireDialog(documentValue: Document, portal: HTMLElement, restoreTarg
   let state = documentDialogStates.get(documentValue);
   if (!state) {
     const backgroundInertValues = new Map<HTMLElement, string | null>();
+    const exemptPortals = new Set<HTMLElement>();
     state = {
       backgroundInertValues,
+      exemptPortals,
       restoreTarget,
       portals: [],
       observer: new MutationObserver((records) => {
         records.forEach((record) => record.addedNodes.forEach((node) => {
-          if (node instanceof HTMLElement) setBackgroundInert(state!, node);
+          if (node instanceof HTMLElement) setBackgroundInert(state!, node, documentValue);
         }));
       }),
+      unsubscribeStepUp: () => {},
     };
+    state.unsubscribeStepUp = onStepUpOverlayStart(documentValue, () => {
+      uninertExemptElements(state!, documentValue);
+    });
     documentDialogStates.set(documentValue, state);
     Array.from(documentValue.body.children).forEach((element) => {
-      if (element instanceof HTMLElement) setBackgroundInert(state!, element);
+      if (element instanceof HTMLElement) setBackgroundInert(state!, element, documentValue);
     });
     state.observer.observe(documentValue.body, { childList: true });
   }
@@ -94,6 +194,7 @@ function releaseDialog(documentValue: Document, portal: HTMLElement, explicitRes
   }
 
   state.observer.disconnect();
+  state.unsubscribeStepUp();
   state.backgroundInertValues.forEach((previousValue, element) => {
     if (previousValue === null) element.removeAttribute('inert');
     else element.setAttribute('inert', previousValue);
@@ -166,7 +267,15 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
       return [...withinDialog, ...feedback].filter((element) => element.offsetParent !== null && !element.closest('[inert]'));
     };
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (documentDialogStates.get(document)?.portals.at(-1)?.element !== portal) return;
+      const state = documentDialogStates.get(document);
+      if (state?.portals.at(-1)?.element !== portal) return;
+      if (
+        isTargetInExternalOverlay(state, event.target)
+        || isTargetInExternalOverlay(state, document.activeElement)
+        || (isStepUpOverlayActive(document) && hasLiveExternalOverlay(state, document))
+      ) {
+        return;
+      }
       if (event.key === 'Escape') {
         if (event.target instanceof HTMLElement && event.target.closest('[data-feedback-portal]')) return;
         if (!dismissOnEscapeRef.current) return;
@@ -224,6 +333,7 @@ export function Dialog({ open, onOpenChange, children, dismissOnEscape = true, p
     const focusFrame = window.requestAnimationFrame(() => {
       const dialog = portal.querySelector<HTMLElement>('[role="dialog"]');
       const focused = document.activeElement;
+      if (isTargetInExternalOverlay(documentDialogStates.get(document), focused)) return;
       if (focused instanceof HTMLElement && focused !== dialog && dialog?.contains(focused)) return;
       const first = dialog && Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
         .find((element) => element.offsetParent !== null && !element.closest('[inert]'));
