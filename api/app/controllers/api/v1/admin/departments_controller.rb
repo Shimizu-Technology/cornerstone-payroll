@@ -24,7 +24,7 @@ module Api
         def create
           department = Department.new(department_params.merge(company_id: current_company_id))
 
-          if department.save
+          if write_department(department) { department.save }
             render json: { data: serialize_department(department) }, status: :created
           else
             render json: {
@@ -36,7 +36,7 @@ module Api
 
         # PATCH /api/v1/admin/departments/:id
         def update
-          if @department.update(department_params)
+          if write_department(@department) { @department.update(department_params) }
             render json: { data: serialize_department(@department) }
           else
             render json: {
@@ -47,6 +47,29 @@ module Api
         end
 
         private
+
+        def write_department(department)
+          current_company.with_lock(requires_new: true) do
+            authorize_department_write!
+            before = department.persisted? ? department.reload.slice("name", "active") : {}
+            saved = yield
+            after = department.slice("name", "active")
+            if saved && before != after
+              record_type = controller_path.start_with?("api/v1/client/") ? "client_departments" : "departments"
+              EmployeeOrganization.audit!(department, actor: current_user, before: before, after: after,
+                action: "#{record_type}##{action_name}", record_type: record_type)
+              department.employees.where(company_id: current_company.id).find_each do |employee|
+                EmployeeOrganization.audit!(employee, actor: current_user, before: before.transform_keys { |key| "department_#{key}" },
+                  after: after.transform_keys { |key| "department_#{key}" })
+              end
+            end
+            saved
+          end
+        end
+
+        def authorize_department_write!
+          revalidate_current_company_write_access!
+        end
 
         def set_department
           @department = Department.find_by(id: params[:id], company_id: current_company_id)

@@ -71,6 +71,7 @@ class AuditLogPresenter
     "portal_notification_recipients#update" => "updated the Cornerstone account team for",
     "employees#create" => "added",
     "employees#update" => "updated",
+    "employee_organization#update" => "updated roles or departments for",
     "employees#confirm_same_person_email" => "confirmed a same-person login email for",
     "employees#clear_shared_email" => "cleared a shared or placeholder email for",
     "employee_contact_hygiene#mark_placeholder_email" => "marked a placeholder email",

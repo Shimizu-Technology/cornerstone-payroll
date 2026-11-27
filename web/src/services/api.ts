@@ -7229,6 +7229,6 @@ export const tippedOccupationsApi = {
     api.patch<TippedOccupationHistory>(`/admin/employees/${employeeId}/tipped_occupations/${occupationId}`, { effective_to: effectiveTo }, { companyId }),
   remove: (employeeId: number, occupationId: number, companyId: number) =>
     api.delete<TippedOccupationHistory>(`/admin/employees/${employeeId}/tipped_occupations/${occupationId}`, { companyId }),
-  bulkSet: (companyId: number, input: TippedOccupationInput & { tax_year: number; employee_ids: number[] }) =>
+  bulkSet: (companyId: number, input: { tax_year: number; employee_ids: number[]; effective_from: string; occupation_code?: string; use_role_code?: boolean; overrides?: Record<number, string>; expected_role_codes?: Record<number, string> }) =>
     api.post<{ count: number; capped_count: number }>('/admin/year_end/tipped_occupations', input, { companyId }),
 };
