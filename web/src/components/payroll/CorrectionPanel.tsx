@@ -1,6 +1,7 @@
 import { isReverificationCancelledError } from '@clerk/react/errors';
 import type { CorrectionRunResponse, VoidPayPeriodResponse } from '@/services/api';
 import { useOptionalStepUpRequest } from '@/lib/useOptionalStepUpRequest';
+import { stepUpErrorMessage } from '@/lib/useStepUpRequest';
 import { sendPayrollApprovalRequest } from '@/services/payroll-approval-api';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 /**
@@ -224,7 +225,7 @@ export function CorrectionPanel({
         acknowledge_later_runs: acknowledgeLaterRuns,
       });
       const response = await result.json().catch(() => null);
-      if (!result.ok) throw new Error(response?.error || 'Unable to void payroll.');
+      if (!result.ok) throw new Error(stepUpErrorMessage(response, 'Unable to void payroll.'));
       onPayPeriodChange((response as VoidPayPeriodResponse).pay_period);
       setShowVoidModal(false);
       setVoidReason('');
@@ -252,7 +253,7 @@ export function CorrectionPanel({
         reason: reopenReason.trim(), confirmation: typedConfirmation, unpaid_acknowledgement: true,
       });
       const response = await result.json().catch(() => null);
-      if (!result.ok) throw new Error(response?.error || 'Unable to reopen payroll.');
+      if (!result.ok) throw new Error(stepUpErrorMessage(response, 'Unable to reopen payroll.'));
       const reopened = response as CorrectionRunResponse;
       onPayPeriodChange(reopened.source_pay_period);
       setShowReopenModal(false);

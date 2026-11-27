@@ -4,7 +4,7 @@ import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCompany } from '@/contexts/CompanyContext';
-import { useStepUpRequest } from '@/lib/useStepUpRequest';
+import { stepUpErrorMessage, useStepUpRequest } from '@/lib/useStepUpRequest';
 import api, { getApiBaseUrl } from '@/services/api';
 import type { SupportGrant } from './grant';
 
@@ -55,7 +55,7 @@ function SupportForm({ companyId, companyName }: { companyId: number; companyNam
       const response = await request();
       const data = await response.json().catch(() => null) as (SupportGrant & { token: string; error?: string }) | null;
       if (!response.ok || !data) {
-        setError(data?.error || 'Could not start the support view.');
+        setError(stepUpErrorMessage(data, 'Could not start the support view.'));
         return;
       }
       const destination = new URL(data.employee_url || '/app', window.location.origin);

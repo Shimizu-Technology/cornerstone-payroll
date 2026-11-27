@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ComponentProps, type ReactNode, type ReactElement } from 'react';
 import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, useUser, UserProfile, useReverification } from '@clerk/react';
 import { isReverificationCancelledError } from '@clerk/react/errors';
+import { beginStepUpOverlay } from '@/components/ui/dialog-overlay';
 // Pinned so a Clerk CDN update can't change the sign-in markup our styles target.
 import { ui as clerkUi } from '@clerk/ui';
 import type { EmployeeBrand } from './brand';
@@ -81,34 +82,75 @@ function ClerkAccountSecurityPanel(): ReactElement {
 }
 
 type Attempt = () => Promise<unknown>;
+interface StepUpOverlayState {
+  reverified: boolean;
+  releaseOverlay: (() => void) | null;
+}
+
+const POST_STEP_UP_RETRY_DELAYS_MS = [250, 600];
+
+function waitStepUp(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
 
 /** Exported for tests. */
 export function ClerkAuthBridge({ children }: { children: ReactNode }): ReactElement {
   const { isSignedIn, getToken, signOut } = useAuth();
   const { user } = useUser();
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  const { openUserProfile } = useClerk();
+  const clerk = useClerk();
+  const { openUserProfile } = clerk;
   // Clerk shows its "confirm it's you" prompt when the fetcher returns the
   // API's reverification hint, at the level the hint names (first_factor
   // while REQUIRE_MFA is off, second_factor once it's on), then runs the
   // same attempt again.
-  const reverify = useReverification(async (attempt: Attempt) => {
+  const reverify = useReverification(async (state: StepUpOverlayState, attempt: Attempt) => {
+    if (state.reverified) {
+      state.releaseOverlay?.();
+      state.releaseOverlay = null;
+      const session = clerk?.session as { reload?: () => Promise<unknown> } | null | undefined;
+      for (let retry = 0; retry <= POST_STEP_UP_RETRY_DELAYS_MS.length; retry += 1) {
+        if (typeof session?.reload === 'function') {
+          await session.reload().catch(() => undefined);
+        }
+        try {
+          return { result: await attempt() };
+        } catch (error) {
+          if (error instanceof StepUpRequiredError) {
+            if (retry < POST_STEP_UP_RETRY_DELAYS_MS.length) {
+              await waitStepUp(POST_STEP_UP_RETRY_DELAYS_MS[retry]);
+              continue;
+            }
+            return { clerk_error: error.hint };
+          }
+          throw error;
+        }
+      }
+    }
     try {
       return { result: await attempt() };
     } catch (error) {
-      if (error instanceof StepUpRequiredError) return { clerk_error: error.hint };
+      if (error instanceof StepUpRequiredError) {
+        state.reverified = true;
+        state.releaseOverlay = beginStepUpOverlay();
+        return { clerk_error: error.hint };
+      }
       throw error;
     }
   });
   const stepUp = useCallback(async <T,>(attempt: () => Promise<T>): Promise<T> => {
+    const state: StepUpOverlayState = { reverified: false, releaseOverlay: null };
     try {
-      const outcome = await reverify(attempt as Attempt) as { result?: unknown; clerk_error?: unknown };
+      const outcome = await reverify(state, attempt as Attempt) as { result?: unknown; clerk_error?: unknown };
       // A hint that comes back again after reverifying means the API still refused.
       if ('clerk_error' in outcome) throw new EmployeeApiError('server', 403);
       return outcome.result as T;
     } catch (error) {
       if (isReverificationCancelledError(error)) throw new StepUpCancelledError();
       throw error;
+    } finally {
+      state.releaseOverlay?.();
+      state.releaseOverlay = null;
     }
   }, [reverify]);
   const value = useMemo<EmployeeAuthValue>(() => ({

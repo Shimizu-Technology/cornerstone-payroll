@@ -943,4 +943,72 @@ describe('EmployeeContactDetails', () => {
     expect(screen.queryByRole('button', { name: /Mark as placeholder/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Clear to blank/i })).toBeNull();
   });
+
+  it('asks staff to confirm before saving an address edit that will replace a pending address request', async () => {
+    authState.isClient = false;
+    authState.user = { id: 2, company_id: 7, role: 'org_admin', name: 'Cornerstone Admin', email: 'staff@example.com' };
+    capabilityState.manageClientConfiguration = true;
+
+    const ana = buildEmployee({
+      id: 202,
+      first_name: 'Ana',
+      last_name: 'Reyes',
+      email: 'ana@example.com',
+      phone: '+16715550100',
+      address_line1: '100 Old Rd',
+      city: 'Hagatna',
+      state: 'GU',
+      zip: '96910',
+      contact_revision: 'rev-1',
+      contact_details_status: {
+        needs_contact_details: false,
+        missing_fields: [],
+        email_issue: null,
+        has_pending_address_request: true,
+      },
+    });
+    apiMocks.adminList.mockResolvedValue({
+      data: [ana],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+    });
+    apiMocks.adminUpdate.mockResolvedValue({
+      data: {
+        ...ana,
+        address_line1: '200 Updated Rd',
+        contact_revision: 'rev-2',
+        contact_details_status: {
+          needs_contact_details: false,
+          missing_fields: [],
+          email_issue: null,
+          has_pending_address_request: false,
+        },
+      },
+      contact_warnings: [],
+    });
+
+    renderStaffPage();
+    expect((await screen.findAllByText('Ana Reyes')).length).toBeGreaterThan(0);
+
+    fireEvent.change(field('Street address for Ana Reyes'), { target: { value: '200 Updated Rd' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Ana Reyes' }));
+
+    expect(await screen.findByText('This employee has a pending address request. Saving will replace it.')).toBeTruthy();
+    expect(apiMocks.adminUpdate).not.toHaveBeenCalled();
+
+    // Cancel keeps the edited address in place without calling the API.
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('This employee has a pending address request. Saving will replace it.')).toBeNull();
+    expect(field('Street address for Ana Reyes').value).toBe('200 Updated Rd');
+    expect(apiMocks.adminUpdate).not.toHaveBeenCalled();
+
+    // Confirming Save submits the update.
+    fireEvent.click(screen.getByRole('button', { name: 'Save Ana Reyes' }));
+    expect(await screen.findByText('This employee has a pending address request. Saving will replace it.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(apiMocks.adminUpdate).toHaveBeenCalledTimes(1));
+    expect(apiMocks.adminUpdate).toHaveBeenCalledWith(202, expect.objectContaining({
+      address_line1: '200 Updated Rd',
+    }), 7);
+  });
 });

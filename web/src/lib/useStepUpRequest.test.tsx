@@ -4,7 +4,7 @@ import { renderHook } from '@testing-library/react';
 import type { ContextType, PropsWithChildren } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MFA_REQUIRED_EVENT } from '@/services/api';
-import { useStepUpRequest } from './useStepUpRequest';
+import { STEP_UP_INCOMPLETE_MESSAGE, stepUpErrorMessage, useStepUpRequest } from './useStepUpRequest';
 
 const { getToken } = vi.hoisted(() => ({ getToken: vi.fn() }));
 
@@ -15,7 +15,11 @@ vi.mock('@clerk/react', async (importOriginal) => ({
 
 type Clerk = NonNullable<ContextType<typeof ClerkInstanceContext>>['value'];
 const openReverification = vi.fn<Clerk['__internal_openReverification']>();
-const clerk = { __internal_openReverification: openReverification } as unknown as Clerk;
+const reloadSession = vi.fn<() => Promise<void>>();
+const clerk = {
+  __internal_openReverification: openReverification,
+  session: { reload: reloadSession },
+} as unknown as Clerk;
 
 function wrapper({ children }: PropsWithChildren) {
   return <ClerkInstanceContext.Provider value={{ value: clerk }}>{children}</ClerkInstanceContext.Provider>;
@@ -24,6 +28,7 @@ function wrapper({ children }: PropsWithChildren) {
 beforeEach(() => {
   getToken.mockReset().mockResolvedValue('initial-token');
   openReverification.mockReset();
+  reloadSession.mockReset().mockResolvedValue(undefined);
 });
 
 describe('useStepUpRequest', () => {
@@ -80,5 +85,81 @@ describe('useStepUpRequest', () => {
     } finally {
       window.removeEventListener(MFA_REQUIRED_EVENT, onMfa);
     }
+  });
+
+  it('reloads the Clerk session and retries with a fresh token if the first post-reverification token is stale', async () => {
+    vi.useFakeTimers();
+    try {
+      const reverificationResponse = () => Response.json({
+        clerk_error: {
+          type: 'forbidden',
+          reason: 'reverification-error',
+          metadata: { reverification: { level: 'first_factor', afterMinutes: 10 } },
+        },
+      }, { status: 403 });
+
+      getToken
+        .mockResolvedValueOnce('stale-token')
+        .mockResolvedValueOnce('stale-token')
+        .mockResolvedValueOnce('fresh-verified-token');
+      openReverification.mockImplementation((props) => props?.afterVerification?.({}));
+      const fetchRequest = vi.fn<(token: string) => Promise<Response>>()
+        .mockResolvedValueOnce(reverificationResponse())
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      const { result } = renderHook(() => useStepUpRequest(fetchRequest), { wrapper });
+
+      const pending = result.current();
+      await vi.runAllTimersAsync();
+      const response = await pending;
+
+      expect(response.status).toBe(200);
+      expect(reloadSession).toHaveBeenCalledTimes(2);
+      expect(getToken.mock.calls).toEqual([[{ skipCache: true }], [{ skipCache: true }], [{ skipCache: true }]]);
+      expect(fetchRequest.mock.calls).toEqual([['stale-token'], ['fresh-verified-token']]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries with a fresh token if the immediate post-reverification request still returns 403 reverification-error', async () => {
+    vi.useFakeTimers();
+    try {
+      const reverificationResponse = () => Response.json({
+        clerk_error: {
+          type: 'forbidden',
+          reason: 'reverification-error',
+          metadata: { reverification: { level: 'first_factor', afterMinutes: 10 } },
+        },
+      }, { status: 403 });
+
+      getToken
+        .mockResolvedValueOnce('token-before')
+        .mockResolvedValueOnce('token-raced')
+        .mockResolvedValueOnce('token-fresh');
+      openReverification.mockImplementation((props) => props?.afterVerification?.({}));
+      const fetchRequest = vi.fn<(token: string) => Promise<Response>>()
+        .mockResolvedValueOnce(reverificationResponse())
+        .mockResolvedValueOnce(reverificationResponse())
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
+      const { result } = renderHook(() => useStepUpRequest(fetchRequest), { wrapper });
+
+      const pending = result.current();
+      await vi.runAllTimersAsync();
+      const response = await pending;
+
+      expect(response.status).toBe(200);
+      expect(fetchRequest.mock.calls).toEqual([['token-before'], ['token-raced'], ['token-fresh']]);
+      expect(getToken.mock.calls).toEqual([[{ skipCache: true }], [{ skipCache: true }], [{ skipCache: true }]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('formats a clear step-up error when a reverification-error body reaches the caller', () => {
+    expect(stepUpErrorMessage({ clerk_error: { reason: 'reverification-error' } }, 'Could not approve for the client.'))
+      .toBe(STEP_UP_INCOMPLETE_MESSAGE);
+    expect(stepUpErrorMessage({ error: 'Override reason is required.' }, 'Fallback'))
+      .toBe('Override reason is required.');
+    expect(stepUpErrorMessage(null, 'Fallback')).toBe('Fallback');
   });
 });

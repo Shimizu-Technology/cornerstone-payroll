@@ -21,10 +21,10 @@ class Company < ApplicationRecord
     "backup_snapshot" => "Backup snapshot",
     "demo" => "Demo company"
   }.freeze
-  # Shown wherever a demo company refuses an action a live client could take
-  # (filing transmission, payments, firm billing). It reads like an ordinary
-  # unavailable state so the demo never announces itself to clients or staff.
-  DEMO_UNAVAILABLE_MESSAGE = "This option isn't available for this client yet."
+  # Shown wherever a demo company refuses an action reserved for live clients
+  # (filing transmission, payments, shared org settings, firm billing).
+  DEMO_UNAVAILABLE_MESSAGE = "A demo company is selected, so this option is turned off. Switch to a live client to use it."
+  CONTAINED_COMPANY_RESTRICTED_CODE = "contained_company_restricted"
   DEMO_ACCESS_DENIED_MESSAGE = "Your access does not allow this action for this client."
   DEMO_RECIPIENT_REFUSED_MESSAGE = "This email address can't be used for this client."
   # Mirrors the database check on a demo's fixture key.

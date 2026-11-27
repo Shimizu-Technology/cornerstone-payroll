@@ -95,6 +95,7 @@ export interface EmployeeContactDetailsStatus {
   missing_fields: string[];
   email_issue: 'placeholder' | 'placeholder_pattern' | 'shared_inbox' | 'shared_with_coworker' | null;
   shared_email_count?: number;
+  has_pending_address_request?: boolean;
 }
 
 /** The contact-only record the Contact details page gets and stores. */
