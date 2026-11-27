@@ -112,11 +112,14 @@ export function Dashboard(): ReactElement {
       </CardContent></Card>}
 
       {!!stats?.recent_payrolls?.length && <Card><CardHeader><h2 className="font-display text-lg font-bold text-neutral-950">Recent payrolls</h2></CardHeader><CardContent className="space-y-2">
-        {stats.recent_payrolls.map(row => <Link key={row.key ?? row.id} to={recentHref(row)} aria-label={`Open payroll ${row.period_description}`} className="flex flex-col gap-2 rounded-lg p-3 hover:bg-primary-50 focus-visible:outline-2 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-semibold text-neutral-950">{row.start_date && row.end_date ? formatDateRange(row.start_date, row.end_date) : row.period_description}</p><p className="text-sm text-neutral-600"><span className="capitalize">{row.run_purpose?.replaceAll('_', ' ') || 'Regular'}</span> · Pay date {formatDate(row.pay_date)} · {row.employee_count} employees</p>
+        {stats.recent_payrolls.map(row => {
+          const dateLabel = row.start_date && row.end_date ? formatDateRange(row.start_date, row.end_date) : row.period_description;
+          return <Link key={row.key ?? row.id} to={recentHref(row)} aria-label={`Open payroll ${dateLabel}`} className="flex flex-col gap-2 rounded-lg p-3 hover:bg-primary-50 focus-visible:outline-2 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="font-semibold text-neutral-950">{dateLabel}</p><p className="text-sm text-neutral-600"><span className="capitalize">{row.run_purpose?.replaceAll('_', ' ') || 'Regular'}</span> · Pay date {formatDate(row.pay_date)} · {row.employee_count} employees</p>
             {row.record_type === 'imported' && <Badge variant="warning">QuickBooks import · locked</Badge>}</div>
           <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(row.total_net)}</p>
-        </Link>)}
+        </Link>;
+        })}
       </CardContent></Card>}
 
       <Card><CardContent className="pt-5"><Link to="/app/client-inbox" className="font-semibold text-primary-800 underline">Client Inbox</Link><p className="mt-2 text-sm text-neutral-600">{portalCounts ? `${portalCounts.waiting_count} waiting on staff · ${portalCounts.unread_count} unread across your clients` : 'Open portal work across your clients'}</p></CardContent></Card>

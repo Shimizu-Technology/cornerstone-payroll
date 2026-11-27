@@ -108,6 +108,15 @@ function readinessBadge(row: EditableRow, isDuplicate = false) {
   return <Badge variant="success">Ready</Badge>;
 }
 
+function overtimeRuleLabel(mode?: string): string {
+  switch (mode) {
+    case 'source_reports': return 'Taken from the time report';
+    case 'daily_records': return 'Over 40 hours per workweek, using daily or weekly hours';
+    case 'total_as_regular_warn_over_80': return 'Weekly split when available, otherwise totals count as regular with a warning over the period limit';
+    default: return 'Weekly split (40 hrs/week)';
+  }
+}
+
 export function PayrollIntakeImportModal({
   open,
   onOpenChange,
@@ -713,7 +722,7 @@ export function PayrollIntakeImportModal({
                     <p className="mt-2 text-sm leading-6 text-neutral-600">
                       {sourceType === 'spike_email'
                         ? 'Daily paid tips are imported as both reported taxable tips and tips paid out, so payroll taxes and W-2GU reporting stay correct without paying tips twice.'
-                        : `${isEmployeeIdMatch ? 'Rows match strictly by Cornerstone Employee ID (never by name). ' : ''}Overtime: ${descriptor?.overtime_mode === 'source_reports' ? 'Taken from the time report' : 'Weekly split (40 hrs/week)'}. Default tips: ${descriptor?.tips_default === 'already_paid_out' ? 'already paid out' : 'paid in check'}.`}
+                        : `${isEmployeeIdMatch ? 'Rows match strictly by Cornerstone Employee ID (never by name). ' : ''}Overtime: ${overtimeRuleLabel(descriptor?.overtime_mode)}. Default tips: ${descriptor?.tips_default === 'already_paid_out' ? 'already paid out' : 'paid in check'}.`}
                     </p>
                   </div>
                 </div>

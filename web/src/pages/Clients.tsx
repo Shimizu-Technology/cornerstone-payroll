@@ -1534,7 +1534,7 @@ export function Clients() {
                       </div>
                       <div className="mt-4 grid grid-cols-2 gap-3">
                         <MobileField label="Pay frequency" value={<span className="capitalize">{c.pay_frequency}</span>} />
-                        <MobileField label="Employees" value={`${c.active_employees} / ${c.total_employees}`} />
+                        <MobileField label="Employees" value={`${c.active_employees} active / ${c.total_employees} total`} />
                       </div>
                       {canEditAssignedClients && (
                         <MobileCardActions>

@@ -186,7 +186,7 @@ function CompanySwitch({ companyId }: { companyId: number }) {
       </div>
 
       {change && (
-        <ChangeDialog row={change.row} on={change.on} state={state} names={names} mutate={mutate}
+        <ChangeDialog row={change.row} on={change.on} state={state} names={names} mutate={mutate} showDiagnostics={isSuperAdmin}
           onClose={() => setChange(null)}
           onSaved={(message) => { setChange(null); setNotice(message); }} />
       )}
@@ -283,11 +283,15 @@ function waivedLabel(key: string): string {
   return key === 'mfa' ? 'Not required yet' : 'Waived for demo';
 }
 
+function hasPlainCheckDetail(check: ReadinessCheck): boolean {
+  return CHECK_COPY[check.key]?.owner === 'Cornerstone' || check.status === 'waived';
+}
+
 function CheckRow({ check, scope, showDiagnostics }: { check: ReadinessCheck; scope: string | null; showDiagnostics: boolean }) {
   const owner = CHECK_COPY[check.key]?.owner ?? 'Shimizu Technology';
   // Cornerstone's own checks and waivers explain themselves in plain words;
   // the platform checks name server settings, so they stay in the details.
-  const plainDetail = owner === 'Cornerstone' || check.status === 'waived';
+  const plainDetail = hasPlainCheckDetail(check);
   const icon = check.status === 'passed'
     ? <CheckCircle2 className="h-5 w-5 text-success-700" aria-hidden="true" />
     : check.status === 'waived'
@@ -406,9 +410,10 @@ function SwitchItem({ row, names, masterOn, onChange }: {
   );
 }
 
-function ChangeDialog({ row, on, state, names, mutate, onClose, onSaved }: {
+function ChangeDialog({ row, on, state, names, mutate, showDiagnostics, onClose, onSaved }: {
   row: SwitchRow; on: boolean; state: EmployeeAppSwitchState; names: Record<string, string>;
   mutate: (mutation: Mutation) => Promise<SwitchFailure | null>;
+  showDiagnostics: boolean;
   onClose: () => void; onSaved: (message: string) => void;
 }) {
   const [failing, setFailing] = useState<ReadinessCheck[]>([]);
@@ -425,7 +430,7 @@ function ChangeDialog({ row, on, state, names, mutate, onClose, onSaved }: {
         <div className="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-950" role="alert">
           <p className="font-semibold">These checks are failing:</p>
           <ul className="mt-1 list-disc space-y-1 pl-5">
-            {failing.map((check) => <li key={check.key}>{names[check.key] ?? check.name}{check.detail ? ` ${check.detail}` : ''}</li>)}
+            {failing.map((check) => <li key={check.key}>{names[check.key] ?? check.name}{check.detail && (showDiagnostics || hasPlainCheckDetail(check)) ? ` ${check.detail}` : ''}</li>)}
           </ul>
         </div>
       )}

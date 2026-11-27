@@ -109,7 +109,7 @@ test('shows locked QuickBooks payroll beside native payroll and keeps the import
   const importedRow = page.getByRole('row').filter({ hasText: 'QuickBooks import' });
   await expect(importedRow).toContainText('Locked');
   await expect(importedRow.getByRole('button', { name: 'View' })).toBeVisible();
-  await expect(importedRow.getByRole('button', { name: 'Edit' })).toHaveCount(0);
+  await expect(importedRow.getByRole('button', { name: /More actions for/ })).toHaveCount(0);
   expect(listRequestUrl).toContain('source=quickbooks');
   expect(listRequestUrl).toContain('year=2024');
 
@@ -191,7 +191,8 @@ test('keeps an imported run visible when a native run with the same numeric id i
   await page.goto('/companies/1/pay-runs');
 
   const nativeRow = page.getByRole('row').filter({ hasText: 'Cornerstone' });
-  await nativeRow.getByRole('button', { name: 'Delete' }).click();
+  await nativeRow.getByRole('button', { name: 'More actions for Jan 15 – 28, 2024' }).click();
+  await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Delete', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
 
   await expect(page.getByRole('row').filter({ hasText: 'QuickBooks import' })).toBeVisible();
@@ -234,13 +235,21 @@ for (const width of [1440, 390]) {
     const run = (date: string) => width === 390
       ? page.getByRole('group', { name: `Pay period ${date}` })
       : page.getByRole('row').filter({ hasText: date });
-    await run('Jan 15 – 28, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
+    const openDelete = async (date: string) => {
+      if (width === 390) {
+        await run(date).getByRole('button', { name: 'Delete', exact: true }).click();
+        return;
+      }
+      await run(date).getByRole('button', { name: `More actions for ${date}` }).click();
+      await page.getByRole('dialog', { name: 'Pay period actions' }).getByRole('button', { name: 'Delete', exact: true }).click();
+    };
+    await openDelete('Jan 15 – 28, 2024');
     await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
     const success = page.getByText(/^Deleted MoSa/);
     await expect(success).toBeVisible();
     await success.hover();
     await expect(run('Jan 15 – 28, 2024')).toHaveCount(0);
-    await run('Feb 1 – 14, 2024').getByRole('button', { name: 'Delete', exact: true }).click();
+    await openDelete('Feb 1 – 14, 2024');
     await expect(success).toHaveCount(0);
     await page.getByRole('dialog').getByRole('button', { name: 'Delete pay run' }).click();
     await expect(page.getByText('This run was approved before. Keep it and correct it instead.')).toBeVisible();

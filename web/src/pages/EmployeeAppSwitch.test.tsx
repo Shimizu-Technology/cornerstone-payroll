@@ -8,12 +8,13 @@ import type { EmployeeAppSwitchState, ReadinessCheck } from '@/services/employee
 import { EmployeeAppSwitch } from './EmployeeAppSwitch';
 
 const mocks = vi.hoisted(() => ({
+  isSuperAdmin: true,
   get: vi.fn(),
   send: vi.fn(),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 7, role: 'org_admin' }, isSuperAdmin: true, isLoading: false, hasCapability: () => true }),
+  useAuth: () => ({ user: { id: 7, role: 'org_admin' }, isSuperAdmin: mocks.isSuperAdmin, isLoading: false, hasCapability: () => true }),
 }));
 vi.mock('@/contexts/CompanyContext', () => ({
   useCompany: () => ({
@@ -78,6 +79,7 @@ function renderPage() {
 
 describe('EmployeeAppSwitch', () => {
   beforeEach(() => {
+    mocks.isSuperAdmin = true;
     mocks.get.mockReset();
     mocks.send.mockReset();
   });
@@ -134,12 +136,18 @@ describe('EmployeeAppSwitch', () => {
     expect(mocks.send).toHaveBeenCalledWith({ method: 'PATCH', suffix: '', body: { changes: { employee_portal_enabled: false }, reason: 'Pause the pilot' } });
   });
 
-  it('lists the failing checks the server returns when a turn-on is refused', async () => {
+  it.each([true, false])('shows turn-on blockers with diagnostics limited to super admins (super admin: %s)', async (isSuperAdmin) => {
+    mocks.isSuperAdmin = isSuperAdmin;
+    const technicalDetail = 'Internal employee-service health check timed out.';
+    const plainDetail = 'Finish the employee app terms first.';
     const ready = state({}, [passed('company', 'This is a live client or a demo company')]);
     mocks.get.mockResolvedValue({ data: ready });
     mocks.send.mockResolvedValue(json(422, {
       error: 'Not ready to turn on yet. Fix the failing checks first.', code: 'not_ready',
-      failing_checks: [{ key: 'employee_service', name: 'The employee service is running and healthy', status: 'failed', detail: "The employee service didn't answer its health check." }],
+      failing_checks: [
+        { key: 'employee_service', name: 'The employee service is running and healthy', status: 'failed', detail: technicalDetail },
+        { key: 'terms', name: 'Employee app terms', status: 'failed', detail: plainDetail },
+      ],
     }));
     renderPage();
 
@@ -150,6 +158,12 @@ describe('EmployeeAppSwitch', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Turn on' }));
 
     expect(await within(dialog).findByText(/The employee service is running and healthy/)).toBeTruthy();
+    expect(dialog.textContent).toContain(plainDetail);
+    if (isSuperAdmin) {
+      expect(dialog.textContent).toContain(technicalDetail);
+    } else {
+      expect(dialog.textContent).not.toContain(technicalDetail);
+    }
     expect(within(dialog).getByText('Not ready to turn on yet. Fix the failing checks first.')).toBeTruthy();
   });
 
