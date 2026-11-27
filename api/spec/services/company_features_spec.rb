@@ -569,6 +569,23 @@ RSpec.describe CompanyFeatures do
       portal_disabled = described_class.for(company, on: Date.new(2026, 2, 1))
       expect(portal_disabled.employee_lifecycle_mode).to eq("approval_first")
       expect(portal_disabled.client_managed_employee_lifecycle?).to be(false)
+
+      unsaved_profile = ClientOperatingProfile.new(
+        company: company,
+        effective_on: Date.new(2026, 1, 1),
+        version: 1,
+        offering: "payroll_portals",
+        hours_source: "manual",
+        client_portal_enabled: true,
+        employee_portal_enabled: false,
+        lifecycle_mode_activated_at: Time.current,
+        options: OperatingProfileCatalog.default_options.deep_merge(
+          "client_portal" => { "employee_lifecycle_mode" => "client_managed" }
+        )
+      )
+      unsaved_features = described_class.new(company: company, profile: unsaved_profile, as_of: Date.new(2026, 2, 1))
+      expect(unsaved_features.employee_lifecycle_mode).to eq("approval_first")
+      expect(unsaved_features.client_managed_employee_lifecycle?).to be(false)
     end
   end
 end

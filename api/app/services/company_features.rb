@@ -92,7 +92,7 @@ class CompanyFeatures
     return "approval_first" unless client_portal_enabled?
     return "approval_first" if LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
     return "approval_first" unless option("client_portal.employee_lifecycle_mode") == "client_managed"
-    return "approval_first" if profile.persisted? && profile.lifecycle_mode_activated_at.blank?
+    return "approval_first" unless profile.persisted? && profile.lifecycle_mode_activated_at.present?
 
     "client_managed"
   end

@@ -2,6 +2,7 @@
 
 require "rails_helper"
 require Rails.root.join("db/migrate/20261128030000_add_employee_lifecycle_foundations_columns_and_constraints")
+require Rails.root.join("db/migrate/20261128030100_add_employee_lifecycle_concurrent_indexes")
 require Rails.root.join("db/migrate/20261128030200_create_employee_verification_items")
 require Rails.root.join("db/migrate/20261128030300_create_pay_period_verification_acknowledgements")
 require Rails.root.join("db/migrate/20261128030400_create_employee_readiness_overrides")
@@ -113,6 +114,71 @@ RSpec.describe "Employee lifecycle PR 1 migrations and DB constraints" do
       expect(connection.select_value("SELECT count(*) FROM #{w4_probe}")).to eq(1)
       expect(connection.check_constraints(w4_probe).map(&:name)).to eq([ described_class::W4_CONSTRAINT ])
       insert_source(w4_probe, "client_direct")
+    end
+  end
+
+  describe AddEmployeeLifecycleConcurrentIndexes do
+    let(:probe_table) { :lifecycle_concurrent_index_probe }
+    let(:probe_index) { "idx_lifecycle_concurrent_index_probe" }
+
+    before do
+      connection.drop_table(probe_table, if_exists: true)
+      connection.create_table(probe_table, id: false) do |t|
+        t.bigint :id, null: false
+        t.bigint :company_id, null: false
+      end
+    end
+
+    after do
+      connection.drop_table(probe_table, if_exists: true)
+    end
+
+    def index_valid?(index_name)
+      connection.select_value(<<~SQL)
+        SELECT i.indisvalid
+        FROM pg_index i
+        JOIN pg_class c ON c.oid = i.indexrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = current_schema()
+          AND c.relname = #{connection.quote(index_name)}
+      SQL
+    end
+
+    it "drops and rebuilds an invalid concurrent index left behind by a failed run" do
+      # Duplicate rows cause CREATE UNIQUE INDEX CONCURRENTLY to fail and leave an INVALID index behind.
+      connection.execute("INSERT INTO #{probe_table} (id, company_id) VALUES (1, 10), (1, 10)")
+      expect do
+        connection.execute("CREATE UNIQUE INDEX CONCURRENTLY #{probe_index} ON #{probe_table} (id, company_id)")
+      end.to raise_error(ActiveRecord::RecordNotUnique)
+
+      expect(index_valid?(probe_index)).to be(false)
+
+      # Deduplicate rows, then re-run the migration and confirm it drops and rebuilds the index validly.
+      connection.execute("DELETE FROM #{probe_table}")
+      connection.execute("INSERT INTO #{probe_table} (id, company_id) VALUES (1, 10)")
+
+      stub_const(
+        "#{described_class}::INDEXES",
+        [ [ probe_table, %i[id company_id], { unique: true, name: probe_index } ] ]
+      )
+
+      migration = described_class.new
+      migration.up
+      expect(index_valid?(probe_index)).to be(true)
+
+      # Re-running when already valid is a safe no-op.
+      expect { migration.up }.not_to raise_error
+      expect(index_valid?(probe_index)).to be(true)
+    end
+
+    it "leaves all three lifecycle concurrent indexes valid in pg_index" do
+      %w[
+        idx_employees_readiness_gate_enforced
+        idx_employee_w4_elections_tenant_key
+        idx_admin_overrides_tenant_key
+      ].each do |index_name|
+        expect(index_valid?(index_name)).to be(true), "Expected #{index_name} to be valid in pg_index"
+      end
     end
   end
 

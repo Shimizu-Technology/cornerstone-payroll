@@ -317,6 +317,44 @@ RSpec.describe EmployeeReadinessEvaluator do
       expect(after_rehire.rehire_or_grandfathered).to be(true)
     end
 
+    it "does not treat deactivation and reactivation as a rehire for gated new hires" do
+      new_hire = create(
+        :employee,
+        :hourly,
+        company: company,
+        date_of_birth: Date.new(1990, 8, 1),
+        hire_date: Date.new(2026, 11, 1),
+        pay_rate: 19.00,
+        payment_delivery_method: nil,
+        readiness_gate_enforced: true
+      )
+      add_w4!(new_hire, effective_on: Date.new(2026, 11, 1), signed_on: nil, source: "legacy_profile", version: 2019)
+
+      EmployeeStatusEvent.create!(
+        company: company,
+        employee: new_hire,
+        event_type: "deactivated",
+        previous_status: "active",
+        resulting_status: "inactive",
+        effective_date: Date.new(2026, 11, 2),
+        source: "client_portal"
+      )
+      EmployeeStatusEvent.create!(
+        company: company,
+        employee: new_hire,
+        event_type: "reactivated",
+        previous_status: "inactive",
+        resulting_status: "active",
+        effective_date: Date.new(2026, 11, 10),
+        source: "client_portal"
+      )
+
+      result = described_class.evaluate(new_hire.reload, rates_on: rates_on, w4_on: w4_on)
+      expect(result).to be_hard_blocked
+      expect(result.rehire_or_grandfathered).to be(false)
+      expect(result.missing_keys).to eq(%w[tax_form payment_method])
+    end
+
     it "resolves default target dates from the company's next open regular pay period or Guam today" do
       expect(described_class.target_dates_for(company)).to eq([ PayrollBusinessClock.today, PayrollBusinessClock.today ])
 
@@ -440,14 +478,88 @@ RSpec.describe EmployeeReadinessEvaluator do
         payment_delivery_method: "paper_check", readiness_gate_enforced: true
       )
 
+      short_ssn_w2 = create_ready_w2_hourly
+      short_ssn_w2.ssn_encrypted = "12345"
+      short_ssn_w2.save!(validate: false)
+
+      short_ein_business = create(
+        :employee, :business_contractor, company: company, business_name: "Short EIN Works LLC",
+        contractor_ein: "98-1122334", contractor_pay_type: "flat_fee", pay_rate: 0,
+        hire_date: Date.new(2026, 11, 1), w9_on_file: true,
+        payment_delivery_method: "paper_check", readiness_gate_enforced: true
+      )
+      short_ein_business.contractor_ein = "12-34"
+      short_ein_business.save!(validate: false)
+
+      short_tin_individual = create(
+        :employee, :contractor, company: company, contractor_type: "individual", contractor_pay_type: "flat_fee",
+        pay_rate: 0, date_of_birth: nil, hire_date: Date.new(2026, 11, 1), w9_on_file: true,
+        payment_delivery_method: "paper_check", readiness_gate_enforced: true
+      )
+      short_tin_individual.ssn_encrypted = "12345"
+      short_tin_individual.contractor_ein = "12-34"
+      short_tin_individual.save!(validate: false)
+
+      short_ssn_valid_ein_individual = create(
+        :employee, :contractor, company: company, contractor_type: "individual", contractor_pay_type: "flat_fee",
+        pay_rate: 0, date_of_birth: nil, hire_date: Date.new(2026, 11, 1), w9_on_file: true,
+        payment_delivery_method: "paper_check", readiness_gate_enforced: true
+      )
+      short_ssn_valid_ein_individual.ssn_encrypted = "12345"
+      short_ssn_valid_ein_individual.contractor_ein = "98-7654321"
+      short_ssn_valid_ein_individual.save!(validate: false)
+
+      null_pay_frequency_comp = create_ready_w2_hourly
+      null_pay_frequency_comp.employee_compensation_changes.first!.update_columns(pay_frequency: nil)
+
+      null_salary_type_comp = create_ready_w2_hourly(employment_type: "salary", salary_type: "annual", pay_rate: 52_000.00)
+      null_salary_type_comp.employee_compensation_changes.first!.update_columns(salary_type: nil)
+
+      null_contractor_pay_type_comp = create(
+        :employee, :contractor, company: company, contractor_type: "individual", contractor_pay_type: "flat_fee",
+        pay_rate: 500.00, date_of_birth: nil, hire_date: Date.new(2026, 11, 1), w9_on_file: true,
+        payment_delivery_method: "paper_check", readiness_gate_enforced: true
+      )
+      null_contractor_pay_type_comp.employee_compensation_changes.first!.update_columns(contractor_pay_type: nil)
+
+      deactivated_reactivated_new_hire = create(
+        :employee, :hourly, company: company, date_of_birth: Date.new(1991, 4, 4),
+        hire_date: Date.new(2026, 11, 1), pay_rate: 18.00, payment_delivery_method: nil,
+        readiness_gate_enforced: true
+      )
+      add_w4!(deactivated_reactivated_new_hire, effective_on: Date.new(2026, 11, 1), signed_on: nil, source: "legacy_profile", version: 2019)
+      EmployeeStatusEvent.create!(
+        company: company, employee: deactivated_reactivated_new_hire,
+        event_type: "deactivated", previous_status: "active", resulting_status: "inactive",
+        effective_date: Date.new(2026, 11, 2), source: "client_portal"
+      )
+      EmployeeStatusEvent.create!(
+        company: company, employee: deactivated_reactivated_new_hire,
+        event_type: "reactivated", previous_status: "inactive", resulting_status: "active",
+        effective_date: Date.new(2026, 11, 5), source: "client_portal"
+      )
+
       population = [
         ready_w2, ready_multirate, future_rate_w2, future_wage_rate_w2,
         ready_variable_salary, zero_fixed_salary, future_w4, default_w4_only,
         new_hire_null_payment, new_hire_legacy_w4, rehire_legacy_and_null_pay,
         prior_paid_null_pay, grandfathered_complete_null_pay, grandfathered_missing_dob,
         partial_new_hire, contractor_individual_ready, contractor_business_missing_ein,
-        contractor_business_ready
+        contractor_business_ready, short_ssn_w2, short_ein_business,
+        short_tin_individual, short_ssn_valid_ein_individual,
+        null_pay_frequency_comp, null_salary_type_comp, null_contractor_pay_type_comp,
+        deactivated_reactivated_new_hire
       ].map(&:reload)
+
+      must_be_incomplete_ids = [
+        short_ssn_w2.id,
+        short_ein_business.id,
+        short_tin_individual.id,
+        null_pay_frequency_comp.id,
+        null_salary_type_comp.id,
+        null_contractor_pay_type_comp.id,
+        deactivated_reactivated_new_hire.id
+      ]
 
       [
         [ Date.new(2026, 11, 22), Date.new(2026, 11, 27) ],
@@ -461,6 +573,8 @@ RSpec.describe EmployeeReadinessEvaluator do
           .readiness_incomplete_for_period(rates_on: period_rates_on, w4_on: period_w4_on)
           .pluck(:id)
 
+        expect(ruby_incomplete_ids).to include(*must_be_incomplete_ids)
+        expect(ruby_incomplete_ids).not_to include(short_ssn_valid_ein_individual.id)
         expect(sql_incomplete_ids).to match_array(ruby_incomplete_ids),
           "SQL/Ruby mismatch for rates_on=#{period_rates_on}, w4_on=#{period_w4_on}: " \
           "sql_only=#{sql_incomplete_ids - ruby_incomplete_ids}, ruby_only=#{ruby_incomplete_ids - sql_incomplete_ids}"

@@ -231,6 +231,7 @@ class Employee < ApplicationRecord
     resolved_w4_on = w4_on.to_date
     today = PayrollBusinessClock.today
     max_hire_year = today.year + 1
+    whitespace = %q(E' \t\n\x0B\f\r')
 
     new_client_hire_sql = <<~SQL.squish
       employees.readiness_gate_enforced = TRUE
@@ -239,6 +240,7 @@ class Employee < ApplicationRecord
         FROM employee_status_events ese
         WHERE ese.employee_id = employees.id
           AND ese.event_type = 'reactivated'
+          AND ese.previous_status = 'terminated'
       )
       AND NOT EXISTS (
         SELECT 1
@@ -277,7 +279,7 @@ class Employee < ApplicationRecord
                 WHERE v.employee_wage_rate_id = ewr.id
                   AND (
                     (v.effective_on <= :rates_on AND (v.ends_on IS NULL OR v.ends_on >= :rates_on))
-                    OR (v.historical_correction = FALSE AND :rates_on < v.effective_on)
+                    OR v.historical_correction = FALSE
                   )
                 ORDER BY
                   CASE WHEN v.effective_on <= :rates_on AND (v.ends_on IS NULL OR v.ends_on >= :rates_on) THEN 0 ELSE 1 END ASC,
@@ -289,14 +291,19 @@ class Employee < ApplicationRecord
                 AND chosen_v.rate > 0
                 AND (
                   chosen_v.covers_date
-                  OR chosen_v.source = 'backfill'
-                  OR chosen_v.effective_on <= (
-                    SELECT baseline.effective_on
-                    FROM employee_compensation_changes baseline
-                    WHERE baseline.employee_id = employees.id
-                      AND baseline.historical_correction = FALSE
-                    ORDER BY baseline.effective_on ASC, baseline.id ASC
-                    LIMIT 1
+                  OR (
+                    :rates_on < chosen_v.effective_on
+                    AND (
+                      chosen_v.source = 'backfill'
+                      OR chosen_v.effective_on <= (
+                        SELECT baseline.effective_on
+                        FROM employee_compensation_changes baseline
+                        WHERE baseline.employee_id = employees.id
+                          AND baseline.historical_correction = FALSE
+                        ORDER BY baseline.effective_on ASC, baseline.id ASC
+                        LIMIT 1
+                      )
+                    )
                   )
                 )
             )
@@ -304,25 +311,25 @@ class Employee < ApplicationRecord
       )
     SQL
 
-    where(<<~SQL.squish, rates_on: resolved_rates_on, w4_on: resolved_w4_on, today: today, max_hire_year: max_hire_year)
-      COALESCE(BTRIM(employees.first_name), '') = ''
-      OR COALESCE(BTRIM(employees.last_name), '') = ''
+    sql_predicate = <<~SQL.squish
+      COALESCE(BTRIM(employees.first_name, #{whitespace}), '') = ''
+      OR COALESCE(BTRIM(employees.last_name, #{whitespace}), '') = ''
       OR (
         employees.employment_type = 'contractor'
         AND COALESCE(employees.contractor_type, '') = 'business'
-        AND COALESCE(BTRIM(employees.business_name), '') = ''
+        AND COALESCE(BTRIM(employees.business_name, #{whitespace}), '') = ''
       )
       OR (
         CASE
           WHEN employees.employment_type = 'contractor' AND COALESCE(employees.contractor_type, '') = 'business'
-            THEN COALESCE(BTRIM(employees.contractor_ein), '') = ''
+            THEN COALESCE(BTRIM(employees.contractor_ein, #{whitespace}), '') = ''
           WHEN employees.employment_type = 'contractor'
-            THEN COALESCE(BTRIM(employees.ssn_encrypted), '') = '' AND COALESCE(BTRIM(employees.contractor_ein), '') = ''
-          ELSE COALESCE(BTRIM(employees.ssn_encrypted), '') = ''
+            THEN COALESCE(BTRIM(employees.ssn_encrypted, #{whitespace}), '') = '' AND COALESCE(BTRIM(employees.contractor_ein, #{whitespace}), '') = ''
+          ELSE COALESCE(BTRIM(employees.ssn_encrypted, #{whitespace}), '') = ''
         END
       )
       OR (
-        employees.employment_type <> 'contractor'
+        COALESCE(employees.employment_type, '') <> 'contractor'
         AND (
           employees.date_of_birth IS NULL
           OR EXTRACT(YEAR FROM employees.date_of_birth) < 1900
@@ -335,22 +342,22 @@ class Employee < ApplicationRecord
         OR EXTRACT(YEAR FROM employees.hire_date) > :max_hire_year
         OR employees.hire_date > :rates_on
       )
-      OR COALESCE(BTRIM(employees.address_line1), '') = ''
-      OR COALESCE(BTRIM(employees.city), '') = ''
-      OR COALESCE(BTRIM(employees.state), '') = ''
-      OR COALESCE(BTRIM(employees.zip), '') = ''
+      OR COALESCE(BTRIM(employees.address_line1, #{whitespace}), '') = ''
+      OR COALESCE(BTRIM(employees.city, #{whitespace}), '') = ''
+      OR COALESCE(BTRIM(employees.state, #{whitespace}), '') = ''
+      OR COALESCE(BTRIM(employees.zip, #{whitespace}), '') = ''
       OR EXISTS (
         SELECT 1
         FROM (
           SELECT
-            COALESCE(comp.employment_type, employees.employment_type) AS employment_type,
-            COALESCE(comp.salary_type, employees.salary_type) AS salary_type,
-            COALESCE(comp.contractor_pay_type, employees.contractor_pay_type) AS contractor_pay_type,
-            COALESCE(comp.pay_frequency, employees.pay_frequency) AS pay_frequency,
-            COALESCE(comp.pay_rate, employees.pay_rate) AS pay_rate
+            CASE WHEN comp.id IS NOT NULL THEN comp.employment_type ELSE employees.employment_type END AS employment_type,
+            CASE WHEN comp.id IS NOT NULL THEN comp.salary_type ELSE employees.salary_type END AS salary_type,
+            CASE WHEN comp.id IS NOT NULL THEN comp.contractor_pay_type ELSE employees.contractor_pay_type END AS contractor_pay_type,
+            CASE WHEN comp.id IS NOT NULL THEN comp.pay_frequency ELSE employees.pay_frequency END AS pay_frequency,
+            COALESCE(CASE WHEN comp.id IS NOT NULL THEN comp.pay_rate ELSE employees.pay_rate END, 0) AS pay_rate
           FROM (SELECT 1) AS _one
           LEFT JOIN LATERAL (
-            SELECT ecc.employment_type, ecc.salary_type, ecc.contractor_pay_type, ecc.pay_frequency, ecc.pay_rate
+            SELECT ecc.id, ecc.employment_type, ecc.salary_type, ecc.contractor_pay_type, ecc.pay_frequency, ecc.pay_rate
             FROM employee_compensation_changes ecc
             WHERE ecc.employee_id = employees.id
               AND (
@@ -364,7 +371,7 @@ class Employee < ApplicationRecord
             LIMIT 1
           ) comp ON TRUE
         ) effective_comp
-        WHERE COALESCE(BTRIM(effective_comp.pay_frequency), '') = ''
+        WHERE COALESCE(BTRIM(effective_comp.pay_frequency, #{whitespace}), '') = ''
           OR (
             effective_comp.employment_type = 'hourly'
             AND effective_comp.pay_rate <= 0
@@ -389,14 +396,14 @@ class Employee < ApplicationRecord
               OR (effective_comp.contractor_pay_type = 'flat_fee' AND effective_comp.pay_rate < 0)
             )
           )
-          OR effective_comp.employment_type NOT IN ('hourly', 'salary', 'contractor')
+          OR COALESCE(effective_comp.employment_type, '') NOT IN ('hourly', 'salary', 'contractor')
       )
       OR (
         employees.employment_type = 'contractor'
         AND employees.w9_on_file IS NOT TRUE
       )
       OR (
-        employees.employment_type <> 'contractor'
+        COALESCE(employees.employment_type, '') <> 'contractor'
         AND NOT EXISTS (
           SELECT 1
           FROM (
@@ -411,7 +418,7 @@ class Employee < ApplicationRecord
           WHERE latest_w4.source <> 'default_withholding'
             AND (
               NOT (#{new_client_hire_sql})
-              OR latest_w4.w4_form_version >= #{MIN_SUPPORTED_W4_FORM_VERSION}
+              OR COALESCE(latest_w4.w4_form_version, 0) >= #{MIN_SUPPORTED_W4_FORM_VERSION}
             )
         )
       )
@@ -423,6 +430,25 @@ class Employee < ApplicationRecord
         END
       )
     SQL
+
+    binds = { rates_on: resolved_rates_on, w4_on: resolved_w4_on, today: today, max_hire_year: max_hire_year }
+
+    # Active Record Encryption prevents PostgreSQL from inspecting decrypted SSN/EIN digits.
+    # Verify encrypted tax IDs in Ruby for any employee in the current relation that passed the SQL checks
+    # so this scope never calls an employee "ready" when EmployeeReadinessEvaluator says "incomplete".
+    invalid_tax_id_ids = where("NOT ((#{sql_predicate}) IS TRUE)", **binds)
+      .except(:select, :order, :limit, :offset, :includes, :preload, :eager_load)
+      .select("employees.id", "employees.employment_type", "employees.contractor_type", "employees.ssn_encrypted", "employees.contractor_ein")
+      .distinct
+      .each_with_object([]) do |employee, ids|
+        ids << employee.id unless EmployeeReadinessEvaluator.tax_id_complete?(employee)
+      end
+
+    if invalid_tax_id_ids.any?
+      where("(#{sql_predicate}) OR employees.id IN (:invalid_tax_id_ids)", **binds, invalid_tax_id_ids: invalid_tax_id_ids)
+    else
+      where(sql_predicate, **binds)
+    end
   }
 
   scope :active, -> { where(status: "active") }

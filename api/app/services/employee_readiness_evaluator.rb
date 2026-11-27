@@ -115,6 +115,16 @@ class EmployeeReadinessEvaluator
       evaluate(employee, rates_on: rates_on, w4_on: w4_on).reason
     end
 
+    def tax_id_complete?(employee)
+      if employee.business_contractor?
+        employee.form_1099_tin&.dig(:type) == "EIN"
+      elsif employee.contractor?
+        employee.form_1099_tin.present?
+      else
+        employee.valid_filing_ssn?
+      end
+    end
+
     def target_dates_for(company)
       period = PayPeriod.where(
         company_id: company.id,
@@ -195,9 +205,14 @@ class EmployeeReadinessEvaluator
 
   def rehired?
     if employee.association(:employee_status_events).loaded?
-      employee.employee_status_events.any? { |event| event.event_type == "reactivated" }
+      employee.employee_status_events.any? do |event|
+        event.event_type == "reactivated" && event.previous_status == "terminated"
+      end
     else
-      employee.persisted? && employee.employee_status_events.where(event_type: "reactivated").exists?
+      employee.persisted? && employee.employee_status_events.where(
+        event_type: "reactivated",
+        previous_status: "terminated"
+      ).exists?
     end
   end
 
@@ -241,15 +256,15 @@ class EmployeeReadinessEvaluator
   end
 
   def evaluate_tax_id
-    if employee.business_contractor?
-      complete = employee.form_1099_tin&.dig(:type) == "EIN"
-      missing_label = complete ? nil : "business EIN missing"
+    complete = self.class.tax_id_complete?(employee)
+    missing_label = if complete
+      nil
+    elsif employee.business_contractor?
+      "business EIN missing"
     elsif employee.contractor?
-      complete = employee.form_1099_tin.present?
-      missing_label = complete ? nil : "TIN (SSN or EIN) missing"
+      "TIN (SSN or EIN) missing"
     else
-      complete = employee.valid_filing_ssn?
-      missing_label = complete ? nil : "SSN missing"
+      "SSN missing"
     end
 
     Item.new(

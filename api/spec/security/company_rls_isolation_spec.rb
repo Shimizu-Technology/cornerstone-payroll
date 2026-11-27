@@ -894,17 +894,13 @@ RSpec.describe "Company RLS", :rls do
     end
 
     def setup_step_three(connection, tables: %w[departments], bypass: false, switch_privileges: "SELECT", read_tables: [], decision_function: true)
-      bypass_clause = bypass ? "BYPASSRLS" : "NOBYPASSRLS"
-      # Roles are cluster-wide; a local PostgreSQL cluster may already have payroll_app.
-      connection.execute(<<~SQL)
-        DO $$ BEGIN
-          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'payroll_app') THEN
-            CREATE ROLE payroll_app NOSUPERUSER #{bypass_clause};
-          ELSE
-            ALTER ROLE payroll_app NOSUPERUSER #{bypass_clause};
-          END IF;
-        END $$
-      SQL
+      raise "setup_step_three must run inside a transaction" unless connection.transaction_open?
+
+      if connection.select_value("SELECT 1 FROM pg_roles WHERE rolname = 'payroll_app'").present?
+        skip "Skipping Step 3 RLS role test: shared PostgreSQL cluster already defines role payroll_app (never altered by specs)"
+      end
+
+      connection.execute("CREATE ROLE payroll_app NOSUPERUSER #{bypass ? 'BYPASSRLS' : 'NOBYPASSRLS'}")
       connection.execute("GRANT USAGE ON SCHEMA public, rls_admin TO payroll_app")
       # As rls_runtime_role.sql grants it in production.
       connection.execute("GRANT EXECUTE ON FUNCTION #{RlsDatabase::LOGIN_LINK_DECISION} TO payroll_app") if decision_function
@@ -916,7 +912,6 @@ RSpec.describe "Company RLS", :rls do
         connection.execute("ALTER TABLE #{quoted} FORCE ROW LEVEL SECURITY")
       end
       connection.execute("GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO payroll_app")
-      connection.execute("REVOKE ALL ON rls_admin.rls_kill_switch FROM payroll_app")
       connection.execute("GRANT #{switch_privileges} ON rls_admin.rls_kill_switch TO payroll_app")
       connection.execute("SET LOCAL ROLE payroll_app")
     end

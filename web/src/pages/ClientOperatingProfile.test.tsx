@@ -95,7 +95,7 @@ describe('Client operating profile editor', () => {
     expect((screen.getByRole('combobox', { name: 'Hours source' }) as HTMLSelectElement).value).toBe('connected_app');
     expect(screen.getByText('This client has no active connected time source.')).toBeTruthy();
     expect(screen.getByText('Off · Available in Milestone 4')).toBeTruthy();
-    expect(screen.getByText('Approval first · Available in Milestone 4')).toBeTruthy();
+    expect(screen.getByText('Cornerstone approves first · Available in Milestone 4')).toBeTruthy();
     expect(screen.queryByText(/Available in Milestone undefined/)).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Employee lifecycle mode' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Employee portal enabled' })).toBeNull();
