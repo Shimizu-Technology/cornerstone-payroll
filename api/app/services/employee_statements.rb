@@ -152,13 +152,14 @@ class EmployeeStatements
   def listed_documents
     employee_documents.where(payroll_items: { payroll_reversed_at: nil })
       .where("employee_documents.status = 'posted' OR (employee_documents.status = 'withdrawn' AND employee_documents.withdrawal_reason = 'void' AND payroll_items.voided = TRUE)")
-      .where(pay_periods: { company_id: @company_id, status: "committed", correction_status: [ nil, "correction" ] })
-      .where(payroll_item_id: PayrollItem.reportable.where(company_id: @company_id, employee_id: @employee_id).select(:id))
+      .where(pay_periods: { correction_status: [ nil, "correction" ] })
   end
 
   def employee_documents
     scope = EmployeeDocument.joins(payroll_item: :pay_period)
       .where(company_id: @company_id, payroll_items: { company_id: @company_id, employee_id: @employee_id })
+      .where(pay_periods: { company_id: @company_id, status: "committed" })
+      .where(payroll_item_id: PayrollItem.reportable.where(company_id: @company_id, employee_id: @employee_id).select(:id))
     @access_until ? scope.where(pay_periods: { pay_date: ..@access_until }) : scope
   end
 

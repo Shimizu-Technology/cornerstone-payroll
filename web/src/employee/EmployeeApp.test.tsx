@@ -115,11 +115,12 @@ describe('employee app shell', () => {
     expect(contextChecks).toBeGreaterThan(1);
   });
 
-  it('shows a withdrawn pay stub notice without amounts or a download', async () => {
+  it.each(['/', '/pay', '/pay/906'])('keeps withdrawn-only pay navigable without amount controls at %s', async (path) => {
     signedIn();
-    window.history.pushState({}, '', '/pay/906');
+    window.history.pushState({}, '', path);
     const stub = {
-      id: '906', status: 'withdrawn', check_date: '2026-11-20', pdf_available: false,
+      id: '906', status: 'withdrawn', check_date: '2026-11-20', pdf_available: true, net_pay: '999.00',
+      pay_period: { start_date: '2026-11-01', end_date: '2026-11-14', pay_date: '2026-11-20' },
       notice: 'This pay stub was withdrawn. A corrected one will follow.',
     };
     vi.stubGlobal('fetch', respond({
@@ -130,7 +131,36 @@ describe('employee app shell', () => {
     }));
     render(<EmployeeApp />);
     expect((await screen.findAllByText(stub.notice)).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: /download/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /download|show amounts|hide amounts/i })).toBeNull();
+    expect(screen.queryByText(/999/)).toBeNull();
+    if (path === '/') {
+      expect(screen.getByText('Your totals will show here after your next active payday.')).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'View pay stub' }).getAttribute('href')).toBe('/pay/906');
+    }
+    if (path !== '/pay') {
+      expect(screen.getByText('Pay date Nov 20, 2026')).toBeTruthy();
+      expect(screen.getByText('Nov 1 – 14, 2026')).toBeTruthy();
+    }
+    if (path === '/pay/906') expect(screen.getByRole('heading', { level: 2, name: 'Nov 1 – 14, 2026' })).toBeTruthy();
+  });
+
+  it('keeps sibling navigation on a withdrawn stub', async () => {
+    signedIn();
+    window.history.pushState({}, '', '/pay/906');
+    const stub = { id: '906', status: 'withdrawn', check_date: '2026-11-20', notice: 'This pay stub was withdrawn.' };
+    const older = { id: '905', check_date: '2026-11-06', net_pay: '75.00' };
+    vi.stubGlobal('fetch', respond({
+      '/employee/links': () => Response.json([{ id: 3 }]),
+      '/employee/context': () => Response.json({ features: { stubs: true } }),
+      '/employee/statements': () => Response.json({ statements: [stub, older], years: [2026], next_page: null }),
+      '/employee/statements/906': () => Response.json(stub),
+      '/employee/statements/905': () => Response.json(older),
+    }));
+    render(<EmployeeApp />);
+    const article = await screen.findByRole('article');
+    expect(within(article).getByRole('heading', { level: 2, name: 'Nov 20, 2026' })).toBeTruthy();
+    expect((await within(article).findAllByRole('link', { name: /^Older:/ })).length).toBeGreaterThan(0);
+    expect(within(article).queryByRole('button', { name: /download/i })).toBeNull();
   });
 
   it('masks amounts by default and remembers the choice on this device', async () => {
