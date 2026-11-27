@@ -26,6 +26,8 @@ module PayrollIntake
       GROUPED_MONEY_PATTERN = /\A[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?\z/
       MAX_HOURS_VALUE = BigDecimal("999999.99")
       MAX_MONEY_VALUE = BigDecimal("99999999.99")
+      MAX_SHEET_ROWS = 10_000
+      MAX_UNCOMPRESSED_SHEET_XML_BYTES = 50 * 1024 * 1024
       COLUMN_LABELS = {
         employee_id: "Employee ID",
         employee_name: "Employee",
@@ -134,6 +136,7 @@ module PayrollIntake
       attr_reader :file_path, :extension, :company, :pay_period
 
       def parse_xlsx
+        validate_xlsx_archive_bounds!
         xlsx = Roo::Spreadsheet.open(file_path, extension: :xlsx)
         metadata = extract_xlsx_metadata(xlsx)
         validate_metadata!(metadata) if metadata.present?
@@ -147,6 +150,9 @@ module PayrollIntake
         max_formula_row = formula_cells.keys.map(&:first).max.to_i
         last_row = [ sheet.last_row.to_i, max_formula_row ].max
         raise ArgumentError, "Workbook #{sheet_name} sheet is empty." if last_row < 1
+        if last_row > MAX_SHEET_ROWS
+          raise ArgumentError, "Workbook #{sheet_name} sheet exceeds the maximum supported #{MAX_SHEET_ROWS} rows."
+        end
 
         headers = (1..sheet.last_column.to_i).map { |col| sheet.cell(1, col) }
         column_map = resolve_headers!(headers)
@@ -185,9 +191,10 @@ module PayrollIntake
         formulas = {}
         Zip::File.open(file_path) do |zip|
           sheet_entry_name = resolve_xlsx_sheet_entry(zip, sheet_name)
-          return formulas unless sheet_entry_name && zip.find_entry(sheet_entry_name)
+          sheet_entry = sheet_entry_name && zip.find_entry(sheet_entry_name)
+          return formulas unless sheet_entry
 
-          doc = Nokogiri::XML(zip.read(sheet_entry_name))
+          doc = Nokogiri::XML(read_bounded_zip_entry(sheet_entry))
           doc.remove_namespaces!
           doc.xpath("//sheetData/row/c[f]").each do |cell_node|
             ref = cell_node["r"].to_s
@@ -202,12 +209,41 @@ module PayrollIntake
         {}
       end
 
+      def validate_xlsx_archive_bounds!
+        Zip::File.open(file_path) do |zip|
+          zip.each do |entry|
+            next unless entry.name.end_with?(".xml", ".rels")
+
+            if entry.size.to_i > MAX_UNCOMPRESSED_SHEET_XML_BYTES
+              raise ArgumentError, "Workbook XML entry #{entry.name} exceeds the maximum supported uncompressed size."
+            end
+          end
+        end
+      end
+
+      def read_bounded_zip_entry(entry)
+        if entry.size.to_i > MAX_UNCOMPRESSED_SHEET_XML_BYTES
+          raise ArgumentError, "Workbook XML entry #{entry.name} exceeds the maximum supported uncompressed size."
+        end
+
+        buffer = +""
+        entry.get_input_stream do |stream|
+          while (chunk = stream.read(65_536))
+            buffer << chunk
+            if buffer.bytesize > MAX_UNCOMPRESSED_SHEET_XML_BYTES
+              raise ArgumentError, "Workbook XML entry #{entry.name} exceeds the maximum supported uncompressed size."
+            end
+          end
+        end
+        buffer
+      end
+
       def resolve_xlsx_sheet_entry(zip, sheet_name)
         workbook_entry = zip.find_entry("xl/workbook.xml")
         rels_entry = zip.find_entry("xl/_rels/workbook.xml.rels")
         return nil unless workbook_entry && rels_entry
 
-        workbook_doc = Nokogiri::XML(workbook_entry.get_input_stream.read)
+        workbook_doc = Nokogiri::XML(read_bounded_zip_entry(workbook_entry))
         workbook_doc.remove_namespaces!
         sheet_node = workbook_doc.xpath("//sheets/sheet").find do |node|
           node["name"].to_s.strip.casecmp?(sheet_name.to_s.strip)
@@ -215,7 +251,7 @@ module PayrollIntake
         rel_id = sheet_node && (sheet_node["id"] || sheet_node.attributes.values.find { |attr| attr.name == "id" }&.value)
         return nil unless rel_id
 
-        rels_doc = Nokogiri::XML(rels_entry.get_input_stream.read)
+        rels_doc = Nokogiri::XML(read_bounded_zip_entry(rels_entry))
         rels_doc.remove_namespaces!
         rel_node = rels_doc.xpath("//Relationship").find { |node| node["Id"] == rel_id }
         target = rel_node&.[]("Target").to_s

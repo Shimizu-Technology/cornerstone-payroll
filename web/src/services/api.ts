@@ -1757,19 +1757,37 @@ export const payPeriodsApi = {
   resolvePortalSource: (id: number, submissionId: number, reason: string): Promise<{ resolved_submission_id: number }> =>
     api.post<{ resolved_submission_id: number }>(`/admin/pay_periods/${id}/resolve_portal_source`, { submission_id: submissionId, reason }),
   // Match the current review's files again, e.g. after reactivating a worker or setting up a loan.
-  rematchImport: (id: number, reason?: string): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/rematch_import`, reason ? { reason } : undefined),
+  rematchImport: (id: number, reason?: string, sourceType?: string): Promise<ImportPreviewResponse> => {
+    const payload = {
+      ...(reason ? { reason } : {}),
+      ...(sourceType ? { source_type: sourceType } : {}),
+    };
+    return api.post<ImportPreviewResponse>(
+      `/admin/pay_periods/${id}/rematch_import`,
+      Object.keys(payload).length > 0 ? payload : undefined,
+    );
+  },
   // Sets up (or resumes) the Employee Loan for an installment the review found in the workbook.
-  setUpImportInstallmentLoan: (id: number, data: { import_id: number; employee_id: number; name?: string; starting_balance?: string; payment_amount?: string; first_deduction_date?: string }): Promise<{ loan_id: number; already_set_up: boolean }> =>
+  setUpImportInstallmentLoan: (id: number, data: { import_id: number; employee_id: number; source_type?: string; name?: string; starting_balance?: string; payment_amount?: string; first_deduction_date?: string }): Promise<{ loan_id: number; already_set_up: boolean }> =>
     api.post<{ loan_id: number; already_set_up: boolean }>(`/admin/pay_periods/${id}/import_installment_loan`, data),
-  currentImport: (id: number): Promise<ImportPreviewResponse> =>
-    api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import`),
+  currentImport: (id: number, sourceType?: string): Promise<ImportPreviewResponse> => {
+    const query = sourceType ? `?source_type=${encodeURIComponent(sourceType)}` : '';
+    return api.get<ImportPreviewResponse>(`/admin/pay_periods/${id}/current_import${query}`);
+  },
   // Takes one file out of an import still in review; the reason is recorded on the new version.
-  removeImportSource: (id: number, sourceRole: string, reason: string): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/remove_import_source`, { source_role: sourceRole, reason }),
+  removeImportSource: (id: number, sourceRole: string, reason: string, sourceType?: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/remove_import_source`, {
+      source_role: sourceRole,
+      reason,
+      ...(sourceType ? { source_type: sourceType } : {}),
+    }),
   // Saves how the tips in an older MoSa workbook were paid; apply uses only the saved choice.
-  saveImportTipTreatment: (id: number, importId: number, tipsPaidOutFromTips: boolean): Promise<ImportPreviewResponse> =>
-    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/import_tip_treatment`, { import_id: importId, tips_paid_out_from_tips: tipsPaidOutFromTips }),
+  saveImportTipTreatment: (id: number, importId: number, tipsPaidOutFromTips: boolean, sourceType?: string): Promise<ImportPreviewResponse> =>
+    api.post<ImportPreviewResponse>(`/admin/pay_periods/${id}/import_tip_treatment`, {
+      import_id: importId,
+      tips_paid_out_from_tips: tipsPaidOutFromTips,
+      ...(sourceType ? { source_type: sourceType } : {}),
+    }),
   applyImport: (
     id: number,
     data: {
@@ -2441,6 +2459,7 @@ export interface ImportPreviewResponse {
   pay_period?: { start_date: string; end_date: string };
   source_package: {
     id: number;
+    source_type?: string;
     package_id: string;
     package_revision: number;
     package_schema_version: string;

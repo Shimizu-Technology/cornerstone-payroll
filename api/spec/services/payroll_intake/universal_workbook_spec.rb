@@ -765,12 +765,72 @@ RSpec.describe "Track C B8-B9: Cornerstone universal workbook, merged apply path
       row1, row2 = parsed.fetch(:rows)
 
       expect(row1[:parse_errors]).to be_empty
-      expect(row1[:week1_hours]).to eq(BigDecimal("40.15"))
-      expect(row1[:week2_hours]).to eq(BigDecimal("39.85"))
-      expect(row1[:tips]).to eq(BigDecimal("99999999.99"))
+      expect(row1[:week1_hours]).to be_a(BigDecimal).and eq(BigDecimal("40.15"))
+      expect(row1[:week2_hours]).to be_a(BigDecimal).and eq(BigDecimal("39.85"))
+      expect(row1[:tips]).to be_a(BigDecimal).and eq(BigDecimal("99999999.99"))
 
       error_codes = row2[:parse_errors].map { |e| e[:code] }
       expect(error_codes).to eq(%w[value_out_of_range value_out_of_range])
+
+      # Inject an exact XML literal where Float coercion rounds up to 1.005 (-> 1.01)
+      # while raw-XML BigDecimal parsing preserves 1.004999999999999999 (-> 1.00).
+      boundary_xlsx = build_xlsx_bytes(rows: [
+        [ employee_01.id, "Employee 01", 40, 40, nil, nil, nil, nil, 0, "NO", 1.23, nil, nil, nil, nil, nil ]
+      ])
+      patched_io = Zip::OutputStream.write_buffer do |out|
+        Zip::InputStream.open(StringIO.new(boundary_xlsx)) do |input|
+          while (entry = input.get_next_entry)
+            content = input.read
+            if entry.name == "xl/worksheets/sheet2.xml"
+              content = content.sub("<v>1.23</v>", "<v>1.004999999999999999</v>")
+            end
+            out.put_next_entry(entry.name)
+            out.write(content)
+          end
+        end
+      end
+      parsed_boundary = PayrollIntake::UniversalWorkbook::Parser.parse_file(
+        upload_for("boundary.xlsx", patched_io.string, xlsx_mime),
+        company: company,
+        pay_period: pay_period
+      )
+      bonus = parsed_boundary.fetch(:rows).sole.fetch(:bonus)
+      expect(bonus).to be_a(BigDecimal).and eq(BigDecimal("1.00"))
+    end
+
+    it "rejects XLSX sheets exceeding the maximum supported row extent or uncompressed XML size" do
+      base_xlsx = build_xlsx_bytes(rows: [
+        [ employee_01.id, "Employee 01", 40, 40, nil, nil, nil, nil, 0, "NO", nil, nil, nil, nil, nil, nil ]
+      ])
+      huge_row_io = Zip::OutputStream.write_buffer do |out|
+        Zip::InputStream.open(StringIO.new(base_xlsx)) do |input|
+          while (entry = input.get_next_entry)
+            content = input.read
+            if entry.name == "xl/worksheets/sheet2.xml"
+              content = content.sub("</sheetData>", '<row r="10001"><c r="C10001"><f>40+5</f><v>45</v></c></row></sheetData>')
+            end
+            out.put_next_entry(entry.name)
+            out.write(content)
+          end
+        end
+      end
+
+      expect do
+        PayrollIntake::UniversalWorkbook::Parser.parse_file(
+          upload_for("huge-row.xlsx", huge_row_io.string, xlsx_mime),
+          company: company,
+          pay_period: pay_period
+        )
+      end.to raise_error(ArgumentError, /exceeds the maximum supported 10000 rows/)
+
+      stub_const("PayrollIntake::UniversalWorkbook::Parser::MAX_UNCOMPRESSED_SHEET_XML_BYTES", 100)
+      expect do
+        PayrollIntake::UniversalWorkbook::Parser.parse_file(
+          upload_for("oversized-xml.xlsx", base_xlsx, xlsx_mime),
+          company: company,
+          pay_period: pay_period
+        )
+      end.to raise_error(ArgumentError, /exceeds the maximum supported uncompressed size/)
     end
   end
 
@@ -961,6 +1021,49 @@ RSpec.describe "Track C B8-B9: Cornerstone universal workbook, merged apply path
       )
       expect(zero_and_blank_w2[:rows].first[:validation_errors]).to be_empty
       expect(zero_and_blank_w2[:rows].second[:validation_errors]).to be_empty
+    end
+
+    it "blocks applying when duplicate employee rows are both included, and succeeds once the duplicate row is excluded" do
+      dup_csv = upload_for("duplicate-employee.csv", build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "40.00", "40.00", "", "", "", "", "10.00", "NO", "", "", "", "", "", "" ],
+        [ employee_01.id, "Employee 01", "10.00", "0.00", "", "", "", "", "0.00", "NO", "", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ dup_csv ],
+        actor: staff
+      ).call.fetch(:session)
+
+      row1, row2 = session.rows.order(:position).to_a
+      expect(row1.errors_payload.map { |e| e["code"] }).to include("duplicate_employee_id")
+      expect(row2.errors_payload.map { |e| e["code"] }).to include("duplicate_employee_id")
+
+      blocked = PayrollIntake::ApplyService.new(
+        session: session,
+        actor: staff,
+        row_overrides: [
+          { id: row1.id, disposition: "included", employee_id: employee_01.id },
+          { id: row2.id, disposition: "included", employee_id: employee_01.id }
+        ]
+      ).call
+      expect(blocked[:errors]).not_to be_empty
+      expect(session.reload.status).to eq("previewed")
+
+      applied = PayrollIntake::ApplyService.new(
+        session: session,
+        actor: staff,
+        row_overrides: [
+          { id: row1.id, disposition: "included", employee_id: employee_01.id },
+          { id: row2.id, disposition: "excluded", disposition_reason: "Duplicate submission row" }
+        ]
+      ).call
+      expect(applied[:errors]).to be_empty
+      expect(applied[:applied].length).to eq(1)
+      expect(applied[:skipped].length).to eq(1)
+      expect(pay_period.payroll_items.find_by!(employee: employee_01).hours_worked).to eq(BigDecimal("80.00"))
+      expect(session.reload.status).to eq("applied")
     end
   end
 end

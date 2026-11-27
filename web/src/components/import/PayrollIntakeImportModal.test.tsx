@@ -80,10 +80,10 @@ const employees: Employee[] = [
 beforeEach(() => {
   vi.clearAllMocks();
   apiMocks.list.mockResolvedValue({ imports: [], disposition_targets: [] });
-  apiMocks.downloadTemplate.mockResolvedValue({
-    blob: new Blob(['template']),
-    filename: 'fixture-co-cornerstone-workbook-2026-06-27.xlsx',
-  });
+  apiMocks.downloadTemplate.mockImplementation((_payPeriodId: number, format: 'xlsx' | 'csv') => Promise.resolve({
+    blob: new Blob([`template-${format}`]),
+    filename: `fixture-co-cornerstone-workbook-2026-06-27.${format}`,
+  }));
   vi.stubGlobal('URL', {
     ...URL,
     createObjectURL: vi.fn(() => 'blob:template-url'),
@@ -159,11 +159,22 @@ it('shows Excel and CSV template download buttons, hides pasted text, and previe
   expect(screen.getByText('Cornerstone Workbook Intake')).toBeTruthy();
   expect(screen.queryByLabelText('Paste email body or copied table')).toBeNull();
 
+  const clickedDownloads: string[] = [];
+  const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    clickedDownloads.push(this.download);
+  });
+
   fireEvent.click(screen.getByRole('button', { name: 'Download Excel template (.xlsx)' }));
   await waitFor(() => expect(apiMocks.downloadTemplate).toHaveBeenCalledWith(12, 'xlsx', 'cornerstone_workbook'));
+  await waitFor(() => expect(clickedDownloads).toContain('fixture-co-cornerstone-workbook-2026-06-27.xlsx'));
 
   fireEvent.click(screen.getByRole('button', { name: 'Download CSV template (.csv)' }));
   await waitFor(() => expect(apiMocks.downloadTemplate).toHaveBeenCalledWith(12, 'csv', 'cornerstone_workbook'));
+  await waitFor(() => expect(clickedDownloads).toEqual([
+    'fixture-co-cornerstone-workbook-2026-06-27.xlsx',
+    'fixture-co-cornerstone-workbook-2026-06-27.csv',
+  ]));
+  clickSpy.mockRestore();
 
   const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
   expect(fileInput.accept).toBe('.xlsx,.csv');
@@ -204,4 +215,100 @@ it('shows Excel and CSV template download buttons, hides pasted text, and previe
     loan_deduction: 25,
   });
   expect(onImportComplete).toHaveBeenCalledOnce();
+});
+
+it('replaces single-file uploads on drag-and-drop, defers paid-out tip clamping until blur, and preserves source-reported hours', async () => {
+  const sourceReportedDescriptor: PayrollIntakeDescriptor = {
+    ...universalDescriptor,
+    overtime_mode: 'source_reports',
+  };
+  apiMocks.preview.mockResolvedValue({
+    import: {
+      id: 56,
+      company_id: 7,
+      pay_period_id: 12,
+      package_id: 'pkg-87654321',
+      package_revision: 1,
+      package_schema_version: 'v1',
+      source_type: 'cornerstone_workbook',
+      status: 'previewed',
+      current: true,
+      documents: [{ id: 2, verification_status: 'verified', filename: 'second.csv' }],
+      warnings: [],
+      rows: [
+        {
+          id: 902,
+          source_employee_name: 'Employee 01',
+          employee_id: 101,
+          disposition: 'included',
+          disposition_reason: null,
+          target_pay_period_id: null,
+          week1_hours: 0,
+          week2_hours: 0,
+          regular_hours: 152,
+          overtime_hours: 8,
+          pto_hours: 0,
+          holiday_hours: 0,
+          week1_tips: 0,
+          week2_tips: 0,
+          reported_tips: 50,
+          tips_paid_out: 50,
+          bonus: 0,
+          loan_deduction: 0,
+          payroll_components: [],
+          errors: [],
+          warnings: [],
+        },
+      ],
+    },
+    disposition_targets: [],
+  });
+
+  render(
+    <PayrollIntakeImportModal
+      open
+      onOpenChange={vi.fn()}
+      payPeriodId={12}
+      descriptor={sourceReportedDescriptor}
+      employees={employees}
+      onImportComplete={vi.fn()}
+    />,
+  );
+
+  // Single-file slot replaces previous file on both file input and drag-and-drop
+  const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(fileInput, { target: { files: [new File(['first'], 'first.csv', { type: 'text/csv' })] } });
+  expect(screen.getByText('first.csv')).toBeTruthy();
+
+  const dropZone = screen.getByText(/Upload Cornerstone workbook/i).closest('div') as HTMLElement;
+  fireEvent.drop(dropZone, {
+    dataTransfer: { files: [new File(['second'], 'second.csv', { type: 'text/csv' })] },
+  });
+  expect(screen.queryByText('first.csv')).toBeNull();
+  expect(screen.getByText('second.csv')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Intake' }));
+  await screen.findByText('Reported Tips');
+
+  // Typing "4" then "40" into Reported tips must not prematurely clamp Paid-out tips to 4
+  const reportedInput = screen.getByLabelText('Reported tips') as HTMLInputElement;
+  const paidOutInput = screen.getByLabelText('Paid-out tips') as HTMLInputElement;
+  expect(reportedInput.value).toBe('50.00');
+  expect(paidOutInput.value).toBe('50.00');
+
+  fireEvent.focus(reportedInput);
+  fireEvent.change(reportedInput, { target: { value: '4' } });
+  expect(paidOutInput.value).toBe('50.00');
+  fireEvent.change(reportedInput, { target: { value: '40' } });
+  fireEvent.blur(reportedInput);
+
+  expect(reportedInput.value).toBe('40.00');
+  expect(paidOutInput.value).toBe('40.00');
+
+  // Editing Week 1 hours in source_reports mode must not overwrite regular/overtime hours
+  const week1Input = screen.getByLabelText('Week 1 hours') as HTMLInputElement;
+  fireEvent.focus(week1Input);
+  fireEvent.change(week1Input, { target: { value: '45' } });
+  fireEvent.blur(week1Input);
+  expect(screen.getByText('152.00 regular · 8.00 OT')).toBeTruthy();
 });
