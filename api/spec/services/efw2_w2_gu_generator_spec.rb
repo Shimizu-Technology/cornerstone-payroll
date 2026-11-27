@@ -14,6 +14,14 @@ RSpec.describe Efw2W2GuGenerator do
   let(:report) { { meta: { year: 2026 }, employees: [ row ], totals: row.slice(*described_class::BOXES).merge(box12_code_d_total: 100, box12_code_aa_total: 50, box12_code_tp_total: 30, box12_code_tt_total: 40) } }
   subject(:generator) { described_class.new(company: company, year: 2026, submitter: submitter, report: report) }
 
+  it "reports a name-format issue for both live and demo companies" do
+    employee.update_columns(first_name: "Employee", last_name: "01")
+    expect(generator.structured_problems).to include(hash_including(code: :employee_name_invalid, message: /name format is invalid/))
+
+    allow(company).to receive(:demo?).and_return(true)
+    expect(generator.structured_problems).to include(hash_including(code: :employee_name_invalid))
+  end
+
   it "preserves Vietnamese and other Latin letters" do
     { "Nguyễn Văn Trần" => "NGUYEN VAN TRAN", "Huỳnh" => "HUYNH", "Phạm" => "PHAM", "Đặng" => "DANG", "Phở Saigon" => "PHO SAIGON", "Ma’lia" => "MA'LIA", "Ñaña" => "NANA", "Åguon" => "AGUON" }.each do |input, expected|
       expect(Efw2Formatting.clean(input)).to eq(expected)
