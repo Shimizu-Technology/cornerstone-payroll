@@ -250,6 +250,11 @@ module YearEnd
       digest = self.class.digest_for(code, evidence.except(:names, :messages))
       acknowledgement = acknowledgements[code]
       ids = evidence[:employees].map(&:first)
+      if code == "tipped_occupation_code_missing"
+        roles = company.employees.where(id: ids).includes(:company_job_role).to_h do |employee|
+          [ employee.id, employee.company_job_role ]
+        end
+      end
       history_reviews, history_details = legacy_basis_reviews(ids) if definition[:kind] == "history_review"
       current = if history_reviews
         ids.all? { |id| history_reviews.key?(id) }
@@ -276,7 +281,8 @@ module YearEnd
         employees: ids.map do |id|
           resolution = history_reviews&.[](id)
           { employee_id: id, name: evidence[:names][id], edit_path: "/companies/#{company.id}/employees/#{id}",
-            history_review: resolution }.compact
+            history_review: resolution,
+            job_role: roles && { name: roles[id]&.name, occupation_code: roles[id]&.occupation_code } }.compact
         end,
         acknowledgement: definition[:kind] == "acknowledge" && acknowledgement ? acknowledgement.payload : nil,
         acknowledgement_stale: definition[:kind] == "acknowledge" && acknowledgement.present? && !current
