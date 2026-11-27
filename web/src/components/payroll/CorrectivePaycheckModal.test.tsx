@@ -48,6 +48,25 @@ describe('CorrectivePaycheckModal recorded baseline', () => {
     expect(screen.getByText(/This correction posts only the change/)).toBeTruthy();
   });
 
+  it('says a direct-deposit employee gets a direct-deposit payment, not a check', async () => {
+    api.preview.mockResolvedValue(preview(85));
+    setup({ ...item, employee_payment_delivery_method: 'direct_deposit' } as PayrollItem);
+    expect(await screen.findByText('A new direct-deposit payment of $60.00 will be recorded.')).toBeTruthy();
+    expect(screen.queryByText(/A new check will be cut/)).toBeNull();
+  });
+
+  it('follows the service fallback (paper check) when the employee has no delivery method', async () => {
+    api.preview.mockResolvedValue(preview(85));
+    setup({ ...item, employee_payment_delivery_method: null, effective_payment_delivery_method: 'direct_deposit' } as PayrollItem);
+    expect(await screen.findByText('A new check will be cut for $60.00.')).toBeTruthy();
+  });
+
+  it('still says a check will be cut for a paper-check employee', async () => {
+    api.preview.mockResolvedValue(preview(85));
+    setup({ ...item, employee_payment_delivery_method: 'paper_check' } as PayrollItem);
+    expect(await screen.findByText('A new check will be cut for $60.00.')).toBeTruthy();
+  });
+
   function mockSignedBaseline() {
     api.preview.mockImplementation((_period, request) => {
       const hours = request.corrected_inputs.hours_worked;
@@ -119,7 +138,7 @@ describe('CorrectivePaycheckModal recorded baseline', () => {
     expect(gross.textContent).toContain('$1,200.00');
     expect(gross.textContent).toContain('$975.00');
     expect(gross.textContent).toContain('-$225.00');
-    expect(screen.getByText(/No check will be cut/).textContent).toContain('-$180.00');
+    expect(screen.getByText(/No payment will be issued/).textContent).toContain('-$180.00');
     await user.type(screen.getByLabelText(/Reason/), 'Verified target is 65 hours');
     await user.click(screen.getByRole('button', { name: 'Issue corrective paycheck' }));
     expect(api.issue).toHaveBeenCalledWith(12, expect.objectContaining({ employee_id: 19, expected_review_digest: preview(65).meta.review_digest, corrected_inputs: expect.objectContaining({ hours_worked: 65 }) }));

@@ -1,3 +1,5 @@
+import { redirectTarget } from './routing';
+
 // Sign-up helpers kept out of signup.tsx so it exports only components.
 
 // An invite link (/activate#token=…, /claim#token=…, /reactivate#token=…,
@@ -62,6 +64,52 @@ export function forgetInviteToken(): void {
   } catch {
     // Nothing stored.
   }
+  forgetSignInReturn();
+}
+
+// Where sign-in returns to (/claim, /reactivate or a deep link). Kept in this
+// tab's sessionStorage too, because Clerk's new-device step (#/client-trust)
+// drops the router state and a phone may reload the tab while the person
+// copies the emailed code. Always re-checked through redirectTarget.
+const RETURN_KEY = 'employee-sign-in-return';
+
+/** The return path from router state, else the one this tab kept; Home when neither is usable. */
+export function signInReturn(state: unknown): string {
+  const fromState = redirectTarget(state);
+  if (fromState !== '/') {
+    try {
+      storage()?.setItem(RETURN_KEY, fromState);
+    } catch {
+      // Storage blocked: the router state still covers this page.
+    }
+    return fromState;
+  }
+  let stored: string | null = null;
+  try {
+    stored = storage()?.getItem(RETURN_KEY) ?? null;
+  } catch {
+    stored = null;
+  }
+  return redirectTarget({ from: stored });
+}
+
+export function forgetSignInReturn(): void {
+  try {
+    storage()?.removeItem(RETURN_KEY);
+  } catch {
+    // Nothing stored.
+  }
+}
+
+/** Clears the kept return path once the signed-in app has reached it. */
+export function arrivedAt(path: string): void {
+  try {
+    // Normalised like AppRoutes' path: no query or hash, no trailing slash, "/" kept.
+    const saved = storage()?.getItem(RETURN_KEY)?.split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+    if (storage()?.getItem(RETURN_KEY) && saved === path) storage()?.removeItem(RETURN_KEY);
+  } catch {
+    // Nothing stored.
+  }
 }
 
 /** Codes are 10 unambiguous letters; people type them with spaces, dashes and any case. */
@@ -77,4 +125,10 @@ export function birthDate(draft: { month: string; day: string; year: string }, n
   const date = new Date(year, month - 1, day);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** The 429 message, using the Retry-After the API sent (a code's lockout window can be 15 minutes). */
+export function rateLimitedText(retryAfterSeconds: number | null | undefined): string {
+  if (!retryAfterSeconds || retryAfterSeconds <= 60) return 'Too many tries. Wait a minute, then try again.';
+  return `Too many tries. Wait about ${Math.ceil(retryAfterSeconds / 60)} minutes, then try again.`;
 }

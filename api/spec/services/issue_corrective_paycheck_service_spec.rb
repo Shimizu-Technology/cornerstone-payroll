@@ -90,6 +90,11 @@ RSpec.describe IssueCorrectivePaycheckService do
       end
     end
 
+    it "records who committed the supplemental so the pay-run list can name them" do
+      supplemental, = issue_target({ hours_worked: 20 })
+      expect(supplemental.reload.committed_by_id).to eq(actor.id)
+    end
+
     shared_examples "a signed recorded baseline after a void" do
       it "repairs 10 to 20 to 1 after voiding the first delta without rewriting history or repeating YTD" do
         frozen_original = original_item.attributes.deep_dup
