@@ -44,7 +44,16 @@ class WidenPayrollSubmissionDocumentsRoleForDescriptors < ActiveRecord::Migratio
       end
     end
 
-    validate_check_constraint :payroll_submission_documents, name: temporary_name
+    begin
+      validate_check_constraint :payroll_submission_documents, name: temporary_name
+    rescue StandardError
+      with_lock_timeout do
+        if connection.check_constraint_exists?(:payroll_submission_documents, name: temporary_name)
+          remove_check_constraint :payroll_submission_documents, name: temporary_name
+        end
+      end
+      raise
+    end
 
     with_lock_timeout do
       [ EXPANDED_TMP, ORIGINAL_TMP ].each do |name|

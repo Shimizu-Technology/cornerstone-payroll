@@ -200,6 +200,13 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
       ).capture!
       expect(source_reported["aligned_with_pay_period"]).to be(false)
       expect(source_reported["legal_week_starts"]).to eq(%w[2026-06-21 2026-06-28])
+
+      aligned_source_reported = PayrollIntake::WorkweekEvidence.new(
+        pay_period: misaligned_period,
+        overtime_mode: "source_reports",
+        workweek_alignment: "aligned"
+      )
+      expect { aligned_source_reported.capture! }.to raise_error(ArgumentError, /begin on the confirmed legal workweek start day/)
     end
 
     it "blocks previewing a misaligned Wed Jun 17 - Tue Jun 30 period with 60h in legal week Jun 21-27 under weekly_split" do
@@ -246,8 +253,30 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
       )
 
       row = result.fetch(:rows).sole
-      expect(row).to include(reported_tips: 75.0, tips_paid_out: 0.0)
+      expect(row[:reported_tips]).to be_a(BigDecimal).and eq(BigDecimal("75.00"))
+      expect(row[:tips_paid_out]).to be_a(BigDecimal).and eq(BigDecimal("0.00"))
+      expect(row[:week1_tips]).to be_a(BigDecimal)
+      expect(row[:week2_tips]).to be_a(BigDecimal)
       expect(row[:source_payload]).to include("resolved_tip_treatment" => "paid_in_check", "tip_treatment_source" => "row_override")
+    end
+
+    it "keeps the configured default and warns when tips_already_paid is an unrecognized string" do
+      create_profile!(tips_default: "paid_in_check", overtime_mode: "weekly_split")
+      result = PayrollIntake::Adapters::SpikeEmail.new(pay_period: pay_period, company: company).normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, week1_hours: 40, week2_hours: 40, total_tips: 75.00, tips_already_paid: "unknown" }
+        ]
+      )
+
+      row = result.fetch(:rows).sole
+      expect(row[:reported_tips]).to eq(BigDecimal("75.00"))
+      expect(row[:tips_paid_out]).to eq(BigDecimal("0.00"))
+      expect(row[:warnings].pluck(:code)).to include("invalid_tip_treatment_override")
+      expect(row[:source_payload]).to include(
+        "resolved_tip_treatment" => "paid_in_check",
+        "tip_treatment_source" => "operating_profile"
+      )
     end
 
     it "never honors per-row tips_already_paid from AI-extracted rows (L1)" do
@@ -460,7 +489,36 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
   end
 
   describe "overtime.mode = source_reports on semimonthly schedule" do
-    it "allows semimonthly pay periods with source-reported overtime and applies cleanly" do
+    it "derives missing regular hours from total - overtime without overpaying and rejects overtime > total" do
+      create_profile!(tips_default: "paid_in_check", overtime_mode: "source_reports", workweek_alignment: "warn_if_offset")
+      adapter = PayrollIntake::Adapters::SpikeEmail.new(pay_period: pay_period, company: company)
+
+      derived = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, total_hours: 45, overtime_hours: 5, total_tips: 20 }
+        ]
+      ).fetch(:rows).sole
+      expect(derived).to include(regular_hours: 40.0, overtime_hours: 5.0, validation_errors: [])
+
+      complete = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, regular_hours: 40, overtime_hours: 5, total_tips: 20 }
+        ]
+      ).fetch(:rows).sole
+      expect(complete).to include(regular_hours: 40.0, overtime_hours: 5.0, validation_errors: [])
+
+      excessive = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          { employee_name: employee.full_name, total_hours: 4, overtime_hours: 5, total_tips: 20 }
+        ]
+      ).fetch(:rows).sole
+      expect(excessive[:validation_errors].pluck(:code)).to include("overtime_exceeds_total")
+    end
+
+    it "previews and applies semimonthly pay periods with source-reported overtime cleanly" do
       company.update!(pay_frequency: "semimonthly")
       create_profile!(tips_default: "paid_in_check", overtime_mode: "source_reports", workweek_alignment: "warn_if_offset")
       semi_period = create(
@@ -471,15 +529,104 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
         pay_date: Date.new(2026, 8, 5),
         status: "draft"
       )
-
-      result = PayrollIntake::Adapters::SpikeEmail.new(pay_period: semi_period, company: company).normalize(
-        detected_period: { start_date: "2026-07-16", end_date: "2026-07-31" },
-        extracted_rows: [
-          { employee_name: employee.full_name, regular_hours: 80, overtime_hours: 4.5, total_hours: 84.5, total_tips: 50 }
-        ]
+      ai_extractor = instance_double(
+        PayrollIntake::AiExtractor,
+        call: {
+          detected_period: { start_date: "2026-07-16", end_date: "2026-07-31" },
+          rows: [
+            {
+              "employee_name" => employee.full_name,
+              "regular_hours" => 80,
+              "overtime_hours" => 4.5,
+              "total_hours" => 84.5,
+              "total_tips" => 50,
+              "confidence" => 0.98
+            }
+          ],
+          warnings: []
+        }
       )
-      row = result.fetch(:rows).sole
-      expect(row).to include(regular_hours: 80.0, overtime_hours: 4.5, reported_tips: 50.0, tips_paid_out: 0.0, validation_errors: [])
+      allow(PayrollIntake::AiExtractor).to receive(:new).and_return(ai_extractor)
+
+      session = PayrollIntake::PreviewService.new(
+        pay_period: semi_period,
+        source_type: "spike_email",
+        pasted_text: "Semimonthly hours summary",
+        actor: staff
+      ).call.fetch(:session)
+      row = session.rows.sole
+      expect(row).to have_attributes(
+        regular_hours: BigDecimal("80.00"),
+        overtime_hours: BigDecimal("4.50"),
+        reported_tips: BigDecimal("50.00"),
+        tips_paid_out: BigDecimal("0.00")
+      )
+
+      applied = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [ { id: row.id, disposition: "included", employee_id: employee.id } ],
+        actor: staff
+      ).call
+      expect(applied[:errors]).to be_empty
+      expect(semi_period.payroll_items.find_by!(employee: employee)).to have_attributes(
+        hours_worked: BigDecimal("80.00"),
+        overtime_hours: BigDecimal("4.50"),
+        reported_tips: BigDecimal("50.00"),
+        tips_paid_out: BigDecimal("0.00")
+      )
+    end
+  end
+
+  describe "weekly pay frequency reconciliation on apply" do
+    it "rejects nonzero week2 overrides on a weekly pay period instead of zeroing employee hours" do
+      company.update!(pay_frequency: "weekly")
+      weekly_period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 6, 14),
+        end_date: Date.new(2026, 6, 20),
+        pay_date: Date.new(2026, 6, 26),
+        status: "draft"
+      )
+      session = PayrollIntakeSession.create!(
+        company: company,
+        pay_period: weekly_period,
+        source_type: "spike_email",
+        source_label: "Spike Coffee Roasters email",
+        import_hash: SecureRandom.hex(32),
+        parser_version: "spike_email:v3",
+        package_id: SecureRandom.uuid,
+        package_revision: 1,
+        package_schema_version: PayrollIntakeSession::PACKAGE_SCHEMA_VERSION,
+        status: "previewed",
+        evidence_snapshot: {
+          "workweek" => PayrollIntake::WorkweekEvidence.new(pay_period: weekly_period, overtime_mode: "weekly_split").capture!,
+          "intake_settings" => { "overtime_mode" => "weekly_split" }
+        },
+        created_by: staff
+      )
+      row = session.rows.create!(
+        position: 0,
+        source_employee_name: employee.full_name,
+        employee: employee,
+        week1_hours: 45,
+        week2_hours: 0,
+        regular_hours: 40,
+        overtime_hours: 5,
+        reported_tips: 20,
+        tips_paid_out: 20,
+        status: "ready"
+      )
+
+      rejected = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [
+          { id: row.id, disposition: "included", employee_id: employee.id, week1_hours: 0, week2_hours: 45, regular_hours: 0, overtime_hours: 0 }
+        ],
+        actor: staff
+      ).call
+      expect(rejected[:applied]).to be_empty
+      expect(rejected[:errors].sole.fetch(:error)).to match(/Week 2 hours cannot be nonzero/)
     end
   end
 
@@ -567,6 +714,98 @@ RSpec.describe "Track C B7: per-company tip and overtime intake settings" do
       expect(applied[:errors]).to be_empty
       expect(pay_period.payroll_items.find_by!(employee: employee)).to have_attributes(
         hours_worked: BigDecimal("40.00"),
+        overtime_hours: BigDecimal("5.00")
+      )
+    end
+
+    it "rejects negative or nonnumeric daily hours, keeps explicit zero valid, and turns unparseable dates into row errors" do
+      create_profile!(tips_default: "already_paid_out", overtime_mode: "daily_records")
+      adapter = PayrollIntake::Adapters::SpikeEmail.new(pay_period: pay_period, company: company)
+
+      invalid_row = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          {
+            employee_name: employee.full_name,
+            total_tips: 20,
+            daily_hours: [
+              { date: "2026-06-15", hours: 15 },
+              { date: "2026-06-16", hours: 15 },
+              { date: "2026-06-17", hours: 15 },
+              { date: "2026-06-18", hours: -5 },
+              { date: "2026-06-19", hours: "abc" },
+              { date: "not-a-date", hours: 4 }
+            ]
+          }
+        ]
+      ).fetch(:rows).sole
+      expect(invalid_row[:validation_errors].pluck(:code)).to include("invalid_daily_hours", "daily_hours_out_of_period")
+      expect(invalid_row[:overtime_hours]).to eq(5.0)
+
+      zero_row = adapter.normalize(
+        detected_period: detected_period,
+        extracted_rows: [
+          {
+            employee_name: employee.full_name,
+            total_hours: 8,
+            total_tips: 20,
+            daily_hours: [
+              { date: "2026-06-15", hours: 8 },
+              { date: "2026-06-16", hours: 0 }
+            ]
+          }
+        ]
+      ).fetch(:rows).sole
+      expect(zero_row[:validation_errors]).to be_empty
+      expect(zero_row).to include(regular_hours: 8.0, overtime_hours: 0.0)
+    end
+
+    it "uses daily_records at apply even when weekly fields are also present, matching preview" do
+      create_profile!(tips_default: "already_paid_out", overtime_mode: "daily_records")
+      daily_hours = [
+        { "date" => "2026-06-15", "hours" => 15 },
+        { "date" => "2026-06-16", "hours" => 15 },
+        { "date" => "2026-06-17", "hours" => 15 },
+        { "date" => "2026-06-22", "hours" => 15 },
+        { "date" => "2026-06-23", "hours" => 20 }
+      ]
+      ai_extractor = instance_double(
+        PayrollIntake::AiExtractor,
+        call: {
+          detected_period: detected_period,
+          rows: [
+            {
+              "employee_name" => employee.full_name,
+              "week1_hours" => 40,
+              "week2_hours" => 40,
+              "total_hours" => 80,
+              "total_tips" => 25,
+              "daily_hours" => daily_hours,
+              "confidence" => 0.98
+            }
+          ],
+          warnings: []
+        }
+      )
+      allow(PayrollIntake::AiExtractor).to receive(:new).and_return(ai_extractor)
+
+      session = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "spike_email",
+        pasted_text: "Daily hours with summary totals",
+        actor: staff
+      ).call.fetch(:session)
+      row = session.rows.sole
+      expect(row).to have_attributes(regular_hours: BigDecimal("75.00"), overtime_hours: BigDecimal("5.00"))
+
+      applied = PayrollIntake::ApplyService.new(
+        session: session,
+        row_overrides: [ { id: row.id, disposition: "included", employee_id: employee.id } ],
+        actor: staff
+      ).call
+      expect(applied[:errors]).to be_empty
+      expect(pay_period.payroll_items.find_by!(employee: employee)).to have_attributes(
+        hours_worked: BigDecimal("75.00"),
         overtime_hours: BigDecimal("5.00")
       )
     end

@@ -260,7 +260,7 @@ module PayrollIntake
       end
 
       daily_entries = Array(row.source_payload.to_h["daily_hours"] || row.source_payload.to_h["days"]).select { |entry| entry.is_a?(Hash) }
-      if mode == "daily_records" && !has_weekly && daily_entries.any?
+      if mode == "daily_records" && daily_entries.any?
         regular_hours, overtime_hours, daily_errors = PayrollIntake::Adapters::SpikeEmail.split_for_daily_records(
           daily_entries,
           pay_period: pay_period
@@ -278,18 +278,30 @@ module PayrollIntake
         return values.merge(regular_hours: regular_hours, overtime_hours: overtime_hours)
       end
 
-      weekly_total = week1 + week2
-      if week1 > 168 || week2 > 168
-        raise ArgumentError, "Week 1 and Week 2 hours cannot exceed 168 hours"
+      if company.pay_frequency.to_s == "weekly"
+        if week2.positive?
+          raise ArgumentError, "Week 2 hours cannot be nonzero on a weekly pay period"
+        end
+        if week1 > 168
+          raise ArgumentError, "Week 1 hours cannot exceed 168 hours"
+        end
+        unless reconciles?(week1, row.total_hours)
+          raise ArgumentError, "Week 1 hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+        end
+        regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(values.fetch(:week1_hours), 0)
+      else
+        weekly_total = week1 + week2
+        if week1 > 168 || week2 > 168
+          raise ArgumentError, "Week 1 and Week 2 hours cannot exceed 168 hours"
+        end
+        unless reconciles?(weekly_total, row.total_hours)
+          raise ArgumentError, "Week 1 + Week 2 hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+        end
+        regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(
+          values.fetch(:week1_hours),
+          values.fetch(:week2_hours)
+        )
       end
-      unless reconciles?(weekly_total, row.total_hours)
-        raise ArgumentError, "Week 1 + Week 2 hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
-      end
-
-      regular_hours, overtime_hours = PayrollIntake::Adapters::SpikeEmail.split_for_weekly_hours(
-        values.fetch(:week1_hours),
-        company.pay_frequency.to_s == "weekly" ? 0 : values.fetch(:week2_hours)
-      )
       unless reconciles?(values.fetch(:regular_hours), regular_hours) && reconciles?(values.fetch(:overtime_hours), overtime_hours)
         raise ArgumentError,
               "Regular/overtime overrides must match Payroll's legal weekly calculation " \
@@ -311,6 +323,14 @@ module PayrollIntake
     end
 
     def repaired_weekly_hours?(row, override)
+      if company.pay_frequency.to_s == "weekly"
+        return false unless override.key?(:week1_hours)
+
+        week1 = decimal_override(override, :week1_hours, row.week1_hours)
+        week2 = decimal_override(override, :week2_hours, row.week2_hours)
+        return week2.zero? && reconciles?(week1, row.total_hours)
+      end
+
       return false unless override.key?(:week1_hours) && override.key?(:week2_hours)
 
       week1 = decimal_override(override, :week1_hours, row.week1_hours)
@@ -364,8 +384,18 @@ module PayrollIntake
       payroll_item.loan_deduction = values[:loan_deduction]
       payroll_item.import_source = session.source_type
       payroll_item.import_origin = "intake"
+      record_reviewed_hours_baseline!(payroll_item, values) if payroll_item.tracks_reviewed_hours?
       payroll_item.sync_default_payroll_adjustments!(employee)
       payroll_item.calculate!
+    end
+
+    def record_reviewed_hours_baseline!(payroll_item, values)
+      data = payroll_item.custom_columns_data.is_a?(Hash) ? payroll_item.custom_columns_data.deep_dup : {}
+      data["imported_hours"] = {
+        "regular_hours" => BigDecimal(values[:regular_hours].to_s).to_s("F"),
+        "overtime_hours" => BigDecimal(values[:overtime_hours].to_s).to_s("F")
+      }
+      payroll_item.custom_columns_data = data
     end
 
     def persist_tip_components!(payroll_item, values)

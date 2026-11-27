@@ -61,9 +61,13 @@ module PayrollIntake
         Array(entries).each do |entry|
           data = entry.with_indifferent_access
           date = parse_source_date(data[:date])
-          hours = coerce_decimal(data[:hours])
           unless date && date.between?(pay_period.start_date, pay_period.end_date)
             errors << { code: "daily_hours_out_of_period", message: "Daily hours date #{data[:date]} falls outside this pay period.", severity: "error" }
+            next
+          end
+          hours = parse_strict_nonnegative_decimal(data[:hours])
+          if hours.nil?
+            errors << { code: "invalid_daily_hours", message: "Daily hours value #{data[:hours].inspect} must be a finite non-negative number.", severity: "error" }
             next
           end
           offset = (date.wday - start_weekday) % 7
@@ -84,6 +88,18 @@ module PayrollIntake
         [ regular.round(2), overtime.round(2), errors, weekly_buckets ]
       end
 
+      def self.parse_strict_nonnegative_decimal(value)
+        return nil if value.nil? || value == true || value == false
+
+        cleaned = value.to_s.strip.gsub(/[$,]/, "")
+        return nil if cleaned.empty?
+
+        parsed = BigDecimal(cleaned, exception: false)
+        return nil unless parsed&.finite? && !parsed.negative?
+
+        parsed
+      end
+
       def self.parse_source_date(value)
         return value if value.is_a?(Date)
         return nil if value.blank?
@@ -92,11 +108,15 @@ module PayrollIntake
         year_token = cleaned.split(/[\/-]/).last.to_s
         format = year_token.length == 2 ? "%m/%d/%y" : "%m/%d/%Y"
 
-        Date.strptime(cleaned, format)
-      rescue Date::Error
-        Date.parse(cleaned)
-      rescue Date::Error
-        nil
+        begin
+          Date.strptime(cleaned, format)
+        rescue Date::Error
+          begin
+            Date.parse(cleaned)
+          rescue Date::Error
+            nil
+          end
+        end
       end
 
       def self.coerce_decimal(value)
@@ -169,8 +189,8 @@ module PayrollIntake
           review_count: rows.count { |row| row[:status] == "needs_review" },
           total_regular_hours: round(rows.sum(0.to_d) { |row| BigDecimal(row[:regular_hours].to_s) }),
           total_overtime_hours: round(rows.sum(0.to_d) { |row| BigDecimal(row[:overtime_hours].to_s) }),
-          total_reported_tips: money(rows.sum(0.to_d) { |row| BigDecimal(row[:reported_tips].to_s) }),
-          total_tips_paid_out: money(rows.sum(0.to_d) { |row| BigDecimal(row[:tips_paid_out].to_s) })
+          total_reported_tips: rows.sum(0.to_d) { |row| row[:reported_tips].to_d }.round(2).to_f,
+          total_tips_paid_out: rows.sum(0.to_d) { |row| row[:tips_paid_out].to_d }.round(2).to_f
         }
 
         evidence = {
@@ -225,12 +245,20 @@ module PayrollIntake
         total_tips = extracted_total_tips.positive? ? extracted_total_tips : summed_week_tips
         total_tips = summed_week_tips if extracted_total_tips.zero? && summed_week_tips.positive?
 
-        row_tip_override = trusted_source ? parse_optional_boolean(raw_row[:tips_already_paid]) : nil
-        tips_already_paid = row_tip_override.nil? ? effective_settings.tips_already_paid_default? : row_tip_override
-        tip_treatment_source = row_tip_override.nil? ? effective_settings.source : "row_override"
+        warnings = Array(hour_warnings)
+        row_tip_override = trusted_source ? parse_optional_boolean(raw_row[:tips_already_paid]) : :absent
+        if row_tip_override == :invalid
+          warnings << warning(
+            "invalid_tip_treatment_override",
+            "Unrecognized tips_already_paid value (#{raw_row[:tips_already_paid].inspect}); using default tip treatment (#{effective_settings.tips_default}).",
+            "warning"
+          )
+          row_tip_override = :absent
+        end
+        tips_already_paid = row_tip_override == :absent ? effective_settings.tips_already_paid_default? : row_tip_override
+        tip_treatment_source = row_tip_override == :absent ? effective_settings.source : "row_override"
         tips_paid_out = tips_already_paid ? total_tips : 0.to_d
 
-        warnings = Array(hour_warnings)
         if total_tips.zero? && tips_already_paid
           warnings << warning("missing_tips", "No paid-out tips were detected for this row. Confirm the source email before applying.", "warning")
         end
@@ -259,11 +287,11 @@ module PayrollIntake
           week2_hours: round(week2_hours),
           regular_hours: round(regular_hours),
           overtime_hours: round(overtime_hours),
-          week1_tips: week1_tips.to_f,
-          week2_tips: week2_tips.to_f,
-          reported_tips: total_tips.to_f,
-          tips_paid_out: tips_paid_out.to_f,
-          loan_deduction: money(raw_row[:loan_deduction]),
+          week1_tips: week1_tips,
+          week2_tips: week2_tips,
+          reported_tips: total_tips,
+          tips_paid_out: tips_paid_out,
+          loan_deduction: money_decimal(raw_row[:loan_deduction]),
           warnings: warnings,
           validation_errors: errors,
           status: status,
@@ -481,15 +509,42 @@ module PayrollIntake
 
       def hours_for_source_reports(total_hours:, regular_hours:, overtime_hours:, total_present:, explicit_regular:, explicit_overtime:)
         errors = []
-        if explicit_regular != explicit_overtime && !total_present
-          errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
-        elsif total_present && explicit_regular && explicit_overtime && !reconciles?(regular_hours + overtime_hours, total_hours)
-          errors << error("source_total_mismatch", "Extracted regular + overtime hours do not tie to the extracted total hours.")
+        if explicit_regular && explicit_overtime
+          if total_present && !reconciles?(regular_hours + overtime_hours, total_hours)
+            errors << error("source_total_mismatch", "Extracted regular + overtime hours do not tie to the extracted total hours.")
+          end
+          return [ regular_hours, overtime_hours, errors, [] ]
         end
 
-        resolved_regular = explicit_regular ? regular_hours : (total_present ? total_hours : 0.to_d)
-        resolved_overtime = explicit_overtime ? overtime_hours : 0.to_d
-        [ resolved_regular, resolved_overtime, errors, [] ]
+        if explicit_overtime && !explicit_regular
+          if total_present
+            derived_regular = (total_hours - overtime_hours).round(2)
+            if derived_regular.negative?
+              errors << error("overtime_exceeds_total", "Extracted overtime hours exceed the extracted total hours.")
+              return [ 0.to_d, overtime_hours, errors, [] ]
+            end
+            return [ derived_regular, overtime_hours, errors, [] ]
+          end
+
+          errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
+          return [ 0.to_d, overtime_hours, errors, [] ]
+        end
+
+        if explicit_regular && !explicit_overtime
+          if total_present
+            derived_overtime = (total_hours - regular_hours).round(2)
+            if derived_overtime.negative?
+              errors << error("regular_exceeds_total", "Extracted regular hours exceed the extracted total hours.")
+              return [ regular_hours, 0.to_d, errors, [] ]
+            end
+            return [ regular_hours, derived_overtime, errors, [] ]
+          end
+
+          errors << error("incomplete_overtime_split", "Extracted regular and overtime hours must be supplied together.")
+          return [ regular_hours, 0.to_d, errors, [] ]
+        end
+
+        [ total_present ? total_hours : 0.to_d, 0.to_d, errors, [] ]
       end
 
       def hours_for_daily_records(daily_hours:, week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:)
@@ -540,11 +595,20 @@ module PayrollIntake
         decimal(value).round(2)
       end
 
-      def parse_optional_boolean(value)
-        return value if value == true || value == false
-        return nil if value.nil? || value.to_s.strip.empty?
+      RECOGNIZED_TRUE_VALUES = %w[true t 1 yes y already_paid_out].freeze
+      RECOGNIZED_FALSE_VALUES = %w[false f 0 no n paid_in_check].freeze
 
-        ActiveModel::Type::Boolean.new.cast(value)
+      def parse_optional_boolean(value)
+        return true if value == true || value == 1
+        return false if value == false || value == 0
+        return :absent if value.nil?
+
+        token = value.to_s.strip.downcase
+        return :absent if token.empty?
+        return true if RECOGNIZED_TRUE_VALUES.include?(token)
+        return false if RECOGNIZED_FALSE_VALUES.include?(token)
+
+        :invalid
       end
 
       def validate_period!(detected_period)
@@ -565,18 +629,7 @@ module PayrollIntake
       end
 
       def parse_date(value)
-        return value if value.is_a?(Date)
-        return nil if value.blank?
-
-        cleaned = value.to_s.strip
-        year_token = cleaned.split(/[\/-]/).last.to_s
-        format = year_token.length == 2 ? "%m/%d/%y" : "%m/%d/%Y"
-
-        Date.strptime(cleaned, format)
-      rescue Date::Error
-        Date.parse(cleaned)
-      rescue Date::Error
-        nil
+        self.class.parse_source_date(value)
       end
 
       def numeric(value)

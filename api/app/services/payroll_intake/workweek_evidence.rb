@@ -34,7 +34,7 @@ module PayrollIntake
       validate_period_length!
 
       aligned = pay_period.start_date.wday == workweek.starts_on_weekday
-      unless aligned || allow_misaligned
+      unless aligned || (allow_misaligned && workweek_alignment != "aligned")
         raise ArgumentError, "Payroll intake requires the pay period to begin on the confirmed legal workweek start day"
       end
       if workweek.effective_on > pay_period.start_date || (workweek.ends_on.present? && workweek.ends_on < pay_period.end_date)
