@@ -866,7 +866,9 @@ module PayrollIntake
     def apply_reviewed_client_changes!(payroll_item, employee, matched_row)
       applier = PayrollIntake::ClientChangeApplier.new(pay_period: pay_period)
       applier.apply_period_pay!(payroll_item, employee, matched_row)
-      applier.apply_client_hours!(payroll_item, employee, matched_row) if matched_row[:client_extra_hours].present?
+      if matched_row[:client_extra_hours].present?
+        applier.apply_client_hours!(payroll_item, employee, matched_row, use_selected_wage_rate_for_existing: true)
+      end
       applier.sync_client_change_evidence!(payroll_item, matched_row)
     end
 
