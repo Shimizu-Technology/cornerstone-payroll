@@ -239,6 +239,10 @@ class StaffRolePolicy
     "api/v1/admin/reports#w2_gu_efw2" => :manage_client_administration,
     # Full TINs: the same access as the 1099 sign-off.
     "api/v1/admin/reports#form_1099_nec_payer_record" => :manage_client_administration,
+    "api/v1/admin/employee_tipped_occupations#create" => :manage_client_configuration,
+    "api/v1/admin/employee_tipped_occupations#update" => :manage_client_configuration,
+    "api/v1/admin/employee_tipped_occupations#destroy" => :manage_client_configuration,
+    "api/v1/admin/employee_tipped_occupations#bulk_set" => :manage_client_configuration,
     "api/v1/admin/employees#review_intake_exception" => :manage_client_configuration,
     "api/v1/admin/employees#terminate" => :manage_client_configuration,
     "api/v1/admin/employees#deactivate" => :manage_employee_status,

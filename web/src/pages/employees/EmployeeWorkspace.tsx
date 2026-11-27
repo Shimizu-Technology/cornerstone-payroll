@@ -1,3 +1,4 @@
+import { EmployeeTippedOccupations } from '@/components/employees/EmployeeTippedOccupations';
 import { EmployeeAppPanel } from '@/components/employee-app/EmployeeAppPanel';
 import { EmployeeContactCard } from '@/components/employees/EmployeeContactCard';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
@@ -132,9 +133,10 @@ export function EmployeeWorkspace(): ReactElement {
   const [contactEditRequest, setContactEditRequest] = useState(0);
   const [appPanelVersion, setAppPanelVersion] = useState(0);
   useEffect(() => {
-    if (loading || !employee || activeTab !== 'pay-setup') return;
+    if (loading || !employee) return;
     const targetId = location.hash.slice(1);
-    if (!['retirement-plan', 'retirement-year-evidence'].includes(targetId)) return;
+    const allowed = activeTab === 'overview' ? ['tipped-occupations'] : ['retirement-plan', 'retirement-year-evidence'];
+    if (!allowed.includes(targetId)) return;
     const target = document.getElementById(targetId);
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });
@@ -400,6 +402,9 @@ export function EmployeeWorkspace(): ReactElement {
                 readOnly={readOnly}
                 canRevealHidden={canRevealHiddenNotes}
               />
+            )}
+            {employee.company_id === companyId && employee.id === employeeId && employee.employment_type !== 'contractor' && (
+              <EmployeeTippedOccupations key={`tipped-occupations:${companyId}:${employee.id}`} employeeId={employee.id} companyId={companyId} readOnly={readOnly} />
             )}
           </>
         )}

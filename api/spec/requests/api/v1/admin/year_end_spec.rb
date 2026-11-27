@@ -17,7 +17,7 @@ RSpec.describe "Year-end checklist", type: :request do
   before do
     [
       Api::V1::Admin::YearEndController, Api::V1::Admin::ReportsController,
-      Api::V1::Admin::PayrollFilingResponsibilitiesController
+      Api::V1::Admin::PayrollFilingResponsibilitiesController, Api::V1::Admin::EmployeeTippedOccupationsController
     ].each do |controller|
       allow_any_instance_of(controller).to receive(:current_user).and_return(acting_user)
       allow_any_instance_of(controller).to receive(:current_company_id) { acting_company.id }
@@ -762,6 +762,145 @@ RSpec.describe "Year-end checklist", type: :request do
       post "/api/v1/admin/reports/w2_gu_preflight", params: { year: 2026 }
       expect(response).to have_http_status(:ok), response.body
       post "/api/v1/admin/reports/w2_gu_mark_ready", params: { year: 2026, notes: "Year-end review" }
+    end
+
+    it "sets an audited Box 14b code in bulk, enables sign-off, and invalidates readiness after a change" do
+      item = pay(company, Date.new(2026, 5, 8), worker: employee, reported_tips: 200, cash_tips_reported: 200,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+      original_payroll = item.attributes
+      record_decision(filing_types: %w[w2_gu], party: "cornerstone")
+      mark_ready
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(response.parsed_body["year_end_blockers"]).to include(hash_including("warning_code" => "tipped_occupation_code_missing"))
+
+      bulk = "/api/v1/admin/year_end/tipped_occupations"
+      post bulk, params: { tax_year: 2026, occupation_code: "102", employee_ids: [ employee.id, -1 ] }
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(employee.employee_tipped_occupations).to be_empty
+
+      post bulk, params: { tax_year: 2026, occupation_code: "102", employee_ids: [ employee.id ] }
+      expect(response).to have_http_status(:created), response.body
+      occupation = employee.employee_tipped_occupations.sole
+      expect(occupation.effective_from).to eq(Date.new(2026, 1, 1))
+      expect(occupation.effective_to).to be_nil
+      expect(checklist_step("review_warnings").dig("data", "warnings")).not_to include(hash_including("code" => "tipped_occupation_code_missing"))
+      mark_ready
+      expect(response).to have_http_status(:ok), response.body
+
+      path = "/api/v1/admin/employees/#{employee.id}/tipped_occupations"
+      post path, params: { occupation_code: "102", effective_from: "2026-06-01" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      post path, params: { occupation_code: "101", effective_from: "2026-06-01", effective_to: "2026-12-31", replace_id: occupation.id }
+      expect(response).to have_http_status(:created), response.body
+      expect(occupation.reload.effective_to).to eq(Date.new(2026, 5, 31))
+
+      replacement_row = response.parsed_body.fetch("data").first
+      expect(replacement_row.fetch("effective_to")).to eq("2026-12-31")
+      replacement_id = replacement_row.fetch("id")
+      expect(checklist_step("mark_ready").dig("data", "filing", "stale")).to be(true)
+      post path, params: { occupation_code: "000", effective_from: "2026-09-01", replace_id: replacement_id }
+      expect(response).to have_http_status(:created), response.body
+      row = W2GuAggregator.new(company, 2026).generate.fetch(:employees).sole
+      expect(row.fetch(:box14b_tipped_occupation_codes)).to include("000")
+      expect(row.fetch(:box14b_tipped_occupation_codes).size).to eq(2)
+      expect(item.reload.attributes).to eq(original_payroll)
+      expect(checklist_step("review_warnings").dig("data", "warnings")).to include(hash_including("code" => "box14b_more_than_two_codes"))
+
+      delete "#{path}/#{occupation.id}"
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.employee_tipped_occupations.exists?(occupation.id)).to be(false)
+      expect(AuditLog.where(user: admin, company: company, record_type: "Employee", record_id: employee.id)
+        .where("action LIKE ?", "employee_tipped_occupation#%").order(:id).pluck(:action))
+        .to eq(%w[employee_tipped_occupation#add employee_tipped_occupation#change employee_tipped_occupation#change employee_tipped_occupation#remove])
+    end
+
+    it "ends a bulk assignment immediately before a later scheduled occupation" do
+      pay(company, Date.new(2026, 5, 8), worker: employee, reported_tips: 200, cash_tips_reported: 200,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+      scheduled = create(:employee_tipped_occupation, employee: employee, occupation_code: "101", effective_from: Date.new(2027, 3, 1))
+
+      post "/api/v1/admin/year_end/tipped_occupations", params: { tax_year: "02026", occupation_code: "102", employee_ids: [ employee.id ] }
+      expect(response).to have_http_status(:created), response.body
+      expect(response.parsed_body).to eq("count" => 1, "capped_count" => 1)
+      expect(employee.employee_tipped_occupations.find_by!(occupation_code: "102").effective_to).to eq(Date.new(2027, 2, 28))
+      expect(scheduled.reload.effective_from).to eq(Date.new(2027, 3, 1))
+    end
+
+    it "changes and ends an occupation while preserving a concurrent code and its own history" do
+      original = create(:employee_tipped_occupation, employee: employee, occupation_code: "101",
+        effective_from: Date.new(2026, 1, 1), effective_to: Date.new(2026, 12, 31))
+      path = "/api/v1/admin/employees/#{employee.id}/tipped_occupations"
+      post path, params: { occupation_code: "102", effective_from: "2026-01-01" }
+      expect(response).to have_http_status(:created), response.body
+
+      post path, params: { occupation_code: "000", effective_from: "2026-06-01", effective_to: "", replace_id: original.id }
+      expect(response).to have_http_status(:created), response.body
+      replacement = employee.employee_tipped_occupations.find_by!(occupation_code: "000")
+      expect(replacement.effective_to).to be_nil
+      expect(original.reload.effective_to).to eq(Date.new(2026, 5, 31))
+
+      patch "#{path}/#{replacement.id}", params: { effective_to: "2026-05-01" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      patch "#{path}/#{replacement.id}", params: { effective_to: "2026-08-31" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(replacement.reload.effective_to).to eq(Date.new(2026, 8, 31))
+      expect(employee.employee_tipped_occupations.count).to eq(3)
+      expect(AuditLog.where(user: admin, record_id: employee.id, action: "employee_tipped_occupation#end")).to exist
+    end
+
+    it "blocks removal for a filed W-2 year within the entry's range" do
+      open_entry = create(:employee_tipped_occupation, employee: employee, occupation_code: "101", effective_from: Date.new(2025, 6, 1))
+      historical_entry = create(:employee_tipped_occupation, employee: employee, occupation_code: "102",
+        effective_from: Date.new(2025, 6, 1), effective_to: Date.new(2025, 12, 31))
+      PayrollFilingRecord.create!(company: company, filing_type: "w2_gu_w3_ss", tax_year: 2026,
+        status: "submitted", submitted_at: Time.current, confirmation_number: "TEST-W2", source_fingerprint: "a" * 64)
+      path = "/api/v1/admin/employees/#{employee.id}/tipped_occupations"
+
+      delete "#{path}/#{open_entry.id}"
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(response.parsed_body.fetch("error")).to include("2026", "Use End or Change")
+      expect(employee.employee_tipped_occupations.exists?(open_entry.id)).to be(true)
+      expect(AuditLog.where(record_id: employee.id, action: "employee_tipped_occupation#remove")).to be_empty
+
+      delete "#{path}/#{historical_entry.id}"
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.employee_tipped_occupations.exists?(historical_entry.id)).to be(false)
+    end
+
+    it "accepts bulk assignments for a later year with a configured wage base" do
+      create(:annual_tax_config, tax_year: 2027)
+      pay(company, Date.new(2027, 5, 7), worker: employee, reported_tips: 200, cash_tips_reported: 200,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+
+      post "/api/v1/admin/year_end/tipped_occupations", params: { tax_year: 2027, occupation_code: "102", employee_ids: [ employee.id ] }
+      expect(response).to have_http_status(:created), response.body
+      expect(employee.employee_tipped_occupations.sole.effective_from).to eq(Date.new(2027, 1, 1))
+    end
+
+    it "returns JSON for a missing required field" do
+      post "/api/v1/admin/employees/#{employee.id}/tipped_occupations", params: { occupation_code: "102" }
+      expect(response).to have_http_status(:bad_request)
+      expect(response.parsed_body).to eq("error" => "Effective from is required.")
+    end
+
+    %w[accountant client employee].each do |role|
+      it "denies a #{role} without staff client configuration access" do
+        user = create(:user, company: company, role: role)
+        allow_any_instance_of(Api::V1::Admin::EmployeeTippedOccupationsController).to receive(:current_user).and_return(user)
+
+        post "/api/v1/admin/employees/#{employee.id}/tipped_occupations", params: { occupation_code: "102", effective_from: "2026-01-01" }
+        expect(response).to have_http_status(:forbidden), response.body
+        expect(employee.employee_tipped_occupations).to be_empty
+      end
+    end
+
+    it "rejects writes to an employee outside the selected company" do
+      other_company = create(:company, organization: company.organization)
+      other_employee = create(:employee, company: other_company, department: create(:department, company: other_company))
+
+      post "/api/v1/admin/employees/#{other_employee.id}/tipped_occupations", params: { occupation_code: "102", effective_from: "2026-01-01" }
+      expect(response).to have_http_status(:not_found), response.body
+      expect(other_employee.employee_tipped_occupations).to be_empty
     end
 
     it "refuses mark-ready for an employee e-file issue with the employee ID" do
