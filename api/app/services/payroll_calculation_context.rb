@@ -52,7 +52,7 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, w4_profile: w4_election&.profile_attributes, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil, pay_period: nil, payroll_item: nil)
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, w4_profile: w4_election&.profile_attributes, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil, pay_period: nil, payroll_item: nil, preserve_entered_pay_rates: false)
       snapshot = {
         "version" => VERSION,
         "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee, rates_on: rates_on) : nil,
@@ -70,9 +70,25 @@ class PayrollCalculationContext
         snapshot["item_payment_delivery_method"] = item_method
         snapshot["employee_payment_default_at_calculation"] = employee_default
         snapshot["payment_delivery_method_overridden"] = prior_overridden && item_method != employee_default
+        if preserve_entered_pay_rates && payroll_item.present?
+          snapshot["preserved_entered_rates"] = preserved_entered_rates_snapshot(payroll_item)
+        end
       end
 
       snapshot
+    end
+
+    def preserved_entered_rates_snapshot(payroll_item)
+      {
+        "pay_rate" => payroll_item.pay_rate.to_d.to_s("F"),
+        "wage_rate_hours" => payroll_item.wage_rate_hours.map do |entry|
+          {
+            "employee_wage_rate_id" => entry["employee_wage_rate_id"].presence&.to_i,
+            "label" => entry["label"].to_s.strip.downcase,
+            "rate" => entry["rate"].to_d.to_s("F")
+          }
+        end
+      }
     end
 
     def paycheck_fingerprint_scoped?(employee:, pay_period:)

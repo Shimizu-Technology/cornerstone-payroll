@@ -32,8 +32,8 @@ class PayPeriodLifecycleService
   end
 
   def approve!
-    CompanyFeatures.with_cache do
-      with_financial_pay_period_lock do
+    with_financial_pay_period_lock do
+      CompanyFeatures.with_cache do
         validate_prior_provider_source!
         validate_current_intake!
         unless pay_period.calculated?
@@ -96,72 +96,72 @@ class PayPeriodLifecycleService
 
   def commit!(acknowledged_outstanding_file_request_ids: nil, expected_next_check_number: nil, acknowledged_verification_items: nil)
     acknowledgement_ids = { batch: [], entries: [] }
-    CompanyFeatures.with_cache do
-      with_financial_pay_period_lock do
-      validate_prior_provider_source!
-      validate_current_intake!
-      unless pay_period.approved?
-        raise InvalidTransitionError, "Can only commit an approved pay period"
-      end
-      if pay_period.parallel_run? || pay_period.payroll_parallel_run_review.present?
-        raise InvalidTransitionError, "Parallel comparison payroll cannot be committed. Create a new live payroll after go-live approval."
-      end
-      validate_run_eligibility!
-      validate_expected_entries!
-      unless pay_period.payroll_items.exists?
-        raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
-      end
+    with_financial_pay_period_lock do
+      CompanyFeatures.with_cache do
+        validate_prior_provider_source!
+        validate_current_intake!
+        unless pay_period.approved?
+          raise InvalidTransitionError, "Can only commit an approved pay period"
+        end
+        if pay_period.parallel_run? || pay_period.payroll_parallel_run_review.present?
+          raise InvalidTransitionError, "Parallel comparison payroll cannot be committed. Create a new live payroll after go-live approval."
+        end
+        validate_run_eligibility!
+        validate_expected_entries!
+        unless pay_period.payroll_items.exists?
+          raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
+        end
 
-      validate_go_live_gate!
-      validate_payroll_participation!
-      validate_variable_period_pay!
-      validate_employee_readiness!
-      validate_paycheck_input_freshness!(stage: :commit)
-      validate_employee_document_readiness!
-      validate_annual_fica_context!
-      validate_employer_contribution_tracking!
-      validate_client_approval!
-      link_error = pay_period.client_file_link_error
-      raise InvalidTransitionError, link_error if link_error
+        validate_go_live_gate!
+        validate_payroll_participation!
+        validate_variable_period_pay!
+        validate_employee_readiness!
+        validate_paycheck_input_freshness!(stage: :commit)
+        validate_employee_document_readiness!
+        validate_annual_fica_context!
+        validate_employer_contribution_tracking!
+        validate_client_approval!
+        link_error = pay_period.client_file_link_error
+        raise InvalidTransitionError, link_error if link_error
 
-      requests = pay_period.outstanding_client_file_requests.lock.to_a
-      validate_file_request_snapshot!(requests, acknowledged_outstanding_file_request_ids)
-      validate_check_number_snapshot!(expected_next_check_number)
-      required_verification_items = validate_verification_acknowledgements!(acknowledged_verification_items)
-      PayrollSubmissions::LinkPayPeriod.for_commit!(pay_period)
-      @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
-      validate_payment_delivery!
-      validate_source_earnings!
-      committed_items = pay_period.payroll_items.includes(
-        :employee,
-        payroll_item_deductions: :deduction_type,
-        employee: { employee_loans: :loan_transactions }
-      ).to_a.sort_by { |item| [ item.employee_id, item.id ] }
+        requests = pay_period.outstanding_client_file_requests.lock.to_a
+        validate_file_request_snapshot!(requests, acknowledged_outstanding_file_request_ids)
+        validate_check_number_snapshot!(expected_next_check_number)
+        required_verification_items = validate_verification_acknowledgements!(acknowledged_verification_items)
+        PayrollSubmissions::LinkPayPeriod.for_commit!(pay_period)
+        @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
+        validate_payment_delivery!
+        validate_source_earnings!
+        committed_items = pay_period.payroll_items.includes(
+          :employee,
+          payroll_item_deductions: :deduction_type,
+          employee: { employee_loans: :loan_transactions }
+        ).to_a.sort_by { |item| [ item.employee_id, item.id ] }
 
-      committed_items.each do |item|
-        item.update!(payment_delivery_method: item.effective_payment_delivery_method)
-      end
+        committed_items.each do |item|
+          item.update!(payment_delivery_method: item.effective_payment_delivery_method)
+        end
 
-      validate_financial_source_correction!
-      pay_period.update!(
-        status: "committed",
-        committed_at: Time.current,
-        committed_by_id: actor&.id
-      )
-      record_verification_acknowledgements!(required_verification_items)
+        validate_financial_source_correction!
+        pay_period.update!(
+          status: "committed",
+          committed_at: Time.current,
+          committed_by_id: actor&.id
+        )
+        record_verification_acknowledgements!(required_verification_items)
 
-      PortalNotifications.payroll_committed!(pay_period, actor: actor)
+        PortalNotifications.payroll_committed!(pay_period, actor: actor)
 
-      apply_ytd_and_loan_effects!(committed_items)
-      # A run paid before already-committed runs adds to their YTD.
-      PayrollYtdSnapshotRefresh.after(pay_period: pay_period, employee_ids: committed_items.map(&:employee_id).uniq)
-      PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
-      assign_check_numbers!(committed_items)
-      create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?
-      record_correction_commit! if pay_period.correction_run?
-      recorded_acknowledgements = record_aire_processing_acknowledgements
-      acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
-      acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
+        apply_ytd_and_loan_effects!(committed_items)
+        # A run paid before already-committed runs adds to their YTD.
+        PayrollYtdSnapshotRefresh.after(pay_period: pay_period, employee_ids: committed_items.map(&:employee_id).uniq)
+        PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
+        assign_check_numbers!(committed_items)
+        create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?
+        record_correction_commit! if pay_period.correction_run?
+        recorded_acknowledgements = record_aire_processing_acknowledgements
+        acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
+        acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
       end
     end
 
@@ -322,8 +322,6 @@ class PayPeriodLifecycleService
   end
 
   def validate_employee_readiness!
-    return unless PayrollReadinessPolicy.company_has_gated_employees?(pay_period.company_id)
-
     items = pay_period.payroll_items.financially_reportable
       .joins(:employee)
       .where(employees: { readiness_gate_enforced: true })
@@ -369,9 +367,10 @@ class PayPeriodLifecycleService
 
   def materialize_scoped_payment_delivery_methods!
     client_managed = CompanyFeatures.for(pay_period.company).client_managed_employee_lifecycle?
-    return unless client_managed || PayrollReadinessPolicy.company_has_gated_employees?(pay_period.company_id)
+    scope = pay_period.payroll_items.financially_reportable.where(payment_delivery_method: nil)
+    scope = scope.joins(:employee).where(employees: { readiness_gate_enforced: true }) unless client_managed
 
-    items = pay_period.payroll_items.financially_reportable.where(payment_delivery_method: nil).includes(:employee).order(:id).to_a
+    items = scope.includes(:employee).order(:id).to_a
     items.each do |item|
       next unless PayrollReadinessPolicy.fingerprint_scoped?(employee: item.employee, pay_period: pay_period, client_managed: client_managed)
 

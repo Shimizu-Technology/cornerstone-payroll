@@ -148,8 +148,6 @@ class Company < ApplicationRecord
   validate :subdomain_slug_change_requires_disabled_profile, if: -> { persisted? && will_save_change_to_subdomain_slug? }
   validate :valid_public_branding
   after_commit { TenantSubdomainRegistry.invalidate! }
-  after_save { CompanyFeatures.clear_cache!(id) }
-  after_destroy { CompanyFeatures.clear_cache!(id) }
 
   validate :subdomain_requires_live_payroll, if: -> { !subdomain_slug.nil? && !operating? }
   validates :ein, uniqueness: { conditions: -> { live_payroll } }, allow_blank: true, unless: :contained?

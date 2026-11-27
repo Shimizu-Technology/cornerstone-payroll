@@ -11,25 +11,11 @@ class CompanyFeatures
   attr_reader :company, :as_of, :profile
 
   def self.with_cache
-    previous_features = Current.company_features_cache
-    previous_gated = Current.company_gated_employees_cache
-    Current.company_features_cache ||= {}
-    Current.company_gated_employees_cache ||= {}
+    previous = Current.company_features_cache
+    Current.company_features_cache = {}
     yield
   ensure
-    Current.company_features_cache = previous_features
-    Current.company_gated_employees_cache = previous_gated
-  end
-
-  def self.clear_cache!(company_id = nil)
-    cache = Current.company_features_cache
-    return unless cache
-
-    if company_id
-      cache.delete_if { |(cid, _date, _retire), _| cid == company_id }
-    else
-      cache.clear
-    end
+    Current.company_features_cache = previous
   end
 
   def self.for(company, on: PayrollBusinessClock.today, retire_windows: true)

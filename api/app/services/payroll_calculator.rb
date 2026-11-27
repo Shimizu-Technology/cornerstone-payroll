@@ -18,7 +18,7 @@
 class PayrollCalculator
   attr_reader :employee, :payroll_item
 
-  def self.for(employee, payroll_item, employment_type: nil, calculation_context: nil, annual_fica_context: nil)
+  def self.for(employee, payroll_item, employment_type: nil, calculation_context: nil, annual_fica_context: nil, preserve_entered_pay_rates: false)
     AnnualTaxConfig.require_verified!(payroll_item.pay_period.pay_date.year, lock: true) if calculation_context.blank?
     TimeTracking::SourceEarningsConservation.validate!(payroll_item, employee: employee)
     employment_type ||= if calculation_context.present? || payroll_item.timekeeping_source == "correction_reference"
@@ -28,21 +28,22 @@ class PayrollCalculator
     end
     case employment_type
     when "hourly"
-      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
+      HourlyPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context, preserve_entered_pay_rates: preserve_entered_pay_rates)
     when "salary"
-      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
+      SalaryPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context, preserve_entered_pay_rates: preserve_entered_pay_rates)
     when "contractor"
-      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context)
+      ContractorPayrollCalculator.new(employee, payroll_item, calculation_context: calculation_context, annual_fica_context: annual_fica_context, preserve_entered_pay_rates: preserve_entered_pay_rates)
     else
       raise ArgumentError, "Unknown employment type: #{employment_type}"
     end
   end
 
-  def initialize(employee, payroll_item, calculation_context: nil, annual_fica_context: nil)
+  def initialize(employee, payroll_item, calculation_context: nil, annual_fica_context: nil, preserve_entered_pay_rates: false)
     @employee = employee
     @payroll_item = payroll_item
     @calculation_context = calculation_context&.deep_stringify_keys
     @annual_fica_context = annual_fica_context
+    @preserve_entered_pay_rates = preserve_entered_pay_rates == true
   end
 
   def calculate
@@ -1038,7 +1039,8 @@ class PayrollCalculator
       w4_profile: w4_profile_for_calculation,
       retirement_election: retirement_election_for_calculation,
       pay_period: pay_period,
-      payroll_item: payroll_item
+      payroll_item: payroll_item,
+      preserve_entered_pay_rates: @preserve_entered_pay_rates
     ).merge(built_in_employer_match_identity)
     if line_rounded_earnings?
       payroll_item.calculation_context_snapshot = payroll_item.calculation_context_snapshot.merge("earnings_rounding" => PayrollEarningsRounding::POLICY)

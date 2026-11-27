@@ -153,8 +153,6 @@ class Employee < ApplicationRecord
   # (EmployeeLinks::EmailChange). Inside the UPDATE, so the row is locked.
   after_update :apply_employee_app_email_change, if: :saved_change_to_email?
   after_create :record_initial_compensation_history, unless: :skip_initial_compensation_history
-  after_save :clear_readiness_gated_cache
-  after_destroy :clear_readiness_gated_cache
   before_validation :normalize_w4_source_reference
   before_validation :normalize_intake_blank_details
   before_validation :normalize_pay_rate_precision
@@ -1319,11 +1317,5 @@ class Employee < ApplicationRecord
     return value if value.nil?
 
     BigDecimal(value.to_s).round(2)
-  end
-
-  def clear_readiness_gated_cache
-    return unless destroyed? || saved_change_to_readiness_gate_enforced? || (previously_new_record? && readiness_gate_enforced?)
-
-    PayrollReadinessPolicy.clear_company_gated_cache!(company_id)
   end
 end

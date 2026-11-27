@@ -20,9 +20,6 @@ class EmployeeAppActivation < ApplicationRecord
   validates :activated_at, presence: true
   validates :revoke_reason, length: { maximum: EmployeeAppSwitch::REASON_MAX }
 
-  after_save { CompanyFeatures.clear_cache!(company_id) }
-  after_destroy { CompanyFeatures.clear_cache!(company_id) }
-
   scope :open, -> { where(revoked_at: nil) }
 
   def self.open_parts_for(company_id)

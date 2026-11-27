@@ -577,5 +577,131 @@ RSpec.describe "Lifecycle PR 2 Admin Pay-Run Request Gates", type: :request do
       expect(response).to have_http_status(:ok), response.body
       expect(period.reload.status).to eq("approved")
     end
+
+    it "clears staleness after refresh_setup preserves entered pay rates for a gated item while still catching later drift (round 2 low)" do
+      ready = create_ready_enforced_employee(first_name: "Jordan", last_name: "RefreshEntered")
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: ready,
+        employment_type: "hourly",
+        pay_rate: 17.50,
+        hours_worked: 40,
+        payment_delivery_method: "paper_check"
+      )
+      item.calculate!
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # refresh_setup intentionally preserves the entered $17.50 rate while recalculating setup
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to eq([])
+      expect(item.reload.pay_rate.to_d).to eq(BigDecimal("17.50"))
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period.reload, stage: :approve)).to eq([])
+
+      post "/api/v1/admin/pay_periods/#{period.id}/approve", as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(period.reload.status).to eq("approved")
+
+      # Unapprove and verify real rate drift AFTER refresh_setup still fails closed
+      period.update!(status: "calculated", approved_at: nil, approved_by_id: nil)
+      EmployeeCompensationChangeService.new(
+        employee: ready,
+        pay_rate: 24.00,
+        effective_on: period.start_date,
+        actor: admin_user,
+        source: "operator",
+        reason: "Rate drift after refresh_setup"
+      ).call!
+
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period.reload, stage: :approve).map { |r| r[:employee_id] }).to eq([ ready.id ])
+      post "/api/v1/admin/pay_periods/#{period.id}/approve", as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body["error"]).to include("Recalculate payroll")
+
+      # Direct item.calculate! without repricing clears preserved_entered_rates and MUST stay stale!
+      item.reload.calculate!
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period.reload, stage: :approve).map { |r| r[:employee_id] }).to eq([ ready.id ])
+    end
+
+    it "clears staleness after refresh_setup preserves entered multi-rate wage_rate_hours while failing closed on tampering or rate drift (round 2 low)" do
+      ready = create_ready_enforced_employee(first_name: "Multi", last_name: "RefreshRates")
+      server_rate = EmployeeWageRate.create!(employee: ready, label: "Server", rate: 20.00, is_primary: true, active: true)
+      lead_rate = EmployeeWageRate.create!(employee: ready, label: "Lead", rate: 25.00, is_primary: false, active: true)
+
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: ready,
+        employment_type: "hourly",
+        pay_rate: 18.00,
+        hours_worked: 30,
+        payment_delivery_method: "paper_check",
+        wage_rate_hours: [
+          { employee_wage_rate_id: server_rate.id, label: "Server", rate: 18.00, regular_hours: 20, overtime_hours: 0, is_primary: true, active: true },
+          { employee_wage_rate_id: lead_rate.id, label: "Lead", rate: 22.00, regular_hours: 10, overtime_hours: 0, is_primary: false, active: true }
+        ]
+      )
+      item.calculate!
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # refresh_setup preserves the entered $18/$22 rates and clears staleness
+      post "/api/v1/admin/pay_periods/#{period.id}/refresh_setup", as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("results", "errors")).to eq([])
+      expect(item.reload.pay_rate.to_d).to eq(BigDecimal("18.00"))
+      expect(item.wage_rate_hours.map { |entry| entry["rate"].to_d }).to eq([ BigDecimal("18.00"), BigDecimal("22.00") ])
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period.reload, stage: :approve)).to eq([])
+
+      # Post-refresh rate tampering without recalculating fails closed
+      item.update_column(:pay_rate, 16.00)
+      expect(PayrollReadinessPolicy.stale_calculation_employees_for(period.reload, stage: :approve).map { |r| r[:employee_id] }).to eq([ ready.id ])
+
+      # Restoring preserved rate approves cleanly
+      item.update_column(:pay_rate, 18.00)
+      post "/api/v1/admin/pay_periods/#{period.id}/approve", as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(period.reload.status).to eq("approved")
+    end
+
+    it "reflects mid-request CompanyFeatures changes immediately because ApplicationController does not cache CompanyFeatures (round 2 medium 1)" do
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+
+      observed = {}
+      allow_any_instance_of(PayrollReview::RevisionService).to receive(:retry_publication_notification!).and_wrap_original do |method|
+        observed[:cache_during_request] = Current.company_features_cache
+        observed[:offering_before] = CompanyFeatures.for(company).offering
+        create(:time_tracking_source, company: company, source_type: "aire_services", active: true)
+        observed[:offering_after] = CompanyFeatures.for(company).offering
+        method.call
+      end
+
+      get "/api/v1/admin/pay_periods/#{period.id}", as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(observed[:cache_during_request]).to be_nil
+      expect(observed[:offering_before]).to eq("payroll_service")
+      expect(observed[:offering_after]).to eq("workforce_suite")
+    end
   end
 end

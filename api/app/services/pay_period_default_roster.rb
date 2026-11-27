@@ -26,12 +26,12 @@ class PayPeriodDefaultRoster
 
     additional_employee_ids = [] if @pay_period.correction_run?
     candidate_ids = (ids + additional_employee_ids).map(&:to_i).uniq - (excluded_employee_ids || @pay_period.pay_period_excluded_employees.pluck(:employee_id))
-    return candidate_ids if candidate_ids.empty?
+    unsaved_ids = candidate_ids - saved_ids
+    return candidate_ids if unsaved_ids.empty?
     return candidate_ids unless PayrollReadinessPolicy.company_has_gated_employees?(@pay_period.company_id)
 
-    saved_id_set = saved_ids.to_set
     enforced_unsaved = @pay_period.company.employees
-      .where(id: candidate_ids - saved_ids, readiness_gate_enforced: true)
+      .where(id: unsaved_ids, readiness_gate_enforced: true)
       .includes(
         :employee_compensation_changes,
         :employee_wage_rates,
@@ -43,7 +43,7 @@ class PayPeriodDefaultRoster
     return candidate_ids if enforced_unsaved.empty?
 
     blocked_ids = PayrollReadinessPolicy.blocked_employee_ids_for(pay_period: @pay_period, employees: enforced_unsaved)
-    candidate_ids - blocked_ids.reject { |id| saved_id_set.include?(id) }
+    candidate_ids - blocked_ids
   end
 
   private

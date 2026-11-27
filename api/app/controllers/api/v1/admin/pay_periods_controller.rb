@@ -394,9 +394,11 @@ module Api
 
           input_snapshots = payroll_input_snapshots
           @payroll_input_changes = []
-          client_managed_lifecycle = CompanyFeatures.for(@pay_period.company).client_managed_employee_lifecycle?
 
-          employee_ids.each do |employee_id|
+          CompanyFeatures.with_cache do
+            client_managed_lifecycle = CompanyFeatures.for(@pay_period.company).client_managed_employee_lifecycle?
+
+            employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
             unless employee
               # A saved paycheck for someone no longer eligible, or wages entered
@@ -580,7 +582,10 @@ module Api
                 unless @preserve_entered_pay_rates || payroll_item.timekeeping_source == "correction_reference"
                   PayrollTimeAllocationService.call!(payroll_item: payroll_item)
                 end
-                payroll_item.calculate!(annual_fica_context: annual_fica_contexts.fetch(employee.id))
+                payroll_item.calculate!(
+                  annual_fica_context: annual_fica_contexts.fetch(employee.id),
+                  preserve_entered_pay_rates: @preserve_entered_pay_rates == true
+                )
                 case PayrollItemActivity.classify(payroll_item)
                 when :verified_empty
                   # The worksheet includes the active roster, but an employee
@@ -600,6 +605,7 @@ module Api
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: PayrollCalculationHistory.message(e) }
             rescue StandardError => e
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: e.message }
+            end
             end
           end
 

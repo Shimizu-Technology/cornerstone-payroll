@@ -13,23 +13,7 @@ class PayrollReadinessPolicy
     def company_has_gated_employees?(company_id)
       return false if company_id.blank?
 
-      cache = Current.company_gated_employees_cache
-      return cache[company_id] if cache&.key?(company_id)
-
-      has_gated = Employee.where(company_id: company_id, readiness_gate_enforced: true).exists?
-      cache[company_id] = has_gated if cache
-      has_gated
-    end
-
-    def clear_company_gated_cache!(company_id = nil)
-      cache = Current.company_gated_employees_cache
-      return unless cache
-
-      if company_id
-        cache.delete(company_id)
-      else
-        cache.clear
-      end
+      Employee.where(company_id: company_id, readiness_gate_enforced: true).exists?
     end
 
     def fingerprint_scoped?(employee:, pay_period:, client_managed: nil)
@@ -189,9 +173,6 @@ class PayrollReadinessPolicy
 
       resolved_stage = stage || (pay_period.approved? ? :commit : :approve)
       client_managed = CompanyFeatures.for(pay_period.company).client_managed_employee_lifecycle?
-      unless client_managed
-        return [] unless company_has_gated_employees?(pay_period.company_id) || any_recorded_fingerprint?(pay_period)
-      end
 
       scope = pay_period.payroll_items.financially_reportable
       unless client_managed
@@ -239,18 +220,6 @@ class PayrollReadinessPolicy
 
     private
 
-    def any_recorded_fingerprint?(pay_period)
-      if pay_period.association(:payroll_items).loaded?
-        pay_period.payroll_items.any? do |item|
-          item.payroll_reversed_at.nil? && item.calculation_context_snapshot.to_h.key?("paycheck_input_fingerprint")
-        end
-      else
-        pay_period.payroll_items.financially_reportable
-          .where("calculation_context_snapshot ? 'paycheck_input_fingerprint'")
-          .exists?
-      end
-    end
-
     def staleness_reason(item:, employee:, pay_period:, snapshot:, stage:)
       recorded_fingerprint = snapshot["paycheck_input_fingerprint"]
       if recorded_fingerprint.blank?
@@ -262,7 +231,7 @@ class PayrollReadinessPolicy
         return "Employee pay, withholding, tax ID, deductions, or status changed after calculation."
       end
 
-      if stale_item_rates?(item: item, employee: employee, pay_period: pay_period)
+      if stale_item_rates?(item: item, employee: employee, pay_period: pay_period, snapshot: snapshot)
         return "Payroll item pay rate or wage-rate allocations no longer match current employee rates for this period."
       end
 
@@ -282,12 +251,17 @@ class PayrollReadinessPolicy
       nil
     end
 
-    def stale_item_rates?(item:, employee:, pay_period:)
+    def stale_item_rates?(item:, employee:, pay_period:, snapshot: {})
       return false if item.timekeeping_source == "correction_reference"
       return false if PayrollWageRateInput.source_locked?(item)
 
       compensation = employee.payroll_compensation_on(pay_period.end_date)
       return true if item.employment_type.present? && item.employment_type != compensation.employment_type
+
+      preserved = snapshot["preserved_entered_rates"]
+      if preserved.is_a?(Hash)
+        return stale_preserved_item_rates?(item: item, compensation: compensation, preserved: preserved)
+      end
 
       if compensation.hourly_pay_basis? && item.wage_rate_hours.present?
         dated_rates = employee.wage_rates_on(pay_period.end_date, include_inactive: true)
@@ -317,6 +291,38 @@ class PayrollReadinessPolicy
         expected_rate = employee.default_payroll_rate_on(pay_period.end_date)
         item.pay_rate.to_d != expected_rate.to_d
       end
+    end
+
+    def stale_preserved_item_rates?(item:, compensation:, preserved:)
+      preserved_pay_rate = preserved["pay_rate"]
+      return true if preserved_pay_rate.blank? || item.pay_rate.to_d != BigDecimal(preserved_pay_rate.to_s)
+
+      if compensation.hourly_pay_basis? && item.wage_rate_hours.present?
+        preserved_entries = Array(preserved["wage_rate_hours"])
+        return true unless preserved_entries.size == item.wage_rate_hours.size
+
+        current_entries = item.wage_rate_hours.map do |entry|
+          {
+            "employee_wage_rate_id" => entry["employee_wage_rate_id"].presence&.to_i,
+            "label" => entry["label"].to_s.strip.downcase,
+            "rate" => entry["rate"].to_d.to_s("F")
+          }
+        end
+        normalized_preserved = preserved_entries.map do |entry|
+          {
+            "employee_wage_rate_id" => entry["employee_wage_rate_id"].presence&.to_i,
+            "label" => entry["label"].to_s.strip.downcase,
+            "rate" => BigDecimal(entry["rate"].to_s).to_s("F")
+          }
+        end
+        return true unless current_entries == normalized_preserved
+      elsif Array(preserved["wage_rate_hours"]).present?
+        return true
+      end
+
+      false
+    rescue ArgumentError
+      true
     end
 
     def verified_supplemental_source_item?(pay_period:, employee:, source_item:)

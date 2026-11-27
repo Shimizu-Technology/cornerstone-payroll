@@ -1238,6 +1238,143 @@ RSpec.describe "Lifecycle PR 2 pay-run readiness, stale-input fingerprint & comm
 
       expect(queries.grep(/employee_w4_elections|employee_deductions|employee_payroll_fields|employee_retirement_elections|employee_readiness_overrides/)).to be_empty
     end
+
+    it "blocks approve! even if company_has_gated_employees? was false before flipping readiness_gate_enforced via update_all (round 2 medium 2)" do
+      # Incomplete employee (no W-4) starts ungated so the item can be calculated
+      incomplete = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Uncached",
+        last_name: "FlipGate",
+        date_of_birth: Date.new(1994, 5, 14),
+        hire_date: Date.new(2026, 1, 1),
+        pay_rate: 20.00,
+        pay_frequency: "biweekly",
+        payment_delivery_method: "paper_check",
+        readiness_gate_enforced: false
+      )
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: incomplete,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40,
+        payment_delivery_method: "paper_check"
+      )
+      item.calculate!
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # Prime outer cache as false, flip readiness_gate_enforced with update_all (skipping callbacks), then approve!
+      CompanyFeatures.with_cache do
+        expect(PayrollReadinessPolicy.company_has_gated_employees?(company.id)).to be(false)
+        expect(CompanyFeatures.for(company).client_managed_employee_lifecycle?).to be(false)
+
+        Employee.where(id: incomplete.id).update_all(readiness_gate_enforced: true)
+
+        expect {
+          PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+        }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /W-4 missing/)
+      end
+      expect(period.reload.status).to eq("calculated")
+    end
+
+    it "blocks approve! on stale unfingerprinted items after update_all flips readiness_gate_enforced or direct SQL enables client_managed (round 2 medium 2)" do
+      ready_initially_ungated = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Ready",
+        last_name: "Unfingerprinted",
+        date_of_birth: Date.new(1994, 5, 14),
+        hire_date: Date.new(2026, 1, 1),
+        pay_rate: 20.00,
+        pay_frequency: "biweekly",
+        payment_delivery_method: "paper_check",
+        readiness_gate_enforced: false
+      )
+      EmployeeW4Election.create!(
+        EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+          company: company,
+          employee: ready_initially_ungated,
+          effective_on: Date.new(2026, 1, 1),
+          w4_signed_on: Date.new(2026, 1, 1),
+          w4_form_version: 2020,
+          source: "client_direct",
+          reason: "Test W-4"
+        )
+      )
+      period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20),
+        status: "draft"
+      )
+      item = period.payroll_items.create!(
+        company: company,
+        employee: ready_initially_ungated,
+        employment_type: "hourly",
+        pay_rate: 20.00,
+        hours_worked: 40,
+        payment_delivery_method: "paper_check"
+      )
+      item.calculate!
+      expect(item.reload.calculation_context_snapshot.to_h).not_to have_key("paycheck_input_fingerprint")
+      period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: admin_user.id)
+
+      # Case 1: update_all flips readiness_gate_enforced -> stale_calculation_employees_for catches missing fingerprint
+      CompanyFeatures.with_cache do
+        expect(PayrollReadinessPolicy.company_has_gated_employees?(company.id)).to be(false)
+        Employee.where(id: ready_initially_ungated.id).update_all(readiness_gate_enforced: true)
+
+        expect {
+          PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+        }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate payroll.*Ready Unfingerprinted/)
+      end
+
+      # Reset gate to false and test Case 2: CompanyFeatures cached as approval_first BEFORE lock,
+      # then client_managed enabled directly in DB -> approve! opens a fresh cache inside the lock and blocks!
+      Employee.where(id: ready_initially_ungated.id).update_all(readiness_gate_enforced: false)
+      stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
+      CompanyFeatures.with_cache do
+        expect(CompanyFeatures.for(company).client_managed_employee_lifecycle?).to be(false)
+
+        now = Time.current
+        ClientOperatingProfile.insert_all!([
+          {
+            company_id: company.id,
+            effective_on: Date.new(2026, 1, 1),
+            version: 1,
+            offering: "payroll_portals",
+            hours_source: "manual",
+            client_portal_enabled: true,
+            employee_portal_enabled: false,
+            lifecycle_mode_activated_at: now,
+            options: OperatingProfileCatalog.default_options.deep_merge(
+              "client_portal" => { "employee_lifecycle_mode" => "client_managed" }
+            ),
+            reason: "Direct insert bypassing callbacks",
+            created_at: now,
+            updated_at: now
+          }
+        ])
+
+        expect {
+          PayPeriodLifecycleService.new(pay_period: period, actor: admin_user).approve!
+        }.to raise_error(PayPeriodLifecycleService::InvalidTransitionError, /Recalculate payroll.*Ready Unfingerprinted/)
+      end
+      expect(period.reload.status).to eq("calculated")
+    end
   end
 end
 
@@ -1245,9 +1382,9 @@ RSpec.describe "Concurrent commit verification acknowledgements (L8)" do
   self.use_transactional_tests = false
 
   it "serializes concurrent commit! calls under the company/period lock and writes exactly one acknowledgement row" do
-    ensure_verified_test_tax_years(2026)
+    verification_tables = ensure_verified_test_tax_years(2026)
     organization = create(:organization, slug: "concurrent-lock-#{SecureRandom.hex(6)}")
-    company = create(:company, organization: organization, name: "Concurrent Lock Co")
+    company = create(:company, organization: organization, name: "Concurrent Lock Co", auto_create_fit_check: false)
     admin_user = create(:user, company: company, organization: organization, role: "admin")
     employee = create(
       :employee,
@@ -1334,33 +1471,48 @@ RSpec.describe "Concurrent commit verification acknowledgements (L8)" do
     expect(period.reload.status).to eq("committed")
     expect(PayPeriodVerificationAcknowledgement.where(pay_period_id: period.id, employee_verification_item_id: verification_item.id).count).to eq(1)
   ensure
-    # Keep non-transactional test DB clean (note: acknowledgements table is append-only, so disable trigger only for test teardown)
-    if defined?(period) && period&.persisted?
+    # Keep non-transactional test DB clean without requiring superuser session_replication_role.
+    if defined?(company) && company&.persisted?
       ActiveRecord::Base.connection_pool.with_connection do |conn|
-        conn.transaction do
-          conn.execute("SET LOCAL session_replication_role = replica")
+        begin
+          conn.execute("ALTER TABLE pay_period_verification_acknowledgements DISABLE TRIGGER pay_period_verification_acknowledgements_append_only")
           PayPeriodVerificationAcknowledgement.where(company_id: company.id).delete_all
-          EmployeeVerificationItem.where(company_id: company.id).delete_all
-          CheckEvent.where(company_id: company.id).delete_all
-          PayrollLiabilityEntry.where(company_id: company.id).delete_all if defined?(PayrollLiabilityEntry)
-          PayrollReviewPackage.where(company_id: company.id).delete_all if defined?(PayrollReviewPackage)
-          PayrollItemEarning.where(payroll_item_id: PayrollItem.where(company_id: company.id).select(:id)).delete_all
-          PayrollItemDeduction.where(payroll_item_id: PayrollItem.where(company_id: company.id).select(:id)).delete_all
-          PayrollItem.where(company_id: company.id).delete_all
-          EmployeeYtdTotal.where(employee_id: employee.id).delete_all
-          CompanyYtdTotal.where(company_id: company.id).delete_all
-          EmployeeW4Election.where(company_id: company.id).delete_all
-          EmployeeCompensationChange.where(company_id: company.id).delete_all
-          PayPeriod.where(company_id: company.id).delete_all
-          Employee.where(company_id: company.id).delete_all
-          Department.where(company_id: company.id).delete_all
-          ClientOperatingProfile.where(company_id: company.id).delete_all
-          AuditLog.where(company_id: company.id).delete_all
-          User.where(id: admin_user.id).delete_all
-          Company.where(id: company.id).delete_all
-          Organization.where(id: organization.id).delete_all
+        ensure
+          conn.execute("ALTER TABLE pay_period_verification_acknowledgements ENABLE TRIGGER pay_period_verification_acknowledgements_append_only")
         end
+        begin
+          conn.execute("ALTER TABLE check_events DISABLE TRIGGER check_events_append_only")
+          CheckEvent.where(company_id: company.id).delete_all
+        ensure
+          conn.execute("ALTER TABLE check_events ENABLE TRIGGER check_events_append_only")
+        end
+
+        event_ids = PortalNotificationEvent.where(company_id: company.id).pluck(:id)
+        PortalNotificationDelivery.where(portal_notification_event_id: event_ids).delete_all if event_ids.any?
+        PortalNotificationEvent.where(id: event_ids).delete_all if event_ids.any?
+        EmployeeVerificationItem.where(company_id: company.id).delete_all
+        NonEmployeeCheck.where(company_id: company.id).find_each(&:destroy!)
+        PayrollLiabilityEntry.where(company_id: company.id).delete_all if defined?(PayrollLiabilityEntry)
+        PayrollLiabilityPosting.where(company_id: company.id).delete_all if defined?(PayrollLiabilityPosting)
+        PayrollReviewPackage.where(company_id: company.id).delete_all if defined?(PayrollReviewPackage)
+        item_ids = PayrollItem.where(company_id: company.id).pluck(:id)
+        PayrollItemEarning.where(payroll_item_id: item_ids).delete_all if item_ids.any?
+        PayrollItemDeduction.where(payroll_item_id: item_ids).delete_all if item_ids.any?
+        PayrollItem.where(id: item_ids).delete_all if item_ids.any?
+        EmployeeYtdTotal.where(employee_id: employee.id).delete_all if defined?(employee) && employee&.persisted?
+        CompanyYtdTotal.where(company_id: company.id).delete_all
+        EmployeeW4Election.where(company_id: company.id).delete_all
+        EmployeeCompensationChange.where(company_id: company.id).delete_all
+        PayPeriod.where(company_id: company.id).delete_all
+        Employee.where(company_id: company.id).delete_all
+        Department.where(company_id: company.id).delete_all
+        ClientOperatingProfile.where(company_id: company.id).delete_all
+        AuditLog.where(company_id: company.id).delete_all
+        User.where(id: admin_user.id).delete_all if defined?(admin_user) && admin_user&.persisted?
+        Company.where(id: company.id).delete_all
+        Organization.where(id: organization.id).delete_all if defined?(organization) && organization&.persisted?
       end
     end
+    verification_tables&.each(&:destroy!)
   end
 end
