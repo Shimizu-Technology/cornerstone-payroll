@@ -1,3 +1,4 @@
+import { EmployeeOrganizationPanel } from '@/components/employees/EmployeeOrganizationPanel';
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
@@ -62,7 +63,7 @@ export function EmployeeList() {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, isClient } = useAuth();
+  const { user, isClient, isClientViewer } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
   const readOnlyWorkspace = !canWriteCompany(activeCompany);
   // A practice-copy client adds employees through the client profile flow,
@@ -327,6 +328,10 @@ export function EmployeeList() {
 
       <div className="p-4 sm:p-6 lg:p-8">
         <EmployeeIntakeSettingsPanel key={companyId} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
+        {canAddEmployee && !isClientViewer && (
+          <EmployeeOrganizationPanel key={companyId} companyId={companyId} isClient={isClient} employees={companyEmployees}
+            onSaved={() => { void fetchEmployees(); void fetchDepartments(); }} />
+        )}
         {/* Filters */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start">
           <div className="relative w-full sm:w-72 sm:shrink-0">

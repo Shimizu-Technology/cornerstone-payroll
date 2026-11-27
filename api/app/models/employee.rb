@@ -75,6 +75,16 @@ class Employee < ApplicationRecord
 
   belongs_to :company
   belongs_to :department, optional: true
+  belongs_to :company_job_role, optional: true
+
+  before_validation do
+    # Existing free-text editors can still set a title. An explicit custom title
+    # detaches the employee from the managed role and its occupation default.
+    if company_job_role_id.present? && will_save_change_to_job_title? && !will_save_change_to_company_job_role_id? &&
+        job_title != company_job_role&.name
+      self.company_job_role = nil
+    end
+  end
   belongs_to :test_workspace_source_employee,
              class_name: "Employee",
              optional: true,
