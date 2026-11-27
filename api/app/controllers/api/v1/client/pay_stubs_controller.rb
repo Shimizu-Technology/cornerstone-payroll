@@ -8,7 +8,7 @@ module Api
 
         def index
           employee = Employee.where(company_id: current_company_id).find(params[:employee_id])
-          items = eligible_items.where(employee_id: employee.id).includes(:pay_period).order("pay_periods.pay_date DESC", id: :desc)
+          items = eligible_items.where(employee_id: employee.id).includes(:pay_period).newest_printed_first
           quickbooks_paychecks = EmployeeDocuments::QuickbooksHistory.for(employee).map do |check|
             {
               id: check[:historical_paycheck_id],

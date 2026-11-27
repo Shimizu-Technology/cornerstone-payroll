@@ -104,6 +104,23 @@ RSpec.describe "Api::V1::Admin::PayStubs", type: :request do
     end
   end
 
+  describe "GET /api/v1/admin/pay_stubs/employee/:employee_id" do
+    it "orders by the date each stub prints before applying the limit" do
+      worker = create(:employee, company: company, department: department)
+      january = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 1, 12), end_date: Date.new(2026, 1, 25), pay_date: Date.new(2026, 1, 31))
+      february = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 1, 26), end_date: Date.new(2026, 2, 8), pay_date: Date.new(2026, 2, 15))
+      late_check = create(:payroll_item, pay_period: january, employee: worker, gross_pay: 500, net_pay: 400, check_date: Date.new(2026, 2, 20))
+      on_time = create(:payroll_item, pay_period: february, employee: worker, gross_pay: 500, net_pay: 400)
+
+      get "/api/v1/admin/pay_stubs/employee/#{worker.id}"
+      expect(response.parsed_body.fetch("pay_stubs").map { |stub| stub.values_at("payroll_item_id", "pay_date") })
+        .to eq([ [ late_check.id, "2026-02-20" ], [ on_time.id, "2026-02-15" ] ])
+
+      get "/api/v1/admin/pay_stubs/employee/#{worker.id}", params: { limit: 1 }
+      expect(response.parsed_body.fetch("pay_stubs").pluck("payroll_item_id")).to eq([ late_check.id ])
+    end
+  end
+
   describe "GET /api/v1/admin/pay_stubs/:id/download" do
     it "downloads the legacy R2 object when the new key is absent" do
       allow(storage).to receive(:download).with(legacy_key).and_return("%PDF-legacy")

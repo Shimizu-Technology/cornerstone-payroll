@@ -17,7 +17,9 @@ RSpec.describe PayrollRegisterPdfGenerator do
       },
       summary: {
         employee_count: 1,
-        total_hours: 80.0,
+        total_hours: 82.0,
+        worked_hours: 80.0,
+        combined_hours: 82.0,
         total_overtime_hours: 2.0,
         total_gross: 2000.00,
         total_bonus: 100.00,
@@ -212,6 +214,21 @@ RSpec.describe PayrollRegisterPdfGenerator do
       expect(text).to include("Regular Hours", "80.00", "Overtime Hours", "2.00", "Bonus", "$100.00")
       expect(text).to include("Straight Loans", "$25.00", "Installment Loans", "$50.00")
       expect(text).to include("Employer Contributions", "$60.00", "Employer Payroll Cost", "$2,213.00")
+    end
+
+    it "totals regular hours, not combined hours, under Regular Hours in each detail table" do
+      report_data[:summary].merge!(total_hours: 85.0, worked_hours: 80.0, combined_hours: 85.0, total_overtime_hours: 5.0, contractor_count: 1)
+      report_data[:employees].first[:overtime_hours] = 5.0
+      report_data[:contractors] = [
+        { employee_id: 2, employee_name: "Kai Santos", employment_type: "contractor", hours_worked: 20, gross_pay: 600,
+          total_deductions: 0, net_pay: 600, check_number: "1099-1", payroll_adjustments: [], payroll_field_entries: [] }
+      ]
+
+      text = PDF::Reader.new(StringIO.new(generator.generate)).pages.map(&:text).join("\n")
+      hour_totals = text.lines.grep(/\A\s*TOTALS\s+\d/).map { |line| line.split.drop(1).first(2) }
+
+      expect(hour_totals).to eq([ %w[80.00 5.00], %w[20.00 0.00] ])
+      expect(text).to match(/Combined Hours \(Regular \+ OT \+ Holiday \+ PTO\)\s+85\.00/)
     end
 
     it "renders source-aware recurring and manual adjustments by worker" do
