@@ -166,7 +166,6 @@ RSpec.describe "Profile, name suffix, voided check, reversal, contractor transit
         }
       )
 
-      pending "L9: voided paper checks (wages still owed) are hidden from Employee Statements API while still listed in Client Pay Stubs, Client Pay Period, and Staff views"
       assert_parity!(
         fixture: :voided_check_p2,
         figure: [ :status, :visible ],
@@ -198,14 +197,15 @@ RSpec.describe "Profile, name suffix, voided check, reversal, contractor transit
         figures: [ :gross_pay, :net_pay, [ :taxes, :total_taxes ] ]
       )
 
-      # Period 2 was reversed: excluded from employee statements, client pay period, client pay stubs,
+      # Period 2 was reversed: a notice in employee statements, excluded from client pay period, client pay stubs,
       # client/staff pay history, and marked payroll_included: false on staff pay run.
       emp_p2 = employee_api(:reversed_paycheck).extract_paycheck(statement_id: doc_p2.id, list_year: Parity::FixtureBuilder::TAX_YEAR)
       cli_p2 = client_api.extract_pay_period_item(pay_period_id: fixture.period2.id, employee_id: employee.id)
       cli_stubs = client_api.pay_stubs_index(employee.id).fetch("pay_stubs")
       stf_p2 = staff_api.extract_pay_run_item(pay_period_id: fixture.period2.id, employee_id: employee.id)
 
-      expect(emp_p2.dig(:status, :visible)).to eq(false)
+      expect(emp_p2.dig(:status, :visible)).to eq(true)
+      expect(emp_p2[:net_pay]).to be_nil
       expect(cli_p2.dig(:status, :visible)).to eq(false)
       expect(cli_stubs.any? { |s| s["id"].to_i == item_p2.id }).to eq(false)
       expect(stf_p2.dig(:status, :payroll_included)).to eq(false)

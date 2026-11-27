@@ -79,8 +79,31 @@ RSpec.describe "Portal notification catalog", :portal_notifications do
       assert_delivery(oversight, supervisor, "immediate")
       assert_delivery(events.detect(&:client_managers_only?), manager, "immediate")
       assert_delivery(events.detect(&:client_viewers_only?), viewer, "digest")
+      account_team = events.find { |event| event.metadata["recipient_scope"] == "account_team" }
+      assert_delivery(account_team, staff, "immediate")
+      expect(events.flat_map { |event| event.deliveries.pluck(:user_id).compact }).to contain_exactly(manager.id, viewer.id, staff.id, supervisor.id)
       assert_copy(oversight, "pay-runs/#{period.id}/work")
       expect { PortalNotifications::Preferences.update!(supervisor, oversight.category => "off") }.to raise_error(ArgumentError)
+      travel(3.minutes) { PortalNotifications::Dispatcher.run! }
+      expect(captured_portal_emails.pluck(:to)).to contain_exactly(manager.email, staff.email, supervisor.email)
+    end
+  end
+
+  it "routes administrative alerts to pay runs and delivers only one copy to a listed super admin" do
+    supervisor = create(:user, role: "super_admin", company: company)
+    actor = create(:user, role: "org_admin", company: company)
+    list_portal_recipient!(company, user: supervisor)
+    entry = AdminOverride.create!(company: company, subject: company, actor: actor, action: "retry_stub_posting",
+      reason: "PrivateReason for synthetic testing", before_snapshot: {}, after_snapshot: {}, preflight_result: {})
+    with_portal_email do
+      PortalNotifications.admin_override!(entry, client_managers: true)
+      events = PortalNotificationEvent.where(event_type: "admin_override")
+      expect(events.map { |event| PortalNotifications::Email.destination_group(event) }.uniq)
+        .to contain_exactly([ :admin_override, company.id, "staff" ], [ :admin_override, company.id, "client" ])
+      events.each { |event| assert_copy(event, "pay-runs") }
+
+      travel(3.minutes) { PortalNotifications::Dispatcher.run! }
+      expect(captured_portal_emails.pluck(:to)).to contain_exactly(manager.email, staff.email, supervisor.email)
     end
   end
 

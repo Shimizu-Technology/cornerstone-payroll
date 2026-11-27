@@ -5,12 +5,9 @@
 # the same year (M4-4, D6, D7). AIRE keeps its own EmployeePayStatements
 # reads; this class only borrows that presenter.
 #
-# A statement is listed only while the payroll behind it still stands: a
-# posted document whose payroll item is in a committed, reportable run, not
-# voided or reversed. A replaced revision is never listed on its own. It is
-# reachable only as an earlier version of a listed statement, so a voided
-# original shows only together with its replacement. A former link sees only
-# statements dated on or before its access end date.
+# A paper check void retains the pay and YTD. Financial reversals and
+# rollbacks display only a withdrawal notice. Former access remains bounded
+# by the last authorized pay date.
 class EmployeeStatements
   PAGE_SIZE = 20
   # Revision chains are short (a void and a reissue, a check number change).
@@ -29,6 +26,10 @@ class EmployeeStatements
   # kind: :payroll (document is the posted revision) or :quickbooks (check,
   # with document the posted original PDF when there is one).
   Statement = Struct.new(:kind, :document, :check, keyword_init: true) do
+    def withdrawn?
+      kind == :payroll && (document.payroll_item.pay_period.voided? || document.payroll_item.payroll_reversed_at.present?)
+    end
+
     def id
       kind == :quickbooks ? "qb-#{check.id}" : document.id.to_s
     end
@@ -51,7 +52,7 @@ class EmployeeStatements
 
   # The newest listed statement's pay date, or nil when none are posted yet.
   def latest_pay_date
-    ordered_union.limit(1).pick(Arel.sql("statements.pay_date"))&.to_date
+    ordered_union(include_withdrawn: false).limit(1).pick(Arel.sql("statements.pay_date"))&.to_date
   end
 
   # A replaced revision's id finds the statement that replaced it, so an old
@@ -63,7 +64,7 @@ class EmployeeStatements
     elsif DOCUMENT_ID.match?(id.to_s)
       document = visible_document(id.to_i)
       document = current_successor(document) if document&.replaced?
-      return load_statements([ [ "payroll", document.id ] ], detail: true).first if document&.posted? && listed_documents.exists?(id: document.id)
+      return load_statements([ [ "payroll", document.id ] ], detail: true).first if document && display_documents.exists?(id: document.id)
     end
     nil
   end
@@ -78,10 +79,10 @@ class EmployeeStatements
 
     document = visible_document(id.to_i)
     return unless document
-    return document if document.posted? && listed_documents.exists?(id: document.id)
+    return document if document.posted? && !document.payroll_item.voided? && listed_documents.exists?(id: document.id)
 
     successor = current_successor(document) if document.replaced?
-    document if successor && listed_documents.exists?(id: successor.id)
+    document if successor && !successor.payroll_item.voided? && listed_documents.exists?(id: successor.id)
   end
 
   # Earlier revisions this posted document replaced, newest first. A delta
@@ -122,7 +123,7 @@ class EmployeeStatements
   # so each regular check's previous one is the next regular check on the
   # page; only the page's last regular check needs a query.
   def previous_regular_by_id(statements)
-    regular = statements.select { |statement| statement.kind == :payroll && regular?(statement.document) }
+    regular = statements.select { |statement| statement.kind == :payroll && !statement.withdrawn? && regular?(statement.document) }
     found = regular.each_cons(2).to_h { |current, previous| [ current.id, previous ] }
     if (last = regular.last) && (previous = previous_regular(last.document))
       found[last.id] = previous
@@ -149,12 +150,23 @@ class EmployeeStatements
 
   # Posted pay stubs whose payroll still stands, for this employee only.
   def listed_documents
-    scope = EmployeeDocument.posted.joins(payroll_item: :pay_period)
-      .where(company_id: @company_id, payroll_items: { company_id: @company_id, employee_id: @employee_id, voided: false,
-        payroll_reversed_at: nil })
-      .where(pay_periods: { company_id: @company_id, status: "committed", correction_status: [ nil, "correction" ] })
+    employee_documents.where(payroll_items: { payroll_reversed_at: nil })
+      .where("employee_documents.status = 'posted' OR (employee_documents.status = 'withdrawn' AND employee_documents.withdrawal_reason = 'void' AND payroll_items.voided = TRUE)")
+      .where(pay_periods: { correction_status: [ nil, "correction" ] })
+  end
+
+  def employee_documents
+    scope = EmployeeDocument.joins(payroll_item: :pay_period)
+      .where(company_id: @company_id, payroll_items: { company_id: @company_id, employee_id: @employee_id })
+      .where(pay_periods: { company_id: @company_id, status: "committed" })
       .where(payroll_item_id: PayrollItem.reportable.where(company_id: @company_id, employee_id: @employee_id).select(:id))
     @access_until ? scope.where(pay_periods: { pay_date: ..@access_until }) : scope
+  end
+
+  def display_documents
+    withdrawn = employee_documents.where(status: %w[posted withdrawn])
+      .where("pay_periods.correction_status = 'voided' OR payroll_items.payroll_reversed_at IS NOT NULL")
+    listed_documents.or(withdrawn)
   end
 
   # Memoized: the scope's cutover date is a query of its own.
@@ -200,8 +212,8 @@ class EmployeeStatements
   # One ordered list across both sources, paged in SQL. Payroll checks sort
   # before QuickBooks checks on the same day; QuickBooks history always ends
   # before the first Payroll run, so that only matters for odd data.
-  def ordered_union(year: nil)
-    payroll = listed_documents
+  def ordered_union(year: nil, include_withdrawn: true)
+    payroll = include_withdrawn ? display_documents : listed_documents
     quickbooks = quickbooks_checks
     if year
       range = Date.new(year)..Date.new(year, 12, 31)
@@ -222,7 +234,7 @@ class EmployeeStatements
 
   def years
     union = union_all(
-      listed_documents.select(Arel.sql("pay_periods.pay_date AS pay_date")),
+      display_documents.select(Arel.sql("pay_periods.pay_date AS pay_date")),
       quickbooks_checks.select(Arel.sql("historical_paychecks.pay_date AS pay_date")),
       "dates"
     )

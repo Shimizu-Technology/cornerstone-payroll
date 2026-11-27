@@ -5,13 +5,15 @@ class PostEmployeePayStubsJob < ApplicationJob
 
   queue_as :default
 
-  def perform
+  def perform(company_id = nil)
     now = Time.current
     guam_now = now.in_time_zone(PayStubGenerator::GUAM_TIME_ZONE)
     through_date = guam_now.hour >= 6 ? guam_now.to_date : guam_now.to_date.yesterday
 
     # Demo companies post like a live client; the stubs stay inside Payroll.
-    Company.operating.find_each do |company|
+    companies = Company.operating
+    companies = companies.where(id: company_id) if company_id
+    companies.find_each do |company|
       features = CompanyFeatures.for(company)
       next unless features.employee_portal_feature?(:stubs)
 

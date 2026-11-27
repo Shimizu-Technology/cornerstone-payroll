@@ -133,6 +133,8 @@ module PortalNotifications
           end
         end
 
+        return subject.is_a?(Company) && subject.id == event.company_id if event.event_type == "admin_override"
+
         case subject
         when EmployeeDocumentNotice
           event.event_type == "tax_form_paper_required" && subject.company_id == event.company_id &&
@@ -265,7 +267,7 @@ module PortalNotifications
 
         if event.audience == "staff"
           return false if event.super_admin_alert? && !user.super_admin?
-          return false if event.event_type == "payroll_reopened" && !event.super_admin_alert? && user.super_admin?
+          return false if event.event_type.in?(%w[payroll_reopened admin_override]) && !event.super_admin_alert? && user.super_admin?
           return false unless staff_can_view_company?(user, company)
 
           if event.event_type.in?(%w[employee_contact_confirmation_requested tax_form_paper_required w2_ready_to_post])

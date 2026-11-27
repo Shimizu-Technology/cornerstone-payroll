@@ -49,7 +49,7 @@ class PayrollRevisionPaymentPreflight
         blockers << "Payment #{payment.check_number || payment.id} covers another payroll; reconcile it separately"
       end
     end
-    blockers << "This payroll has recorded paid or submitted tax filing evidence; use the filing correction workflow" if filing_evidence?
+    blockers << "This payroll has recorded paid or submitted tax filing evidence or an unresolved filing exception; use the filing correction workflow" if filing_evidence?
     later_ids = later_committed_runs.distinct.order(:id).pluck(:id)
     if reopen
       if pay_period.time_tracking_imports.where(status: "applied").any?(&:finalized_batch?) ||
@@ -121,7 +121,8 @@ class PayrollRevisionPaymentPreflight
   def filing_evidence?
     date = pay_period.pay_date
     quarter = (date.month - 1) / 3 + 1
-    Form500Filing.where(pay_period_id: pay_period.id, status: %w[paid filed]).exists? ||
+    # An exception leaves filing or payment unresolved until staff reconcile it.
+    Form500Filing.where(pay_period_id: pay_period.id, status: %w[paid filed exception]).exists? ||
       PayrollFilingRecord.where(company_id: pay_period.company_id, tax_year: date.year)
         .where("quarter = ? OR quarter IS NULL", quarter).exists? ||
       QuarterlyComplianceTask.joins(:quarterly_compliance_packet)

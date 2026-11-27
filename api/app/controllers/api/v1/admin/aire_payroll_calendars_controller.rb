@@ -5,6 +5,7 @@ module Api
     module Admin
       class AirePayrollCalendarsController < BaseController
         include ConnectedPayrollControl
+        include RecentVerification
         UUID_FORMAT = /\A\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\z/
         before_action :require_connected_payroll!, except: :show
         before_action :set_pay_period
@@ -53,26 +54,34 @@ module Api
         end
 
         def change_cutoff
-          @pay_period.company.with_lock do
-            revalidate_current_company_write_access!(company: @pay_period.company, capability: :manage_time_tracking_lock)
+          skip_default_audit_log!
+          result = AdminOverrideService.perform!(company: @pay_period.company, subject: @pay_period, actor: current_user,
+            capability: :manage_time_tracking_lock, action: "aire_cutoff_change", reason: params[:reason],
+            impersonated: impersonated_session?, client_managers: true, skip_record: ->(change) { change.idempotent },
+            snapshot: -> { cutoff_snapshot }) do |actor, reason|
+            AirePayrollCalendar::CutoffChange.new(
+              pay_period: @pay_period, action: params[:lock_action], cutoff_at: params[:cutoff_at], reason: reason,
+              actor: actor, request_id: params[:request_id].to_s.match?(UUID_FORMAT) ? params[:request_id] : nil
+            ).call
           end
-          result = AirePayrollCalendar::CutoffChange.new(
-            pay_period: @pay_period,
-            action: params[:lock_action],
-            cutoff_at: params[:cutoff_at],
-            reason: params[:reason],
-            actor: current_user,
-            request_id: params[:request_id].to_s.match?(UUID_FORMAT) ? params[:request_id] : nil
-          ).call
           render json: {
             aire_payroll_calendar: AirePayrollCalendar::Presenter.call(@pay_period.reload),
             idempotent: result.idempotent
           }, status: result.idempotent ? :ok : :created
+        rescue AdminOverrideService::AccessDenied => e
+          render json: { error: e.message }, status: :forbidden
+        rescue ArgumentError => e
+          render json: { error: e.message }, status: :unprocessable_entity
         rescue AirePayrollCalendar::CutoffChange::Error => e
           render json: { error: e.message }, status: e.status
         end
 
         private
+
+        def cutoff_snapshot
+          publication = @pay_period.reload.aire_payroll_calendar_period&.latest_publication
+          { "publication_id" => publication&.id, "cutoff_at" => publication&.cutoff_at }
+        end
 
         def set_pay_period
           @pay_period = PayPeriod.find_by!(id: params[:pay_period_id], company_id: current_company_id)

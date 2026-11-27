@@ -24,8 +24,11 @@ module Api
           Company.lock.find(current_company_id)
           @pay_period.lock!
           @form500_filing = @pay_period.reload_form500_filing
-          if @pay_period.voided? && form500_params[:status].in?(%w[paid filed])
-            raise ArgumentError, "A voided payroll cannot be marked paid or filed; review its correction payroll"
+          if @pay_period.voided?
+            raise ArgumentError, "A voided payroll cannot be marked paid or filed or have its Form 500 changed; review its correction payroll"
+          end
+          if form500_params[:status] == "cancelled"
+            raise ArgumentError, "Form 500 cancellation is recorded when payroll is rolled back"
           end
           persist_form500_filing!
         end
