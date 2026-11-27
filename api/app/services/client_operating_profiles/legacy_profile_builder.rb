@@ -50,6 +50,7 @@ module ClientOperatingProfiles
 
       sources = Array(company.payroll_intake_source_types).map(&:to_s)
       return [ "payroll_portals", "intake_adapter", "mosa_revel" ] if sources.include?("mosa_revel")
+      return [ "payroll_portals", "intake_adapter", "cornerstone_workbook" ] if sources.include?("cornerstone_workbook")
       return [ "payroll_service", "intake_adapter", "spike_email" ] if sources.include?("spike_email")
 
       [ "payroll_service", "manual", nil ]

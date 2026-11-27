@@ -14,8 +14,12 @@ class PayrollIntakeDocument < ApplicationRecord
   inherit_company_from :payroll_intake_session
   belongs_to :payroll_submission_document, optional: true
 
+  def self.allowed_source_roles
+    (SOURCE_ROLES + PayrollIntake::Registry.all.flat_map { |descriptor| descriptor.files.map(&:role) }).uniq
+  end
+
   validates :document_type, inclusion: { in: DOCUMENT_TYPES }
-  validates :source_role, inclusion: { in: SOURCE_ROLES }
+  validates :source_role, inclusion: { in: ->(_) { PayrollIntakeDocument.allowed_source_roles } }
   validates :verification_status, inclusion: { in: VERIFICATION_STATUSES }
   validates :position,
             numericality: { only_integer: true, greater_than_or_equal_to: 0 },

@@ -1,0 +1,46 @@
+# Track C B8-B9 universal Cornerstone payroll workbook descriptor.
+key: cornerstone_workbook
+label: Cornerstone workbook
+source_label: Cornerstone universal payroll workbook
+parser_version: cornerstone_workbook:v1
+extraction: deterministic
+accepts_pasted_text: false
+tracks_reviewed_hours: false
+employee_match: employee_id
+idempotency: files_and_workweek
+tips_default: paid_in_check
+overtime_mode: weekly_split
+workweek_alignment: aligned
+portal:
+  submittable: true
+  role_map:
+    payroll_workbook: cornerstone_workbook
+files:
+  cornerstone_workbook:
+    label: Cornerstone workbook
+    hint: "Upload the completed Cornerstone payroll workbook (.xlsx or .csv) pre-filled with active Employee IDs."
+    extensions: [.xlsx, .csv]
+    max: 1
+    required_by_default: true
+    portal_role: payroll_workbook
+    portal_label: Cornerstone payroll workbook (.xlsx or .csv)
+    portal_hint: "Download this period's pre-filled Excel or CSV template, enter hours, PTO, holiday, tips, bonuses, one-time items, and loans, then upload it here."
+    supports_link: false
+    template_formats: [xlsx, csv]
+    provides:
+      - week1_hours
+      - week2_hours
+      - regular_hours
+      - overtime_hours
+      - pto_hours
+      - holiday_hours
+      - reported_tips
+      - tips_already_paid
+      - bonus
+      - one_time_earnings
+      - one_time_deductions
+      - loan_deduction
+pay_period:
+  workweek_starts_at_minutes: 0
+  requires_confirmed_workweek: true
+  source_reports_overtime: false

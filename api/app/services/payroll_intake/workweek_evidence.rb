@@ -74,7 +74,9 @@ module PayrollIntake
     attr_reader :pay_period, :allow_misaligned, :overtime_mode, :workweek_alignment
 
     def pay_frequency
-      pay_period.company&.pay_frequency.to_s.presence || "biweekly"
+      pay_period.company_pay_schedule&.frequency.presence ||
+        pay_period.company&.pay_frequency.to_s.presence ||
+        "biweekly"
     end
 
     def source_reports_overtime?

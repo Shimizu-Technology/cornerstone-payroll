@@ -1,6 +1,6 @@
 import { useFeedbackState, ActionFeedback } from '@/components/ui/action-feedback';
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardList, FileText, RefreshCw, UploadCloud, UserPlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, Download, FileText, RefreshCw, UploadCloud, UserPlus } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -27,6 +27,7 @@ import type {
 } from '@/services/api';
 import type { ContractorPayType, ContractorType, Employee, EmployeeFormData, EmploymentType, PayFrequency, PayPeriod, PayrollItem } from '@/types';
 import { formatCurrency } from '@/lib/utils';
+import { acceptStringForSlot, templateFormatsForSlot } from '@/lib/importSources';
 import { guamBusinessDate } from '@/lib/payrollBusinessDate';
 
 interface PayrollIntakeImportModalProps {
@@ -114,14 +115,26 @@ export function PayrollIntakeImportModal({
   onImportComplete,
 }: PayrollIntakeImportModalProps) {
   const sourceType = descriptor?.key || 'spike_email';
-  const modalTitle = sourceType === 'spike_email' ? 'Spike Payroll Intake' : `${descriptor?.label || 'Payroll'} Intake`;
+  const acceptsPastedText = descriptor ? descriptor.accepts_pasted_text : sourceType === 'spike_email';
+  const isEmployeeIdMatch = descriptor?.employee_match === 'employee_id';
+  const primaryFileSlot = descriptor?.files?.[0] || null;
+  const templateFormats = templateFormatsForSlot(primaryFileSlot);
+  const fileAccept = primaryFileSlot ? acceptStringForSlot(primaryFileSlot) : 'image/*,.pdf';
+  const modalTitle = sourceType === 'spike_email'
+    ? 'Spike Payroll Intake'
+    : sourceType === 'cornerstone_workbook'
+      ? 'Cornerstone Workbook Intake'
+      : `${descriptor?.label || 'Payroll'} Intake`;
   const modalDescription = sourceType === 'spike_email'
     ? 'Paste the Spike payroll email or upload screenshots. Review every extracted row before applying taxable paid-out tips.'
-    : `Upload or paste source payroll data for ${descriptor?.source_label || descriptor?.label || sourceType} and review every row before applying.`;
+    : sourceType === 'cornerstone_workbook'
+      ? 'Download this pay period’s pre-filled Excel or CSV workbook, then upload the completed file to preview and apply.'
+      : `Upload or paste source payroll data for ${descriptor?.source_label || descriptor?.label || sourceType} and review every row before applying.`;
   const [step, setStep] = useState<Step>('upload');
   const [pastedText, setPastedText] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
+  const [downloadingFormat, setDownloadingFormat] = useState<'xlsx' | 'csv' | null>(null);
   const [error, setError, errorFeedbackAttempt] = useFeedbackState<string | null>(null);
   const [importData, setImportData] = useState<PayrollIntakeImportData | null>(null);
   const [rows, setRows] = useState<EditableRow[]>([]);
@@ -241,6 +254,26 @@ export function PayrollIntakeImportModal({
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const pastedFiles = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith('image/'));
     if (pastedFiles.length > 0) addFiles(pastedFiles);
+  };
+
+  const handleDownloadTemplate = async (format: 'xlsx' | 'csv') => {
+    try {
+      setDownloadingFormat(format);
+      setError(null);
+      const { blob, filename } = await payrollIntakeImportsApi.downloadTemplate(payPeriodId, format, sourceType);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename || `cornerstone-workbook.${format}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to download ${format.toUpperCase()} template`);
+    } finally {
+      setDownloadingFormat(null);
+    }
   };
 
   const handlePreview = async () => {
@@ -434,6 +467,9 @@ export function PayrollIntakeImportModal({
     }
   };
 
+  const showExtendedWorkbookColumns = sourceType === 'cornerstone_workbook'
+    || rows.some((row) => toNumber(row.pto_hours) > 0 || toNumber(row.holiday_hours) > 0 || toNumber(row.bonus) > 0 || toNumber(row.loan_deduction) > 0 || (row.payroll_components || []).length > 0);
+
   const buildApplyRows = (): PayrollIntakeApplyRowPayload[] => rows.map((row) => ({
     id: row.id,
     include: row.disposition === 'included',
@@ -445,6 +481,9 @@ export function PayrollIntakeImportModal({
     week2_hours: toNumber(row.week2_hours),
     regular_hours: toNumber(row.regular_hours),
     overtime_hours: toNumber(row.overtime_hours),
+    ...(row.pto_hours !== undefined ? { pto_hours: toNumber(row.pto_hours) } : {}),
+    ...(row.holiday_hours !== undefined ? { holiday_hours: toNumber(row.holiday_hours) } : {}),
+    ...(row.bonus !== undefined && row.bonus !== null ? { bonus: toNumber(row.bonus) } : {}),
     week1_tips: toNumber(row.week1_tips),
     week2_tips: toNumber(row.week2_tips),
     reported_tips: Math.max(toNumber(row.reported_tips), toNumber(row.tips_paid_out)),
@@ -540,19 +579,50 @@ export function PayrollIntakeImportModal({
             )}
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_360px]">
             <div className="space-y-4">
-              <div>
-                <label htmlFor="payroll-intake-source-text" className="mb-2 block text-sm font-semibold text-neutral-800">
-                  Paste email body or copied table
-                </label>
-                <Textarea
-                  id="payroll-intake-source-text"
-                  value={pastedText}
-                  onChange={(event) => setPastedText(event.target.value)}
-                  onPaste={handlePaste}
-                  placeholder="Paste the Spike email here. If you paste a screenshot from the clipboard, it will attach below."
-                  className="min-h-[260px] rounded-2xl border-neutral-300 bg-white font-mono text-xs leading-6 shadow-sm"
-                />
-              </div>
+              {acceptsPastedText && (
+                <div>
+                  <label htmlFor="payroll-intake-source-text" className="mb-2 block text-sm font-semibold text-neutral-800">
+                    Paste email body or copied table
+                  </label>
+                  <Textarea
+                    id="payroll-intake-source-text"
+                    value={pastedText}
+                    onChange={(event) => setPastedText(event.target.value)}
+                    onPaste={handlePaste}
+                    placeholder="Paste the Spike email here. If you paste a screenshot from the clipboard, it will attach below."
+                    className="min-h-[260px] rounded-2xl border-neutral-300 bg-white font-mono text-xs leading-6 shadow-sm"
+                  />
+                </div>
+              )}
+
+              {templateFormats.length > 0 && (
+                <div className="rounded-3xl border border-primary-200 bg-primary-50/50 p-5">
+                  <h3 className="text-sm font-semibold text-neutral-950">Download this period’s pre-filled template</h3>
+                  <p className="mt-1 text-xs leading-5 text-neutral-600">
+                    Pre-filled with every active employee’s Cornerstone Employee ID and name. Includes columns for hours, PTO, holiday, tips, bonuses, one-time items, and loans.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {templateFormats.map((format) => (
+                      <Button
+                        key={format}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="bg-white"
+                        disabled={downloadingFormat !== null}
+                        onClick={() => void handleDownloadTemplate(format)}
+                      >
+                        <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                        {downloadingFormat === format
+                          ? `Downloading ${format.toUpperCase()}…`
+                          : format === 'xlsx'
+                            ? 'Download Excel template (.xlsx)'
+                            : 'Download CSV template (.csv)'}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div
                 className="rounded-3xl border-2 border-dashed border-neutral-300 bg-neutral-50/70 p-6 text-center transition-colors hover:border-primary-300 hover:bg-primary-50/40"
@@ -563,18 +633,30 @@ export function PayrollIntakeImportModal({
                 }}
               >
                 <UploadCloud className="mx-auto h-8 w-8 text-primary-700" aria-hidden="true" />
-                <p className="mt-3 text-sm font-semibold text-neutral-900">Drop screenshots or PDFs here</p>
-                <p className="mt-1 text-xs text-neutral-500">Images use the vision extractor only when pasted text is not enough.</p>
+                <p className="mt-3 text-sm font-semibold text-neutral-900">
+                  {primaryFileSlot ? `Upload ${primaryFileSlot.label}` : 'Drop screenshots or PDFs here'}
+                </p>
+                <p className="mt-1 text-xs text-neutral-500">
+                  {primaryFileSlot?.hint || 'Images use the vision extractor only when pasted text is not enough.'}
+                </p>
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*,.pdf"
-                  multiple
+                  accept={fileAccept}
+                  multiple={!primaryFileSlot || (primaryFileSlot.max ?? 1) > 1}
                   className="hidden"
-                  onChange={(event) => event.target.files && addFiles(event.target.files)}
+                  onChange={(event) => {
+                    if (!event.target.files) return;
+                    if (primaryFileSlot?.max === 1) {
+                      const picked = event.target.files[0];
+                      setFiles(picked ? [picked] : []);
+                    } else {
+                      addFiles(event.target.files);
+                    }
+                  }}
                 />
                 <Button variant="outline" className="mt-4" onClick={() => fileInputRef.current?.click()}>
-                  Select Files
+                  {primaryFileSlot?.max === 1 ? 'Select Workbook File' : 'Select Files'}
                 </Button>
               </div>
             </div>
@@ -584,9 +666,13 @@ export function PayrollIntakeImportModal({
                 <div className="flex items-start gap-3">
                   <ClipboardList className="mt-0.5 h-5 w-5 text-primary-700" aria-hidden="true" />
                   <div>
-                    <h3 className="font-semibold text-neutral-950">Spike tip policy</h3>
+                    <h3 className="font-semibold text-neutral-950">
+                      {sourceType === 'spike_email' ? 'Spike tip policy' : `${descriptor?.label || 'Intake'} rules`}
+                    </h3>
                     <p className="mt-2 text-sm leading-6 text-neutral-600">
-                      Daily paid tips are imported as both reported taxable tips and tips paid out, so payroll taxes and W-2GU reporting stay correct without paying tips twice.
+                      {sourceType === 'spike_email'
+                        ? 'Daily paid tips are imported as both reported taxable tips and tips paid out, so payroll taxes and W-2GU reporting stay correct without paying tips twice.'
+                        : `${isEmployeeIdMatch ? 'Rows match strictly by Cornerstone Employee ID (never by name). ' : ''}Overtime mode: ${descriptor?.overtime_mode || 'weekly_split'}. Default tips: ${descriptor?.tips_default === 'already_paid_out' ? 'already paid out' : 'paid in check'}.`}
                     </p>
                   </div>
                 </div>
@@ -598,7 +684,9 @@ export function PayrollIntakeImportModal({
                   <h3 className="font-semibold text-neutral-950">Attached source files</h3>
                 </div>
                 {files.length === 0 ? (
-                  <p className="text-sm text-neutral-500">No screenshots or PDFs attached.</p>
+                  <p className="text-sm text-neutral-500">
+                    {primaryFileSlot ? `No ${primaryFileSlot.label.toLowerCase()} selected.` : 'No screenshots or PDFs attached.'}
+                  </p>
                 ) : (
                   <ul className="space-y-2 text-sm text-neutral-700">
                     {files.map((file) => (
@@ -683,9 +771,22 @@ export function PayrollIntakeImportModal({
                     <TableHead className="min-w-[120px] text-right">Week 2</TableHead>
                     <TableHead className="min-w-[130px] text-right">Regular</TableHead>
                     <TableHead className="min-w-[120px] text-right">OT</TableHead>
+                    {showExtendedWorkbookColumns && (
+                      <>
+                        <TableHead className="min-w-[100px] text-right">PTO</TableHead>
+                        <TableHead className="min-w-[100px] text-right">Holiday</TableHead>
+                      </>
+                    )}
                     <TableHead className="min-w-[130px] text-right">W1 Tips</TableHead>
                     <TableHead className="min-w-[130px] text-right">W2 Tips</TableHead>
-                    <TableHead className="min-w-[150px] text-right">Paid-Out Tips</TableHead>
+                    <TableHead className="min-w-[150px] text-right">{sourceType === 'cornerstone_workbook' ? 'Tips (Paid Out)' : 'Paid-Out Tips'}</TableHead>
+                    {showExtendedWorkbookColumns && (
+                      <>
+                        <TableHead className="min-w-[110px] text-right">Bonus</TableHead>
+                        <TableHead className="min-w-[140px] text-right">One-Time</TableHead>
+                        <TableHead className="min-w-[110px] text-right">Loan</TableHead>
+                      </>
+                    )}
                     <TableHead className="min-w-[100px]">Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -768,9 +869,26 @@ export function PayrollIntakeImportModal({
                       <NumericCell value={row.week2_hours} onChange={(value) => updateWeekHours(row.id, 'week2_hours', value ?? 0)} />
                       <TableCell className="text-right font-mono">{toNumber(row.regular_hours).toFixed(2)}</TableCell>
                       <TableCell className="text-right font-mono">{toNumber(row.overtime_hours).toFixed(2)}</TableCell>
+                      {showExtendedWorkbookColumns && (
+                        <>
+                          <TableCell className="text-right font-mono">{toNumber(row.pto_hours).toFixed(2)}</TableCell>
+                          <TableCell className="text-right font-mono">{toNumber(row.holiday_hours).toFixed(2)}</TableCell>
+                        </>
+                      )}
                       <NumericCell value={row.week1_tips} onChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} money />
                       <NumericCell value={row.week2_tips} onChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} money />
                       <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
+                      {showExtendedWorkbookColumns && (
+                        <>
+                          <TableCell className="text-right font-mono">{formatCurrency(toNumber(row.bonus))}</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {(row.payroll_components || []).length > 0
+                              ? (row.payroll_components || []).map((item) => `${item.label}: ${formatCurrency(toNumber(item.amount))}`).join(', ')
+                              : '—'}
+                          </TableCell>
+                          <TableCell className="text-right font-mono">{formatCurrency(toNumber(row.loan_deduction))}</TableCell>
+                        </>
+                      )}
                       <TableCell>{readinessBadge(row)}</TableCell>
                     </TableRow>
                   ))}
