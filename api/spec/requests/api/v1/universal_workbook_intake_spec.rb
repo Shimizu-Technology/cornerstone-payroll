@@ -242,6 +242,154 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       expect(portal_period.pending_source_review?).to be(false)
       expect(portal_period.status_events.where(event: "import", payroll_submission_id: submission_id)).to exist
     end
+
+    it "applies staff-approved client extra_hours (6.50h @ $20/hr) on top of a portal universal workbook (75 reg / 5 OT + $25 bonus = $1,805 gross)" do
+      ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
+      primary_rate = employee_01.employee_wage_rates.find_by(is_primary: true) ||
+        employee_01.employee_wage_rates.create!(label: "Primary", rate: 20.00, is_primary: true, active: true)
+
+      filled_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "45.00", "35.00", "", "", "", "", "", "", "25.00", "", "", "", "", "" ]
+      end
+      upload = portal_upload("portal-with-extra-hours.csv", filled_csv, csv_mime)
+
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: upload,
+             no_changes: "false",
+             changes: [
+               {
+                 kind: "extra_hours",
+                 employee_id: employee_01.id,
+                 employee_wage_rate_id: primary_rate.id,
+                 hours: "6.50"
+               }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      stub_portal_user(Api::V1::Admin::PayrollImportsController, staff, company)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: { submission_id: submission_id },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      prefill_rows = response.parsed_body.dig("client_change_prefill", "rows")
+      expect(prefill_rows.sole).to include(
+        "change_index" => 0,
+        "kind" => "extra_hours",
+        "employee_id" => employee_01.id,
+        "hours" => "6.5"
+      )
+
+      import_id = response.parsed_body.fetch("import_id")
+      portal_source_id = response.parsed_body.dig("portal_source", "selection_id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: import_id,
+             portal_source_id: portal_source_id,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               { change_index: 0, hours: "6.50", decision: "apply" }
+             ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item = pay_period.reload.payroll_items.find_by!(employee: employee_01)
+      # Workbook: 75.00 reg + 5.00 OT + $25 bonus = $1,675.00
+      # Approved client change: +6.50 extra hours @ $20/hr = +$130.00 -> $1,805.00 gross
+      expect(item.hours_worked).to eq(BigDecimal("81.50"))
+      expect(item.overtime_hours).to eq(BigDecimal("5.00"))
+      expect(item.bonus).to eq(BigDecimal("25.00"))
+      expect(item.gross_pay).to eq(BigDecimal("1805.00"))
+      expect(item.custom_columns_data.dig("client_change_evidence", "applied_regular_hours")).to eq("81.5")
+    end
+  end
+
+  describe "Concurrent open reviews across mosa_revel and direct cornerstone_workbook" do
+    before do
+      company.update!(payroll_intake_source_types: [ "mosa_revel", "cornerstone_workbook" ])
+    end
+
+    it "keeps an open MoSa review (73 reg / 2 OT) reachable via current_import after a direct universal workbook preview at revision 2" do
+      mosa_session = PayrollIntakeSession.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: staff,
+        source_type: "mosa_revel",
+        status: "previewed",
+        import_hash: SecureRandom.hex(32),
+        parser_version: "mosa_revel:v1",
+        package_id: SecureRandom.uuid,
+        package_revision: 1
+      )
+      PayrollIntakeRow.create!(
+        payroll_intake_session: mosa_session,
+        employee: employee_01,
+        source_employee_name: "Employee 01",
+        regular_hours: BigDecimal("73.00"),
+        overtime_hours: BigDecimal("2.00"),
+        reported_tips: BigDecimal("0.00"),
+        tips_paid_out: BigDecimal("0.00"),
+        source_payload: {
+          "row_kind" => "matched",
+          "preview_row" => {
+            "employee_id" => employee_01.id,
+            "employee_name" => "Employee 01",
+            "match_status" => "matched",
+            "regular_hours" => 73.0,
+            "overtime_hours" => 2.0,
+            "tips" => 0.0,
+            "loan_deduction" => 0.0
+          }
+        },
+        disposition: "pending"
+      )
+      mosa_import_record = PayrollImportRecord.create!(
+        pay_period: pay_period,
+        payroll_intake_session: mosa_session,
+        status: "previewed",
+        matched_data: [
+          {
+            "employee_id" => employee_01.id,
+            "employee_name" => "Employee 01",
+            "match_status" => "matched",
+            "regular_hours" => 73.0,
+            "overtime_hours" => 2.0,
+            "tips" => 0.0,
+            "loan_deduction" => 0.0
+          }
+        ],
+        raw_data: { "tips_paid_out_from_tips" => false, "low_confidence_matches" => [] }
+      )
+
+      # Preview a direct universal workbook -> creates revision 2 session without a PayrollImportRecord
+      stub_portal_user(Api::V1::Admin::PayrollIntakeImportsController, staff, company)
+      workbook_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "40.00", "40.00", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      end
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/payroll_intake_imports/preview",
+           params: { source_type: "cornerstone_workbook", files: [ portal_upload("direct.csv", workbook_csv, csv_mime) ] }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("import", "package_revision")).to eq(2)
+
+      # Reopening current_import must still return the open MoSa revision 1 review (not 404)
+      stub_portal_user(Api::V1::Admin::PayrollImportsController, staff, company)
+      get "/api/v1/admin/pay_periods/#{pay_period.id}/current_import"
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("import_id")).to eq(mosa_import_record.id)
+      expect(response.parsed_body.dig("source_package", "package_revision")).to eq(1)
+      expect(response.parsed_body.dig("preview", "matched").sole).to include(
+        "employee_id" => employee_01.id,
+        "regular_hours" => 73.0,
+        "overtime_hours" => 2.0
+      )
+    end
   end
 
   describe "Merged apply path for reviewed-hours (mosa_revel) imports" do
