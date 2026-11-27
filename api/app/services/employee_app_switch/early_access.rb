@@ -43,7 +43,7 @@ module EmployeeAppSwitch
         window
       end
       # A demo the new window no longer names closes now, not at the next sweep.
-      DemoExpiry.call(organization_ids: [ organization.id ])
+      ActiveRecord.after_all_transactions_commit { DemoExpiry.call(organization_ids: [ organization.id ]) }
       window
     end
 
@@ -59,7 +59,7 @@ module EmployeeAppSwitch
         audit!(actor, organization, END_ACTION, window, { reason: reason })
         window
       end
-      DemoExpiry.call(organization_ids: [ organization.id ])
+      ActiveRecord.after_all_transactions_commit { DemoExpiry.call(organization_ids: [ organization.id ]) }
       window
     end
 

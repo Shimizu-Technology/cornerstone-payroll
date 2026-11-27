@@ -112,11 +112,9 @@ RSpec.describe "PayPeriod Correction API (CPR-71)", type: :request do
           request_id: be_present
         )
         expect(audit.metadata).to include(
-          "changed_fields" => include("correction_status", "void_reason", "voided_at"),
-          "after_values" => include(
-            "correction_status" => "voided",
-            "void_reason" => "Audit dedupe test"
-          ),
+          "changed_fields" => include("correction_status", "voided_at"),
+          "reason" => "Audit dedupe test",
+          "after_values" => include("correction_status" => "voided"),
           "business_summary" => include(
             "employee_count" => 1,
             "total_gross" => "1600.0",

@@ -177,7 +177,7 @@ function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, current
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    if (!reason.trim()) { setError('Enter a reason for the change.'); return; }
+    if (reason.trim().length < 10) { setError('Enter a reason of at least 10 characters.'); return; }
     // The minimum moves on while the dialog is open; Cornerstone would refuse a time that slipped under it.
     const freshMin = toGuamInput(earliestLockChange(currentTime()).toISOString());
     if (action === 'change' && freshMin > max) {
@@ -236,7 +236,7 @@ function LockTimeDialog({ action, payPeriodId, calendar, appliedAt, now, current
           )}
           <label className="mt-4 block text-sm font-medium text-neutral-800">
             Reason (required)
-            <Textarea className="mt-1" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} rows={3} required
+            <Textarea className="mt-1" value={reason} onChange={(event) => setReason(event.target.value)} minLength={10} maxLength={500} rows={3} required
               placeholder="For example: payday moved for the holiday" />
           </label>
           {error && <p role="alert" className="mt-3 rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-sm text-danger-800">{error}</p>}

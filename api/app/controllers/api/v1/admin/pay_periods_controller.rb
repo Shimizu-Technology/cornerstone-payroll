@@ -22,7 +22,7 @@ module Api
         before_action :set_pay_period, only: [
           :show, :update, :destroy, :run_payroll, :adopt_confirmed_workweek, :approve, :unapprove, :commit,
           :promoted_payment_preview, :prepare_promoted_payment,
-          :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check,
+          :correct_pay_date, :void, :create_correction_run, :reopen_unpaid, :refresh_setup, :correction_preflight, :correction_history, :generate_fit_check, :complete_rollback_review,
           :corrective_paycheck_preview, :corrective_paychecks, :supplemental_pay_periods,
           :comparison, :payroll_field_inputs, :client_review, :record_client_approval, :override_client_approval, :corrected_hours, :connect_corrected_hours
         ]
@@ -804,6 +804,31 @@ module Api
         #
         # Voids a committed pay period. Reverses YTD totals and writes an
         # immutable correction audit event. Requires a mandatory reason.
+        def complete_rollback_review
+          skip_default_audit_log!
+          AdminOverrideService.complete_rollback_review!(period: @pay_period, actor: current_user,
+            impersonated: impersonated_session?, reason: params[:reason], review_id: params[:review_id])
+          render json: { pay_period: pay_period_json(@pay_period.reload) }
+        rescue ArgumentError => error
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
+        def retry_stuck_job
+          skip_default_audit_log!
+          require_direct_recent_verification!(impersonation_error: "Exit Sign in as before retrying a job.")
+          return if performed?
+          return render json: { error: "Select a client first." }, status: :unprocessable_entity unless current_company
+
+          AdminOverrideService.retry_job!(company: current_company, actor: current_user,
+            verified: MfaPolicy.recently_step_up_verified?(@clerk_token_payload),
+            impersonated: impersonated_session?, job_key: params[:job], reason: params[:reason])
+          render json: { status: "queued" }, status: :accepted
+        rescue ActiveJob::EnqueueError
+          render json: { error: "The retry request was recorded but the job could not be queued." }, status: :service_unavailable
+        rescue ArgumentError => error
+          render json: { error: error.message }, status: :unprocessable_entity
+        end
+
         def void
           return unless rollback_verification_passed?
 
@@ -1437,6 +1462,8 @@ module Api
             superseded_by_id:         pay_period.superseded_by_id,
             can_void:                        pay_period.can_void? && !impersonated_session? && StaffRolePolicy.allowed?(current_user, :break_glass),
             rollback_review_required: pay_period.rollback_review_required,
+            rollback_review_id: (AdminOverrideService.rollback_review_id(pay_period)&.to_s unless list || impersonated_session?),
+            can_retry_payroll_job: (!impersonated_session? && StaffRolePolicy.allowed?(current_user, :break_glass) unless list),
             can_create_correction_run:       pay_period.can_create_correction_run?,
             can_delete_draft_correction_run: pay_period.can_delete_draft_correction_run?,
             # Per-employee corrective paycheck (off-cycle supplemental period)

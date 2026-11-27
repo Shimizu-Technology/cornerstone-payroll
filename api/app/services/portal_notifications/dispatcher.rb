@@ -16,11 +16,12 @@ module PortalNotifications
     EMPLOYEE_CHANNEL = "employee_portal_notification"
     BATCH_KEY_V2_PREFIX = "portal-notification-v2-"
 
-    def self.run!(now: Time.current)
-      new(now).run!
+    def self.run!(now: Time.current, company_id: nil)
+      new(now, company_id: company_id).run!
     end
 
-    def initialize(now)
+    def initialize(now, company_id: nil)
+      @company_id = company_id
       # Truncate to PostgreSQL microsecond precision so claimed_at equality checks match stored timestamps.
       @now = now.change(usec: now.usec)
       @claim_token = SecureRandom.hex(16)
@@ -37,7 +38,9 @@ module PortalNotifications
     attr_reader :now, :claim_token
 
     def due_scope
-      PortalNotificationDelivery.pending.where(channel: "email")
+      deliveries = PortalNotificationDelivery.pending
+      deliveries = deliveries.where(company_id: @company_id) if @company_id
+      deliveries.where(channel: "email")
         .where("deliver_after <= ?", now)
         .where("next_attempt_at IS NULL OR next_attempt_at <= ?", now)
         .where("claimed_at IS NULL OR claimed_at < ?", now - CLAIM_TIMEOUT)
@@ -67,6 +70,7 @@ module PortalNotifications
 
         lock_scope = PortalNotificationDelivery.where(id: due_ids)
         lock_scope = lock_scope.or(PortalNotificationDelivery.where(batch_key: batch_keys)) if batch_keys.any?
+        lock_scope = lock_scope.where(company_id: @company_id) if @company_id
         locked_rows = lock_scope.order(:id).lock("FOR UPDATE SKIP LOCKED")
           .includes(:user, portal_notification_event: [ :company, :subject ]).to_a
 

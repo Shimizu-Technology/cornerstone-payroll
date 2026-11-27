@@ -127,6 +127,8 @@ class StaffRolePolicy
   }.freeze
 
   ACTION_CAPABILITIES = {
+    "api/v1/admin/pay_periods#retry_stuck_job" => :break_glass,
+    "api/v1/admin/pay_periods#complete_rollback_review" => :payroll_operations,
     "api/v1/admin/pay_periods#void" => :break_glass,
     "api/v1/admin/pay_periods#reopen_unpaid" => :break_glass,
     "api/v1/admin/pay_periods#correction_preflight" => :break_glass,
