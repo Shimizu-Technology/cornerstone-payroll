@@ -229,8 +229,8 @@ RSpec.describe PayrollImport::ImportService do
       employee = create(
         :employee,
         company: company,
-        first_name: "Sara",
-        last_name: "Doctor",
+        first_name: "Sloane",
+        last_name: "Ellis",
         employment_type: "salary",
         salary_type: "variable",
         pay_rate: 120_000.00,

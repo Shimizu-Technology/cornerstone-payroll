@@ -885,7 +885,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.loan_payment).to eq(BigDecimal("275"))
     end
 
-    it "charges Madela's separate $250 loan field in addition to a $300.00 direct loan" do
+    it "charges a separate $250 loan field in addition to a $300.00 direct loan" do
       loan_field = PayrollFieldDefinition.create!(
         company: company,
         name: "Loan - Devon Holbrook",
@@ -909,7 +909,7 @@ RSpec.describe PayrollCalculator do
       expect(payroll_item.net_pay.to_d).to eq(without_direct_loan - BigDecimal("300.00"))
     end
 
-    it "keeps Emma's legacy $250 installment separate from a direct loan deduction" do
+    it "keeps a legacy $250 installment separate from a direct loan deduction" do
       payroll_item.payroll_adjustments = [
         { "label" => "Loan - Installment", "amount" => BigDecimal("250"),
           "treatment" => "post_tax_deduction", "active" => true }

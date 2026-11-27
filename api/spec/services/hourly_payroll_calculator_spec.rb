@@ -8,18 +8,18 @@ RSpec.describe HourlyPayrollCalculator do
   let(:department) { create(:department, company: company) }
   let(:pay_period) { create(:pay_period, company: company, pay_date: Date.new(2024, 1, 19)) }
 
-  # Validation test case from AGENT_INSTRUCTIONS.md
-  # Employee: 56.48 hours @ $9.25, single filing
-  # Expected: Gross $522.44, SS $32.39, Medicare $7.58, Withholding $0.00, Net $482.47
-  describe "validation case: 56.48 hours @ $9.25 single" do
+  # Validation test case: low-wage hourly single filer below withholding threshold
+  # Employee: 50.0 hours @ $10.00, single filing
+  # Expected: Gross $500.00, SS $31.00, Medicare $7.25, Withholding $0.00, Net $461.75
+  describe "validation case: 50.0 hours @ $10.00 single" do
     let(:employee) do
       create(:employee,
         company: company,
         department: department,
         first_name: "Alex",
-        last_name: "Fred",
+        last_name: "Sample",
         employment_type: "hourly",
-        pay_rate: 9.25,
+        pay_rate: 10.00,
         filing_status: "single",
         allowances: 0,
         retirement_rate: 0,
@@ -32,8 +32,8 @@ RSpec.describe HourlyPayrollCalculator do
         pay_period: pay_period,
         employee: employee,
         employment_type: "hourly",
-        pay_rate: 9.25,
-        hours_worked: 56.48,
+        pay_rate: 10.00,
+        hours_worked: 50.0,
         overtime_hours: 0,
         reported_tips: 0,
         bonus: 0
@@ -44,21 +44,21 @@ RSpec.describe HourlyPayrollCalculator do
       calculator = described_class.new(employee, payroll_item)
       calculator.calculate
 
-      expect(payroll_item.gross_pay).to eq(522.44)
+      expect(payroll_item.gross_pay).to eq(500.00)
     end
 
     it "calculates correct Social Security" do
       calculator = described_class.new(employee, payroll_item)
       calculator.calculate
 
-      expect(payroll_item.social_security_tax).to eq(32.39)
+      expect(payroll_item.social_security_tax).to eq(31.00)
     end
 
     it "calculates correct Medicare" do
       calculator = described_class.new(employee, payroll_item)
       calculator.calculate
 
-      expect(payroll_item.medicare_tax).to eq(7.58)
+      expect(payroll_item.medicare_tax).to eq(7.25)
     end
 
     it "calculates zero withholding (below threshold)" do
@@ -73,8 +73,8 @@ RSpec.describe HourlyPayrollCalculator do
       calculator.calculate
 
       # Net = Gross - Total Deductions
-      # Net = 522.44 - (0 + 32.39 + 7.58 + 0 + 0 + 0 + 0) = 482.47
-      expect(payroll_item.net_pay).to eq(482.47)
+      # Net = 500.00 - (0 + 31.00 + 7.25 + 0 + 0 + 0 + 0) = 461.75
+      expect(payroll_item.net_pay).to eq(461.75)
     end
   end
 

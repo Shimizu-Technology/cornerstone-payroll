@@ -5,33 +5,32 @@ module PayrollImport
   #
   # Example PDF structure (fixed-width columns):
   #      Employee                            Role               Ext. ID               Wage            Regular h.          Overtime h.        Doubletime h.                Regular            Overtime           Doubletime           Total Hours                  Total                 Fees
-  #      Benson, Calra R.                        -                     -                    -               58.99                      -                     -             604.64                       -                    -              58.99               604.64                      -
+  #      Benson, Calra R.                        -                     -                    -               40.00                      -                     -             600.00                       -                    -              40.00               600.00                      -
   #
   # Returns array of hashes with:
   # - employee_name (string): "Benson, Calra R."
-  # - regular_hours (decimal): 58.99
+  # - regular_hours (decimal): 40.00
   # - overtime_hours (decimal): 0.0
-  # - regular_pay (decimal): 604.64
+  # - regular_pay (decimal): 600.00
   # - overtime_pay (decimal): 0.0
-  # - total_hours (decimal): 58.99
-  # - total_pay (decimal): 604.64
+  # - total_hours (decimal): 40.00
+  # - total_pay (decimal): 600.00
   class RevelPdfParser
     # Column positions determined by analyzing sample PDFs
     # Measured in character positions from start of line
-    # Based on analysis of payroll_2025-12-15_00-00_to_2025-12-28_23-59.pdf
     COLUMNS = {
       employee: 0..39,          # "Benson, Calra R." ends around position 39
       role: 40..59,             # "-" appears at position ~45
       ext_id: 60..79,           # "-" appears at position ~65
       wage: 80..99,             # "-" appears at position ~85
-      regular_hours: 100..119,  # "58.99" appears at position ~104-109
+      regular_hours: 100..119,  # "40.00" appears at position ~104-109
       overtime_hours: 120..139, # "-" appears at position ~130
       doubletime_hours: 140..159, # "-" appears at position ~150
-      regular_pay: 160..179,    # "604.64" appears at position ~164-170
+      regular_pay: 160..179,    # "600.00" appears at position ~164-170
       overtime_pay: 180..199,   # "-" appears at position ~190
       doubletime_pay: 200..219, # "-" appears at position ~210
-      total_hours: 220..239,    # "58.99" appears at position ~228-233
-      total_pay: 240..259,      # "604.64" appears at position ~248-254
+      total_hours: 220..239,    # "40.00" appears at position ~228-233
+      total_pay: 240..259,      # "600.00" appears at position ~248-254
       fees: 260..279            # "-" appears at position ~270
     }.freeze
 
@@ -306,8 +305,8 @@ module PayrollImport
 
     def implausible_fixed_parse?(values)
       # 200h ceiling matches MAX_REALISTIC_HOURS in validation script (14 days * ~14h max).
-      # Catches compressed-layout lines like PP09 Alvarez/Naomi where fixed columns
-      # misread regular_pay (240.00) as total_hours; fallback flexible parser resolves correctly.
+      # Catches compressed-layout lines where fixed columns misread regular_pay (e.g. 240.00)
+      # as total_hours; fallback flexible parser resolves correctly.
       values[:employee].to_s.strip.empty? || values[:total_hours].to_f > 200.0 || (values[:total_pay].to_f > 0 && values[:total_hours].to_f.zero?)
     end
 

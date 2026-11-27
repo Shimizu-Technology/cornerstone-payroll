@@ -228,7 +228,7 @@ module PayrollImport
       # Exact full match
       return 1.0 if input == employee
 
-      # Exact first-token match (handles "Aaron" = "Aaron-Michael" via "aaron" = "aaron michael".first)
+      # Exact first-token match (handles "Alex" = "Alex-Jordan" via "alex" = "alex jordan".first)
       return 1.0 if input_first == emp_first
 
       # First token of input matches first token of employee

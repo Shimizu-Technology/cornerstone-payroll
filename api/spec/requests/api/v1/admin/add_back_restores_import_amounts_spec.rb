@@ -7,7 +7,7 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
   let!(:staff) { create(:user, company: company, role: "admin") }
   let!(:avery) { create(:employee, company: company, first_name: "Avery", last_name: "Example", pay_rate: 20) }
   # Not in Revel; the workbook has a one-time loan and tips for him.
-  let!(:addison) { create(:employee, company: company, first_name: "Jordan", last_name: "Workbook", pay_rate: 35) }
+  let!(:jordan) { create(:employee, company: company, first_name: "Jordan", last_name: "Workbook", pay_rate: 35) }
   let!(:run) { create(:pay_period, company: company) }
   let(:url) { "/api/v1/admin/pay_periods/#{run.id}" }
   let(:objects) { {} }
@@ -70,35 +70,35 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
     expect(response).to have_http_status(:ok), response.body
   end
 
-  def addison_item = run.payroll_items.find_by(employee: addison)
+  def jordan_item = run.payroll_items.find_by(employee: jordan)
 
-  def remove_addison!
-    delete "#{url}/payroll_items/#{addison_item.id}"
+  def remove_jordan!
+    delete "#{url}/payroll_items/#{jordan_item.id}"
     expect(response).to have_http_status(:no_content), response.body
-    expect(addison_item).to be_nil
+    expect(jordan_item).to be_nil
   end
 
-  def add_back_addison!
-    delete "#{url}/excluded_employees/#{addison.id}", as: :json
+  def add_back_jordan!
+    delete "#{url}/excluded_employees/#{jordan.id}", as: :json
     expect(response).to have_http_status(:ok), response.body
     response.parsed_body.fetch("add_back")
   end
 
-  def calculate_addison!(hours: 40)
-    post "#{url}/run_payroll", params: { employee_ids: [ avery.id, addison.id ],
-      hours: { addison.id.to_s => { regular: hours, overtime: 0 } } }, as: :json
+  def calculate_jordan!(hours: 40)
+    post "#{url}/run_payroll", params: { employee_ids: [ avery.id, jordan.id ],
+      hours: { jordan.id.to_s => { regular: hours, overtime: 0 } } }, as: :json
     expect(response).to have_http_status(:ok), response.body
     expect(response.parsed_body.dig("results", "errors")).to be_empty
-    addison_item.reload
+    jordan_item.reload
   end
 
   def current_package_id = PayrollIntakeSession.where(pay_period: run).order(:package_revision).last.package_id
 
   def kitchen_loan!(amount: 100, scheduled: true)
     type = DeductionType.create!(company: company, name: "Kitchen loan", category: "post_tax", sub_category: "loan", active: true)
-    loan = EmployeeLoan.create!(company: company, employee: addison, deduction_type: type, name: "Kitchen loan",
+    loan = EmployeeLoan.create!(company: company, employee: jordan, deduction_type: type, name: "Kitchen loan",
       tracking_mode: "recurring_no_balance", payment_amount: amount, first_deduction_date: run.pay_date)
-    addison.employee_deductions.create!(deduction_type: type, amount: amount, is_percentage: false, active: true) if scheduled
+    jordan.employee_deductions.create!(deduction_type: type, amount: amount, is_percentage: false, active: true) if scheduled
     loan
   end
 
@@ -113,29 +113,29 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
 
   def import_and_remove!
     apply!(preview!)
-    expect(addison_item).to have_attributes(requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d, import_source: "mosa_revel")
-    remove_addison!
+    expect(jordan_item).to have_attributes(requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d, import_source: "mosa_revel")
+    remove_jordan!
   end
 
   it "brings back the loan and tips, leaves hours for staff, and deducts the loan once hours are calculated" do
     import_and_remove!
 
-    add_back = add_back_addison!
+    add_back = add_back_jordan!
 
     expect(add_back).to include("employee_name" => "Jordan Workbook", "not_restored" => [])
     expect(add_back["restored"]).to contain_exactly(
       { "key" => "loan", "kind" => "loan", "label" => "Loan", "amount" => "150.0" },
       { "key" => "tips", "kind" => "tips", "label" => "Tips", "amount" => "20.0" }
     )
-    expect(addison_item).to have_attributes(hours_worked: 0, requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d,
+    expect(jordan_item).to have_attributes(hours_worked: 0, requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d,
       tips_paid_out: 0, import_source: "mosa_revel")
-    expect(addison_item.deduction_review_warnings).to include("No Revel hours — enter hours from MoSa's email before calculating.")
+    expect(jordan_item.deduction_review_warnings).to include("No Revel hours — enter hours from MoSa's email before calculating.")
     expect(run.reload).to be_draft
     audit = AuditLog.where(action: "pay_period_excluded_employees#destroy").sole
-    expect(audit.metadata).to include("employee_id" => addison.id, "import_id" => PayrollImportRecord.where(pay_period: run).sole.id,
+    expect(audit.metadata).to include("employee_id" => jordan.id, "import_id" => PayrollImportRecord.where(pay_period: run).sole.id,
       "restored_import_amounts" => add_back["restored"], "not_restored_import_amounts" => [])
 
-    item = calculate_addison!
+    item = calculate_jordan!
     expect_no_loan_overdeduction!(add_back, item)
     expect(item.gross_pay).to eq(1420.to_d)
     expect(item.loan_deduction).to eq(150.00.to_d)
@@ -146,24 +146,24 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
 
   it "doesn't double the loan when the worker is removed and added back again" do
     import_and_remove!
-    add_back_addison!
-    remove_addison!
-    add_back = add_back_addison!
+    add_back_jordan!
+    remove_jordan!
+    add_back = add_back_jordan!
 
     expect(add_back["restored"].map { |row| row["amount"] }).to contain_exactly("150.0", "20.0")
-    expect(addison_item).to have_attributes(requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d)
-    expect(calculate_addison!.loan_deduction).to eq(150.00.to_d)
+    expect(jordan_item).to have_attributes(requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d)
+    expect(calculate_jordan!.loan_deduction).to eq(150.00.to_d)
     expect(AuditLog.where(action: "pay_period_excluded_employees#destroy").count).to eq(2)
   end
 
   it "doesn't double the loan when the import is applied again after the add-back" do
     import_and_remove!
-    add_back_addison!
-    calculate_addison!
+    add_back_jordan!
+    calculate_jordan!
 
     apply!(preview!(avery_hours: 39, replaces: current_package_id), confirm_hours_overwrite: true)
 
-    item = addison_item.reload
+    item = jordan_item.reload
     expect(item).to have_attributes(requested_loan_deduction: 150.00.to_d, reported_tips: 20.to_d, hours_worked: 40)
     expect(item.loan_deduction).to eq(150.00.to_d)
   end
@@ -172,7 +172,7 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
     import_and_remove!
     preview!(avery_hours: 38, replaces: current_package_id)
 
-    add_back = add_back_addison!
+    add_back = add_back_jordan!
 
     expect(add_back["restored"]).to be_empty
     expect(add_back["not_restored"]).to contain_exactly(
@@ -180,8 +180,8 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
         "reason" => "The import was replaced by newer files. Apply the current import review, or enter it by hand. Enter it under Hours → Tips & Deductions."),
       include("kind" => "tips", "amount" => "20.0", "enter_by_hand" => true)
     )
-    expect(addison_item).to be_nil
-    expect_no_loan_overdeduction!(add_back, calculate_addison!)
+    expect(jordan_item).to be_nil
+    expect_no_loan_overdeduction!(add_back, calculate_jordan!)
     expect(run.pay_period_excluded_employees).to be_empty
     expect(AuditLog.where(action: "pay_period_excluded_employees#destroy").sole.metadata["not_restored_import_amounts"].size).to eq(2)
   end
@@ -190,15 +190,15 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
     import_and_remove!
     kitchen_loan!(amount: 100)
 
-    add_back = add_back_addison!
+    add_back = add_back_jordan!
 
     expect(add_back["restored"]).to contain_exactly(include("kind" => "tips", "amount" => "20.0"))
     expect(add_back["not_restored"]).to contain_exactly(include("kind" => "loan", "amount" => "150.0", "enter_by_hand" => false,
       "reason" => "Kitchen loan is $100.00 for this payday, but the workbook says $150.00. Update the schedule in Cornerstone or correct the workbook. " \
         "Employee Loans will deduct $100.00 this payday (Kitchen loan); the workbook says $150.00. Check it in Employee Loans. Don't enter the workbook loan by hand."))
-    expect(addison_item).to have_attributes(requested_loan_deduction: 0, reported_tips: 20.to_d)
-    expect(addison_item.custom_columns_data["mosa_missing_revel_hours"]).to be(false)
-    item = calculate_addison!
+    expect(jordan_item).to have_attributes(requested_loan_deduction: 0, reported_tips: 20.to_d)
+    expect(jordan_item.custom_columns_data["mosa_missing_revel_hours"]).to be(false)
+    item = calculate_jordan!
     expect(item.loan_payment).to eq(100.to_d)
     expect_no_loan_overdeduction!(add_back, item)
   end
@@ -207,14 +207,14 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
     import_and_remove!
     kitchen_loan!(amount: 100).update!(status: "suspended")
 
-    add_back = add_back_addison!
+    add_back = add_back_jordan!
 
     # Nothing will be deducted, so staff resume the loan or enter a one-time amount; never both.
     expect(add_back["not_restored"]).to contain_exactly(include("kind" => "loan", "enter_by_hand" => true,
       "reason" => a_string_starting_with("Kitchen loan is paused").and(ending_with(
         "Employee Loans will deduct nothing this payday; the workbook says $150.00. Resume the loan in Employee Loans, " \
         "or, if the workbook amount really is one-time this period, enter it under Hours → Tips & Deductions."))))
-    expect_no_loan_overdeduction!(add_back, calculate_addison!)
+    expect_no_loan_overdeduction!(add_back, calculate_jordan!)
   end
 
   it "doesn't ask for the loan by hand from a replaced import when Employee Loans now deducts one" do
@@ -222,64 +222,64 @@ RSpec.describe "Adding a removed worker back restores the import's amounts", typ
     preview!(avery_hours: 38, replaces: current_package_id)
     kitchen_loan!(amount: 100)
 
-    add_back = add_back_addison!
+    add_back = add_back_jordan!
 
     expect(add_back["not_restored"]).to include(include("kind" => "loan", "enter_by_hand" => false,
       "reason" => a_string_including("Employee Loans will deduct $100.00 this payday (Kitchen loan)")))
-    expect_no_loan_overdeduction!(add_back, calculate_addison!)
+    expect_no_loan_overdeduction!(add_back, calculate_jordan!)
   end
 
   it "clears an earlier Not paid this period answer, so approval waits for the added-back worker's hours" do
-    # Addison is usually paid: paid in three of the last four committed runs,
+    # Jordan is usually paid: paid in three of the last four committed runs,
     # kept in the prior tax year so this year's FICA history isn't involved.
     4.times do |index|
       offset = 1.year + (index * 14).days
       past = create(:pay_period, company: company, start_date: run.start_date - offset, end_date: run.end_date - offset,
         pay_date: run.pay_date - offset)
-      create(:payroll_item, pay_period: past, employee: addison, gross_pay: 200) if index < 3
+      create(:payroll_item, pay_period: past, employee: jordan, gross_pay: 200) if index < 3
       # History only; these runs are never recalculated here.
       past.update_columns(status: "committed", committed_at: Time.current)
     end
     # Before the files arrived, staff answered Not paid this period.
-    resolution = PayrollEntryResolution.create!(pay_period: run, employee: addison, note: "No shifts yet")
+    resolution = PayrollEntryResolution.create!(pay_period: run, employee: jordan, note: "No shifts yet")
     import_and_remove!
 
-    add_back_addison!
+    add_back_jordan!
 
     expect(PayrollEntryResolution.exists?(resolution.id)).to be(false)
     audit = AuditLog.where(action: "pay_period_excluded_employees#destroy").sole
     expect(audit.metadata["cleared_entry_resolutions"]).to eq([ { "payroll_standing_change_id" => nil, "note" => "No shifts yet" } ])
     entries = PayrollExpectedEntries.new(run.reload).payload
-    expect(entries[:missing_regulars]).to include(include(employee_id: addison.id, resolved: false, awaiting_hours: true))
-    expect(entries[:outstanding]).to include(addison.full_name)
-    calculate_addison!(hours: 0)
-    expect(PayrollExpectedEntries.new(run.reload).payload[:outstanding]).to include(addison.full_name)
+    expect(entries[:missing_regulars]).to include(include(employee_id: jordan.id, resolved: false, awaiting_hours: true))
+    expect(entries[:outstanding]).to include(jordan.full_name)
+    calculate_jordan!(hours: 0)
+    expect(PayrollExpectedEntries.new(run.reload).payload[:outstanding]).to include(jordan.full_name)
   end
 
   it "returns the recorded add-back when the request is repeated, and keeps it in Expected entries until hours are in" do
     import_and_remove!
-    first = add_back_addison!
-    expect(add_back_addison!).to eq(first)
+    first = add_back_jordan!
+    expect(add_back_jordan!).to eq(first)
     expect(AuditLog.where(action: "pay_period_excluded_employees#destroy").count).to eq(1)
 
     added_back = PayrollExpectedEntries.new(run.reload).payload[:added_back]
-    expect(added_back).to contain_exactly(include(employee_id: addison.id, hours_entered: false, restored: first["restored"]))
-    calculate_addison!
+    expect(added_back).to contain_exactly(include(employee_id: jordan.id, hours_entered: false, restored: first["restored"]))
+    calculate_jordan!
     expect(PayrollExpectedEntries.new(run.reload).payload[:added_back]).to be_empty
   end
 
   it "keeps a not-restored amount listed after hours are in, and drops it once a newer import is applied" do
     import_and_remove!
     kitchen_loan!(amount: 100)
-    add_back_addison!
-    calculate_addison!
+    add_back_jordan!
+    calculate_jordan!
 
     expect(PayrollExpectedEntries.new(run.reload).payload[:added_back])
-      .to contain_exactly(include(employee_id: addison.id, hours_entered: true, not_restored: [ include("kind" => "loan") ]))
+      .to contain_exactly(include(employee_id: jordan.id, hours_entered: true, not_restored: [ include("kind" => "loan") ]))
     # The corrected workbook matches the new Employee Loans schedule.
     apply!(preview!(avery_hours: 39, replaces: current_package_id, loan: 100), confirm_hours_overwrite: true)
     expect(PayrollExpectedEntries.new(run.reload).payload[:added_back]).to be_empty
-    expect(addison_item.reload.loan_payment).to eq(100.to_d)
+    expect(jordan_item.reload.loan_payment).to eq(100.to_d)
   end
 
   it "says nothing came back for a worker the import didn't include" do
