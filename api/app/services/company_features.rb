@@ -10,19 +10,20 @@ class CompanyFeatures
 
   attr_reader :company, :as_of, :profile
 
-  def self.for(company, on: PayrollBusinessClock.today)
+  def self.for(company, on: PayrollBusinessClock.today, retire_windows: true)
     raise ArgumentError, "company is required" unless company.is_a?(Company)
 
     date = (on || PayrollBusinessClock.today).to_date
     persisted = ClientOperatingProfile.for_date(company.id, date)
     resolved = persisted || ClientOperatingProfiles::LegacyProfileBuilder.build(company, effective_on: date)
-    new(company: company, profile: resolved, as_of: date)
+    new(company: company, profile: resolved, as_of: date, retire_windows: retire_windows)
   end
 
-  def initialize(company:, profile:, as_of:)
+  def initialize(company:, profile:, as_of:, retire_windows: true)
     @company = company
     @profile = profile
     @as_of = as_of
+    @retire_windows = retire_windows
   end
 
   def persisted?
@@ -213,6 +214,6 @@ class CompanyFeatures
     return true unless company.demo?
     return @demo_gate_open if defined?(@demo_gate_open)
 
-    @demo_gate_open = EmployeeAppSwitch::Enforcement.demo_app_open?(company)
+    @demo_gate_open = EmployeeAppSwitch::Enforcement.demo_app_open?(company, retire_windows: @retire_windows)
   end
 end
