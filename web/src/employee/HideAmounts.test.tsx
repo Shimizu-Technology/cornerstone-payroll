@@ -120,6 +120,8 @@ const FORBIDDEN_AMOUNTS = [
   '23,230',
   '23230',
   '36.45',
+  '17.75',
+  '18.25',
 ];
 
 const LEAKED_CURRENCY_PATTERN = /\$\s*[-+]?(?:\d|\.\d)|\bUSD\s*[-+]?(?:\d|\.\d)|(?:\d|\.\d)\s*USD\b/i;
@@ -161,6 +163,13 @@ function mockEmployeeRoutes(overrides: Record<string, () => Response> = {}): Ret
     }),
     '/employee/help': () => Response.json({
       help_contacts: [{ name: 'Rina Calvo', role: 'Manager', phone: '6715550110', email: 'rina@harborfinch.test', text_ok: true }],
+    }),
+    '/employee/job': () => Response.json({
+      job: {
+        employer_name: 'Harbor Finch Kitchen', department: 'Front of House', role: 'Server', employee_id: '1042',
+        worker_type: 'w2', pay_frequency: 'biweekly', start_date: '2024-03-04', payment_method: 'direct_deposit',
+        contact_name: 'Rina Calvo', pay: { type: 'hourly', rates: [{ label: 'Server', rate: '17.75' }, { label: 'Host', rate: '18.25' }] },
+      },
     }),
     ...overrides,
   };
@@ -386,11 +395,13 @@ describe('Employee app masked pay amounts by default (Track K)', () => {
     expectMaskedDomClean(taxes.container);
     taxes.unmount();
 
-    // My info and Help also have no toggle and expose no money.
+    // My info shows its pay rates masked, behind the same toggle.
     window.history.pushState({}, '', '/my-info');
     const myInfo = render(<EmployeeApp />);
     expect(await screen.findByText('Direct deposit')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Show amounts|Hide amounts/ })).toBeNull();
+    const job = screen.getByRole('region', { name: 'My job' });
+    expect(within(job).getByRole('button', { name: 'Show amounts' })).toBeTruthy();
+    await screen.findByRole('region', { name: 'Contact details' });
     expectMaskedDomClean(myInfo.container);
     myInfo.unmount();
 

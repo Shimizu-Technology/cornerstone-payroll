@@ -20,6 +20,8 @@ RSpec.describe "Employee endpoint isolation matrix", type: :request do
       { kind: :link, access: :read, feature: :portal },
     [ "GET",    "/api/v1/employee/help" ] =>
       { kind: :link, access: :read, feature: :portal },
+    [ "GET",    "/api/v1/employee/job" ] =>
+      { kind: :link, access: :read, feature: :portal },
     [ "GET",    "/api/v1/employee/profile" ] =>
       { kind: :link, access: :read, feature: :profile_requests, profile_window: true },
     [ "PATCH",  "/api/v1/employee/profile/phone" ] =>

@@ -285,6 +285,31 @@ test.describe('employee app on a phone', () => {
     await snap(page, '17-emergency-remove-confirm');
   });
 
+  test('My job sits at the top of My info, with pay masked, and fits a 360-390px phone', async ({ page }) => {
+    await signIn(page);
+    await page.clock.setFixedTime(new Date('2026-11-25T09:00:00+10:00'));
+    await mockEmployeeApi(page, { context: { ...context, next_payday: '2026-12-04' } });
+    await page.goto(`/?${tenantQuery}`);
+    await expect(page.getByText('Server · Front of House')).toBeVisible();
+
+    await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My info' }).click();
+    const card = page.getByRole('region', { name: 'My job' });
+    await expect(card).toContainText('Every two weeks');
+    await expect(page.locator('.emp-cards-grid > section').first()).toHaveAttribute('aria-label', 'My job');
+    await expect(card).toContainText('Employee (W-2)');
+    await expect(card).not.toContainText('$15.00');
+    await card.getByRole('button', { name: 'Show amounts' }).click();
+    await expect(card.getByRole('listitem')).toHaveText(['Server$15.00 an hourChanges to $17.00 an hour on Dec 1', 'Banquet server$17.25 an hour']);
+    await expect(card).toContainText('Originally hired Mar 4, 2024');
+    await expect(card.getByRole('link', { name: 'Contact Rina Calvo' })).toHaveAttribute('href', '/help');
+
+    for (const width of [390, 360]) {
+      await page.setViewportSize({ width, height: 844 });
+      await expectPhoneBasics(page);
+    }
+    await snap(page, '06b-my-job', true);
+  });
+
   test('legal name and SSN point to Cornerstone, with what to bring', async ({ page }) => {
     await signIn(page);
     await mockEmployeeApi(page);
@@ -311,6 +336,7 @@ test.describe('employee app on a phone', () => {
 
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'My info' }).click();
     await expect(page.getByText("Your details can't be changed here after your job ends.")).toBeVisible();
+    await expect(page.getByRole('region', { name: 'My job' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Change|Request a change|Add a contact/ })).toHaveCount(0);
     await snap(page, '13-former-my-info', true);
 

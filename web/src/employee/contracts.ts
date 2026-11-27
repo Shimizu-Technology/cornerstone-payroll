@@ -396,6 +396,110 @@ export function parseTaxForms(data: unknown): TaxForm[] {
   });
 }
 
+// ---------- GET /employee/job ----------
+// Served (JobController, EmployeeProfiles::Job): { job: { employer_name,
+// department, role, employee_id, worker_type: "w2" | "1099", pay_frequency,
+// pay: { type: "hourly", rates: [{ label, rate, change }] } | { type: "salary",
+// per_period, annual, change } | { type: "flat_fee", per_period, change },
+// start_date, first_hired_on, payment_method, contact_name } | null }. Null
+// for a former job. Pay is as of today; `change` is a change scheduled to
+// reach the next paycheck ({ rate | per_period, annual, effective_on }), or
+// null. effective_on is null when the next check is already calculated at a
+// different amount. first_hired_on is set only after a rehire. No SSN or
+// bank numbers.
+
+export type PayFrequency = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly';
+
+export interface JobRate {
+  /** The job's name on the wage rate ("Server"), or null for a single profile rate. */
+  label: string | null;
+  rate: Money;
+  /**
+   * The rate the next paycheck will use, when it differs from today's: a
+   * change starting before its period ends, or (effectiveOn null) the rate
+   * an already calculated check pays.
+   */
+  change: { rate: Money; effectiveOn: string | null } | null;
+}
+
+/** A salary or fee the next paycheck will use, when it differs from today's (effectiveOn as for JobRate). */
+export interface PeriodPayChange {
+  perPeriod: Money;
+  annual: Money | null;
+  effectiveOn: string | null;
+}
+
+export type JobPay =
+  | { type: 'hourly'; rates: JobRate[] }
+  /** Both null for a salary set each pay period. */
+  | { type: 'salary'; perPeriod: Money | null; annual: Money | null; change: PeriodPayChange | null }
+  | { type: 'flat_fee'; perPeriod: Money | null; change: PeriodPayChange | null };
+
+export interface EmployeeJob {
+  employerName: string | null;
+  department: string | null;
+  role: string | null;
+  /** The number printed as "Employee ID" on pay stubs. */
+  employeeId: string | null;
+  workerType: 'w2' | '1099';
+  payFrequency: PayFrequency | null;
+  pay: JobPay | null;
+  /** The current stint's start (a rehire date after a rehire). */
+  startDate: string | null;
+  /** The first hire date, only when a rehire started a later stint. */
+  firstHiredOn: string | null;
+  paymentMethod: 'direct_deposit' | 'paper_check' | null;
+  /** The first Help contact's name, for "Something wrong? Contact ...". */
+  contactName: string | null;
+}
+
+function rateChange(value: unknown): JobRate['change'] {
+  const change = record(value);
+  const rate = money(change?.rate);
+  return rate ? { rate, effectiveOn: isoDate(change?.effective_on) } : null;
+}
+
+function periodPayChange(value: unknown): PeriodPayChange | null {
+  const change = record(value);
+  const perPeriod = money(change?.per_period);
+  return perPeriod ? { perPeriod, annual: money(change?.annual), effectiveOn: isoDate(change?.effective_on) } : null;
+}
+
+function jobPay(value: unknown): JobPay | null {
+  const pay = record(value);
+  if (pay?.type === 'hourly') {
+    const rates = list(pay, 'rates').flatMap((item) => {
+      const row = record(item);
+      const rate = money(row?.rate);
+      return rate ? [{ label: text(row?.label), rate, change: rateChange(row?.change) }] : [];
+    });
+    return rates.length > 0 ? { type: 'hourly', rates } : null;
+  }
+  if (pay?.type === 'salary') {
+    return { type: 'salary', perPeriod: money(pay.per_period), annual: money(pay.annual), change: periodPayChange(pay.change) };
+  }
+  if (pay?.type === 'flat_fee') return { type: 'flat_fee', perPeriod: money(pay.per_period), change: periodPayChange(pay.change) };
+  return null;
+}
+
+export function parseJob(data: unknown): EmployeeJob | null {
+  const job = record(record(data)?.job);
+  if (!job) return null;
+  return {
+    employerName: text(job.employer_name),
+    department: text(job.department),
+    role: text(job.role),
+    employeeId: text(job.employee_id),
+    workerType: job.worker_type === '1099' ? '1099' : 'w2',
+    payFrequency: oneOf(job.pay_frequency, ['weekly', 'biweekly', 'semimonthly', 'monthly'] as const),
+    pay: jobPay(job.pay),
+    startDate: isoDate(job.start_date),
+    firstHiredOn: isoDate(job.first_hired_on),
+    paymentMethod: oneOf(job.payment_method, ['direct_deposit', 'paper_check'] as const),
+    contactName: text(job.contact_name),
+  };
+}
+
 // ---------- GET /employee/help ----------
 // Served (HelpController, M4-4c): { help_contacts: [{ name, role, phone, email, text_ok }] },
 // each CompanyHelpContact#as_help_json (M4-9a), in the order the client set.
