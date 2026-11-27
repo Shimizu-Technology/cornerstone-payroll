@@ -364,6 +364,22 @@ class Company < ApplicationRecord
     payroll_intake_source_types.include?(source_type.to_s)
   end
 
+  def payroll_intake_descriptors
+    PayrollIntake::Registry.for_company(self)
+  end
+
+  def portal_submittable_intake_descriptors
+    PayrollIntake::Registry.portal_submittable_for_company(self)
+  end
+
+  def portal_submittable_intake_descriptor
+    portal_submittable_intake_descriptors.first
+  end
+
+  def portal_payroll_files_enabled?
+    portal_submittable_intake_descriptors.any?
+  end
+
   # Source files that make a complete intake package for this client. A
   # client-specific list replaces the source's default; an empty list means
   # any single file can be applied.
@@ -416,18 +432,48 @@ class Company < ApplicationRecord
       return
     end
 
+    allowed_setting_keys = %w[required_sources tips_default overtime_mode workweek_alignment].freeze
     payroll_intake_settings.each do |source_type, settings|
       unless PayrollIntake::Registry.registered?(source_type) && settings.is_a?(Hash)
         errors.add(:payroll_intake_settings, "contains an unsupported source type: #{source_type}")
         next
       end
-      next unless settings.key?("required_sources")
 
-      required = settings["required_sources"]
-      unknown = Array(required).map(&:to_s) - PayrollIntake::SourceCompleteness.roles_for(source_type).keys
-      next if required.is_a?(Array) && unknown.empty?
+      unknown_keys = settings.keys.map(&:to_s) - allowed_setting_keys
+      if unknown_keys.any?
+        errors.add(:payroll_intake_settings, "contains unknown #{source_type} setting(s): #{unknown_keys.join(', ')}")
+      end
 
-      errors.add(:payroll_intake_settings, "lists unknown #{source_type} source files: #{Array(required).join(', ')}")
+      if settings.key?("required_sources")
+        required = settings["required_sources"]
+        unknown = Array(required).map(&:to_s) - PayrollIntake::SourceCompleteness.roles_for(source_type).keys
+        unless required.is_a?(Array) && unknown.empty?
+          errors.add(:payroll_intake_settings, "lists unknown #{source_type} source files: #{Array(required).join(', ')}")
+        end
+      end
+
+      if settings.key?("tips_default") && !OperatingProfileCatalog::TIPS_DEFAULTS.include?(settings["tips_default"].to_s)
+        errors.add(:payroll_intake_settings, "has invalid #{source_type} tips_default: #{settings['tips_default']}")
+      end
+
+      if settings.key?("overtime_mode") && !OperatingProfileCatalog::OVERTIME_MODES.include?(settings["overtime_mode"].to_s)
+        errors.add(:payroll_intake_settings, "has invalid #{source_type} overtime_mode: #{settings['overtime_mode']}")
+      end
+
+      if settings.key?("workweek_alignment") && !OperatingProfileCatalog::WORKWEEK_ALIGNMENTS.include?(settings["workweek_alignment"].to_s)
+        errors.add(:payroll_intake_settings, "has invalid #{source_type} workweek_alignment: #{settings['workweek_alignment']}")
+      end
+
+      descriptor = PayrollIntake::Registry.find(source_type)
+      effective_overtime = (settings["overtime_mode"].presence || descriptor&.overtime_mode || OperatingProfileCatalog.default_for("overtime.mode")).to_s
+      effective_alignment = (settings["workweek_alignment"].presence ||
+        (effective_overtime == "source_reports" ? (descriptor&.workweek_alignment || "warn_if_offset") : "aligned")).to_s
+      if effective_alignment == "warn_if_offset" && effective_overtime != "source_reports"
+        errors.add(
+          :payroll_intake_settings,
+          "#{source_type} workweek_alignment cannot be warn_if_offset with computed overtime_mode #{effective_overtime} (29 CFR 778.104)"
+        )
+      end
     end
   end
 

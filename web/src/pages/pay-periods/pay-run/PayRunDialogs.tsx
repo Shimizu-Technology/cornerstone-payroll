@@ -26,6 +26,7 @@ import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunDialogs({
   activeCompany,
+  activeIntakeAdapter,
   aireRecordsOpen,
   clientApprovalConfirmed,
   clientApprovalEvidence,
@@ -63,6 +64,7 @@ export function PayRunDialogs({
   recordClientApproval,
   reloadSavedSourceImport,
   replacingItem,
+  reviewedHoursAdapter,
   setAdditionalEmployeeIds,
   setAireRecordsOpen,
   setClientApprovalConfirmed,
@@ -95,6 +97,7 @@ export function PayRunDialogs({
         onOpenChange={setImportModalOpen}
         payPeriodId={payPeriod.id}
         companyId={Number(companyId)}
+        descriptor={reviewedHoursAdapter}
         onSourcePreviewed={() => void loadPayPeriod(payPeriod.id, true)}
         onImportComplete={handleImportComplete}
         canReactivateWorkers={workerStatusAccess.canReactivate}
@@ -104,6 +107,7 @@ export function PayRunDialogs({
         open={payrollIntakeImportOpen}
         onOpenChange={setPayrollIntakeImportOpen}
         payPeriodId={payPeriod.id}
+        descriptor={activeIntakeAdapter}
         employees={employees}
         onEmployeeCreated={(employee) => setEmployees((current) => [...current.filter((candidate) => candidate.id !== employee.id), employee])}
         onSourcePreviewed={() => void loadPayPeriod(payPeriod.id, true)}

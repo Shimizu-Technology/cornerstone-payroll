@@ -42,10 +42,22 @@ module PayrollIntake
         find(key).present?
       end
 
+      def portal_roles
+        all.select(&:portal_submittable?).flat_map(&:portal_roles).uniq
+      end
+
+      def tracks_reviewed_hours_keys
+        all.select(&:tracks_reviewed_hours?).map(&:key)
+      end
+
       def for_company(company)
         return [] unless company
 
         Array(company.payroll_intake_source_types).filter_map { |key| find(key) }
+      end
+
+      def portal_submittable_for_company(company)
+        for_company(company).select(&:portal_submittable?)
       end
 
       def register(adapter_or_descriptor)
