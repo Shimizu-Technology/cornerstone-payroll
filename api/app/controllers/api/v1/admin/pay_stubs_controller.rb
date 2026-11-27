@@ -263,7 +263,8 @@ module Api
                                         .select(:id)
                          })
                          .newest_printed_first
-                         .limit(params[:limit] || 12)
+                         .limit(params[:limit] || 12).to_a
+          documents = EmployeeDocument.posted_by_payroll_item(employee.company_id, items.map(&:id))
 
           render json: {
             employee: {
@@ -276,6 +277,7 @@ module Api
                 pay_period: item.pay_period.period_description,
                 pay_date: item.check_date || item.pay_period.pay_date,
                 net_pay: item.net_pay,
+                corrected: documents[item.id]&.correction_label? || false,
                 storage_key: pay_stub_key(item)
               }
             end

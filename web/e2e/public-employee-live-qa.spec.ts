@@ -77,6 +77,33 @@ test('an unavailable stub stays in Pay and returns to the selected year', async 
   await expect(page.getByRole('link', { name: /Dec 19/ })).toBeVisible();
 });
 
+test('labels money corrections and shows neutral history for details-only revisions', async ({ page }) => {
+  await signIn(page);
+  const row = statements2026[0];
+  let corrected = false;
+  await mockEmployeeApi(page, { statements: () => [{ ...row, corrected }] });
+  await page.route('**/api/v1/employee/statements/906', route => json(route, {
+    ...detailFor(row),
+    corrected,
+    earlier_versions: [{ id: '805', status: 'replaced', posted_at: '2026-11-19T08:00:00Z', payment_line: 'Direct deposit' }],
+  }));
+
+  await page.goto(`${employeeBaseUrl}/pay?${tenantQuery}`);
+  const stub = page.getByRole('link', { name: /Nov 20/ });
+  await expect(stub).toBeVisible();
+  await expect(stub.getByText('Corrected', { exact: true })).toHaveCount(0);
+  await stub.click();
+  await page.getByText('See earlier versions').click();
+  await expect(page.getByText('Original pay stub')).toBeVisible();
+  await expect(page.getByText(/Corrected/)).toHaveCount(0);
+
+  corrected = true;
+  await page.goto(`${employeeBaseUrl}/pay?${tenantQuery}`);
+  await expect(stub.getByText('Corrected', { exact: true })).toBeVisible();
+  await stub.click();
+  await expect(page.getByText('Corrected — see the original')).toBeVisible();
+});
+
 test('hides YTD-only earnings on a phone and restores their YTD column on desktop', async ({ page }) => {
   await signIn(page);
   await mockEmployeeApi(page);

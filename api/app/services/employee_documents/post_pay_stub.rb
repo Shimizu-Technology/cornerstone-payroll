@@ -7,8 +7,12 @@ module EmployeeDocuments
         (latest&.revision || 0) + 1
       end
 
+      def ordinary_repost?
+        predecessor && original.nil? && predecessor.withdrawal_reason.nil? && !predecessor.withdrawn?
+      end
+
       def signature
-        [ latest&.id, original&.id, predecessor&.id, revision, fingerprint, payment_line ]
+        [ latest&.id, original&.id, predecessor&.id, revision, fingerprint, payment_line, ordinary_repost? ]
       end
     end
 
@@ -40,6 +44,8 @@ module EmployeeDocuments
       return unless prepared
 
       posting, bytes = prepared
+      figures = PrintedFigures.digest(bytes)
+      money_changed = (PrintedFigures.for_document(posting.predecessor) != figures) if posting.ordinary_repost?
       recorded = false
       staged = FreezePdf.stage(bytes: bytes, source: @item, revision: posting.revision)
       checked_at = Time.current
@@ -48,7 +54,7 @@ module EmployeeDocuments
         next unless current
         next :stale unless current.signature == posting.signature
 
-        document = record_posting(staged, current, period, checked_at)
+        document = record_posting(staged, current, period, checked_at, figures, money_changed)
         EmployeeDocument.current_transaction.after_rollback { FreezePdf.remove_uncommitted_object(staged.key) }
         recorded = true
         document
@@ -106,15 +112,17 @@ module EmployeeDocuments
         fingerprint: fingerprint, payment_line: PayrollPaymentLabel.statement_line(@item))
     end
 
-    def record_posting(staged, posting, period, checked_at)
+    def record_posting(staged, posting, period, checked_at, figures, money_changed)
       document = FreezePdf.record_staged!(staged, source: @item, posted_at: Time.current, revision: posting.revision,
         predecessor: posting.predecessor, payment_line: posting.payment_line,
-        payroll_facts: { payroll_facts_sha256: posting.fingerprint, payroll_facts_checked_at: checked_at })
+        payroll_facts: { payroll_facts_sha256: posting.fingerprint, payroll_facts_checked_at: checked_at, printed_figures_sha256: figures, money_changed: money_changed })
       posting.latest&.update!(status: :replaced)
       # A delta correction is a separate payment. Its original stays active
       # while the underlying original payroll obligation remains in force.
       posting.original&.update!(status: :replaced) unless @item.correction_entry?
-      enqueue_employee_pay_stub_notice(document) if posting.predecessor.nil? && @notice_since && period.pay_date >= @notice_since
+      if money_changed || (posting.predecessor.nil? && @notice_since && period.pay_date >= @notice_since)
+        enqueue_employee_pay_stub_notice(document)
+      end
       document
     end
 
@@ -157,8 +165,12 @@ module EmployeeDocuments
       @item.net_pay.to_d.positive? && @item.effective_payment_delivery_method == "paper_check" && @item.check_number.blank?
     end
 
-    def enqueue_employee_pay_stub_notice(_document)
-      # D11 will enqueue the notice after the first posting commits.
+    def enqueue_employee_pay_stub_notice(document)
+      # Initial availability notices remain reserved for D11.
+      return unless document.correction_label?
+
+      EmployeeDocumentNotice.create!(company_id: document.company_id, employee_document: document,
+        employee_id: @item.employee_id, kind: TaxFormNotice::PAY_STUB_CORRECTED, status: "pending")
     end
   end
 end

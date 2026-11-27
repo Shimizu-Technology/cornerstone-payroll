@@ -46,7 +46,7 @@ class EmployeeStatements
         pdf_available: document.posted? && !item.voided?,
         **(item.voided? ? { notice: VOIDED_CHECK_MESSAGE } : {}),
         original_pdf: false,
-        corrected: document.corrected,
+        corrected: document.correction_label?,
         posted_at: document.posted_at.iso8601
       )
     end
