@@ -55,6 +55,8 @@ RSpec.describe "General test workspaces" do
   end
 
   it "copies employee setup and selected payroll history as locked, check-free evidence" do
+    role = source_company.company_job_roles.create!(name: "Server", occupation_code: "102", active: false)
+    employee.update!(company_job_role: role, job_title: role.name)
     old_period.update_columns(rollback_review_required: true)
     definition = create(:payroll_field_definition, company: source_company, owner_employee: employee, name: "Phone allowance")
     EmployeePayrollField.create!(employee: employee, payroll_field_definition: definition, amount: 25)
@@ -67,6 +69,9 @@ RSpec.describe "General test workspaces" do
     copied_period = workspace.pay_periods.sole
     expect(workspace).to be_test_workspace_ready
     expect(copied_employee.test_workspace_source_employee).to eq(employee)
+    expect(copied_employee.company_job_role).to eq(workspace.company_job_roles.sole)
+    expect(copied_employee.company_job_role).to have_attributes(name: "Server", occupation_code: "102", active: false)
+    expect(copied_employee.job_title).to eq("Server")
     # M3-4: SetupCloner copies the compensation history, not a new baseline.
     timeline = ->(person) { person.employee_compensation_changes.chronological.map { |row| row.attributes.slice("effective_on", "ends_on", "pay_rate", "source") } }
     expect(timeline.call(copied_employee)).to eq(timeline.call(employee))

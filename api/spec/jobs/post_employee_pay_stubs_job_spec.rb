@@ -41,6 +41,37 @@ RSpec.describe PostEmployeePayStubsJob do
     expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
   end
 
+  [ nil, "Kitchen" ].each do |old_department|
+    it "preserves posted earnings YTD when the prior fallback was #{old_department || 'Regular Pay'}" do
+      require Rails.root.join("db/migrate/20261128010100_pin_employee_stub_wage_labels")
+      department = create(:department, company: company, name: "Kitchen")
+      employee.update!(department: old_department && department)
+      prior = create(:pay_period, :committed, company: company, start_date: Date.new(2026, 7, 18),
+        end_date: Date.new(2026, 7, 31), pay_date: Date.new(2026, 8, 6))
+      create(:payroll_item, employee: employee, pay_period: prior, gross_pay: 800, net_pay: 640,
+        hours_worked: 40, pay_rate: 20, payment_delivery_method: "direct_deposit")
+      item.update!(gross_pay: 800, net_pay: 640, hours_worked: 40, pay_rate: 20)
+      PayrollItemEarning.create!(payroll_item: item, category: "regular", label: "Kitchen", amount: 800, hours: 40, rate: 20)
+
+      # Recreate the old input to freeze a document exactly as before the migration.
+      allow_any_instance_of(Employee).to receive(:legacy_stub_regular_wage_label).and_return(old_department)
+      run_at(cutoff)
+      original = documents.sole
+      allow_any_instance_of(Employee).to receive(:legacy_stub_regular_wage_label).and_call_original
+      migration = PinEmployeeStubWageLabels.new
+      migration.suppress_messages { migration.send(:pin_existing_labels) }
+      expect(employee.reload.legacy_stub_regular_wage_label).to eq(old_department)
+
+      employee.update!(department: department)
+      expect(PayStubGenerator.new(item.reload).employee_payroll_facts_sha256).not_to eq(original.payroll_facts_sha256) unless old_department
+      expect { run_at(cutoff + 5.minutes) }.not_to change(EmployeeDocument, :count)
+      department.update!(name: "Production")
+      expect { run_at(cutoff + 10.minutes) }.not_to change(EmployeeDocument, :count)
+      expect(documents.reload.sole).to have_attributes(id: original.id, status: "posted", payroll_facts_sha256: original.payroll_facts_sha256)
+      expect(PayStubGenerator.new(item.reload).employee_payroll_facts_sha256).not_to eq(original.payroll_facts_sha256) if old_department
+    end
+  end
+
   it "posts a new revision when only the employee's suffix changes" do
     item
     run_at(cutoff)
