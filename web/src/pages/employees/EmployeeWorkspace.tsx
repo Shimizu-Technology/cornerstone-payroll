@@ -133,9 +133,10 @@ export function EmployeeWorkspace(): ReactElement {
   const [contactEditRequest, setContactEditRequest] = useState(0);
   const [appPanelVersion, setAppPanelVersion] = useState(0);
   useEffect(() => {
-    if (loading || !employee || activeTab !== 'pay-setup') return;
+    if (loading || !employee) return;
     const targetId = location.hash.slice(1);
-    if (!['retirement-plan', 'retirement-year-evidence'].includes(targetId)) return;
+    const allowed = activeTab === 'overview' ? ['tipped-occupations'] : ['retirement-plan', 'retirement-year-evidence'];
+    if (!allowed.includes(targetId)) return;
     const target = document.getElementById(targetId);
     target?.scrollIntoView?.({ block: 'start' });
     target?.focus({ preventScroll: true });

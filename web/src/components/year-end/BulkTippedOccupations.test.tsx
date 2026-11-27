@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BulkTippedOccupations } from './BulkTippedOccupations';
 
-const { bulkSet } = vi.hoisted(() => ({ bulkSet: vi.fn().mockResolvedValue({ count: 1 }) }));
+const { bulkSet } = vi.hoisted(() => ({ bulkSet: vi.fn().mockResolvedValue({ count: 1, capped_count: 1 }) }));
 vi.mock('@/services/api', () => ({
   tippedOccupationsApi: { catalog: async () => ({ codes: { '000': 'Nonqualifying occupation', '102': 'Wait Staff' } }), bulkSet },
 }));
@@ -23,14 +23,18 @@ it('confirms the selected count and refreshes the Year-End warnings after saving
   fireEvent.click(await screen.findByLabelText('Select all 2 employees'));
   expect(screen.getByRole('button', { name: 'Apply to 2 selected' })).toBeTruthy();
   fireEvent.click(screen.getByLabelText('Worker Two'));
-  fireEvent.change(screen.getByLabelText('Treasury occupation code'), { target: { value: '102' } });
+  const picker = screen.getByRole('combobox', { name: 'Treasury occupation code' });
+  fireEvent.change(picker, { target: { value: 'wait' } });
+  expect(screen.queryByRole('option', { name: /Nonqualifying/ })).toBeNull();
+  fireEvent.keyDown(picker, { key: 'ArrowDown' });
+  fireEvent.keyDown(picker, { key: 'Enter' });
   const apply = screen.getByRole('button', { name: 'Apply to 1 selected' });
 
   fireEvent.click(apply);
   expect(bulkSet).not.toHaveBeenCalled();
-  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('for 1 employee from 2026-01-01'));
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('for 1 employee starting 2026-01-01'));
 
   fireEvent.click(apply);
-  await waitFor(() => expect(onSaved).toHaveBeenCalledWith('Saved the tipped occupation code for 1 employee.'));
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith('Saved the tipped occupation code for 1 employee. For 1 employee, the code ends the day before the next scheduled entry.'));
   expect(bulkSet).toHaveBeenCalledWith(7, { tax_year: 2026, employee_ids: [1], occupation_code: '102', effective_from: '2026-01-01' });
 });

@@ -782,18 +782,21 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(response).to have_http_status(:created), response.body
       occupation = employee.employee_tipped_occupations.sole
       expect(occupation.effective_from).to eq(Date.new(2026, 1, 1))
+      expect(occupation.effective_to).to be_nil
       expect(checklist_step("review_warnings").dig("data", "warnings")).not_to include(hash_including("code" => "tipped_occupation_code_missing"))
       mark_ready
       expect(response).to have_http_status(:ok), response.body
 
       path = "/api/v1/admin/employees/#{employee.id}/tipped_occupations"
-      post path, params: { occupation_code: "101", effective_from: "2026-06-01" }
+      post path, params: { occupation_code: "102", effective_from: "2026-06-01" }
       expect(response).to have_http_status(:unprocessable_entity)
-      post path, params: { occupation_code: "101", effective_from: "2026-06-01", replace_id: occupation.id }
+      post path, params: { occupation_code: "101", effective_from: "2026-06-01", effective_to: "2026-12-31", replace_id: occupation.id }
       expect(response).to have_http_status(:created), response.body
       expect(occupation.reload.effective_to).to eq(Date.new(2026, 5, 31))
 
-      replacement_id = response.parsed_body.fetch("data").first.fetch("id")
+      replacement_row = response.parsed_body.fetch("data").first
+      expect(replacement_row.fetch("effective_to")).to eq("2026-12-31")
+      replacement_id = replacement_row.fetch("id")
       expect(checklist_step("mark_ready").dig("data", "filing", "stale")).to be(true)
       post path, params: { occupation_code: "000", effective_from: "2026-09-01", replace_id: replacement_id }
       expect(response).to have_http_status(:created), response.body
@@ -809,6 +812,46 @@ RSpec.describe "Year-end checklist", type: :request do
       expect(AuditLog.where(user: admin, company: company, record_type: "Employee", record_id: employee.id)
         .where("action LIKE ?", "employee_tipped_occupation#%").order(:id).pluck(:action))
         .to eq(%w[employee_tipped_occupation#add employee_tipped_occupation#change employee_tipped_occupation#change employee_tipped_occupation#remove])
+    end
+
+    it "ends a bulk assignment immediately before a later scheduled occupation" do
+      pay(company, Date.new(2026, 5, 8), worker: employee, reported_tips: 200, cash_tips_reported: 200,
+        social_security_taxable_wages: 1_800, social_security_taxable_tips: 200)
+      scheduled = create(:employee_tipped_occupation, employee: employee, occupation_code: "101", effective_from: Date.new(2027, 3, 1))
+
+      post "/api/v1/admin/year_end/tipped_occupations", params: { tax_year: "02026", occupation_code: "102", employee_ids: [ employee.id ] }
+      expect(response).to have_http_status(:created), response.body
+      expect(response.parsed_body).to eq("count" => 1, "capped_count" => 1)
+      expect(employee.employee_tipped_occupations.find_by!(occupation_code: "102").effective_to).to eq(Date.new(2027, 2, 28))
+      expect(scheduled.reload.effective_from).to eq(Date.new(2027, 3, 1))
+    end
+
+    it "changes and ends an occupation while preserving a concurrent code and its own history" do
+      original = create(:employee_tipped_occupation, employee: employee, occupation_code: "101",
+        effective_from: Date.new(2026, 1, 1), effective_to: Date.new(2026, 12, 31))
+      path = "/api/v1/admin/employees/#{employee.id}/tipped_occupations"
+      post path, params: { occupation_code: "102", effective_from: "2026-01-01" }
+      expect(response).to have_http_status(:created), response.body
+
+      post path, params: { occupation_code: "000", effective_from: "2026-06-01", effective_to: "", replace_id: original.id }
+      expect(response).to have_http_status(:created), response.body
+      replacement = employee.employee_tipped_occupations.find_by!(occupation_code: "000")
+      expect(replacement.effective_to).to be_nil
+      expect(original.reload.effective_to).to eq(Date.new(2026, 5, 31))
+
+      patch "#{path}/#{replacement.id}", params: { effective_to: "2026-05-01" }
+      expect(response).to have_http_status(:unprocessable_entity)
+      patch "#{path}/#{replacement.id}", params: { effective_to: "2026-08-31" }
+      expect(response).to have_http_status(:ok), response.body
+      expect(replacement.reload.effective_to).to eq(Date.new(2026, 8, 31))
+      expect(employee.employee_tipped_occupations.count).to eq(3)
+      expect(AuditLog.where(user: admin, record_id: employee.id, action: "employee_tipped_occupation#end")).to exist
+    end
+
+    it "returns JSON for a missing required field" do
+      post "/api/v1/admin/employees/#{employee.id}/tipped_occupations", params: { occupation_code: "102" }
+      expect(response).to have_http_status(:bad_request)
+      expect(response.parsed_body).to eq("error" => "Effective from is required.")
     end
 
     %w[accountant client employee].each do |role|

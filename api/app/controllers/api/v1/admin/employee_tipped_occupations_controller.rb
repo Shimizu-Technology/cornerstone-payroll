@@ -9,10 +9,13 @@ module Api
         CODES = JSON.parse(Rails.root.join("config/tipped_occupation_codes.json").read).fetch("codes").freeze
         FIELDS = %w[id occupation_code effective_from effective_to].freeze
 
-        before_action :set_employee, only: %i[index create destroy]
+        before_action :set_employee, only: %i[index create update destroy]
 
         rescue_from ActiveRecord::RecordNotFound do
           render json: { error: "Employee or occupation code not found." }, status: :not_found
+        end
+        rescue_from ActionController::ParameterMissing do |error|
+          render json: { error: "#{error.param.to_s.humanize} is required." }, status: :bad_request
         end
         rescue_from InvalidInput do |error|
           render json: { error: error.message }, status: :unprocessable_entity
@@ -40,12 +43,27 @@ module Api
               unless start_date > previous.effective_from && (previous.effective_to.nil? || start_date <= previous.effective_to)
                 raise InvalidInput, "The new start date must fall after the old start date and within the old effective period."
               end
-              end_date = previous.effective_to
+              end_date = previous.effective_to unless params.key?(:effective_to)
             end
 
             save_occupation(@employee, code, start_date, end_date, previous: previous)
           end
           render json: history, status: :created
+        end
+
+        def update
+          end_date = parse_date(params.require(:effective_to))
+          write do
+            occupation = @employee.employee_tipped_occupations.find(params[:id])
+            if occupation.effective_to && end_date > occupation.effective_to
+              raise InvalidInput, "An end date cannot extend the existing effective period."
+            end
+
+            before = occupation.slice(*FIELDS)
+            occupation.update!(effective_to: end_date)
+            audit_change("end", occupation, before: before) if occupation.saved_change_to_effective_to?
+          end
+          render json: history
         end
 
         def destroy
@@ -59,7 +77,7 @@ module Api
 
         def bulk_set
           code = validated_code
-          year = Integer(params.require(:tax_year).to_s, exception: false)
+          year = Integer(params.require(:tax_year).to_s, 10, exception: false)
           unless year && year >= 2026 && W2GuAggregator::SS_WAGE_BASE_BY_YEAR.key?(year)
             raise InvalidInput, "Choose a supported tax year."
           end
@@ -68,9 +86,10 @@ module Api
           start_date = date_or_nil(params[:effective_from]) || period.begin
           raise InvalidInput, "Choose a start date in the selected tax year." unless period.cover?(start_date)
 
-          ids = params.permit(employee_ids: []).fetch(:employee_ids, []).map { |id| Integer(id.to_s, exception: false) }.uniq
+          ids = params.permit(employee_ids: []).fetch(:employee_ids, []).map { |id| Integer(id.to_s, 10, exception: false) }.uniq
           raise InvalidInput, "Select at least one employee." if ids.empty? || ids.any?(&:nil?)
 
+          capped_count = 0
           write do
             report = W2GuAggregator.new(current_company, year).generate
             eligible_ids = report[:employees].filter_map do |row|
@@ -80,12 +99,16 @@ module Api
               raise InvalidInput, "The warning list has changed. Refresh the checklist and select the employees again."
             end
 
+            next_starts = EmployeeTippedOccupation.where(company_id: current_company.id, employee_id: ids)
+              .where("effective_from > ?", start_date).group(:employee_id).minimum(:effective_from)
             current_company.employees.where(id: ids).order(:id).each do |employee|
-              save_occupation(employee, code, start_date, period.end)
+              next_start = next_starts[employee.id]
+              capped_count += 1 if next_start
+              save_occupation(employee, code, start_date, next_start&.prev_day)
             end
           end
 
-          render json: { count: ids.length }, status: :created
+          render json: { count: ids.length, capped_count: capped_count }, status: :created
         rescue ReportValidationError, W2GuAggregator::MissingWageBase => error
           render json: { error: error.message }, status: :unprocessable_entity
         end
@@ -129,8 +152,8 @@ module Api
 
         def save_occupation(employee, code, start_date, end_date, previous: nil)
           occupations = employee.employee_tipped_occupations
-          if occupations.where.not(id: previous&.id).effective_during(start_date..(end_date || Date.new(9999, 12, 31))).exists?
-            raise InvalidInput, "The effective period overlaps an existing occupation code."
+          if occupations.where(occupation_code: code).where.not(id: previous&.id).effective_during(start_date..(end_date || Date.new(9999, 12, 31))).exists?
+            raise InvalidInput, "The effective period overlaps another entry for this occupation code."
           end
 
           before = previous&.slice(*FIELDS)
