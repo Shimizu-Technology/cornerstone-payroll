@@ -935,4 +935,75 @@ RSpec.describe PayrollImport::ImportService do
       )
     end
   end
+
+  describe "workbook-only client extra hours with newly added second wage rate" do
+    it "refuses with 'Choose a saved job for the existing hours' and saves nothing when baseline restoration empties allocations" do
+      employee = create(:employee, company: company, first_name: "Employee", last_name: "01", pay_rate: 35.00)
+      rate_35 = employee.employee_wage_rates.find_by(is_primary: true) ||
+        employee.employee_wage_rates.create!(label: "Primary", rate: 35.00, is_primary: true, active: true)
+      rev1_allocations = [
+        {
+          "employee_wage_rate_id" => rate_35.id,
+          "label" => rate_35.label,
+          "rate" => 35.0,
+          "regular_hours" => 44.5,
+          "overtime_hours" => 0.0,
+          "holiday_hours" => 0.0,
+          "pto_hours" => 0.0,
+          "active" => true,
+          "is_primary" => true
+        }
+      ]
+      item = create(
+        :payroll_item,
+        company: company,
+        pay_period: pay_period,
+        employee: employee,
+        employment_type: "hourly",
+        pay_rate: 35.00,
+        hours_worked: 44.50,
+        overtime_hours: 0.00,
+        import_source: "mosa_revel",
+        custom_columns_data: {
+          "wage_rate_hours" => rev1_allocations,
+          "client_change_evidence" => {
+            "kind" => "extra_hours",
+            "submission_id" => 1,
+            "baseline_regular_hours" => "40.0",
+            "baseline_allocations" => [],
+            "applied_regular_hours" => "44.5",
+            "applied_allocations" => rev1_allocations,
+            "applied_hours" => {
+              "hours_worked" => "44.5",
+              "overtime_hours" => "0.0",
+              "holiday_hours" => "0.0",
+              "pto_hours" => "0.0"
+            }
+          }
+        }
+      )
+
+      # Newly active $42/hr job selected on the next revision
+      rate_42 = employee.employee_wage_rates.create!(label: "Specialty", rate: 42.00, is_primary: false, active: true)
+
+      result = service.apply!(
+        matched: [
+          {
+            employee_id: employee.id,
+            workbook_only: true,
+            selected_wage_rate_id: rate_42.id,
+            client_extra_hours: { hours: "4.5", employee_wage_rate_id: rate_35.id, rate: "35.0" },
+            client_change_evidence: { kind: "extra_hours", submission_id: 2, reviewed_value: "4.5" }
+          }
+        ]
+      )
+
+      expect(result[:success]).to be_empty
+      expect(result[:errors].sole[:error]).to eq("Choose a saved job for the existing hours for Employee 01.")
+
+      item.reload
+      expect(item.hours_worked).to eq(BigDecimal("44.50"))
+      expect(item.wage_rate_hours).to eq(rev1_allocations)
+    end
+  end
 end
