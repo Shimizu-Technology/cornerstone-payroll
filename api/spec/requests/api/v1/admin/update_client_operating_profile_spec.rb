@@ -363,9 +363,14 @@ RSpec.describe "PATCH /api/v1/admin/companies/:company_id/operating_profile", ty
     expect(ClientOperatingProfiles::ParityChecker.call.differences.map(&:field)).to eq([ "year_end.contact.name" ])
   end
 
-  it "refuses to activate every M4–M6 switch even for an org admin" do
+  it "refuses to activate every M4–M6 switch (including locked enum lifecycle mode) even for an org admin" do
     OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS.each do |key|
-      update_profile(changes: { key => true })
+      entry = OperatingProfileCatalog.fetch(key)
+      attempted_value = entry.type == "enum" ? (entry.allowed - [ entry.default ]).first : true
+      changes = { key => attempted_value }
+      changes["client_portal_enabled"] = true if entry.requires.include?("client_portal_enabled")
+
+      update_profile(changes: changes)
       expect(response).to have_http_status(422)
       expect(response.parsed_body.fetch("error")).to include("locked")
     end

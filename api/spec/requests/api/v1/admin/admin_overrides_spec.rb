@@ -124,14 +124,15 @@ RSpec.describe "Admin payroll overrides", type: :request, portal_notifications: 
   it "protects recorded overrides from SQL updates, deletes and truncation" do
     rollback
     expect(response).to have_http_status(:ok), response.body
-    %w[UPDATE DELETE TRUNCATE].zip([
-      "UPDATE admin_overrides SET reason = 'tampered fixture reason'",
-      "DELETE FROM admin_overrides",
-      "TRUNCATE admin_overrides"
-    ]).each do |verb, sql|
+    [
+      [ "UPDATE", "UPDATE admin_overrides SET reason = 'tampered fixture reason'", /append-only/ ],
+      [ "DELETE", "DELETE FROM admin_overrides", /append-only/ ],
+      [ "TRUNCATE", "TRUNCATE admin_overrides", /cannot truncate a table referenced in a foreign key constraint/i ],
+      [ "TRUNCATE CASCADE", "TRUNCATE admin_overrides CASCADE", /append-only/ ]
+    ].each do |verb, sql, expected_error|
       expect {
         AdminOverride.transaction(requires_new: true) { AdminOverride.connection.execute(sql) }
-      }.to raise_error(ActiveRecord::StatementInvalid, /append-only/), verb
+      }.to raise_error(ActiveRecord::StatementInvalid, expected_error), verb
     end
   end
 

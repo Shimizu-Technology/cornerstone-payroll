@@ -23,4 +23,14 @@ RSpec.describe EmployeeStatusEvent do
     expect(event.destroy).to be(false)
     expect(event.reload.event_type).to eq("deactivated")
   end
+
+  it "accepts client_portal as a transition source" do
+    client_event = described_class.create!(
+      employee: employee, company: employee.company,
+      event_type: "terminated", previous_status: "active", resulting_status: "terminated",
+      effective_date: Date.current, source: "client_portal"
+    )
+    expect(client_event).to be_persisted
+    expect(client_event.source).to eq("client_portal")
+  end
 end

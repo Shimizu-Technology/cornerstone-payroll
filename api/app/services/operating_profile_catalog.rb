@@ -27,6 +27,10 @@ class OperatingProfileCatalog
       id.split(".")
     end
 
+    def deprecated?
+      OperatingProfileCatalog::DEPRECATED_IDS.include?(id)
+    end
+
     def as_json(*)
       {
         id: id,
@@ -41,6 +45,7 @@ class OperatingProfileCatalog
         example: example,
         effect: effect,
         requires: requires,
+        deprecated: deprecated?,
         locked_until_milestone: OperatingProfileCatalog.locked_milestone_for(self),
         managed_by_employee_app_switch: OperatingProfileCatalog::EMPLOYEE_APP_SWITCH_IDS.include?(id)
       }
@@ -60,6 +65,8 @@ class OperatingProfileCatalog
   CONFIGURABLE_REVIEW_FIRST_GROUPS = %w[profile contact address pay termination].freeze
   ALWAYS_REVIEWED_GROUPS = %w[bank w4 identity].freeze
   ALL_REVIEW_FIRST_GROUPS = (CONFIGURABLE_REVIEW_FIRST_GROUPS + ALWAYS_REVIEWED_GROUPS).freeze
+  DEPRECATED_IDS = CONFIGURABLE_REVIEW_FIRST_GROUPS.map { |group| "client_portal.review_first.#{group}" }.freeze
+  EMPLOYEE_LIFECYCLE_MODES = %w[approval_first client_managed].freeze
   EMPLOYEE_PORTAL_FEATURES = %w[
     stubs tax_forms profile_requests delivery_consent documents pto bank_requests w4_requests
   ].freeze
@@ -67,6 +74,7 @@ class OperatingProfileCatalog
   FORMER_ACCESS_YEARS_RANGE = (1..10).freeze
 
   LOCKED_TOGGLE_MILESTONES = {
+    "client_portal.employee_lifecycle_mode" => 4,
     "employee_portal_enabled" => 4,
     "employee_portal.features.stubs" => 4,
     "employee_portal.features.tax_forms" => 4,
@@ -219,6 +227,20 @@ class OperatingProfileCatalog
       example: "warn_if_offset for MoSa's where Revel splits overtime; aligned when Payroll calculates weekly overtime itself.",
       effect: "Determines whether an offset pay period blocks weekly overtime calculation or proceeds with an explicit warning.",
       requires: [].freeze
+    ),
+    Entry.new(
+      id: "client_portal.employee_lifecycle_mode",
+      label: "Employee lifecycle mode",
+      section: "client_portal",
+      storage: :option,
+      type: "enum",
+      default: "approval_first",
+      allowed: EMPLOYEE_LIFECYCLE_MODES,
+      capability: :manage_organization,
+      what: "Controls whether client portal managers submit employee changes for Cornerstone approval first or manage new hires, edits, terminations, and rehires directly with post-change Cornerstone verification.",
+      example: '"approval_first" for Harborview Bistro by default; "client_managed" for Pacific Trade Works once pilot preflights pass.',
+      effect: 'When "approval_first", new hires and pay or tax changes wait in the staff approval queue. When "client_managed", client managers manage records directly behind the Ready to pay checklist while Cornerstone verifies changes and acknowledges unverified items before committing payroll.',
+      requires: [ "client_portal_enabled" ].freeze
     ),
     Entry.new(
       id: "client_portal.review_first.profile",
@@ -589,6 +611,11 @@ class OperatingProfileCatalog
 
     def default_for(id)
       deep_dup_value(fetch(id).default)
+    end
+
+    def locked_default_for(id)
+      entry = find(id)
+      entry ? deep_dup_value(entry.default) : nil
     end
 
     def default_options

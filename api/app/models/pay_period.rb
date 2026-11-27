@@ -66,6 +66,8 @@ class PayPeriod < ApplicationRecord
   has_many :payroll_items, dependent: :destroy
   has_many :pay_period_excluded_employees, dependent: :destroy
   has_many :excluded_employees, through: :pay_period_excluded_employees, source: :employee
+  has_many :pay_period_verification_acknowledgements, dependent: :restrict_with_error
+  has_many :employee_readiness_overrides, dependent: :restrict_with_error
   has_many :time_tracking_imports, dependent: :destroy
   has_many :payroll_review_packages, dependent: :destroy
   has_many :non_employee_checks, dependent: :destroy

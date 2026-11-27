@@ -3,7 +3,7 @@
 class EmployeeStatusEvent < ApplicationRecord
   EVENT_TYPES = %w[terminated reactivated deactivated].freeze
   STATUSES = %w[active inactive terminated].freeze
-  SOURCES = %w[operator production_migration].freeze
+  SOURCES = %w[operator production_migration client_portal].freeze
   TERMINATION_REASONS = %w[voluntary involuntary layoff reduction_in_force end_of_contract retirement other].freeze
 
   DEACTIVATION_REASONS = %w[leave_of_absence seasonal no_hours_scheduled other].freeze

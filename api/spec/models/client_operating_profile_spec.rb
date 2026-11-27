@@ -141,4 +141,40 @@ RSpec.describe ClientOperatingProfile, type: :model do
       bad_adapter_shape.save!(validate: false)
     }.to raise_error(ActiveRecord::StatementInvalid, /client_operating_profiles_intake_adapter_shape_check/)
   end
+
+  it "refuses moving locked enum client_portal.employee_lifecycle_mode off approval_first while allowing legacy rows to close" do
+    locked_create = build_profile(
+      client_portal_enabled: true,
+      options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } }
+    )
+    expect(locked_create).not_to be_valid
+    expect(locked_create.errors[:options]).to include("Employee lifecycle mode is locked until its milestone launches")
+
+    valid_profile = build_profile(
+      client_portal_enabled: true,
+      options: { "client_portal" => { "employee_lifecycle_mode" => "approval_first" } }
+    )
+    expect(valid_profile).to be_valid
+    valid_profile.save!
+
+    valid_profile.options = { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } }
+    expect(valid_profile).not_to be_valid
+    expect(valid_profile.errors[:options]).to include("Employee lifecycle mode is locked until its milestone launches")
+
+    # Simulate a legacy row stored with client_managed: closing its dates stays allowed so rollback/sanitization works.
+    valid_profile.update_columns(options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } })
+    valid_profile.reload
+    valid_profile.ends_on = Date.new(2026, 6, 30)
+    expect(valid_profile).to be_valid
+    valid_profile.save!
+
+    # Deprecated review_first options remain valid on existing and new rows.
+    legacy_review_first = build_profile(
+      version: 2,
+      effective_on: Date.new(2026, 7, 1),
+      client_portal_enabled: true,
+      options: { "client_portal" => { "review_first" => { "profile" => false, "pay" => true } } }
+    )
+    expect(legacy_review_first).to be_valid
+  end
 end

@@ -751,6 +751,127 @@ RSpec.describe "Company RLS", :rls do
       end
     end
 
+    it "isolates employee verification items, commit acknowledgements, and readiness overrides with composite tenant FKs" do
+      pool.with_connection do |connection|
+        connection.transaction do
+          company = create(:company)
+          other_company = create(:company, organization: company.organization)
+          actor = create(:user, company: company, organization: company.organization, role: "org_admin")
+
+          fixtures = TenantScope.as_system(reason: "Create lifecycle foundation RLS fixtures") do
+            rows = [ company, other_company ].map do |owner|
+              employee = create(:employee, company: owner)
+              period = create(:pay_period, company: owner)
+              w4 = EmployeeW4Election.create!(
+                EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+                  company: owner, employee: employee, effective_on: period.pay_date,
+                  source: "default_withholding", reason: "Default withholding fixture"
+                )
+              )
+              admin_override = AdminOverride.create!(
+                company: owner, actor: actor, subject: employee, action: "employee_readiness_override#grant",
+                reason: "RLS isolation test override fixture",
+                before_snapshot: {}, after_snapshot: {}, preflight_result: {}
+              )
+              item = EmployeeVerificationItem.create!(
+                company: owner, employee: employee, event_kind: "new_hire",
+                status: "pending_verification", source_actor: actor
+              )
+              ack = PayPeriodVerificationAcknowledgement.create!(
+                company: owner, pay_period: period, employee_verification_item: item,
+                employee: employee, acknowledged_by: actor, acknowledged_at: Time.current,
+                item_status_snapshot: "pending_verification", item_updated_at_snapshot: item.updated_at
+              )
+              override = EmployeeReadinessOverride.create!(
+                company: owner, employee: employee, pay_period: period,
+                default_w4_election: w4, default_w4_acknowledged: true,
+                missing_items_snapshot: [ "tax_form" ],
+                reason: "RLS isolation test readiness override",
+                granted_by: actor, granted_at: Time.current, admin_override: admin_override
+              )
+              { company: owner, employee: employee, period: period, w4: w4, admin_override: admin_override, item: item, ack: ack, override: override }
+            end
+
+            own, foreign = rows
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeVerificationItem.new(company: own[:company], employee: foreign[:employee], event_kind: "new_hire").save!(validate: false)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            expect do
+              connection.transaction(requires_new: true) do
+                PayPeriodVerificationAcknowledgement.new(
+                  company: own[:company], pay_period: foreign[:period], employee_verification_item: own[:item],
+                  employee: own[:employee], acknowledged_by: actor, acknowledged_at: Time.current,
+                  item_status_snapshot: "pending_verification", item_updated_at_snapshot: own[:item].updated_at
+                ).save!(validate: false)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeReadinessOverride.new(
+                  company: own[:company], employee: own[:employee], expires_on: Date.current + 7,
+                  default_w4_election: foreign[:w4], reason: "Cross-company W-4 override must fail FK",
+                  granted_by: actor, granted_at: Time.current, admin_override: own[:admin_override]
+                ).save!(validate: false)
+              end
+            end.to raise_error(ActiveRecord::InvalidForeignKey)
+
+            setup_step_three(
+              connection,
+              tables: %w[employee_verification_items pay_period_verification_acknowledgements employee_readiness_overrides],
+              read_tables: %w[employees pay_periods employee_w4_elections admin_overrides users]
+            )
+            rows
+          end
+
+          own, foreign = fixtures
+          TenantScope.with_company(company.id) do
+            expect(EmployeeVerificationItem.pluck(:id)).to eq([ own[:item].id ])
+            expect(EmployeeVerificationItem.where(id: foreign[:item].id).update_all(status: "verified")).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeVerificationItem.insert_all!([ {
+                  company_id: other_company.id, employee_id: foreign[:employee].id,
+                  event_kind: "profile_change", status: "pending_verification",
+                  created_at: Time.current, updated_at: Time.current
+                } ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+
+            expect(PayPeriodVerificationAcknowledgement.pluck(:id)).to eq([ own[:ack].id ])
+            expect(PayPeriodVerificationAcknowledgement.where(id: foreign[:ack].id).delete_all).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                PayPeriodVerificationAcknowledgement.insert_all!([ {
+                  company_id: other_company.id, pay_period_id: foreign[:period].id,
+                  employee_verification_item_id: foreign[:item].id, employee_id: foreign[:employee].id,
+                  acknowledged_by_id: actor.id, acknowledged_at: Time.current,
+                  item_status_snapshot: "pending_verification", item_updated_at_snapshot: foreign[:item].updated_at,
+                  created_at: Time.current, updated_at: Time.current
+                } ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+
+            expect(EmployeeReadinessOverride.pluck(:id)).to eq([ own[:override].id ])
+            expect(EmployeeReadinessOverride.where(id: foreign[:override].id).update_all(revoke_reason: "tampered")).to eq(0)
+            expect do
+              connection.transaction(requires_new: true) do
+                EmployeeReadinessOverride.insert_all!([ {
+                  company_id: other_company.id, employee_id: foreign[:employee].id,
+                  expires_on: Date.current + 7, reason: "Cross-tenant insert must fail RLS",
+                  granted_by_id: actor.id, granted_at: Time.current,
+                  admin_override_id: foreign[:admin_override].id,
+                  created_at: Time.current, updated_at: Time.current
+                } ])
+              end
+            end.to raise_error(ActiveRecord::StatementInvalid) { |error| expect(error.cause).to be_a(PG::InsufficientPrivilege) }
+          end
+          raise ActiveRecord::Rollback
+        end
+      end
+    end
+
     [ [ true, "SELECT" ], [ false, "SELECT, UPDATE" ] ].each do |bypass, privileges|
       it "rejects runtime role capabilities bypass=#{bypass} and grants=#{privileges}" do
         pool.with_connection do |connection|
@@ -773,6 +894,15 @@ RSpec.describe "Company RLS", :rls do
     end
 
     def setup_step_three(connection, tables: %w[departments], bypass: false, switch_privileges: "SELECT", read_tables: [], decision_function: true)
+      raise "setup_step_three must run inside a transaction" unless connection.transaction_open?
+
+      if connection.select_value("SELECT 1 FROM pg_roles WHERE rolname = 'payroll_app'").present?
+        reason = "shared PostgreSQL cluster already defines role payroll_app (never altered by specs)"
+        raise "Step 3 RLS role test cannot run in CI: #{reason}" if ENV["CI"].present?
+
+        skip "Skipping Step 3 RLS role test: #{reason}"
+      end
+
       connection.execute("CREATE ROLE payroll_app NOSUPERUSER #{bypass ? 'BYPASSRLS' : 'NOBYPASSRLS'}")
       connection.execute("GRANT USAGE ON SCHEMA public, rls_admin TO payroll_app")
       # As rls_runtime_role.sql grants it in production.
