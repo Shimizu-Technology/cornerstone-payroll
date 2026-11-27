@@ -17,9 +17,11 @@ class SessionLoadTimeout extends Error {}
  * use the same client, which sends the link in X-Employee-Link-Id. Nothing is
  * stored on the device: the chosen employer and loaded pay live in memory.
  */
-export function EmployeeSessionProvider({ viewOnly = false, support, children }: {
+export function EmployeeSessionProvider({ viewOnly = false, support, initialLinkId = null, children }: {
   viewOnly?: boolean;
   support?: { token: string; link: EmployeeLink };
+  /** The link just claimed or reactivated, so a login with several employers opens that one. */
+  initialLinkId?: string | null;
   children: ReactNode;
 }): ReactElement {
   const { getToken } = useEmployeeAuth();
@@ -27,7 +29,7 @@ export function EmployeeSessionProvider({ viewOnly = false, support, children }:
   const api = useMemo(() => createEmployeeApi({ baseUrl: API_BASE_URL, getToken, grantToken: support?.token }), [getToken, support?.token]);
   const [state, setState] = useState<EmployeeSessionState>({ status: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const [chosenId, setChosenId] = useState<string | null>(null);
+  const [chosenId, setChosenId] = useState<string | null>(initialLinkId);
   const opened = useRef(false);
   const [memory, setMemory] = useState(() => new Map<string, unknown>());
 
