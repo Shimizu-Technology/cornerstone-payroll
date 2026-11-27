@@ -4973,6 +4973,12 @@ module Api
               }, status: :unprocessable_entity
             end
 
+            # Not even a draft while a native paycheck inside the opening
+            # balance may be counted twice or left out (PayrollBridgeOverlap).
+            if PayrollBridgeOverlap.new(company_id: company.id, year: year).w2_blocking.any?
+              return render json: { error: PayrollBridgeOverlap::FILING_BLOCKED }, status: :unprocessable_entity
+            end
+
             readiness = snapshot[:readiness]
             final = snapshot[:final]
             copies = W2GuOfficialCopies.new(company: company, report: snapshot[:report], kind: kind, draft: !final, practice: company.practice_copy?)

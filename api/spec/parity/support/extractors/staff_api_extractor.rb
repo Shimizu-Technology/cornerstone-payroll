@@ -37,6 +37,13 @@ module Parity
         [ @ctx.response.status, @ctx.response.parsed_body ]
       end
 
+      # [status, parsed JSON or nil] of a staff GET that may refuse.
+      def get(path, params = {})
+        @ctx.get path, params: params, headers: @headers
+        body = @ctx.response.media_type == "application/json" ? @ctx.response.parsed_body : nil
+        [ @ctx.response.status, body ]
+      end
+
       def ytd_summary_pdf_text(params)
         @ctx.get "/api/v1/admin/reports/ytd_summary_pdf", params: params, headers: @headers
         raise "GET /api/v1/admin/reports/ytd_summary_pdf failed: #{@ctx.response.status}" unless @ctx.response.successful?

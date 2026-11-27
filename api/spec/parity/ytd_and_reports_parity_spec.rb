@@ -615,6 +615,11 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         expect(snapshot[:final]).to eq(false)
         expect(W2GuOfficialCopies.final?(company: fixture.company, year: year, readiness: snapshot[:readiness],
           fingerprint: ready_before[:fingerprint])).to eq(false)
+        # Not even watermarked drafts of the official copies.
+        %w[w2_gu_employee_copies w2_gu_copy_1_drt].each do |endpoint|
+          expect(staff_api.get("/api/v1/admin/reports/#{endpoint}", year: year))
+            .to eq([ 422, { "error" => PayrollBridgeOverlap::FILING_BLOCKED } ]), endpoint
+        end
       end
 
       it "suggests a duplicate for a run repeating an imported paycheck, for review only" do
@@ -645,10 +650,19 @@ RSpec.describe "YTD, historical QuickBooks, reports, and W-2GU parity", type: :r
         expect(overlaps.map { |row| row.payroll_item.id }).to eq([ by_check_date.id ])
         expect(overlaps.sole.evidence.dig("payroll_item", "paid_on")).to eq("2026-01-15")
         expect(preflight_codes).to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+        finding = W2GuPreflightValidator.new(company: fixture.company, year: year).run.fetch(:findings)
+          .find { |row| row[:code] == "BRIDGE_OVERLAP_NEEDS_DISPOSITION" }
+        expect(finding[:message]).to include("paid 01/15/2026")
+        # Combined reports flag it with the same detector, though its run pays after the bridge.
+        expect(staff_api.ytd_summary(year: year).dig("source_summary", "source_overlap", "bridge_window_paycheck_count")).to eq(1)
+        expect(staff_api.get("/api/v1/admin/pay_periods/#{by_check_date.pay_period_id}/payroll_items/#{by_check_date.id}").last.dig("payroll_item", "ytd_review", "message"))
+          .to eq(PayrollBridgeOverlap::STAFF_NOTE)
 
         by_check_date.update_columns(employment_type: "contractor")
         expect(overlaps.sole.blocks_w2?).to eq(false)
         expect(preflight_codes).not_to include("BRIDGE_OVERLAP_NEEDS_DISPOSITION")
+        expect(staff_api.get("/api/v1/admin/pay_periods/#{by_check_date.pay_period_id}/payroll_items/#{by_check_date.id}").last.dig("payroll_item", "ytd_review", "message"))
+          .to eq(PayrollBridgeOverlap::CONTRACTOR_STAFF_NOTE)
         # Its statement note still shows: contractor YTD leaves the run out too.
         expect(PayrollBridgeOverlap.for_employee(employee: employee, year: year, through: later_item.pay_period.pay_date)).to be_present
       end

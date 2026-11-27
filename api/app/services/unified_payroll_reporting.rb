@@ -332,13 +332,27 @@ class UnifiedPayrollReporting
         net_pay_delta: sum(historical_adjustments, :net_pay)
       },
       source_overlap: {
-        employee_pay_date_count: overlapping_employee_dates.length
+        employee_pay_date_count: overlapping_employee_dates.length,
+        **bridge_window_count(native_items)
       },
       historical_ytd_bridge: totals_basis ? bridge_summary.merge(totals_basis: totals_basis) : bridge_summary
     }
   end
 
   private
+
+  # Native paychecks in this view dated inside an applied opening balance:
+  # the W-2GU block's detector (PayrollBridgeOverlap), so a check dated
+  # before its run's pay date is caught too. Only present when there is one.
+  def bridge_window_count(native_items)
+    return {} if native_items.empty?
+
+    ids = native_items.map(&:id).to_set
+    count = native_items.map { |item| item.pay_period.pay_date.year }.uniq.sum do |year|
+      PayrollBridgeOverlap.new(company_id: @company_id, year: year).call.map { |overlap| overlap.payroll_item.id }.uniq.count { |id| ids.include?(id) }
+    end
+    count.positive? ? { bridge_window_paycheck_count: count } : {}
+  end
 
   def historical_source_counts(rows, excluded)
     {

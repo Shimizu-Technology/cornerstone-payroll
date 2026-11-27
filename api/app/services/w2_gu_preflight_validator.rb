@@ -103,7 +103,7 @@ class W2GuPreflightValidator
       Finding.new(
         severity: "blocking",
         code: "BRIDGE_OVERLAP_NEEDS_DISPOSITION",
-        message: "Paycheck ##{item.id} (#{item.employee.full_name}, paid #{item.pay_period.pay_date.strftime('%m/%d/%Y')}) is dated inside the imported opening balance. " \
+        message: "Paycheck ##{item.id} (#{item.employee.full_name}, paid #{overlap.paid_on.strftime('%m/%d/%Y')}) is dated inside the imported opening balance. " \
           "Resolve whether it is its own payment or the same payment as an imported paycheck before filing.",
         employee_id: item.employee_id
       )
