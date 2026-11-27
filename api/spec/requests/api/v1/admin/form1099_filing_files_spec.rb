@@ -46,7 +46,8 @@ RSpec.describe "1099 filing files", type: :request do
     [ [ "form_1099_pub1220", "draft" ], [ "form_1099_pub1220", "final" ], [ "form_1096_totals", "draft" ] ].each do |action, mode|
       get "/api/v1/admin/reports/#{action}", params: { year: 2026, mode: mode }
       expect(response).to have_http_status(:forbidden), "#{action} #{mode}: #{response.body}"
-      expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
+      expect(response.parsed_body["code"]).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+      expect(response.parsed_body["error"]).to include("practice company (test workspace)", "turned off")
       expect(response.body).not_to include("123456789")
     end
   end
