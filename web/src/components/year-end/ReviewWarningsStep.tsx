@@ -1,3 +1,7 @@
+import { useCompany } from '@/contexts/CompanyContext';
+import { canWriteCompany } from '@/lib/company-write-access';
+import { useOptionalSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
+import { BulkTippedOccupations } from './BulkTippedOccupations';
 import { useState, type ReactElement } from 'react';
 import { Link, useLocation } from 'react-router';
 import { Badge } from '@/components/ui/badge';
@@ -70,8 +74,12 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
   onRefresh: () => Promise<void>;
 }): ReactElement {
   const location = useLocation();
+  const { activeCompany } = useCompany();
+  const hasConfigurationAccess = useOptionalSelectedCompanyCapability('manage_client_configuration', checklist.company.id);
+  const canSetCodes = hasConfigurationAccess && canWriteCompany(activeCompany, 'manage_client_configuration');
   const [showAll, setShowAll] = useState(false);
   const employees = showAll ? warning.employees : warning.employees.slice(0, SHOWN_EMPLOYEES);
+  const profileAnchor = warning.code === 'tipped_occupation_code_missing' ? '#tipped-occupations' : '';
   const returnTo = encodeURIComponent(`${location.pathname}${location.search}#step-review_warnings`);
 
   return (
@@ -92,7 +100,7 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
           <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
             {employees.map((employee) => (
               <li key={employee.employee_id}>
-                <Link to={`${employee.edit_path}?return_to=${returnTo}`} className="inline-flex min-h-9 items-center font-medium text-primary-700 underline [overflow-wrap:anywhere]">
+                <Link to={`${employee.edit_path}?return_to=${returnTo}${profileAnchor}`} className="inline-flex min-h-9 items-center font-medium text-primary-700 underline [overflow-wrap:anywhere]">
                   {employee.name ?? `Employee ${employee.employee_id}`}
                 </Link>
                 {employee.history_review && (
@@ -107,6 +115,10 @@ function WarningCard({ checklist, warning, onSaved, onRefresh }: {
             </button>
           )}
         </div>
+      )}
+      {canSetCodes && warning.code === 'tipped_occupation_code_missing' && warning.employees.length > 0 && (
+        <BulkTippedOccupations key={`${checklist.company.id}:${checklist.tax_year}`} companyId={checklist.company.id}
+          year={checklist.tax_year} employees={warning.employees} onSaved={onSaved} />
       )}
       {warning.acknowledgement && (
         <p className="mt-3 rounded-lg bg-neutral-50 p-2.5 text-sm text-neutral-700">
