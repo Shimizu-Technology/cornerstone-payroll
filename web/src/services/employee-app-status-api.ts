@@ -6,7 +6,8 @@ import { formatEmployeeAppDate } from '@/services/employee-app-rollout-api';
 
 /** EmployeeAppRollout#display_status: the one status rule for the report and the employee panel. */
 export type AppAccountStatus = 'not_invited' | 'invited' | 'reinvited' | 'invite_expired' | 'locked' | 'active' | 'deactivated' | 'former' | 'revoked';
-export type DeliveryAnswer = 'paperless' | 'keep_paper' | 'not_answered';
+/** not_applicable: W-2GU for a 1099 contractor, who gets no W-2GU. */
+export type DeliveryAnswer = 'paperless' | 'keep_paper' | 'not_answered' | 'not_applicable';
 export type AppStatusFilter = 'not_signed_up' | 'signed_up_no_opens' | 'invite_expired' | 'terms_not_accepted' | 'no_paperless_answer' | 'kept_paper';
 
 export interface AppAccount {
@@ -79,6 +80,7 @@ export const answerLabels: Record<DeliveryAnswer, string> = {
   paperless: 'Paperless',
   keep_paper: 'Keep paper',
   not_answered: 'Not answered',
+  not_applicable: 'Not applicable (1099)',
 };
 
 export function employeeAppStatusApi(companyId: number, audience: 'admin' | 'client') {

@@ -314,6 +314,21 @@ RSpec.describe "Employee app status report", type: :request do
     expect(plan).to include("idx_audit_logs_employee_app_opens")
   end
 
+  it "shows W-2GU as not applicable for a 1099 contractor and leaves it out of the paperless chips" do
+    contractor = create(:employee, :contractor, company: company, first_name: "Kai", last_name: "Contractor", department: nil)
+    get path(staff), headers: headers(staff)
+    expect(row_for(contractor)["w2gu"]).to eq("answer" => "not_applicable", "answered_at" => nil)
+    expect(row_for(contractor)["pay_statements"]["answer"]).to eq("not_answered")
+
+    kai_link = link!(contractor, status: "active", user: employee_login("user_status_kai"), activated_at: 1.day.ago)
+    DeliveryPreference.create!(company: company, employee: contractor, employee_account_link: kai_link, user: kai_link.user,
+      kind: "pay_statements", recorded_at: 1.hour.ago)
+    get path(staff), headers: headers(staff), params: { filter: "no_paperless_answer" }
+    expect(data["employees"].map { |row| row["id"] }).not_to include(contractor.id)
+    get path(staff, "/csv"), headers: headers(staff), params: { q: "kai" }
+    expect(CSV.parse(response.body).last.values_at(10, 12)).to eq([ "Keep paper", "Not applicable (1099)" ])
+  end
+
   it "computes an export only for the employees its department, role and name filters leave" do
     queried_ids = []
     allow(DeliveryConsents::Answers).to receive(:by_employee).and_wrap_original do |original, company_id, ids|
