@@ -6,7 +6,7 @@
 # (Api::V1::Integrations::EmailEventsController) says delivered, delayed,
 # bounced or complained.
 class EmployeeDocumentNotice < ApplicationRecord
-  KINDS = %w[w2gu_available].freeze
+  KINDS = %w[w2gu_available pay_stub_corrected].freeze
   STATUSES = %w[pending sent skipped failed].freeze
   DELIVERY_STATUSES = %w[unknown delivered delayed bounced complained].freeze
   SKIP_REASONS = %w[feature_off document_unavailable no_app_access email_not_verified recipient_not_allowed

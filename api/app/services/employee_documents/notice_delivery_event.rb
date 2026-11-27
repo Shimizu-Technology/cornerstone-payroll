@@ -114,9 +114,10 @@ module EmployeeDocuments
     # A bounce or complaint is recorded for staff, without the address.
     def audit_problem!(notice)
       company = notice.company
+      source = notice.kind == TaxFormNotice::KIND ? "employee_tax_forms" : "employee_pay_stubs"
       AuditLog.record!(
         actor: AuditActor.system_job(name), organization_id: company.organization_id, company_id: company.id,
-        action: "employee_tax_forms#notice_#{notice.delivery_status}", record_type: "EmployeeDocumentNotice",
+        action: "#{source}#notice_#{notice.delivery_status}", record_type: "EmployeeDocumentNotice",
         record_id: notice.id, subject_name: notice.employee&.display_name, event_category: "employee_portal",
         metadata: { employee_document_id: notice.employee_document_id, employee_id: notice.employee_id,
                     bounce_type: notice.bounce_type }.compact
