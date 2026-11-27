@@ -308,6 +308,126 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       expect(item.gross_pay).to eq(BigDecimal("1805.00"))
       expect(item.custom_columns_data.dig("client_change_evidence", "applied_regular_hours")).to eq("81.5")
     end
+
+    it "clears withdrawn extra_hours client_change_evidence across rev 1 -> rev 2 -> rev 3 so omitting the employee in rev 3 succeeds" do
+      employee_02 = create(:employee, company: company, first_name: "Employee", last_name: "02", pay_rate: 25.00)
+      primary_rate = employee_01.employee_wage_rates.find_by(is_primary: true) ||
+        employee_01.employee_wage_rates.create!(label: "Primary", rate: 20.00, is_primary: true, active: true)
+      ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
+
+      # Rev 1: workbook 45+35 (75 reg / 5 OT) + $25 bonus + 3.25 approved extra hours @ $20 -> 78.25 reg, $1,740 gross
+      rev1_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "45.00", "35.00", "", "", "", "", "", "", "25.00", "", "", "", "", "" ]
+      end
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: portal_upload("rev1.csv", rev1_csv, csv_mime),
+             no_changes: "false",
+             changes: [
+               { kind: "extra_hours", employee_id: employee_01.id, employee_wage_rate_id: primary_rate.id, hours: "3.25" }
+             ].to_json
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev1_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      stub_portal_user(Api::V1::Admin::PayrollImportsController, staff, company)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import", params: { submission_id: rev1_id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      rev1_package_id = response.parsed_body.dig("source_package", "package_id")
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id"),
+             confirm_client_changes: true,
+             reviewed_changes: [ { change_index: 0, hours: "3.25", decision: "apply" } ]
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item1 = pay_period.reload.payroll_items.find_by!(employee: employee_01)
+      expect(item1.hours_worked).to eq(BigDecimal("78.25"))
+      expect(item1.gross_pay).to eq(BigDecimal("1740.00"))
+      expect(item1.custom_columns_data.dig("client_change_evidence", "applied_regular_hours")).to eq("78.25")
+
+      # Rev 2: withdraws extra hours and adds $1 bonus ($26 total) -> 75 reg, $1,676 gross, clears client_change_evidence
+      rev2_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "45.00", "35.00", "", "", "", "", "", "", "26.00", "", "", "", "", "" ]
+      end
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: portal_upload("rev2.csv", rev2_csv, csv_mime),
+             based_on_revision: 1,
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev2_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: {
+             submission_id: rev2_id,
+             supersedes_package_id: rev1_package_id,
+             supersession_reason: "Client withdrew extra hours and adjusted bonus"
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      rev2_package_id = response.parsed_body.dig("source_package", "package_id")
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id")
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item1.reload
+      expect(item1.hours_worked).to eq(BigDecimal("75.00"))
+      expect(item1.bonus).to eq(BigDecimal("26.00"))
+      expect(item1.gross_pay).to eq(BigDecimal("1676.00"))
+      expect(item1.custom_columns_data["client_change_evidence"]).to be_nil
+
+      # Rev 3: omits Employee 01 and includes Employee 02 -> applies 200 without false 422, saves Employee 02
+      rev3_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_02.id, "Employee 02", "40.00", "40.00", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      end
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: portal_upload("rev3.csv", rev3_csv, csv_mime),
+             based_on_revision: 2,
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      rev3_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: {
+             submission_id: rev3_id,
+             supersedes_package_id: rev2_package_id,
+             supersession_reason: "Client updated workbook roster"
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: response.parsed_body.fetch("import_id"),
+             portal_source_id: response.parsed_body.dig("portal_source", "selection_id")
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item1.reload
+      expect(item1.hours_worked).to eq(BigDecimal("75.00"))
+      expect(item1.gross_pay).to eq(BigDecimal("1676.00"))
+      expect(item1.custom_columns_data["client_change_evidence"]).to be_nil
+
+      item2 = pay_period.reload.payroll_items.find_by!(employee: employee_02)
+      expect(item2.hours_worked).to eq(BigDecimal("80.00"))
+      expect(item2.gross_pay).to eq(BigDecimal("2000.00"))
+    end
   end
 
   describe "Concurrent open reviews across mosa_revel and direct cornerstone_workbook" do
