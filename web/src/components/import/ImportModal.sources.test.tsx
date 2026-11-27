@@ -72,7 +72,7 @@ it('previews the Revel PDF on its own', async () => {
   fireEvent.change(screen.getByLabelText('Revel hours PDF'), { target: { files: [file] } });
   fireEvent.click(screen.getByRole('button', { name: 'Preview Import' }));
 
-  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, file, undefined, false, undefined, undefined));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, file, undefined, false, undefined, undefined, 'mosa_revel'));
   expect(await screen.findByRole('region', { name: 'Files for this import' })).toBeTruthy();
 });
 
@@ -86,7 +86,7 @@ it('adds the missing workbook to the open package without asking for a reason', 
 
   expect(screen.queryByLabelText('What changed?')).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Add to import version 1' }));
-  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, file, false, undefined, undefined));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, file, false, undefined, undefined, 'mosa_revel'));
 });
 
 it('asks what changed before replacing a file the package already has', async () => {
@@ -103,7 +103,7 @@ it('asks what changed before replacing a file the package already has', async ()
   fireEvent.change(screen.getByLabelText('What changed?'), { target: { value: 'MoSa corrected hours' } });
   expect(previewButton.disabled).toBe(false);
   fireEvent.click(previewButton);
-  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, file, undefined, false, { supersedesPackageId: 'package-1', reason: 'MoSa corrected hours' }, undefined));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, file, undefined, false, { supersedesPackageId: 'package-1', reason: 'MoSa corrected hours' }, undefined, 'mosa_revel'));
 });
 
 it('keeps Apply off until the workbook is added or no tips or loans is confirmed', async () => {
@@ -132,7 +132,7 @@ it('adds the workbook from the review and keeps the outcomes already chosen', as
 
   const file = workbook();
   fireEvent.change(screen.getByLabelText('Add Tips & loans workbook'), { target: { files: [file] } });
-  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, file, undefined));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, file, undefined, undefined, undefined, 'mosa_revel'));
   await waitFor(() => expect(screen.getByText(/Import version 2/)).toBeTruthy());
 
   expect((screen.getAllByLabelText('Outcome for Cook, Blake')[0] as HTMLSelectElement).value).toBe('excluded');
@@ -203,7 +203,7 @@ it('sends only the new file when one chosen file is already in the open import',
   fireEvent.change(screen.getByLabelText('Tips & loans workbook'), { target: { files: [workbookFile] } });
 
   fireEvent.click(await screen.findByRole('button', { name: 'Add to import version 1' }));
-  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, workbookFile, false, undefined, undefined));
+  await waitFor(() => expect(mocks.previewImport).toHaveBeenCalledWith(9, undefined, workbookFile, false, undefined, undefined, 'mosa_revel'));
 });
 
 it('requires a saved tip choice when the review holds an older MoSa workbook', async () => {
@@ -249,4 +249,118 @@ it('offers no Remove for a client portal revision', () => {
   portal.portal_source = { selection_id: 1, submission_id: 2, revision: 1, period_id: 3, current: true, changes: [], workbook_choice: 'attach' } as unknown as ImportPreviewResponse['portal_source'];
   openReview(portal);
   expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull();
+});
+
+it('renders upload file pickers and accept attributes from the supplied adapter descriptor', () => {
+  render(
+    <MemoryRouter>
+      <ImportModal
+        open
+        payPeriodId={9}
+        companyId={7}
+        descriptor={{
+          key: 'mosa_revel',
+          label: 'Custom descriptor label',
+          source_label: 'Custom source',
+          parser_version: 'mosa_revel:v1',
+          extraction: 'deterministic',
+          accepts_pasted_text: false,
+          tracks_reviewed_hours: true,
+          employee_match: 'name_fuzzy',
+          idempotency: 'files_period_roster_loans_and_workweek',
+          reports_overtime: true,
+          tips_default: 'already_paid_out',
+          overtime_mode: 'source_reports',
+          workweek_alignment: 'warn_if_offset',
+          required_sources: ['revel_hours', 'supplemental_workbook'],
+          files: [
+            {
+              role: 'revel_hours',
+              label: 'Custom Hours Report',
+              hint: 'Upload the custom hours report.',
+              accept: ['.pdf'],
+              max: 1,
+              required: true,
+              required_by_default: true,
+              portal_role: 'revel_payroll',
+              provides: ['regular_hours'],
+            },
+            {
+              role: 'supplemental_workbook',
+              label: 'Custom Adjustments Sheet',
+              hint: 'Upload the custom adjustments sheet.',
+              accept: ['.xlsx', '.csv'],
+              max: 1,
+              required: false,
+              required_by_default: true,
+              waivable: 'No adjustments this period',
+              portal_role: 'changes_workbook',
+              provides: ['reported_tips'],
+            },
+          ],
+          portal: { submittable: true, role_map: { revel_payroll: 'revel_hours', changes_workbook: 'supplemental_workbook' } },
+        }}
+        onOpenChange={vi.fn()}
+        onImportComplete={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+
+  expect((screen.getByLabelText('Custom Hours Report') as HTMLInputElement).accept).toBe('.pdf');
+  expect((screen.getByLabelText('Custom Adjustments Sheet') as HTMLInputElement).accept).toBe('.xlsx,.csv');
+  expect(screen.getByText('Upload the custom hours report.')).toBeTruthy();
+  expect((screen.getByRole('checkbox', { name: /Legacy workbook fallback/ }) as HTMLInputElement).checked).toBe(true);
+});
+
+it('forwards the selected descriptor key as source_type when previewing an import', async () => {
+  mocks.previewImport.mockResolvedValue(preview([pdfSource, workbookMissing]));
+  render(
+    <MemoryRouter>
+      <ImportModal
+        open
+        payPeriodId={9}
+        companyId={7}
+        descriptor={{
+          key: 'custom_reviewed_workbook',
+          label: 'Custom Reviewed Workbook',
+          source_label: 'Custom Reviewed',
+          parser_version: 'custom_reviewed_workbook:v1',
+          extraction: 'deterministic',
+          accepts_pasted_text: false,
+          tracks_reviewed_hours: true,
+          employee_match: 'name_fuzzy',
+          idempotency: 'files_period_roster_loans_and_workweek',
+          reports_overtime: true,
+          tips_default: 'paid_in_check',
+          overtime_mode: 'source_reports',
+          workweek_alignment: 'warn_if_offset',
+          required_sources: ['revel_hours'],
+          files: [
+            {
+              role: 'revel_hours',
+              label: 'Custom Hours PDF',
+              hint: 'Upload custom hours.',
+              accept: ['.pdf'],
+              max: 1,
+              required: true,
+              required_by_default: true,
+              portal_role: 'custom_hours',
+              provides: ['regular_hours'],
+            },
+          ],
+          portal: { submittable: true, role_map: { custom_hours: 'revel_hours' } },
+        }}
+        onOpenChange={vi.fn()}
+        onImportComplete={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+
+  const file = pdf();
+  fireEvent.change(screen.getByLabelText('Custom Hours PDF'), { target: { files: [file] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Import' }));
+
+  await waitFor(() =>
+    expect(mocks.previewImport).toHaveBeenCalledWith(9, file, undefined, false, undefined, undefined, 'custom_reviewed_workbook'),
+  );
 });

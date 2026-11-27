@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 interface Props {
   sources: ImportPackageSource[];
   summary: string;
+  acceptByRole?: Record<string, string>;
   // Omitted when files must be added another way (a client portal revision).
   onAdd?: (role: string, file: File) => void;
   // Omitted when a file cannot be taken out (an applied import, a portal revision, or its only file).
@@ -24,7 +25,7 @@ interface Props {
 
 // Which files this import has, which are still needed, and a way to add the
 // missing one or take out one added by mistake without starting over.
-export function ImportSourceChecklist({ sources, summary, onAdd, onRemove, busy, waived, onWaivedChange, clientWaived, waiverBlockedReason }: Props) {
+export function ImportSourceChecklist({ sources, summary, acceptByRole, onAdd, onRemove, busy, waived, onWaivedChange, clientWaived, waiverBlockedReason }: Props) {
   const [removing, setRemoving] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -74,7 +75,7 @@ export function ImportSourceChecklist({ sources, summary, onAdd, onRemove, busy,
                   type="file"
                   className="sr-only"
                   aria-label={`Add ${source.label}`}
-                  accept={MOSA_SOURCE_ACCEPT[source.role]}
+                  accept={source.accept?.join(',') || acceptByRole?.[source.role] || MOSA_SOURCE_ACCEPT[source.role]}
                   disabled={busy}
                   onChange={(event) => {
                     const file = event.target.files?.[0];

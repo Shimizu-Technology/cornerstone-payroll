@@ -49,11 +49,17 @@ module Api
             return render json: { error: "Choose the Revel hours PDF, the tips & loans workbook, or both." }, status: :unprocessable_entity
           end
 
+          source_type = params[:source_type].presence&.to_s || "mosa_revel"
+          descriptor = PayrollIntake::Registry.find(source_type)
+          unless descriptor&.tracks_reviewed_hours? && @pay_period.company.payroll_intake_source_enabled?(descriptor.key)
+            return render json: { error: "Unsupported or disabled reviewed-hours intake source: #{source_type}" }, status: :unprocessable_entity
+          end
+
           begin
             selected_source = pay_run_selection.source! if params[:use_submission_id].present?
             package_result = PayrollIntake::PreviewService.new(
               pay_period: @pay_period,
-              source_type: "mosa_revel",
+              source_type: descriptor.key,
               files: [ pdf_file, excel_file ].compact,
               actor: current_user,
               portal_submission: selected_source,
@@ -113,11 +119,12 @@ module Api
           end
 
           package_result = PayrollIntake::PreviewService.new(
-            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true,
+            pay_period: @pay_period, source_type: current.source_type, files: [], actor: current_user, carry_forward: true,
             supersession_reason: params[:reason].to_s.strip.first(500).presence
           ).call
-          # A tip choice follows the workbook it was made for (see tip_confirmation_for).
-          import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
+          # A tip choice follows the workbook it was made for (see tip_confirmation_for);
+          # unconfirmed reviews re-resolve the company's configured default tip treatment.
+          import_record = persist_preview(package_result, nil, nil)
           render json: preview_response(import_record, package_result)
         rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -147,7 +154,7 @@ module Api
           role = params[:source_role].to_s
           label = PayrollIntake::SourceCompleteness.new(session: current, company: @pay_period.company).labels_for([ role ]).first
           verified = current.documents.select { |document| document.verification_status == "verified" }
-          unless role.in?(PayrollIntake::SourceCompleteness.roles_for("mosa_revel").keys) && verified.any? { |document| document.source_role == role }
+          unless role.in?(PayrollIntake::SourceCompleteness.roles_for(current.source_type).keys) && verified.any? { |document| document.source_role == role }
             return render json: { error: "Import version #{current.package_revision} has no #{label} to remove." }, status: :unprocessable_entity
           end
           if verified.all? { |document| document.source_role == role }
@@ -159,11 +166,12 @@ module Api
           end
 
           package_result = PayrollIntake::PreviewService.new(
-            pay_period: @pay_period, source_type: "mosa_revel", files: [], actor: current_user, carry_forward: true,
+            pay_period: @pay_period, source_type: current.source_type, files: [], actor: current_user, carry_forward: true,
             remove_roles: [ role ], supersedes_package_id: current.package_id, supersession_reason: "Removed: #{label}. #{reason}"
           ).call
-          # A tip choice follows the workbook it was made for (see tip_confirmation_for).
-          import_record = persist_preview(package_result, nil, nil, tips_paid_out_from_tips: false)
+          # A tip choice follows the workbook it was made for (see tip_confirmation_for);
+          # unconfirmed reviews re-resolve the company's configured default tip treatment.
+          import_record = persist_preview(package_result, nil, nil)
           render json: preview_response(import_record, package_result)
         rescue PayrollIntake::PreviewService::ReplacementRequiredError, ArgumentError => e
           render json: { error: e.message }, status: :unprocessable_entity
@@ -549,12 +557,22 @@ module Api
         end
 
         def persist_preview(package_result, pdf_file, excel_file,
-                            tips_paid_out_from_tips: ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]),
+                            tips_paid_out_from_tips: nil,
                             tip_choice_offered: false,
                             portal_submission: nil)
           source_package = package_result.fetch(:session)
           unless source_package.applyable?
             raise ArgumentError, "This source package was already applied or superseded. Review a corrected current source."
+          end
+          effective_settings = PayrollIntake::EffectiveSettings.for(
+            company: @pay_period.company,
+            pay_period: @pay_period,
+            source_type: source_package.source_type
+          )
+          if tips_paid_out_from_tips.nil?
+            tips_paid_out_from_tips = params.key?(:tips_paid_out_from_tips) ?
+              ActiveModel::Type::Boolean.new.cast(params[:tips_paid_out_from_tips]) :
+              effective_settings.tips_already_paid_default?
           end
           preview_data = preview_from_source_package(source_package)
           tip_confirmation = tip_confirmation_for(source_package, tips_paid_out_from_tips, offered: tip_choice_offered)
@@ -575,6 +593,8 @@ module Api
               pdf_count: preview_data[:pdf_count],
               excel_count: preview_data[:excel_count],
               tips_paid_out_from_tips: tips_paid_out_from_tips,
+              tip_treatment_default: effective_settings.tips_default,
+              tip_treatment_default_source: effective_settings.source,
               tip_treatment_confirmed: tip_confirmation["tip_treatment_confirmed"],
               unmatched_excel_names: preview_data[:unmatched_excel_names],
               duplicate_employee_matches: preview_data[:duplicate_employee_matches],

@@ -5,9 +5,10 @@ module PayrollImport
   module CurrentReview
     module_function
 
-    def source_package_for(pay_period)
+    def source_package_for(pay_period, source_type: nil)
+      source_types = source_type.present? ? [ source_type.to_s ] : PayrollIntake::Registry.tracks_reviewed_hours_keys
       pay_period.payroll_intake_sessions.current
-                .where(source_type: "mosa_revel", status: %w[previewed reviewed])
+                .where(source_type: source_types, status: %w[previewed reviewed])
                 .order(package_revision: :desc, id: :desc)
                 .first
     end

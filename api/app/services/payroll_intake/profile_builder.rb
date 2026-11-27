@@ -4,15 +4,29 @@ module PayrollIntake
   # Builds the read-only intake profile payload for a company from the
   # descriptor registry and effective operating-profile settings.
   class ProfileBuilder
-    def initialize(company:, on: nil)
+    def initialize(company:, on: nil, audience: :staff)
       @company = company
       @as_of = (on || PayrollBusinessClock.today).to_date
+      @audience = audience
     end
 
     def call
       features = CompanyFeatures.for(@company, on: @as_of)
+      preloaded = features.persisted? ? features.profile : nil
       adapters = PayrollIntake::Registry.for_company(@company).map do |descriptor|
-        descriptor.serialize(required_sources: @company.payroll_intake_required_sources(descriptor.key))
+        effective = PayrollIntake::EffectiveSettings.for(
+          company: @company,
+          source_type: descriptor.key,
+          on: @as_of,
+          preloaded_profile: preloaded
+        )
+        descriptor.serialize(
+          required_sources: effective.required_sources,
+          tips_default: effective.tips_default,
+          overtime_mode: effective.overtime_mode,
+          workweek_alignment: effective.workweek_alignment,
+          audience: @audience
+        )
       end
 
       {

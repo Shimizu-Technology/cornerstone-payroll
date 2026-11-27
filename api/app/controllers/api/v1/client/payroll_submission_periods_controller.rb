@@ -7,13 +7,15 @@ module Api
         before_action :require_payroll_files, only: :submissions
         include PayrollSubmissionPeriodActions
 
-        # Send a new revision: Revel payroll PDF, changes, notes, attachments.
+        # Send a new revision: descriptor-defined payroll files, changes, notes, attachments.
         def submissions
           skip_default_audit_log!
+          portal_role_keys = (payroll_catalog_company.portal_submittable_intake_descriptor&.portal_roles || []).map(&:to_sym)
+          permitted_keys = (%i[revel_payroll changes_workbook workbook_choice no_changes changes_link_url notes
+                               idempotency_key based_on_revision excel_attachments_supporting] + portal_role_keys).uniq
           result = PayrollSubmissions::CreateRevision.new(
             company: payroll_catalog_company, actor: current_user, entry: @entry, catalog: payroll_catalog,
-            params: params.permit(:revel_payroll, :changes_workbook, :workbook_choice, :no_changes, :changes_link_url, :notes,
-              :idempotency_key, :based_on_revision, :excel_attachments_supporting, attachments: [], keep_document_ids: []).to_h.merge(changes: params[:changes]),
+            params: params.permit(*permitted_keys, attachments: [], keep_document_ids: []).to_h.merge(changes: params[:changes]),
             request_context: payroll_request_context
           ).call
           @entry = payroll_catalog.resolve(result.submission.payroll_submission_period_id)
@@ -33,7 +35,7 @@ module Api
         private
 
         def require_payroll_files
-          unless payroll_catalog_company.payroll_intake_source_enabled?("mosa_revel")
+          unless payroll_catalog_company.portal_payroll_files_enabled?
             render json: { error: "Payroll files are not enabled for this client" }, status: :forbidden
           end
         end

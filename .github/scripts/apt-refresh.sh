@@ -8,6 +8,21 @@ set -uo pipefail
 
 echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
 
+# The runner image ships Microsoft's package repository, which CI never installs from. When that
+# repository returns 403, every refresh fails (here and inside `playwright install --with-deps`), so
+# turn it off for this job.
+disable_microsoft_repo() {
+  local file
+  for file in /etc/apt/sources.list.d/*; do
+    [ -f "$file" ] || continue
+    if grep -q 'packages\.microsoft\.com' "$file"; then
+      sudo mv "$file" "$file.disabled"
+      echo "Disabled $(basename "$file") for this job."
+    fi
+  done
+}
+disable_microsoft_repo
+
 use_public_dns() {
   echo "::warning::Package index refresh keeps failing; switching this runner to public DNS resolvers."
   sudo mkdir -p /etc/systemd/resolved.conf.d
