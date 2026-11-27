@@ -181,6 +181,67 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       get "/api/v1/client/payroll_submission_periods/#{ref}/template", params: { file_format: "csv" }
       expect(response).to have_http_status(:forbidden)
     end
+
+    it "supports full client portal workbook submit -> staff preview -> apply with 75 reg / 5 OT hours and $25 bonus" do
+      ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
+      filled_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "45.00", "35.00", "", "", "", "", "", "", "25.00", "", "", "", "", "" ]
+      end
+      upload = portal_upload("portal-biweekly.csv", filled_csv, csv_mime)
+
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: upload,
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+      expect(submission_id).to be_present
+
+      # Staff previews the client-submitted universal workbook via the portal import bridge
+      stub_portal_user(Api::V1::Admin::PayrollImportsController, staff, company)
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: { submission_id: submission_id },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      preview = response.parsed_body.fetch("preview")
+      expect(preview.fetch("matched_count")).to eq(1)
+      expect(preview.fetch("can_apply")).to be(true)
+      expect(preview.fetch("matched").sole).to include(
+        "employee_id" => employee_01.id,
+        "regular_hours" => 75.0,
+        "overtime_hours" => 5.0,
+        "bonus" => 25.0
+      )
+
+      import_id = response.parsed_body.fetch("import_id")
+      portal_source_id = response.parsed_body.dig("portal_source", "selection_id")
+      expect(portal_source_id).to be_present
+
+      # Staff applies the reviewed portal workbook through PayrollIntake::ApplyService
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: import_id, portal_source_id: portal_source_id },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      item = pay_period.reload.payroll_items.find_by!(employee: employee_01)
+      expect(item.hours_worked).to eq(BigDecimal("75.00"))
+      expect(item.overtime_hours).to eq(BigDecimal("5.00"))
+      expect(item.hours_worked + item.overtime_hours).to eq(BigDecimal("80.00"))
+      expect(item.bonus).to eq(BigDecimal("25.00"))
+      expect(item.bonus_source).to eq("import")
+      expect(item.import_source).to eq("cornerstone_workbook")
+      # 75 * $20 + 5 * $30 + $25 bonus = $1500 + $150 + $25 = $1675.00
+      expect(item.gross_pay).to eq(BigDecimal("1675.00"))
+      expect(pay_period.status).to eq("calculated")
+
+      portal_period = PayrollSubmissionPeriod.find_by!(company: company, start_date: pay_period.start_date, end_date: pay_period.end_date)
+      expect(portal_period.pending_source_review?).to be(false)
+      expect(portal_period.status_events.where(event: "import", payroll_submission_id: submission_id)).to exist
+    end
   end
 
   describe "Merged apply path for reviewed-hours (mosa_revel) imports" do

@@ -88,7 +88,7 @@ module PayrollIntake
       end
 
       def normalize(extracted_rows:, detected_period: nil, trusted_source: true)
-        active_by_id = company.employees.active.index_by(&:id)
+        active_by_id = company.employees.active.preload(:employee_compensation_changes).index_by(&:id)
         non_active_by_id = company.employees.where.not(status: "active").index_by(&:id)
 
         raw_list = Array(extracted_rows).map { |row| row.with_indifferent_access }
@@ -113,14 +113,14 @@ module PayrollIntake
           row_count: rows.length,
           ready_count: rows.count { |row| row[:status] == "ready" },
           review_count: rows.count { |row| row[:status] == "needs_review" },
-          total_regular_hours: sum_decimal(rows) { |row| row[:regular_hours] }.to_f,
-          total_overtime_hours: sum_decimal(rows) { |row| row[:overtime_hours] }.to_f,
-          total_pto_hours: sum_decimal(rows) { |row| row.dig(:source_payload, "pto_hours") }.to_f,
-          total_holiday_hours: sum_decimal(rows) { |row| row.dig(:source_payload, "holiday_hours") }.to_f,
-          total_reported_tips: sum_decimal(rows) { |row| row[:reported_tips] }.to_f,
-          total_tips_paid_out: sum_decimal(rows) { |row| row[:tips_paid_out] }.to_f,
-          total_bonus: sum_decimal(rows) { |row| row.dig(:source_payload, "bonus") }.to_f,
-          total_loan_deductions: sum_decimal(rows) { |row| row[:loan_deduction] }.to_f
+          total_regular_hours: sum_decimal(rows) { |row| row[:regular_hours] }.to_s("F"),
+          total_overtime_hours: sum_decimal(rows) { |row| row[:overtime_hours] }.to_s("F"),
+          total_pto_hours: sum_decimal(rows) { |row| row.dig(:source_payload, "pto_hours") }.to_s("F"),
+          total_holiday_hours: sum_decimal(rows) { |row| row.dig(:source_payload, "holiday_hours") }.to_s("F"),
+          total_reported_tips: sum_decimal(rows) { |row| row[:reported_tips] }.to_s("F"),
+          total_tips_paid_out: sum_decimal(rows) { |row| row[:tips_paid_out] }.to_s("F"),
+          total_bonus: sum_decimal(rows) { |row| row.dig(:source_payload, "bonus") }.to_s("F"),
+          total_loan_deductions: sum_decimal(rows) { |row| row[:loan_deduction] }.to_s("F")
         }
 
         evidence = {
@@ -224,6 +224,23 @@ module PayrollIntake
         tip_treatment_source = row_tips_override.nil? ? effective_settings.source : "row_override"
         tips_paid_out = tips_already_paid ? tips : 0.to_d
 
+        if matched_employee
+          errors.concat(
+            contractor_field_errors(
+              row_num: row_num,
+              employee: matched_employee,
+              week1_hours: week1_hours,
+              week2_hours: week2_hours,
+              regular_hours: regular_hours,
+              overtime_hours: overtime_hours,
+              pto_hours: pto_hours,
+              holiday_hours: holiday_hours,
+              tips: tips,
+              tips_paid_out: tips_paid_out
+            )
+          )
+        end
+
         serialized_components = Array(raw_row[:payroll_components]).map do |component|
           data = component.to_h.deep_stringify_keys
           data["amount"] = to_decimal(data["amount"]).to_s("F")
@@ -318,7 +335,11 @@ module PayrollIntake
       def resolve_source_reported_hours(row_num:, week1_hours:, week2_hours:, explicit_regular:, explicit_overtime:,
                                         week1_present:, week2_present:, regular_present:, overtime_present:)
         errors = []
-        if (week1_hours.positive? || week2_hours.positive?) && !regular_present && !overtime_present
+        weekly_present = week1_present || week2_present
+        weekly_total = (week1_hours + week2_hours).round(2)
+        reported_total = (explicit_regular + explicit_overtime).round(2)
+
+        if weekly_present && !regular_present && !overtime_present && weekly_total.positive?
           errors << error(
             "source_overtime_hours_required",
             "Row #{row_num}: Enter Regular Hours and Overtime Hours when overtime mode is source_reports."
@@ -326,7 +347,53 @@ module PayrollIntake
           return [ 0.to_d, 0.to_d, errors, [] ]
         end
 
+        if weekly_present && (regular_present || overtime_present) && !reconciles?(weekly_total, reported_total)
+          errors << error(
+            "conflicting_hours_columns",
+            "Row #{row_num}: Week 1 + Week 2 hours (#{format('%.2f', weekly_total)}) do not match " \
+            "Regular + Overtime hours (#{format('%.2f', reported_total)}). Clear Week 1/Week 2 Hours or reconcile both totals."
+          )
+          return [ explicit_regular, explicit_overtime, errors, [] ]
+        end
+
         [ explicit_regular, explicit_overtime, errors, [] ]
+      end
+
+      def contractor_field_errors(row_num:, employee:, week1_hours:, week2_hours:, regular_hours:, overtime_hours:,
+                                  pto_hours:, holiday_hours:, tips:, tips_paid_out:)
+        compensation = employee.payroll_compensation_on(pay_period.end_date)
+        return [] unless compensation.employment_type == "contractor"
+
+        errors = []
+        if pto_hours.positive?
+          errors << error(
+            "contractor_unsupported_pto_hours",
+            "Row #{row_num}: 1099 contractors cannot receive PTO hours in universal workbook intake " \
+            "(got #{format('%.2f', pto_hours)}). Clear PTO Hours before applying."
+          )
+        end
+        if holiday_hours.positive?
+          errors << error(
+            "contractor_unsupported_holiday_hours",
+            "Row #{row_num}: 1099 contractors cannot receive holiday hours in universal workbook intake " \
+            "(got #{format('%.2f', holiday_hours)}). Clear Holiday Hours before applying."
+          )
+        end
+        if tips.positive? || tips_paid_out.positive?
+          errors << error(
+            "contractor_unsupported_tips",
+            "Row #{row_num}: 1099 contractors cannot receive employee tips or tip offsets in universal workbook intake " \
+            "(got $#{format('%.2f', [ tips, tips_paid_out ].max)}). Clear Tips before applying."
+          )
+        end
+        if compensation.contractor_pay_type != "hourly" &&
+          (regular_hours.positive? || overtime_hours.positive? || week1_hours.positive? || week2_hours.positive?)
+          errors << error(
+            "contractor_unsupported_hours",
+            "Row #{row_num}: Flat-fee 1099 contractors cannot receive hourly wages via hours columns. Clear Hours before applying."
+          )
+        end
+        errors
       end
 
       def resolve_weekly_split_hours(row_num:, week1_hours:, week2_hours:, explicit_regular:, explicit_overtime:,

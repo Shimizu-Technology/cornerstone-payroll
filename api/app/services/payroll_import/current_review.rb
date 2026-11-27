@@ -6,7 +6,12 @@ module PayrollImport
     module_function
 
     def source_package_for(pay_period, source_type: nil)
-      source_types = source_type.present? ? [ source_type.to_s ] : PayrollIntake::Registry.tracks_reviewed_hours_keys
+      source_types = if source_type.present?
+        [ source_type.to_s ]
+      else
+        (PayrollIntake::Registry.tracks_reviewed_hours_keys +
+          PayrollIntake::Registry.all.select(&:portal_submittable?).map(&:key)).uniq
+      end
       pay_period.payroll_intake_sessions.current
                 .where(source_type: source_types, status: %w[previewed reviewed])
                 .order(package_revision: :desc, id: :desc)

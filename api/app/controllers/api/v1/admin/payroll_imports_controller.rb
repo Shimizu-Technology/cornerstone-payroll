@@ -404,7 +404,8 @@ module Api
             outcome = PayrollIntake::ApplyService.new(
               session: source_package,
               actor: current_user,
-              force_overwrite: force_overwrite
+              force_overwrite: force_overwrite,
+              acknowledge_warnings: ActiveModel::Type::Boolean.new.cast(params[:acknowledge_warnings])
             ).apply_reviewed_import!(
               import_record: import_record,
               matched_data: matched_data,
@@ -532,7 +533,9 @@ module Api
             company_id: @pay_period.company_id,
             status: "previewed",
             pdf_filename: retained_filename(source_package, "revel_hours") || pdf_file&.original_filename,
-            excel_filename: retained_filename(source_package, "supplemental_workbook") || excel_file&.original_filename,
+            excel_filename: retained_filename(source_package, "supplemental_workbook") ||
+              retained_filename(source_package, "cornerstone_workbook") ||
+              excel_file&.original_filename,
             import_origin: PayrollIntake::ImportOrigin.build(session: source_package, portal_submission: portal_submission),
             raw_data: {
               pdf_count: preview_data[:pdf_count],
@@ -690,6 +693,8 @@ module Api
         end
 
         def workbook_warnings(package, submission)
+          return [] unless PayrollIntake::SourceCompleteness.roles_for(package.source_type).key?("supplemental_workbook")
+
           unless package.documents.any? { |document| document.source_role == "supplemental_workbook" }
             none = submission&.workbook_choice == "none"
             return [ { code: none ? "client_no_tips_or_loans" : "missing_workbook",
@@ -733,6 +738,10 @@ module Api
 
 
         def preview_from_source_package(source_package)
+          if source_package.source_type == "cornerstone_workbook"
+            return universal_workbook_preview_from_source_package(source_package)
+          end
+
           evidence = source_package.evidence_snapshot.to_h
           preview = evidence.fetch("preview", {})
           matched = source_package.rows.filter_map do |row|
@@ -757,6 +766,56 @@ module Api
             source_warnings: source_package.warnings || [],
             source_rows: source_package.rows.map { |row| source_row_json(row) },
             can_apply: source_package.rows.none?(&:blocking_errors?) && Array(preview["duplicate_employee_matches"]).empty?
+          }
+        end
+
+        def universal_workbook_preview_from_source_package(source_package)
+          rows = source_package.rows.includes(:employee).to_a
+          matched = rows.filter_map do |row|
+            next if row.employee_id.blank?
+
+            universal_workbook_preview_row(row)
+          end
+          matched = PayrollImport::LivePreviewRowState.new(@pay_period).refresh(matched)
+          duplicate_employee_ids = rows.filter_map(&:employee_id).tally.select { |_id, count| count > 1 }.keys
+
+          {
+            matched: matched,
+            unmatched_pdf_names: [],
+            unmatched_excel_names: rows.filter_map { |row| row.source_employee_name if row.employee_id.blank? },
+            duplicate_employee_matches: duplicate_employee_ids.map { |employee_id| { "employee_id" => employee_id } },
+            low_confidence_matches: [],
+            pdf_count: 0,
+            excel_count: rows.length,
+            matched_count: matched.length,
+            source_warnings: source_package.warnings || [],
+            source_rows: rows.map { |row| source_row_json(row) },
+            can_apply: rows.any? && rows.none?(&:blocking_errors?) && duplicate_employee_ids.empty?
+          }
+        end
+
+        def universal_workbook_preview_row(row)
+          payload = row.source_payload.to_h
+          {
+            "source_row_id" => row.id,
+            "employee_id" => row.employee_id,
+            "employee_name" => row.employee&.full_name || row.source_employee_name,
+            "match_status" => "matched",
+            "match_method" => row.match_method || "employee_id",
+            "match_confidence" => row.match_confidence&.to_f || 1.0,
+            "week1_hours" => row.week1_hours.to_f,
+            "week2_hours" => row.week2_hours.to_f,
+            "regular_hours" => row.regular_hours.to_f,
+            "overtime_hours" => row.overtime_hours.to_f,
+            "pto_hours" => payload["pto_hours"].to_d.to_f,
+            "holiday_hours" => payload["holiday_hours"].to_d.to_f,
+            "tips" => row.reported_tips.to_f,
+            "reported_tips" => row.reported_tips.to_f,
+            "tips_paid_out" => row.tips_paid_out.to_f,
+            "bonus" => payload["bonus"].present? ? payload["bonus"].to_d.to_f : nil,
+            "payroll_components" => Array(payload["payroll_components"]),
+            "loan_deduction" => row.loan_deduction.to_f,
+            "notes" => payload["notes"]
           }
         end
 
@@ -873,7 +932,8 @@ module Api
             source_employee_name: row.source_employee_name,
             employee_id: row.employee_id,
             employee_name: row.employee&.full_name,
-            row_kind: row.source_payload.to_h["row_kind"],
+            row_kind: row.source_payload.to_h["row_kind"] ||
+              (row.payroll_intake_session&.source_type == "cornerstone_workbook" ? (row.employee_id.present? ? "matched" : "unmatched_workbook") : nil),
             disposition: row.disposition,
             disposition_reason: row.disposition_reason,
             target_pay_period_id: row.target_pay_period_id,
@@ -916,7 +976,12 @@ module Api
 
           excluded_ids = Array(params[:excluded_employee_ids]).map(&:to_i).to_set
           source_package.rows.map do |row|
-            if row.source_payload.to_h["row_kind"] == "matched"
+            matched_row = if source_package.source_type == "cornerstone_workbook"
+              row.employee_id.present? && !row.blocking_errors?
+            else
+              row.source_payload.to_h["row_kind"] == "matched"
+            end
+            if matched_row
               excluded = excluded_ids.include?(row.employee_id)
               {
                 id: row.id,
