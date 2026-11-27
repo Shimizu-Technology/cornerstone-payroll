@@ -45,7 +45,7 @@ module PayrollIntake
       payroll_item.custom_columns_data = data
     end
 
-    def apply_client_hours!(payroll_item, employee, row)
+    def apply_client_hours!(payroll_item, employee, row, use_selected_wage_rate_for_existing: false)
       input = row.fetch(:client_extra_hours).to_h.deep_symbolize_keys
       period_rates = employee.wage_rates_on(pay_period.end_date)
       rate = period_rates.find { |candidate| candidate.id.to_s == input[:employee_wage_rate_id].to_s }
@@ -59,7 +59,7 @@ module PayrollIntake
       allocations = payroll_item.wage_rate_hours.deep_dup
 
       if allocations.empty? && [ payroll_item.hours_worked, payroll_item.overtime_hours, payroll_item.holiday_hours, payroll_item.pto_hours ].any? { |hours| hours.to_d.positive? }
-        base = if row[:selected_wage_rate_id].present?
+        base = if use_selected_wage_rate_for_existing && row[:selected_wage_rate_id].present?
           period_rates.find { |candidate| candidate.id.to_s == row[:selected_wage_rate_id].to_s }
         else
           primary = employee.primary_wage_rate_on(pay_period.end_date)
