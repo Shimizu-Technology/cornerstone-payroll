@@ -21,6 +21,8 @@ describe('computeExtraHoursPreview', () => {
       deltaOvertimeHours: 1.5,
       resultingRegularHours: 80,
       resultingOvertimeHours: 6.5,
+      resultingWeek1Hours: 45,
+      resultingWeek2Hours: 41.5,
       grossPayDelta: 145,
     });
   });
@@ -44,6 +46,8 @@ describe('computeExtraHoursPreview', () => {
       deltaOvertimeHours: 6.5,
       resultingRegularHours: 75,
       resultingOvertimeHours: 11.5,
+      resultingWeek1Hours: 51.5,
+      resultingWeek2Hours: 35,
       grossPayDelta: 195,
     });
   });
@@ -190,5 +194,20 @@ describe('computeExtraHoursPreview', () => {
       hours: '10',
     });
     expect(sixDecimals.grossPayDelta).toBe(201.23);
+  });
+
+  it('rejects workweek previews when weekly baselines do not reconcile with aggregate baselines', () => {
+    const mismatched = computeExtraHoursPreview({
+      mode: 'workweek',
+      rate: '20.0',
+      baselineRegularHours: '75.0',
+      baselineOvertimeHours: '5.0',
+      hours: '1',
+      workweek: 1,
+      workweekCount: 2,
+    });
+    expect(mismatched.valid).toBe(false);
+    expect(mismatched.error).toContain('Weekly hours baseline does not match');
+    expect(mismatched.grossPayDelta).toBeNull();
   });
 });

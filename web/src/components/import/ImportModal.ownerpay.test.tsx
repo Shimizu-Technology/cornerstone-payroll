@@ -250,7 +250,7 @@ it('fills per-owner boxes from client changes, permits edits and requires explic
     confirm_client_changes: true,
     reviewed_changes: [
       { change_index: 0, amount: '4495.00', reason: 'Client confirmed correction' },
-      { change_index: 1, regular_hours: '68', overtime_hours: '0', hours: '68' },
+      { change_index: 1, regular_hours: '68', overtime_hours: '0', hours: '68', baseline_regular_hours: '40.0', baseline_overtime_hours: '0.0' },
     ],
   })));
   expect(mocks.createItem).not.toHaveBeenCalled(); expect(mocks.updateItem).not.toHaveBeenCalled();
@@ -482,7 +482,7 @@ it('shows live regular/overtime hours and gross pay delta for biweekly workweek 
   fireEvent.click(applyButton());
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
     confirm_client_changes: true,
-    reviewed_changes: [{ change_index: 0, hours: '6.5', workweek: 1, reason: 'Worked in week 1 per timesheet' }],
+    reviewed_changes: [{ change_index: 0, hours: '6.5', workweek: 1, baseline_regular_hours: '75.0', baseline_overtime_hours: '5.0', reason: 'Worked in week 1 per timesheet' }],
   })));
 });
 
@@ -525,7 +525,7 @@ it('shows live split preview (+$155.00 for 4 reg + 2.5 OT at $20/hr) and blocks 
   expect(applyButton().disabled).toBe(false);
   fireEvent.click(applyButton());
   await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
-    reviewed_changes: [{ change_index: 0, regular_hours: '4', overtime_hours: '2.5', hours: '6.5' }],
+    reviewed_changes: [{ change_index: 0, regular_hours: '4', overtime_hours: '2.5', hours: '6.5', baseline_regular_hours: '70.0', baseline_overtime_hours: '2.0' }],
   })));
 });
 
@@ -604,4 +604,160 @@ it('shows exact gross pay delta for rates with more than two decimals ($20.125/h
   expect(fractionalRateBox.textContent).toContain('+$60.38');
   const roundingBox = screen.getByRole('region', { name: 'Resulting hours and gross pay difference for Jordan Worker' });
   expect(roundingBox.textContent).toContain('+$0.52');
+});
+
+it('shows cumulative regular/overtime hours and combined gross delta when two split rows target the same employee', () => {
+  const data = preview([]);
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '1',
+        extra_hours_mode: 'split',
+        regular_hours: '1',
+        overtime_hours: '0',
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Service',
+        wage_rate: '20.0',
+        baseline_regular_hours: '39.0',
+        baseline_overtime_hours: '0.0',
+      },
+      {
+        change_index: 1,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '1',
+        extra_hours_mode: 'split',
+        regular_hours: '1',
+        overtime_hours: '0',
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Service',
+        wage_rate: '20.0',
+        baseline_regular_hours: '39.0',
+        baseline_overtime_hours: '0.0',
+      },
+    ],
+  };
+  open(data);
+  const boxes = screen.getAllByRole('region', { name: 'Resulting hours and gross pay difference for Avery Server' });
+  expect(boxes).toHaveLength(2);
+  expect(boxes[0].textContent).toContain('40.00 regular · 0.00 overtime');
+  expect(boxes[0].textContent).toContain('+$20.00');
+  expect(boxes[1].textContent).toContain('41.00 regular · 0.00 overtime');
+  expect(boxes[1].textContent).toContain('Combined for Avery Server: +$40.00');
+});
+
+it('shows cumulative regular/overtime hours and combined gross delta when two workweek rows target the same employee', () => {
+  const data = preview([]);
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '4',
+        extra_hours_mode: 'workweek',
+        workweek: 1,
+        workweeks: [
+          { index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' },
+          { index: 2, start_date: '2026-06-21', end_date: '2026-06-27', label: 'Jun 21–27' },
+        ],
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Primary',
+        wage_rate: '20.0',
+        baseline_regular_hours: '73.0',
+        baseline_overtime_hours: '0.0',
+        baseline_week1_hours: '38.0',
+        baseline_week2_hours: '35.0',
+      },
+      {
+        change_index: 1,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '6.5',
+        extra_hours_mode: 'workweek',
+        workweek: 2,
+        workweeks: [
+          { index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' },
+          { index: 2, start_date: '2026-06-21', end_date: '2026-06-27', label: 'Jun 21–27' },
+        ],
+        employee_wage_rate_id: 7,
+        wage_rate_label: 'Primary',
+        wage_rate: '20.0',
+        baseline_regular_hours: '73.0',
+        baseline_overtime_hours: '0.0',
+        baseline_week1_hours: '38.0',
+        baseline_week2_hours: '35.0',
+      },
+    ],
+  };
+  open(data);
+  const boxes = screen.getAllByRole('region', { name: 'Resulting hours and gross pay difference for Avery Server' });
+  expect(boxes).toHaveLength(2);
+  expect(boxes[0].textContent).toContain('75.00 regular · 2.00 overtime');
+  expect(boxes[0].textContent).toContain('+$100.00');
+  expect(boxes[1].textContent).toContain('80.00 regular · 3.50 overtime');
+  expect(boxes[1].textContent).toContain('+$145.00');
+  expect(boxes[1].textContent).toContain('Combined for Avery Server: +$245.00');
+});
+
+it('clamps single-workweek Apply payload to week 1 and clears client-change confirmation when job selection changes', async () => {
+  const twoRates = row({
+    source_row_id: 1,
+    wage_rate_options: [{ id: 11, label: 'Main Kitchen', rate: 20 }, { id: 12, label: 'Shared Kitchen', rate: 20 }],
+    selected_wage_rate_id: 11,
+  });
+  const data = preview([]);
+  data.preview.matched = [twoRates];
+  data.client_change_prefill = {
+    submission_id: 20,
+    revision: 2,
+    rows: [
+      {
+        change_index: 0,
+        kind: 'extra_hours',
+        employee_id: 1,
+        employee_name: 'Avery Server',
+        hours: '2',
+        extra_hours_mode: 'workweek',
+        workweek: 2,
+        workweeks: [{ index: 1, start_date: '2026-06-14', end_date: '2026-06-20', label: 'Jun 14–20' }],
+        employee_wage_rate_id: 11,
+        wage_rate_label: 'Main Kitchen',
+        wage_rate: '20.0',
+        baseline_regular_hours: '38.0',
+        baseline_overtime_hours: '0.0',
+        baseline_week1_hours: '38.0',
+        baseline_week2_hours: '0.0',
+      },
+    ],
+  };
+  mocks.applyImport.mockResolvedValue({ results: { success: [], errors: [] }, pay_period: { id: 9 } });
+  open(data);
+
+  const confirmBox = screen.getByLabelText(/I checked the owner pay and extra hours/) as HTMLInputElement;
+  fireEvent.click(confirmBox);
+  expect(confirmBox.checked).toBe(true);
+  expect(applyButton().disabled).toBe(false);
+
+  // Changing the job selector clears the confirmation checkbox
+  fireEvent.change(screen.getAllByLabelText('Job and rate for Avery Server')[0], { target: { value: '12' } });
+  expect(confirmBox.checked).toBe(false);
+  expect(applyButton().disabled).toBe(true);
+
+  fireEvent.click(confirmBox);
+  fireEvent.click(applyButton());
+  await waitFor(() => expect(mocks.applyImport).toHaveBeenCalledWith(9, expect.objectContaining({
+    reviewed_changes: [expect.objectContaining({ change_index: 0, workweek: 1 })],
+  })));
 });

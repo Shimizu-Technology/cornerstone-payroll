@@ -61,10 +61,12 @@ module PayrollSubmissions
       end
     end
 
-    def apply_to(rows, reviewed:, confirmed:, source_employee_ids: rows.map { |row| row[:employee_id] }, dispositions: [])
+    def apply_to(rows, reviewed:, confirmed:, source_employee_ids: rows.map { |row| row[:employee_id] }, dispositions: [], previewed_baselines: {})
       changes = proposals(source_rows: rows)
       @review_decisions = []
       reviewed = Array(reviewed).map { |row| row.to_h.with_indifferent_access }
+      previewed_baselines = previewed_baselines.to_h.stringify_keys
+      running_extra_hours = {}
       changes.select { |change| change[:requires_pay_decision] }.each do |change|
         next if reviewed.any? { |input| input[:change_index].to_s == change[:change_index].to_s }
 
@@ -122,10 +124,48 @@ module PayrollSubmissions
           applied_value = row[:period_pay].presence || change[:saved_period_pay] || value
           @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: applied_value, pay_choice: input[:pay_choice], reason: input[:reason])
         else
-          extra_outcome = apply_extra_hours!(row, change, input)
+          emp_key = change[:employee_id].to_s
+          running_state = running_extra_hours[emp_key]
+          unless running_state
+            verify_extra_hours_baseline!(change, input, previewed_baselines)
+            running_state = {
+              regular_hours: change[:baseline_regular_hours].to_d,
+              overtime_hours: change[:baseline_overtime_hours].to_d,
+              week1_hours: change[:baseline_week1_hours].to_d,
+              week2_hours: change[:baseline_week2_hours].to_d,
+              total_hours: 0.to_d,
+              total_delta_regular: 0.to_d,
+              total_delta_overtime: 0.to_d,
+              total_gross_delta: 0.to_d,
+              line_hours: {},
+              entries: []
+            }
+            running_extra_hours[emp_key] = running_state
+          end
+
+          extra_outcome = apply_extra_hours!(row, change, input, running_state: running_state)
           value = extra_outcome.fetch(:reviewed_value)
           evidence_details = extra_outcome.fetch(:evidence)
-          row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value, **evidence_details)
+          running_state[:entries] << evidence_details.merge(
+            change_index: change[:change_index],
+            employee_wage_rate_id: change[:employee_wage_rate_id],
+            reviewed_value: value
+          )
+          if running_state[:entries].one?
+            row[:client_change_evidence] = change.merge(submission_id: @submission.id, reviewed_value: value, **evidence_details)
+          else
+            row[:client_change_evidence] = change.merge(
+              submission_id: @submission.id,
+              reviewed_value: PayrollIntake::ExtraHoursPolicy.format_hours(running_state[:total_hours]),
+              hours_mode: evidence_details[:hours_mode],
+              delta_regular_hours: running_state[:total_delta_regular].to_s("F"),
+              delta_overtime_hours: running_state[:total_delta_overtime].to_s("F"),
+              resulting_regular_hours: running_state[:regular_hours].to_s("F"),
+              resulting_overtime_hours: running_state[:overtime_hours].to_s("F"),
+              gross_pay_delta: format("%.2f", running_state[:total_gross_delta]),
+              entries: running_state[:entries]
+            )
+          end
           @review_decisions << change.merge(decision: decision, reviewed_value: value, applied_value: value, reason: input[:reason], **evidence_details)
         end
       end
@@ -282,14 +322,46 @@ module PayrollSubmissions
       )
     end
 
-    def apply_extra_hours!(row, change, input)
+    def verify_extra_hours_baseline!(change, input, previewed_baselines)
+      current_reg = BigDecimal(change[:baseline_regular_hours].to_s.presence || "0").round(2)
+      current_ot = BigDecimal(change[:baseline_overtime_hours].to_s.presence || "0").round(2)
+
+      expected = previewed_baselines["#{@submission.id}:#{change[:change_index]}"]&.stringify_keys
+      if expected
+        prev_reg = BigDecimal(expected["baseline_regular_hours"].to_s.presence || "0").round(2)
+        prev_ot = BigDecimal(expected["baseline_overtime_hours"].to_s.presence || "0").round(2)
+        if prev_reg != current_reg || prev_ot != current_ot
+          raise ArgumentError, "Worksheet hours changed for #{change[:employee_name]} since this preview was opened (preview: #{prev_reg.to_s("F")} regular / #{prev_ot.to_s("F")} overtime; current: #{current_reg.to_s("F")} regular / #{current_ot.to_s("F")} overtime). Preview again before applying."
+        end
+      end
+
+      return unless input.key?(:baseline_regular_hours) || input.key?(:baseline_overtime_hours)
+
+      sent_reg = input.key?(:baseline_regular_hours) && input[:baseline_regular_hours].present? ? BigDecimal(input[:baseline_regular_hours].to_s).round(2) : current_reg
+      sent_ot = input.key?(:baseline_overtime_hours) && input[:baseline_overtime_hours].present? ? BigDecimal(input[:baseline_overtime_hours].to_s).round(2) : current_ot
+      return if sent_reg == current_reg && sent_ot == current_ot
+
+      raise ArgumentError, "Worksheet hours changed for #{change[:employee_name]} since this preview was opened (preview: #{sent_reg.to_s("F")} regular / #{sent_ot.to_s("F")} overtime; current: #{current_reg.to_s("F")} regular / #{current_ot.to_s("F")} overtime). Preview again before applying."
+    rescue ArgumentError => e
+      raise e if e.message.start_with?("Worksheet hours changed")
+
+      raise ArgumentError, "Invalid baseline hours for #{change[:employee_name]}. Preview again before applying."
+    end
+
+    def apply_extra_hours!(row, change, input, running_state:)
       mode = change[:extra_hours_mode].to_s
       rate = change[:wage_rate]
-      base_reg = change[:baseline_regular_hours] || "0"
-      base_ot = change[:baseline_overtime_hours] || "0"
-      line_base_reg = change[:baseline_line_regular_hours]
-      line_base_ot = change[:baseline_line_overtime_hours]
+      base_reg = running_state[:regular_hours]
+      base_ot = running_state[:overtime_hours]
+      job_key = "#{change[:employee_wage_rate_id]}:#{rate.to_d.to_s("F")}"
+      line_state = running_state[:line_hours][job_key] || {
+        regular_hours: change[:baseline_line_regular_hours].nil? ? base_reg : change[:baseline_line_regular_hours].to_d,
+        overtime_hours: change[:baseline_line_overtime_hours].nil? ? base_ot : change[:baseline_line_overtime_hours].to_d
+      }
+      line_base_reg = line_state[:regular_hours]
+      line_base_ot = line_state[:overtime_hours]
       reason = input[:reason].to_s.strip
+      entry_payload = nil
 
       resolved = case mode
       when "straight_time"
@@ -307,7 +379,7 @@ module PayrollSubmissions
         if outcome[:hours] != change[:hours].to_d
           require_adjustment_reason!(change[:employee_name], reason)
         end
-        row[:client_extra_hours] = {
+        entry_payload = {
           hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:hours]),
           regular_hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:delta_regular_hours]),
           overtime_hours: "0",
@@ -339,7 +411,7 @@ module PayrollSubmissions
         end
         require_adjustment_reason!(change[:employee_name], reason) if changed
 
-        row[:client_extra_hours] = {
+        entry_payload = {
           hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:hours]),
           regular_hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:delta_regular_hours]),
           overtime_hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:delta_overtime_hours]),
@@ -350,7 +422,7 @@ module PayrollSubmissions
         outcome
       when "workweek"
         workweeks = Array(change[:workweeks])
-        chosen_week = if workweeks.size == 1 && input[:workweek].blank?
+        chosen_week = if workweeks.size == 1
           1
         else
           input[:workweek]
@@ -369,20 +441,20 @@ module PayrollSubmissions
           hours: input[:hours],
           workweek: chosen_week,
           workweeks: workweeks,
-          baseline_week1: change[:baseline_week1_hours],
-          baseline_week2: change[:baseline_week2_hours]
+          baseline_week1: running_state[:week1_hours],
+          baseline_week2: running_state[:week2_hours]
         )
         changed = outcome[:hours] != change[:hours].to_d ||
-          (change[:workweek].present? && outcome[:workweek] != change[:workweek].to_i)
+          (workweeks.size > 1 && change[:workweek].present? && outcome[:workweek] != change[:workweek].to_i)
         require_adjustment_reason!(change[:employee_name], reason) if changed
 
-        row[:client_extra_hours] = {
+        entry_payload = {
           hours: PayrollIntake::ExtraHoursPolicy.format_hours(outcome[:hours]),
           workweek: outcome[:workweek],
           workweek_start_date: outcome[:workweek_start_date],
           workweek_end_date: outcome[:workweek_end_date],
-          baseline_week1_hours: change[:baseline_week1_hours],
-          baseline_week2_hours: change[:baseline_week2_hours],
+          baseline_week1_hours: running_state[:week1_hours].to_s("F"),
+          baseline_week2_hours: running_state[:week2_hours].to_s("F"),
           hours_mode: "workweek",
           employee_wage_rate_id: change[:employee_wage_rate_id],
           rate: rate
@@ -391,6 +463,25 @@ module PayrollSubmissions
       else
         raise ArgumentError, "Choose regular/overtime hours or a workweek for #{change[:employee_name]} before applying."
       end
+
+      row[:client_extra_hours_list] ||= []
+      row[:client_extra_hours_list] << entry_payload
+      row[:client_extra_hours] ||= entry_payload
+
+      running_state[:regular_hours] = resolved[:resulting_regular_hours]
+      running_state[:overtime_hours] = resolved[:resulting_overtime_hours]
+      if resolved[:hours_mode] == "workweek"
+        running_state[:week1_hours] = resolved[:new_week1_hours]
+        running_state[:week2_hours] = resolved[:new_week2_hours]
+      end
+      running_state[:total_hours] = (running_state[:total_hours] + resolved[:hours]).round(2)
+      running_state[:total_delta_regular] = (running_state[:total_delta_regular] + resolved[:delta_regular_hours]).round(2)
+      running_state[:total_delta_overtime] = (running_state[:total_delta_overtime] + resolved[:delta_overtime_hours]).round(2)
+      running_state[:total_gross_delta] = (running_state[:total_gross_delta] + resolved[:gross_pay_delta]).round(2)
+      running_state[:line_hours][job_key] = {
+        regular_hours: (line_base_reg + resolved[:delta_regular_hours]).round(2),
+        overtime_hours: (line_base_ot + resolved[:delta_overtime_hours]).round(2)
+      }
 
       row[:missing_revel_hours_with_deductions] = false
       # An employee absent from both files has no review job picker; the client

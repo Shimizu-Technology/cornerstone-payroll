@@ -64,9 +64,12 @@ module PayrollSubmissions
       normalized = rows.each_with_index.map { |row, index| normalize_row(row, index) }
       missing = @defaults.values.select { |item| item.active? && item.availability_error(rates_on: @rates_on).nil? && item.required? }.reject { |item| normalized.any? { |row| row["standing_change_id"] == item.id } }
       @errors["changes"] << "Every period defaults changed. Reload and fill in or skip every default." if missing.any?
-      duplicates = normalized.select { |row| %w[owner_pay extra_hours].include?(row["kind"]) && !row["skipped"] }
-        .group_by { |row| [ row["kind"], row["employee_id"] ] }.values.any?(&:many?)
-      @errors["changes"] << "Keep one owner-pay or extra-hours row per employee." if duplicates
+      owner_duplicates = normalized.select { |row| row["kind"] == "owner_pay" && !row["skipped"] }
+        .group_by { |row| row["employee_id"] }.values.any?(&:many?)
+      @errors["changes"] << "Keep one owner-pay row per employee." if owner_duplicates
+      extra_duplicates = normalized.select { |row| row["kind"] == "extra_hours" && !row["skipped"] }
+        .group_by { |row| [ row["employee_id"], row["employee_wage_rate_id"], row["workweek"] ] }.values.any?(&:many?)
+      @errors["changes"] << "Keep one extra-hours row per employee, job, and workweek." if extra_duplicates
       default_ids = normalized.filter_map { |row| row["standing_change_id"] }
       @errors["changes"] << "Keep one answer per every-period default." if default_ids.uniq.size != default_ids.size
       raise Invalid, @errors.to_h if @errors.any?

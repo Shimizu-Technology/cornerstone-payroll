@@ -592,16 +592,24 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             if (isNoPay(row) || clientDeclines[row.change_index]) {
               return { ...base, hours: row.hours ?? '' };
             }
+            const baselineFields = {
+              ...(row.baseline_regular_hours !== undefined || row.saved_regular_hours !== undefined
+                ? { baseline_regular_hours: row.baseline_regular_hours ?? row.saved_regular_hours }
+                : {}),
+              ...(row.baseline_overtime_hours !== undefined || row.saved_overtime_hours !== undefined
+                ? { baseline_overtime_hours: row.baseline_overtime_hours ?? row.saved_overtime_hours }
+                : {}),
+            };
             if (state.mode === 'split') {
               const regText = state.regularDraft.trim() || '0';
               const otText = state.overtimeDraft.trim() || '0';
               const totalHundredths = (parseDecimalHundredths(regText) ?? 0) + (parseDecimalHundredths(otText) ?? 0);
-              return { ...base, regular_hours: regText, overtime_hours: otText, hours: formatCompactHours(totalHundredths) };
+              return { ...base, ...baselineFields, regular_hours: regText, overtime_hours: otText, hours: formatCompactHours(totalHundredths) };
             }
             if (state.mode === 'workweek') {
-              return { ...base, hours: state.hoursDraft, ...(state.workweekDraft ? { workweek: state.workweekDraft } : {}) };
+              return { ...base, ...baselineFields, hours: state.hoursDraft, ...(state.workweekDraft ? { workweek: state.workweekDraft } : {}) };
             }
-            return { ...base, hours: state.hoursDraft };
+            return { ...base, ...baselineFields, hours: state.hoursDraft };
           }) } : {}),
       });
       setResults({
@@ -632,56 +640,149 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const isNoPay = (change: (typeof clientChanges)[number]) => !!change.requires_pay_decision && (!!clientDeclines[change.change_index] || sourceRows.some(row => row.employee_id === change.employee_id && row.disposition === 'excluded'));
   const noPayReason = (change: (typeof clientChanges)[number]) => sourceRows.find(row => row.employee_id === change.employee_id && row.disposition === 'excluded')?.disposition_reason || clientDeclineReasons[change.change_index] || '';
   const hasPayConflict = (row: (typeof clientChanges)[number]) => row.kind === 'owner_pay' && [row.saved_period_pay, row.workbook_period_pay].some(amount => amount !== undefined && Number(amount) !== Number(clientChangeDrafts[row.change_index] ?? row.amount));
-  const extraHoursReviewState = (row: (typeof clientChanges)[number]) => {
-    const mode: ExtraHoursMode = row.extra_hours_mode || (row.is_contractor ? 'straight_time' : row.workweeks?.length ? 'workweek' : 'split');
-    const hoursDraft = clientChangeDrafts[row.change_index] ?? row.hours ?? '';
-    const regularDraft = clientExtraRegularDrafts[row.change_index] ?? row.regular_hours ?? '';
-    const overtimeDraft = clientExtraOvertimeDrafts[row.change_index] ?? row.overtime_hours ?? '';
-    const workweekDraft = clientExtraWorkweeks[row.change_index] ?? row.workweek ?? (row.workweeks?.length === 1 ? 1 : undefined);
-    const selectedJobId = row.employee_id ? rateChoices[row.employee_id] : undefined;
-    const lineBaselineRegular = selectedJobId !== undefined
-      ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_regular_hours ?? row.saved_regular_hours ?? '0') : '0')
-      : row.baseline_line_regular_hours;
-    const lineBaselineOvertime = selectedJobId !== undefined
-      ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0') : '0')
-      : row.baseline_line_overtime_hours;
-    const preview = computeExtraHoursPreview({
-      mode,
-      rate: row.wage_rate,
-      baselineRegularHours: row.baseline_regular_hours ?? row.saved_regular_hours ?? '0',
-      baselineOvertimeHours: row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0',
-      baselineLineRegularHours: lineBaselineRegular,
-      baselineLineOvertimeHours: lineBaselineOvertime,
-      baselineWeek1Hours: row.baseline_week1_hours ?? '0',
-      baselineWeek2Hours: row.baseline_week2_hours ?? '0',
-      hours: hoursDraft,
-      regularHours: regularDraft,
-      overtimeHours: overtimeDraft,
-      workweek: workweekDraft,
-      workweekCount: row.workweeks?.length || 2,
-    });
-    const missingSubmittedSplit = row.needs_classification || (mode === 'split' && row.regular_hours === undefined && row.overtime_hours === undefined);
-    let adjusted = false;
-    if (mode === 'split') {
-      if (missingSubmittedSplit) {
-        const submittedTotal = parseDecimalHundredths(row.hours);
-        adjusted = preview.valid && submittedTotal !== null && Math.round(preview.totalHours * 100) !== submittedTotal;
-      } else {
-        const regVal = parseDecimalHundredths(regularDraft.trim() || '0');
-        const otVal = parseDecimalHundredths(overtimeDraft.trim() || '0');
-        const origReg = parseDecimalHundredths(row.regular_hours ?? '0');
-        const origOt = parseDecimalHundredths(row.overtime_hours ?? '0');
-        adjusted = regVal !== origReg || otVal !== origOt;
-      }
-    } else if (mode === 'workweek') {
-      const hoursChanged = parseDecimalHundredths(hoursDraft) !== parseDecimalHundredths(row.hours);
-      const weekChanged = row.workweek !== undefined && workweekDraft !== undefined && workweekDraft !== row.workweek;
-      adjusted = hoursChanged || weekChanged;
-    } else {
-      adjusted = parseDecimalHundredths(hoursDraft) !== parseDecimalHundredths(row.hours);
-    }
-    return { mode, hoursDraft, regularDraft, overtimeDraft, workweekDraft, preview, adjusted, missingSubmittedSplit };
+  type ExtraHoursReviewEntry = {
+    mode: ExtraHoursMode;
+    hoursDraft: string;
+    regularDraft: string;
+    overtimeDraft: string;
+    workweekDraft: number | undefined;
+    preview: ReturnType<typeof computeExtraHoursPreview>;
+    adjusted: boolean;
+    missingSubmittedSplit: boolean;
+    employeeActiveRowCount: number;
+    employeeActiveRowIndex: number;
+    cumulativeGrossPayDelta: number | null;
   };
+  const extraHoursReviewMap = (() => {
+    const map = new Map<number, ExtraHoursReviewEntry>();
+    const activeCountByEmployee = new Map<number, number>();
+    for (const row of clientChanges) {
+      if (row.kind !== 'extra_hours' || !row.employee_id) continue;
+      if (isNoPay(row) || clientDeclines[row.change_index] || row.error) continue;
+      activeCountByEmployee.set(row.employee_id, (activeCountByEmployee.get(row.employee_id) ?? 0) + 1);
+    }
+    const runningByEmployee = new Map<number, {
+      reg: number;
+      ot: number;
+      w1: number;
+      w2: number;
+      grossDeltaCents: number | null;
+      seenCount: number;
+      lineHours: Map<string, { reg: number; ot: number }>;
+    }>();
+
+    for (const row of clientChanges) {
+      if (row.kind !== 'extra_hours') continue;
+      const mode: ExtraHoursMode = row.extra_hours_mode || (row.is_contractor ? 'straight_time' : row.workweeks?.length ? 'workweek' : 'split');
+      const hoursDraft = clientChangeDrafts[row.change_index] ?? row.hours ?? '';
+      const regularDraft = clientExtraRegularDrafts[row.change_index] ?? row.regular_hours ?? '';
+      const overtimeDraft = clientExtraOvertimeDrafts[row.change_index] ?? row.overtime_hours ?? '';
+      const workweekDraft = row.workweeks?.length === 1 ? 1 : (clientExtraWorkweeks[row.change_index] ?? row.workweek ?? undefined);
+      const selectedJobId = row.employee_id ? rateChoices[row.employee_id] : undefined;
+      const isActive = !isNoPay(row) && !clientDeclines[row.change_index] && !row.error;
+      const prior = isActive && row.employee_id ? runningByEmployee.get(row.employee_id) : undefined;
+      const jobKey = `${row.employee_wage_rate_id ?? ''}:${row.wage_rate ?? ''}`;
+      const priorLine = prior?.lineHours.get(jobKey);
+
+      const initialLineRegular = selectedJobId !== undefined
+        ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_line_regular_hours ?? row.baseline_regular_hours ?? row.saved_regular_hours ?? '0') : '0')
+        : row.baseline_line_regular_hours;
+      const initialLineOvertime = selectedJobId !== undefined
+        ? (selectedJobId === row.employee_wage_rate_id ? (row.baseline_line_overtime_hours ?? row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0') : '0')
+        : row.baseline_line_overtime_hours;
+
+      const baseRegInput = prior ? prior.reg.toFixed(2) : (row.baseline_regular_hours ?? row.saved_regular_hours ?? '0');
+      const baseOtInput = prior ? prior.ot.toFixed(2) : (row.baseline_overtime_hours ?? row.saved_overtime_hours ?? '0');
+      const lineBaseRegInput = priorLine ? priorLine.reg.toFixed(2) : initialLineRegular;
+      const lineBaseOtInput = priorLine ? priorLine.ot.toFixed(2) : initialLineOvertime;
+      const baseW1Input = prior ? prior.w1.toFixed(2) : (row.baseline_week1_hours ?? '0');
+      const baseW2Input = prior ? prior.w2.toFixed(2) : (row.baseline_week2_hours ?? '0');
+
+      const preview = computeExtraHoursPreview({
+        mode,
+        rate: row.wage_rate,
+        baselineRegularHours: baseRegInput,
+        baselineOvertimeHours: baseOtInput,
+        baselineLineRegularHours: lineBaseRegInput,
+        baselineLineOvertimeHours: lineBaseOtInput,
+        baselineWeek1Hours: baseW1Input,
+        baselineWeek2Hours: baseW2Input,
+        hours: hoursDraft,
+        regularHours: regularDraft,
+        overtimeHours: overtimeDraft,
+        workweek: workweekDraft,
+        workweekCount: row.workweeks?.length || 2,
+      });
+
+      const missingSubmittedSplit = row.needs_classification || (mode === 'split' && row.regular_hours === undefined && row.overtime_hours === undefined);
+      let adjusted = false;
+      if (mode === 'split') {
+        if (missingSubmittedSplit) {
+          const submittedTotal = parseDecimalHundredths(row.hours);
+          adjusted = preview.valid && submittedTotal !== null && Math.round(preview.totalHours * 100) !== submittedTotal;
+        } else {
+          const regVal = parseDecimalHundredths(regularDraft.trim() || '0');
+          const otVal = parseDecimalHundredths(overtimeDraft.trim() || '0');
+          const origReg = parseDecimalHundredths(row.regular_hours ?? '0');
+          const origOt = parseDecimalHundredths(row.overtime_hours ?? '0');
+          adjusted = regVal !== origReg || otVal !== origOt;
+        }
+      } else if (mode === 'workweek') {
+        const hoursChanged = parseDecimalHundredths(hoursDraft) !== parseDecimalHundredths(row.hours);
+        const weekChanged = (row.workweeks?.length ?? 0) > 1 && row.workweek !== undefined && workweekDraft !== undefined && workweekDraft !== row.workweek;
+        adjusted = hoursChanged || weekChanged;
+      } else {
+        adjusted = parseDecimalHundredths(hoursDraft) !== parseDecimalHundredths(row.hours);
+      }
+
+      const employeeActiveRowCount = isActive && row.employee_id ? (activeCountByEmployee.get(row.employee_id) ?? 1) : 1;
+      const employeeActiveRowIndex = isActive ? (prior?.seenCount ?? 0) + 1 : 0;
+      let cumulativeGrossPayDelta: number | null = preview.grossPayDelta;
+
+      if (isActive && row.employee_id) {
+        const prevCents = prior ? prior.grossDeltaCents : 0;
+        const nextCents = prevCents !== null && preview.valid && preview.grossPayDelta !== null
+          ? prevCents + Math.round(preview.grossPayDelta * 100)
+          : null;
+        cumulativeGrossPayDelta = nextCents === null ? null : nextCents / 100;
+
+        const nextLineHours = new Map(prior?.lineHours ?? []);
+        const prevLineReg = priorLine ? priorLine.reg : (Number(initialLineRegular ?? baseRegInput) || 0);
+        const prevLineOt = priorLine ? priorLine.ot : (Number(initialLineOvertime ?? baseOtInput) || 0);
+        if (preview.valid) {
+          nextLineHours.set(jobKey, {
+            reg: Math.round((prevLineReg + preview.deltaRegularHours) * 100) / 100,
+            ot: Math.round((prevLineOt + preview.deltaOvertimeHours) * 100) / 100,
+          });
+        }
+        runningByEmployee.set(row.employee_id, {
+          reg: preview.valid ? preview.resultingRegularHours : (Number(baseRegInput) || 0),
+          ot: preview.valid ? preview.resultingOvertimeHours : (Number(baseOtInput) || 0),
+          w1: preview.valid && preview.resultingWeek1Hours !== undefined ? preview.resultingWeek1Hours : (Number(baseW1Input) || 0),
+          w2: preview.valid && preview.resultingWeek2Hours !== undefined ? preview.resultingWeek2Hours : (Number(baseW2Input) || 0),
+          grossDeltaCents: nextCents,
+          seenCount: employeeActiveRowIndex,
+          lineHours: nextLineHours,
+        });
+      }
+
+      map.set(row.change_index, {
+        mode,
+        hoursDraft,
+        regularDraft,
+        overtimeDraft,
+        workweekDraft,
+        preview,
+        adjusted,
+        missingSubmittedSplit,
+        employeeActiveRowCount,
+        employeeActiveRowIndex,
+        cumulativeGrossPayDelta,
+      });
+    }
+    return map;
+  })();
+  const extraHoursReviewState = (row: (typeof clientChanges)[number]): ExtraHoursReviewEntry => extraHoursReviewMap.get(row.change_index)!;
   const changeRequiresAdjustmentReason = (row: (typeof clientChanges)[number]) => {
     if (isNoPay(row) || clientDeclines[row.change_index]) return false;
     if (row.kind === 'owner_pay') {
@@ -865,7 +966,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
           aria-label={`Job and rate for ${row.employee_name}`}
           className="mt-1 block min-h-11 w-full min-w-0 max-w-full rounded-lg border border-neutral-300 bg-white px-2 py-2 text-base"
           value={rateChoices[row.employee_id] ?? row.selected_wage_rate_id ?? ''}
-          onChange={(event) => setRateChoices((current) => ({ ...current, [row.employee_id]: Number(event.target.value) }))}
+          onChange={(event) => { setRateChoices((current) => ({ ...current, [row.employee_id]: Number(event.target.value) })); setReviewedClientChanges(false); }}
         >
           <option value="">Choose a job and rate</option>
           {row.wage_rate_options.map((option) => <option key={option.id} value={option.id}>{option.label} · {formatCurrency(option.rate)}/hr</option>)}
@@ -1340,16 +1441,21 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
                             className="space-y-0.5 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-800"
                           >
                             <p>
-                              <span className="font-semibold">Resulting hours:</span>{' '}
+                              <span className="font-semibold">
+                                {extraState.employeeActiveRowCount > 1 ? `Resulting hours (after change ${extraState.employeeActiveRowIndex} of ${extraState.employeeActiveRowCount}):` : 'Resulting hours:'}
+                              </span>{' '}
                               {extraState.preview.resultingRegularHours.toFixed(2)} regular · {extraState.preview.resultingOvertimeHours.toFixed(2)} overtime
-                              {' '}({extraState.preview.deltaRegularHours > 0 ? `+${extraState.preview.deltaRegularHours.toFixed(2)} reg` : '0.00 reg'}
-                              {extraState.preview.deltaOvertimeHours > 0 ? `, +${extraState.preview.deltaOvertimeHours.toFixed(2)} OT` : ''})
+                              {' '}({extraState.preview.deltaRegularHours > 0 ? `+${extraState.preview.deltaRegularHours.toFixed(2)} reg` : extraState.preview.deltaRegularHours < 0 ? `${extraState.preview.deltaRegularHours.toFixed(2)} reg` : '0.00 reg'}
+                              {extraState.preview.deltaOvertimeHours !== 0 ? `, ${extraState.preview.deltaOvertimeHours > 0 ? '+' : ''}${extraState.preview.deltaOvertimeHours.toFixed(2)} OT` : ''})
                             </p>
                             {extraState.preview.grossPayDelta !== null && (
                               <p>
                                 <span className="font-semibold">Gross pay difference:</span>{' '}
-                                +{formatCurrency(extraState.preview.grossPayDelta)}
+                                {extraState.preview.grossPayDelta >= 0 ? '+' : ''}{formatCurrency(extraState.preview.grossPayDelta)}
                                 {extraState.mode === 'straight_time' ? ' (straight time)' : ''}
+                                {extraState.employeeActiveRowCount > 1 && extraState.cumulativeGrossPayDelta !== null
+                                  ? ` · Combined for ${change.employee_name || 'employee'}: ${extraState.cumulativeGrossPayDelta >= 0 ? '+' : ''}${formatCurrency(extraState.cumulativeGrossPayDelta)}`
+                                  : ''}
                               </p>
                             )}
                           </div>
