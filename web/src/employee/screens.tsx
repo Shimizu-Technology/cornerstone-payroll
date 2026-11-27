@@ -1,4 +1,4 @@
-import { useEffect, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { Link, useLocation } from 'react-router';
 import { useBrand, useEmployeeAuth } from './contexts';
@@ -58,6 +58,10 @@ export function SignInScreen(): ReactElement {
   useDocumentTitle('Sign in');
   const { SignInForm } = useEmployeeAuth();
   const location = useLocation();
+  // Read once: Clerk's hash steps (such as the new-device code at
+  // #/client-trust) replace the history entry and drop its state, which
+  // would otherwise send the person to Home instead of back to an invite.
+  const [redirectTo] = useState(() => redirectTarget(location.state));
   return (
     <main className="emp-auth emp-auth-top">
       <div className="emp-auth-bar">
@@ -71,7 +75,7 @@ export function SignInScreen(): ReactElement {
           {brand.demo && <DemoPill />}
         </span>
       </div>
-      <SignInForm redirectTo={redirectTarget(location.state)} />
+      <SignInForm redirectTo={redirectTo} />
       <div className="mt-4 space-y-4">
         <p className="text-center text-[0.88rem] text-neutral-600">{firstTimeLine(brand.isFallback ? null : brand.name)}</p>
         <SetUpLink />

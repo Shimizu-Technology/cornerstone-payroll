@@ -305,7 +305,7 @@ describe('ChecksPanel earnings statements', () => {
     view.unmount();
   });
   it('keeps bank confirmation alongside statement actions and refreshes its exact saved evidence', async () => {
-    const deposit = { id: 44, employee_id: 3, employee_name: 'Drew Deposit', net_pay: 500, payment_confirmation: null };
+    const deposit = { id: 44, employee_id: 3, employee_name: 'Drew Deposit', net_pay: 1272.03, payment_confirmation: null };
     const response = { checks: [], direct_deposit_items: [deposit], earnings_statement_items: [depositStatement], meta };
     apiMocks.list.mockResolvedValueOnce(response).mockResolvedValue({ ...response, direct_deposit_items: [{ ...deposit, payment_confirmation: { settled_on: '2026-10-07', bank_reference: 'QA-BANK-44', confirmed_at: '2026-10-07T00:00:00Z' } }] });
     apiMocks.confirmDirectDepositPayment.mockResolvedValue({});
@@ -313,13 +313,14 @@ describe('ChecksPanel earnings statements', () => {
     render(<FeedbackProvider><ChecksPanel payPeriod={{ id: 8, status: 'committed' } as PayPeriod} onChecksChanged={onChecksChanged} /></FeedbackProvider>);
     fireEvent.click(await screen.findByRole('button', { name: 'Confirm bank payment' }));
     const dialog = screen.getByRole('dialog', { name: 'Confirm bank payment' });
+    expect(within(dialog).getByText(/Drew Deposit · \$1,272\.03 net\./)).toBeTruthy();
     expect((within(dialog).getByRole('button', { name: 'Confirm payment' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(within(dialog).getByLabelText('Bank settlement date'), { target: { value: '2026-10-07' } });
     fireEvent.change(within(dialog).getByLabelText('Bank confirmation or transaction reference'), { target: { value: 'QA-BANK-44' } });
     fireEvent.click(within(dialog).getByRole('checkbox'));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm payment' }));
     await waitFor(() => expect(apiMocks.confirmDirectDepositPayment).toHaveBeenCalledExactlyOnceWith(44, { settled_on: '2026-10-07', bank_reference: 'QA-BANK-44', note: undefined, attestation: true }));
-    await screen.findByText('Bank paid 2026-10-07 · QA-BANK-44');
+    await screen.findByText('Bank paid Oct 7, 2026 · QA-BANK-44');
     expect(onChecksChanged).toHaveBeenCalledOnce();
     expect(screen.queryByRole('dialog', { name: 'Confirm bank payment' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Print non-check statements' })).toBeTruthy();
@@ -360,7 +361,7 @@ describe('ChecksPanel paper status scope', () => {
     expect(screen.getByText(countLabel(0, 'paper checks'))).toBeTruthy();
     expect(screen.getByText(countLabel(1, 'direct-deposit stubs'))).toBeTruthy();
     if (confirmed) {
-      expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+      expect(screen.getByText(`Bank paid Nov 22, 2026 · ${bankConfirmation.bank_reference}`)).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
     } else {
       expect(screen.getByRole('button', { name: 'Confirm bank payment' })).toBeTruthy();
@@ -375,7 +376,7 @@ describe('ChecksPanel paper status scope', () => {
     const group = screen.getByRole('group', { name: 'Paper check status' });
     expect(within(group).getByText('Paper check status')).toBeTruthy();
     expect(within(group).getByText(countLabel(1, 'issued'))).toBeTruthy();
-    expect(screen.getByText(`Bank paid ${bankConfirmation.settled_on} · ${bankConfirmation.bank_reference}`)).toBeTruthy();
+    expect(screen.getByText(`Bank paid Nov 22, 2026 · ${bankConfirmation.bank_reference}`)).toBeTruthy();
     expect(within(group).queryByText(/Bank paid/)).toBeNull();
   });
 
@@ -432,7 +433,7 @@ describe('ChecksPanel cancellation sync evidence', () => {
 
   it('keeps actual completed bank evidence visible while source cancellation still waits', async () => {
     renderCancellationStatement(pendingCancellation, true);
-    expect(await screen.findByText(/Bank paid 2026-10-08 · Bank completed 42/)).toBeTruthy();
+    expect(await screen.findByText(/Bank paid Oct 8, 2026 · Bank completed 42/)).toBeTruthy();
     expect(screen.getByText('Check cancellation pending time tracking confirmation')).toBeTruthy();
     expect(screen.getByText(/separate from any recorded bank payment/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Confirm bank payment' })).toBeNull();
@@ -442,7 +443,7 @@ describe('ChecksPanel cancellation sync evidence', () => {
     renderCancellationStatement({ ...pendingCancellation, status: 'error', errors: ['The connected source could not confirm this cancellation.'] }, true);
     expect(await screen.findByText('Check cancellation sync needs attention')).toBeTruthy();
     expect(screen.getByText('The connected source could not confirm this cancellation.')).toBeTruthy();
-    expect(screen.getByText(/Bank paid 2026-10-08/)).toBeTruthy();
+    expect(screen.getByText(/Bank paid Oct 8, 2026/)).toBeTruthy();
   });
 
   it('clears waiting guidance only after the API reports acknowledgement', async () => {

@@ -92,13 +92,20 @@ class MfaPolicy
   end
   private_class_method :fresh_factor?
 
-  # A missing, non-integer or future iat can't date the verification.
+  # A missing or non-integer iat can't date the verification. Clerk sets nbf
+  # 10 seconds before iat to absorb clock skew, and request authentication
+  # has already checked nbf, so an iat no further ahead of this server's clock
+  # than that gap means the token was just issued. Any other future iat can't
+  # date it.
   def self.token_age_seconds(payload, now)
     iat = payload["iat"]
     return nil unless iat.is_a?(Integer)
 
     elapsed = now.to_i - iat
-    elapsed unless elapsed.negative?
+    return elapsed unless elapsed.negative?
+
+    nbf = payload["nbf"]
+    0 if nbf.is_a?(Integer) && nbf < iat && nbf <= now.to_i
   end
   private_class_method :token_age_seconds
 

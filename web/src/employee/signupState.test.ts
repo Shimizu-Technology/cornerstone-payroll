@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { currentInviteToken, forgetInviteToken, takeInviteToken } from './signupState';
+import { currentInviteToken, forgetInviteToken, rateLimitedText, takeInviteToken } from './signupState';
 
 const TOKEN = 'a'.repeat(40);
 
@@ -35,5 +35,15 @@ describe('invite token', () => {
     window.history.replaceState(null, '', `/activate?token=${TOKEN}`);
     takeInviteToken(window.location);
     expect(currentInviteToken()).toBeNull();
+  });
+});
+
+describe('rateLimitedText', () => {
+  it('says how long to wait from Retry-After', () => {
+    expect(rateLimitedText(null)).toBe('Too many tries. Wait a minute, then try again.');
+    expect(rateLimitedText(60)).toBe('Too many tries. Wait a minute, then try again.');
+    // The per-code throttle that a sign-up lockout uses up lasts 15 minutes.
+    expect(rateLimitedText(900)).toBe('Too many tries. Wait about 15 minutes, then try again.');
+    expect(rateLimitedText(100)).toBe('Too many tries. Wait about 2 minutes, then try again.');
   });
 });

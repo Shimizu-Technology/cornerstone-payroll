@@ -984,7 +984,7 @@ class IssueCorrectivePaycheckService
   # single item — without re-running the calculator (we already filled in
   # the delta values authoritatively).
   def commit_supplemental!(supplemental)
-    supplemental.update!(status: "committed", committed_at: Time.current)
+    supplemental.update!(status: "committed", committed_at: Time.current, committed_by_id: (@actor || Current.user)&.id)
     PayrollYtdSnapshotRefresh.call(pay_period: supplemental, employee_ids: [ @employee.id ])
 
     # YTD and check number — same primitives the regular commit uses.

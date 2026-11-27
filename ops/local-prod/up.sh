@@ -9,6 +9,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 PHASE="${LOCAL_PROD_RLS_PHASE:-enforced}"
 [[ "$PHASE" == enforced || "$PHASE" == shadow ]] || die "LOCAL_PROD_RLS_PHASE must be enforced or shadow"
+REQUIRE_MFA_VALUE="${LOCAL_PROD_REQUIRE_MFA:-false}"
+[[ "$REQUIRE_MFA_VALUE" == true || "$REQUIRE_MFA_VALUE" == false ]] || die "LOCAL_PROD_REQUIRE_MFA must be true or false"
 VIEW_AS_READY_VALUE="${LOCAL_PROD_VIEW_AS_READY:-true}"
 [[ "$VIEW_AS_READY_VALUE" == true || "$VIEW_AS_READY_VALUE" == false ]] || die "LOCAL_PROD_VIEW_AS_READY must be true or false"
 DEMO_EMAIL_ALLOWLIST_VALUE="${LOCAL_PROD_DEMO_EMAIL_ALLOWLIST:-demo.client+clerk_test@example.com,demo.employee+clerk_test@example.com,demo.manager+clerk_test@example.com,demo.viewer+clerk_test@example.com}"
@@ -79,7 +81,7 @@ write_envs() {
     echo "DEPLOYMENT_ENV='local'"
     echo "RAILS_LOG_LEVEL='info'"
     echo "AUTH_ENABLED='true'"
-    echo "REQUIRE_MFA='false'"
+    echo "REQUIRE_MFA='$REQUIRE_MFA_VALUE'"
     echo "FORCE_SSL='true'"
     echo "USE_SOLID_CACHE='true'"
     echo "USE_SOLID_QUEUE='true'"
@@ -355,6 +357,14 @@ start_rails() {
     >>"$LOGS/$name.log" 2>&1 </dev/null &
   for _ in {1..30}; do [[ -s "$pidfile" ]] && break; sleep 1; done
   service_alive "$name" || die "$name did not start (see $LOGS/$name.log)"
+  if [[ "$name" == worker ]]; then
+    # dev-lifecycle ties a claim to the exact command line, and Solid Queue
+    # renames its process once it boots; claim the final name.
+    for _ in {1..60}; do
+      [[ "$(ps -ww -p "$(service_pid worker)" -o command= 2>/dev/null)" == solid-queue* ]] && break
+      sleep 1
+    done
+  fi
   claim "$(service_pid "$name")" "local-prod $name"
 }
 

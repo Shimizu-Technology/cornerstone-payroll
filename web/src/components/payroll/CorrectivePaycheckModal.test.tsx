@@ -48,6 +48,19 @@ describe('CorrectivePaycheckModal recorded baseline', () => {
     expect(screen.getByText(/This correction posts only the change/)).toBeTruthy();
   });
 
+  it('says a direct-deposit employee gets a direct-deposit payment, not a check', async () => {
+    api.preview.mockResolvedValue(preview(85));
+    setup({ ...item, employee_payment_delivery_method: 'direct_deposit' } as PayrollItem);
+    expect(await screen.findByText('A new direct-deposit payment of $60.00 will be recorded.')).toBeTruthy();
+    expect(screen.queryByText(/A new check will be cut/)).toBeNull();
+  });
+
+  it('still says a check will be cut for a paper-check employee', async () => {
+    api.preview.mockResolvedValue(preview(85));
+    setup({ ...item, employee_payment_delivery_method: 'paper_check' } as PayrollItem);
+    expect(await screen.findByText('A new check will be cut for $60.00.')).toBeTruthy();
+  });
+
   function mockSignedBaseline() {
     api.preview.mockImplementation((_period, request) => {
       const hours = request.corrected_inputs.hours_worked;

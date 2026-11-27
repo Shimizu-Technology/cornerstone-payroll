@@ -313,6 +313,10 @@ export function CorrectivePaycheckModal({
   const corrected = preview?.corrected;
   const recorded = preview?.recorded ?? preview?.original;
   const willGenerateCheck = preview?.meta.will_generate_check ?? false;
+  // The supplemental pays the way the employee is paid today (the service
+  // copies the employee's delivery method), so a direct-deposit employee gets
+  // a direct-deposit stub, not a paper check.
+  const paidByDirectDeposit = (originalItem.employee_payment_delivery_method ?? originalItem.effective_payment_delivery_method) === 'direct_deposit';
   const employeeName = originalItem.employee_name ?? 'this employee';
   const handleDialogOpenChange = (nextOpen: boolean): void => {
     if (!nextOpen && issuing) return;
@@ -481,10 +485,22 @@ export function CorrectivePaycheckModal({
                 <div className="mt-2 rounded border-l-4 border-blue-400 bg-blue-50 p-3 text-xs text-blue-900">
                   {willGenerateCheck ? (
                     <>
-                      <p className="font-medium">A new check will be cut for {formatCurrency(deltas.net_pay)}.</p>
-                      <p>The supplemental period gets its own check #, FIT
-                      deposit (if enabled), tax sync, and transmittal.
-                      YTDs and reports update automatically.</p>
+                      {paidByDirectDeposit ? (
+                        <>
+                          <p className="font-medium">A new direct-deposit payment of {formatCurrency(deltas.net_pay)} will be recorded.</p>
+                          <p>Send the transfer at the bank, then confirm it on
+                          Checks & payments. The supplemental period gets its own
+                          pay stub, FIT deposit (if enabled), tax sync, and
+                          transmittal. YTDs and reports update automatically.</p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="font-medium">A new check will be cut for {formatCurrency(deltas.net_pay)}.</p>
+                          <p>The supplemental period gets its own check #, FIT
+                          deposit (if enabled), tax sync, and transmittal.
+                          YTDs and reports update automatically.</p>
+                        </>
+                      )}
                     </>
                   ) : (
                     <>
