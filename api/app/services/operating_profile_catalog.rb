@@ -203,7 +203,7 @@ class OperatingProfileCatalog
       capability: :manage_client_configuration,
       what: "How regular and overtime hours are determined from imported or recorded hours.",
       example: "source_reports for MoSa's Revel and AIRE; weekly_split for Spike weekly totals; total_as_regular_warn_over_80 for biweekly totals without weekly split.",
-      effect: "Controls whether Payroll trusts source-reported overtime or splits hours using the company's legal workweek.",
+      effect: "Controls whether Payroll trusts source-reported overtime or splits hours using the company's legal workweek. Note: total_as_regular_warn_over_80 cannot detect weekly overtime when a biweekly total is 80 hours or less (for example, 45 hours in week 1 and 35 hours in week 2) unless daily or weekly hours are also supplied.",
       requires: [].freeze
     ),
     Entry.new(
@@ -660,6 +660,14 @@ class OperatingProfileCatalog
 
       errors = []
       validate_node(raw_options, OPTION_TREE, [], errors, intake_adapter: intake_adapter)
+      if errors.empty?
+        resolved_overtime = option_value(raw_options, "overtime.mode")
+        resolved_alignment = option_value(raw_options, "workweek.alignment")
+        if resolved_alignment == "warn_if_offset" && resolved_overtime != "source_reports"
+          errors << "option 'workweek.alignment' cannot be 'warn_if_offset' when option 'overtime.mode' is '#{resolved_overtime}' " \
+                    "(computed overtime requires aligned 7-day workweeks per 29 CFR 778.104)"
+        end
+      end
       errors
     end
 

@@ -213,10 +213,13 @@ module PayrollSubmissions
         on: entry.end_date
       )
       descriptor.serialize(
-        required_sources: effective.required_sources,
+        # Client portal required slots stay governed by descriptor defaults, not
+        # staff-side intake.required_sources completeness overrides.
+        required_sources: descriptor.default_required_source_roles,
         tips_default: effective.tips_default,
         overtime_mode: effective.overtime_mode,
-        workweek_alignment: effective.workweek_alignment
+        workweek_alignment: effective.workweek_alignment,
+        audience: @staff ? :staff : :client
       )
     end
 

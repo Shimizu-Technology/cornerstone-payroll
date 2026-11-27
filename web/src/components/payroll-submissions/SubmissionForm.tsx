@@ -84,6 +84,9 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     setSlotFiles(currentFiles => ({ ...currentFiles, [portalRole]: file }));
   };
   const keptDocumentFor = (portalRole: string) => carryable.find(d => d.role === portalRole && keep.includes(d.document!.id));
+  const isPortalSlotRequired = (slot: PayrollIntakeFileSlot & { portal_role: string }): boolean => (
+    slot.portal_role === 'revel_payroll' || (slot.required_by_default && !slot.waivable)
+  );
   const workbook = linkableSlot ? (slotFiles[linkableRole] || null) : null;
   const hasNewWorkbook = Boolean(linkableSlot && workbookChoice === 'attach' && workbook);
   const keptWorkbook = linkableSlot ? keptDocumentFor(linkableRole) : undefined;
@@ -101,7 +104,7 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
     setError(null); setDetails({});
     for (const slot of portalSlots) {
       if (slot.supports_link) continue;
-      if (slot.required && !slot.waivable && !slotFiles[slot.portal_role] && !keptDocumentFor(slot.portal_role)) {
+      if (isPortalSlotRequired(slot) && !slotFiles[slot.portal_role] && !keptDocumentFor(slot.portal_role)) {
         const message = slot.portal_role === 'revel_payroll'
           ? 'Attach the Revel payroll PDF'
           : `Attach the ${slot.portal_label || slot.label}`;
@@ -207,11 +210,13 @@ export function SubmissionForm({ period, current, onSent, onCancel }: {
             </fieldset>
           );
         }
+        const required = isPortalSlotRequired(slot);
         return (
           <fieldset key={slot.portal_role} className="min-w-0 space-y-2">
             <legend className="text-sm font-semibold text-neutral-900">
               {index + 1}. {label}{' '}
-              <span className="font-normal text-neutral-600">({slot.required && !slot.waivable ? 'required' : 'optional'})</span>
+              {required && <span className="font-normal text-neutral-600">(required)</span>}
+              {!required && <span className="font-normal text-neutral-600">(optional)</span>}
             </legend>
             {hint && <p className="text-sm text-neutral-600">{hint}</p>}
             {kept && !chosen && <p className="text-sm text-neutral-700">Keeping {kept.file_name} from revision {current?.revision}. Choose a file to replace it.</p>}

@@ -15,13 +15,17 @@ module Api
         company_ids = companies.pluck(:id)
         total_employee_counts = employee_counts_by_company(company_ids)
         active_employee_counts = employee_counts_by_company(company_ids, active_only: true)
+        preloaded_profiles = PayrollIntake::EffectiveSettings.preload_profiles(company_ids)
+        descriptor_audience = current_user.staff_member? ? :staff : :client
 
         render json: {
           companies: companies.map do |company|
             company_summary(
               company,
               total_employee_counts: total_employee_counts,
-              active_employee_counts: active_employee_counts
+              active_employee_counts: active_employee_counts,
+              preloaded_profile: preloaded_profiles[company.id],
+              descriptor_audience: descriptor_audience
             )
           end,
           can_manage_clients: current_user.organization_admin?,
@@ -42,7 +46,7 @@ module Api
         "Count employees across the signed-in user's accessible companies"
       end
 
-      def company_summary(company, total_employee_counts:, active_employee_counts:)
+      def company_summary(company, total_employee_counts:, active_employee_counts:, preloaded_profile: PayrollIntake::EffectiveSettings::UNLOADED, descriptor_audience: :staff)
         summary = {
           id: company.id,
           organization_id: company.organization_id,
@@ -55,12 +59,17 @@ module Api
           payroll_intake_source_types: company.payroll_intake_source_types,
           portal_payroll_files_enabled: company.portal_payroll_files_enabled?,
           payroll_intake_adapters: company.payroll_intake_descriptors.map do |descriptor|
-            effective = PayrollIntake::EffectiveSettings.for(company: company, source_type: descriptor.key)
+            effective = PayrollIntake::EffectiveSettings.for(
+              company: company,
+              source_type: descriptor.key,
+              preloaded_profile: preloaded_profile
+            )
             descriptor.serialize(
               required_sources: effective.required_sources,
               tips_default: effective.tips_default,
               overtime_mode: effective.overtime_mode,
-              workweek_alignment: effective.workweek_alignment
+              workweek_alignment: effective.workweek_alignment,
+              audience: descriptor_audience
             )
           end,
           historical_payroll_enabled: company.historical_payroll_enabled,

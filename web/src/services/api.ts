@@ -2250,12 +2250,12 @@ export interface PayrollIntakeDescriptor {
   key: string;
   label: string;
   source_label: string;
-  parser_version: string;
+  parser_version?: string;
   extraction: string;
   accepts_pasted_text: boolean;
   tracks_reviewed_hours: boolean;
   employee_match: string;
-  idempotency: string;
+  idempotency?: string;
   reports_overtime: boolean;
   tips_default: 'paid_in_check' | 'already_paid_out' | string;
   overtime_mode: 'source_reports' | 'weekly_split' | 'total_as_regular_warn_over_80' | 'daily_records' | string;

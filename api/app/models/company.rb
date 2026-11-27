@@ -463,6 +463,17 @@ class Company < ApplicationRecord
       if settings.key?("workweek_alignment") && !OperatingProfileCatalog::WORKWEEK_ALIGNMENTS.include?(settings["workweek_alignment"].to_s)
         errors.add(:payroll_intake_settings, "has invalid #{source_type} workweek_alignment: #{settings['workweek_alignment']}")
       end
+
+      descriptor = PayrollIntake::Registry.find(source_type)
+      effective_overtime = (settings["overtime_mode"].presence || descriptor&.overtime_mode || OperatingProfileCatalog.default_for("overtime.mode")).to_s
+      effective_alignment = (settings["workweek_alignment"].presence ||
+        (effective_overtime == "source_reports" ? (descriptor&.workweek_alignment || "warn_if_offset") : "aligned")).to_s
+      if effective_alignment == "warn_if_offset" && effective_overtime != "source_reports"
+        errors.add(
+          :payroll_intake_settings,
+          "#{source_type} workweek_alignment cannot be warn_if_offset with computed overtime_mode #{effective_overtime} (29 CFR 778.104)"
+        )
+      end
     end
   end
 

@@ -192,7 +192,6 @@ module PayrollSubmissions
 
     def validate_roles!(kept, prepared, answers:)
       descriptor = portal_descriptor
-      required_roles = @company.payroll_intake_required_sources(descriptor.key)
       roles = kept.map(&:role) + prepared.map(&:role)
       errors = {}
 
@@ -224,9 +223,11 @@ module PayrollSubmissions
 
         count = roles.count(portal_role)
         max_allowed = slot.max || 1
-        required = required_roles.include?(slot.role)
+        # Client portal required slots come from the descriptor (never weakened
+        # by staff-side intake.required_sources completeness overrides).
+        required = portal_role == "revel_payroll" || (slot.required_by_default && !slot.supports_link && slot.waivable.blank?)
 
-        if count.zero? && required && !slot.supports_link && slot.waivable.blank?
+        if count.zero? && required
           errors[portal_role] = [
             portal_role == "revel_payroll" ? "Attach the Revel payroll PDF" : "Attach the #{slot.portal_label || slot.label}"
           ]

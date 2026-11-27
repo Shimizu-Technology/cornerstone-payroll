@@ -8,6 +8,11 @@
 # adapter. Application-level validation in PayrollSubmissionDocument restricts
 # roles strictly to registered descriptor portal roles plus 'attachment'.
 #
+# Note for future submittable descriptors: `revel_payroll` and `changes_workbook`
+# already have partial unique indexes enforcing at most one document per role per
+# submission. When adding a new portal-submittable descriptor role with `max: 1`,
+# add a matching partial unique index in its migration.
+#
 # Uses SET LOCAL lock_timeout = '5s' and NOT VALID + validate outside the lock.
 class WidenPayrollSubmissionDocumentsRoleForDescriptors < ActiveRecord::Migration[8.1]
   disable_ddl_transaction!
