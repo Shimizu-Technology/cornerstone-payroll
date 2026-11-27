@@ -45,7 +45,8 @@ RSpec.describe "Wage filing files", type: :request do
     [ [ "w2_gu_efw2", "draft" ], [ "w2_gu_efw2", "final" ], [ "w3ss_pdf", "draft" ] ].each do |action, mode|
       get "/api/v1/admin/reports/#{action}", params: { year: 2026, mode: mode }
       expect(response).to have_http_status(:forbidden), "#{action} #{mode}: #{response.body}"
-      expect(response.parsed_body["error"]).to include("unavailable in a test workspace")
+      expect(response.parsed_body["code"]).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+      expect(response.parsed_body["error"]).to include("practice company (test workspace)", "turned off")
       expect(response.body).not_to include("123456789")
     end
   end

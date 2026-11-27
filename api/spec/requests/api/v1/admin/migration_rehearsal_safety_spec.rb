@@ -41,7 +41,8 @@ RSpec.describe "Api::V1::Admin migration rehearsal safety", type: :request do
     post "/api/v1/admin/pay_periods/#{pay_period.id}/commit"
 
     expect(response).to have_http_status(:forbidden)
-    expect(response.parsed_body.fetch("error")).to include("unavailable in a test workspace")
+    expect(response.parsed_body.fetch("code")).to eq(Company::CONTAINED_COMPANY_RESTRICTED_CODE)
+    expect(response.parsed_body.fetch("error")).to include("practice company (test workspace)", "turned off")
     expect(pay_period.reload.status).to eq("approved")
   end
 
