@@ -22,6 +22,7 @@ class W2GuPreflightValidator
     findings.concat(employer_findings)
     employee_ids, source_findings = filing_employee_ids
     findings.concat(source_findings)
+    findings.concat(bridge_overlap_findings)
     findings.concat(employee_findings(employee_ids))
 
     {
@@ -91,6 +92,22 @@ class W2GuPreflightValidator
     end
 
     out
+  end
+
+  # A native paycheck inside an opening balance's window may already be in
+  # that balance; W-2GU can't count it exactly once until that is resolved
+  # (PayrollBridgeOverlap). Contractor paychecks aren't on a W-2GU.
+  def bridge_overlap_findings
+    PayrollBridgeOverlap.new(company_id: company.id, year: year).w2_blocking.map do |overlap|
+      item = overlap.payroll_item
+      Finding.new(
+        severity: "blocking",
+        code: "BRIDGE_OVERLAP_NEEDS_DISPOSITION",
+        message: "Paycheck ##{item.id} (#{item.employee.full_name}, paid #{overlap.paid_on.strftime('%m/%d/%Y')}) is dated inside the imported opening balance. " \
+          "Resolve whether it is its own payment or the same payment as an imported paycheck before filing.",
+        employee_id: item.employee_id
+      )
+    end
   end
 
   def filing_employee_ids

@@ -10,14 +10,14 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
   let(:other_organization) { create(:organization) }
   let(:other_company) { create(:company, organization: other_organization) }
 
-  let(:admin_user) { create(:user, company: company, organization: organization, role: "admin", email: "staff-contact@example.com", name: "Dafne Staff") }
+  let(:admin_user) { create(:user, company: company, organization: organization, role: "admin", email: "staff-contact@example.com", name: "Staff Admin") }
   let(:client_user) do
-    user = create(:user, company: company, organization: organization, role: "client", email: "emma.client@example.com", name: "Elena Mercer")
+    user = create(:user, company: company, organization: organization, role: "client", email: "elena.client@example.com", name: "Elena Mercer")
     CompanyAssignment.create!(user: user, company: company)
     user
   end
   let(:other_client_user) do
-    user = create(:user, company: company, organization: organization, role: "client", email: "sara.client@example.com", name: "Sloane Owner")
+    user = create(:user, company: company, organization: organization, role: "client", email: "sloane.client@example.com", name: "Sloane Owner")
     CompanyAssignment.create!(user: user, company: company)
     user
   end
@@ -45,7 +45,7 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
     create(
       :employee,
       company: company,
-      first_name: "Emma",
+      first_name: "Elena",
       last_name: "Mercer",
       email: nil,
       phone: nil
@@ -89,7 +89,7 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
       patch "/api/v1/client/employees/#{missing_contact_employee.id}",
             headers: { "X-Company-Id" => company.id.to_s },
             params: {
-              employee: { first_name: "Sara", last_name: "Owner", email: other_client_user.email },
+              employee: { first_name: "Sloane", last_name: "Owner", email: other_client_user.email },
               confirm_same_person_email: true
             }
 
@@ -111,7 +111,7 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
         expect(response).to have_http_status(:unprocessable_entity)
         expect(response.parsed_body.dig("contact_validation", "same_person_confirmation_required")).to be(false)
         expect(response.parsed_body.dig("details", "email")).to eq([ EmployeeContactValidator::CLIENT_GENERIC_LOGIN_EMAIL_ERROR ])
-        expect(response.body).not_to include("Dafne", "External Admin", "Sloane Owner", "admin")
+        expect(response.body).not_to include("Staff Admin", "External Admin", "Sloane Owner", "admin")
       end
     end
 
@@ -255,7 +255,7 @@ RSpec.describe "Employee Contact Details API (Staff and Client)", type: :request
     it "forwards confirm_same_person_email on bulk import apply_json with the same authorization and audit rules as create" do
       allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(admin_user)
       row_payload = {
-        first_name: "Emma",
+        first_name: "Elena",
         last_name: "Mercer",
         email: client_user.email,
         employment_type: "hourly",

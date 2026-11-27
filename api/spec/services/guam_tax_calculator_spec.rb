@@ -64,15 +64,15 @@ RSpec.describe GuamTaxCalculator do
       end
     end
 
-    # Validation test case from AGENT_INSTRUCTIONS.md
-    context "with 56.48 hours @ $9.25 single filing (validation case)" do
+    # Validation test case: low-wage single filer below withholding threshold
+    context "with 50.0 hours @ $10.00 single filing (validation case)" do
       it "calculates expected values" do
-        # Gross = 56.48 * 9.25 = 522.44
-        result = calculator.calculate(gross_pay: 522.44)
+        # Gross = 50.0 * 10.00 = 500.00
+        result = calculator.calculate(gross_pay: 500.00)
 
         expect(result[:withholding]).to eq(0.00)  # Below $562 threshold
-        expect(result[:social_security]).to eq(32.39)  # 522.44 * 0.062 = 32.39
-        expect(result[:medicare]).to eq(7.58)          # 522.44 * 0.0145 = 7.5754 ≈ 7.58
+        expect(result[:social_security]).to eq(31.00)  # 500.00 * 0.062 = 31.00
+        expect(result[:medicare]).to eq(7.25)          # 500.00 * 0.0145 = 7.25
       end
     end
   end

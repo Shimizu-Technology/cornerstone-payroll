@@ -104,14 +104,14 @@ RSpec.describe PayrollImport::RevelPdfParser do
     end
 
     it "right-aligns a compressed Revel row into realistic payroll columns" do
-      line = "Compressed, Rowan".ljust(40) + "- - - 24.26 - - 240.00 - - 24.26 240.00 -"
+      line = "Compressed, Rowan".ljust(40) + "- - - 24.00 - - 240.00 - - 24.00 240.00 -"
       values = parser.send(:parse_flexible_columns, line)
 
       expect(values).to include(
         employee: "Compressed, Rowan",
-        regular_hours: 24.26,
+        regular_hours: 24.00,
         regular_pay: 240.00,
-        total_hours: 24.26,
+        total_hours: 24.00,
         total_pay: 240.00
       )
       expect(values[:total_hours]).to be < 200

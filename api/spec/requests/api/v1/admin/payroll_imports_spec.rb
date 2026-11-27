@@ -761,4 +761,121 @@ RSpec.describe "Api::V1::Admin::PayrollImports", type: :request do
       end
     end
   end
+
+  describe "reviewed-hours source_type routing" do
+    it "routes an enabled non-MoSa reviewed-hours source_type to PreviewService and retains it through apply" do
+      custom_adapter = Class.new(PayrollIntake::Adapters::MosaRevel) do
+        define_singleton_method(:descriptor) do
+          @descriptor ||= PayrollIntake::Descriptor.new(
+            key: "custom_reviewed_hours",
+            label: "Custom Reviewed Hours",
+            source_label: "Custom Reviewed Hours PDF",
+            parser_version: "custom_reviewed_hours:v1",
+            adapter_class: self,
+            extraction: "deterministic",
+            accepts_pasted_text: false,
+            tracks_reviewed_hours: true,
+            employee_match: "name_fuzzy",
+            idempotency: "files_period_roster_loans_and_workweek",
+            reports_overtime: true,
+            tips_default: "paid_in_check",
+            overtime_mode: "source_reports",
+            workweek_alignment: "warn_if_offset",
+            files: [
+              {
+                role: "revel_hours",
+                label: "Custom hours PDF",
+                hint: "Upload the custom reviewed hours PDF.",
+                accept: [ ".pdf" ],
+                content_type: "application/pdf",
+                max: 1,
+                required_by_default: true,
+                portal_role: "custom_hours",
+                provides: %w[regular_hours overtime_hours]
+              }
+            ],
+            portal: { submittable: true, role_map: { "custom_hours" => "revel_hours" } }
+          )
+        end
+
+        def initialize(pay_period:, company:)
+          @pay_period = pay_period
+          @company = company
+          @effective_settings = PayrollIntake::EffectiveSettings.for(
+            company: company,
+            pay_period: pay_period,
+            source_type: self.class.descriptor.key
+          )
+        end
+      end
+
+      PayrollIntake::Registry.register(custom_adapter)
+      company.update!(payroll_intake_source_types: [ "custom_reviewed_hours" ])
+      config = create(:annual_tax_config, **AnnualTaxConfig::OFFICIAL_2026_PAYROLL_TAXES, tax_year: pay_period.pay_date.year)
+      create(:filing_status_config, annual_tax_config: config, filing_status: "single", standard_deduction: 8600)
+      CompanyWorkweek.create!(
+        company: company,
+        starts_on_weekday: pay_period.start_date.wday,
+        starts_at_minutes: 0,
+        timezone: "Pacific/Guam",
+        effective_on: pay_period.start_date,
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: admin_user,
+        confirmed_at: Time.current,
+        notes: "Confirmed for custom reviewed-hours request test"
+      )
+      storage = Class.new do
+        def initialize = @objects = {}
+        def upload(key, data, content_type:) = @objects[key] = { data: data, content_type: content_type }
+        def download_with_limit(key, max_bytes:) = @objects.fetch(key).fetch(:data).byteslice(0, max_bytes)
+        def delete(key) = @objects.delete(key)
+      end.new
+      allow(R2StorageService).to receive(:new).and_return(storage)
+
+      pdf_path = build_revel_pdf(
+        [ { name: "Example, Avery", regular_hours: 40, overtime_hours: 2, regular_pay: 9_999 } ],
+        period_start: pay_period.start_date,
+        period_end: pay_period.end_date
+      )
+
+      expect(PayrollIntake::PreviewService).to receive(:new)
+        .with(hash_including(pay_period: pay_period, source_type: "custom_reviewed_hours"))
+        .and_call_original
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: {
+             source_type: "custom_reviewed_hours",
+             pdf_file: Rack::Test::UploadedFile.new(
+               pdf_path,
+               "application/pdf",
+               true,
+               original_filename: "payroll_#{pay_period.start_date}_to_#{pay_period.end_date}.pdf"
+             )
+           }
+
+      expect(response).to have_http_status(:ok), response.body
+      import_record = PayrollImportRecord.find(response.parsed_body.fetch("import_id"))
+      source_package = import_record.payroll_intake_session
+      expect(source_package.source_type).to eq("custom_reviewed_hours")
+      expect(source_package.parser_version).to eq("custom_reviewed_hours:v1")
+      expect(import_record.import_origin["adapter_key"]).to eq("custom_reviewed_hours")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: { import_id: import_record.id },
+           as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(source_package.reload.status).to eq("applied")
+      expect(source_package.source_type).to eq("custom_reviewed_hours")
+      expect(import_record.reload.status).to eq("applied")
+      expect(import_record.import_origin["adapter_key"]).to eq("custom_reviewed_hours")
+
+      applied_item = pay_period.payroll_items.find_by!(employee: included_employee)
+      expect(applied_item.hours_worked).to eq(BigDecimal("40"))
+      expect(applied_item.overtime_hours).to eq(BigDecimal("2"))
+    ensure
+      PayrollIntake::Registry.reset!
+    end
+  end
 end

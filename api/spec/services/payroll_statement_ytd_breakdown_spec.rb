@@ -6,7 +6,7 @@ RSpec.describe PayrollStatementYtdBreakdown do
   include HistoricalYtdBridgeFixtureHelper
 
   let(:company) { create(:company, name: "MoSa's Migration Test") }
-  let(:employee) { create(:employee, company: company, first_name: "Monique", last_name: "Ellis", employment_type: "salary") }
+  let(:employee) { create(:employee, company: company, first_name: "Morgan", last_name: "Ellis", employment_type: "salary") }
   let(:pay_date) { Date.new(2026, 9, 24) }
   let(:pay_period) do
     create(:pay_period, :committed, company: company,
@@ -14,7 +14,7 @@ RSpec.describe PayrollStatementYtdBreakdown do
   end
   let(:payroll_item) do
     create(:payroll_item, pay_period: pay_period, company: company, employee: employee,
-      employment_type: "salary", gross_pay: 9_527.02, net_pay: 6_806.85)
+      employment_type: "salary", gross_pay: 5_000.00, net_pay: 3_600.00)
   end
 
   def field_entry(item:, label:, amount:, treatment:, category:, reporting_group: nil)
@@ -53,11 +53,11 @@ RSpec.describe PayrollStatementYtdBreakdown do
       employee: employee,
       through_period_end: Date.new(2026, 9, 6),
       through_pay_date: Date.new(2026, 9, 10),
-      tips_paid_out: 1_900.80,
+      tips_paid_out: 1_200.00,
       source_breakdown: {
-        "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "5500.00" },
+        "pretax_deduction_breakdown" => { "401(k) Pre-Tax" => "10000.00" },
         "after_tax_deduction_breakdown" => {},
-        "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "3800.00" }
+        "employer_contribution_breakdown" => { "401(k) Pre-Tax" => "4000.00" }
       }
     )
     payroll_item.update!(retirement_payment: 500.00, employer_retirement_match: 200.00)
@@ -67,25 +67,25 @@ RSpec.describe PayrollStatementYtdBreakdown do
     employer = result.employer_contributions.index_by(&:semantic)
 
     expect(deductions.fetch(:"401k_pre_tax")).to have_attributes(
-      label: "401(k) Pre-Tax", current: 500.00.to_d, ytd: 6_000.00.to_d)
+      label: "401(k) Pre-Tax", current: 500.00.to_d, ytd: 10_500.00.to_d)
     expect(deductions.fetch(:tips_paid_out)).to have_attributes(
-      label: "Tips Paid Out", current: 0.to_d, ytd: 1_900.80.to_d)
+      label: "Tips Paid Out", current: 0.to_d, ytd: 1_200.00.to_d)
     expect(employer.fetch(:"401k_pre_tax")).to have_attributes(
-      current: 200.00.to_d, ytd: 4_000.00.to_d)
-    expect(deductions.values.sum(0.to_d, &:ytd)).to eq(20_459.to_d)
+      current: 200.00.to_d, ytd: 4_200.00.to_d)
+    expect(deductions.values.sum(0.to_d, &:ytd)).to eq(11_700.to_d)
   end
 
   it "does not display the legacy payout inferred from historical Pay Tip earnings" do
     balance = apply_historical_ytd_balance(
       company: company, employee: employee,
       through_period_end: Date.new(2026, 9, 6), through_pay_date: Date.new(2026, 9, 10),
-      reported_tips: 1_900.80, tips_paid_out: 1_900.80,
-      source_breakdown: { "earnings_breakdown" => { "Pay Tip" => "1900.80" } }
+      reported_tips: 1_200.00, tips_paid_out: 1_200.00,
+      source_breakdown: { "earnings_breakdown" => { "Pay Tip" => "1200.00" } }
     )
 
     expect(described_class.new(payroll_item).deductions.map(&:semantic)).not_to include(:tips_paid_out)
     expect(balance.ytd_aggregate_totals.fetch(:tips_paid_out)).to eq(0.to_d)
-    expect(balance.reload.tips_paid_out).to eq(1_900.80.to_d)
+    expect(balance.reload.tips_paid_out).to eq(1_200.00.to_d)
   end
 
   it "preserves a separately documented historical tip payout once" do
@@ -104,58 +104,58 @@ RSpec.describe PayrollStatementYtdBreakdown do
   end
 
   it "matches migrated health and child support to differently worded current fields" do
-    verna = create(:employee, company: company, first_name: "Verna", last_name: "John", employment_type: "hourly")
+    worker = create(:employee, company: company, first_name: "Valerie", last_name: "Lane", employment_type: "hourly")
     apply_historical_ytd_balance(
       company: company,
-      employee: verna,
+      employee: worker,
       through_period_end: Date.new(2026, 9, 6),
       through_pay_date: Date.new(2026, 9, 10),
       source_breakdown: {
         "pretax_deduction_breakdown" => {},
         "after_tax_deduction_breakdown" => {
-          "Health Insurance" => "1100.00",
-          "Case No. 0000101" => "1450.00"
+          "Health Insurance" => "2000.00",
+          "Case No. 0000101" => "3000.00"
         },
         "employer_contribution_breakdown" => {}
       }
     )
-    item = create(:payroll_item, pay_period: pay_period, company: company, employee: verna,
-      employment_type: "hourly", gross_pay: 1_147.95)
-    field_entry(item: item, label: "Health Insurance", amount: 126, treatment: "post_tax_deduction", category: "insurance")
-    field_entry(item: item, label: "Remittance ID 0000101", amount: 168, treatment: "post_tax_deduction", category: "child_support")
+    item = create(:payroll_item, pay_period: pay_period, company: company, employee: worker,
+      employment_type: "hourly", gross_pay: 1_200.00)
+    field_entry(item: item, label: "Health Insurance", amount: 100, treatment: "post_tax_deduction", category: "insurance")
+    field_entry(item: item, label: "Remittance ID 0000101", amount: 150, treatment: "post_tax_deduction", category: "child_support")
 
     rows = described_class.new(item).deductions.index_by(&:semantic)
 
-    expect(rows.fetch(:insurance)).to have_attributes(current: 126.to_d, ytd: 1_200.to_d)
-    expect(rows.fetch(:child_support)).to have_attributes(current: 168.to_d, ytd: 1_600.to_d)
+    expect(rows.fetch(:insurance)).to have_attributes(current: 100.to_d, ytd: 2_100.to_d)
+    expect(rows.fetch(:child_support)).to have_attributes(current: 150.to_d, ytd: 3_150.to_d)
   end
 
-  it "carries Sara's migrated allotment, rent, and auto-loan reimbursements into Other Pay" do
-    sara = create(:employee, company: company, first_name: "Sara", last_name: "Doctor", employment_type: "salary")
+  it "carries migrated allotment, rent, and auto-loan reimbursements into Other Pay" do
+    owner = create(:employee, company: company, first_name: "Sloane", last_name: "Ellis", employment_type: "salary")
     apply_historical_ytd_balance(
       company: company,
-      employee: sara,
+      employee: owner,
       through_period_end: Date.new(2026, 9, 6),
       through_pay_date: Date.new(2026, 9, 10),
       source_breakdown: {
         "earnings_breakdown" => {
-          "Reimb" => "3600.00",
+          "Reimb" => "6400.00",
           "Rent - Sample" => "2400.00",
-          "Auto Loan Reimbursem" => "1936.00"
+          "Auto Loan Reimbursem" => "1600.00"
         }
       }
     )
-    item = create(:payroll_item, pay_period: pay_period, company: company, employee: sara,
-      employment_type: "salary", gross_pay: 9_695.24)
+    item = create(:payroll_item, pay_period: pay_period, company: company, employee: owner,
+      employment_type: "salary", gross_pay: 5_000.00)
     field_entry(item: item, label: "Allotment - Daniel", amount: 400.00, treatment: "non_taxable_addition", category: "allotment")
     field_entry(item: item, label: "Rent Reimbursement", amount: 150, treatment: "non_taxable_addition", category: "rent")
-    field_entry(item: item, label: "Auto Loan Reimbursement", amount: 121, treatment: "non_taxable_addition", category: "reimbursement")
+    field_entry(item: item, label: "Auto Loan Reimbursement", amount: 100, treatment: "non_taxable_addition", category: "reimbursement")
 
     rows = described_class.new(item).other_pay.index_by(&:label)
 
-    expect(rows.fetch("Allotment - Daniel")).to have_attributes(current: 400.00.to_d, ytd: 4_000.00.to_d)
+    expect(rows.fetch("Allotment - Daniel")).to have_attributes(current: 400.00.to_d, ytd: 6_800.00.to_d)
     expect(rows.fetch("Rent Reimbursement")).to have_attributes(current: 150.to_d, ytd: 2_550.to_d)
-    expect(rows.fetch("Auto Loan Reimbursement")).to have_attributes(current: 121.to_d, ytd: 2_057.to_d)
+    expect(rows.fetch("Auto Loan Reimbursement")).to have_attributes(current: 100.to_d, ytd: 1_700.to_d)
   end
 
   it "prefers an explicit current reimbursement over the legacy allotment rename" do

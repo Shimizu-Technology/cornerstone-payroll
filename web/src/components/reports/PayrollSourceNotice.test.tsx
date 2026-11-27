@@ -44,3 +44,31 @@ it('names prior-provider payments separately from QuickBooks', () => {
   expect(screen.getByText(/3 linked prior-provider paychecks/)).toBeTruthy();
   expect(screen.queryByText(/linked QuickBooks/)).toBeNull();
 });
+
+it('says when imported totals come from the opening balance and when they are shown as imported', () => {
+  const bridged = { applied: true, tax_years: [ 2026 ], totals_basis: 'historical_ytd_bridge' as const };
+  const { unmount } = render(<PayrollSourceNotice summary={{ ...summary, historical_ytd_bridge: bridged }} />);
+  expect(screen.getByText(/the same figures as pay stubs and W-2GU/).textContent).toContain('Hours, 401(k), employer costs and other categories are shown as imported.');
+  unmount();
+  render(<PayrollSourceNotice summary={{ ...summary, historical_ytd_bridge: { ...bridged, totals_basis: 'as_imported' } }} />);
+  expect(screen.getByText(/Imported figures are shown as imported/)).toBeTruthy();
+});
+
+it('warns when Cornerstone paychecks are dated inside the opening balance and says W-2GU filing is blocked', () => {
+  render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 0, bridge_window_paycheck_count: 2, bridge_window_w2_blocking_count: 1 } }} />);
+  const alert = screen.getByRole('alert').textContent;
+  expect(alert).toContain('2 Cornerstone paychecks are dated inside the imported opening year-to-date balance');
+  expect(alert).toContain('W-2GU filing is blocked until it is resolved.');
+});
+
+it('warns about contractor-only overlaps without claiming W-2GU is blocked', () => {
+  render(<PayrollSourceNotice summary={{ ...summary, source_overlap: { employee_pay_date_count: 0, bridge_window_paycheck_count: 1, bridge_window_w2_blocking_count: 0 } }} />);
+  const alert = screen.getByRole('alert').textContent;
+  expect(alert).toContain('1 Cornerstone paycheck is dated inside the imported opening year-to-date balance');
+  expect(alert).not.toContain('W-2GU');
+});
+
+it('says nothing about the basis when no opening balance applies', () => {
+  render(<PayrollSourceNotice summary={{ ...summary, historical_ytd_bridge: { applied: false, tax_years: [], totals_basis: 'as_imported' } }} />);
+  expect(screen.queryByText(/as imported/)).toBeNull();
+});

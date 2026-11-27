@@ -8,7 +8,7 @@ async function mockClientSession(page: Page): Promise<void> {
   await page.route('**/api/v1/auth/me', (route) => json(route, {
     user: {
       id: 7,
-      email: 'emma.client@example.test',
+      email: 'elena.client@example.test',
       name: 'Elena Mercer',
       role: 'client',
       organization_id: 1,

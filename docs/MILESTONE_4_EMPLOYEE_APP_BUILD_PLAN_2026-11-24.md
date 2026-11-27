@@ -9,12 +9,12 @@
 
 Milestone 4 gives MoSa's employees a phone-friendly app where they sign in and see their own pay. It shows each paycheck, the same PDF stub Cornerstone prints, their pay history, a copy of their 2026 W-2GU, and their contact details. They can update their phone, personal email and emergency contacts themselves after confirming with a code, and ask for a home-address change, which MoSa's admins approve and Cornerstone then confirms on the payroll side (§0 D4).
 
-There's no staging round for this milestone (Leon, November 24, 2026). Agents test locally, in CI and on the Clerk test app. In production, with the app on for MoSa's but nobody invited, Leon and Dafne use a view-only "Sign in as" to see exactly what any employee or MoSa's admin sees, The Cornerstone team does real sign-ups of its own on company 1 records, and Mark and Benjo run the written script. Then Elena Mercer, who leads MoSa's day to day and is on its payroll, becomes the first real user. She gets a client portal login and her own employee access, and tests every flow. Emma, Sara and Mo then enter their employees' own emails and phone numbers and send the invites. Sara and Mo follow Emma. The three admins use it for one full pay period, and then it opens to everyone else.
+There's no staging round for this milestone (Leon, November 24, 2026). Agents test locally, in CI and on the Clerk test app. In production, with the app on for MoSa's but nobody invited, Leon and Dafne use a view-only "Sign in as" to see exactly what any employee or MoSa's admin sees, The Cornerstone team does real sign-ups of its own on company 1 records, and Mark and Benjo run the written script. Then the pilot client's day-to-day manager, who is also on its payroll, becomes the first real user. They get a client portal login and their own employee access, and test every flow. The three client admins then enter their employees' own emails and phone numbers and send the invites. The two owners follow the manager. The three admins use it for one full pay period, and then it opens to everyone else.
 
 Three findings shape this plan more than the code does:
 
-1. **We can't reach MoSa's employees yet.** Production has no real employee email and no phone number for any of MoSa's 61 active employees (§2). Most records carry one shared inbox that was entered by mistake. MoSa's admins will enter their employees' own details (D1), so the client portal needs an easy way to set and update them, and the shared inbox has to be cleaned up (M4-3).
-2. **MoSa's has no client logins yet.** There are zero client users for company 6, so Emma, Sara and Mo have to be invited to the client portal before they can act as employee-app admins.
+1. **We can't reach MoSa's employees yet.** Production has no real personal employee emails or phone numbers on file for active pilot employees (§2). Most records carry one shared inbox that was entered by mistake. MoSa's admins will enter their employees' own details (D1), so the client portal needs an easy way to set and update them, and the shared inbox has to be cleaned up (M4-3).
+2. **MoSa's has no client logins yet.** There are zero client users for company 6, so the three client admins have to be invited to the client portal before they can act as employee-app admins.
 3. **The longest wait isn't code.** The lawyer review and the written security plan (WISP) must be finished before employees go live (architecture decision §6). They should start now and run alongside the build.
 
 Bank changes stay **off** for MoSa's in this milestone. Payroll holds no bank details for MoSa's, because MoSa's pays through its own bank's ACH (§2), and the lawyer hasn't yet answered the direct deposit question.
@@ -42,8 +42,8 @@ Bank changes stay **off** for MoSa's in this milestone. Payroll holds no bank de
 | Topic | Decision |
 |---|---|
 | **Pilot client** | MoSa's (company 6) first. |
-| **Check before employees** | Leon, Dafne, Mark and Benjo check it before Emma or any other MoSa's employee gets access. There's no staging round for this milestone (D10). |
-| **First real user** | Elena Mercer, who leads MoSa's day to day and is on its payroll (§2). She is both a MoSa's admin and an employee, on one login with a role switcher (architecture decision §0, "Logins"). |
+| **Check before employees** | Leon, Dafne, Mark and Benjo check it before the pilot manager or any other MoSa's employee gets access. There's no staging round for this milestone (D10). |
+| **First real user** | MoSa's day-to-day manager, who is also on its payroll (§2). They are both a MoSa's admin and an employee, on one login with a role switcher (architecture decision §0, "Logins"). |
 | **Documents and policy sign-offs** | Milestone 5, with onboarding. Electronic-delivery consent for stubs and W-2s stays in Milestone 4. |
 | **2026 W-2GUs** | Paper as required, plus a copy posted in the app. Electronic-only delivery starts with the 2027 forms, after consent. |
 | **Employee contact details** | Most MoSa's employees have a phone and a personal email. The shared inbox on employee records is a mistake to fix. Every employee gets their own email, and email, phone and address must be easy to set and update (M4-3). |
@@ -52,24 +52,24 @@ Bank changes stay **off** for MoSa's in this milestone. Payroll holds no bank de
 | **Languages** | English only (D8). |
 | **Employees' sign-in** | Password, Google, or an emailed code from Clerk, plus two-step sign-in once `REQUIRE_MFA=true` (D9, revised Nov 25, 2026). |
 | **Sign in as** | View-only for the pilot, then plan the full version properly (D10, M4-13). |
-| **Employee support** | Each client's own management answers its employees' app questions, and escalates to Cornerstone. At MoSa's that's Emma, Sara and Mo. The Help screen shows the client's contacts, set per company (Leon, November 24). |
-| **First employees** | Emma, Sara and Mo, the three MoSa's admins, who are all on MoSa's payroll. Then everyone else, or a group MoSa's picks (Leon, November 24). |
+| **Employee support** | Each client's own management answers its employees' app questions, and escalates to Cornerstone. At MoSa's that's the three client admins. The Help screen shows the client's contacts, set per company (Leon, November 24). |
+| **First employees** | The three MoSa's admins (manager and owners), who are all on MoSa's payroll. Then everyone else, or a group MoSa's picks (Leon, November 24). |
 | **QuickBooks stub PDFs** | They don't print full SSNs (Leon, November 24). The automated scan in M4-4 stays as a safeguard. |
 
 ### Decisions and recommendations
 
 | # | Question | Decision or recommendation | Why |
 |---|---|---|---|
-| D1 | How do employees' emails and phones get in? | **Decided.** MoSa's admins enter and maintain their employees' emails, mobile numbers and addresses in the client portal, and send the invites (M4-3, M4-9). Emma goes first as the demo: her details are entered, she signs up, and she tests every flow before anyone else is invited. Cornerstone enters details only when MoSa's asks. Anyone without an email gets a printed one-time sign-up code and enters their own email. | It gets MoSa's into the system early, and keeps contact details with the people who know them. Client users can already edit an employee's email, phone and address directly (`api/app/services/client_employee_update_service.rb:5-21`). A wrong email can't let the wrong person in, because sign-up also checks DOB and SSN last 4. |
+| D1 | How do employees' emails and phones get in? | **Decided.** MoSa's admins enter and maintain their employees' emails, mobile numbers and addresses in the client portal, and send the invites (M4-3, M4-9). The pilot manager goes first as the demo: their details are entered, they sign up, and they test every flow before anyone else is invited. Cornerstone enters details only when MoSa's asks. Anyone without an email gets a printed one-time sign-up code and enters their own email. | It gets MoSa's into the system early, and keeps contact details with the people who know them. Client users can already edit an employee's email, phone and address directly (`api/app/services/client_employee_update_service.rb:5-21`). A wrong email can't let the wrong person in, because sign-up also checks DOB and SSN last 4. |
 | D2 | Documents and policy sign-offs | **Decided.** Milestone 5. The architecture decision's milestone table is updated in this PR. | They need MoSa's actual policies, which nobody has given us yet, plus the lawyer's view on electronic signatures. Milestone 5's onboarding uses the same parts. |
-| D3 | Bank changes for MoSa's | **Recommended: off.** The app shows "Direct deposit" or "Paper check" read-only, with a "Contact MoSa's to change" note. | Payroll holds no bank details for MoSa's (0 of 48 direct-deposit employees, §2). The lawyer's direct deposit question (Part 3 Q1) is open. The catalog's `bank_requests` switch also depends on an `sms_provider` setting that doesn't exist (`operating_profile_catalog.rb:384-396`), so it can't be turned on as written. |
-| D4 | How do employees' own changes get applied? | **Decided.** Mobile phone, personal email and emergency contacts apply right away after a fresh one-time code (Leon, November 19, confirmed November 24). **Home address: MoSa's admins approve**, and the change applies on approval. Nobody approves a request about their own record: when the employee is also a MoSa's admin, like Emma, another MoSa's admin or Cornerstone approves. **Cornerstone sees every applied change** in a "Changes to confirm" list and marks each one confirmed on the payroll side. A payroll run warns about unconfirmed changes but isn't blocked. Legal name, SSN and W-4 stay with Cornerstone. | MoSa's knows its people and can already change addresses directly today. The confirm list keeps Cornerstone responsible for payroll accuracy without making it a bottleneck. Today change requests are approved only by staff with `manage_client_configuration` (`api/app/models/employee_change_request.rb:129-137`), so M4-7 adds a client approval path. |
+| D3 | Bank changes for MoSa's | **Recommended: off.** The app shows "Direct deposit" or "Paper check" read-only, with a "Contact MoSa's to change" note. | Payroll holds no bank details for MoSa's (0 direct-deposit employees have bank accounts stored, §2). The lawyer's direct deposit question (Part 3 Q1) is open. The catalog's `bank_requests` switch also depends on an `sms_provider` setting that doesn't exist (`operating_profile_catalog.rb:384-396`), so it can't be turned on as written. |
+| D4 | How do employees' own changes get applied? | **Decided.** Mobile phone, personal email and emergency contacts apply right away after a fresh one-time code (Leon, November 19, confirmed November 24). **Home address: MoSa's admins approve**, and the change applies on approval. Nobody approves a request about their own record: when the employee is also a MoSa's admin, another MoSa's admin or Cornerstone approves. **Cornerstone sees every applied change** in a "Changes to confirm" list and marks each one confirmed on the payroll side. A payroll run warns about unconfirmed changes but isn't blocked. Legal name, SSN and W-4 stay with Cornerstone. | MoSa's knows its people and can already change addresses directly today. The confirm list keeps Cornerstone responsible for payroll accuracy without making it a bottleneck. Today change requests are approved only by staff with `manage_client_configuration` (`api/app/models/employee_change_request.rb:129-137`), so M4-7 adds a client approval path. |
 | D5 | Paper during the pilot | **Recommended.** Nothing changes in how MoSa's employees get stubs today. The app adds a copy. Electronic-only delivery is a later switch, once counsel approves the consent wording. | Guam UETA requires a recorded agreement and a paper option (research Q1). Until counsel answers Part 3 Q2, the app can't replace paper. |
 | D6 | Pay before September 10, 2026 | **Decided: show it.** Cornerstone has the original QuickBooks stub PDFs. They're uploaded, matched to each employee and check with a staff review (never guessed), and posted as "Original QuickBooks stub". The Pay list shows those checks from the QuickBooks data Payroll already imported. Before anything posts: confirm the PDFs don't print a full SSN, and that the imported rows group into one entry per check (M4-4). | Employees see the whole year in one place, and the originals are exactly what they received. The imported rows carry earnings, tax and deduction breakdowns (`api/db/schema.rb:2050-2102`). At least one employee has more imported rows for January–August than a biweekly schedule produces, so the per-check grouping has to be confirmed first. |
 | D7 | Save the stub as issued | **Recommended.** Post each stub to the app at a defined moment and freeze it then, with a fingerprint (M4-4 defines the moment). Corrections become a separate "Corrected" document. Today the staff download serves an archived R2 copy only in narrow cases and otherwise regenerates (`api/app/controllers/api/v1/admin/pay_stubs_controller.rb:64-79`). AIRE always regenerates (`api/app/controllers/api/v1/integrations/aire/worker_statements_controller.rb:43-52`). | Regenerating can change the "Generated on" time, the check number or payment line, and, after reversals, the YTD figures. An employee's earlier download should match what the app shows later. |
 | D8 | Languages | **Decided.** English only. | No translation setup exists in `web/`, and there's no known need. |
-| D9 | Employees' second sign-in step | **Revised Nov 25, 2026 (owner): two-step sign-in is required for every user, employees included, once `REQUIRE_MFA=true`; until Clerk Pro is bought MFA stays off and every step-up uses first-factor reverification. See `docs/rollout/MFA_ROLLOUT_RUNBOOK.md`.** Earlier decision: employee-only logins don't need an authenticator app. They sign in with a password, Google, or an emailed code from Clerk, and Clerk emails a code on each new device. Before any change, they confirm again with a fresh first-step verification (Clerk reverification at the first-factor level, `fva[0]` within 10 minutes). Employees who chose to enroll a second factor confirm with that instead. Staff and client users, including Emma, Sara and Mo, require two-step sign-in. | This matches the M3 plan: employee-only users "pass the global MFA gate… relying on step-up" (M3 plan, M3-2). Most restaurant workers won't set up an authenticator app. The lawyer review asks whether the FTC Safeguards Rule's MFA requirement covers employees viewing their own records (§3 G1). |
-| D10 | How is it tested with real data? | **Decided:** (a) **no staging** for this milestone; agents test locally, in CI and on the Clerk test app; (b) **view-only "Sign in as"** in production (M4-9): Leon and Dafne see exactly what a given employee or client user sees, with that person's permissions, before and after they sign up; (c) before Emma, **the Cornerstone team does real sign-ups itself** on Cornerstone (company 1) employee records, so any sign-up problem is found by us and not by the client (Leon: "we'll test it first before Emma is in there"). That covers both paths: a staff member claiming employee access with an existing login, such as Benjo, and one brand-new employee-only sign-up with a second email, which is revoked afterward; (d) **Emma is the first real user** (D1). The **full "Sign in as"**, acting for a user, is planned properly in M4-13. | Test workspaces can't turn the employee app on (`api/app/services/company_features.rb:104-108`), and links must belong to a live company, which the database enforces (`api/db/migrate/20261122060000_add_payroll_invitation_binding_and_employee_account_links.rb:30`). View-only creates no new exposure, because staff with access to MoSa's already see this data. Acting for someone does, and some actions are the person's own legal acts, so the full version gets its own design. |
+| D9 | Employees' second sign-in step | **Revised Nov 25, 2026 (owner): two-step sign-in is required for every user, employees included, once `REQUIRE_MFA=true`; until Clerk Pro is bought MFA stays off and every step-up uses first-factor reverification. See `docs/rollout/MFA_ROLLOUT_RUNBOOK.md`.** Earlier decision: employee-only logins don't need an authenticator app. They sign in with a password, Google, or an emailed code from Clerk, and Clerk emails a code on each new device. Before any change, they confirm again with a fresh first-step verification (Clerk reverification at the first-factor level, `fva[0]` within 10 minutes). Employees who chose to enroll a second factor confirm with that instead. Staff and client users, including the pilot client admins, require two-step sign-in. | This matches the M3 plan: employee-only users "pass the global MFA gate… relying on step-up" (M3 plan, M3-2). Most restaurant workers won't set up an authenticator app. The lawyer review asks whether the FTC Safeguards Rule's MFA requirement covers employees viewing their own records (§3 G1). |
+| D10 | How is it tested with real data? | **Decided:** (a) **no staging** for this milestone; agents test locally, in CI and on the Clerk test app; (b) **view-only "Sign in as"** in production (M4-9): Leon and Dafne see exactly what a given employee or client user sees, with that person's permissions, before and after they sign up; (c) before the pilot manager, **the Cornerstone team does real sign-ups itself** on Cornerstone (company 1) employee records, so any sign-up problem is found by us and not by the client (Leon: "we'll test it first before the client is in there"). That covers both paths: a staff member claiming employee access with an existing login, such as Benjo, and one brand-new employee-only sign-up with a second email, which is revoked afterward; (d) **The pilot manager is the first real user** (D1). The **full "Sign in as"**, acting for a user, is planned properly in M4-13. | Test workspaces can't turn the employee app on (`api/app/services/company_features.rb:104-108`), and links must belong to a live company, which the database enforces (`api/db/migrate/20261122060000_add_payroll_invitation_binding_and_employee_account_links.rb:30`). View-only creates no new exposure, because staff with access to MoSa's already see this data. Acting for someone does, and some actions are the person's own legal acts, so the full version gets its own design. |
 | D11 | Tell employees when a new stub posts? | **Recommended: yes, by email.** It says "Your pay stub for <date> is ready" with no amounts and a link to the app. It goes only to the verified personal email, only when the company's `stubs` switch is on, and only while `PORTAL_EMAIL_NOTIFICATIONS_ENABLED` is on. | The portal plan lists it (`EMPLOYEE_PORTAL_AND_PLATFORM_PLAN_2026-11-17.md`, Phase 1), and it's the main reason people open the app. Generic emails with no amounts follow the existing pattern (`api/app/services/portal_notifications/email.rb:6`). |
 | D12 | What happens to an open session when access ends? | **Recommended.** Revoking or retiring a link ends access on the next request, because the link check runs on every call. When it was the person's last eligible link, the `portal_employee` login is also deactivated, which blocks every API call at once (`api/app/controllers/api/v1/employee_portal/base_controller.rb:31`). Their Clerk sessions are ended through Clerk's Backend API. The existing `PayrollAccess::RevocationDispatcher` only drops live Cable connections (`api/app/services/payroll_access/session_revoker.rb:10`), and the employee service has none. Former employees keep read-only access until `former_access_until`. | A stolen or shared login shouldn't keep working after Cornerstone revokes it. |
 
@@ -145,31 +145,27 @@ Every claim below was checked against `origin/main` (`01e6aa52`) on November 24,
 
 ---
 
-## 2. MoSa's production data (read-only, November 24, 2026)
+## 2. Pilot production readiness findings (read-only, November 24, 2026)
 
-These counts come from production (revision `455eef28`), run inside one `REPEATABLE READ READ ONLY` transaction. The output was counts only, with no names or contact details.
+A read-only production check (exact client headcounts and email-hygiene counts are kept outside this public repository) established the constraints below:
 
-| | Result |
+| Area | Finding |
 |---|---|
-| Active employees | **61**: 59 hourly, 2 salary, 0 contractors |
-| DOB and SSN on file | **61 of 61**, so every active employee can pass the sign-up check |
-| Full mailing address | 53 of 61 |
-| Email | 46 on file, **2 distinct addresses**. 45 are one shared inbox, entered by mistake (Leon). The other belongs to a staff user (Dafne). 15 have none. |
-| Phone | **0** |
-| Payment method | 48 direct deposit, 13 paper check. **0 bank accounts on file.** |
-| Inactive employees | 56, none with a termination date, none paid through Payroll in 2026 |
-| Payroll-run pay periods in 2026 | 6 committed, from September 10 to November 19 |
-| Imported 2026 history | 855 QuickBooks paychecks (January 1 – August 27) for 72 employees (58 now active, 14 inactive) |
-| Client users for company 6 | **0** |
-| Employee-app links or portal users anywhere | 0 |
-| Shared inbox across all companies (second check, same day) | One address on **405 employee records at 5 companies** (221 active). A second address is shared by 5 more. Neither is anyone's login email. |
-| MoSa's three admins | Emma, Sara and Mo each have an active MoSa's employee record with 2026 Payroll checks, so each can claim employee access. One record has more imported QuickBooks rows for January–August than a biweekly schedule produces (see D6). |
+| Active workforce | Mix of hourly and salaried employees, zero contractors; every active employee has DOB and SSN on file so all can pass the sign-up check. |
+| Mailing addresses | Most active employees have a full mailing address; a small subset still needs addresses entered. |
+| Email & phone | No personal employee emails or mobile phone numbers on file. Most records carried a single shared inbox entered by mistake, plus one staff user address; the rest were blank. |
+| Payment method | Mix of direct deposit and paper check, with **0 bank accounts on file**. |
+| Inactive employees | Inactive records lacked termination dates and had no committed 2026 Cornerstone payroll runs. |
+| 2026 history | Committed Cornerstone payroll runs plus imported prior-year-to-date QuickBooks paychecks across active and some inactive employees. |
+| Portal & app state | Zero client users and zero employee-app links at the time of the check. |
+| Shared inbox scope | The shared inbox appeared across multiple companies in production (not used as any user's login email). |
+| Pilot admins | All three pilot client admins have active employee records with 2026 checks, so each can claim employee access. One record had more imported QuickBooks rows than a biweekly schedule produces (see D6). |
 
 **What this means:**
 
 - Invites can't use the email on file. MoSa's admins enter real addresses, the shared inbox is cleared (M4-3), and the invite tool refuses a shared address, a placeholder, or a staff user's address.
-- The 14 inactive employees paid in early 2026 get paper W-2s, as today. In the pilot, only active employees get invites.
-- The 56 inactive employees with no termination date can't start a "former employee" window. That's harmless while only active employees are invited. A cleanup report for Cornerstone is in M4-9.
+- Inactive employees paid earlier in 2026 continue to get paper W-2s, as today. In the pilot, only active employees get invites.
+- Inactive employees with no termination date can't start a "former employee" window. That's harmless while only active employees are invited. A cleanup report for Cornerstone is in M4-9.
 
 ---
 
@@ -184,12 +180,12 @@ All of these must be true. Each one maps to a check in the go-live runbook (M4-1
 | G3 | **Clerk production live** (M3-0b complete, with its readiness evidence recorded; it's scheduled for the night of November 24) and **two-step sign-in on** for staff and client users (`REQUIRE_MFA=true`) after the M4-1 fix, on Clerk Pro. | Lead | Clerk Pro is bought at this gate (Leon, November 22). |
 | G4 | **Row-level security enforced** (M3-7 phase 3). Employee endpoints run with the guard set to `raise`. | Lead | About December 9–11. |
 | G5 | **Employee website and API service live:** Netlify site 2, Render `employee_web`, `mosas.shimizu-technology.com` and a company 1 subdomain for the team's own sign-ups, Clerk allowed subdomains. | Lead | M4-10. |
-| G6 | **MoSa's admins have client logins:** Emma, Sara and Mo invited to the client portal, with `PORTAL_EMAIL_NOTIFICATIONS_ENABLED` on. | Leon's go | This follows the November 15 client-portal steps (Leon tests, Dafne re-runs a practice copy, then Emma is invited). |
-| G7 | **Contact details entered** by MoSa's admins for each wave (D1). | Emma, Sara and Mo | Emma's first. |
-| G8 | **Internal sign-off, then Emma:** (a) in production with no MoSa's employee invited, Leon and Dafne check employees, and Emma's client view once her client login exists (G6), with view-only Sign in as. The team does both kinds of real sign-up on company 1 (D10c), Mark and Benjo run the written script, and Dafne signs off. (b) Then Emma completes her acceptance as the first real user. | Leon, Dafne, Mark, Benjo, Emma | The go-live rule's steps 3–4 (architecture decision §6), without staging (D10a). |
+| G6 | **MoSa's admins have client logins:** the three client admins invited to the client portal, with `PORTAL_EMAIL_NOTIFICATIONS_ENABLED` on. | Leon's go | This follows the November 15 client-portal steps (Leon tests, Dafne re-runs a practice copy, then the pilot manager is invited). |
+| G7 | **Contact details entered** by MoSa's admins for each wave (D1). | Client admins | Pilot manager first. |
+| G8 | **Internal sign-off, then pilot manager:** (a) in production with no MoSa's employee invited, Leon and Dafne check employees, and the pilot manager's client view once their client login exists (G6), with view-only Sign in as. The team does both kinds of real sign-up on company 1 (D10c), Mark and Benjo run the written script, and Dafne signs off. (b) Then the pilot manager completes acceptance as the first real user. | Leon, Dafne, Mark, Benjo, Pilot manager | The go-live rule's steps 3–4 (architecture decision §6), without staging (D10a). |
 | G9 | **Security check of the employee surface and Sign in as:** cross-company, cross-link and former-access tests under RLS `raise`; an adversarial review by a different model family; an automated scan of the employee site and API. | Lead | M4-11. A full penetration test is due before onboarding clients outside Cornerstone's current book (M3 plan §5.2). |
 
-**Order of the gates.** G3, G4, G5, G6 and G9 come first, then the internal check (G8a). **Emma (G8b) also needs the WISP (G2),** which is drafted internally and doesn't wait on outside counsel. She needs either G1 or a pilot carve-out that counsel clears as a fast-track first question and that MoSa's owners (Sara and Mo) and Emma sign. Emma can't waive Cornerstone's own Safeguards or § 7216 duties on her own. Every other employee waits for all nine gates and their contact details (G7).
+**Order of the gates.** G3, G4, G5, G6 and G9 come first, then the internal check (G8a). **The pilot manager (G8b) also needs the WISP (G2),** which is drafted internally and doesn't wait on outside counsel. They need either G1 or a pilot carve-out that counsel clears as a fast-track first question and that MoSa's owners and pilot manager sign. A client admin can't waive Cornerstone's own Safeguards or § 7216 duties on their own. Every other employee waits for all nine gates and their contact details (G7).
 
 ---
 
@@ -233,7 +229,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - Issues a link with a random token (only the digest is stored), a 14-day expiry, and `invited_by`.
   - **It doesn't create a login.** `users.email` must be unique and valid (`api/app/models/user.rb:41`), and many employees have no usable email yet, so the `portal_employee` user is created at sign-up. `EmployeeAccountLink#user` is already optional until the link is active (`api/app/models/employee_account_link.rb:4,13`).
   - Sends the invite to the employee's own email (M4-3), or prints a one-time sign-up code (10 characters, unambiguous letters, valid 14 days, single use, digest only).
-  - **Same-person logins:** when the employee's email belongs to an existing login already confirmed as the same person (M4-3), such as Emma's client login, the invite points to "Sign in to add your employee access" (the claim path below) instead of new-account sign-up.
+  - **Same-person logins:** when the employee's email belongs to an existing login already confirmed as the same person (M4-3), such as a client admin's login, the invite points to "Sign in to add your employee access" (the claim path below) instead of new-account sign-up.
   - Resend keeps the link and rotates the token. Revoke records who, why and when (D12). Every step is audited.
 - **Sign-up for a new person** (`POST /api/v1/employee/activation`, reachable before a link session exists):
   1. **Check:** the token or code, plus DOB and SSN last 4. It compares in constant time and returns one generic error for every failure. It locks after 5 failures per link (24-hour lock, staff can unlock), and alerts staff after 3 locks at one company in an hour.
@@ -248,7 +244,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
      - re-checks that it's still `invited`, not expired, not locked, `portal_enabled?`, and that a subdomain token's `azp` matches the link's company;
      - marks it `active` with `activated_at`;
      - clears `invite_token_digest`.
-- **Claiming a link with an existing login** (`POST /api/v1/employee/links/claim`, signed in): for someone who already has a Payroll login: a client admin who is also an employee, like Emma (D1); a Cornerstone staff member with a company 1 employee record, like Benjo (D10c); or an employee at a second client. `PayrollInvitation#send_invite` refuses users who are already bound (`payroll_invitation.rb:20-21`), so this path never sends a Clerk invitation. It takes the token or code plus DOB and SSN-4, requires step-up (M4-1), and attaches the link to the signed-in user. Staff and client users keep their own two-step rules. The web app switches roles using `/auth/me` `roles`.
+- **Claiming a link with an existing login** (`POST /api/v1/employee/links/claim`, signed in): for someone who already has a Payroll login: a client admin who is also an employee (D1); a Cornerstone staff member with a company 1 employee record, like Benjo (D10c); or an employee at a second client. `PayrollInvitation#send_invite` refuses users who are already bound (`payroll_invitation.rb:20-21`), so this path never sends a Clerk invitation. It takes the token or code plus DOB and SSN-4, requires step-up (M4-1), and attaches the link to the signed-in user. Staff and client users keep their own two-step rules. The web app switches roles using `/auth/me` `roles`.
 - **Finding links:** `GET /api/v1/employee/links` (no link header needed) returns the signed-in user's eligible links: id, company name, subdomain slug, status, and former-access end date. The web app uses it for the employer picker and the `X-Employee-Link-Id` header.
 - **Where `links` and `links/claim` live:** neither can inherit `EmployeePortal::BaseController`, which requires the link header (`base_controller.rb:19-23`).
   - They go in a small `EmployeePortal::AccountController` that verifies the Clerk token the same way, allows client-subdomain tokens (`clerk_authenticatable.rb:30,81-83`), and returns 404 on every failure.
@@ -439,7 +435,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
       - `Current.real_user` and `Current.view_as_grant` stay separate from the effective user;
       - `AuditLog.record!` itself stamps the real user and the grant on every row, because many controllers call it directly with `current_user`, for example `api/app/controllers/api/v1/client/pay_periods_controller.rb:73`.
     - **Employees who haven't signed up:** there's no user or link row yet, so the grant resolves a read-only employee context (employee, company, simulated status). The M4-4, M4-5 and M4-7 read services take that context instead of a link.
-    - **The log:** each session is audited as "Leon viewed as Emma". A new client endpoint (`GET /api/v1/client/support_access_logs`) shows only those events for the client's company, so client admins can see them without seeing internal staff audit entries.
+    - **The log:** each session is audited as "Leon viewed as Elena Mercer". A new client endpoint (`GET /api/v1/client/support_access_logs`) shows only those events for the client's company, so client admins can see them without seeing internal staff audit entries.
     - **No session as the user:** Clerk's own impersonation feature was considered and not used, because it creates a session as the user.
   - **Help contacts:** client admins and Cornerstone set the support names, phone and email shown on the company's Help screen.
   - **Client users** see the rollout page, enter contact details (M4-3), and invite, resend and print sign-up codes for their company's employees (D1). Revoking stays with Cornerstone in the pilot, apart from termination, which retires links automatically.
@@ -482,22 +478,22 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
 
 - **The internal check (G8):**
   - **Before production:** a real new-user activation on the Clerk test app with matching subdomain settings.
-  - **In production, with the app on for MoSa's and no employee invited:** Leon and Dafne use view-only Sign in as on several MoSa's employees (hourly, salaried, direct deposit, paper check), and on Emma's client view once her client login exists (G6). They compare stubs with the printed ones.
+  - **In production, with the app on for MoSa's and no employee invited:** Leon and Dafne use view-only Sign in as on several MoSa's employees (hourly, salaried, direct deposit, paper check), and on the pilot manager's client view once their client login exists (G6). They compare stubs with the printed ones.
   - **The team's real sign-ups on company 1 (D10c):**
     - a claim with an existing login, such as Benjo's;
     - one brand-new employee-only sign-up with a second email, revoked afterward, which also proves that revoking ends the Clerk session (D12);
     - covering stubs, a contact change with a code, lockout and unlock.
 
-    Emma and Benjo both use the claim path, so without this new-user sign-up the first real one would be a wave 1 employee's.
+    The pilot manager and Benjo both use the claim path, so without this new-user sign-up the first real one would be a wave 1 employee's.
   - Mark and Benjo run the written script, and Dafne signs off.
-- **Emma's acceptance** (wave 0): Emma gets her client portal login, claims her employee access, and runs the script as both admin and employee:
+- **Pilot manager acceptance** (wave 0): the pilot manager gets their client portal login, claims their employee access, and runs the script as both admin and employee:
   - stubs, QuickBooks history, and the W-2 copy once posted;
-  - a contact change, and an address request approved by Sara or Mo;
+  - a contact change, and an address request approved by another client admin;
   - the rollout page and contact entry.
-- **The rollout runbook.** Each step starts only when its gates in §3 ("Order of the gates") are met: Emma after G3–G6, G9, G8a, G2 and G1 or a cleared carve-out; wave 1 after all nine gates and G7.
+- **The rollout runbook.** Each step starts only when its gates in §3 ("Order of the gates") are met: the pilot manager after G3–G6, G9, G8a, G2 and G1 or a cleared carve-out; wave 1 after all nine gates and G7.
   1. turn on for MoSa's;
-  2. invite Emma, Sara and Mo to the client portal (if not already done);
-  3. Emma first, then Sara and Mo (wave 0);
+  2. invite the three client admins to the client portal (if not already done);
+  3. pilot manager first, then the two owners (wave 0);
   4. one full pay period with the three admins;
   5. MoSa's enters contact details and invites everyone else, or a group it picks (wave 1).
 - **Rollback:** switch off for MoSa's. Links and records stay. The API returns its usual 404, and the app shows "The employee app isn't available right now".
@@ -529,7 +525,7 @@ Each slice is one pull request unless it says otherwise. Every slice merges to `
   - bind an employee identity (activation or claim);
   - submit payroll-sensitive changes, such as pay rate, W-4 or SSN.
 
-  These show "Only Emma can do this."
+  These show "Only Elena Mercer can do this."
 - **Code shape:** one central check with an allowlist of actions permitted while acting, wired into both base controllers. New write endpoints are denied by default. A spec fails if a write endpoint isn't classified, and it runs with `APP_PROCESS_ROLE=all` so every route is checked. `AuditLog.record!` stamps the staff member as the actor and the user plus the grant as on-behalf-of (M4-9).
 - **Legal:** a question for counsel on acting for users (consent, notice, attribution), and wording for the client agreement and privacy notice.
 - **Tests:**
@@ -563,8 +559,8 @@ Then:
 
 Then:
   M4-11 security verification
-  G3, G4, G5, G6, G9 → M4-12 internal check (G8a) → G2 + (G1 or cleared carve-out) → Emma (wave 0, G8b)
-    → Sara and Mo (wave 0) → one pay period → all gates G1–G9 + G7 → wave 1 (everyone else)
+  G3, G4, G5, G6, G9 → M4-12 internal check (G8a) → G2 + (G1 or cleared carve-out) → Pilot manager (wave 0, G8b)
+    → Owners (wave 0) → one pay period → all gates G1–G9 + G7 → wave 1 (everyone else)
 
 After wave 1:
   M4-13 full Sign in as                   (after M4-9; wording after G1)
@@ -598,10 +594,10 @@ After wave 1:
 | **The 2026 W-2 in the app is wrong** | Posted before the filing record is final, or a correction is needed with no W-2c. | Only when it would print as final for staff (current readiness record plus the filing-responsibility gate). Staff can withdraw a posted copy. W-2c is a follow-up before electronic-only delivery. |
 | **Year-end is delayed** | M4 work competes with the January deadlines. | Milestone 1 keeps priority. M4 slices merge switched off. |
 | **Sign in as is misused** | A staff member views or acts for someone without a reason. | View-only first. A separate permission held by two people, plus step-up, a reason, a time limit, a banner, and an audit the client can see. The full mode has a default-deny allowlist and never covers legal acts (M4-13). |
-| **An admin approves their own change** | Emma is both a MoSa's admin and an employee. | No self-approval (M4-7). |
+| **An admin approves their own change** | The pilot manager is both a MoSa's admin and an employee. | No self-approval (M4-7). |
 | **QuickBooks PDFs expose too much or reach the wrong person** | An original stub prints a full SSN, or a page is matched to the wrong employee. | SSN check before posting, staff-reviewed matches only, and unmatched pages stay unposted (M4-4). |
 | **Clearing the shared inbox breaks something** | Leon confirmed nothing depends on it, but matching code reads the field. | Specs on every reader (M4-3), a report first, then clearing company by company with an audit. |
-| **The client is the first to hit a bug** | There's no staging round, and Emma is the first real user. | Local, CI and Clerk test-app runs, view-only checks in production, and the team's own sign-up before Emma (D10c). |
+| **The client is the first to hit a bug** | There's no staging round, and the pilot manager is the first real user. | Local, CI and Clerk test-app runs, view-only checks in production, and the team's own sign-up first (D10c). |
 
 ---
 
@@ -623,12 +619,12 @@ Milestone 4 is done when:
 
 1. Every slice above is merged and deployed, switched off by default.
 2. Gates G1–G9 are met and recorded.
-3. Leon, Dafne, Mark and Benjo have signed off (G8), and Emma has completed her acceptance.
+3. Leon, Dafne, Mark and Benjo have signed off (G8), and the pilot manager has completed acceptance.
 4. MoSa's wave 1 (everyone) has used the app for one full pay period, with these confirmed:
    - no cross-employee access in the audit;
    - no change in how pay is run;
    - stubs in the app match the printed stubs.
-5. Emma, Sara and Mo have used the rollout page and request list as admins.
+5. The three client admins have used the rollout page and request list as admins.
 
 ---
 
@@ -684,10 +680,10 @@ Leon's priority for this milestone is that the app is clean, welcoming and easy 
 - **Blockers:**
   - View-only Sign in as had no rendering path or enforcement design. GET requests write activity and audit rows, the employee base controller doesn't inherit `ApplicationController`, employees who haven't signed up have no link, there were no target limits, and there was no client log endpoint (M4-9).
   - The client approval path would have let a client approve payroll-sensitive change requests. It's now limited to employee-submitted address requests (M4-7).
-  - Blocking every login email would have blocked dual-role people like Emma. It now blocks only another person's login (M4-3).
+  - Blocking every login email would have blocked dual-role client admins/employees. It now blocks only another person's login (M4-3).
 - **Highs:**
-  - Emma and Benjo both use the claim path, so a brand-new sign-up is now tested on company 1, and a company 1 subdomain is added (D10, M4-10, M4-12).
-  - The gate order contradicted itself, and Emma needs the WISP (§0, §3, §5).
+  - The pilot manager and Benjo both use the claim path, so a brand-new sign-up is now tested on company 1, and a company 1 subdomain is added (D10, M4-10, M4-12).
+  - The gate order contradicted itself, and the pilot manager needs the WISP (§0, §3, §5).
   - There were more readers and writers of `employees.email`, including the time-tracking email matcher (M4-3).
   - The notification audiences and client change-request routes and scoping needed new wiring (M4-7).
   - Full Sign in as needed one company per grant, more forbidden actions, and attribution in `AuditLog.record!` (M4-13).
@@ -700,11 +696,11 @@ Leon's priority for this milestone is that the app is clean, welcoming and easy 
 
 **Leon's answers (November 24, after round 2):**
 
-- Decided: D1 (MoSa's admins enter contacts and invite, with Emma first), D4 (MoSa's approves addresses and Cornerstone confirms), D6 (show January–August with the original QuickBooks PDFs), D8, D9 and D10 (no staging, and view-only Sign in as).
+- Decided: D1 (MoSa's admins enter contacts and invite, with the pilot manager first), D4 (MoSa's approves addresses and Cornerstone confirms), D6 (show January–August with the original QuickBooks PDFs), D8, D9 and D10 (no staging, and view-only Sign in as).
 - The shared inbox is a mistake to fix (M4-3).
 - The full Sign in as is planned in M4-13.
-- A read-only production check confirmed Emma's record and the shared inbox's reach (§2).
-- Later the same day: the team signs up first, before Emma (D10c); nothing depends on the shared inbox; the QuickBooks PDFs are one per check. Leon approved the plan.
+- A read-only production check confirmed the pilot manager's record and the shared inbox's reach (§2).
+- Later the same day: the team signs up first, before the pilot manager (D10c); nothing depends on the shared inbox; the QuickBooks PDFs are one per check. Leon approved the plan.
 
 **Round 2 (Gemini 4 Neon, high, re-check of `cac49720`): "ready with fixes."**
 

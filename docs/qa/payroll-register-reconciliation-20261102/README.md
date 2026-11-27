@@ -26,9 +26,9 @@ Cornerstone accountants use the payroll register to reconcile each paycheck and 
 
 ## Acceptance and evidence
 
-Agent-executed affected-flow QA uses synthetic data only, on disposable local databases. Required cases: 3% Roth-rate employee ($28.80), Roth catch-up ($1,500.00 after the $24,500 traditional limit), $500.00 field retirement with employer match and a saved mirror, $20 non-taxable addition, ordinary employee, mixed-source fractional reimbursements, and a deliberately broken one-cent row. Tests verify emitted PDF cells and XLSX cells as well as the JSON data used by the screen. Employer match must never reduce net.
+Agent-executed affected-flow QA uses synthetic data only, on disposable local databases. Required cases: 3% Roth-rate employee ($30.00), Roth catch-up ($600.00 after the $24,500 traditional limit), $500.00 field retirement with employer match and a saved mirror, $20 non-taxable addition, ordinary employee, mixed-source fractional reimbursements, and a deliberately broken one-cent row. Tests verify emitted PDF cells and XLSX cells as well as the JSON data used by the screen. Employer match must never reduce net.
 
-Baseline and after images below were rendered from the same synthetic saved amounts. The baseline reproduces all-zero retirement rows with a $1,245.15 footer. After shows $500.00 traditional and $1,245.15 Roth, with a matching $20 non-taxable addition. Both versions fit landscape letter. The synthetic five-worker register remains four pages; no production names or data appear in these images.
+Baseline and after images below were rendered from synthetic saved amounts. Both versions fit landscape letter. The synthetic five-worker register remains four pages; no production names or data appear in these images.
 
 ![Before: employee retirement missing while footer includes Roth](before-register.png)
 

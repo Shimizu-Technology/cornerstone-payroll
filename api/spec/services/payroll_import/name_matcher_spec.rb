@@ -9,14 +9,14 @@ RSpec.describe PayrollImport::NameMatcher do
 
   let(:employees) do
     [
-      StubEmployee.new(1, "Vincent",   "Caldera",   "Victor Caldera"),
+      StubEmployee.new(1, "Victor",    "Caldera",   "Victor Caldera"),
       StubEmployee.new(2, "Zachary",   "Bennett",   "Zachary Bennett"),
-      StubEmployee.new(3, "Calra",     "Arthur",    "Calra Benson"),
-      StubEmployee.new(4, "Kyle",      "Richard",   "Kevin Mercer"),
-      StubEmployee.new(5, "Jayden",    "Solberg",   "Jordan Solberg"),
-      StubEmployee.new(6, "Maria",     "Robert",    "Maya Morales"),
-      StubEmployee.new(7, "Natalie",   "Thomas",    "Naomi Alvarez"),
-      StubEmployee.new(8, "George",    "Novak",     "Graham Novak"),
+      StubEmployee.new(3, "Calra",     "Benson",    "Calra Benson"),
+      StubEmployee.new(4, "Kevin",     "Mercer",    "Kevin Mercer"),
+      StubEmployee.new(5, "Jordan",    "Solberg",   "Jordan Solberg"),
+      StubEmployee.new(6, "Maya",      "Morales",   "Maya Morales"),
+      StubEmployee.new(7, "Naomi",     "Alvarez",   "Naomi Alvarez"),
+      StubEmployee.new(8, "Graham",    "Novak",     "Graham Novak"),
       StubEmployee.new(9, "Riley",     "Marlowe",   "Riley Marlowe")
     ]
   end
@@ -59,7 +59,7 @@ RSpec.describe PayrollImport::NameMatcher do
   # ── First-name alias matching ──────────────────────────────────────────────
 
   describe "FIRST_NAME_ALIASES" do
-    it "matches 'Kyle A.' alias → Kevin Mercer (employee)" do
+    it "matches 'Kevin A.' alias → Kevin Mercer (employee)" do
       result = matcher.match_pdf_name("Mercer, Kevin A.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(4)
@@ -71,14 +71,14 @@ RSpec.describe PayrollImport::NameMatcher do
       expect(result[:employee_id]).to eq(4)
     end
 
-    it "matches 'Jayden M.' alias → Jordan Solberg" do
+    it "matches 'Jordan M.' alias → Jordan Solberg" do
       result = matcher.match_pdf_name("Solberg, Jordan M.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(5)
     end
 
-    it "matches 'Maya Carmen' alias → Maya Morales" do
-      result = matcher.match_pdf_name("Morales, Maya Carmen")
+    it "matches 'Maya Cristina' alias → Maya Morales" do
+      result = matcher.match_pdf_name("Morales, Maya Cristina")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(6)
     end
@@ -94,8 +94,8 @@ RSpec.describe PayrollImport::NameMatcher do
     end
 
     it "matches transposed first name 'Benson, Calra R.' → Clara Benson" do
-      julie_employees = [ StubEmployee.new(10, "Julie", "Arthur", "Clara Benson") ]
-      transposition_matcher = described_class.new(julie_employees)
+      clara_employees = [ StubEmployee.new(10, "Clara", "Benson", "Clara Benson") ]
+      transposition_matcher = described_class.new(clara_employees)
       result = transposition_matcher.match_pdf_name("Benson, Calra R.")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(10)
@@ -127,7 +127,7 @@ RSpec.describe PayrollImport::NameMatcher do
     end
 
     it "handles extra whitespace" do
-      result = matcher.match_excel_name("  Novak  ", "  George  ")
+      result = matcher.match_excel_name("  Novak  ", "  Graham  ")
       expect(result).not_to be_nil
       expect(result[:employee_id]).to eq(8)
     end
@@ -190,7 +190,7 @@ RSpec.describe PayrollImport::NameMatcher do
     end
 
     it "counts a transposition as 1 edit" do
-      expect(matcher.send(:dld, "calra", "julie")).to eq(1)
+      expect(matcher.send(:dld, "calra", "clara")).to eq(1)
     end
 
     it "returns 1 for single substitution" do
