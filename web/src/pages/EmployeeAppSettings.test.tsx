@@ -278,4 +278,28 @@ describe('EmployeeAppSettings', () => {
     expect(screen.getByRole('img', { name: /Help screen on a desktop/ })).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Home Screen icon labeled Example Grill' })).toBeTruthy();
   });
+
+  it('colors the Home Screen icon preview with the brand color and explains non-square logo behavior', async () => {
+    mocks.get.mockResolvedValue({
+      data: settings({
+        branding: {
+          ...settings().branding,
+          primary_color: '#1F4E5F',
+          external_logo_url: 'https://images.example.test/wide-logo.png',
+        },
+      }),
+    });
+    renderPage();
+    await screen.findByText('Help contacts not set up');
+
+    const logoImg = await screen.findByAltText('Example Grill LLC logo') as HTMLImageElement;
+    Object.defineProperty(logoImg, 'naturalWidth', { value: 600 });
+    Object.defineProperty(logoImg, 'naturalHeight', { value: 300 });
+    fireEvent.load(logoImg);
+
+    expect(screen.getByText(/while the Home Screen icon uses your initial instead/)).toBeTruthy();
+    const iconTile = screen.getByRole('img', { name: 'Home Screen icon labeled Example Grill LLC' }).querySelector('span');
+    expect(iconTile?.style.background).toBe('rgb(31, 78, 95)');
+    expect(iconTile?.style.color).toBe('rgb(255, 255, 255)');
+  });
 });

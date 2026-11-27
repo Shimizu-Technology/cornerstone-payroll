@@ -242,24 +242,56 @@ function InviteWave({ rollout, companyId, companyName, audience, recordPath, ref
             {matches.length === 0 ? (
               <p className="text-sm text-neutral-600">{query ? 'No matching employees.' : 'No employees ready for this delivery method.'}</p>
             ) : (
-              <ul className="max-h-72 divide-y divide-neutral-100 overflow-auto rounded-xl border border-neutral-200">
-                {matches.map((employee) => {
-                  const checked = selected.includes(employee.id);
-                  return (
-                    <li key={employee.id}>
-                      <label className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2 text-sm has-checked:bg-primary-50">
-                        <input type="checkbox" className="accent-primary-700" checked={checked}
-                          disabled={busy || (!checked && selectedIds.length >= rollout.max_wave_size)}
-                          onChange={() => setSelected((previous) => checked ? previous.filter((id) => id !== employee.id) : [...previous, employee.id])} />
-                        <span className="min-w-0 [overflow-wrap:anywhere]">
-                          <strong>{employee.name}</strong>
-                          {delivery === 'email' && <span className="block text-neutral-600">{employee.email}</span>}
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="space-y-2">
+                {audience !== 'admin' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || matches.every((employee) => selectedIds.includes(employee.id)) || selectedIds.length >= rollout.max_wave_size}
+                        onClick={() => {
+                          setSelected((previous) => {
+                            const currentValid = previous.filter((id) => eligible.some((candidate) => candidate.id === id));
+                            const next = [...currentValid];
+                            for (const employee of matches) {
+                              if (next.length >= rollout.max_wave_size) break;
+                              if (!next.includes(employee.id)) next.push(employee.id);
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        Select all ready ({Math.min(matches.length, rollout.max_wave_size)})
+                      </Button>
+                      {selectedIds.length > 0 && (
+                        <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => setSelected([])}>
+                          Clear selection
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <ul className="max-h-72 divide-y divide-neutral-100 overflow-auto rounded-xl border border-neutral-200">
+                  {matches.map((employee) => {
+                    const checked = selected.includes(employee.id);
+                    return (
+                      <li key={employee.id}>
+                        <label className="flex min-h-11 cursor-pointer items-center gap-3 px-3 py-2 text-sm has-checked:bg-primary-50">
+                          <input type="checkbox" className="accent-primary-700" checked={checked}
+                            disabled={busy || (!checked && selectedIds.length >= rollout.max_wave_size)}
+                            onChange={() => setSelected((previous) => checked ? previous.filter((id) => id !== employee.id) : [...previous, employee.id])} />
+                          <span className="min-w-0 [overflow-wrap:anywhere]">
+                            <strong>{employee.name}</strong>
+                            {delivery === 'email' && <span className="block text-neutral-600">{employee.email}</span>}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             )}
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" disabled={selectedIds.length === 0} loading={busy}>{delivery === 'email' ? 'Send email invites' : 'Create printed codes'}</Button>

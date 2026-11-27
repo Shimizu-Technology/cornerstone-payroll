@@ -119,9 +119,9 @@ function TermsCheckbox({ terms, loadFailed, reload, checked, onChange, error }: 
         <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} aria-invalid={error ? true : undefined} aria-describedby={error ? 'emp-terms-error' : undefined} />
         <span>
           I agree to the{' '}
-          <a className="emp-link-inline" href={terms.termsUrl} target="_blank" rel="noreferrer">{terms.title}</a>
+          <a className="emp-link-inline inline-flex min-h-11 items-center" href={terms.termsUrl} target="_blank" rel="noreferrer">{terms.title}</a>
           {' '}and{' '}
-          <a className="emp-link-inline" href={terms.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a>.
+          <a className="emp-link-inline inline-flex min-h-11 items-center" href={terms.privacyUrl} target="_blank" rel="noreferrer">Privacy Notice</a>.
         </span>
       </label>
       {error && <p id="emp-terms-error" className="emp-field-error">{error}</p>}
@@ -152,7 +152,7 @@ function NoMatchMessage(): ReactElement {
   );
 }
 
-type Failure = 'no_match' | 'rate_limited' | 'offline' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated'
+type Failure = 'no_match' | 'rate_limited' | 'offline' | 'network' | 'server' | 'cancelled' | 'mfa_setup' | 'mfa_required' | 'signed_out' | 'terms_updated'
   | 'email_mismatch' | 'code_retired';
 
 function failureOf(error: unknown): Failure {
@@ -170,6 +170,7 @@ function failureOf(error: unknown): Failure {
     case 'mfa_required': return 'mfa_required';
     case 'rate_limited': return 'rate_limited';
     case 'offline': return 'offline';
+    case 'network': return 'network';
     default: return 'server';
   }
 }
@@ -216,21 +217,29 @@ function FailureMessage({ failure, cancelledText, retryAfterSeconds }: { failure
   if (failure === 'rate_limited') return <FormMessage tone="bad">{rateLimitedText(retryAfterSeconds)}</FormMessage>;
   if (failure === 'terms_updated') return <FormMessage tone="bad">The terms were updated. Please review them again.</FormMessage>;
   if (failure === 'offline') return <FormMessage tone="bad">You're offline. Connect to Wi-Fi or data, then try again.</FormMessage>;
+  if (failure === 'network') return <FormMessage tone="bad">We couldn't reach the server. Check your Wi-Fi or signal, then try again.</FormMessage>;
   return <FormMessage tone="bad">Something went wrong on our end. Try again in a minute.</FormMessage>;
 }
 
 // ---------- Frame ----------
 
-/** Back leaves sign-up, so it also drops the invite token kept for this tab. */
-function AuthFrame({ back, children }: { back: string; children: ReactNode }): ReactElement {
+/** Back leaves sign-up (dropping the invite token) unless `onBack` steps within the flow. */
+function AuthFrame({ back, onBack, children }: { back?: string; onBack?: () => void; children: ReactNode }): ReactElement {
   const brand = useBrand();
   return (
     <main className="emp-auth emp-auth-top">
       <div className="emp-auth-bar">
-        <Link to={back} className="emp-back" onClick={forgetInviteToken}>
-          <ChevronLeft aria-hidden="true" className="size-[26px]" />
-          Back
-        </Link>
+        {onBack ? (
+          <button type="button" className="emp-back" onClick={onBack}>
+            <ChevronLeft aria-hidden="true" className="size-[26px]" />
+            Back
+          </button>
+        ) : (
+          <Link to={back ?? '/'} className="emp-back" onClick={forgetInviteToken}>
+            <ChevronLeft aria-hidden="true" className="size-[26px]" />
+            Back
+          </Link>
+        )}
         <span className="flex min-w-0 items-center gap-2">
           <BrandMark />
           <span className="min-w-0 break-words font-display text-[1.06rem] font-bold leading-tight">{brand.name}</span>
@@ -341,7 +350,7 @@ export function ActivateScreen(): ReactElement {
 
   if (step === 'email' && check) {
     return (
-      <AuthFrame back="/">
+      <AuthFrame onBack={() => { setStep('details'); setFailure(null); }}>
         <form className="emp-form emp-auth-form" onSubmit={(event) => { void submit(event); }} noValidate>
           <div className="space-y-2">
             <p className="emp-step">Step 2 of 2</p>
@@ -373,7 +382,7 @@ export function ActivateScreen(): ReactElement {
           <FailureMessage failure={failure} retryAfterSeconds={retryAfterSeconds} />
           <EmpButton type="submit" block disabled={working || !terms} aria-busy={working}>{working ? 'Opening…' : 'Create account'}</EmpButton>
           <p className="emp-hint text-center">Next you'll choose a password, or use Google or an emailed code.</p>
-          <EmpButton variant="quiet" block onClick={() => { setStep('details'); setFailure(null); }}>Back to step 1</EmpButton>
+          <Link to="/" className="emp-btn emp-btn-quiet emp-btn-block" onClick={forgetInviteToken}>Cancel setup</Link>
         </form>
       </AuthFrame>
     );
@@ -437,7 +446,7 @@ export function FinishSignUpScreen(): ReactElement {
     }, (error: unknown) => {
       if (!current) return;
       const failure = failureOf(error);
-      setFailed(failure === 'offline' || failure === 'rate_limited' || failure === 'mfa_setup' || failure === 'mfa_required' ? failure : 'server');
+      setFailed(failure === 'offline' || failure === 'network' || failure === 'rate_limited' || failure === 'mfa_setup' || failure === 'mfa_required' ? failure : 'server');
     });
     return () => { current = false; };
   }, [api, attempt, navigate]);

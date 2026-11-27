@@ -30,6 +30,8 @@ export function consentErrorMessage(error: unknown, fallback: string): string {
         return 'Your electronic consent is already on. To switch back to paper, use My info.';
       case 'offline':
         return "You're offline. Connect to Wi-Fi or data, then try again.";
+      case 'network':
+        return "We couldn't reach the server. Check your Wi-Fi or signal, then try again.";
       case 'rate_limited':
         return 'Too many tries. Wait a minute, then try again.';
       default:

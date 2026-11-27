@@ -46,7 +46,9 @@ describe('Employee app rollout', () => {
     expect(screen.queryByRole('radio', { name: 'Printed code' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Create printed codes' })).toBeNull();
     await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
-    expect(screen.queryByRole('button', { name: /Select all matches|Select up to|Clear selection/ })).toBeNull();
+    // Clients get their own "Select all ready" control; the staff-only bulk controls stay hidden.
+    expect(screen.queryByRole('button', { name: /Select all matches|Select up to/ })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Clear selection' })).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Send email invites' }));
     expect(mocks.post).toHaveBeenCalledWith('/client/employee_app_rollout/7/invite',
       { employee_ids: [21], delivery: 'email' }, { companyId: 7 });
@@ -206,5 +208,48 @@ describe('Employee app rollout', () => {
     expect(summary?.className).toContain('min-h-11');
     expect(summary?.className.split(/\s+/)).not.toContain('flex');
     expect(label.className).toContain('inline-flex');
+  });
+
+  it('supports Select all ready and Clear selection in Invite a group for the client audience up to max_wave_size', async () => {
+    mocks.get.mockResolvedValue({ data: {
+      ...rollout,
+      max_wave_size: 2,
+      counts: { ...rollout.counts, ready_to_invite: 3 },
+      candidates: [
+        ...rollout.candidates,
+        { id: 23, name: 'Sample Three', email: 'three@example.test', email_ready: true, email_review_required: false },
+      ],
+    } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
+
+    const selectAll = await screen.findByRole('button', { name: 'Select all ready (2)' });
+    expect(screen.queryByRole('button', { name: /Select all matches|Select up to/ })).toBeNull();
+    await user.click(selectAll);
+    expect(screen.getByText('2 selected')).toBeTruthy();
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
+    expect((screen.getByRole('checkbox', { name: /Sample One/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /Sample Two/ }) as HTMLInputElement).checked).toBe(true);
+    const thirdCheckbox = screen.getByRole('checkbox', { name: /Sample Three/ }) as HTMLInputElement;
+    expect(thirdCheckbox.checked).toBe(false);
+    expect(thirdCheckbox.disabled).toBe(true);
+    expect(screen.getAllByRole('button', { name: 'Clear selection' })).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+    expect(screen.getByText('0 selected')).toBeTruthy();
+    expect(thirdCheckbox.disabled).toBe(false);
+  });
+
+  it('does not render client bulk-selection controls for the admin audience', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, max_wave_size: 2 } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+
+    await screen.findByRole('checkbox', { name: /Sample One/ });
+    expect(screen.queryByRole('button', { name: /Select all ready/ })).toBeNull();
+    await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    // Staff keep their own bulk controls, so exactly one Clear selection shows.
+    expect(screen.getAllByRole('button', { name: 'Clear selection' })).toHaveLength(1);
   });
 });

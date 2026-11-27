@@ -1,18 +1,25 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 6, payroll_intake_source_types: mocks.enabled ? ['mosa_revel'] : [], portal_payroll_files_enabled: mocks.portalEnabled } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompany: { id: 6, payroll_intake_source_types: mocks.enabled ? mocks.sourceTypes : [], portal_payroll_files_enabled: mocks.portalEnabled } }) }));
+vi.mock('@/hooks/useClientViewOnly', () => ({ useClientViewOnly: () => mocks.viewOnly }));
 import { MemoryRouter } from 'react-router';
 import { PayrollFilesEntry } from './PayrollFilesEntry';
 import { currentSubmissionPeriod } from '@/lib/payrollSubmissionFormat';
 import type { PeriodSummary } from '@/services/payrollSubmissions';
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), enabled: true, portalEnabled: undefined as boolean | undefined }));
+const mocks = vi.hoisted(() => ({
+  list: vi.fn(),
+  enabled: true,
+  portalEnabled: undefined as boolean | undefined,
+  sourceTypes: ['mosa_revel'] as string[],
+  viewOnly: false,
+}));
 vi.mock('@/services/payrollSubmissions', async original => ({
   ...await original<typeof import('@/services/payrollSubmissions')>(),
   clientPayrollSubmissionsApi: { list: mocks.list },
 }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.enabled = true; mocks.portalEnabled = undefined; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); mocks.enabled = true; mocks.portalEnabled = undefined; mocks.sourceTypes = ['mosa_revel']; mocks.viewOnly = false; });
 
 const period = (overrides: Partial<PeriodSummary>): PeriodSummary => ({
   ref: '2026-10-19_2026-11-01', id: null, start_date: '2026-10-19', end_date: '2026-11-01', label: 'Oct 19 – Nov 1, 2026', pay_date: '2026-11-05',
@@ -98,4 +105,22 @@ it('shows the card when a non-MoSa descriptor enables portal payroll files', asy
   mocks.list.mockResolvedValue({ data: [period({})], meta: { derives_from_schedule: true } });
   renderEntry();
   expect(await screen.findByRole('link', { name: 'Send payroll files' })).toBeTruthy();
+});
+
+it('uses intake-profile wording instead of Revel for workbook clients', async () => {
+  mocks.sourceTypes = ['cornerstone_workbook'];
+  mocks.list.mockResolvedValue({ data: [period({})], meta: { derives_from_schedule: true } });
+  renderEntry();
+  expect(await screen.findByText(/your hours workbook and report changes/)).toBeTruthy();
+  expect(screen.queryByText(/Revel/)).toBeNull();
+});
+
+it('gives view-only users a neutral View pay period files card with no Send button', async () => {
+  mocks.viewOnly = true;
+  mocks.sourceTypes = ['cornerstone_workbook'];
+  mocks.list.mockResolvedValue({ data: [period({})], meta: { derives_from_schedule: true } });
+  renderEntry();
+  expect(await screen.findByRole('heading', { name: 'View pay period files' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'View pay period files' }).getAttribute('href')).toBe('/payroll-files/2026-10-19_2026-11-01');
+  expect(screen.queryByRole('link', { name: /Send payroll files/ })).toBeNull();
 });

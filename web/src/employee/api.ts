@@ -22,7 +22,7 @@ import {
  * - mfa_required: 403, this session didn't finish two-step sign-in.
  */
 export type EmployeeApiErrorKind =
-  | 'not_found' | 'resource_not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'server' | 'invalid' | 'conflict'
+  | 'not_found' | 'resource_not_found' | 'unauthorized' | 'rate_limited' | 'offline' | 'network' | 'server' | 'invalid' | 'conflict'
   | 'mfa_enrollment_required' | 'mfa_required'
   | 'email_code_daily_limit' | 'emergency_contact_limit' | 'personal_email_required' | 'address_on_file_changed'
   | 'access_proof_invalid' | 'disclosure_outdated' | 'no_active_consent' | 'consent_active' | 'terms_updated'
@@ -236,13 +236,19 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
   const base = parseApiBase(baseUrl);
   const contextUrl = employeeUrl(base, '/employee/context');
 
+  function isTokenNetworkError(error: unknown): boolean {
+    if (error instanceof TypeError) return true;
+    return error instanceof Error && /offline|network|failed to fetch/i.test(`${error.name} ${error.message}`);
+  }
+
   async function sessionToken(fresh = false): Promise<string> {
     let token: string | null;
     try {
       token = await getToken(fresh ? { fresh } : undefined);
-    } catch {
+    } catch (error) {
       // Clerk rejects (ClerkOfflineError) when the connection drops mid-refresh.
-      throw new EmployeeApiError(isOnline() ? 'server' : 'offline');
+      if (!isOnline()) throw new EmployeeApiError('offline');
+      throw new EmployeeApiError(isTokenNetworkError(error) ? 'network' : 'server');
     }
     if (!token) throw new EmployeeApiError('unauthorized');
     return token;
@@ -272,7 +278,8 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new EmployeeApiError(isOnline() ? 'server' : 'offline');
+      if (!isOnline()) throw new EmployeeApiError('offline');
+      throw new EmployeeApiError(error instanceof TypeError ? 'network' : 'server');
     }
 
     if (!response.ok) {
@@ -451,7 +458,7 @@ export function createEmployeeApi({ baseUrl, getToken, grantToken, fetchImpl = (
 export type EmployeeApi = ReturnType<typeof createEmployeeApi>;
 
 /** What the signed-in shell shows when it can't open the employee's pay. */
-export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'error' | 'mfa_setup' | 'mfa_required';
+export type EmployeeProblem = 'unavailable' | 'ended' | 'signed_out' | 'rate_limited' | 'offline' | 'network' | 'error' | 'mfa_setup' | 'mfa_required';
 
 /**
  * A failed link check means "isn't available" during setup and "access ended"
@@ -466,6 +473,7 @@ export function problemFor(error: unknown, { opened }: { opened: boolean }): Emp
     case 'mfa_required': return 'mfa_required';
     case 'rate_limited': return 'rate_limited';
     case 'offline': return 'offline';
+    case 'network': return 'network';
     default: return 'error';
   }
 }

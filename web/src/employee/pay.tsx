@@ -34,7 +34,7 @@ function Money({ value, fallback = '—' }: { value: string | null | undefined; 
 
 // ---------- Data ----------
 
-type MoreState = 'idle' | 'working' | 'failed' | 'offline';
+type MoreState = 'idle' | 'working' | 'failed' | 'offline' | 'network';
 
 interface Statements {
   state: DataState<StatementPage>;
@@ -73,7 +73,12 @@ function useStatements(year: number | null): Statements {
       setMore({ year, state: 'idle' });
     }, (error: unknown) => {
       if (isSessionError(error)) reportError(error);
-      else setMore({ year, state: error instanceof EmployeeApiError && error.kind === 'offline' ? 'offline' : 'failed' });
+      else {
+        const nextMore = error instanceof EmployeeApiError && error.kind === 'offline' ? 'offline'
+          : error instanceof EmployeeApiError && error.kind === 'network' ? 'network'
+            : 'failed';
+        setMore({ year, state: nextMore });
+      }
     });
   } : null;
   return { state, reload, more: moreState, showMore };
@@ -310,24 +315,24 @@ export function HomeTab(): ReactElement {
       {stubsOn ? <HomeWithPay /> : (
         <div className="emp-home-grid">
           <div className="emp-column">
-            <Card title="Latest pay">
+            <Card title="Latest pay" className="emp-home-latest">
               <Placeholder icon={House} title="Your latest pay will show here">
                 <p>You'll see your take-home pay and your pay stub here as soon as they're added.</p>
               </Placeholder>
             </Card>
-            <Card title="Recent pay">
+            <Card title="Recent pay" className="emp-home-recent">
               <Placeholder icon={Banknote} title="Your recent paychecks will show here">
                 <p>Each one links to its pay stub.</p>
               </Placeholder>
             </Card>
           </div>
-          <div className="emp-column emp-wide-only">
-            <Card title="This year so far">
+          <div className="emp-column">
+            <Card title="This year so far" className="emp-home-ytd">
               <Placeholder icon={CalendarDays} title="Your totals for the year will show here">
                 <p>Take-home pay and pay before taxes, added up.</p>
               </Placeholder>
             </Card>
-            <QuestionsCard />
+            <div className="emp-wide-only"><QuestionsCard /></div>
           </div>
         </div>
       )}
@@ -349,11 +354,11 @@ function HomeWithPay(): ReactElement {
   return (
     <div className="emp-home-grid">
       <div className="emp-column">
-        <Card title="Latest pay" action={latestActive ? <HideAmountsToggle /> : undefined}>
+        <Card title="Latest pay" className="emp-home-latest" action={latestActive ? <HideAmountsToggle /> : undefined}>
           {body((check) => <LatestPay statement={check} statements={statements} />, <NoPayYet />)}
         </Card>
         {(state.status !== 'ready' || recent.length > 0) && (
-          <Card title="Recent pay">
+          <Card title="Recent pay" className="emp-home-recent">
             {body(() => (
               <div className="space-y-2">
                 <StatementList statements={recent} linkTo={(s) => `/pay/${s.id}`} />
@@ -363,11 +368,11 @@ function HomeWithPay(): ReactElement {
           </Card>
         )}
       </div>
-      <div className="emp-column emp-wide-only">
-        <Card title="This year so far">
+      <div className="emp-column">
+        <Card title="This year so far" className="emp-home-ytd">
           {body(() => latestActive ? <YearSoFar latest={latestActive} /> : <p className="text-neutral-600">Your totals will show here after your next active payday.</p>, <p className="text-neutral-600">Your totals will show here after your first payday.</p>)}
         </Card>
-        <QuestionsCard />
+        <div className="emp-wide-only"><QuestionsCard /></div>
       </div>
     </div>
   );
@@ -414,6 +419,7 @@ function PayHistory({ selectedId, linkTo, year, onYear }: { selectedId?: string 
             )}
             {more === 'failed' && <p className="emp-field-error" role="alert">Couldn't load more pay stubs. Try again.</p>}
             {more === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to load more pay stubs.</p>}
+            {more === 'network' && <p className="emp-field-error" role="alert">We couldn't reach the server. Check your Wi-Fi or signal.</p>}
           </>
         ))}
     </div>
@@ -576,6 +582,7 @@ function StubPdfButton({ id, filename, label }: { id: string; filename: string; 
       </EmpButton>
       {state === 'failed' && <p className="emp-field-error" role="alert">Couldn't download the PDF. Try again.</p>}
       {state === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to download the PDF.</p>}
+      {state === 'network' && <p className="emp-field-error" role="alert">We couldn't reach the server. Check your Wi-Fi or signal.</p>}
     </div>
   );
 }

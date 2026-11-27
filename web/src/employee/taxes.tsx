@@ -63,6 +63,7 @@ function W2Card({ form }: { form: TaxForm }): ReactElement {
             </EmpButton>
             {state === 'failed' && <p className="emp-field-error" role="alert">Couldn't download the form. Try again.</p>}
             {state === 'offline' && <p className="emp-field-error" role="alert">You're offline. Connect to download the form.</p>}
+            {state === 'network' && <p className="emp-field-error" role="alert">We couldn't reach the server. Check your Wi-Fi or signal.</p>}
           </>
         )}
         <PaperCopyLine />

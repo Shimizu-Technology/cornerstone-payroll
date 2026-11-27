@@ -19,7 +19,7 @@ export function savePdf(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
-export type DownloadState = 'idle' | 'working' | 'failed' | 'offline';
+export type DownloadState = 'idle' | 'working' | 'failed' | 'offline' | 'network';
 
 /**
  * One download button's state: "Downloading…", then done, or a short message
@@ -39,7 +39,8 @@ export function useDownload(fetchPdf: () => Promise<Blob>, filename: string): { 
         setState('idle');
         reportError(error);
       } else {
-        setState((error as { kind?: string } | null)?.kind === 'offline' ? 'offline' : 'failed');
+        const kind = (error as { kind?: string } | null)?.kind;
+        setState(kind === 'offline' ? 'offline' : kind === 'network' ? 'network' : 'failed');
       }
     });
   }, [fetchPdf, filename, reportError]);

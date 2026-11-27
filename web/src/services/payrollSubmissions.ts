@@ -166,7 +166,7 @@ export const STATUS_STEPS: { status: SubmissionStatus; label: string }[] = [
 ];
 
 export const CHANGE_KINDS: { kind: ChangeKind; label: string; hint: string }[] = [
-  { kind: 'extra_hours', label: 'Extra or manual hours', hint: 'Hours not in the Revel report' },
+  { kind: 'extra_hours', label: 'Extra or manual hours', hint: 'Hours not in your payroll files' },
   { kind: 'owner_pay', label: 'Owner pay', hint: 'Each person’s pay for this period' },
   { kind: 'paid_leave', label: 'Paid leave', hint: 'Leave hours to add' },
   { kind: 'new_hire', label: 'New hire', hint: 'Name and starting wage' },

@@ -153,10 +153,11 @@ export function Chip({ tone = 'neutral', icon: Icon, children, ...props }: { ton
  * A data card that couldn't load: offline, too many tries, or a server error.
  * The rest of the screen keeps working, and Try again reloads just this.
  */
-export function LoadProblem({ kind, onRetry, what = 'this' }: { kind: 'offline' | 'rate_limited' | 'server'; onRetry: () => void; what?: string }): ReactElement {
+export function LoadProblem({ kind, onRetry, what = 'this' }: { kind: 'offline' | 'network' | 'rate_limited' | 'server'; onRetry: () => void; what?: string }): ReactElement {
   const message = kind === 'offline' ? `You're offline. Connect to Wi-Fi or data to see ${what}.`
-    : kind === 'rate_limited' ? 'Too many tries. Wait a minute, then try again.'
-      : `We couldn't load ${what}. Try again in a minute.`;
+    : kind === 'network' ? "We couldn't reach the server. Check your Wi-Fi or signal."
+      : kind === 'rate_limited' ? 'Too many tries. Wait a minute, then try again.'
+        : `We couldn't load ${what}. Try again in a minute.`;
   return (
     <div className="flex flex-col items-start gap-2" role="alert">
       <p className="text-neutral-700">{message}</p>

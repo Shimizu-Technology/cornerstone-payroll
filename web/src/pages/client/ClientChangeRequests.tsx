@@ -232,24 +232,27 @@ export function ClientChangeRequests() {
                   ))}
                 </div>
                 <div className="hidden lg:block">
-                <Table stickyHeader>
+                <Table stickyHeader className="[&_th]:px-3 [&_td]:px-3 [&_td]:py-3">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Employee</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Type</TableHead>
-                      <TableHead>Requested by</TableHead>
                       <TableHead>Submitted</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody striped>
                     {requests.map((request) => (
                       <TableRow key={request.id}>
-                        <TableCell className="font-medium text-gray-900"><button type="button" className="inline-flex min-h-11 items-center text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button></TableCell>
+                        <TableCell className="whitespace-normal font-medium text-gray-900">
+                          <div className="min-w-0">
+                            <button type="button" className="inline-flex min-h-11 items-center text-left text-primary-700 underline-offset-2 hover:underline focus-visible:underline" onClick={() => void loadRequest(request.id)}>{request.employee_name}</button>
+                            {request.requested_by_name && <p className="text-xs font-normal text-neutral-500">By {request.requested_by_name}</p>}
+                          </div>
+                        </TableCell>
                         <TableCell><StatusBadge status={request.status} /></TableCell>
-                        <TableCell>{requestLabel(request)}</TableCell>
-                        <TableCell>{request.requested_by_name || '—'}</TableCell>
-                        <TableCell>{formatGuamDateTime(request.created_at)}</TableCell>
+                        <TableCell className="whitespace-normal">{requestLabel(request)}</TableCell>
+                        <TableCell className="whitespace-normal text-sm text-neutral-700">{formatGuamDateTime(request.created_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

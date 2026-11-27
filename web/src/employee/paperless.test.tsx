@@ -170,10 +170,16 @@ describe('"Go paperless?" step', () => {
     expect(within(form).getByText('Electronic pay statements under Guam UETA.').closest('[hidden]')).toBeNull();
 
     const submit = within(form).getByRole('button', { name: 'Go paperless' });
-    expect((submit as HTMLButtonElement).disabled).toBe(true);
-    await userEvent.click(within(form).getByRole('checkbox', {
+    const checkbox = within(form).getByRole('checkbox', {
       name: 'I have read this disclosure and agree to electronic delivery of my pay statements.',
-    }));
+    });
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(submit);
+    expect(screen.getByRole('alert').textContent).toContain('To go paperless, check the box to agree.');
+    expect(document.activeElement).toBe(checkbox);
+    expect(posts(fetchMock)).toEqual([]);
+
+    await userEvent.click(checkbox);
     await userEvent.click(submit);
 
     const dialog = await screen.findByTestId('dev-preview-step-up');
@@ -309,7 +315,10 @@ describe('when the disclosure changes while agreeing', () => {
     const updated = await within(form).findByText('Updated wording for electronic pay statements.');
     expect(updated.closest('[hidden]')).toBeNull();
     expect((within(form).getByRole('checkbox') as HTMLInputElement).checked).toBe(false);
-    expect((within(form).getByRole('button', { name: 'Go paperless' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(form).getByRole('button', { name: 'Go paperless' }) as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.click(within(form).getByRole('button', { name: 'Go paperless' }));
+    expect(screen.getByRole('alert').textContent).toContain('To go paperless, check the box to agree.');
+    expect(bodies).toHaveLength(1);
 
     await userEvent.click(within(form).getByRole('checkbox'));
     await userEvent.click(within(form).getByRole('button', { name: 'Go paperless' }));

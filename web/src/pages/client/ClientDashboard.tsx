@@ -219,17 +219,21 @@ export function ClientDashboard(): ReactElement {
             label="Uploaded documents"
             value={loading ? '—' : String(documentCount)}
             sublabel="Stored for payroll review"
-            icon={<FileBarChart2 className="h-5 w-5" />}
+            icon={<FolderOpen className="h-5 w-5" />}
           />
           <PortalStat
             label="Recent payrolls"
             value={loading ? '—' : String(stats?.recent_payrolls?.length ?? 0)}
-            sublabel="Finalized and imported payrolls"
-            icon={<FolderOpen className="h-5 w-5" />}
+            sublabel={loading
+              ? undefined
+              : stats?.ytd_totals?.payroll_count && stats.ytd_totals.payroll_count > (stats?.recent_payrolls?.length ?? 0)
+                ? `Shown below · ${stats.ytd_totals.payroll_count} this year`
+                : 'Shown below'}
+            icon={<FileBarChart2 className="h-5 w-5" />}
           />
         </div>
 
-        <div className="grid gap-4 sm:gap-6 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:gap-6 md:grid-cols-2 lg:grid-cols-3">
           <QuickLink
             title="Employees"
             description="Add and update employee records"

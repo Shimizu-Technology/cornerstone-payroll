@@ -154,10 +154,10 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
                 {stale ? 'Updating…' : `Showing ${rows.length} ${rows.length === 1 ? 'employee' : 'employees'}`}
               </p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" loading={downloading === 'csv'} disabled={downloading !== null || stale} onClick={() => void download('csv')}>
+                <Button type="button" variant="outline" className="gap-2" loading={downloading === 'csv'} disabled={downloading !== null || stale} onClick={() => void download('csv')}>
                   <Download aria-hidden="true" className="size-4" /> CSV
                 </Button>
-                <Button type="button" variant="outline" loading={downloading === 'xlsx'} disabled={downloading !== null || stale} onClick={() => void download('xlsx')}>
+                <Button type="button" variant="outline" className="gap-2" loading={downloading === 'xlsx'} disabled={downloading !== null || stale} onClick={() => void download('xlsx')}>
                   <Download aria-hidden="true" className="size-4" /> Excel
                 </Button>
               </div>
@@ -185,7 +185,7 @@ function CompanyAppStatus({ companyId, audience }: { companyId: number; audience
               {rows.map((row) => (
                 <li key={row.id}>
                   <MobileRecordCard>
-                    <Link className="text-base font-semibold text-primary-800 underline underline-offset-2 [overflow-wrap:anywhere]" to={recordPath(row.id)}>{row.name}</Link>
+                    <Link className="inline-flex min-h-11 items-center text-base font-semibold text-primary-800 underline underline-offset-2 [overflow-wrap:anywhere]" to={recordPath(row.id)}>{row.name}</Link>
                     {(row.department || row.role) && <p className="mt-1 text-sm text-neutral-600">{[row.department?.name, row.role].filter(Boolean).join(' · ')}</p>}
                     <div className="mt-3 grid grid-cols-2 gap-3">
                       <MobileField label="App account" value={<AccountCell account={row.account} showLastOpened />} className="col-span-2" />
