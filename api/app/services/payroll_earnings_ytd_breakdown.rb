@@ -13,9 +13,10 @@ class PayrollEarningsYtdBreakdown
   end
   Component = Data.define(:label, :category, :hours, :rate, :amount)
 
-  def initialize(payroll_item, sources: nil)
+  def initialize(payroll_item, sources: nil, employee_copy: false)
     @payroll_item = payroll_item
     @sources = sources || PayrollStatementYtdSources.new(payroll_item)
+    @employee_copy = employee_copy
     @employee = payroll_item.employee
     @pay_period = payroll_item.pay_period
     @company = payroll_item.company
@@ -234,12 +235,19 @@ class PayrollEarningsYtdBreakdown
     overtime = item.overtime_hours.to_d * overtime_rate
     holiday = item.holiday_hours.to_d * rate
     pto = item.pto_hours.to_d * rate
-    regular_label = item.employee.contractor? ? "Contract Labor" : item.employee.department&.name.presence || "Regular Pay"
+    regular_label = fallback_regular_label(item.employee)
 
     components << Component.new(label: regular_label, category: "regular", hours: item.hours_worked, rate: rate, amount: regular) unless regular.zero?
     components << Component.new(label: "Overtime Pay", category: "overtime", hours: item.overtime_hours, rate: overtime_rate, amount: overtime) unless overtime.zero?
     components << Component.new(label: "Holiday Pay", category: "holiday", hours: item.holiday_hours, rate: rate, amount: holiday) unless holiday.zero?
     components << Component.new(label: "PTO Pay", category: "pto", hours: item.pto_hours, rate: rate, amount: pto) unless pto.zero?
+  end
+
+  def fallback_regular_label(employee)
+    return "Contract Labor" if employee.contractor?
+
+    label = @employee_copy ? employee.legacy_stub_regular_wage_label : employee.department&.name
+    label.presence || "Regular Pay"
   end
 
   def append_custom_components(components, item)

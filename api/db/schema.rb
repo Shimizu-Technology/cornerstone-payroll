@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_28_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_28_010100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1879,6 +1879,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_010000) do
     t.datetime "phone_confirmed_by_employee_at"
     t.string "contact_source"
     t.bigint "company_job_role_id"
+    t.string "legacy_stub_regular_wage_label"
     t.index [ "company_job_role_id" ], name: "index_employees_on_company_job_role_id"
     t.index "lower(btrim((email)::text, ' \t\n\v\f\r'::text))", name: "index_employees_on_lower_email", where: "(email IS NOT NULL)"
     t.index [ "company_id", "last_name", "first_name" ], name: "index_employees_on_company_id_and_last_name_and_first_name"

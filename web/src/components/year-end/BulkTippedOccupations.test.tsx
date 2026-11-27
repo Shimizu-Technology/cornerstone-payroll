@@ -48,10 +48,13 @@ it('submits role defaults with an employee-specific override after confirmation'
   fireEvent.click(screen.getByRole('button', { name: 'Set tipped occupation codes' }));
   fireEvent.click(await screen.findByLabelText('Select all 1 employees'));
   fireEvent.click(screen.getByLabelText("Use each employee's role code"));
+  expect(screen.getByText(/No role code/)).toBeTruthy();
+  expect(screen.getByText('Choose an override for Worker Three.')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Apply to 1 selected' }) as HTMLButtonElement).disabled).toBe(true);
   fireEvent.change(screen.getByLabelText('Override for Worker Three'), { target: { value: '000' } });
   fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 selected' }));
 
   await waitFor(() => expect(bulkSet).toHaveBeenCalledWith(7, {
-    tax_year: 2026, employee_ids: [3], use_role_code: true, overrides: { 3: '000' }, effective_from: '2026-01-01',
+    tax_year: 2026, employee_ids: [3], use_role_code: true, overrides: { 3: '000' }, expected_role_codes: {}, effective_from: '2026-01-01',
   }));
 });

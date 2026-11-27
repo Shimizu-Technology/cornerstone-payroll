@@ -777,6 +777,11 @@ RSpec.describe "Year-end checklist", type: :request do
       post path, params: input, as: :json
       expect(response).to have_http_status(:unprocessable_entity)
       expect(employee.employee_tipped_occupations).to be_empty
+      expect(response.parsed_body.fetch("error")).to include(second.full_name)
+      post path, params: input.merge(overrides: { second.id.to_s => "000" },
+        expected_role_codes: { employee.id.to_s => "000" }), as: :json
+      expect(response).to have_http_status(:unprocessable_entity)
+      expect(response.parsed_body.fetch("error")).to include("Role codes changed", employee.full_name)
 
       post path, params: input.merge(overrides: { second.id.to_s => "000" }), as: :json
       expect(response).to have_http_status(:created), response.body

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -14,6 +14,9 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
   employees: Employee[];
   onSaved: () => void;
 }) {
+  const onSavedRef = useRef(onSaved);
+  useLayoutEffect(() => { onSavedRef.current = onSaved; }, [onSaved]);
+
   const prefix = isClient ? '/client' : '/admin';
   const endpoint = `${prefix}/employee_organization`;
   const scope = { companyId };
@@ -33,8 +36,16 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
   const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id));
   const offPageCount = selected.filter((id) => !pageIds.includes(id)).length;
 
+  function receiveCatalog(catalog: Catalog) {
+    setData(catalog);
+    const activeChoice = (value: string, entries: Entry[]) =>
+      value === 'clear' || entries.some((entry) => entry.active && String(entry.id) === value) ? value : '';
+    setDepartment((value) => activeChoice(value, catalog.departments));
+    setRole((value) => activeChoice(value, catalog.roles));
+  }
+
   async function load() {
-    setData(await apiClient.get<Catalog>(endpoint, undefined, scope));
+    receiveCatalog(await apiClient.get<Catalog>(endpoint, undefined, scope));
   }
 
   async function run(action: () => Promise<void>) {
@@ -59,7 +70,7 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
 
   async function saveEntry() {
     if (kind === 'roles') {
-      setData(await apiClient.post<Catalog>(`${endpoint}/save_role`, {
+      receiveCatalog(await apiClient.post<Catalog>(`${endpoint}/save_role`, {
         id: editId || undefined, role: { name, active, occupation_code: code || null },
       }, scope));
     } else {
@@ -70,7 +81,7 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
     }
     edit('');
     setNotice('Saved.');
-    onSaved();
+    onSavedRef.current();
   }
 
   async function assign() {
@@ -84,7 +95,7 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
     setSelected([]);
     setDepartment('');
     setRole('');
-    onSaved();
+    onSavedRef.current();
   }
 
   function assignmentOptions(entries: Entry[]) {
@@ -104,8 +115,8 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
       {error && <p role="alert" className="text-sm text-danger-700">{error}</p>}
       {notice && <p role="status" className="text-sm">{notice}</p>}
       {data && (
-        <fieldset disabled={busy} className="grid gap-5 rounded-lg border p-4 lg:grid-cols-2">
-          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(assign); }}>
+        <fieldset disabled={busy} className="grid min-w-0 gap-5 rounded-lg border p-4 lg:grid-cols-2">
+          <form className="min-w-0 space-y-3" onSubmit={(event) => { event.preventDefault(); void run(assign); }}>
             <h2 className="font-semibold">Assign employees</h2>
             {pageIds.length > 0 && (
               <label className="flex min-h-9 items-center gap-2">
@@ -140,12 +151,14 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
               onChange={(event) => setRole(event.target.value)} />
             {offPageCount > 0 && <p className="text-sm">{offPageCount} selected from other pages or filters.</p>}
             {selected.length > 500 && <p className="text-sm">Select up to 500 employees per update.</p>}
-            <Button type="submit" disabled={!selected.length || selected.length > 500 || (!department && !role)}>
-              Apply to {selected.length} selected
-            </Button>
-            {selected.length > 0 && <Button type="button" variant="ghost" onClick={() => setSelected([])}>Clear selection</Button>}
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={!selected.length || selected.length > 500 || (!department && !role)}>
+                Apply to {selected.length} selected
+              </Button>
+              {selected.length > 0 && <Button type="button" variant="ghost" onClick={() => setSelected([])}>Clear selection</Button>}
+            </div>
           </form>
-          <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(saveEntry); }}>
+          <form className="min-w-0 space-y-3" onSubmit={(event) => { event.preventDefault(); void run(saveEntry); }}>
             <h2 className="font-semibold">Manage roles and departments</h2>
             <Select label="List" value={kind} options={[{ value: 'roles', label: 'Roles' }, { value: 'departments', label: 'Departments' }]}
               onChange={(event) => { setKind(event.target.value === 'roles' ? 'roles' : 'departments'); edit(''); }} />
@@ -155,7 +168,7 @@ export function EmployeeOrganizationPanel({ companyId, isClient, employees, onSa
               }))]}
               onChange={(event) => edit(event.target.value, data[kind].find((entry) => String(entry.id) === event.target.value))} />
             <Input label="Name" required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} />
-            {kind === 'roles' && <Select label="Default tipped occupation" value={code}
+            {kind === 'roles' && <Select className="min-w-0 max-w-full truncate" label="Default tipped occupation" value={code}
               options={[{ value: '', label: 'None' }, ...Object.entries(data.codes).map(([value, label]) => ({ value, label: `${value} · ${label}` }))]}
               onChange={(event) => setCode(event.target.value)} />}
             <label className="flex min-h-9 items-center gap-2">

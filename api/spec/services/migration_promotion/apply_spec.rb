@@ -207,6 +207,9 @@ RSpec.describe MigrationPromotion::Apply do
   end
 
   it "atomically replaces the empty draft, synchronizes setup, and records both payrolls without payment side effects" do
+    source_role = rehearsal.company_job_roles.create!(name: "Server", occupation_code: "102")
+    existing_role = target_company.company_job_roles.create!(name: "Server", active: false)
+    [ source_employee, new_source_employee ].each { |person| person.update!(company_job_role: source_role, job_title: source_role.name) }
     first_source_period.update_columns(rollback_review_required: true)
     expect { apply }.to change { target_company.pay_periods.committed.count }.from(0).to(2)
 
@@ -222,6 +225,9 @@ RSpec.describe MigrationPromotion::Apply do
     expect(promoted.sum { |period| period.payroll_items.sum(:net_pay) }).to eq(2_670.to_d)
 
     target_employee.reload
+    expect(existing_role.reload).to have_attributes(active: true, occupation_code: "102")
+    expect(target_employee.company_job_role).to eq(existing_role)
+    expect(target_company.employees.find_by!(first_name: "New", last_name: "Employee").company_job_role).to eq(existing_role)
     expect(target_employee).to have_attributes(first_name: "Ana", last_name: "Updated", pay_rate: 22.to_d)
     expect(target_company.employees.find_by!(first_name: "New", last_name: "Employee").pay_rate).to eq(19.to_d)
     # M3-4: the rehearsal's compensation history replaces the target's.

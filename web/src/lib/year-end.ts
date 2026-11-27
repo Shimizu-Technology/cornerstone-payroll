@@ -219,7 +219,7 @@ export interface YearEndWarning {
   period: [string | null, string | null] | null;
   /** Per-quarter specifics, for warnings that are not about employees. */
   details?: string[];
-  employees: Array<{ employee_id: number; name: string | null; edit_path: string; history_review?: { by: string; at: string } }>;
+  employees: Array<{ employee_id: number; name: string | null; edit_path: string; job_role?: { name: string | null; occupation_code: string | null }; history_review?: { by: string; at: string } }>;
   acknowledgement: {
     note: string;
     acknowledged_at: string | null;

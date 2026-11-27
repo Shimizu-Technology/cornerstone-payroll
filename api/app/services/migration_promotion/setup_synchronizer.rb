@@ -3,7 +3,7 @@
 module MigrationPromotion
   class SetupSynchronizer
     EMPLOYEE_COLUMNS_EXCLUDED = %w[
-      id company_id department_id previous_employee_id test_workspace_source_employee_id created_at updated_at
+      id company_id department_id company_job_role_id legacy_stub_regular_wage_label previous_employee_id test_workspace_source_employee_id created_at updated_at
       created_by_id email_verified_at phone_confirmed_by_employee_at
     ].freeze
     CONTACT_COLUMNS = %w[
@@ -21,7 +21,8 @@ module MigrationPromotion
     def call
       clear_replaceable_setup!
       department_map = copy_collection(rehearsal.departments, Department, company: target_company)
-      employee_map = sync_employees!(department_map)
+      role_map = sync_roles!
+      employee_map = sync_employees!(department_map, role_map)
       deduction_type_map = copy_collection(rehearsal.deduction_types, DeductionType, company: target_company)
       pay_schedule_map = copy_collection(rehearsal.company_pay_schedules, CompanyPaySchedule, company: target_company)
       workweek_map = copy_collection(rehearsal.company_workweeks, CompanyWorkweek, company: target_company)
@@ -74,13 +75,22 @@ module MigrationPromotion
       target_company.departments.delete_all
     end
 
-    def sync_employees!(department_map)
+    def sync_roles!
+      rehearsal.company_job_roles.order(:id).to_h do |source|
+        role = target_company.company_job_roles.find_or_initialize_by(name: source.name)
+        role.update!(source.slice("active", "occupation_code"))
+        [ source.id, role ]
+      end
+    end
+
+    def sync_employees!(department_map, role_map)
       employee_map = mapping.map.dup
       flagged_emails = EmployeeContactValidator.marked_placeholder_emails(organization_id: target_company.organization_id)
       rehearsal.employees.order(:id).each do |source|
         attributes = source.attributes.except(*EMPLOYEE_COLUMNS_EXCLUDED).merge(
           "company_id" => target_company.id,
           "department_id" => source.department_id && department_map.fetch(source.department_id).id,
+          "company_job_role_id" => source.company_job_role_id && role_map.fetch(source.company_job_role_id).id,
           "previous_employee_id" => nil,
           "test_workspace_source_employee_id" => nil,
           "portal_pending_approval" => false
