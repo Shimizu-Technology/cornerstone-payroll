@@ -2,8 +2,8 @@ import * as React from 'react';
 import { createPortal } from 'react-dom';
 import { cn } from '@/lib/utils';
 import {
-  containsClerkOverlay,
   isClerkOverlayElement,
+  isClerkPortalRoot,
   isStepUpOverlayActive,
   onStepUpOverlayStart,
 } from './dialog-overlay';
@@ -41,16 +41,23 @@ interface DocumentDialogState {
 
 const documentDialogStates = new WeakMap<Document, DocumentDialogState>();
 
+function isAppOrOpenerContainer(state: DocumentDialogState | undefined, element: HTMLElement): boolean {
+  if (element.id === 'root') return true;
+  if (!state) return false;
+  if (state.restoreTarget && element.contains(state.restoreTarget)) return true;
+  return state.portals.some(({ restoreTarget }) => Boolean(restoreTarget && element.contains(restoreTarget)));
+}
+
 function isExemptBodyChild(state: DocumentDialogState, element: HTMLElement, documentValue: Document): boolean {
   if (
     element.hasAttribute('data-dialog-portal')
     || element.hasAttribute('data-feedback-portal')
-    || element.hasAttribute('data-floating-ui-portal')
-    || state.exemptPortals.has(element)
   ) {
     return true;
   }
-  if (containsClerkOverlay(element)) {
+  if (isAppOrOpenerContainer(state, element)) return false;
+  if (state.exemptPortals.has(element)) return true;
+  if (isClerkPortalRoot(element)) {
     state.exemptPortals.add(element);
     return true;
   }
@@ -63,20 +70,17 @@ function isExemptBodyChild(state: DocumentDialogState, element: HTMLElement, doc
 
 function uninertExemptElements(state: DocumentDialogState, documentValue: Document): void {
   state.backgroundInertValues.forEach((previousValue, element) => {
-    if (
-      element.hasAttribute('data-floating-ui-portal')
-      || state.exemptPortals.has(element)
-      || containsClerkOverlay(element)
-    ) {
+    if (isAppOrOpenerContainer(state, element)) return;
+    if (state.exemptPortals.has(element) || isClerkPortalRoot(element)) {
       state.exemptPortals.add(element);
       state.backgroundInertValues.delete(element);
       if (previousValue === null) element.removeAttribute('inert');
       else element.setAttribute('inert', previousValue);
     }
   });
-  // Also release any newly mounted floating/Clerk roots if not yet tracked.
+  // Also track any already-mounted Clerk / floating-ui portal root not yet in exemptPortals.
   Array.from(documentValue.body.children).forEach((child) => {
-    if (child instanceof HTMLElement && (child.hasAttribute('data-floating-ui-portal') || containsClerkOverlay(child))) {
+    if (child instanceof HTMLElement && !isAppOrOpenerContainer(state, child) && isClerkPortalRoot(child)) {
       state.exemptPortals.add(child);
     }
   });
@@ -88,15 +92,27 @@ function setBackgroundInert(state: DocumentDialogState, element: HTMLElement, do
   element.setAttribute('inert', '');
 }
 
+function topBodyChildOf(target: Element): HTMLElement | null {
+  const body = target.ownerDocument?.body;
+  if (!body) return null;
+  let current: Element | null = target;
+  while (current && current.parentElement !== body) {
+    current = current.parentElement;
+  }
+  return current instanceof HTMLElement ? current : null;
+}
+
 function isTargetInExternalOverlay(state: DocumentDialogState | undefined, target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  if (isClerkOverlayElement(target)) return true;
+  if (target.closest('[inert]')) return false;
   if (state) {
     for (const portal of state.exemptPortals) {
       if (portal.isConnected && portal.contains(target)) return true;
     }
   }
-  return false;
+  const bodyChild = topBodyChildOf(target);
+  if (!bodyChild || isAppOrOpenerContainer(state, bodyChild)) return false;
+  return isClerkPortalRoot(bodyChild) || isClerkOverlayElement(target);
 }
 
 function hasLiveExternalOverlay(state: DocumentDialogState | undefined, documentValue: Document): boolean {
@@ -106,13 +122,14 @@ function hasLiveExternalOverlay(state: DocumentDialogState | undefined, document
       state.exemptPortals.delete(portal);
       continue;
     }
-    if (portal.childElementCount > 0) return true;
+    if (!isAppOrOpenerContainer(state, portal) && portal.childElementCount > 0) return true;
   }
   return Array.from(documentValue.body.children).some((child) => (
     child instanceof HTMLElement
     && !child.hasAttribute('data-dialog-portal')
     && !child.hasAttribute('data-feedback-portal')
-    && containsClerkOverlay(child)
+    && !isAppOrOpenerContainer(state, child)
+    && isClerkPortalRoot(child)
   ));
 }
 

@@ -101,6 +101,9 @@ function StepUpDialogHarness(): ReactNode {
   return (
     <div>
       <button type="button" data-testid="background-page-btn">Background page button</button>
+      <div className="cl-rootBox cl-userProfile-root" data-testid="embedded-clerk-profile">
+        <button type="button">Embedded profile button</button>
+      </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogTitle>Step-up inside dialog test</DialogTitle>

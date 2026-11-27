@@ -1,15 +1,5 @@
 const CLERK_DATA_ATTR_PREFIX = 'data-clerk';
-const CLERK_DESCENDANT_SELECTOR = [
-  '[class^="cl-"]',
-  '[class*=" cl-"]',
-  '[id^="cl-"]',
-  '[data-clerk-portal]',
-  '[data-clerk-component]',
-  '[data-clerk-id]',
-  '[data-clerk-modal]',
-  '[data-clerk-dev-mode-overlay]',
-  '[data-clerk-dev-mode-notice]',
-].join(',');
+const MAX_PORTAL_WRAPPER_DEPTH = 3;
 
 const stepUpCounts = new WeakMap<Document, number>();
 const stepUpListeners = new WeakMap<Document, Set<() => void>>();
@@ -40,10 +30,30 @@ export function isClerkOverlayElement(node: EventTarget | null): boolean {
   return false;
 }
 
-/** True when `element` is itself a Clerk root or hosts one inside a portal wrapper. */
-export function containsClerkOverlay(element: Element): boolean {
+/**
+ * True only when a direct `document.body` child IS a Clerk root itself,
+ * carries explicit Clerk / floating-ui portal attributes, or is a bare portal
+ * wrapper whose sole direct wrapper chain leads straight to a Clerk root.
+ * Never matches an app mount root like `#root` that merely embeds `<UserProfile>`.
+ */
+export function isClerkPortalRoot(element: Element): boolean {
+  if (element.id === 'root') return false;
   if (hasClerkClass(element) || hasClerkAttribute(element)) return true;
-  if (element.querySelector(CLERK_DESCENDANT_SELECTOR) !== null) return true;
+  if (element.hasAttribute('data-floating-ui-portal')) return true;
+
+  // Clerk's `Portal` appends a plain wrapper `<div>` directly to `document.body`
+  // whose first/sole child is the Clerk backdrop/root. Walk at most a few
+  // single-child anonymous wrapper divs so an app container with sibling UI
+  // is never treated as a Clerk portal.
+  let current: Element = element;
+  for (let depth = 0; depth < MAX_PORTAL_WRAPPER_DEPTH; depth += 1) {
+    if (current.children.length !== 1) return false;
+    const onlyChild = current.firstElementChild;
+    if (!onlyChild || onlyChild.id === 'root') return false;
+    if (hasClerkClass(onlyChild) || hasClerkAttribute(onlyChild)) return true;
+    if (onlyChild.tagName !== 'DIV' || onlyChild.id !== '') return false;
+    current = onlyChild;
+  }
   return false;
 }
 
