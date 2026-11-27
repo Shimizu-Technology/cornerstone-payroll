@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Header } from '@/components/layout/Header';
+import { formatDateRange } from '@/lib/display-date';
 import { formatCurrency, formatDate, payPeriodStatusConfig } from '@/lib/utils';
 import { reportsApi, type DashboardResponse } from '@/services/api';
 import type { PayPeriodStatus } from '@/types';
@@ -64,13 +65,13 @@ export function Dashboard(): ReactElement {
   const employeeHref = activeCompanyId ? newEmployeePath(activeCompanyId) : '/employees/new';
   const runHref = (id: number): string => activeCompanyId ? payRunPath(activeCompanyId, id, 'work') : `/pay-periods/${id}`;
   const recentHref = (row: DashboardResponse['stats']['recent_payrolls'][number]): string => row.record_type === 'imported' && activeCompanyId
-    ? importedPayRunPath(activeCompanyId, row.id) : activeCompanyId ? payRunPath(activeCompanyId, row.id, 'overview') : runHref(row.id);
+    ? importedPayRunPath(activeCompanyId, row.id) : runHref(row.id);
   const lastRegular = stats?.last_regular_payroll;
   const lastAdjustment = stats?.last_adjustment_payroll;
   const importedCount = stats?.ytd_totals?.imported_payroll_count ?? 0;
 
   return <div>
-    <Header title="Home" description={activeCompany?.name || 'Payroll'} actions={<Button onClick={() => navigate(payRunsHref)}>{readOnlyWorkspace ? 'Browse Pay Periods' : 'Manage pay periods'}</Button>} />
+    <Header title="Home" actions={<Button onClick={() => navigate(payRunsHref)}>{readOnlyWorkspace ? 'Browse Pay Periods' : 'Manage pay periods'}</Button>} />
     <div className="space-y-6 p-4 sm:p-6 lg:p-8">
       {error && <ActionFeedback retryKey={errorFeedbackAttempt} tone="error" message={error} />}
       <Card>
@@ -111,11 +112,14 @@ export function Dashboard(): ReactElement {
       </CardContent></Card>}
 
       {!!stats?.recent_payrolls?.length && <Card><CardHeader><h2 className="font-display text-lg font-bold text-neutral-950">Recent payrolls</h2></CardHeader><CardContent className="space-y-2">
-        {stats.recent_payrolls.map(row => <Link key={row.key ?? row.id} to={recentHref(row)} aria-label={`Open payroll ${row.period_description}`} className="flex flex-col gap-2 rounded-lg p-3 hover:bg-primary-50 focus-visible:outline-2 sm:flex-row sm:items-center sm:justify-between">
-          <div><p className="font-semibold text-neutral-950">{row.period_description}</p><p className="text-sm text-neutral-600">{row.run_purpose?.replaceAll('_', ' ') || 'Regular'} · Pay date {formatDate(row.pay_date)} · {row.employee_count} employees</p>
+        {stats.recent_payrolls.map(row => {
+          const dateLabel = row.start_date && row.end_date ? formatDateRange(row.start_date, row.end_date) : row.period_description;
+          return <Link key={row.key ?? row.id} to={recentHref(row)} aria-label={`Open payroll ${dateLabel}`} className="flex flex-col gap-2 rounded-lg p-3 hover:bg-primary-50 focus-visible:outline-2 sm:flex-row sm:items-center sm:justify-between">
+          <div><p className="font-semibold text-neutral-950">{dateLabel}</p><p className="text-sm text-neutral-600"><span className="capitalize">{row.run_purpose?.replaceAll('_', ' ') || 'Regular'}</span> · Pay date {formatDate(row.pay_date)} · {row.employee_count} employees</p>
             {row.record_type === 'imported' && <Badge variant="warning">QuickBooks import · locked</Badge>}</div>
           <p className="font-semibold tabular-nums text-neutral-950">{formatCurrency(row.total_net)}</p>
-        </Link>)}
+        </Link>;
+        })}
       </CardContent></Card>}
 
       <Card><CardContent className="pt-5"><Link to="/app/client-inbox" className="font-semibold text-primary-800 underline">Client Inbox</Link><p className="mt-2 text-sm text-neutral-600">{portalCounts ? `${portalCounts.waiting_count} waiting on staff · ${portalCounts.unread_count} unread across your clients` : 'Open portal work across your clients'}</p></CardContent></Card>

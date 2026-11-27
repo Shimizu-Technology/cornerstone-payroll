@@ -144,7 +144,9 @@ describe('PayPeriods test workspaces', () => {
       expect(within(container).queryByRole('button', { name: 'Delete' })).toBeNull();
       expect(within(container).queryByRole('button', { name: /enter hours/i })).toBeNull();
     }
-    for (const container of [practiceRow, practiceCard]) {
+    fireEvent.click(within(practiceRow).getByRole('button', { name: /More actions for/ }));
+    const actions = await screen.findByRole('dialog', { name: 'Pay period actions' });
+    for (const container of [actions, practiceCard]) {
       expect(within(container).getByRole('button', { name: 'Edit' })).toBeTruthy();
       expect(within(container).getByRole('button', { name: 'Delete' })).toBeTruthy();
       expect(within(container).getByRole('button', { name: /enter hours/i })).toBeTruthy();
@@ -182,6 +184,20 @@ describe('PayPeriods test workspaces', () => {
     expect(await screen.findByText('No pay periods found. Create your first pay period to get started.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'New Pay Period' })).toBeTruthy();
     expect(screen.queryByText(/recorded as previous-provider history/)).toBeNull();
+  });
+
+  it('keeps desktop row actions behind a labeled control', async () => {
+    apiMocks.activeCompany = { id: 11 };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([editablePeriod]));
+    render(<MemoryRouter><PayPeriods /></MemoryRouter>);
+
+    const table = await screen.findByRole('table');
+    const actions = within(table).getByRole('button', { name: /More actions for/ });
+    expect(within(table).queryByRole('button', { name: 'Edit' })).toBeNull();
+    fireEvent.click(actions);
+    const dialog = await screen.findByRole('dialog', { name: 'Pay period actions' });
+    expect(within(dialog).getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Delete' })).toBeTruthy();
   });
 
   it('suppresses every mutation action in both read-only row layouts', async () => {
@@ -277,7 +293,9 @@ it.each(['desktop', 'phone'])('opens the source acknowledgement worksheet instea
     <Route path="/companies/11/pay-runs/12/work" element={<p>Review hours and acknowledge source coverage</p>} />
   </Routes></MemoryRouter>);
   const container = await screen.findByRole(layout === 'desktop' ? 'row' : 'group', { name: layout === 'desktop' ? /Aug 24 – Sep 6, 2026/ : 'Pay period Aug 24 – Sep 6, 2026' });
-  fireEvent.click(within(container).getByRole('button', { name: /Recalculate/ }));
+  if (layout === 'desktop') fireEvent.click(within(container).getByRole('button', { name: /More actions for/ }));
+  const actions = layout === 'desktop' ? await screen.findByRole('dialog', { name: 'Pay period actions' }) : container;
+  fireEvent.click(within(actions).getByRole('button', { name: /Recalculate/ }));
   expect(await screen.findByText('Review hours and acknowledge source coverage')).toBeTruthy();
   expect(apiMocks.runPayroll).not.toHaveBeenCalled();
 });
@@ -328,7 +346,7 @@ describe('PayPeriods delete confirmation', () => {
     expect((within(dialog).getByRole('button', { name: 'Delete pay run' }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(apiMocks.payPeriodDelete).not.toHaveBeenCalled();
-    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);
   });
 
   it('resets the checkbox on cancel and preserves the run after a server refusal', async () => {

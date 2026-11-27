@@ -362,8 +362,8 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
                     </div></MobileRecordCard>
                   ))}
                 </div>
-                <div className="hidden overflow-x-auto sm:block">
-                  <table className="min-w-[68rem] w-full text-sm">
+                <div className="hidden max-w-full overflow-x-auto sm:block">
+                  <table className="w-full min-w-[54rem] text-sm [&_th]:px-2 [&_td]:px-2">
                   <thead className="border-b bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                     <tr>
                       <th className="px-4 py-3 text-left">Name</th>
@@ -388,7 +388,7 @@ function ClientPayrollFields({ companyId, companyName, selectedFieldId }: { comp
                           {field.amount_type === 'percentage' ? (field.default_percentage == null ? 'Per person' : `${field.default_percentage}%`) : field.amount_type === 'fixed' ? (field.default_amount == null ? 'Per person' : `$${Number(field.default_amount).toFixed(2)}`) : 'Manual'}
                         </td>
                         <td className="px-4 py-3">{field.active ? 'Active' : 'Archived'}</td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="whitespace-nowrap px-2 py-3 text-right">
                           <Button variant="ghost" size="sm" onClick={() => editField(field)} disabled={saving}>Edit</Button>
                           <Button variant="ghost" size="sm" disabled={saving} onClick={() => setImpact({ kind: field.active ? 'archive' : 'reactivate', field })}>{field.active ? 'Archive' : 'Reactivate'}</Button>
                         </td>

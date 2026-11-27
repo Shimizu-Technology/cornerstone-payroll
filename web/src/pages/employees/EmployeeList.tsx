@@ -327,9 +327,9 @@ export function EmployeeList() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
-        <EmployeeIntakeSettingsPanel key={companyId} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
+        <EmployeeIntakeSettingsPanel key={`intake-${companyId}`} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
         {canAddEmployee && !isClientViewer && (
-          <EmployeeOrganizationPanel key={companyId} companyId={companyId} isClient={isClient} employees={companyEmployees}
+          <EmployeeOrganizationPanel key={`org-${companyId}`} companyId={companyId} isClient={isClient} employees={companyEmployees}
             onSaved={() => { void fetchEmployees(); void fetchDepartments(); }} />
         )}
         {/* Filters */}
@@ -338,6 +338,7 @@ export function EmployeeList() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <Input
               type="text"
+              aria-label="Search employees"
               placeholder="Search employees..."
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
@@ -347,6 +348,7 @@ export function EmployeeList() {
           
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:flex sm:flex-1 sm:basis-96 sm:flex-wrap">
             <Select
+              aria-label="Employee status"
               value={status}
               onChange={(e) => updateFilter('status', e.target.value)}
               className="w-full sm:w-36"
@@ -358,6 +360,7 @@ export function EmployeeList() {
             </Select>
 
             <Select
+              aria-label="Employment type"
               value={employmentType}
               onChange={(e) => updateFilter('employment_type', e.target.value)}
               className="w-full sm:w-36"
@@ -369,6 +372,7 @@ export function EmployeeList() {
             </Select>
 
             <Select
+              aria-label="Department"
               value={departmentId}
               onChange={(e) => updateFilter('department_id', e.target.value)}
               className="w-full sm:w-44"
@@ -480,7 +484,7 @@ export function EmployeeList() {
                             />
                           ))}
                         </div>
-                        <Card className="hidden sm:block">
+                        <Card className="hidden sm:block [&_th]:normal-case [&_th]:tracking-normal">
                           <Table stickyHeader containerClassName="max-h-[32rem]">
                             <TableHeader>
                             <TableRow>
@@ -491,7 +495,7 @@ export function EmployeeList() {
                                 direction={sortDirection}
                                 onToggle={toggleSort}
                                 stickyLeft
-                                sentenceCase={isClient}
+                                sentenceCase
                                 className="bg-gray-50"
                               />
                               <SortableHead
@@ -500,16 +504,16 @@ export function EmployeeList() {
                                 activeColumn={sortBy}
                                 direction={sortDirection}
                                 onToggle={toggleSort}
-                                sentenceCase={isClient}
+                                sentenceCase
                                 className="bg-gray-50"
                               />
                               <SortableHead
-                                label={isClient ? 'Pay rate' : 'Pay Rate'}
+                                label="Pay rate"
                                 column="rate"
                                 activeColumn={sortBy}
                                 direction={sortDirection}
                                 onToggle={toggleSort}
-                                sentenceCase={isClient}
+                                sentenceCase
                                 className="bg-gray-50"
                               />
                               <TableHead className="bg-gray-50">Paid by</TableHead>
@@ -519,7 +523,7 @@ export function EmployeeList() {
                                 activeColumn={sortBy}
                                 direction={sortDirection}
                                 onToggle={toggleSort}
-                                sentenceCase={isClient}
+                                sentenceCase
                                 className="bg-gray-50"
                               />
                               <TableHead className="text-right">Actions</TableHead>

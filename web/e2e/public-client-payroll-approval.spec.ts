@@ -186,6 +186,6 @@ test('client can find and review every payroll amount on a narrow phone before a
   await page.getByLabel('Note for Cornerstone (required to request changes)').fill('Reviewed every amount.');
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Approve this revision' }).click();
-  await expect(page.getByText('Revision 3 approved by MoSa Approver. Recorded. Cornerstone will see it in Client Inbox.')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Revision 3 approved by MoSa Approver. Recorded. Your Cornerstone payroll team has it.' })).toBeVisible();
   expect(approvalPayload).toEqual({ revision_id: 91, acknowledgement, notes: 'Reviewed every amount.' });
 });

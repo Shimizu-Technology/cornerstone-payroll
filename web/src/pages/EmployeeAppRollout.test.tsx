@@ -46,17 +46,39 @@ describe('Employee app rollout', () => {
     expect(screen.queryByRole('radio', { name: 'Printed code' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Create printed codes' })).toBeNull();
     await user.click(screen.getByRole('checkbox', { name: /Sample One/ }));
+    expect(screen.queryByRole('button', { name: /Select all matches|Select up to|Clear selection/ })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Send email invites' }));
     expect(mocks.post).toHaveBeenCalledWith('/client/employee_app_rollout/7/invite',
       { employee_ids: [21], delivery: 'email' }, { companyId: 7 });
   });
 
-  it('shows a client viewer the rollout with a view-only note instead of invites or settings', async () => {
+  it('caps bulk selection, keeps it across searches, and clears hidden selections too', async () => {
+    mocks.get.mockResolvedValue({ data: { ...rollout, max_wave_size: 1 } });
+    const user = userEvent.setup();
+    render(<MemoryRouter><EmployeeAppRollout audience="admin" /></MemoryRouter>);
+
+    await user.click(await screen.findByRole('button', { name: 'Select up to 1' }));
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(1);
+    expect(screen.getByRole('checkbox', { name: /Sample Two/ })).toHaveProperty('disabled', true);
+
+    const search = screen.getByRole('searchbox', { name: 'Find employees' });
+    await user.type(search, 'Sample Two');
+    expect(screen.queryByRole('checkbox', { name: /Sample One/ })).toBeNull();
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /Sample Two/ })).toHaveProperty('checked', false);
+
+    await user.click(screen.getByRole('button', { name: 'Clear selection' }));
+    expect(screen.getByText('0 selected')).toBeTruthy();
+    await user.clear(search);
+    expect(screen.getByRole('checkbox', { name: /Sample One/ })).toHaveProperty('checked', false);
+  });
+
+  it('shows a client viewer the rollout without invites or settings', async () => {
     auth.isClientViewer = true;
     mocks.get.mockResolvedValue({ data: { ...rollout, can_manage_invites: false, can_print_codes: false } });
     render(<MemoryRouter><EmployeeAppRollout audience="client" /></MemoryRouter>);
 
-    expect(await screen.findByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Employee app rollout' })).toBeTruthy();
     expect(screen.getByText('Ready to invite by email').nextElementSibling?.textContent).toBe('2');
     expect(screen.queryByRole('button', { name: 'Send email invites' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Branding and Help settings' })).toBeNull();

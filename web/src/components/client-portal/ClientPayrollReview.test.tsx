@@ -21,13 +21,13 @@ it('hides the decision from a client viewer even when the period says decisions 
   expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
   expect(screen.queryByLabelText('Note for Cornerstone (required to request changes)')).toBeNull();
-  expect(screen.getByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+  expect(screen.queryByText(/Your access is view-only/)).toBeNull();
 });
 it('lets a client viewer open the preview but not approve or request changes', () => {
   auth.isClientViewer = true;
   render(<ClientPayrollReview payPeriod={{ ...period, can_decide_payroll_review: false }} companyId={3} onDone={onDone} />);
   expect(screen.getByRole('button', { name: 'View preview' })).toBeTruthy();
-  expect(screen.getByText('Your access is view-only. Ask your account manager for changes.')).toBeTruthy();
+  expect(screen.queryByText(/Your access is view-only/)).toBeNull();
   expect(screen.queryByRole('button', { name: 'Approve this revision' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Request changes' })).toBeNull();
 });
@@ -163,7 +163,7 @@ it('shows honest approval confirmation across queued, sent, and not_sent states'
       onDone={onDone}
     />,
   );
-  expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
+  expect(screen.getByRole('status').textContent).toContain('Recorded. Your Cornerstone payroll team has it.');
   expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
 });
 
@@ -226,6 +226,6 @@ it('shows honest change-request confirmation across queued, sent, and not_sent s
       onDone={onDone}
     />,
   );
-  expect(screen.getByRole('status').textContent).toContain('Recorded. Cornerstone will see it in Client Inbox.');
+  expect(screen.getByRole('status').textContent).toContain('Recorded. Your Cornerstone payroll team has it.');
   expect(screen.getByRole('status').textContent).not.toContain('Notification requested');
 });
