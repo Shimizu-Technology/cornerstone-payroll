@@ -129,6 +129,7 @@ export const EMPLOYEE_ROUTE_OBJECTS: RouteObject[] = [
   { path: '/taxes' },
   { path: '/my-info' },
   { path: '/help' },
+  { path: '/go-paperless' },
 ];
 
 /**

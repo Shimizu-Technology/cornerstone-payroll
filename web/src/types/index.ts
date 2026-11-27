@@ -433,6 +433,9 @@ export interface Employee {
 export interface EmployeeDeliveryConsentItem {
   kind: 'pay_statements' | 'w2gu';
   status: 'not_consented' | 'consented' | 'withdrawn';
+  /** The employee's answer: a withdrawal counts as keep paper. Older responses may omit it. */
+  answer?: EmployeeDeliveryAnswer;
+  paper_chosen_at?: string | null;
   disclosure_version: string | null;
   disclosure_status: 'draft' | 'approved' | null;
   given_at: string | null;
@@ -442,10 +445,21 @@ export interface EmployeeDeliveryConsentItem {
   paper_continues: boolean;
 }
 
+export type EmployeeDeliveryAnswer = 'paperless' | 'keep_paper' | 'not_answered';
+
+export interface EmployeeDeliveryAnswerCounts {
+  paperless: number;
+  keep_paper: number;
+  not_answered: number;
+  total: number;
+}
+
 export interface EmployeeDeliveryConsentsSummary {
   feature_enabled: boolean;
   paper_delivery_continues: boolean;
   items: EmployeeDeliveryConsentItem[];
+  /** How the company's active employees answered, per kind. */
+  company_counts?: Partial<Record<EmployeeDeliveryConsentItem['kind'], EmployeeDeliveryAnswerCounts>>;
 }
 
 export type EmployeeW4ElectionSource = 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
