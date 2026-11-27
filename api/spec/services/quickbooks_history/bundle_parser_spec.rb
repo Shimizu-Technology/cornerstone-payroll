@@ -108,7 +108,7 @@ RSpec.describe QuickbooksHistory::BundleParser do
     expect("Auto Insurance Reimb").to match(reviewed_non_taxable_label)
     expect("Auto Loan Reimbursem").to match(reviewed_non_taxable_label)
     expect("Medicare Reimb Diffe").to match(reviewed_non_taxable_label)
-    expect("Rent - Charlie").to match(reviewed_non_taxable_label)
+    expect("Rent - Sample").to match(reviewed_non_taxable_label)
     expect("Loan pay to SP").to match(reviewed_non_taxable_label)
   end
 
