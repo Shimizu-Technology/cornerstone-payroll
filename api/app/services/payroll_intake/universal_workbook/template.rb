@@ -104,10 +104,11 @@ module PayrollIntake
       end
 
       def pay_frequency
-        pay_period&.company_pay_schedule&.frequency.presence ||
-          CompanyPaySchedule.for_date(company.id, start_date)&.frequency.presence ||
-          company.pay_frequency.to_s.presence ||
-          "biweekly"
+        PayrollIntake::WorkweekEvidence.pay_frequency_for(
+          pay_period: pay_period,
+          company: company,
+          start_date: start_date
+        )
       end
 
       def build_styles(workbook)

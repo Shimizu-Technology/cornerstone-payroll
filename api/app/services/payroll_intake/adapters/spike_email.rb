@@ -363,7 +363,7 @@ module PayrollIntake
       end
 
       def weekly_frequency?
-        (pay_period.company_pay_schedule&.frequency.presence || company.pay_frequency.to_s) == "weekly"
+        PayrollIntake::WorkweekEvidence.pay_frequency_for(pay_period: pay_period, company: company) == "weekly"
       end
 
       def period_regular_hours_threshold
@@ -373,6 +373,9 @@ module PayrollIntake
       def hours_for_weekly_split(week1_hours:, week2_hours:, total_hours:, regular_hours:, overtime_hours:, week1_present:, week2_present:, total_present:, explicit_regular:, explicit_overtime:)
         errors = []
         if weekly_frequency?
+          if week2_present && week2_hours.positive?
+            errors << error("week2_not_allowed_on_weekly", "Week 2 hours must be blank or 0 on a weekly pay schedule.")
+          end
           if week1_present
             if week1_hours > 168
               errors << error("weekly_hours_out_of_range", "A legal workweek cannot contain more than 168 hours.")

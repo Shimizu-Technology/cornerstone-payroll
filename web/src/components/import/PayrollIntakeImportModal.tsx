@@ -180,9 +180,10 @@ export function PayrollIntakeImportModal({
     if (row.disposition !== 'included') return acc;
     acc.regular += toNumber(row.regular_hours);
     acc.overtime += toNumber(row.overtime_hours);
-    acc.tips += toNumber(row.reported_tips);
+    acc.reportedTips += toNumber(row.reported_tips);
+    acc.paidOutTips += toNumber(row.tips_paid_out);
     return acc;
-  }, { regular: 0, overtime: 0, tips: 0 }), [rows]);
+  }, { regular: 0, overtime: 0, reportedTips: 0, paidOutTips: 0 }), [rows]);
 
   const includedRows = rows.filter((row) => row.disposition === 'included');
   const duplicateEmployeeIds = useMemo(() => {
@@ -332,9 +333,29 @@ export function PayrollIntakeImportModal({
     }));
   };
 
+  const updateReportedTips = (rowId: number, value: number) => {
+    const nextReported = Math.max(0, value);
+    setRows((current) => current.map((row) => {
+      if (row.id !== rowId) return row;
+      const nextPaidOut = Math.min(toNumber(row.tips_paid_out), nextReported);
+      return normalizeRow({ ...row, reported_tips: nextReported, tips_paid_out: nextPaidOut });
+    }));
+  };
+
   const updatePaidOutTips = (rowId: number, value: number) => {
-    const totalTips = Math.max(0, value);
-    updateRow(rowId, { reported_tips: totalTips, tips_paid_out: totalTips });
+    const nextPaidOut = Math.max(0, value);
+    if (sourceType === 'cornerstone_workbook') {
+      setRows((current) => current.map((row) => {
+        if (row.id !== rowId) return row;
+        return normalizeRow({
+          ...row,
+          tips_paid_out: nextPaidOut,
+          reported_tips: Math.max(toNumber(row.reported_tips), nextPaidOut),
+        });
+      }));
+      return;
+    }
+    updateRow(rowId, { reported_tips: nextPaidOut, tips_paid_out: nextPaidOut });
   };
 
   const normalizeRow = (row: EditableRow): EditableRow => {
@@ -707,11 +728,14 @@ export function PayrollIntakeImportModal({
 
         {step === 'preview' && importData && (
           <div className="space-y-5">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className={`grid gap-3 sm:grid-cols-2 ${showExtendedWorkbookColumns ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}>
               <SummaryCard label="Source package" value={`Revision ${importData.package_revision}`} />
               <SummaryCard label="Included rows" value={String(includedRows.length)} />
               <SummaryCard label="Hours" value={`${totals.regular.toFixed(2)} regular / ${totals.overtime.toFixed(2)} OT`} />
-              <SummaryCard label="Paid-out tips" value={formatCurrency(totals.tips)} />
+              {showExtendedWorkbookColumns && (
+                <SummaryCard label="Reported tips" value={formatCurrency(totals.reportedTips)} />
+              )}
+              <SummaryCard label="Paid-out tips" value={formatCurrency(totals.paidOutTips)} />
             </div>
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-900">
@@ -752,11 +776,36 @@ export function PayrollIntakeImportModal({
                   <div className="grid grid-cols-2 gap-3">
                     <label className="text-xs font-medium text-neutral-600">Week 1 hours<NumericInput className="mt-1 w-full" value={row.week1_hours} onValueChange={(value) => updateWeekHours(row.id, 'week1_hours', value ?? 0)} min={0} /></label>
                     <label className="text-xs font-medium text-neutral-600">Week 2 hours<NumericInput className="mt-1 w-full" value={row.week2_hours} onValueChange={(value) => updateWeekHours(row.id, 'week2_hours', value ?? 0)} min={0} /></label>
-                    <label className="text-xs font-medium text-neutral-600">Week 1 tips<NumericInput className="mt-1 w-full" value={row.week1_tips} onValueChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
-                    <label className="text-xs font-medium text-neutral-600">Week 2 tips<NumericInput className="mt-1 w-full" value={row.week2_tips} onValueChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
-                    <label className="col-span-2 text-xs font-medium text-neutral-600">Paid-out tips<NumericInput className="mt-1 w-full" value={row.tips_paid_out} onValueChange={(value) => updatePaidOutTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                    {sourceType === 'cornerstone_workbook' ? (
+                      <>
+                        <label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 w-full" value={row.reported_tips} onValueChange={(value) => updateReportedTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                        <label className="text-xs font-medium text-neutral-600">Paid-out tips<NumericInput className="mt-1 w-full" value={row.tips_paid_out} onValueChange={(value) => updatePaidOutTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                      </>
+                    ) : (
+                      <>
+                        <label className="text-xs font-medium text-neutral-600">Week 1 tips<NumericInput className="mt-1 w-full" value={row.week1_tips} onValueChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                        <label className="text-xs font-medium text-neutral-600">Week 2 tips<NumericInput className="mt-1 w-full" value={row.week2_tips} onValueChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                        <label className="col-span-2 text-xs font-medium text-neutral-600">Paid-out tips<NumericInput className="mt-1 w-full" value={row.tips_paid_out} onValueChange={(value) => updatePaidOutTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                      </>
+                    )}
                   </div>
                   <p className="text-xs text-neutral-500">{toNumber(row.regular_hours).toFixed(2)} regular · {toNumber(row.overtime_hours).toFixed(2)} OT</p>
+                  {showExtendedWorkbookColumns && (
+                    <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl bg-neutral-50 px-3 py-2 text-xs text-neutral-700">
+                      <div><dt className="text-neutral-500">PTO</dt><dd className="font-mono font-medium">{toNumber(row.pto_hours).toFixed(2)} hrs</dd></div>
+                      <div><dt className="text-neutral-500">Holiday</dt><dd className="font-mono font-medium">{toNumber(row.holiday_hours).toFixed(2)} hrs</dd></div>
+                      <div><dt className="text-neutral-500">Bonus</dt><dd className="font-mono font-medium">{formatCurrency(toNumber(row.bonus))}</dd></div>
+                      <div><dt className="text-neutral-500">Loan</dt><dd className="font-mono font-medium">{formatCurrency(toNumber(row.loan_deduction))}</dd></div>
+                      <div className="col-span-2">
+                        <dt className="text-neutral-500">One-Time</dt>
+                        <dd className="font-mono font-medium">
+                          {(row.payroll_components || []).length > 0
+                            ? (row.payroll_components || []).map((item) => `${item.label}: ${formatCurrency(toNumber(item.amount))}`).join(', ')
+                            : '—'}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
                   {[...(row.errors || []), ...(row.warnings || [])].map((warning, index) => <Badge key={`${warning.code}-${index}`} variant={severityVariant(warning.severity)} wrap className="mr-1 text-left">{warning.message}</Badge>)}
                 </section>
               ))}
@@ -777,9 +826,18 @@ export function PayrollIntakeImportModal({
                         <TableHead className="min-w-[100px] text-right">Holiday</TableHead>
                       </>
                     )}
-                    <TableHead className="min-w-[130px] text-right">W1 Tips</TableHead>
-                    <TableHead className="min-w-[130px] text-right">W2 Tips</TableHead>
-                    <TableHead className="min-w-[150px] text-right">{sourceType === 'cornerstone_workbook' ? 'Tips (Paid Out)' : 'Paid-Out Tips'}</TableHead>
+                    {sourceType === 'cornerstone_workbook' ? (
+                      <>
+                        <TableHead className="min-w-[140px] text-right">Reported Tips</TableHead>
+                        <TableHead className="min-w-[140px] text-right">Paid-Out Tips</TableHead>
+                      </>
+                    ) : (
+                      <>
+                        <TableHead className="min-w-[130px] text-right">W1 Tips</TableHead>
+                        <TableHead className="min-w-[130px] text-right">W2 Tips</TableHead>
+                        <TableHead className="min-w-[150px] text-right">Paid-Out Tips</TableHead>
+                      </>
+                    )}
                     {showExtendedWorkbookColumns && (
                       <>
                         <TableHead className="min-w-[110px] text-right">Bonus</TableHead>
@@ -875,9 +933,18 @@ export function PayrollIntakeImportModal({
                           <TableCell className="text-right font-mono">{toNumber(row.holiday_hours).toFixed(2)}</TableCell>
                         </>
                       )}
-                      <NumericCell value={row.week1_tips} onChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} money />
-                      <NumericCell value={row.week2_tips} onChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} money />
-                      <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
+                      {sourceType === 'cornerstone_workbook' ? (
+                        <>
+                          <NumericCell value={row.reported_tips} onChange={(value) => updateReportedTips(row.id, value ?? 0)} money />
+                          <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
+                        </>
+                      ) : (
+                        <>
+                          <NumericCell value={row.week1_tips} onChange={(value) => updateWeekTips(row.id, 'week1_tips', value ?? 0)} money />
+                          <NumericCell value={row.week2_tips} onChange={(value) => updateWeekTips(row.id, 'week2_tips', value ?? 0)} money />
+                          <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
+                        </>
+                      )}
                       {showExtendedWorkbookColumns && (
                         <>
                           <TableCell className="text-right font-mono">{formatCurrency(toNumber(row.bonus))}</TableCell>

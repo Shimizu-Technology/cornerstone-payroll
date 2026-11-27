@@ -150,9 +150,10 @@ module PayrollIntake
       end
 
       def pay_frequency
-        @pay_frequency ||= pay_period.company_pay_schedule&.frequency.presence ||
-          company.pay_frequency.to_s.presence ||
-          "biweekly"
+        @pay_frequency ||= PayrollIntake::WorkweekEvidence.pay_frequency_for(
+          pay_period: pay_period,
+          company: company
+        )
       end
 
       def weekly_frequency?
@@ -432,6 +433,13 @@ module PayrollIntake
         # Biweekly (two complete 7-day workweeks)
         if week1_hours > MAX_HOURS_PER_WEEK || week2_hours > MAX_HOURS_PER_WEEK
           errors << error("weekly_hours_out_of_range", "Row #{row_num}: A 7-day workweek cannot exceed 168 hours.")
+        end
+
+        if week1_present != week2_present
+          errors << error(
+            "incomplete_weekly_hours",
+            "Row #{row_num}: Enter both Week 1 Hours and Week 2 Hours on a biweekly schedule. Enter 0 for a week with no hours."
+          )
         end
 
         if week1_present || week2_present

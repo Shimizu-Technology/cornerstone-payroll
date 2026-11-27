@@ -170,12 +170,26 @@ it('shows Excel and CSV template download buttons, hides pasted text, and previe
   fireEvent.change(fileInput, { target: { files: [new File(['csv'], 'filled.csv', { type: 'text/csv' })] } });
 
   fireEvent.click(screen.getByRole('button', { name: 'Preview Intake' }));
-  await screen.findByText('PTO');
-  expect(screen.getByText('Holiday')).toBeTruthy();
-  expect(screen.getByText('Bonus')).toBeTruthy();
-  expect(screen.getByText('One-Time')).toBeTruthy();
-  expect(screen.getByText('Loan')).toBeTruthy();
-  expect(screen.getByText('Mileage: $30.00')).toBeTruthy();
+  await screen.findByText('Reported Tips');
+  expect(screen.getByText('Paid-Out Tips')).toBeTruthy();
+  expect(screen.getAllByText('Reported tips').length).toBe(2);
+  expect(screen.getAllByText('Paid-out tips').length).toBe(2);
+  expect((screen.getByLabelText('Reported tips') as HTMLInputElement).value).toBe('50.00');
+  expect((screen.getByLabelText('Paid-out tips') as HTMLInputElement).value).toBe('0.00');
+  // Summary distinguishes $50.00 reported tips from $0.00 paid-out tips
+  expect(screen.getAllByText('$50.00').length).toBeGreaterThanOrEqual(1);
+  expect(screen.getAllByText('$0.00').length).toBeGreaterThanOrEqual(1);
+  // Desktop table and mobile card both display extended workbook fields
+  expect(screen.getAllByText('PTO').length).toBe(2);
+  expect(screen.getAllByText('Holiday').length).toBe(2);
+  expect(screen.getAllByText('Bonus').length).toBe(2);
+  expect(screen.getAllByText('One-Time').length).toBe(2);
+  expect(screen.getAllByText('Loan').length).toBe(2);
+  expect(screen.getAllByText('Mileage: $30.00').length).toBe(2);
+  expect(screen.getByText('4.00 hrs')).toBeTruthy();
+  expect(screen.getByText('8.00 hrs')).toBeTruthy();
+  expect(screen.getAllByText('$100.00').length).toBe(2);
+  expect(screen.getAllByText('$25.00').length).toBe(2);
 
   fireEvent.click(screen.getByRole('button', { name: 'Apply Reviewed Rows' }));
   await waitFor(() => expect(apiMocks.apply).toHaveBeenCalledOnce());

@@ -9,6 +9,29 @@ module PayrollIntake
     # Previews saved before these were recorded still apply if the rest matches.
     LATER_KEYS = %w[aligned_with_pay_period legal_week_starts].freeze
 
+    # Single shared pay-frequency resolver for intake templates, adapters,
+    # workweek evidence, and apply.
+    #
+    # Precedence:
+    # 1. The persisted pay period's associated CompanyPaySchedule.
+    # 2. A CompanyPaySchedule covering start_date ONLY when no PayPeriod record
+    #    exists yet (e.g. a virtual client-portal period before PayPeriod creation).
+    # 3. The company's pay_frequency.
+    # 4. Default "biweekly".
+    def self.pay_frequency_for(pay_period: nil, company: nil, start_date: nil)
+      resolved_company = company || pay_period&.company
+      if pay_period
+        pay_period.company_pay_schedule&.frequency.presence ||
+          resolved_company&.pay_frequency.to_s.presence ||
+          "biweekly"
+      else
+        schedule_date = start_date&.to_date
+        (resolved_company && schedule_date ? CompanyPaySchedule.for_date(resolved_company.id, schedule_date)&.frequency.presence : nil) ||
+          resolved_company&.pay_frequency.to_s.presence ||
+          "biweekly"
+      end
+    end
+
     # allow_misaligned: ONLY permissible when the source reports overtime itself
     # (overtime_mode == "source_reports", e.g., Revel). Computed overtime modes
     # (weekly_split, daily_records, total_as_regular_warn_over_80) must always
@@ -74,9 +97,7 @@ module PayrollIntake
     attr_reader :pay_period, :allow_misaligned, :overtime_mode, :workweek_alignment
 
     def pay_frequency
-      pay_period.company_pay_schedule&.frequency.presence ||
-        pay_period.company&.pay_frequency.to_s.presence ||
-        "biweekly"
+      self.class.pay_frequency_for(pay_period: pay_period)
     end
 
     def source_reports_overtime?

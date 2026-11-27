@@ -322,9 +322,10 @@ module PayrollIntake
     end
 
     def resolved_pay_frequency
-      @resolved_pay_frequency ||= pay_period.company_pay_schedule&.frequency.presence ||
-        company.pay_frequency.to_s.presence ||
-        "biweekly"
+      @resolved_pay_frequency ||= PayrollIntake::WorkweekEvidence.pay_frequency_for(
+        pay_period: pay_period,
+        company: company
+      )
     end
 
     def validate_workweek_snapshot!
@@ -679,6 +680,11 @@ module PayrollIntake
       payroll_item.pto_hours = 0
       unless universal_workbook? && PayrollBonusInput.manual?(payroll_item)
         payroll_item.bonus = 0
+        # A blank replacement clears source-controlled bonus provenance so
+        # stale "import" metadata never remains on a zeroed bonus. Manual
+        # bonuses preserve both their amount and bonus_source = "manual".
+        payroll_item.bonus_source = nil
+        payroll_item.imported_bonus = nil
       end
       payroll_item.non_taxable_pay = 0
       payroll_item.loan_payment = 0

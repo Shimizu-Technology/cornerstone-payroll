@@ -800,4 +800,167 @@ RSpec.describe "Track C B8-B9: Cornerstone universal workbook, merged apply path
       ).to be(true)
     end
   end
+
+  describe "CodeRabbit review regression coverage" do
+    it "rejects a blank Week 2 cell on biweekly schedules while accepting explicit 0" do
+      blank_week2_csv = upload_for("biweekly-blank-w2.csv", build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "45.00", "", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ blank_week2_csv ],
+        actor: staff
+      ).call.fetch(:session)
+
+      expect(session.rows.sole.errors_payload.map { |e| e["code"] }).to include("incomplete_weekly_hours")
+
+      explicit_zero_csv = upload_for("biweekly-zero-w2.csv", build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "45.00", "0", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session2 = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ explicit_zero_csv ],
+        actor: staff,
+        supersedes_package_id: session.package_id,
+        supersession_reason: "Entered explicit 0 for Week 2"
+      ).call.fetch(:session)
+
+      row2 = session2.rows.sole
+      expect(row2.errors_payload).to be_empty
+      expect(row2.regular_hours).to eq(BigDecimal("40.00"))
+      expect(row2.overtime_hours).to eq(BigDecimal("5.00"))
+    end
+
+    it "clears stale import bonus provenance on blank universal workbook replacement while preserving manual bonuses" do
+      first_csv = upload_for("bonus-v1.csv", build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "40.00", "40.00", "", "", "", "", "", "", "100.00", "", "", "", "", "" ],
+        [ employee_02.id, "Employee 02", "40.00", "40.00", "", "", "", "", "", "", "75.00", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session1 = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ first_csv ],
+        actor: staff
+      ).call.fetch(:session)
+
+      result1 = PayrollIntake::ApplyService.new(
+        session: session1,
+        row_overrides: session1.rows.map { |r| { id: r.id, disposition: "included" } },
+        actor: staff
+      ).call
+      expect(result1[:errors]).to be_empty
+
+      item1 = pay_period.payroll_items.find_by!(employee: employee_01)
+      item2 = pay_period.payroll_items.find_by!(employee: employee_02)
+      expect(item1).to have_attributes(bonus: BigDecimal("100.00"), bonus_source: "import", imported_bonus: BigDecimal("100.00"))
+
+      # Operator manually overrides Employee 02's bonus
+      PayrollBonusInput.manual!(item2, "250.00")
+      item2.save!
+
+      blank_bonus_csv = upload_for("bonus-v2-blank.csv", build_csv_bytes(rows: [
+        [ employee_01.id, "Employee 01", "40.00", "40.00", "", "", "", "", "", "", "", "", "", "", "", "" ],
+        [ employee_02.id, "Employee 02", "40.00", "40.00", "", "", "", "", "", "", "", "", "", "", "", "" ]
+      ]), csv_mime)
+
+      session2 = PayrollIntake::PreviewService.new(
+        pay_period: pay_period,
+        source_type: "cornerstone_workbook",
+        files: [ blank_bonus_csv ],
+        actor: staff,
+        supersedes_package_id: session1.package_id,
+        supersession_reason: "Removed Employee 01 bonus"
+      ).call.fetch(:session)
+
+      result2 = PayrollIntake::ApplyService.new(
+        session: session2,
+        row_overrides: session2.rows.map { |r| { id: r.id, disposition: "included" } },
+        actor: staff
+      ).call
+      expect(result2[:errors]).to be_empty
+
+      expect(item1.reload).to have_attributes(bonus: BigDecimal("0.00"), bonus_source: nil, imported_bonus: nil)
+      expect(item2.reload).to have_attributes(bonus: BigDecimal("250.00"), bonus_source: "manual")
+    end
+
+    it "uses identical pay-frequency resolution in Template and CornerstoneWorkbook when a persisted period has no linked schedule" do
+      CompanyPaySchedule.create!(
+        company: company,
+        frequency: "weekly",
+        period_rule: "weekly",
+        period_start_weekday: 0,
+        pay_date_rule: "days_after_period_end",
+        pay_date_offset_days: 5,
+        timezone: "Pacific/Guam",
+        effective_on: Date.new(2026, 6, 1),
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: staff,
+        confirmed_at: Time.current,
+        notes: "Later weekly schedule added after period was saved"
+      )
+      unlinked_period = pay_period
+      unlinked_period.update_column(:company_pay_schedule_id, nil) # rubocop:disable Rails/SkipsModelValidations
+
+      template = PayrollIntake::UniversalWorkbook::Template.new(pay_period: unlinked_period)
+      adapter = PayrollIntake::Adapters::CornerstoneWorkbook.new(pay_period: unlinked_period, company: company)
+
+      expect(template.send(:pay_frequency)).to eq("biweekly")
+      expect(adapter.send(:pay_frequency)).to eq("biweekly")
+      expect(PayrollIntake::WorkweekEvidence.pay_frequency_for(pay_period: unlinked_period)).to eq("biweekly")
+    end
+
+    it "rejects positive Week 2 hours in SpikeEmail preview when the pay-period schedule is weekly over a biweekly company" do
+      weekly_schedule = CompanyPaySchedule.create!(
+        company: company,
+        frequency: "weekly",
+        period_rule: "weekly",
+        period_start_weekday: 0,
+        pay_date_rule: "days_after_period_end",
+        pay_date_offset_days: 5,
+        timezone: "Pacific/Guam",
+        effective_on: Date.new(2026, 6, 1),
+        source: "operator_confirmed",
+        confirmation_status: "confirmed",
+        confirmed_by: staff,
+        confirmed_at: Time.current,
+        notes: "Weekly pay schedule overriding biweekly company default"
+      )
+      weekly_period = create(
+        :pay_period,
+        company: company,
+        company_workweek: workweek,
+        company_pay_schedule: weekly_schedule,
+        start_date: Date.new(2026, 7, 5),
+        end_date: Date.new(2026, 7, 11),
+        pay_date: Date.new(2026, 7, 16),
+        status: "draft"
+      )
+
+      adapter = PayrollIntake::Adapters::SpikeEmail.new(pay_period: weekly_period, company: company)
+      period_dates = { start_date: "2026-07-05", end_date: "2026-07-11" }
+      positive_w2 = adapter.normalize(
+        extracted_rows: [
+          { employee_name: "Employee 01", week1_hours: 40, week2_hours: 8 }
+        ],
+        detected_period: period_dates
+      )
+      expect(positive_w2[:rows].sole[:validation_errors].map { |e| e[:code] }).to include("week2_not_allowed_on_weekly")
+
+      zero_and_blank_w2 = adapter.normalize(
+        extracted_rows: [
+          { employee_name: "Employee 01", week1_hours: 40, week2_hours: 0 },
+          { employee_name: "Employee 02", week1_hours: 42 }
+        ],
+        detected_period: period_dates
+      )
+      expect(zero_and_blank_w2[:rows].first[:validation_errors]).to be_empty
+      expect(zero_and_blank_w2[:rows].second[:validation_errors]).to be_empty
+    end
+  end
 end
