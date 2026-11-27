@@ -10,6 +10,28 @@ class PayrollReadinessPolicy
   STALE_ERROR_PREFIX = "Recalculate payroll — employee pay, withholding, tax ID, payment method, or status changed after calculation for"
 
   class << self
+    def company_has_gated_employees?(company_id)
+      return false if company_id.blank?
+
+      cache = Current.company_gated_employees_cache
+      return cache[company_id] if cache&.key?(company_id)
+
+      has_gated = Employee.where(company_id: company_id, readiness_gate_enforced: true).exists?
+      cache[company_id] = has_gated if cache
+      has_gated
+    end
+
+    def clear_company_gated_cache!(company_id = nil)
+      cache = Current.company_gated_employees_cache
+      return unless cache
+
+      if company_id
+        cache.delete(company_id)
+      else
+        cache.clear
+      end
+    end
+
     def fingerprint_scoped?(employee:, pay_period:, client_managed: nil)
       return true if employee.readiness_gate_enforced?
 
@@ -52,6 +74,7 @@ class PayrollReadinessPolicy
 
     def readiness_excluded_employees_for(pay_period)
       return [] unless pay_period.status.in?(%w[draft calculated approved]) && !pay_period.voided?
+      return [] unless company_has_gated_employees?(pay_period.company_id)
 
       excluded_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id)
       candidates = Employee.where(company_id: pay_period.company_id, readiness_gate_enforced: true)
@@ -166,8 +189,18 @@ class PayrollReadinessPolicy
 
       resolved_stage = stage || (pay_period.approved? ? :commit : :approve)
       client_managed = CompanyFeatures.for(pay_period.company).client_managed_employee_lifecycle?
+      unless client_managed
+        return [] unless company_has_gated_employees?(pay_period.company_id) || any_recorded_fingerprint?(pay_period)
+      end
 
-      items = pay_period.payroll_items.financially_reportable.includes(
+      scope = pay_period.payroll_items.financially_reportable
+      unless client_managed
+        scope = scope.joins(:employee).where(
+          "employees.readiness_gate_enforced = TRUE OR payroll_items.calculation_context_snapshot ? 'paycheck_input_fingerprint'"
+        )
+      end
+
+      items = scope.includes(
         :correction_for_payroll_item,
         :financial_correction_origin_item,
         employee: [
@@ -190,7 +223,6 @@ class PayrollReadinessPolicy
         recorded_fingerprint = snapshot["paycheck_input_fingerprint"]
         scoped = fingerprint_scoped?(employee: employee, pay_period: pay_period, client_managed: client_managed)
         next unless scoped || recorded_fingerprint.present?
-        next if recorded_fingerprint.blank?
         next if verified_correction_paycheck?(pay_period: pay_period, employee: employee, payroll_item: item)
 
         reason = staleness_reason(item: item, employee: employee, pay_period: pay_period, snapshot: snapshot, stage: resolved_stage)
@@ -207,11 +239,31 @@ class PayrollReadinessPolicy
 
     private
 
+    def any_recorded_fingerprint?(pay_period)
+      if pay_period.association(:payroll_items).loaded?
+        pay_period.payroll_items.any? do |item|
+          item.payroll_reversed_at.nil? && item.calculation_context_snapshot.to_h.key?("paycheck_input_fingerprint")
+        end
+      else
+        pay_period.payroll_items.financially_reportable
+          .where("calculation_context_snapshot ? 'paycheck_input_fingerprint'")
+          .exists?
+      end
+    end
+
     def staleness_reason(item:, employee:, pay_period:, snapshot:, stage:)
       recorded_fingerprint = snapshot["paycheck_input_fingerprint"]
+      if recorded_fingerprint.blank?
+        return "Payroll item was calculated without an input fingerprint and must be recalculated."
+      end
+
       current_fingerprint = PayrollCalculationContext.paycheck_input_fingerprint(employee: employee, pay_period: pay_period)
       if recorded_fingerprint != current_fingerprint
         return "Employee pay, withholding, tax ID, deductions, or status changed after calculation."
+      end
+
+      if stale_item_rates?(item: item, employee: employee, pay_period: pay_period)
+        return "Payroll item pay rate or wage-rate allocations no longer match current employee rates for this period."
       end
 
       recorded_item_method = snapshot["item_payment_delivery_method"]
@@ -228,6 +280,43 @@ class PayrollReadinessPolicy
       end
 
       nil
+    end
+
+    def stale_item_rates?(item:, employee:, pay_period:)
+      return false if item.timekeeping_source == "correction_reference"
+      return false if PayrollWageRateInput.source_locked?(item)
+
+      compensation = employee.payroll_compensation_on(pay_period.end_date)
+      return true if item.employment_type.present? && item.employment_type != compensation.employment_type
+
+      if compensation.hourly_pay_basis? && item.wage_rate_hours.present?
+        dated_rates = employee.wage_rates_on(pay_period.end_date, include_inactive: true)
+        rates_by_id = dated_rates.index_by { |rate| rate.id.to_i }
+        rates_by_label = dated_rates.index_by { |rate| rate.label.to_s.strip.downcase }
+
+        item.wage_rate_hours.each do |entry|
+          rate_id = entry["employee_wage_rate_id"].presence&.to_i
+          dated_rate = if rate_id
+            rates_by_id[rate_id]
+          else
+            rates_by_label[entry["label"].to_s.strip.downcase]
+          end
+          return true if rate_id && dated_rate.nil?
+          return true if dated_rate && entry["rate"].to_d != dated_rate.rate.to_d
+        end
+
+        primary_entry = item.wage_rate_hours.find { |entry| entry["is_primary"] } || item.wage_rate_hours.first
+        expected_rates = [
+          primary_entry&.fetch("rate", nil)&.to_d,
+          employee.default_payroll_rate_on(pay_period.end_date).to_d
+        ].compact.uniq
+        return true unless expected_rates.include?(item.pay_rate.to_d)
+
+        false
+      else
+        expected_rate = employee.default_payroll_rate_on(pay_period.end_date)
+        item.pay_rate.to_d != expected_rate.to_d
+      end
     end
 
     def verified_supplemental_source_item?(pay_period:, employee:, source_item:)
@@ -272,6 +361,7 @@ class PayrollReadinessPolicy
       late_hours_run = pay_period.late_hours_run
       return false unless late_hours_run.present? && !late_hours_run.closed?
       return false unless late_hours_run.company_id == pay_period.company_id
+      return false if late_hours_run.applied_at.nil?
 
       origin = late_hours_run.origin_pay_period
       return false unless origin.present? && origin.company_id == pay_period.company_id && origin.committed? && !origin.voided?
@@ -280,8 +370,6 @@ class PayrollReadinessPolicy
         row.is_a?(Hash) && row["payroll_employee_id"].to_i == employee.id
       end
       return false unless in_selection
-
-      return true if late_hours_run.applied_at.nil?
 
       TimeTrackingEntryAllocation.where(
         company_id: pay_period.company_id,

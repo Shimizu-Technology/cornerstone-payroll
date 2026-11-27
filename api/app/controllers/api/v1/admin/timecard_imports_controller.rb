@@ -109,7 +109,7 @@ module Api
         end
 
         def set_pay_period
-          @pay_period = PayPeriod.find(params[:pay_period_id] || params[:id])
+          @pay_period = PayPeriod.find(params[:pay_period_id])
           unless @pay_period.company_id == current_company_id
             render json: { error: "Pay period not found" }, status: :not_found
           end

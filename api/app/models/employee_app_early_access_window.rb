@@ -26,6 +26,9 @@ class EmployeeAppEarlyAccessWindow < ApplicationRecord
   validates :end_reason, length: { maximum: REASON_MAX }
   validate :company_ids_shape
 
+  after_save { CompanyFeatures.clear_cache! }
+  after_destroy { CompanyFeatures.clear_cache! }
+
   scope :open, -> { where(ended_at: nil, retired_at: nil) }
   scope :history_order, -> { order(created_at: :desc, id: :desc) }
 

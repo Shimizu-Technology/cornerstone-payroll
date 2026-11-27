@@ -394,6 +394,7 @@ module Api
 
           input_snapshots = payroll_input_snapshots
           @payroll_input_changes = []
+          client_managed_lifecycle = CompanyFeatures.for(@pay_period.company).client_managed_employee_lifecycle?
 
           employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
@@ -439,19 +440,31 @@ module Api
                 payroll_item.company_id = current_company_id
                 payroll_item.hours_worked = 0
               end
-              if PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: employee, pay_period: @pay_period) &&
-                  (payroll_item.new_record? || !payroll_item.payment_delivery_method_overridden_in_snapshot?)
+              scoped = PayrollReadinessPolicy.fingerprint_scoped?(
+                employee: employee,
+                pay_period: @pay_period,
+                client_managed: client_managed_lifecycle
+              )
+              if scoped && (payroll_item.new_record? || !payroll_item.payment_delivery_method_overridden_in_snapshot?)
                 payroll_item.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
               else
                 payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
               end
 
-              verified_correction = PayrollReadinessPolicy.verified_correction_paycheck?(
-                pay_period: @pay_period,
-                employee: employee,
-                payroll_item: payroll_item
-              )
-              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || (@pay_period.correction_run? && verified_correction)
+              preserve_correction_rate = if @pay_period.correction_run?
+                if scoped
+                  PayrollReadinessPolicy.verified_correction_paycheck?(
+                    pay_period: @pay_period,
+                    employee: employee,
+                    payroll_item: payroll_item
+                  )
+                else
+                  true
+                end
+              else
+                false
+              end
+              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || preserve_correction_rate
               if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
                 payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
               end
@@ -467,7 +480,7 @@ module Api
                   apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
                 else
                   payroll_item.clear_wage_rate_hours!
-                  sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
+                  sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || preserve_correction_rate
                   payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
                   payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
                   payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]

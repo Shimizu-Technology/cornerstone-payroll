@@ -2,7 +2,7 @@
 
 class Current < ActiveSupport::CurrentAttributes
   attribute :real_user, :view_as_grant
-  attribute :user, :actor, :organization_id, :company_id, :request_id, :ip_address, :user_agent, :domain_audit_recorded, default: nil
+  attribute :user, :actor, :organization_id, :company_id, :request_id, :ip_address, :user_agent, :domain_audit_recorded, :company_features_cache, :company_gated_employees_cache, default: nil
 
   def self.prevent_view_as_side_effects!
     raise ActiveRecord::ReadOnlyError, "Side effects are unavailable during a view-only support session" if view_as_grant

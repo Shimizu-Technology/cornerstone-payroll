@@ -27,6 +27,7 @@ class PayPeriodDefaultRoster
     additional_employee_ids = [] if @pay_period.correction_run?
     candidate_ids = (ids + additional_employee_ids).map(&:to_i).uniq - (excluded_employee_ids || @pay_period.pay_period_excluded_employees.pluck(:employee_id))
     return candidate_ids if candidate_ids.empty?
+    return candidate_ids unless PayrollReadinessPolicy.company_has_gated_employees?(@pay_period.company_id)
 
     saved_id_set = saved_ids.to_set
     enforced_unsaved = @pay_period.company.employees

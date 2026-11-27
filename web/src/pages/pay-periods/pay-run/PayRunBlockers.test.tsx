@@ -111,3 +111,33 @@ it('renders the stale-calculation banner with Recalculate action and the unverif
   fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
   expect(handleRunPayroll).toHaveBeenCalledOnce();
 });
+
+it('shows Mid-period pay change warnings on hours and approval steps without duplicating on lifecycle', () => {
+  const payPeriod = {
+    id: 12,
+    company_id: 7,
+    status: 'approved',
+    compensation_warnings: ['Jordan Sample changed rate mid-period.'],
+  };
+
+  const { rerender } = render(
+    <MemoryRouter>
+      <PayRunBlockers {...({ part: 'hours', payPeriod } as unknown as ComponentProps<typeof PayRunBlockers>)} />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText(/Mid-period pay change\./)).toBeTruthy();
+
+  rerender(
+    <MemoryRouter>
+      <PayRunBlockers {...({ part: 'approval', payPeriod } as unknown as ComponentProps<typeof PayRunBlockers>)} />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText(/Mid-period pay change\./)).toBeTruthy();
+
+  rerender(
+    <MemoryRouter>
+      <PayRunBlockers {...({ part: 'lifecycle', payPeriod } as unknown as ComponentProps<typeof PayRunBlockers>)} />
+    </MemoryRouter>,
+  );
+  expect(screen.queryByText(/Mid-period pay change\./)).toBeNull();
+});

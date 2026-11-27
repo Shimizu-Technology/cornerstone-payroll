@@ -22,7 +22,8 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
   const [mappings, setMappings] = useState<Map<number, number | null>>(new Map());
   const [result, setResult] = useState<{
     applied: number;
-    skipped: { name: string; reason: string }[];
+    skipped: number;
+    skippedReadiness: { name: string; reason: string }[];
     errors: number;
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -87,12 +88,16 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
       }
 
       const res = await payPeriodsApi.applyTimecardImport(payPeriodId, importMappings);
+      const skippedEntries = res.skipped || [];
       setResult({
         applied: res.applied.length,
-        skipped: (res.skipped || []).map((entry) => ({
-          name: entry.employee_name || entry.name || (entry.employee_id ? `Employee #${entry.employee_id}` : 'Employee'),
-          reason: entry.reason,
-        })),
+        skipped: skippedEntries.length,
+        skippedReadiness: skippedEntries
+          .filter((entry) => entry.code === 'employee_readiness_incomplete')
+          .map((entry) => ({
+            name: entry.employee_name || entry.name || (entry.employee_id ? `Employee #${entry.employee_id}` : 'Employee'),
+            reason: entry.reason,
+          })),
         errors: res.errors.length,
       });
       setStep('done');
@@ -280,14 +285,14 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
               <h4 className="text-lg font-semibold text-gray-900">Import Complete</h4>
               <p className="text-sm text-gray-600 mt-2">
                 {result.applied} employee hours imported successfully.
-                {result.skipped.length > 0 && ` ${result.skipped.length} skipped.`}
+                {result.skipped > 0 && ` ${result.skipped} skipped.`}
                 {result.errors > 0 && ` ${result.errors} errors occurred.`}
               </p>
-              {result.skipped.length > 0 && (
+              {result.skippedReadiness.length > 0 && (
                 <div role="status" className="mt-4 text-left bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-950">
                   <p className="font-medium">Skipped employees (hours not imported):</p>
                   <ul className="mt-1 list-disc list-inside space-y-1">
-                    {result.skipped.map((entry, idx) => (
+                    {result.skippedReadiness.map((entry, idx) => (
                       <li key={idx}><span className="font-medium">{entry.name}:</span> {entry.reason}</li>
                     ))}
                   </ul>

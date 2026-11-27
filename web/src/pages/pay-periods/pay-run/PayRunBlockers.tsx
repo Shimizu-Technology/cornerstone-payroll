@@ -210,7 +210,7 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
-        {showHours && payPeriod.compensation_warnings?.map((warning) => (
+        {part !== 'lifecycle' && payPeriod.compensation_warnings?.map((warning) => (
           <Alert key={warning}>
             <p className="max-w-4xl leading-6"><span className="font-semibold">Mid-period pay change.</span> {warning}</p>
           </Alert>

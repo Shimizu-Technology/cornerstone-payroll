@@ -615,10 +615,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       });
       setResults({
         success: response.results.success.length,
-        skipped: (response.results.skipped || []).map((entry) => ({
-          name: entry.name || `Employee #${entry.employee_id}`,
-          reason: entry.reason,
-        })),
+        skipped: (response.results.skipped || [])
+          .filter((entry) => entry.code === 'employee_readiness_incomplete')
+          .map((entry) => ({
+            name: entry.name || `Employee #${entry.employee_id}`,
+            reason: entry.reason,
+          })),
         errors: response.results.errors.map((e) => `${e.name}: ${e.error}`),
       });
       setStep('done');

@@ -10,10 +10,42 @@ class CompanyFeatures
 
   attr_reader :company, :as_of, :profile
 
+  def self.with_cache
+    previous_features = Current.company_features_cache
+    previous_gated = Current.company_gated_employees_cache
+    Current.company_features_cache ||= {}
+    Current.company_gated_employees_cache ||= {}
+    yield
+  ensure
+    Current.company_features_cache = previous_features
+    Current.company_gated_employees_cache = previous_gated
+  end
+
+  def self.clear_cache!(company_id = nil)
+    cache = Current.company_features_cache
+    return unless cache
+
+    if company_id
+      cache.delete_if { |(cid, _date, _retire), _| cid == company_id }
+    else
+      cache.clear
+    end
+  end
+
   def self.for(company, on: PayrollBusinessClock.today, retire_windows: true)
     raise ArgumentError, "company is required" unless company.is_a?(Company)
 
     date = (on || PayrollBusinessClock.today).to_date
+    cache = Current.company_features_cache
+    if cache && company.persisted?
+      key = [ company.id, date, retire_windows ]
+      return cache[key] if cache.key?(key)
+
+      persisted = ClientOperatingProfile.for_date(company.id, date)
+      resolved = persisted || ClientOperatingProfiles::LegacyProfileBuilder.build(company, effective_on: date)
+      return cache[key] = new(company: company, profile: resolved, as_of: date, retire_windows: retire_windows)
+    end
+
     persisted = ClientOperatingProfile.for_date(company.id, date)
     resolved = persisted || ClientOperatingProfiles::LegacyProfileBuilder.build(company, effective_on: date)
     new(company: company, profile: resolved, as_of: date, retire_windows: retire_windows)

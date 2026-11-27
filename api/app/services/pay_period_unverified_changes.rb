@@ -29,6 +29,7 @@ class PayPeriodUnverifiedChanges
       .where(company_id: @pay_period.company_id)
       .open_items
       .affecting_pay
+    return EmployeeVerificationItem.none unless base.exists?
 
     reportable_employee_ids = @pay_period.payroll_items.financially_reportable.select(:employee_id)
     on_run = base.where(employee_id: reportable_employee_ids)

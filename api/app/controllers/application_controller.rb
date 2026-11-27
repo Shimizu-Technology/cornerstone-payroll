@@ -24,7 +24,9 @@ class ApplicationController < ActionController::API
   end
 
   def reset_current_context
-    yield
+    CompanyFeatures.with_cache do
+      yield
+    end
   ensure
     Current.reset
   end

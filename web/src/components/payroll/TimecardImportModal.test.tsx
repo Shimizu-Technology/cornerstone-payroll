@@ -67,4 +67,36 @@ describe('TimecardImportModal skipped-hours notice', () => {
     expect(screen.getByText(/W-4 missing\. Hours were not imported\./)).toBeTruthy();
     expect(onImportComplete).toHaveBeenCalledOnce();
   });
+
+  it('keeps the existing skip display unchanged when only non-readiness exclusions were skipped', async () => {
+    mocks.previewTimecardImport.mockResolvedValue({
+      preview: [
+        { csv_name: 'Casey Legacy', employee_id: 50, regular_hours: '40', overtime_hours: '0', total_hours: '40', match_score: 1 },
+      ],
+      all_employees: [{ id: 50, name: 'Casey Legacy' }],
+      total_rows: 1,
+      matched: 1,
+      unmatched: 0,
+    });
+    mocks.applyTimecardImport.mockResolvedValue({
+      applied: [],
+      skipped: [{ employee_id: 50, name: 'Casey Legacy', reason: 'Excluded from this pay period' }],
+      errors: [],
+    });
+
+    const { container } = render(
+      <TimecardImportModal open onClose={vi.fn()} payPeriodId={12} onImportComplete={vi.fn()} />
+    );
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const csvFile = new File(['Employee Name,Regular Hours\nCasey Legacy,40\n'], 'timecards.csv', { type: 'text/csv' });
+    fireEvent.change(fileInput, { target: { files: [csvFile] } });
+
+    await screen.findByText('Apply Import (1 employees)');
+    fireEvent.click(screen.getByRole('button', { name: 'Apply Import (1 employees)' }));
+
+    await waitFor(() => expect(screen.getByText('Import Complete')).toBeTruthy());
+    expect(screen.getByText(/1 skipped\./)).toBeTruthy();
+    expect(screen.queryByText('Skipped employees (hours not imported):')).toBeNull();
+  });
 });

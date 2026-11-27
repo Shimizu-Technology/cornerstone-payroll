@@ -798,34 +798,36 @@ class PayrollItem < ApplicationRecord
 
   # Calculate and store all values
   def calculate!(annual_fica_context: nil)
-    ApplicationRecord.transaction do
-      PayrollCorrectionPayBasisGuard.validate!(self)
-      # Validate a clean copy of the persisted period. Calculating an item built
-      # through `pay_period.payroll_items` leaves that unsaved item in the
-      # association target; validating the in-memory parent would recursively
-      # validate the same child and fail before the calculator can save it.
-      calculation_period = PayPeriod.find(pay_period_id)
-      unless calculation_period.valid?(:payroll_calculation)
-        raise ActiveRecord::RecordInvalid, calculation_period
-      end
-      self.pay_period = calculation_period
-      if PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: employee, pay_period: calculation_period) &&
-          calculation_period.status.in?(%w[draft calculated]) &&
-          !payment_delivery_method_overridden_in_snapshot?
-        self.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
-      else
-        self.payment_delivery_method ||= effective_payment_delivery_method
-      end
+    CompanyFeatures.with_cache do
+      ApplicationRecord.transaction do
+        PayrollCorrectionPayBasisGuard.validate!(self)
+        # Validate a clean copy of the persisted period. Calculating an item built
+        # through `pay_period.payroll_items` leaves that unsaved item in the
+        # association target; validating the in-memory parent would recursively
+        # validate the same child and fail before the calculator can save it.
+        calculation_period = PayPeriod.find(pay_period_id)
+        unless calculation_period.valid?(:payroll_calculation)
+          raise ActiveRecord::RecordInvalid, calculation_period
+        end
+        self.pay_period = calculation_period
+        if PayrollCalculationContext.paycheck_fingerprint_scoped?(employee: employee, pay_period: calculation_period) &&
+            calculation_period.status.in?(%w[draft calculated]) &&
+            !payment_delivery_method_overridden_in_snapshot?
+          self.payment_delivery_method = employee.payment_delivery_method.presence || "paper_check"
+        else
+          self.payment_delivery_method ||= effective_payment_delivery_method
+        end
 
-      if variable_salary_missing?
-        raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
-      end
+        if variable_salary_missing?
+          raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
+        end
 
-      synchronize_mosa_reviewed_hours!
-      calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
-      calculator.calculate
-      save!
-      TimeTracking::SourceEarningsConservation.validate!(self, calculated: true, employee: employee)
+        synchronize_mosa_reviewed_hours!
+        calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
+        calculator.calculate
+        save!
+        TimeTracking::SourceEarningsConservation.validate!(self, calculated: true, employee: employee)
+      end
     end
   rescue *PayrollCalculationHistory::ERRORS => e
     raise PayrollCalculationHistory::HoldError, PayrollCalculationHistory.message(e)

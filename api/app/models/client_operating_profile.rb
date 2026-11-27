@@ -26,6 +26,8 @@ class ClientOperatingProfile < ApplicationRecord
   validate :lifecycle_mode_activation_blockers_must_be_hash
 
   after_commit { TenantSubdomainRegistry.invalidate! }
+  after_save { CompanyFeatures.clear_cache!(company_id) }
+  after_destroy { CompanyFeatures.clear_cache!(company_id) }
 
   scope :active_on, ->(date) {
     resolved_date = date.to_date

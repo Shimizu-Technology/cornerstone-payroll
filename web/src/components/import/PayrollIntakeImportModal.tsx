@@ -566,10 +566,15 @@ export function PayrollIntakeImportModal({
       setDoneSummary({
         applied: response.results.applied.length,
         skipped: response.results.skipped.length,
-        skippedItems: response.results.skipped.map((entry) => ({
-          name: entry.source_employee_name || `Row #${entry.row_id}`,
-          reason: entry.reason,
-        })),
+        skippedItems: response.results.skipped
+          .filter((entry) => entry.code === 'employee_readiness_incomplete')
+          .map((entry) => ({
+            name:
+              entry.name
+              || entry.source_employee_name
+              || (entry.row_id !== undefined ? `Row #${entry.row_id}` : entry.employee_id !== undefined ? `Employee #${entry.employee_id}` : 'Employee'),
+            reason: entry.reason,
+          })),
         errors: response.results.errors.map((entry) => entry.error),
       });
       setImportData(response.import);

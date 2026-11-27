@@ -32,32 +32,34 @@ class PayPeriodLifecycleService
   end
 
   def approve!
-    with_financial_pay_period_lock do
-      validate_prior_provider_source!
-      validate_current_intake!
-      unless pay_period.calculated?
-        raise InvalidTransitionError, "Can only approve a calculated pay period"
-      end
+    CompanyFeatures.with_cache do
+      with_financial_pay_period_lock do
+        validate_prior_provider_source!
+        validate_current_intake!
+        unless pay_period.calculated?
+          raise InvalidTransitionError, "Can only approve a calculated pay period"
+        end
 
-      validate_go_live_gate!
-      validate_run_eligibility!
-      validate_expected_entries!
-      validate_payroll_participation!
-      validate_variable_period_pay!
-      validate_employee_readiness!
-      validate_paycheck_input_freshness!(stage: :approve)
-      validate_employee_document_readiness!
-      validate_annual_fica_context!
-      validate_employer_contribution_tracking!
-      validate_payment_delivery!
-      validate_source_earnings!
-      materialize_scoped_payment_delivery_methods!
-      pay_period.update!(
-        status: "approved",
-        approved_by_id: actor&.id,
-        approved_at: Time.current
-      )
-      PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).publish!
+        validate_go_live_gate!
+        validate_run_eligibility!
+        validate_expected_entries!
+        validate_payroll_participation!
+        validate_variable_period_pay!
+        validate_employee_readiness!
+        validate_paycheck_input_freshness!(stage: :approve)
+        validate_employee_document_readiness!
+        validate_annual_fica_context!
+        validate_employer_contribution_tracking!
+        validate_payment_delivery!
+        validate_source_earnings!
+        materialize_scoped_payment_delivery_methods!
+        pay_period.update!(
+          status: "approved",
+          approved_by_id: actor&.id,
+          approved_at: Time.current
+        )
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).publish!
+      end
     end
 
     pay_period
@@ -94,7 +96,8 @@ class PayPeriodLifecycleService
 
   def commit!(acknowledged_outstanding_file_request_ids: nil, expected_next_check_number: nil, acknowledged_verification_items: nil)
     acknowledgement_ids = { batch: [], entries: [] }
-    with_financial_pay_period_lock do
+    CompanyFeatures.with_cache do
+      with_financial_pay_period_lock do
       validate_prior_provider_source!
       validate_current_intake!
       unless pay_period.approved?
@@ -159,6 +162,7 @@ class PayPeriodLifecycleService
       recorded_acknowledgements = record_aire_processing_acknowledgements
       acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
       acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
+      end
     end
 
     AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
@@ -318,18 +322,24 @@ class PayPeriodLifecycleService
   end
 
   def validate_employee_readiness!
-    items = pay_period.payroll_items.financially_reportable.includes(
-      :correction_for_payroll_item,
-      :financial_correction_origin_item,
-      employee: [
-        :employee_compensation_changes,
-        :employee_wage_rates,
-        :employee_wage_rate_versions,
-        :employee_w4_elections,
-        :employee_status_events,
-        :employee_readiness_overrides
-      ]
-    ).order(:id).to_a
+    return unless PayrollReadinessPolicy.company_has_gated_employees?(pay_period.company_id)
+
+    items = pay_period.payroll_items.financially_reportable
+      .joins(:employee)
+      .where(employees: { readiness_gate_enforced: true })
+      .includes(
+        :correction_for_payroll_item,
+        :financial_correction_origin_item,
+        employee: [
+          :employee_compensation_changes,
+          :employee_wage_rates,
+          :employee_wage_rate_versions,
+          :employee_w4_elections,
+          :employee_status_events,
+          :employee_readiness_overrides
+        ]
+      ).order(:id).to_a
+    return if items.empty?
 
     blocked = items.filter_map do |item|
       employee = item.employee
@@ -359,6 +369,8 @@ class PayPeriodLifecycleService
 
   def materialize_scoped_payment_delivery_methods!
     client_managed = CompanyFeatures.for(pay_period.company).client_managed_employee_lifecycle?
+    return unless client_managed || PayrollReadinessPolicy.company_has_gated_employees?(pay_period.company_id)
+
     items = pay_period.payroll_items.financially_reportable.where(payment_delivery_method: nil).includes(:employee).order(:id).to_a
     items.each do |item|
       next unless PayrollReadinessPolicy.fingerprint_scoped?(employee: item.employee, pay_period: pay_period, client_managed: client_managed)
