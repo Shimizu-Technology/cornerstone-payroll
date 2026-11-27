@@ -64,6 +64,9 @@ class ClientOperatingProfile < ApplicationRecord
       changed_by_id: changed_by_id,
       reason: reason,
       confirmed_at: confirmed_at&.utc&.iso8601,
+      lifecycle_mode_activated_at: lifecycle_mode_activated_at&.utc&.iso8601,
+      lifecycle_mode_activation_failed_at: lifecycle_mode_activation_failed_at&.utc&.iso8601,
+      lifecycle_mode_activation_blockers: lifecycle_mode_activation_blockers || {},
       persisted: persisted?,
       created_at: created_at&.utc&.iso8601,
       updated_at: updated_at&.utc&.iso8601

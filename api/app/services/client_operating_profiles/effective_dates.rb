@@ -24,7 +24,9 @@ module ClientOperatingProfiles
     end
 
     def amend?(date)
-      @latest.present? && @latest.version > 1 && @latest.effective_on == date && date > @today
+      return false unless @latest.present? && @latest.version > 1 && @latest.effective_on == date
+
+      date > @today || (@latest.lifecycle_mode_activated_at.nil? && @latest.lifecycle_mode_activation_failed_at.present?)
     end
 
     private

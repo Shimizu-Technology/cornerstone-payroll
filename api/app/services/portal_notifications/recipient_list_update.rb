@@ -11,6 +11,7 @@ module PortalNotifications
     # address must be ticked instead, so their own alert setting applies.
     class EmailBelongsToAccount < StandardError; end
     class InvalidTeamRole < StandardError; end
+    class LastLifecycleRecipientRequired < StandardError; end
 
     def self.call!(company:, actor:, user_ids:, emails:, lead_user_id: nil, backup_user_id: nil)
       new(
@@ -66,6 +67,16 @@ module PortalNotifications
             same_org_matches.first.email.downcase
           raise EmailBelongsToAccount, matched_email
         end
+      end
+
+      if ClientOperatingProfiles::LifecycleModePreflight.client_managed_active_or_scheduled?(company) &&
+          ClientOperatingProfiles::LifecycleModePreflight.qualifying_staff_recipient_count_for(
+            company,
+            user_ids: user_ids,
+            emails: emails
+          ).zero?
+        raise LastLifecycleRecipientRequired,
+              "Keep at least one qualifying staff notification recipient while Client-managed employee lifecycle is active or scheduled."
       end
 
       changes = replace!

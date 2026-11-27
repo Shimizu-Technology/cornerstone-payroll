@@ -111,7 +111,10 @@ module ClientOperatingProfiles
       changed_fields = after.keys.reject { |key| after.fetch(key) == before.fetch(key) }
       raise Invalid, "Change at least one setting before saving." if changed_fields.empty?
 
-      attributes = OperatingProfileCatalog.attributes_from(after).merge(changed_by: @actor, reason: @reason.strip)
+      lifecycle_attrs = resolve_lifecycle_activation_attributes!(previous: previous, before: before, after: after)
+      attributes = OperatingProfileCatalog.attributes_from(after)
+        .merge(lifecycle_attrs)
+        .merge(changed_by: @actor, reason: @reason.strip)
       profile = if amend
         previous.update!(**attributes)
         previous
@@ -128,6 +131,38 @@ module ClientOperatingProfiles
         }
       )
       profile
+    end
+
+    def resolve_lifecycle_activation_attributes!(previous:, before:, after:)
+      mode = after["client_portal.employee_lifecycle_mode"]
+      unless mode == "client_managed" && after["client_portal_enabled"] == true
+        return {
+          lifecycle_mode_activated_at: nil,
+          lifecycle_mode_activation_failed_at: nil,
+          lifecycle_mode_activation_blockers: {}
+        }
+      end
+
+      already_activated = previous.persisted? &&
+        before["client_portal_enabled"] == true &&
+        before["client_portal.employee_lifecycle_mode"] == "client_managed" &&
+        previous.lifecycle_mode_activated_at.present?
+      if already_activated
+        return {
+          lifecycle_mode_activated_at: previous.lifecycle_mode_activated_at,
+          lifecycle_mode_activation_failed_at: nil,
+          lifecycle_mode_activation_blockers: {}
+        }
+      end
+
+      preflight = LifecycleModePreflight.evaluate(@company)
+      raise Invalid, preflight.error_messages.join(" ") unless preflight.passed?
+
+      {
+        lifecycle_mode_activated_at: (@effective_on <= PayrollBusinessClock.today ? Time.current : nil),
+        lifecycle_mode_activation_failed_at: nil,
+        lifecycle_mode_activation_blockers: {}
+      }
     end
 
     def switch_kept_on?(key, before, after)

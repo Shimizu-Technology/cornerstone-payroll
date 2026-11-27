@@ -12,8 +12,8 @@ module Api
 
         class AuditWriteFailed < StandardError; end
 
-        before_action :reject_closed_practice_copy, only: [ :create, :update ]
-        before_action :set_employee, only: [ :show, :update ]
+        before_action :reject_closed_practice_copy, only: [ :create, :update, :terminate, :rehire ]
+        before_action :set_employee, only: [ :show, :update, :terminate, :rehire ]
 
         def index
           if params[:rates_on].present?
@@ -59,13 +59,26 @@ module Api
           end
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          render json: {
-            data: serialize_employee(result.employee, contact_context: contact_context),
-            change_request: serialize_change_request(result.change_request),
-            applied_direct_fields: result.applied_direct_fields,
-            contact_warnings: result.contact_warnings || [],
-            message: "Employee profile created. Payroll-sensitive details were submitted for approval as request ##{result.change_request.id}."
-          }, status: :created
+          if result.client_managed
+            render json: {
+              data: serialize_employee(result.employee, contact_context: contact_context),
+              change_request: nil,
+              readiness: result.readiness&.as_json,
+              verification_items: Array(result.verification_items).map { |item| serialize_verification_item(item) },
+              applied_direct_fields: result.applied_direct_fields,
+              contact_warnings: result.contact_warnings || [],
+              warnings: result.warnings || [],
+              message: create_client_managed_message(result)
+            }, status: :created
+          else
+            render json: {
+              data: serialize_employee(result.employee, contact_context: contact_context),
+              change_request: serialize_change_request(result.change_request),
+              applied_direct_fields: result.applied_direct_fields,
+              contact_warnings: result.contact_warnings || [],
+              message: "Employee profile created. Payroll-sensitive details were submitted for approval as request ##{result.change_request.id}."
+            }, status: :created
+          end
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee || e.record)
         rescue EmployeeContactChanges::EmailChangeLocked
@@ -97,13 +110,26 @@ module Api
           end
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          render json: {
-            data: contact_page_or_full(result.employee, contact_context),
-            change_request: serialize_change_request(result.change_request),
-            applied_direct_fields: result.applied_direct_fields,
-            contact_warnings: result.contact_warnings || [],
-            message: update_message(result.change_request)
-          }
+          if result.client_managed
+            render json: {
+              data: contact_page_or_full(result.employee, contact_context),
+              change_request: serialize_change_request(result.change_request),
+              readiness: result.readiness&.as_json,
+              verification_items: Array(result.verification_items).map { |item| serialize_verification_item(item) },
+              applied_direct_fields: result.applied_direct_fields,
+              contact_warnings: result.contact_warnings || [],
+              warnings: result.warnings || [],
+              message: update_client_managed_message(result)
+            }
+          else
+            render json: {
+              data: contact_page_or_full(result.employee, contact_context),
+              change_request: serialize_change_request(result.change_request),
+              applied_direct_fields: result.applied_direct_fields,
+              contact_warnings: result.contact_warnings || [],
+              message: update_message(result.change_request)
+            }
+          end
         rescue ClientEmployeeUpdateService::PendingAddressRequest => e
           render json: { error: e.message, code: "address_request_pending", pending_request_id: e.request_id },
             status: :conflict
@@ -130,6 +156,255 @@ module Api
           }, status: :unprocessable_entity
         rescue LegacyRecurringComponentGuard::Error => e
           render json: { error: "Validation failed", details: { payroll_components: [ e.message ] } }, status: :unprocessable_entity
+        rescue AuditWriteFailed
+          render json: { error: AUDIT_FAILURE_MESSAGE }, status: :service_unavailable
+        end
+
+        def terminate
+          payload = termination_params
+          reason_category = payload[:reason_category].to_s.strip
+          unless EmployeeStatusEvent::TERMINATION_REASONS.include?(reason_category)
+            return render json: {
+              error: "Validation failed",
+              details: { reason_category: [ "must be a valid termination reason" ] }
+            }, status: :unprocessable_entity
+          end
+
+          final_pay_notes = payload[:final_pay_notes].to_s.strip.presence
+          notes = payload[:notes].to_s.strip.presence
+          if final_pay_notes && final_pay_notes.length > 2000
+            return render json: {
+              error: "Validation failed",
+              details: { final_pay_notes: [ "is too long (maximum is 2000 characters)" ] }
+            }, status: :unprocessable_entity
+          end
+          if notes && notes.length > 2000
+            return render json: {
+              error: "Validation failed",
+              details: { notes: [ "is too long (maximum is 2000 characters)" ] }
+            }, status: :unprocessable_entity
+          end
+
+          effective_date_input = payload[:effective_date].presence || payload[:last_worked_on].presence
+          event = nil
+          verification_item = nil
+          post_termination_committed_ids = []
+          warnings = []
+          error_response = nil
+
+          ActiveRecord::Base.transaction do
+            Company.lock.find(current_company_id)
+            revalidate_client_company_write_access!
+            ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
+            unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+              error_response = [ {
+                error: "Client-managed employee lifecycle is not enabled for this company.",
+                code: "client_lifecycle_disabled"
+              }, :forbidden ]
+              next
+            end
+
+            if EmployeeProfileIdentity.own_record_for_client_managed?(@employee, current_user)
+              error_response = [ {
+                error: "You cannot terminate your own employee record.",
+                code: "self_lifecycle_forbidden"
+              }, :forbidden ]
+              next
+            end
+
+            event = EmployeeStatusTransitionService.terminate!(
+              employee: @employee,
+              actor: current_user,
+              attributes: {
+                effective_date: effective_date_input,
+                last_worked_on: payload[:last_worked_on].presence,
+                reason_category: reason_category,
+                internal_notes: notes,
+                source: "client_portal"
+              }
+            )
+
+            post_termination_committed_ids = post_termination_committed_pay_period_ids(@employee, event.effective_date)
+            if post_termination_committed_ids.any?
+              warnings << "This employee was already paid in committed payroll after #{event.effective_date.iso8601}. Cornerstone has been alerted to review for overpayment, void, or correction."
+            end
+
+            mid_period_approved = EmployeeStatusTransitionService.open_run_groups(@employee, effective_date: event.effective_date)
+              .fetch(:check)
+              .select(&:approved?)
+            if mid_period_approved.any?
+              warnings << "Terminating mid-period on an approved pay run requires Cornerstone to unapprove, recalculate, republish, and request re-approval before commit."
+            end
+
+            metadata = {
+              "reason_category" => event.reason_category,
+              "last_worked_on" => event.last_worked_on&.iso8601,
+              "final_pay_notes" => final_pay_notes,
+              "notes" => notes,
+              "post_termination_committed_pay_period_ids" => post_termination_committed_ids
+            }.compact
+
+            verification_item = EmployeeVerificationItems::Recorder.record!(
+              employee: @employee,
+              actor: current_user,
+              event_kind: "termination",
+              changed_fields: %w[status termination_date],
+              before_values: { "status" => event.previous_status, "termination_date" => nil },
+              after_values: { "status" => "terminated", "termination_date" => event.effective_date.iso8601 },
+              effective_on: event.effective_date,
+              source_record: event,
+              metadata: metadata
+            )
+
+            record_lifecycle_audit!(
+              action: "client_employees#terminate",
+              employee: @employee,
+              metadata: {
+                source: "client_portal",
+                employee_name: @employee.display_name,
+                status_event_id: event.id,
+                verification_item_id: verification_item.id,
+                effective_date: event.effective_date.iso8601,
+                last_worked_on: event.last_worked_on&.iso8601,
+                reason_category: event.reason_category,
+                post_termination_committed_pay_period_ids: post_termination_committed_ids
+              }.compact
+            )
+          end
+
+          return render json: error_response[0], status: error_response[1] if error_response
+
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          render json: {
+            data: serialize_employee(@employee.reload, contact_context: contact_context),
+            status_event: serialize_status_event(event),
+            verification_item: serialize_verification_item(verification_item),
+            post_termination_committed_pay_period_ids: post_termination_committed_ids,
+            warnings: warnings,
+            message: "#{@employee.full_name} has been terminated effective #{event.effective_date.iso8601}. Cornerstone has been notified to verify."
+          }
+        rescue EmployeeProfileIdentity::LinkCheckUnavailable => e
+          render json: { error: e.message }, status: :service_unavailable
+        rescue EmployeeStatusTransitionService::ApprovedRunBlocked => e
+          run = e.pay_period
+          render json: {
+            error: "This employee is on an approved pay run for #{run.start_date.iso8601} to #{run.end_date.iso8601}. Ask Cornerstone to unapprove that run before terminating effective #{e.effective_date.iso8601}."
+          }, status: :unprocessable_entity
+        rescue EmployeeStatusTransitionService::Forbidden => e
+          render json: { error: e.message }, status: :forbidden
+        rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
+        rescue AuditWriteFailed
+          render json: { error: AUDIT_FAILURE_MESSAGE }, status: :service_unavailable
+        end
+
+        def rehire
+          payload = rehire_params
+          notes = payload[:notes].to_s.strip.presence
+          if notes && notes.length > 2000
+            return render json: {
+              error: "Validation failed",
+              details: { notes: [ "is too long (maximum is 2000 characters)" ] }
+            }, status: :unprocessable_entity
+          end
+
+          event = nil
+          readiness = nil
+          verification_item = nil
+          error_response = nil
+
+          ActiveRecord::Base.transaction do
+            Company.lock.find(current_company_id)
+            revalidate_client_company_write_access!
+            ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
+            unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+              error_response = [ {
+                error: "Client-managed employee lifecycle is not enabled for this company.",
+                code: "client_lifecycle_disabled"
+              }, :forbidden ]
+              next
+            end
+
+            if EmployeeProfileIdentity.own_record_for_client_managed?(@employee, current_user)
+              error_response = [ {
+                error: "You cannot rehire your own employee record.",
+                code: "self_lifecycle_forbidden"
+              }, :forbidden ]
+              next
+            end
+
+            previous_termination_date = @employee.termination_date
+            event = EmployeeStatusTransitionService.reactivate!(
+              employee: @employee,
+              actor: current_user,
+              attributes: {
+                effective_date: payload[:effective_date],
+                internal_notes: notes,
+                source: "client_portal"
+              }
+            )
+
+            # Stamp readiness_gate_enforced = true on client-portal rehire while
+            # keeping any existing document_readiness_required gate untouched (§3.2).
+            @employee.update!(readiness_gate_enforced: true) unless @employee.readiness_gate_enforced?
+            readiness = EmployeeReadinessEvaluator.evaluate(@employee.reload)
+
+            verification_item = EmployeeVerificationItems::Recorder.record!(
+              employee: @employee,
+              actor: current_user,
+              event_kind: "rehire",
+              changed_fields: %w[status termination_date readiness_gate_enforced],
+              before_values: {
+                "status" => event.previous_status,
+                "termination_date" => previous_termination_date&.iso8601
+              },
+              after_values: {
+                "status" => "active",
+                "termination_date" => nil
+              },
+              effective_on: event.effective_date,
+              source_record: event,
+              metadata: {
+                "notes" => notes,
+                "readiness_status" => readiness.status,
+                "missing_keys" => readiness.missing_keys
+              }.compact
+            )
+
+            record_lifecycle_audit!(
+              action: "client_employees#rehire",
+              employee: @employee,
+              metadata: {
+                source: "client_portal",
+                employee_name: @employee.display_name,
+                status_event_id: event.id,
+                verification_item_id: verification_item.id,
+                effective_date: event.effective_date.iso8601,
+                readiness_status: readiness.status
+              }.compact
+            )
+          end
+
+          return render json: error_response[0], status: error_response[1] if error_response
+
+          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          render json: {
+            data: serialize_employee(@employee.reload, contact_context: contact_context),
+            status_event: serialize_status_event(event),
+            readiness: readiness.as_json,
+            verification_item: serialize_verification_item(verification_item),
+            message: "#{@employee.full_name} has been rehired effective #{event.effective_date.iso8601}. Cornerstone has been notified to verify."
+          }
+        rescue EmployeeProfileIdentity::LinkCheckUnavailable => e
+          render json: { error: e.message }, status: :service_unavailable
+        rescue EmployeeStatusTransitionService::Forbidden => e
+          render json: { error: e.message }, status: :forbidden
+        rescue EmployeeStatusTransitionService::Error => e
+          render json: { error: e.message }, status: :unprocessable_entity
+        rescue ActiveRecord::RecordInvalid => e
+          render json: { error: "Validation failed", details: e.record.errors.messages }, status: :unprocessable_entity
         rescue AuditWriteFailed
           render json: { error: AUDIT_FAILURE_MESSAGE }, status: :service_unavailable
         end
@@ -194,6 +469,9 @@ module Api
             :state,
             :zip,
             :phone,
+            :payment_delivery_method,
+            :compensation_effective_on,
+            :effective_on,
             default_custom_earnings: [ :label, :amount ],
             default_payroll_adjustments: [ :label, :amount, :treatment, :notes, :active ],
             wage_rates: [ :id, :label, :rate, :is_primary, :active ]
@@ -364,8 +642,99 @@ module Api
           end
 
           data["document_readiness"] = EmployeeDocumentReadiness.summary(employee) if include_document_readiness
+          if employee.readiness_gate_enforced? || CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+            data["readiness"] = EmployeeReadinessEvaluator.evaluate(employee).as_json
+          end
 
           data
+        end
+
+        def create_client_managed_message(result)
+          if result.readiness&.ready?
+            "#{result.employee.full_name} is ready for payroll. Cornerstone will verify their details."
+          else
+            "#{result.employee.full_name} was saved as Incomplete. Finish the Ready to pay checklist to include them in payroll."
+          end
+        end
+
+        def update_client_managed_message(result)
+          if result.change_request
+            return "Your address request was sent for review. Your current address stays on file until it’s approved." if result.change_request.profile_address?
+
+            return "Changes to your own employee record were submitted to Cornerstone for review as request ##{result.change_request.id}."
+          end
+
+          "Saved. Cornerstone has been notified to verify this change."
+        end
+
+        def termination_params
+          source = params[:termination].is_a?(ActionController::Parameters) ? params[:termination] : params
+          source.permit(:effective_date, :last_worked_on, :reason_category, :final_pay_notes, :notes)
+        end
+
+        def rehire_params
+          source = params[:rehire].is_a?(ActionController::Parameters) ? params[:rehire] : params
+          source.permit(:effective_date, :notes)
+        end
+
+        def post_termination_committed_pay_period_ids(employee, effective_date)
+          PayPeriod
+            .where(company_id: current_company_id, status: "committed", run_purpose: "regular")
+            .where("correction_status IS NULL OR correction_status <> ?", "voided")
+            .where("end_date > ?", effective_date)
+            .joins(:payroll_items)
+            .merge(PayrollItem.financially_reportable)
+            .where(payroll_items: { employee_id: employee.id })
+            .distinct
+            .order(:id)
+            .pluck(:id)
+        end
+
+        def serialize_status_event(event)
+          {
+            id: event.id,
+            event_type: event.event_type,
+            previous_status: event.previous_status,
+            resulting_status: event.resulting_status,
+            effective_date: event.effective_date&.iso8601,
+            last_worked_on: event.last_worked_on&.iso8601,
+            reason_category: event.reason_category,
+            source: event.source
+          }
+        end
+
+        def serialize_verification_item(item)
+          return nil unless item
+
+          {
+            id: item.id,
+            employee_id: item.employee_id,
+            event_kind: item.event_kind,
+            status: item.status,
+            affects_pay: item.affects_pay,
+            effective_on: item.effective_on&.iso8601,
+            changed_fields: item.changed_fields,
+            metadata: item.metadata,
+            created_at: item.created_at&.utc&.iso8601,
+            updated_at: item.updated_at&.utc&.iso8601(6)
+          }
+        end
+
+        def record_lifecycle_audit!(action:, employee:, metadata:)
+          AuditLog.record!(
+            user: current_user,
+            company_id: current_company_id,
+            action: action,
+            record_type: "employees",
+            record_id: employee.id,
+            subject_name: employee.full_name,
+            metadata: metadata,
+            ip_address: request.remote_ip,
+            user_agent: request.user_agent
+          )
+        rescue StandardError => e
+          Rails.logger.error("[ClientEmployeesController] Audit log failed; rolling back #{action}: #{e.class}")
+          raise AuditWriteFailed, e.message
         end
 
         def update_message(change_request)
