@@ -89,7 +89,6 @@ module PayrollSubmissions
       links = submission.submission_documents.includes(:client_document).to_a
       roles = links.map(&:role)
       allowed_roles = (descriptor.portal_roles + [ "attachment" ]).uniq
-      required_roles = @run.company.payroll_intake_required_sources(descriptor.key)
 
       invalid = (roles - allowed_roles).any? || descriptor.files.any? do |slot|
         portal_role = slot.portal_role
@@ -97,7 +96,7 @@ module PayrollSubmissions
 
         count = roles.count(portal_role)
         max_allowed = slot.max || 1
-        must_be_present = required_roles.include?(slot.role) && !slot.supports_link && slot.waivable.blank?
+        must_be_present = portal_role == "revel_payroll" || (slot.required_by_default && !slot.supports_link && slot.waivable.blank?)
         (must_be_present && count.zero?) || count > max_allowed
       end
 

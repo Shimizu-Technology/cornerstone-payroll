@@ -9,7 +9,7 @@ module Api
           as_of = parse_as_of_date
           return unless as_of
 
-          render json: PayrollIntake::ProfileBuilder.new(company: current_company, on: as_of).call
+          render json: PayrollIntake::ProfileBuilder.new(company: current_company, on: as_of, audience: :client).call
         end
 
         private

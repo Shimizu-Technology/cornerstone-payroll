@@ -109,10 +109,40 @@ RSpec.describe "Payroll intake profile", type: :request do
     expect(body.fetch("company_id")).to eq(company.id)
     expect(body.fetch("adapters").pluck("key")).to eq([ "mosa_revel" ])
     expect(body.dig("adapters", 0, "portal", "submittable")).to be(true)
+    expect(body.dig("adapters", 0)).not_to have_key("parser_version")
+    expect(body.dig("adapters", 0)).not_to have_key("idempotency")
 
     staff = create(:user, company: company, role: "admin")
     stub_portal_user(Api::V1::Client::IntakeProfilesController, staff, company)
     get "/api/v1/client/intake_profile"
     expect(response).to have_http_status(:forbidden)
+  end
+
+  it "batches operating-profile lookups in GET /api/v1/companies and omits descriptor internals for client users (L3)" do
+    organization = create(:organization)
+    c1 = create(:company, organization: organization, payroll_intake_source_types: [ "mosa_revel" ])
+    c2 = create(:company, organization: organization, payroll_intake_source_types: [ "spike_email" ])
+    client = create(:user, organization: organization, company: c1, role: "client")
+    CompanyAssignment.create!(user: client, company: c1)
+    CompanyAssignment.create!(user: client, company: c2)
+    stub_portal_user(Api::V1::CompaniesController, client, c1)
+
+    profile_queries = 0
+    callback = lambda do |_name, _start, _finish, _id, payload|
+      sql = payload[:sql].to_s
+      profile_queries += 1 if sql.include?("client_operating_profiles") && !sql.start_with?("EXPLAIN")
+    end
+    ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+      get "/api/v1/companies"
+    end
+
+    expect(response).to have_http_status(:ok)
+    expect(profile_queries).to be <= 1
+    adapters = response.parsed_body.fetch("companies").flat_map { |row| row.fetch("payroll_intake_adapters") }
+    expect(adapters).not_to be_empty
+    adapters.each do |adapter|
+      expect(adapter).not_to have_key("parser_version")
+      expect(adapter).not_to have_key("idempotency")
+    end
   end
 end

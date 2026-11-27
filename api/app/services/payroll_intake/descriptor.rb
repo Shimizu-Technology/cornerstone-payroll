@@ -214,9 +214,11 @@ module PayrollIntake
       portal.fetch("role_map")
     end
 
-    def serialize(required_sources: nil, tips_default: nil, overtime_mode: nil, workweek_alignment: nil)
+    CLIENT_OMITTED_KEYS = %w[parser_version idempotency].freeze
+
+    def serialize(required_sources: nil, tips_default: nil, overtime_mode: nil, workweek_alignment: nil, audience: :staff)
       effective_required = required_sources.nil? ? default_required_source_roles : Array(required_sources).map(&:to_s)
-      {
+      payload = {
         "key" => key,
         "label" => label,
         "source_label" => source_label,
@@ -237,6 +239,7 @@ module PayrollIntake
           "role_map" => portal_role_map
         }
       }
+      audience.to_sym == :client ? payload.except(*CLIENT_OMITTED_KEYS) : payload
     end
 
     private

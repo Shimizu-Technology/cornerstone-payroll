@@ -9,17 +9,19 @@ module PayrollIntake
     # Previews saved before these were recorded still apply if the rest matches.
     LATER_KEYS = %w[aligned_with_pay_period legal_week_starts].freeze
 
-    # allow_misaligned: the source reports overtime itself (Revel), or the
-    # company's workweek alignment policy is warn_if_offset, so a pay period
-    # that starts on a different weekday than the saved workweek is recorded
-    # and warned about instead of refused.
+    # allow_misaligned: ONLY permissible when the source reports overtime itself
+    # (overtime_mode == "source_reports", e.g., Revel). Computed overtime modes
+    # (weekly_split, daily_records, total_as_regular_warn_over_80) must always
+    # align with complete 7-day legal workweeks per 29 CFR 778.104.
     def initialize(pay_period:, allow_misaligned: false, overtime_mode: nil, workweek_alignment: nil)
       @pay_period = pay_period
       @overtime_mode = overtime_mode.presence&.to_s
       @workweek_alignment = workweek_alignment.presence&.to_s
-      @allow_misaligned = allow_misaligned ||
-        @overtime_mode == "source_reports" ||
-        @workweek_alignment == "warn_if_offset"
+      @allow_misaligned = if @overtime_mode.present?
+        @overtime_mode == "source_reports"
+      else
+        allow_misaligned
+      end
     end
 
     def capture!

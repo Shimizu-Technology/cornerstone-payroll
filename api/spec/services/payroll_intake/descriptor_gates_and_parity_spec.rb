@@ -291,5 +291,42 @@ RSpec.describe "Track C B4-B6 descriptor-driven gates, submission roles, and MoS
       expect(detail.fetch(:allowed_actions)).not_to include("submit")
       expect(detail.fetch(:intake_descriptor)).to be_nil
     end
+
+    it "keeps the Revel PDF required in the client portal even when staff required_sources omits revel_hours (M3) and hides descriptor internals from clients (L3)" do
+      company = create(
+        :company,
+        payroll_intake_source_types: [ "mosa_revel" ],
+        payroll_intake_settings: { "mosa_revel" => { "required_sources" => [] } }
+      )
+      pay_period = create(
+        :pay_period,
+        company: company,
+        start_date: Date.new(2026, 7, 12),
+        end_date: Date.new(2026, 7, 25),
+        pay_date: Date.new(2026, 7, 31)
+      )
+      client = create(:user, company: company, role: "client")
+      CompanyAssignment.create!(user: client, company: company)
+      catalog = PayrollSubmissions::Catalog.new(company: company, today: pay_period.end_date + 1)
+      entry = catalog.resolve("#{pay_period.start_date}_#{pay_period.end_date}")
+
+      detail = PayrollSubmissions::Serializer.new(current_user: client, catalog: catalog).detail(entry)
+      revel_slot = detail.dig(:intake_descriptor, "files").find { |slot| slot.fetch("portal_role") == "revel_payroll" }
+      expect(revel_slot.fetch("required")).to be(true)
+      expect(detail.fetch(:intake_descriptor)).not_to have_key("parser_version")
+      expect(detail.fetch(:intake_descriptor)).not_to have_key("idempotency")
+
+      expect do
+        PayrollSubmissions::CreateRevision.new(
+          company: company,
+          actor: client,
+          catalog: catalog,
+          entry: entry,
+          params: { workbook_choice: "none", no_changes: true }
+        ).call
+      end.to raise_error(PayrollSubmissions::FileSet::Invalid) do |error|
+        expect(error.details).to include("revel_payroll" => [ "Attach the Revel payroll PDF" ])
+      end
+    end
   end
 end

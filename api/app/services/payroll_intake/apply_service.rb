@@ -252,15 +252,30 @@ module PayrollIntake
         unless reconciles?(combined, row.total_hours)
           raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
         end
+        if BigDecimal(values.fetch(:overtime_hours).to_s) < BigDecimal(row.overtime_hours.to_s)
+          raise ArgumentError,
+                "Overtime hours cannot be reduced below #{format('%.2f', row.overtime_hours)} hours in warn-over-80 mode"
+        end
         return values
       end
 
-      if mode == "daily_records" && !has_weekly && Array(row.source_payload.to_h["daily_hours"] || row.source_payload.to_h["days"]).any?
-        combined = BigDecimal(values.fetch(:regular_hours).to_s) + BigDecimal(values.fetch(:overtime_hours).to_s)
-        unless reconciles?(combined, row.total_hours)
-          raise ArgumentError, "Regular + overtime hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
+      daily_entries = Array(row.source_payload.to_h["daily_hours"] || row.source_payload.to_h["days"]).select { |entry| entry.is_a?(Hash) }
+      if mode == "daily_records" && !has_weekly && daily_entries.any?
+        regular_hours, overtime_hours, daily_errors = PayrollIntake::Adapters::SpikeEmail.split_for_daily_records(
+          daily_entries,
+          pay_period: pay_period
+        )
+        raise ArgumentError, daily_errors.first.fetch(:message) if daily_errors.any?
+
+        unless reconciles?(regular_hours + overtime_hours, row.total_hours)
+          raise ArgumentError, "Daily hours must equal the extracted row total of #{format('%.2f', row.total_hours)} hours"
         end
-        return values
+        unless reconciles?(values.fetch(:regular_hours), regular_hours) && reconciles?(values.fetch(:overtime_hours), overtime_hours)
+          raise ArgumentError,
+                "Regular/overtime overrides must match Payroll's legal daily-workweek calculation " \
+                "(#{format('%.2f', regular_hours)} regular / #{format('%.2f', overtime_hours)} overtime)"
+        end
+        return values.merge(regular_hours: regular_hours, overtime_hours: overtime_hours)
       end
 
       weekly_total = week1 + week2

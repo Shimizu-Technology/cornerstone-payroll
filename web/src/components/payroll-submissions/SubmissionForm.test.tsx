@@ -298,3 +298,51 @@ it('renders upload slots, labels, accept filters, and required checks from a cus
   expect((form.get('payroll_workbook') as File).name).toBe('payroll.csv');
   expect(form.get('workbook_choice')).toBeNull();
 });
+
+it('keeps the Revel PDF labeled and enforced as required even when required_sources marks it false (M3)', async () => {
+  const relaxedPeriod: PeriodDetail = {
+    ...period,
+    intake_descriptor: {
+      key: 'mosa_revel',
+      label: 'Revel hours + Cornerstone workbook',
+      source_label: 'Revel Payroll + Cornerstone Workbook',
+      extraction: 'deterministic',
+      accepts_pasted_text: false,
+      tracks_reviewed_hours: true,
+      employee_match: 'name_fuzzy',
+      reports_overtime: true,
+      tips_default: 'paid_in_check',
+      overtime_mode: 'source_reports',
+      workweek_alignment: 'warn_if_offset',
+      required_sources: [],
+      files: [
+        {
+          role: 'revel_hours',
+          label: 'Revel hours PDF',
+          hint: 'Hours worked, including overtime, from Revel.',
+          accept: ['.pdf'],
+          content_type: 'application/pdf',
+          max: 1,
+          required: false,
+          required_by_default: true,
+          waivable: null,
+          portal_role: 'revel_payroll',
+          portal_label: 'Revel hours report (PDF)',
+          portal_hint: 'Hours worked, including overtime, from Revel.',
+          supports_link: false,
+          provides: ['regular_hours', 'overtime_hours'],
+        },
+      ],
+      portal: { submittable: true, role_map: { revel_payroll: 'revel_hours' } },
+    },
+  };
+
+  render(<SubmissionForm period={relaxedPeriod} onSent={vi.fn()} />);
+  expect(screen.getByText('(required)')).toBeTruthy();
+  expect(screen.queryByText('(optional)')).toBeNull();
+
+  fireEvent.click(screen.getByLabelText('No changes this period'));
+  send();
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Attach the Revel payroll PDF');
+  expect(mocks.submit).not.toHaveBeenCalled();
+});

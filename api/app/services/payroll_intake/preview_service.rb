@@ -529,10 +529,15 @@ module PayrollIntake
     end
 
     def normalize_extraction(extraction)
-      normalized = adapter_class.new(pay_period: pay_period, company: company).normalize(
+      adapter = adapter_class.new(pay_period: pay_period, company: company)
+      normalize_kwargs = {
         extracted_rows: extraction[:rows],
         detected_period: extraction[:detected_period]
-      )
+      }
+      if adapter.method(:normalize).parameters.any? { |type, name| name == :trusted_source || type == :keyrest }
+        normalize_kwargs[:trusted_source] = extraction.fetch(:trusted_source, true)
+      end
+      normalized = adapter.normalize(**normalize_kwargs)
       warnings = Array(extraction[:warnings]) + Array(normalized[:warnings]) + @carry_warnings
       if workweek_evidence["aligned_with_pay_period"] == false
         warnings << {
@@ -632,7 +637,7 @@ module PayrollIntake
       end
 
       text_extraction = extract_rows_from_text
-      return text_extraction if text_extraction[:rows].present?
+      return text_extraction.merge(trusted_source: true) if text_extraction[:rows].present?
 
       ai_extraction = PayrollIntake::AiExtractor.new(
         source_type: source_type,
@@ -643,7 +648,8 @@ module PayrollIntake
       {
         rows: ai_extraction[:rows],
         detected_period: ai_extraction[:detected_period] || text_extraction[:detected_period],
-        warnings: Array(text_extraction[:warnings]) + Array(ai_extraction[:warnings])
+        warnings: Array(text_extraction[:warnings]) + Array(ai_extraction[:warnings]),
+        trusted_source: false
       }
     end
 
