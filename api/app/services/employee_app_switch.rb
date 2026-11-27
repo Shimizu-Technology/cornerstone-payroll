@@ -128,8 +128,8 @@ module EmployeeAppSwitch
   end
 
   # Whether each part is actually open today, as the employee API decides.
-  def effective_values(company, today: PayrollBusinessClock.today)
-    features = CompanyFeatures.for(company, on: today)
+  def effective_values(company, today: PayrollBusinessClock.today, retire_windows: true)
+    features = CompanyFeatures.for(company, on: today, retire_windows: retire_windows)
     KEYS.index_with do |key|
       case key
       when MASTER then features.employee_portal_enabled?
