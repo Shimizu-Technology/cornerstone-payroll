@@ -41,7 +41,7 @@ Implements a complete automated payroll import pipeline for **MoSa's Joint (comp
 
 | File | Description |
 |------|-------------|
-| `api/scripts/mosa_full_year_validation.rb` | End-to-end validation across all 26 periods; writes `data/mosa-2025/validation_report.md` |
+| `api/scripts/mosa_full_year_validation.rb` | End-to-end validation across all 26 periods; wrote `data/mosa-2025/validation_report.md` (historical; the script is no longer in this repository) |
 | `api/scripts/mosa_backfill_employees.rb` | Scans PDFs for unmatched names, creates skeleton employee records safely |
 | `scripts/mosa_run.sh` | Entrypoint: `download | validate | backfill | help` |
 | `scripts/download_mosa_attachments.py` | Gmail attachment downloader (uses `gog` OAuth) |
@@ -63,8 +63,8 @@ Implements a complete automated payroll import pipeline for **MoSa's Joint (comp
 | `docs/RUNBOOK.md` | Operator runbook (daily ops, file naming, common issues) |
 | `docs/PR_DESCRIPTION.md` | This file |
 | `docs/QB_PARITY_CHECKLIST.md` | QuickBooks parity gap analysis for roadmap planning |
-| `data/mosa-2025/validation_report.md` | Final 26-period validation output |
-| `data/mosa-2025/mosa_hardening_report_2026-03-09.md` | Hardening pass narrative (backfill + parser precision) |
+| `data/mosa-2025/validation_report.md` | Final 26-period validation output (generated locally; not committed) |
+| `data/mosa-2025/mosa_hardening_report_2026-03-09.md` | Hardening pass narrative (kept outside the repo; not committed) |
 
 ---
 
@@ -122,8 +122,8 @@ Implements a complete automated payroll import pipeline for **MoSa's Joint (comp
 
 - **Go / No-Go criteria:** `docs/ROLLOUT_CHECKLIST.md` — all automated gates ✅, Cornerstone parallel-run sign-off pending
 - **Day-to-day ops:** `docs/RUNBOOK.md` — covers download → validate → backfill → apply cycle
-- **Validation evidence:** `data/mosa-2025/validation_report.md` — shareable directly with Cornerstone staff
-- **Hardening narrative:** `data/mosa-2025/mosa_hardening_report_2026-03-09.md`
+- **Validation evidence:** `data/mosa-2025/validation_report.md`, generated locally and shared with Cornerstone staff directly, never committed
+- **Hardening narrative:** kept outside the repository (it contains client data)
 
 ---
 
@@ -144,7 +144,7 @@ Schema change: `pay_rate` precision upgraded from default to `decimal(10,4)`. An
 
 1. Start with `docs/ROLLOUT_CHECKLIST.md` for overall context.
 2. Review `api/app/services/payroll_import/` — this is the core logic.
-3. Check `data/mosa-2025/validation_report.md` for validation evidence.
+3. The 2025 validation report is kept outside this repository because it contains client data; ask the project lead for it.
 4. Run tests: `cd api && bundle exec rspec spec/services/payroll_import/`
 5. Comment `@greptile` on the PR for AI code review.
 
