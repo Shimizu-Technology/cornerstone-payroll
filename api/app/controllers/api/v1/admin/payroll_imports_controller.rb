@@ -109,7 +109,7 @@ module Api
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
           end
 
-          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period, source_type: params[:source_type].presence)
           current_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
           unless current&.applyable? && current_record
             return render json: { error: "Only an import still in review can be matched again. Upload corrected files instead." }, status: :unprocessable_entity
@@ -142,7 +142,7 @@ module Api
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
           end
 
-          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period, source_type: params[:source_type].presence)
           current_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
           unless current&.applyable? && current_record
             return render json: { error: "Only an import still in review can have a file removed." }, status: :unprocessable_entity
@@ -188,7 +188,7 @@ module Api
             return render json: { error: "Cannot import into a committed pay period" }, status: :unprocessable_entity
           end
 
-          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period, source_type: params[:source_type].presence)
           import_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
           unless current&.applyable? && import_record && import_record.id.to_s == params[:import_id].to_s
             return render json: { error: "This review is no longer current. Reopen the current import." }, status: :unprocessable_entity
@@ -221,7 +221,7 @@ module Api
           access = loan_setup_access
           return render json: { error: access[:reason] }, status: :forbidden unless access[:allowed]
 
-          current = PayrollImport::CurrentReview.source_package_for(@pay_period)
+          current = PayrollImport::CurrentReview.source_package_for(@pay_period, source_type: params[:source_type].presence)
           import_record = PayrollImport::CurrentReview.import_record_for(@pay_period, current)
           unless current&.applyable? && import_record && import_record.id.to_s == params[:import_id].to_s
             return render json: { error: "This review is no longer current. Reopen the current import." }, status: :unprocessable_entity
@@ -563,7 +563,7 @@ module Api
         def preview_response(import_record, package_result, selection: nil)
           @audit_import_record = import_record
           source_package = package_result.fetch(:session)
-          preview = preview_from_source_package(source_package)
+          preview = preview_from_source_package(source_package, serialize_numbers: true)
           preview[:tips_paid_out_from_tips] = ActiveModel::Type::Boolean.new.cast(import_record.raw_data.to_h["tips_paid_out_from_tips"])
           preview[:tip_treatment_confirmed] = import_record.raw_data.to_h["tip_treatment_confirmed"].present?
           selection ||= import_record.submission_imports.order(id: :desc).first
@@ -585,10 +585,20 @@ module Api
         def audit_record_metadata(_record)
           return {} unless @audit_import_record
 
-          metadata = { import_id: @audit_import_record.id, source_files: [
-            ("revel_hours" if @audit_import_record.pdf_filename.present?),
-            ("supplemental_workbook" if @audit_import_record.excel_filename.present?)
-          ].compact }
+          retained_roles = @audit_import_record.payroll_intake_session&.documents
+            &.reject { |document| document.verification_status == "legacy_unverified" }
+            &.sort_by(&:position)
+            &.map(&:source_role)
+            &.uniq
+          source_files = if retained_roles.present?
+            retained_roles
+          else
+            [
+              ("revel_hours" if @audit_import_record.pdf_filename.present?),
+              ("supplemental_workbook" if @audit_import_record.excel_filename.present?)
+            ].compact
+          end
+          metadata = { import_id: @audit_import_record.id, source_files: source_files }
           metadata[:matched_count] = Array(@audit_import_record.matched_data).size unless action_name == "apply"
           if @audit_import_results
             metadata[:applied_count] = @audit_import_results.fetch(:success, []).size
@@ -737,9 +747,9 @@ module Api
         end
 
 
-        def preview_from_source_package(source_package)
+        def preview_from_source_package(source_package, serialize_numbers: false)
           if source_package.source_type == "cornerstone_workbook"
-            return universal_workbook_preview_from_source_package(source_package)
+            return universal_workbook_preview_from_source_package(source_package, serialize_numbers: serialize_numbers)
           end
 
           evidence = source_package.evidence_snapshot.to_h
@@ -769,12 +779,12 @@ module Api
           }
         end
 
-        def universal_workbook_preview_from_source_package(source_package)
+        def universal_workbook_preview_from_source_package(source_package, serialize_numbers: false)
           rows = source_package.rows.includes(:employee).to_a
           matched = rows.filter_map do |row|
             next if row.employee_id.blank?
 
-            universal_workbook_preview_row(row)
+            universal_workbook_preview_row(row, serialize_numbers: serialize_numbers)
           end
           matched = PayrollImport::LivePreviewRowState.new(@pay_period).refresh(matched)
           duplicate_employee_ids = rows.filter_map(&:employee_id).tally.select { |_id, count| count > 1 }.keys
@@ -794,8 +804,9 @@ module Api
           }
         end
 
-        def universal_workbook_preview_row(row)
+        def universal_workbook_preview_row(row, serialize_numbers: false)
           payload = row.source_payload.to_h
+          bonus = payload["bonus"].present? ? payload["bonus"].to_d : nil
           {
             "source_row_id" => row.id,
             "employee_id" => row.employee_id,
@@ -803,26 +814,32 @@ module Api
             "match_status" => "matched",
             "match_method" => row.match_method || "employee_id",
             "match_confidence" => row.match_confidence&.to_f || 1.0,
-            "week1_hours" => row.week1_hours.to_f,
-            "week2_hours" => row.week2_hours.to_f,
-            "regular_hours" => row.regular_hours.to_f,
-            "overtime_hours" => row.overtime_hours.to_f,
-            "pto_hours" => payload["pto_hours"].to_d.to_f,
-            "holiday_hours" => payload["holiday_hours"].to_d.to_f,
-            "tips" => row.reported_tips.to_f,
-            "reported_tips" => row.reported_tips.to_f,
-            "tips_paid_out" => row.tips_paid_out.to_f,
-            "bonus" => payload["bonus"].present? ? payload["bonus"].to_d.to_f : nil,
+            "week1_hours" => format_preview_decimal(row.week1_hours.to_d, serialize_numbers: serialize_numbers),
+            "week2_hours" => format_preview_decimal(row.week2_hours.to_d, serialize_numbers: serialize_numbers),
+            "regular_hours" => format_preview_decimal(row.regular_hours.to_d, serialize_numbers: serialize_numbers),
+            "overtime_hours" => format_preview_decimal(row.overtime_hours.to_d, serialize_numbers: serialize_numbers),
+            "pto_hours" => format_preview_decimal(payload["pto_hours"].to_d, serialize_numbers: serialize_numbers),
+            "holiday_hours" => format_preview_decimal(payload["holiday_hours"].to_d, serialize_numbers: serialize_numbers),
+            "tips" => format_preview_decimal(row.reported_tips.to_d, serialize_numbers: serialize_numbers),
+            "reported_tips" => format_preview_decimal(row.reported_tips.to_d, serialize_numbers: serialize_numbers),
+            "tips_paid_out" => format_preview_decimal(row.tips_paid_out.to_d, serialize_numbers: serialize_numbers),
+            "bonus" => bonus ? format_preview_decimal(bonus, serialize_numbers: serialize_numbers) : nil,
             "payroll_components" => Array(payload["payroll_components"]),
-            "loan_deduction" => row.loan_deduction.to_f,
+            "loan_deduction" => format_preview_decimal(row.loan_deduction.to_d, serialize_numbers: serialize_numbers),
             "notes" => payload["notes"]
           }
+        end
+
+        def format_preview_decimal(value, serialize_numbers:)
+          decimal = value.to_d
+          serialize_numbers ? decimal.to_f : decimal.to_s("F")
         end
 
         def source_package_json(source_package)
           completeness = PayrollIntake::SourceCompleteness.new(session: source_package, company: @pay_period.company)
           {
             id: source_package.id,
+            source_type: source_package.source_type,
             package_id: source_package.package_id,
             package_revision: source_package.package_revision,
             package_schema_version: source_package.package_schema_version,

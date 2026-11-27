@@ -675,5 +675,228 @@ RSpec.describe "Cornerstone universal workbook endpoints (staff + client portal)
       expect(session.reload.status).to eq("applied")
       expect(import_record.reload.status).to eq("applied")
     end
+
+    it "rolls back portal selection.applied_at and client decisions on workbook row error, then succeeds on retry" do
+      allow(PayrollSubmissions::Catalog).to receive(:today).and_return(Date.new(2026, 6, 28))
+      company.update!(payroll_intake_source_types: [ "cornerstone_workbook" ])
+      employee_02 = create(:employee, company: company, first_name: "Employee", last_name: "02", pay_rate: 22.00)
+      owner = create(
+        :employee,
+        company: company,
+        first_name: "Owner",
+        last_name: "03",
+        employment_type: "salary",
+        salary_type: "variable",
+        pay_rate: 0
+      )
+      create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: owner,
+        employment_type: "salary",
+        salary_override: BigDecimal("1500.00"),
+        import_source: "mosa_revel",
+        custom_columns_data: {
+          "client_change_evidence" => { "kind" => "owner_pay", "submission_id" => 999_999, "reviewed_value" => "1500.00" },
+          "period_pay_evidence" => { "source_type" => "client_submission" }
+        }
+      )
+      # Existing manual row for employee_02 causes a row error when force_overwrite is false
+      create(
+        :payroll_item,
+        pay_period: pay_period,
+        employee: employee_02,
+        employment_type: "hourly",
+        pay_rate: BigDecimal("22.00"),
+        hours_worked: BigDecimal("10.00"),
+        import_source: nil
+      )
+
+      workbook_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "45.00", "35.00", "", "", "", "", "0.00", "NO", "25.00", "", "", "", "", "" ]
+        csv << [ employee_02.id, "Employee 02", "40.00", "40.00", "", "", "", "", "0.00", "NO", "", "", "", "", "", "" ]
+      end
+      ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
+      stub_portal_user(Api::V1::Client::PayrollSubmissionPeriodsController, client_user, company)
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: portal_upload("portal-rollback.csv", workbook_csv, csv_mime),
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: { submission_id: submission_id },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+
+      preview_body = response.parsed_body
+      import_id = preview_body.fetch("import_id")
+      selection_id = preview_body.dig("portal_source", "selection_id")
+      owner_change = preview_body.dig("client_change_prefill", "rows").find { |row| row["employee_id"] == owner.id }
+      expect(owner_change).to be_present
+
+      selection = PayrollSubmissionImport.find(selection_id)
+      import_record = PayrollImportRecord.find(import_id)
+      session = import_record.payroll_intake_session
+
+      # Verify decimal persistence in matched_data
+      emp1_matched = import_record.matched_data.find { |row| row["employee_id"] == employee_01.id }
+      expect(emp1_matched["bonus"]).to eq("25.0")
+      expect(emp1_matched["tips"]).to eq("0.0")
+
+      # Apply without force_overwrite: employee_02 triggers a row error after employee_01,
+      # selection.applied_at, and the owner no_pay exclusion were written in the transaction.
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: import_id,
+             portal_source_id: selection_id,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               {
+                 change_index: owner_change.fetch("change_index"),
+                 decision: "no_pay",
+                 reason: "Owner skipping draw this period"
+               }
+             ]
+           },
+           as: :json
+
+      expect(response).to have_http_status(:unprocessable_entity), response.body
+      expect(response.parsed_body.dig("details", "row_errors").map { |err| err["employee_id"] }).to include(employee_02.id)
+      expect(selection.reload.applied_at).to be_nil
+      expect(pay_period.pay_period_excluded_employees.where(employee_id: owner.id)).to be_empty
+      expect(pay_period.payroll_items.exists?(employee_id: owner.id)).to be(true)
+      expect(pay_period.payroll_items.exists?(employee_id: employee_01.id)).to be(false)
+      expect(session.reload.status).to eq("previewed")
+      expect(import_record.reload.status).to eq("previewed")
+
+      # Retry the exact same review with force_overwrite: true and confirm it applies cleanly
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/apply_import",
+           params: {
+             import_id: import_id,
+             portal_source_id: selection_id,
+             force_overwrite: true,
+             confirm_client_changes: true,
+             reviewed_changes: [
+               {
+                 change_index: owner_change.fetch("change_index"),
+                 decision: "no_pay",
+                 reason: "Owner skipping draw this period"
+               }
+             ]
+           },
+           as: :json
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(selection.reload.applied_at).to be_present
+      expect(pay_period.pay_period_excluded_employees.where(employee_id: owner.id)).to exist
+      expect(pay_period.payroll_items.exists?(employee_id: owner.id)).to be(false)
+      expect(pay_period.payroll_items.find_by!(employee_id: employee_01.id).hours_worked).to eq(BigDecimal("75.00"))
+      expect(pay_period.payroll_items.find_by!(employee_id: employee_02.id).hours_worked).to eq(BigDecimal("80.00"))
+      expect(session.reload.status).to eq("applied")
+      expect(import_record.reload.status).to eq("applied")
+
+      # Audit metadata reports retained verified source role ("cornerstone_workbook") rather than "supplemental_workbook"
+      controller_probe = Api::V1::Admin::PayrollImportsController.new
+      controller_probe.instance_variable_set(:@audit_import_record, import_record)
+      expect(controller_probe.send(:audit_record_metadata, nil)[:source_files]).to eq([ "cornerstone_workbook" ])
+    end
+
+    it "scopes tip_treatment and rematch to source_type when a MoSa review and a newer portal workbook review are both current" do
+      allow(PayrollSubmissions::Catalog).to receive(:today).and_return(Date.new(2026, 6, 28))
+      mosa_session = PayrollIntakeSession.create!(
+        company: company,
+        pay_period: pay_period,
+        created_by: staff,
+        source_type: "mosa_revel",
+        status: "draft",
+        import_hash: SecureRandom.hex(32),
+        parser_version: "mosa_revel:v1",
+        package_id: SecureRandom.uuid,
+        package_revision: 1,
+        warnings: [ { "code" => "legacy_mosa_workbook", "severity" => "warning", "message" => "Legacy MoSa workbook" } ],
+        evidence_snapshot: { "preview" => { "pdf_count" => 0, "excel_count" => 1 } }
+      )
+      mosa_session.documents.create!(
+        document_type: "other",
+        source_role: "supplemental_workbook",
+        filename: "legacy-tips.xlsx",
+        content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        storage_reference: "test/mosa-legacy-tips-#{SecureRandom.hex(6)}.xlsx",
+        byte_size: 12,
+        sha256: Digest::SHA256.hexdigest("legacy-tips"),
+        verification_status: "verified",
+        verified_at: Time.current,
+        position: 0,
+        metadata: { "legacy_tip_format" => true }
+      )
+      mosa_session.update!(status: "previewed")
+      mosa_record = PayrollImportRecord.create!(
+        pay_period: pay_period,
+        payroll_intake_session: mosa_session,
+        status: "previewed",
+        excel_filename: "legacy-tips.xlsx",
+        matched_data: [],
+        raw_data: { "tips_paid_out_from_tips" => false }
+      )
+
+      company.update!(payroll_intake_source_types: [ "cornerstone_workbook" ])
+      workbook_csv = CSV.generate do |csv|
+        csv << PayrollIntake::UniversalWorkbook::Template::COLUMNS
+        csv << [ employee_01.id, "Employee 01", "40.00", "40.00", "", "", "", "", "15.00", "NO", "", "", "", "", "", "" ]
+      end
+      ref = "#{pay_period.start_date.iso8601}_#{pay_period.end_date.iso8601}"
+      stub_portal_user(Api::V1::Client::PayrollSubmissionPeriodsController, client_user, company)
+      post "/api/v1/client/payroll_submission_periods/#{ref}/submissions",
+           params: {
+             payroll_workbook: portal_upload("newer-portal.csv", workbook_csv, csv_mime),
+             no_changes: "true",
+             changes: "[]"
+           }
+      expect(response).to have_http_status(:created), response.body
+      submission_id = response.parsed_body.dig("data", "submissions", 0, "id")
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/preview_import",
+           params: { submission_id: submission_id },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("source_package", "source_type")).to eq("cornerstone_workbook")
+      portal_import_id = response.parsed_body.fetch("import_id")
+      portal_record = PayrollImportRecord.find(portal_import_id)
+      portal_session = portal_record.payroll_intake_session
+      company.update!(payroll_intake_source_types: [ "mosa_revel", "cornerstone_workbook" ])
+
+      # Update tip_treatment on the MoSa review explicitly via source_type while the newer portal review is current
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/import_tip_treatment",
+           params: {
+             import_id: mosa_record.id,
+             tips_paid_out_from_tips: true,
+             source_type: "mosa_revel"
+           },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("source_package", "source_type")).to eq("mosa_revel")
+      expect(mosa_record.reload.raw_data["tips_paid_out_from_tips"]).to be(true)
+      expect(portal_record.reload.raw_data["tips_paid_out_from_tips"]).not_to be(true)
+
+      # Rematch the MoSa review explicitly via source_type without touching the portal review
+      rematched_result = { session: mosa_session, duplicate: true }
+      preview_double = instance_double(PayrollIntake::PreviewService, call: rematched_result)
+      expect(PayrollIntake::PreviewService).to receive(:new).with(
+        hash_including(pay_period: pay_period, source_type: "mosa_revel", carry_forward: true)
+      ).and_return(preview_double)
+
+      post "/api/v1/admin/pay_periods/#{pay_period.id}/rematch_import",
+           params: { source_type: "mosa_revel" },
+           as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("source_package", "source_type")).to eq("mosa_revel")
+      expect(portal_session.reload.status).to eq("previewed")
+      expect(portal_record.reload.status).to eq("previewed")
+    end
   end
 end

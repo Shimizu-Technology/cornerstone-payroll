@@ -191,6 +191,11 @@ module PayrollIntake
       applied = false
 
       ActiveRecord::Base.transaction(requires_new: true) do
+        if universal_workbook?
+          session.lock!
+          raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
+        end
+
         # This selection resolves the pending-source gate only inside the
         # same transaction as successful calculation/apply. Any failure
         # rolls it back along with every payroll row and status event.
@@ -200,50 +205,47 @@ module PayrollIntake
         client_changes&.apply_period_decisions!(actor: actor)
 
         if universal_workbook?
-          session.with_lock(requires_new: true) do
-            raise ArgumentError, "Only previewed payroll intake sessions can be applied" unless session.applyable?
-            validate_workweek_snapshot!
-            apply_universal_workbook_reviewed_decisions!(
-              matched_data: matched_data,
-              disposition_plan: disposition_plan,
-              unpaid_owners: unpaid_owners,
-              tips_paid_out_from_tips: tips_paid_out_from_tips,
-              results: results
+          validate_workweek_snapshot!
+          apply_universal_workbook_reviewed_decisions!(
+            matched_data: matched_data,
+            disposition_plan: disposition_plan,
+            unpaid_owners: unpaid_owners,
+            tips_paid_out_from_tips: tips_paid_out_from_tips,
+            results: results
+          )
+          raise ActiveRecord::Rollback if results[:errors].any?
+
+          import_record.update!(
+            status: "applied",
+            validation_errors: [],
+            import_origin: PayrollIntake::ImportOrigin.build(
+              session: session,
+              portal_submission: selection&.payroll_submission,
+              replaced_hand_edited_hours: hand_edited_hours.any?
+            ),
+            raw_data: import_record.raw_data.to_h.merge(
+              "client_change_decisions" => client_changes&.review_decisions || [],
+              "source_waivers" => source_waivers,
+              "replaced_hand_edited_hours" => hand_edited_hours
             )
-            raise ActiveRecord::Rollback if results[:errors].any?
+          )
 
-            import_record.update!(
-              status: "applied",
-              validation_errors: [],
-              import_origin: PayrollIntake::ImportOrigin.build(
-                session: session,
-                portal_submission: selection&.payroll_submission,
-                replaced_hand_edited_hours: hand_edited_hours.any?
-              ),
-              raw_data: import_record.raw_data.to_h.merge(
-                "client_change_decisions" => client_changes&.review_decisions || [],
-                "source_waivers" => source_waivers,
-                "replaced_hand_edited_hours" => hand_edited_hours
-              )
-            )
-
-            if results[:success].any?
-              update_pay_period_after_apply!
-            elsif pay_period.intake_stale_session_id == session.id
-              pay_period.clear_intake_stale!
-            end
-            finalize_session_after_apply!
-
-            if selection
-              record_portal_selection_applied!(
-                selection: selection,
-                client_changes: client_changes,
-                import_record: import_record
-              )
-            end
-
-            applied = true
+          if results[:success].any?
+            update_pay_period_after_apply!
+          elsif pay_period.intake_stale_session_id == session.id
+            pay_period.clear_intake_stale!
           end
+          finalize_session_after_apply!
+
+          if selection
+            record_portal_selection_applied!(
+              selection: selection,
+              client_changes: client_changes,
+              import_record: import_record
+            )
+          end
+
+          applied = true
         else
           if matched_data.any?
             service = PayrollImport::ImportService.new(pay_period, actor: actor)
@@ -545,6 +547,9 @@ module PayrollIntake
         error = payload.respond_to?(:with_indifferent_access) ? payload.with_indifferent_access : {}
         code = error[:code].to_s
         next if code == "unmatched_employee" && employee.present?
+        # Duplicate employee mappings across included rows are already enforced
+        # by duplicate_employee_ids_for, so excluding duplicate rows resolves this.
+        next if code == "duplicate_employee_id"
         next if code.in?(%w[weekly_hours_required incomplete_weekly_hours]) && repaired_weekly_hours?(row, override)
 
         error[:message].presence || "Resolve the stored payroll intake validation error before applying."

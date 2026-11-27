@@ -93,13 +93,17 @@ function severityVariant(severity?: string) {
   return 'info' as const;
 }
 
-function readinessBadge(row: EditableRow) {
+function blockingErrorsFor(row: EditableRow) {
+  return (row.errors || []).filter((entry) => entry.code !== 'duplicate_employee_id');
+}
+
+function readinessBadge(row: EditableRow, isDuplicate = false) {
   if (row.disposition === 'pending') return <Badge variant="danger">Needs outcome</Badge>;
   if (row.disposition === 'excluded') return <Badge variant="outline">Excluded</Badge>;
   if (row.disposition === 'deferred') return <Badge variant="warning">Deferred</Badge>;
   if (row.disposition === 'informational') return <Badge variant="info">Informational</Badge>;
   if (!row.employee_id) return <Badge variant="danger">Needs match</Badge>;
-  if ((row.errors || []).length > 0) return <Badge variant="danger">Blocked</Badge>;
+  if (isDuplicate || blockingErrorsFor(row).length > 0) return <Badge variant="danger">Blocked</Badge>;
   if ((row.warnings || []).length > 0) return <Badge variant="warning">Review</Badge>;
   return <Badge variant="success">Ready</Badge>;
 }
@@ -195,7 +199,7 @@ export function PayrollIntakeImportModal({
     return new Set(Array.from(counts.entries()).filter(([, count]) => count > 1).map(([employeeId]) => employeeId));
   }, [rows]);
   const hasWarnings = includedRows.some((row) => (row.warnings || []).length > 0) || (importData?.warnings || []).length > 0;
-  const hasBlockingRowErrors = includedRows.some((row) => (row.errors || []).length > 0);
+  const hasBlockingRowErrors = includedRows.some((row) => blockingErrorsFor(row).length > 0);
   const hasBlockingMissingMatches = includedRows.some((row) => !row.employee_id);
   const hasDuplicateEmployeeMappings = duplicateEmployeeIds.size > 0;
   const hasIncompleteDispositions = rows.some((row) => (
@@ -246,6 +250,11 @@ export function PayrollIntakeImportModal({
 
   const addFiles = (nextFiles: FileList | File[]) => {
     const incoming = Array.from(nextFiles);
+    if (incoming.length === 0) return;
+    if (primaryFileSlot?.max === 1) {
+      setFiles([incoming[0]]);
+      return;
+    }
     setFiles((current) => {
       const existingKeys = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
       return [...current, ...incoming.filter((file) => !existingKeys.has(`${file.name}:${file.size}:${file.lastModified}`))];
@@ -315,11 +324,20 @@ export function PayrollIntakeImportModal({
     }));
   };
 
+  const isSourceReportedOvertime = (row: EditableRow) => {
+    const resolved = row.source_payload?.resolved_overtime_mode;
+    const mode = typeof resolved === 'string' && resolved ? resolved : descriptor?.overtime_mode;
+    return mode === 'source_reports';
+  };
+
   const updateWeekHours = (rowId: number, key: 'week1_hours' | 'week2_hours', value: number): void => {
     setRows((current) => current.map((row) => {
       if (row.id !== rowId) return row;
 
       const next = { ...row, [key]: Math.max(0, value) };
+      if (isSourceReportedOvertime(row)) {
+        return normalizeRow(next);
+      }
       const week1 = toNumber(next.week1_hours);
       const week2 = toNumber(next.week2_hours);
       const regularHours = Math.min(week1, 40) + Math.min(week2, 40);
@@ -335,9 +353,16 @@ export function PayrollIntakeImportModal({
 
   const updateReportedTips = (rowId: number, value: number) => {
     const nextReported = Math.max(0, value);
+    setRows((current) => current.map((row) => (
+      row.id === rowId ? { ...row, reported_tips: nextReported } : row
+    )));
+  };
+
+  const commitReportedTips = (rowId: number) => {
     setRows((current) => current.map((row) => {
       if (row.id !== rowId) return row;
-      const nextPaidOut = Math.min(toNumber(row.tips_paid_out), nextReported);
+      const nextReported = Math.max(0, toNumber(row.reported_tips));
+      const nextPaidOut = Math.min(Math.max(0, toNumber(row.tips_paid_out)), nextReported);
       return normalizeRow({ ...row, reported_tips: nextReported, tips_paid_out: nextPaidOut });
     }));
   };
@@ -668,12 +693,7 @@ export function PayrollIntakeImportModal({
                   className="hidden"
                   onChange={(event) => {
                     if (!event.target.files) return;
-                    if (primaryFileSlot?.max === 1) {
-                      const picked = event.target.files[0];
-                      setFiles(picked ? [picked] : []);
-                    } else {
-                      addFiles(event.target.files);
-                    }
+                    addFiles(event.target.files);
                   }}
                 />
                 <Button variant="outline" className="mt-4" onClick={() => fileInputRef.current?.click()}>
@@ -758,7 +778,7 @@ export function PayrollIntakeImportModal({
             <div className="space-y-3 sm:hidden" aria-label="Payroll intake source rows">
               {rows.map((row) => (
                 <section key={row.id} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4" aria-label={`Source row for ${row.source_employee_name}`}>
-                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{row.source_employee_name}</p>{row.match_confidence != null && <p className="mt-1 text-xs text-neutral-500">Match confidence {Math.round(row.match_confidence * 100)}%</p>}</div>{readinessBadge(row)}</div>
+                  <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-semibold text-neutral-950">{row.source_employee_name}</p>{row.match_confidence != null && <p className="mt-1 text-xs text-neutral-500">Match confidence {Math.round(row.match_confidence * 100)}%</p>}</div>{readinessBadge(row, Boolean(row.employee_id && duplicateEmployeeIds.has(row.employee_id)))}</div>
                   <label className="block text-sm font-medium text-neutral-700">Outcome
                     <Select className="mt-1 w-full" aria-label={`Outcome for ${row.source_employee_name}`} value={row.disposition} onChange={(event) => {
                       const disposition = event.target.value as EditableRow['disposition'];
@@ -778,7 +798,7 @@ export function PayrollIntakeImportModal({
                     <label className="text-xs font-medium text-neutral-600">Week 2 hours<NumericInput className="mt-1 w-full" value={row.week2_hours} onValueChange={(value) => updateWeekHours(row.id, 'week2_hours', value ?? 0)} min={0} /></label>
                     {sourceType === 'cornerstone_workbook' ? (
                       <>
-                        <label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 w-full" value={row.reported_tips} onValueChange={(value) => updateReportedTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
+                        <label className="text-xs font-medium text-neutral-600">Reported tips<NumericInput className="mt-1 w-full" value={row.reported_tips} onValueChange={(value) => updateReportedTips(row.id, value ?? 0)} onBlur={() => commitReportedTips(row.id)} min={0} fixedDecimalsOnBlur={2} /></label>
                         <label className="text-xs font-medium text-neutral-600">Paid-out tips<NumericInput className="mt-1 w-full" value={row.tips_paid_out} onValueChange={(value) => updatePaidOutTips(row.id, value ?? 0)} min={0} fixedDecimalsOnBlur={2} /></label>
                       </>
                     ) : (
@@ -935,7 +955,7 @@ export function PayrollIntakeImportModal({
                       )}
                       {sourceType === 'cornerstone_workbook' ? (
                         <>
-                          <NumericCell value={row.reported_tips} onChange={(value) => updateReportedTips(row.id, value ?? 0)} money />
+                          <NumericCell value={row.reported_tips} onChange={(value) => updateReportedTips(row.id, value ?? 0)} onBlur={() => commitReportedTips(row.id)} money />
                           <NumericCell value={row.tips_paid_out} onChange={(value) => updatePaidOutTips(row.id, value ?? 0)} money />
                         </>
                       ) : (
@@ -956,7 +976,7 @@ export function PayrollIntakeImportModal({
                           <TableCell className="text-right font-mono">{formatCurrency(toNumber(row.loan_deduction))}</TableCell>
                         </>
                       )}
-                      <TableCell>{readinessBadge(row)}</TableCell>
+                      <TableCell>{readinessBadge(row, Boolean(row.employee_id && duplicateEmployeeIds.has(row.employee_id)))}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1237,12 +1257,13 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function NumericCell({ value, onChange, money = false }: { value: number; onChange: (value: number | null) => void; money?: boolean }) {
+function NumericCell({ value, onChange, onBlur, money = false }: { value: number; onChange: (value: number | null) => void; onBlur?: () => void; money?: boolean }) {
   return (
     <TableCell className="min-w-[124px] text-right">
       <NumericInput
         value={value}
         onValueChange={onChange}
+        onBlur={onBlur}
         min={0}
         fixedDecimalsOnBlur={money ? 2 : 2}
         className="h-11 min-h-0 rounded-2xl px-3 py-2 text-right text-sm tabular-nums"
