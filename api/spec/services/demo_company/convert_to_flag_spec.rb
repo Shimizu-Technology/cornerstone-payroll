@@ -551,9 +551,7 @@ RSpec.describe DemoCompany::ConvertToFlag do
 
     it "rejects direct SQL conversion when the GUC is unset (NULL), rejects forbidden transitions, and blocks keyless fixture-key acquisition or manifest edits" do
       # Use a brand-new PG connection so app.demo_shape_migration_op is genuinely absent (NULL).
-      raw_conn = PG.connect(ActiveRecord::Base.connection_db_config.configuration_hash.slice(:host, :port, :dbname, :user, :password).compact.merge(
-        dbname: ActiveRecord::Base.connection_db_config.database
-      ))
+      raw_conn = PG.connect(ActiveRecord::Base.connection_db_config.url)
       begin
         expect(raw_conn.exec("SELECT current_setting('app.demo_shape_migration_op', true)").getvalue(0, 0)).to be_nil
 
