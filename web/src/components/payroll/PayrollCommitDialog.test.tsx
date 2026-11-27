@@ -173,4 +173,95 @@ describe('Payroll commit confirmation', () => {
     expect(state.onConfirm).toHaveBeenLastCalledWith(12, { acknowledged_outstanding_file_request_ids: [], expected_next_check_number: 1200 });
   });
 
+  it('requires per-item checkboxes for unverified employee changes and reloads cleanly on 409 unverified_changes_changed', async () => {
+    const changeA = {
+      id: 501,
+      updated_at: '2026-11-28T01:00:00.000000Z',
+      employee_id: 21,
+      employee_name: 'Jordan Sample',
+      event_kind: 'compensation_change',
+      status: 'pending_verification',
+      summary: 'Pay rate or compensation changed (pay rate)',
+    };
+    const changeB = {
+      id: 502,
+      updated_at: '2026-11-28T01:05:00.000000Z',
+      employee_id: 22,
+      employee_name: 'Morgan Example',
+      event_kind: 'w4_change',
+      status: 'returned_to_client',
+      summary: 'W-4 withholding changed (filing status)',
+    };
+    const changeAUpdated = { ...changeA, updated_at: '2026-11-28T01:10:00.000000Z' };
+
+    api.get
+      .mockResolvedValueOnce({ pay_period: { ...period, unverified_employee_changes: [changeA, changeB] } })
+      .mockResolvedValue({ pay_period: { ...period, unverified_employee_changes: [changeAUpdated, changeB] } });
+
+    const state = props();
+    state.onConfirm.mockRejectedValueOnce(new ApiError('Changed', 409, undefined, { code: 'unverified_changes_changed' }));
+
+    render(<PayrollCommitDialog {...state} />);
+    await loaded();
+
+    expect(screen.getByText('Changed since last payroll, not verified (2)')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /select all/i })).toBeNull();
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Confirm commit' })).toHaveProperty('disabled', true);
+
+    fireEvent.click(checkboxes[0]);
+    expect(screen.getByRole('button', { name: 'Confirm commit' })).toHaveProperty('disabled', true);
+
+    fireEvent.click(checkboxes[1]);
+    expect(screen.getByRole('button', { name: 'Confirm commit' })).toHaveProperty('disabled', false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+    await loaded();
+
+    const alert = screen.getByRole('alert');
+    expect(document.activeElement).toBe(alert);
+    expect(alert.textContent).toContain('Unverified employee changes were added, edited, or resolved');
+
+    const reloadedBoxes = screen.getAllByRole('checkbox');
+    expect(reloadedBoxes).toHaveLength(2);
+    reloadedBoxes.forEach((box) => expect(box).toHaveProperty('checked', false));
+    expect(screen.getByRole('button', { name: 'Confirm commit' })).toHaveProperty('disabled', true);
+
+    fireEvent.click(reloadedBoxes[0]);
+    fireEvent.click(reloadedBoxes[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm commit' }));
+
+    expect(state.onConfirm).toHaveBeenLastCalledWith(12, {
+      acknowledged_outstanding_file_request_ids: [],
+      expected_next_check_number: 1200,
+      acknowledged_verification_items: [
+        { id: 501, updated_at: '2026-11-28T01:10:00.000000Z' },
+        { id: 502, updated_at: '2026-11-28T01:05:00.000000Z' },
+      ],
+    });
+  });
+
+  it('groups more than 10 unverified employee changes by employee with individual checkboxes and no select-all shortcut', async () => {
+    const manyChanges = Array.from({ length: 11 }, (_, idx) => ({
+      id: 600 + idx,
+      updated_at: `2026-11-28T02:00:${String(idx).padStart(2, '0')}.000000Z`,
+      employee_id: idx < 6 ? 31 : 32,
+      employee_name: idx < 6 ? 'Jordan Sample' : 'Morgan Example',
+      event_kind: 'compensation_change',
+      status: 'pending_verification',
+      summary: `Change #${idx + 1}`,
+    }));
+    api.get.mockResolvedValue({ pay_period: { ...period, unverified_employee_changes: manyChanges } });
+
+    render(<PayrollCommitDialog {...props()} />);
+    await loaded();
+
+    expect(screen.getByText('Jordan Sample (0/6 acknowledged)')).toBeTruthy();
+    expect(screen.getByText('Morgan Example (0/5 acknowledged)')).toBeTruthy();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(11);
+    expect(screen.queryByRole('button', { name: /select all/i })).toBeNull();
+  });
+
 });

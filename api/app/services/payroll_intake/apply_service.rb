@@ -91,6 +91,21 @@ module PayrollIntake
                 next
               end
 
+              existing_item = pay_period.payroll_items.find_by(employee_id: employee.id)
+              if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: pay_period, employee: employee, payroll_item: existing_item))
+                disposition_plan.apply!(decision, status: "skipped")
+                results[:skipped] << {
+                  row_id: row.id,
+                  employee_id: employee.id,
+                  name: employee.full_name,
+                  source_employee_name: row.source_employee_name,
+                  reason: "Skipped — #{readiness_blocker.reason} Hours were not imported.",
+                  code: "employee_readiness_incomplete",
+                  missing_keys: readiness_blocker.missing_keys
+                }
+                next
+              end
+
               unresolved_errors = unresolved_validation_errors(row, override, employee)
               if unresolved_errors.any?
                 results[:errors] << {
@@ -272,12 +287,19 @@ module PayrollIntake
             )
           )
 
+          skipped_readiness_ids = Array(results[:skipped])
+            .select { |entry| entry[:code] == "employee_readiness_incomplete" }
+            .map { |entry| entry[:employee_id].to_i }
+            .to_set
+
           disposition_plan.decisions.each do |decision|
             if decision.included? && unpaid_owners.key?(decision.row.employee_id)
               decision.disposition = "excluded"
               decision.reason = unpaid_owners[decision.row.employee_id]
             end
-            if decision.included?
+            if decision.included? && skipped_readiness_ids.include?(decision.row.employee_id.to_i)
+              disposition_plan.apply!(decision, status: "skipped")
+            elsif decision.included?
               payroll_item = pay_period.payroll_items.find_by!(employee_id: decision.row.employee_id)
               disposition_plan.apply!(
                 decision,
@@ -781,6 +803,22 @@ module PayrollIntake
 
         if duplicate_employee_ids.include?(employee.id)
           results[:errors] << { employee_id: employee.id, name: row.source_employee_name, error: "Multiple included intake rows map to #{employee.full_name}. Exclude duplicates before applying." }
+          next
+        end
+
+        existing_item = pay_period.payroll_items.find_by(employee_id: employee.id)
+        if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: pay_period, employee: employee, payroll_item: existing_item))
+          handled_employee_ids << employee.id
+          disposition_plan.apply!(decision, status: "skipped")
+          results[:skipped] << {
+            row_id: row.id,
+            employee_id: employee.id,
+            name: employee.full_name,
+            source_employee_name: row.source_employee_name,
+            reason: "Skipped — #{readiness_blocker.reason} Hours were not imported.",
+            code: "employee_readiness_incomplete",
+            missing_keys: readiness_blocker.missing_keys
+          }
           next
         end
 

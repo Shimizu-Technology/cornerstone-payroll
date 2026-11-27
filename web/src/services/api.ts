@@ -479,9 +479,15 @@ class ApiClient {
   }
 }
 
+export type AcknowledgedVerificationItem = {
+  id: number;
+  updated_at: string;
+};
+
 export type PayrollCommitSnapshot = {
   acknowledged_outstanding_file_request_ids: number[];
   expected_next_check_number?: number;
+  acknowledged_verification_items?: AcknowledgedVerificationItem[];
 };
 
 export class ApiError extends Error {
@@ -1942,7 +1948,7 @@ export interface TimecardImportMapping {
 
 export interface TimecardImportApplyResponse {
   applied: { employee_id: number; employee_name: string; hours_worked: number; overtime_hours: number }[];
-  skipped: unknown[];
+  skipped: { employee_id?: number; employee_name?: string; name?: string; reason: string; code?: string }[];
   errors: { employee_id: number; name?: string; error: string }[];
 }
 
@@ -2202,7 +2208,7 @@ export interface PayrollIntakeApplyRowPayload {
 export interface PayrollIntakeApplyResponse {
   results: {
     applied: Array<{ row_id: number; employee_id: number; employee_name: string; regular_hours: number; overtime_hours: number; reported_tips: number; tips_paid_out: number }>;
-    skipped: Array<{ row_id: number; source_employee_name?: string; reason: string }>;
+    skipped: Array<{ row_id?: number; employee_id?: number; name?: string; source_employee_name?: string; reason: string; code?: string }>;
     errors: Array<{ row_id?: number; employee_id?: number; source_employee_name?: string; error: string }>;
   };
   import: PayrollIntakeImportData;
@@ -2561,7 +2567,7 @@ export interface ImportPreviewResponse {
 export interface ImportApplyResponse {
   results: {
     success: { employee_id: number; name: string }[];
-    skipped?: { employee_id: number; name?: string; reason: string }[];
+    skipped?: { employee_id: number; name?: string; reason: string; code?: string }[];
     errors: { employee_id: number; name: string; error: string }[];
   };
   pay_period: PayPeriod & { payroll_items?: PayrollItem[] };

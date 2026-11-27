@@ -130,6 +130,8 @@ export function PayPeriodDetail(props: PayPeriodDetailProps) {
   const preparedChecks = sections.processing.payrollItems.filter(item => !item.voided && item.effective_payment_delivery_method !== 'direct_deposit' && Number(item.net_pay) > 0 && ['prepared', 'printed'].includes(item.check_status || '')).length;
   const attention = [
     ...(payPeriod.intake_stale_at ? [{ text: 'Source changed · review required', href: route('work', '#payroll-blockers') }] : []),
+    ...(payPeriod.stale_calculation_employees?.length ? [{ text: 'Recalculate required · employee details changed', href: route('work', '#payroll-stale-calculation') }] : []),
+    ...(payPeriod.unverified_employee_changes?.length && payPeriod.status !== 'committed' && payPeriod.correction_status !== 'voided' ? [{ text: `Changed since last payroll, not verified (${payPeriod.unverified_employee_changes.length})`, href: route('work', '#payroll-unverified-changes') }] : []),
     ...(sections.feedback.savedImportReloadRequired ? [{ text: 'Reload saved source hours before processing', href: route('work', '#payroll-feedback') }] : []),
     ...(sections.summary.hasCorrectionPayBasisHold ? [{ text: 'Review retained correction pay setup', href: route('work', '#pay-basis-hold') }] : []),
     ...(payPeriod.correction_status === 'voided' ? [{ text: 'Review voided payroll and correction history', href: route('activity', '#payroll-corrections') }] : []),

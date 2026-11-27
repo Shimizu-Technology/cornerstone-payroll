@@ -18,7 +18,25 @@ class EmployeeDocumentReadiness
 
   # The explicit employee flag lets this gate fail closed for new hires without
   # retroactively blocking legacy and QuickBooks-cutover rosters at deployment.
+  # Newly created client-managed hires (readiness_gate_enforced: true,
+  # document_readiness_required: false) seed record-keeping rows with
+  # required_for_payroll: false; staff-created hires and explicit staff opt-ins
+  # keep document_readiness_required: true enforced in require_payroll_ready!.
   def self.seed_new_hire!(employee:, actor:)
+    if employee.readiness_gate_enforced? && !employee.document_readiness_required?
+      DEFAULT_REQUIREMENTS.fetch(employee.tax_classification).each do |requirement_type|
+        employee.employee_document_requirements.create_or_find_by!(requirement_type: requirement_type) do |requirement|
+          requirement.company = employee.company
+          requirement.created_by = actor
+          requirement.label = EmployeeDocumentRequirement::REQUIREMENT_TYPES.fetch(requirement_type)
+          requirement.status = "missing"
+          requirement.required_for_payroll = false
+          requirement.due_on = employee.hire_date
+        end
+      end
+      return
+    end
+
     newly_seeded = !employee.document_readiness_required?
     employee.update!(document_readiness_required: true) if newly_seeded
     if newly_seeded && employee.intake_exception.present?

@@ -79,6 +79,15 @@ module Api
             return render json: { error: "Employee not found" }, status: :not_found
           end
 
+          if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: @pay_period, employee: employee))
+            return render json: {
+              error: readiness_blocker.reason,
+              errors: [ readiness_blocker.reason ],
+              code: "employee_readiness_incomplete",
+              missing_keys: readiness_blocker.missing_keys
+            }, status: :unprocessable_entity
+          end
+
           attrs = payroll_item_params
           fit_reason = fit_override_reason!(attrs)
           wage_rate_hours = attrs.delete(:wage_rate_hours)

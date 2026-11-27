@@ -312,3 +312,99 @@ it('replaces single-file uploads on drag-and-drop, defers paid-out tip clamping 
   fireEvent.blur(week1Input);
   expect(screen.getByText('152.00 regular · 8.00 OT')).toBeTruthy();
 });
+
+it('keeps non-readiness skip summaries unchanged without Row #undefined and shows readiness skips clearly (L7)', async () => {
+  const onImportComplete = vi.fn();
+  apiMocks.preview.mockResolvedValue({
+    import: {
+      id: 77,
+      company_id: 7,
+      pay_period_id: 12,
+      package_id: 'pkg-l7-test',
+      package_revision: 1,
+      package_schema_version: 'v1',
+      source_type: 'cornerstone_workbook',
+      status: 'previewed',
+      current: true,
+      documents: [{ id: 1, verification_status: 'verified', filename: 'filled.csv' }],
+      warnings: [],
+      rows: [
+        {
+          id: 901,
+          source_employee_name: 'Employee 01',
+          employee_id: 101,
+          disposition: 'included',
+          disposition_reason: null,
+          target_pay_period_id: null,
+          week1_hours: 40,
+          week2_hours: 40,
+          regular_hours: 80,
+          overtime_hours: 0,
+          pto_hours: 0,
+          holiday_hours: 0,
+          week1_tips: 0,
+          week2_tips: 0,
+          reported_tips: 0,
+          tips_paid_out: 0,
+          bonus: 0,
+          loan_deduction: 0,
+          payroll_components: [],
+          errors: [],
+          warnings: [],
+        },
+      ],
+    },
+    disposition_targets: [],
+  });
+  apiMocks.apply.mockResolvedValue({
+    results: {
+      applied: [{ row_id: 901, employee_id: 101, employee_name: 'Employee 01', regular_hours: 80, overtime_hours: 0, reported_tips: 0, tips_paid_out: 0 }],
+      skipped: [
+        // Existing unpaid-owner/excluded entry shape with no row_id, no source_employee_name, no code
+        { employee_id: 102, name: 'Sloane Owner', reason: 'Unpaid owner' },
+        // Readiness skip entry
+        { employee_id: 103, name: 'Morgan Example', reason: "Skipped — Can't be paid yet: W-4 missing. Hours were not imported.", code: 'employee_readiness_incomplete' },
+      ],
+      errors: [],
+    },
+    import: {
+      id: 77,
+      company_id: 7,
+      pay_period_id: 12,
+      package_id: 'pkg-l7-test',
+      package_revision: 1,
+      package_schema_version: 'v1',
+      source_type: 'cornerstone_workbook',
+      status: 'applied',
+      current: true,
+      documents: [],
+      warnings: [],
+      rows: [],
+    },
+    pay_period: { id: 12, status: 'draft' },
+  });
+
+  render(
+    <PayrollIntakeImportModal
+      open
+      onOpenChange={vi.fn()}
+      payPeriodId={12}
+      descriptor={universalDescriptor}
+      employees={employees}
+      onImportComplete={onImportComplete}
+    />,
+  );
+
+  const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(fileInput, { target: { files: [new File(['csv'], 'filled.csv', { type: 'text/csv' })] } });
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Intake' }));
+  await screen.findByText('Apply Reviewed Rows');
+  fireEvent.click(screen.getByRole('button', { name: 'Apply Reviewed Rows' }));
+
+  await screen.findByText('Payroll intake applied');
+  expect(screen.getByText(/Applied 1 row and skipped 2\./)).toBeTruthy();
+  expect(screen.queryByText(/Row #undefined/)).toBeNull();
+  expect(screen.queryByText(/Sloane Owner/)).toBeNull();
+  expect(screen.getByText(/Morgan Example:/)).toBeTruthy();
+  expect(screen.getByText(/W-4 missing\. Hours were not imported\./)).toBeTruthy();
+});

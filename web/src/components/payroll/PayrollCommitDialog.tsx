@@ -11,14 +11,18 @@ import type { PayPeriod } from '@/types';
 
 type Props = {
   open: boolean;
-  payPeriod: Pick<PayPeriod, 'id' | 'company_id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'annual_fica_review' | 'annual_fica_review_note' | 'correction_status' | 'payroll_review' | 'client_payroll_approval_required' | 'check_number_summary' | 'payroll_items' | 'outstanding_file_requests' | 'client_file_link_error'>;
+  payPeriod: Pick<PayPeriod, 'id' | 'company_id' | 'status' | 'start_date' | 'end_date' | 'pay_date' | 'compliance_warnings' | 'annual_fica_review' | 'annual_fica_review_note' | 'correction_status' | 'payroll_review' | 'client_payroll_approval_required' | 'check_number_summary' | 'payroll_items' | 'outstanding_file_requests' | 'client_file_link_error' | 'unverified_employee_changes'>;
   companyName: string;
   processing: boolean;
   onCancel: () => void;
   onConfirm: (payPeriodId: number, snapshot: PayrollCommitSnapshot) => Promise<void>;
 };
-type Conflict = { kind: 'counter'; previous: number; current: number } | { kind: 'requests'; added: number[]; resolved: string[] };
+type Conflict =
+  | { kind: 'counter'; previous: number; current: number }
+  | { kind: 'requests'; added: number[]; resolved: string[] }
+  | { kind: 'verification_changes'; addedCount: number; updatedCount: number; resolvedCount: number };
 const warningStyle = 'rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-950';
+const verificationItemKey = (item: { id: number; updated_at: string }) => `${item.id}:${item.updated_at}`;
 
 export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyName, processing, onCancel, onConfirm }: Props) {
   const [loaded, setLoaded] = useState<{ id: number; companyId?: number; period: PayPeriod } | null>(null);
@@ -38,15 +42,27 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
   }, [ready, conflict]);
   const busy = processing || submitting;
   const requests = payPeriod.outstanding_file_requests ?? [];
+  const unverifiedChanges = payPeriod.unverified_employee_changes ?? [];
   const items = payPeriod.payroll_items?.filter(item => item.payroll_included !== false) ?? [];
   const warnings = payPeriod.compliance_warnings?.filter(warning => warning !== payPeriod.annual_fica_review_note) ?? [];
   const totalNet = items.reduce((sum, item) => sum + Number(item.net_pay || 0), 0);
+
+  const [checkedVerificationKeys, setCheckedVerificationKeys] = useState<Set<string>>(() => new Set());
+  const toggleVerificationKey = (key: string, checked: boolean) => {
+    setCheckedVerificationKeys((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const current = ++generation.current;
     setLoaded(null);
     setError(null);
     setConflict(null);
+    setCheckedVerificationKeys(new Set());
     setLoading(true);
     setSubmitting(false);
     if (open) {
@@ -60,12 +76,13 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
   }, [open, initialPeriod.id, initialPeriod.company_id]);
   const requestKey = `${payPeriod.id}:${open}:${requests.map(request => `${request.id}:${request.status}`).join(',')}`;
   const [acknowledgedKey, setAcknowledgedKey] = useState<string | null>(null);
-  useEffect(() => { setAcknowledgedKey(null); }, [open, payPeriod.id]);
+  useEffect(() => { setAcknowledgedKey(null); setCheckedVerificationKeys(new Set()); }, [open, payPeriod.id]);
   const acknowledged = acknowledgedKey === requestKey;
+  const allUnverifiedAcknowledged = unverifiedChanges.every((item) => checkedVerificationKeys.has(verificationItemKey(item)));
   const clientCommitReason = payPeriod.client_file_link_error || payrollClientCommitReason(payPeriod);
   const hasPaperChecks = items.some(item => (item.effective_payment_delivery_method ?? item.payment_delivery_method ?? 'paper_check') === 'paper_check');
   const numbering = payPeriod.check_number_summary;
-  const canConfirm = ready && (!requests.length || acknowledged) && !clientCommitReason && !busy && payPeriod.status === 'approved' &&
+  const canConfirm = ready && (!requests.length || acknowledged) && allUnverifiedAcknowledged && !clientCommitReason && !busy && payPeriod.status === 'approved' &&
     payPeriod.correction_status !== 'voided' && (!hasPaperChecks || !!numbering);
   const confirm = async () => {
     if (!canConfirm) return;
@@ -76,12 +93,16 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
       await onConfirm(payPeriod.id, {
         acknowledged_outstanding_file_request_ids: requests.map(request => request.id),
         ...(hasPaperChecks && numbering ? { expected_next_check_number: numbering.next_check_number } : {}),
+        ...(unverifiedChanges.length > 0 ? {
+          acknowledged_verification_items: unverifiedChanges.map((item) => ({ id: item.id, updated_at: item.updated_at })),
+        } : {}),
       });
     } catch (err) {
       if (current !== generation.current) return;
       const code = err instanceof ApiError ? (err.data as { code?: string } | undefined)?.code : undefined;
-      if (code === 'outstanding_file_requests_changed' || code === 'check_number_changed') {
+      if (code === 'outstanding_file_requests_changed' || code === 'check_number_changed' || code === 'unverified_changes_changed') {
         setAcknowledgedKey(null);
+        setCheckedVerificationKeys(new Set());
         setLoaded(null);
         setConflict(null);
         setLoading(true);
@@ -95,6 +116,17 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
               const updated = pay_period.outstanding_file_requests ?? [];
               setConflict({ kind: 'requests', added: updated.filter(request => !requests.some(old => old.id === request.id)).map(request => request.id),
                 resolved: requests.filter(old => !updated.some(request => request.id === old.id)).map(request => request.title) });
+            } else if (code === 'unverified_changes_changed') {
+              const updated = pay_period.unverified_employee_changes ?? [];
+              const oldById = new Map(unverifiedChanges.map((item) => [item.id, item]));
+              const updatedById = new Map(updated.map((item) => [item.id, item]));
+              const addedCount = updated.filter((item) => !oldById.has(item.id)).length;
+              const updatedCount = updated.filter((item) => {
+                const prior = oldById.get(item.id);
+                return prior && prior.updated_at !== item.updated_at;
+              }).length;
+              const resolvedCount = unverifiedChanges.filter((item) => !updatedById.has(item.id)).length;
+              setConflict({ kind: 'verification_changes', addedCount, updatedCount, resolvedCount });
             } else {
               // Nothing to show beside the numbering (no paper checks or no summary): say why Confirm stopped.
               setError(err instanceof Error ? err.message : 'This payroll changed. Review it and confirm again.');
@@ -157,6 +189,97 @@ export function PayrollCommitDialog({ open, payPeriod: initialPeriod, companyNam
             </> : <p className="mt-2">None outstanding.</p>}
           </div>
         </section>}
+        {(!!unverifiedChanges.length || conflict?.kind === 'verification_changes') && (() => {
+          const renderItemRow = (item: (typeof unverifiedChanges)[number]) => {
+            const key = verificationItemKey(item);
+            const checked = checkedVerificationKeys.has(key);
+            const statusLabel = item.status === 'returned_to_client' ? 'Sent back to client' : 'Pending verification';
+            return (
+              <li key={key} className="rounded-lg border border-warning-200 bg-white/80 p-3">
+                <label className="flex min-h-11 cursor-pointer items-start gap-3 leading-6">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-5 w-5 shrink-0"
+                    checked={checked}
+                    disabled={busy}
+                    onChange={(event) => toggleVerificationKey(key, event.target.checked)}
+                  />
+                  <span className="min-w-0 flex-1 break-words">
+                    <span className="font-semibold text-neutral-950">{item.employee_name}</span>
+                    <span> — {item.summary}</span>
+                    <span className="ml-1.5 text-xs font-medium text-warning-800">({statusLabel})</span>
+                    {payPeriod.company_id && (
+                      <a
+                        className="ml-2 text-xs font-medium text-primary-700 underline"
+                        href={`/companies/${payPeriod.company_id}/employees/${item.employee_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open employee
+                      </a>
+                    )}
+                  </span>
+                </label>
+              </li>
+            );
+          };
+
+          const groupedByEmployee = unverifiedChanges.length > 10
+            ? Array.from(
+              unverifiedChanges.reduce((map, item) => {
+                const group = map.get(item.employee_id) ?? { employeeId: item.employee_id, employeeName: item.employee_name, items: [] as typeof unverifiedChanges };
+                group.items.push(item);
+                map.set(item.employee_id, group);
+                return map;
+              }, new Map<number, { employeeId: number; employeeName: string; items: typeof unverifiedChanges }>()).values()
+            )
+            : null;
+
+          return (
+            <section aria-label="Unverified employee changes" className="space-y-3 text-sm">
+              {conflict?.kind === 'verification_changes' && (
+                <div role="alert" ref={conflictAlert} tabIndex={-1} className={warningStyle}>
+                  <p>
+                    {unverifiedChanges.length
+                      ? 'Unverified employee changes were added, edited, or resolved. Review every item and tick each box again.'
+                      : 'Unverified employee changes were resolved. No unverified items remain. Review the updated details, then confirm again.'}
+                  </p>
+                </div>
+              )}
+              <div className={warningStyle}>
+                <p className="font-semibold">
+                  Changed since last payroll, not verified ({unverifiedChanges.length})
+                </p>
+                {unverifiedChanges.length ? (
+                  <>
+                    <p className="mt-1 text-warning-900">
+                      Acknowledge each item to commit now. Acknowledged items stay in the To verify queue until verified by Cornerstone.
+                    </p>
+                    {groupedByEmployee ? (
+                      <div className="mt-3 space-y-2">
+                        {groupedByEmployee.map((group) => {
+                          const checkedInGroup = group.items.filter((item) => checkedVerificationKeys.has(verificationItemKey(item))).length;
+                          return (
+                            <details key={group.employeeId} open className="rounded-lg border border-warning-200 bg-warning-50/50 p-2">
+                              <summary className="min-h-11 cursor-pointer font-semibold text-neutral-950">
+                                {group.employeeName} ({checkedInGroup}/{group.items.length} acknowledged)
+                              </summary>
+                              <ul className="mt-2 space-y-2">{group.items.map(renderItemRow)}</ul>
+                            </details>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <ul className="mt-3 space-y-2">{unverifiedChanges.map(renderItemRow)}</ul>
+                    )}
+                  </>
+                ) : (
+                  <p className="mt-2">No unverified changes remaining.</p>
+                )}
+              </div>
+            </section>
+          );
+        })()}
         {clientCommitReason && <p role="alert" className={`${warningStyle} whitespace-pre-wrap break-words`}>{clientCommitReason}</p>}
         <p className="text-sm leading-6 text-neutral-600">Review this run before confirming. Later payroll changes must use the corrections workflow.</p>
       </div>}

@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
+import { MemoryRouter } from 'react-router';
 import { PayRunRoster } from './PayRunRoster';
 
 afterEach(cleanup);
@@ -78,4 +79,40 @@ it('keeps an empty live region mounted, leaves a saved add-back to Expected entr
   expect(screen.getByTestId('add-back-announcement').textContent).toBe("Manual Worker is back. Restored from the import: Loan $150.00. Hours aren't brought back. Enter hours, then calculate.");
   view.rerender(<PayRunRoster {...data} addBackNotice={{ source: 'roster', result, hoursEntered: true }} />);
   expect(screen.getByTestId('add-back-announcement').textContent).toBe('Manual Worker is back. Restored from the import: Loan $150.00. Hours are entered.');
+});
+
+it('renders the collapsible Not included — incomplete setup panel with reasons separate from Removed from this run', () => {
+  const data = props();
+  render(
+    <MemoryRouter>
+      <PayRunRoster
+        {...data}
+        companyId={7}
+        payPeriod={{
+          ...data.payPeriod,
+          company_id: 7,
+          readiness_excluded_employees: [
+            {
+              employee_id: 88,
+              name: 'Morgan Example',
+              employment_type: 'hourly',
+              reason: "Can't be paid yet: W-4 missing and payment method not chosen.",
+              missing_keys: ['tax_form', 'payment_method'],
+            },
+          ],
+        }}
+      />
+    </MemoryRouter>
+  );
+
+  expect(screen.getByText('Removed from this run (1)')).toBeTruthy();
+  const summary = screen.getByText('Not included — incomplete setup (1)');
+  const details = summary.closest('details');
+  expect(details).not.toBeNull();
+  expect(details?.open).toBe(false);
+
+  fireEvent.click(summary);
+  expect(details?.open).toBe(true);
+  expect(within(details as HTMLElement).getByText('Morgan Example')).toBeTruthy();
+  expect(within(details as HTMLElement).getByText(/Can't be paid yet: W-4 missing and payment method not chosen\./)).toBeTruthy();
 });

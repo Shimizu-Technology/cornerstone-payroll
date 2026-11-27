@@ -92,7 +92,7 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
   const [savingTips, setSavingTips] = useState(false);
   // Fingerprints of the chosen files, to spot files the open import already holds.
   const [chosenDigests, setChosenDigests] = useState<Record<string, { file: File; sha256: string | null }>>({});
-  const [results, setResults] = useState<{ success: number; errors: string[] } | null>(null);
+  const [results, setResults] = useState<{ success: number; skipped: { name: string; reason: string }[]; errors: string[] } | null>(null);
   const [templateDownloading, setTemplateDownloading] = useState(false);
   const [currentPackage, setCurrentPackage] = useState<PayrollIntakeImportData | null>(null);
   const [replacementReason, setReplacementReason] = useState('');
@@ -615,6 +615,12 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
       });
       setResults({
         success: response.results.success.length,
+        skipped: (response.results.skipped || [])
+          .filter((entry) => entry.code === 'employee_readiness_incomplete')
+          .map((entry) => ({
+            name: entry.name || `Employee #${entry.employee_id}`,
+            reason: entry.reason,
+          })),
         errors: response.results.errors.map((e) => `${e.name}: ${e.error}`),
       });
       setStep('done');
@@ -1804,6 +1810,18 @@ export function ImportModal({ initialPreview, open, onOpenChange, payPeriodId, c
             <div className="p-3 bg-green-50 border border-green-200 text-green-800 rounded-lg text-sm">
               Successfully imported {results.success} employee{results.success !== 1 ? 's' : ''}.
             </div>
+            {results.skipped.length > 0 && (
+              <div role="status" className="p-3 bg-amber-50 border border-amber-200 text-amber-950 rounded-lg text-sm">
+                <p className="font-medium">
+                  Skipped {results.skipped.length} employee{results.skipped.length !== 1 ? 's' : ''} (hours not imported):
+                </p>
+                <ul className="mt-1 list-disc list-inside space-y-1">
+                  {results.skipped.map((entry, i) => (
+                    <li key={i}><span className="font-medium">{entry.name}:</span> {entry.reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {results.errors.length > 0 && (
               <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
                 <p className="font-medium">Errors:</p>

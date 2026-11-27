@@ -395,7 +395,10 @@ module Api
           input_snapshots = payroll_input_snapshots
           @payroll_input_changes = []
 
-          employee_ids.each do |employee_id|
+          CompanyFeatures.with_cache do
+            client_managed_lifecycle = CompanyFeatures.for(@pay_period.company).client_managed_employee_lifecycle?
+
+            employee_ids.each do |employee_id|
             employee = employees_by_id[employee_id.to_i]
             unless employee
               # A saved paycheck for someone no longer eligible, or wages entered
@@ -404,8 +407,17 @@ module Api
               stale = @pay_period.payroll_items.find_by(employee_id: employee_id.to_i)&.employee
               stale ||= Employee.find_by(id: employee_id.to_i, company_id: current_company_id) if params.key?(:employee_ids)
               if stale
-                results[:errors] << { employee_id: stale.id, name: stale.full_name,
-                  error: "#{stale.full_name} is no longer eligible for this run (status or new-hire paperwork). Resolve it, or remove them from payroll, then calculate again." }
+                readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(
+                  pay_period: @pay_period,
+                  employee: stale,
+                  payroll_item: @pay_period.payroll_items.find_by(employee_id: stale.id)
+                )
+                error_message = if readiness_blocker
+                  "#{stale.full_name} — #{readiness_blocker.reason}"
+                else
+                  "#{stale.full_name} is no longer eligible for this run (status or new-hire paperwork). Resolve it, or remove them from payroll, then calculate again."
+                end
+                results[:errors] << { employee_id: stale.id, name: stale.full_name, error: error_message }
               end
               next
             end
@@ -430,9 +442,31 @@ module Api
                 payroll_item.company_id = current_company_id
                 payroll_item.hours_worked = 0
               end
-              payroll_item.payment_delivery_method ||= employee.payment_delivery_method.presence || "paper_check"
+              scoped = PayrollReadinessPolicy.fingerprint_scoped?(
+                employee: employee,
+                pay_period: @pay_period,
+                client_managed: client_managed_lifecycle
+              )
+              payroll_item.sync_payment_delivery_method_for_calculation!(
+                pay_period: @pay_period,
+                employee: employee,
+                client_managed: client_managed_lifecycle
+              )
 
-              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
+              preserve_correction_rate = if @pay_period.correction_run?
+                if scoped
+                  PayrollReadinessPolicy.verified_correction_paycheck?(
+                    pay_period: @pay_period,
+                    employee: employee,
+                    payroll_item: payroll_item
+                  )
+                else
+                  true
+                end
+              else
+                false
+              end
+              sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || preserve_correction_rate
               if pay_basis_changed && !@pay_period.correction_run? && payroll_item.timekeeping_source != "correction_reference"
                 payroll_item.pay_rate = employee.default_payroll_rate_on(@pay_period.end_date)
               end
@@ -448,7 +482,7 @@ module Api
                   apply_wage_rate_hours(payroll_item, wage_rate_hours, employee)
                 else
                   payroll_item.clear_wage_rate_hours!
-                  sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || @pay_period.correction_run?
+                  sync_pay_rate_from_employee(payroll_item, employee) unless @preserve_entered_pay_rates || preserve_correction_rate
                   payroll_item.hours_worked = hours_data[:regular] if hours_data[:regular]
                   payroll_item.overtime_hours = hours_data[:overtime] if hours_data[:overtime]
                   payroll_item.holiday_hours = hours_data[:holiday] if hours_data[:holiday]
@@ -548,7 +582,10 @@ module Api
                 unless @preserve_entered_pay_rates || payroll_item.timekeeping_source == "correction_reference"
                   PayrollTimeAllocationService.call!(payroll_item: payroll_item)
                 end
-                payroll_item.calculate!(annual_fica_context: annual_fica_contexts.fetch(employee.id))
+                payroll_item.calculate!(
+                  annual_fica_context: annual_fica_contexts.fetch(employee.id),
+                  preserve_entered_pay_rates: @preserve_entered_pay_rates == true
+                )
                 case PayrollItemActivity.classify(payroll_item)
                 when :verified_empty
                   # The worksheet includes the active roster, but an employee
@@ -568,6 +605,7 @@ module Api
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: PayrollCalculationHistory.message(e) }
             rescue StandardError => e
               results[:errors] << { employee_id: employee.id, name: employee.full_name, error: e.message }
+            end
             end
           end
 
@@ -692,9 +730,13 @@ module Api
         # Final lock - no more changes allowed
         def commit
           service = lifecycle_service
-          service.commit!(acknowledged_outstanding_file_request_ids: params[:acknowledged_outstanding_file_request_ids],
-            expected_next_check_number: params[:expected_next_check_number])
+          service.commit!(
+            acknowledged_outstanding_file_request_ids: params[:acknowledged_outstanding_file_request_ids],
+            expected_next_check_number: params[:expected_next_check_number],
+            acknowledged_verification_items: params[:acknowledged_verification_items]
+          )
           @acknowledged_outstanding_file_requests = service.acknowledged_outstanding_file_requests
+          @acknowledged_verification_items = service.acknowledged_verification_items
           render json: { pay_period: pay_period_json(@pay_period) }
         rescue PayPeriodLifecycleService::CommitConflict => e
           render json: { error: e.message, code: e.code }, status: :conflict
@@ -1086,6 +1128,10 @@ module Api
             metadata[:acknowledged_outstanding_file_request_ids] = @acknowledged_outstanding_file_requests.pluck(:id)
             metadata[:outstanding_file_requests] = @acknowledged_outstanding_file_requests
           end
+          if action_name == "commit" && @acknowledged_verification_items.present?
+            metadata[:acknowledged_verification_item_ids] = @acknowledged_verification_items.pluck(:id)
+            metadata[:acknowledged_verification_items] = @acknowledged_verification_items
+          end
           if action_name == "run_payroll" && @payroll_input_changes.present?
             metadata[:input_change_count] = @payroll_input_changes.size
             metadata[:input_changes] = @payroll_input_changes.first(AUDITED_INPUT_CHANGE_LIMIT)
@@ -1464,6 +1510,9 @@ module Api
             lifecycle: lifecycle,
             ineligible_workers: list ? nil : PayrollRunEligibility.new(pay_period).payload,
             expected_entries: list ? nil : PayrollExpectedEntries.new(pay_period).payload,
+            readiness_excluded_employees: list ? nil : PayrollReadinessPolicy.readiness_excluded_employees_for(pay_period),
+            stale_calculation_employees: list ? nil : PayrollReadinessPolicy.stale_calculation_employees_for(pay_period),
+            unverified_employee_changes: list ? nil : PayPeriodUnverifiedChanges.new(pay_period).payload,
             pay_date_corrections: pay_period_pay_date_corrections(pay_period).map { |log| pay_date_correction_json(log) },
             # CPR-71: correction fields
             correction_status:        pay_period.correction_status,

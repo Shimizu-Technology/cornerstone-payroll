@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "digest"
+require "openssl"
 
 # Captures the mutable employee configuration that influenced a payroll
 # calculation. Committed payroll items use this immutable snapshot when a
@@ -8,6 +9,8 @@ require "digest"
 # history.
 class PayrollCalculationContext
   VERSION = 1
+  UNSPECIFIED = Object.new.freeze
+  TAX_ID_HMAC_KEY_MUTEX = Mutex.new
 
   SCALAR_ATTRIBUTES = %w[
     date_of_birth
@@ -51,15 +54,148 @@ class PayrollCalculationContext
   ].freeze
 
   class << self
-    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: nil, w4_profile: w4_election&.profile_attributes, retirement_election: nil, rates_on: PayrollBusinessClock.today, employee_basis: nil)
-      {
+    def capture(employee:, employee_deductions:, payroll_field_assignments:, w4_election: UNSPECIFIED, w4_profile: UNSPECIFIED, retirement_election: UNSPECIFIED, rates_on: PayrollBusinessClock.today, employee_basis: nil, pay_period: nil, payroll_item: nil, preserve_entered_pay_rates: false)
+      resolved_w4_profile = if w4_profile.equal?(UNSPECIFIED)
+        w4_election.equal?(UNSPECIFIED) ? nil : w4_election&.profile_attributes
+      else
+        w4_profile
+      end
+      resolved_retirement_election = retirement_election.equal?(UNSPECIFIED) ? nil : retirement_election
+
+      snapshot = {
         "version" => VERSION,
         "intake_setup_fingerprint" => employee.intake_exception.present? ? intake_setup_fingerprint(employee: employee, rates_on: rates_on) : nil,
-        "employee" => employee_snapshot(employee, w4_profile: w4_profile).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
+        "employee" => employee_snapshot(employee, w4_profile: resolved_w4_profile).merge(employee_basis || EmployeeCompensationChangeService.snapshot(employee, rates_on)),
         "employee_deductions" => deduction_snapshots(employee_deductions),
         "payroll_field_assignments" => payroll_field_snapshots(payroll_field_assignments),
-        "retirement_election" => retirement_election&.snapshot_attributes&.deep_stringify_keys
+        "retirement_election" => resolved_retirement_election&.snapshot_attributes&.deep_stringify_keys
       }
+
+      if pay_period.present? && paycheck_fingerprint_scoped?(employee: employee, pay_period: pay_period)
+        item_method = payroll_item ? payroll_item.effective_payment_delivery_method : (employee.payment_delivery_method.presence || "paper_check")
+        employee_default = employee.payment_delivery_method.presence || "paper_check"
+        prior_overridden = payroll_item&.calculation_context_snapshot.to_h["payment_delivery_method_overridden"] == true
+        snapshot["paycheck_input_fingerprint"] = paycheck_input_fingerprint(
+          employee: employee,
+          pay_period: pay_period,
+          w4_election: w4_election,
+          w4_profile: w4_profile,
+          retirement_election: retirement_election
+        )
+        snapshot["item_payment_delivery_method"] = item_method
+        snapshot["employee_payment_default_at_calculation"] = employee_default
+        snapshot["payment_delivery_method_overridden"] = prior_overridden && item_method != employee_default
+        if preserve_entered_pay_rates && payroll_item.present?
+          snapshot["preserved_entered_rates"] = preserved_entered_rates_snapshot(payroll_item)
+        end
+      end
+
+      snapshot
+    end
+
+    def preserved_entered_rates_snapshot(payroll_item)
+      {
+        "pay_rate" => payroll_item.pay_rate.to_d.to_s("F"),
+        "wage_rate_hours" => payroll_item.wage_rate_hours.map do |entry|
+          {
+            "employee_wage_rate_id" => entry["employee_wage_rate_id"].presence&.to_i,
+            "label" => entry["label"].to_s.strip.downcase,
+            "rate" => entry["rate"].to_d.to_s("F")
+          }
+        end
+      }
+    end
+
+    def paycheck_fingerprint_scoped?(employee:, pay_period:)
+      PayrollReadinessPolicy.fingerprint_scoped?(employee: employee, pay_period: pay_period)
+    end
+
+    # Canonical SHA-256 fingerprint of live period-resolved calculation inputs
+    # for readiness_gate_enforced employees and client_managed companies.
+    # Deliberately excludes employee_loans (which mutate on commit of other runs
+    # and enforce their own balance/schedule check on commit) and separates
+    # payment_delivery_method into state-aware snapshot keys (§6.3B).
+    def paycheck_input_fingerprint(employee:, pay_period:, w4_election: UNSPECIFIED, w4_profile: UNSPECIFIED, retirement_election: UNSPECIFIED)
+      rates_on = pay_period.end_date
+      w4_on = pay_period.pay_date
+      dated_employee = dated_employee_attributes(employee, rates_on)
+      is_contractor = dated_employee["employment_type"] == "contractor"
+
+      compensation_fields = %w[
+        pay_rate employment_type salary_type pay_frequency
+        contractor_pay_type contractor_type
+        default_custom_earnings default_payroll_adjustments
+        date_of_birth retirement_rate roth_retirement_rate
+        employer_retirement_match_rate employer_roth_match_rate
+        additional_withholding
+      ]
+
+      election = if is_contractor
+        nil
+      elsif !w4_election.equal?(UNSPECIFIED)
+        w4_election
+      else
+        employee.w4_election_on(w4_on)
+      end
+
+      resolved_w4_profile = if is_contractor
+        nil
+      elsif !w4_profile.equal?(UNSPECIFIED) && w4_profile.present?
+        w4_profile.deep_stringify_keys
+      elsif election
+        election.profile_attributes.deep_stringify_keys
+      else
+        EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.deep_stringify_keys
+      end
+
+      w4_payload = if is_contractor
+        { "contractor" => true, "w9_on_file" => employee.w9_on_file == true }
+      elsif election
+        {
+          "election_id" => election.id,
+          "source" => election.source,
+          "effective_on" => election.effective_on&.iso8601,
+          "w4_signed_on" => election.w4_signed_on&.iso8601,
+          "profile" => resolved_w4_profile
+        }
+      else
+        {
+          "election_id" => nil,
+          "source" => nil,
+          "profile" => resolved_w4_profile
+        }
+      end
+
+      deductions = loaded_records_by_id(employee, :employee_deductions, includes: :deduction_type)
+      payroll_fields = loaded_records_by_id(employee, :employee_payroll_fields, includes: :payroll_field_definition)
+      selected_retirement_election = if is_contractor
+        nil
+      elsif !retirement_election.equal?(UNSPECIFIED)
+        retirement_election
+      else
+        employee.retirement_election_on(w4_on)
+      end
+      selected_retirement_year_input = is_contractor ? nil : employee.retirement_year_input_for(w4_on.year)
+
+      payload = {
+        "compensation" => dated_employee.slice(*compensation_fields),
+        "wage_rates" => dated_wage_rate_attributes(employee, rates_on).map { |row| row.except("created_at", "updated_at") },
+        "w4" => w4_payload,
+        "tax_id_digest" => tax_id_digest(employee),
+        "status_boundaries" => {
+          "status" => employee.status,
+          "hire_date" => employee.hire_date&.iso8601,
+          "termination_date" => employee.termination_date&.iso8601
+        },
+        "deductions" => deduction_snapshots(deductions),
+        "deduction_assignments" => stable_rows_for(deductions, klass: EmployeeDeduction),
+        "payroll_fields" => payroll_field_snapshots(payroll_fields),
+        "payroll_field_assignments" => stable_rows_for(payroll_fields, klass: EmployeePayrollField),
+        "retirement_election" => selected_retirement_election&.attributes&.except("created_at", "updated_at", "company_id"),
+        "retirement_year_input" => selected_retirement_year_input&.attributes&.except("created_at", "updated_at", "company_id")
+      }
+
+      Digest::SHA256.hexdigest(JSON.generate(canonicalize(payload)))
     end
 
     # For new intake exceptions only. This guards a calculation against later
@@ -150,6 +286,40 @@ class PayrollCalculationContext
     end
 
     private
+
+    def loaded_records_by_id(employee, association_name, includes: nil)
+      if employee.association(association_name).loaded?
+        records = employee.public_send(association_name).to_a
+        if includes && records.any? { |record| !record.association(includes).loaded? }
+          ActiveRecord::Associations::Preloader.new(records: records, associations: includes).call
+        end
+        records.sort_by { |row| row.id.to_i }
+      else
+        relation = employee.public_send(association_name)
+        relation = relation.includes(includes) if includes
+        relation.reorder(:id).to_a
+      end
+    end
+
+    def stable_rows_for(records, klass:)
+      columns = %w[created_at updated_at]
+      columns << "company_id" if klass < CompanyFromParent
+      records.map { |row| row.attributes.except(*columns) }
+    end
+
+    def tax_id_hmac_key
+      secret = Rails.application.secret_key_base
+      TAX_ID_HMAC_KEY_MUTEX.synchronize do
+        @tax_id_hmac_keys ||= {}
+        @tax_id_hmac_keys[secret] ||= ActiveSupport::KeyGenerator.new(secret).generate_key("paycheck_input_fingerprint_tax_id", 32)
+      end
+    end
+
+    def tax_id_digest(employee)
+      ssn_digits = employee.ssn_encrypted.to_s.gsub(/\D/, "")
+      ein_digits = employee.contractor_ein.to_s.gsub(/\D/, "")
+      OpenSSL::HMAC.hexdigest("SHA256", tax_id_hmac_key, "#{employee.company_id}:#{employee.id}:#{ssn_digits}:#{ein_digits}")
+    end
 
     def canonicalize(value)
       case value

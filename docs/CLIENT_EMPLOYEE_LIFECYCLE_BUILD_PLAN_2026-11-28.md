@@ -425,7 +425,9 @@ Immutable record of every unverified item staff explicitly acknowledged when com
 | `item_updated_at_snapshot` | `datetime, null: false` | Exact `updated_at` of the item staff reviewed |
 | `created_at` / `updated_at` | `datetime, null: false` | |
 
-Indexes: unique on `(pay_period_id, employee_verification_item_id)` and index on `(company_id, employee_verification_item_id)` for fast committed-acknowledgement lookup during supersession checks. Immutable (`before_update` / `before_destroy` abort, like `EmployeeStatusEvent`).
+Indexes: unique on `(pay_period_id, employee_verification_item_id)` and index on `(company_id, employee_verification_item_id)` for fast committed-acknowledgement lookup during supersession checks. Append-only at both the application layer (`before_update` / `before_destroy` abort) and the database layer (`BEFORE UPDATE OR DELETE` and `BEFORE TRUNCATE` triggers matching `admin_overrides`).
+
+> **PR 3 & PR 4 lock-order invariant:** `PayPeriodLifecycleService#approve!` and `#commit!` lock `Company` → `PayPeriod` → `EmployeeVerificationItem` (without locking `Employee` rows). Every PR 3 and PR 4 writer that creates, updates, supersedes, verifies, returns, or revokes `employee_verification_items` or `employee_readiness_overrides` **must acquire `Company.lock` first** (following the global `Company → PayPeriod (ordered by :id) → Employee (ordered by :id)` lock order) so concurrent edits cannot race past commit's verification-acknowledgement snapshot check or readiness check.
 
 #### Migration 4: `employee_readiness_overrides` (RLS-protected)
 Tracks org-admin / super-admin overrides letting an Incomplete employee be paid.
@@ -812,7 +814,7 @@ PR 1 (Schema, zero-downtime migrations, RLS, locked mode switch, readiness evalu
 
 ### PR 3 — Client-managed employee lifecycle API, no-self-dealing, lock order & mode preflights
 - **Scope:**
-  - Standardize `Company → PayPeriod (ordered by :id) → Employee (ordered by :id)` lock order in `EmployeeStatusTransitionService` (both staff and client callers) and all client lifecycle endpoints.
+  - Standardize `Company → PayPeriod (ordered by :id) → Employee (ordered by :id)` lock order in `EmployeeStatusTransitionService` (both staff and client callers) and all client lifecycle endpoints. Every writer that creates, updates, or supersedes `employee_verification_items` must acquire `Company.lock` first so `PayPeriodLifecycleService#commit!` verification-acknowledgement checks (which lock `Company → PayPeriod → EmployeeVerificationItem` without locking `Employee` rows) remain race-safe.
   - Branch `ClientEmployeeUpdateService` and `Client::EmployeesController` on `client_managed_employee_lifecycle?`:
     - Explicit `readiness_gate_enforced = true` stamping only on client-portal create and client-portal rehire (verifying `EmployeeClassificationTransitionService` preserves `previous_employee.readiness_gate_enforced`, staff/import paths do not stamp it, and rehire preserves any existing `document_readiness_required: true` document gate).
     - Expanded always-on self-record detection (`EmployeeProfileIdentity.own_record?` + normalized email match + normalized full-name match, regardless of `profile_requests`):
@@ -836,7 +838,7 @@ PR 1 (Schema, zero-downtime migrations, RLS, locked mode switch, readiness evalu
 
 ### PR 4 — Staff "To verify" queue API, org-admin readiness override & notifications
 - **Scope:**
-  - Add `Admin::EmployeeVerificationItemsController` (`index`, `show` at `:payroll_operations`; `verify`, `return_to_client` at **`:manage_client_configuration`**), wired into `ClientInboxQuery` (live-only summary counters excluding demo companies).
+  - Add `Admin::EmployeeVerificationItemsController` (`index`, `show` at `:payroll_operations`; `verify`, `return_to_client` at **`:manage_client_configuration`**), wired into `ClientInboxQuery` (live-only summary counters excluding demo companies). Every `verify`, `return_to_client`, override grant/revoke, and `clear_readiness_gate` writer must acquire `Company.lock` first so concurrent `PayPeriodLifecycleService#approve!` and `#commit!` checks remain race-safe.
   - Add `:override_employee_readiness` capability (`super_admin`, `org_admin` only, non-delegatable) to `StaffRolePolicy`, plus `Admin::EmployeeReadinessOverridesController` (`create`, `destroy`, `clear_readiness_gate`) backed by `AdminOverrideService.perform!` + `RecentVerification` + automatic IRS Pub 15-T `default_withholding` `EmployeeW4Election` creation when W-4 is missing.
   - Update `EmployeeIntakeExceptionReviewService.call!` to reject any employee with `readiness_gate_enforced: true` (closing the dual-override bypass).
   - Wire `employee_verification_queued` (staff recipients with `:manage_client_configuration`), `employee_verification_returned` (`client_managers_only: true`), and `lifecycle_mode_activation_blocked` (listed `:manage_client_configuration` staff + `org_admin`/`super_admin` fallback) into `PortalNotifications`, `Recipients`, and `Email` (privacy-safe copy, `[Demo]` prefix).

@@ -19,6 +19,13 @@ module Api
             exclusion = period.pay_period_excluded_employees.find_by(employee: employee)
             add_back = nil
             if exclusion
+              if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: period, employee: employee))
+                return render json: {
+                  error: readiness_blocker.reason,
+                  code: "employee_readiness_incomplete",
+                  missing_keys: readiness_blocker.missing_keys
+                }, status: :unprocessable_entity
+              end
               unless Employee.where(company: current_company).eligible_for_payroll_run(period, explicitly_selected: true).exists?(id: employee.id)
                 return render json: { error: "This employee is not eligible for this run's dates. Review their employment status before adding them back." }, status: :unprocessable_entity
               end

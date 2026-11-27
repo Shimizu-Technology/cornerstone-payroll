@@ -103,6 +103,28 @@ class PayrollItem < ApplicationRecord
     payment_delivery_method.presence || (pay_period.committed? ? "paper_check" : employee&.payment_delivery_method.presence) || "paper_check"
   end
 
+  def payment_delivery_method_overridden_in_snapshot?
+    snapshot = calculation_context_snapshot.to_h
+    return true if snapshot["payment_delivery_method_overridden"] == true
+
+    recorded_item = snapshot["item_payment_delivery_method"]
+    recorded_default = snapshot["employee_payment_default_at_calculation"]
+    recorded_item.present? && recorded_default.present? && recorded_item != recorded_default
+  end
+
+  def sync_payment_delivery_method_for_calculation!(pay_period: self.pay_period, employee: self.employee, client_managed: nil)
+    scoped = PayrollReadinessPolicy.fingerprint_scoped?(
+      employee: employee,
+      pay_period: pay_period,
+      client_managed: client_managed
+    )
+    if scoped && pay_period.status.in?(%w[draft calculated]) && (new_record? || !payment_delivery_method_overridden_in_snapshot?)
+      self.payment_delivery_method = employee&.payment_delivery_method.presence || "paper_check"
+    else
+      self.payment_delivery_method ||= effective_payment_delivery_method
+    end
+  end
+
   # True when this row was created by IssueCorrectivePaycheckService and
   # represents a delta against another payroll item (rather than an
   # absolute period entry).
@@ -788,7 +810,7 @@ class PayrollItem < ApplicationRecord
   end
 
   # Calculate and store all values
-  def calculate!(annual_fica_context: nil)
+  def calculate!(annual_fica_context: nil, preserve_entered_pay_rates: false)
     ApplicationRecord.transaction do
       PayrollCorrectionPayBasisGuard.validate!(self)
       # Validate a clean copy of the persisted period. Calculating an item built
@@ -800,14 +822,19 @@ class PayrollItem < ApplicationRecord
         raise ActiveRecord::RecordInvalid, calculation_period
       end
       self.pay_period = calculation_period
-      self.payment_delivery_method ||= effective_payment_delivery_method
+      sync_payment_delivery_method_for_calculation!(pay_period: calculation_period, employee: employee)
 
       if variable_salary_missing?
         raise ArgumentError, "Enter this employee's Pay this period amount in the payroll worksheet before calculating or importing payroll."
       end
 
       synchronize_mosa_reviewed_hours!
-      calculator = PayrollCalculator.for(employee, self, annual_fica_context: annual_fica_context)
+      calculator = PayrollCalculator.for(
+        employee,
+        self,
+        annual_fica_context: annual_fica_context,
+        preserve_entered_pay_rates: preserve_entered_pay_rates
+      )
       calculator.calculate
       save!
       TimeTracking::SourceEarningsConservation.validate!(self, calculated: true, employee: employee)

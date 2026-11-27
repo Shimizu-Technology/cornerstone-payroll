@@ -153,7 +153,12 @@ export function PayrollIntakeImportModal({
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [acknowledgeWarnings, setAcknowledgeWarnings] = useState(false);
   const [forceOverwrite, setForceOverwrite] = useState(false);
-  const [doneSummary, setDoneSummary] = useState<{ applied: number; skipped: number; errors: string[] } | null>(null);
+  const [doneSummary, setDoneSummary] = useState<{
+    applied: number;
+    skipped: number;
+    skippedItems: { name: string; reason: string }[];
+    errors: string[];
+  } | null>(null);
   const [localEmployees, setLocalEmployees] = useState<Employee[]>(employees);
   const [createEmployeeRow, setCreateEmployeeRow] = useState<EditableRow | null>(null);
   const [newEmployeeForm, setNewEmployeeForm] = useState<NewEmployeeForm>(() => defaultNewEmployeeForm());
@@ -561,6 +566,15 @@ export function PayrollIntakeImportModal({
       setDoneSummary({
         applied: response.results.applied.length,
         skipped: response.results.skipped.length,
+        skippedItems: response.results.skipped
+          .filter((entry) => entry.code === 'employee_readiness_incomplete')
+          .map((entry) => ({
+            name:
+              entry.name
+              || entry.source_employee_name
+              || (entry.row_id !== undefined ? `Row #${entry.row_id}` : entry.employee_id !== undefined ? `Employee #${entry.employee_id}` : 'Employee'),
+            reason: entry.reason,
+          })),
         errors: response.results.errors.map((entry) => entry.error),
       });
       setImportData(response.import);
@@ -1033,6 +1047,16 @@ export function PayrollIntakeImportModal({
                 <p className="mt-1 text-sm">Applied {doneSummary.applied} row{doneSummary.applied === 1 ? '' : 's'} and skipped {doneSummary.skipped}.</p>
               </div>
             </div>
+            {doneSummary.skippedItems.length > 0 && (
+              <div role="status" className="rounded-2xl border border-warning-200 bg-warning-50 p-4 text-sm text-warning-950">
+                <p className="font-semibold">Skipped rows ({doneSummary.skippedItems.length})</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {doneSummary.skippedItems.map((entry, idx) => (
+                    <li key={idx}><span className="font-medium">{entry.name}:</span> {entry.reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {doneSummary.errors.length > 0 && (
               <div className="rounded-2xl border border-danger-200 bg-danger-50 p-4 text-sm text-danger-700">
                 {doneSummary.errors.join(', ')}

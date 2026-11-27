@@ -1,6 +1,7 @@
 
 
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { BusyStatus } from '@/components/ui/busy-status';
 import { AddBackNotice } from './AddBackNotice';
@@ -10,6 +11,7 @@ import type { PayRunSectionProps } from './usePayRunController';
 
 export function PayRunRoster({
   additionalEmployeeIds,
+  companyId,
   employees,
   financialActionsHeld,
   handleRunPayroll,
@@ -65,10 +67,40 @@ export function PayRunRoster({
     {hasStagedWorksheetChanges && <p className="mt-2 text-sm text-neutral-600">Calculate your worksheet edits first, then add someone back.</p>}
   </section>
 )}
+{(isCalculated || isDraft || payPeriod.status === 'approved') && !!payPeriod.readiness_excluded_employees?.length && (
+  <details className="rounded-lg border border-warning-200 bg-warning-50/70 p-4 text-sm text-warning-950">
+    <summary className="min-h-11 cursor-pointer font-semibold">
+      Not included — incomplete setup ({payPeriod.readiness_excluded_employees.length})
+    </summary>
+    <p className="mt-2 text-sm leading-6 text-warning-900">
+      These client-managed hires are missing required payroll setup for this pay period and cannot be paid until their checklist is complete or an organization admin records an override.
+    </p>
+    <ul className="mt-3 space-y-2">
+      {payPeriod.readiness_excluded_employees.map((employee) => {
+        const effectiveCompanyId = companyId ?? payPeriod.company_id;
+        return (
+          <li key={employee.employee_id} className="flex flex-col gap-1 border-t border-warning-200/80 pt-2 first:border-t-0 first:pt-0 sm:flex-row sm:items-baseline sm:justify-between">
+            <div className="min-w-0 break-words">
+              {effectiveCompanyId ? (
+                <Link className="font-semibold text-primary-800 underline" to={`/companies/${effectiveCompanyId}/employees/${employee.employee_id}`}>
+                  {employee.name}
+                </Link>
+              ) : (
+                <span className="font-semibold">{employee.name}</span>
+              )}
+              <span className="ml-1.5 text-warning-900">— {employee.reason}</span>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  </details>
+)}
 {(isCalculated || (isDraft && payPeriod.run_purpose !== 'regular')) && (() => {
           const payrollEmployeeIds = new Set(payrollItems.map((pi) => pi.employee_id));
           const excludedEmployeeIds = new Set(payPeriod.excluded_employee_ids || []);
-          const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id) && !excludedEmployeeIds.has(emp.id));
+          const readinessExcludedIds = new Set((payPeriod.readiness_excluded_employees || []).map((emp) => emp.employee_id));
+          const missingEmployees = employees.filter((emp) => !payrollEmployeeIds.has(emp.id) && !excludedEmployeeIds.has(emp.id) && !readinessExcludedIds.has(emp.id));
           if (missingEmployees.length === 0) return null;
           return (
             <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">

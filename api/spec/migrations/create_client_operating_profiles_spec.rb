@@ -5,7 +5,9 @@ require Rails.root.join("db/migrate/20261122050000_create_client_operating_profi
 
 RSpec.describe CreateClientOperatingProfiles do
   after do
+    ApplicationRecord.connection.schema_cache.clear_data_source_cache!("client_operating_profiles")
     ClientOperatingProfile.reset_column_information
+    CreateClientOperatingProfiles::MigrationClientOperatingProfile.reset_column_information
     ApplicationRecord.connection.clear_cache!
   end
 
@@ -67,6 +69,7 @@ RSpec.describe CreateClientOperatingProfiles do
     migration = described_class.new
     migration.down
     migration.up
+    ApplicationRecord.connection.schema_cache.clear_data_source_cache!("client_operating_profiles")
     ClientOperatingProfile.reset_column_information
     ApplicationRecord.connection.clear_cache!
 

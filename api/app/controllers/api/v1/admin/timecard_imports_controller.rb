@@ -58,7 +58,20 @@ module Api
                 next
               end
               if excluded_employee_ids.include?(employee.id)
-                results[:skipped] << { employee_id: employee.id, reason: "Excluded from this pay period" }
+                results[:skipped] << { employee_id: employee.id, name: employee.full_name, reason: "Excluded from this pay period" }
+                next
+              end
+
+              existing_item = @pay_period.payroll_items.find_by(employee_id: employee.id)
+              if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: @pay_period, employee: employee, payroll_item: existing_item))
+                results[:skipped] << {
+                  employee_id: employee.id,
+                  employee_name: employee.full_name,
+                  name: employee.full_name,
+                  reason: "Skipped — #{readiness_blocker.reason} Hours were not imported.",
+                  code: "employee_readiness_incomplete",
+                  missing_keys: readiness_blocker.missing_keys
+                }
                 next
               end
 

@@ -33,28 +33,33 @@ class PayPeriodLifecycleService
 
   def approve!
     with_financial_pay_period_lock do
-      validate_prior_provider_source!
-      validate_current_intake!
-      unless pay_period.calculated?
-        raise InvalidTransitionError, "Can only approve a calculated pay period"
-      end
+      CompanyFeatures.with_cache do
+        validate_prior_provider_source!
+        validate_current_intake!
+        unless pay_period.calculated?
+          raise InvalidTransitionError, "Can only approve a calculated pay period"
+        end
 
-      validate_go_live_gate!
-      validate_run_eligibility!
-      validate_expected_entries!
-      validate_payroll_participation!
-      validate_variable_period_pay!
-      validate_employee_document_readiness!
-      validate_annual_fica_context!
-      validate_employer_contribution_tracking!
-      validate_payment_delivery!
-      validate_source_earnings!
-      pay_period.update!(
-        status: "approved",
-        approved_by_id: actor&.id,
-        approved_at: Time.current
-      )
-      PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).publish!
+        validate_go_live_gate!
+        validate_run_eligibility!
+        validate_expected_entries!
+        validate_payroll_participation!
+        validate_variable_period_pay!
+        validate_employee_readiness!
+        validate_paycheck_input_freshness!(stage: :approve)
+        validate_employee_document_readiness!
+        validate_annual_fica_context!
+        validate_employer_contribution_tracking!
+        validate_payment_delivery!
+        validate_source_earnings!
+        materialize_scoped_payment_delivery_methods!
+        pay_period.update!(
+          status: "approved",
+          approved_by_id: actor&.id,
+          approved_at: Time.current
+        )
+        PayrollReview::RevisionService.new(pay_period: pay_period, actor: actor).publish!
+      end
     end
 
     pay_period
@@ -87,71 +92,77 @@ class PayPeriodLifecycleService
     pay_period
   end
 
-  attr_reader :acknowledged_outstanding_file_requests
+  attr_reader :acknowledged_outstanding_file_requests, :acknowledged_verification_items
 
-  def commit!(acknowledged_outstanding_file_request_ids: nil, expected_next_check_number: nil)
+  def commit!(acknowledged_outstanding_file_request_ids: nil, expected_next_check_number: nil, acknowledged_verification_items: nil)
     acknowledgement_ids = { batch: [], entries: [] }
     with_financial_pay_period_lock do
-      validate_prior_provider_source!
-      validate_current_intake!
-      unless pay_period.approved?
-        raise InvalidTransitionError, "Can only commit an approved pay period"
+      CompanyFeatures.with_cache do
+        validate_prior_provider_source!
+        validate_current_intake!
+        unless pay_period.approved?
+          raise InvalidTransitionError, "Can only commit an approved pay period"
+        end
+        if pay_period.parallel_run? || pay_period.payroll_parallel_run_review.present?
+          raise InvalidTransitionError, "Parallel comparison payroll cannot be committed. Create a new live payroll after go-live approval."
+        end
+        validate_run_eligibility!
+        validate_expected_entries!
+        unless pay_period.payroll_items.exists?
+          raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
+        end
+
+        validate_go_live_gate!
+        validate_payroll_participation!
+        validate_variable_period_pay!
+        validate_employee_readiness!
+        validate_paycheck_input_freshness!(stage: :commit)
+        validate_employee_document_readiness!
+        validate_annual_fica_context!
+        validate_employer_contribution_tracking!
+        validate_client_approval!
+        link_error = pay_period.client_file_link_error
+        raise InvalidTransitionError, link_error if link_error
+
+        requests = pay_period.outstanding_client_file_requests.lock.to_a
+        validate_file_request_snapshot!(requests, acknowledged_outstanding_file_request_ids)
+        validate_check_number_snapshot!(expected_next_check_number)
+        required_verification_items = validate_verification_acknowledgements!(acknowledged_verification_items)
+        PayrollSubmissions::LinkPayPeriod.for_commit!(pay_period)
+        @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
+        validate_payment_delivery!
+        validate_source_earnings!
+        committed_items = pay_period.payroll_items.includes(
+          :employee,
+          payroll_item_deductions: :deduction_type,
+          employee: { employee_loans: :loan_transactions }
+        ).to_a.sort_by { |item| [ item.employee_id, item.id ] }
+
+        committed_items.each do |item|
+          item.update!(payment_delivery_method: item.effective_payment_delivery_method)
+        end
+
+        validate_financial_source_correction!
+        pay_period.update!(
+          status: "committed",
+          committed_at: Time.current,
+          committed_by_id: actor&.id
+        )
+        record_verification_acknowledgements!(required_verification_items)
+
+        PortalNotifications.payroll_committed!(pay_period, actor: actor)
+
+        apply_ytd_and_loan_effects!(committed_items)
+        # A run paid before already-committed runs adds to their YTD.
+        PayrollYtdSnapshotRefresh.after(pay_period: pay_period, employee_ids: committed_items.map(&:employee_id).uniq)
+        PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
+        assign_check_numbers!(committed_items)
+        create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?
+        record_correction_commit! if pay_period.correction_run?
+        recorded_acknowledgements = record_aire_processing_acknowledgements
+        acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
+        acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
       end
-      if pay_period.parallel_run? || pay_period.payroll_parallel_run_review.present?
-        raise InvalidTransitionError, "Parallel comparison payroll cannot be committed. Create a new live payroll after go-live approval."
-      end
-      validate_run_eligibility!
-      validate_expected_entries!
-      unless pay_period.payroll_items.exists?
-        raise EmptyPayPeriodError, "Cannot commit pay period with no payroll items"
-      end
-
-      validate_go_live_gate!
-      validate_payroll_participation!
-      validate_variable_period_pay!
-      validate_employee_document_readiness!
-      validate_annual_fica_context!
-      validate_employer_contribution_tracking!
-      validate_client_approval!
-      link_error = pay_period.client_file_link_error
-      raise InvalidTransitionError, link_error if link_error
-
-      requests = pay_period.outstanding_client_file_requests.lock.to_a
-      validate_file_request_snapshot!(requests, acknowledged_outstanding_file_request_ids)
-      validate_check_number_snapshot!(expected_next_check_number)
-      PayrollSubmissions::LinkPayPeriod.for_commit!(pay_period)
-      @acknowledged_outstanding_file_requests = requests.map { |request| { id: request.id, title: request.title, status: request.status } }
-      validate_payment_delivery!
-      validate_source_earnings!
-      committed_items = pay_period.payroll_items.includes(
-        :employee,
-        payroll_item_deductions: :deduction_type,
-        employee: { employee_loans: :loan_transactions }
-      ).to_a.sort_by { |item| [ item.employee_id, item.id ] }
-
-      committed_items.each do |item|
-        item.update!(payment_delivery_method: item.effective_payment_delivery_method)
-      end
-
-      validate_financial_source_correction!
-      pay_period.update!(
-        status: "committed",
-        committed_at: Time.current,
-        committed_by_id: actor&.id
-      )
-
-      PortalNotifications.payroll_committed!(pay_period, actor: actor)
-
-      apply_ytd_and_loan_effects!(committed_items)
-      # A run paid before already-committed runs adds to their YTD.
-      PayrollYtdSnapshotRefresh.after(pay_period: pay_period, employee_ids: committed_items.map(&:employee_id).uniq)
-      PayrollLiabilityPostingService.post!(pay_period: pay_period, actor: actor)
-      assign_check_numbers!(committed_items)
-      create_fit_tax_deposit_check!(committed_items) if pay_period.company.auto_create_fit_check?
-      record_correction_commit! if pay_period.correction_run?
-      recorded_acknowledgements = record_aire_processing_acknowledgements
-      acknowledgement_ids[:batch].concat(recorded_acknowledgements[:batch])
-      acknowledgement_ids[:entries].concat(recorded_acknowledgements[:entries])
     end
 
     AirePayrollAcknowledgement.dispatch_pending!(ids: acknowledgement_ids[:batch]) if acknowledgement_ids[:batch].any?
@@ -308,6 +319,147 @@ class PayPeriodLifecycleService
     EmployeeDocumentReadiness.require_payroll_ready!(pay_period)
   rescue EmployeeDocumentReadiness::BlockedError => e
     raise DocumentsBlockedError.new(e.message, employees: e.employees)
+  end
+
+  def validate_employee_readiness!
+    items = pay_period.payroll_items.financially_reportable
+      .joins(:employee)
+      .where(employees: { readiness_gate_enforced: true })
+      .includes(
+        :correction_for_payroll_item,
+        :financial_correction_origin_item,
+        employee: [
+          :employee_compensation_changes,
+          :employee_wage_rates,
+          :employee_wage_rate_versions,
+          :employee_w4_elections,
+          :employee_status_events,
+          :employee_readiness_overrides
+        ]
+      ).order(:id).to_a
+    return if items.empty?
+
+    blocked = items.filter_map do |item|
+      employee = item.employee
+      next unless employee&.readiness_gate_enforced?
+
+      blocker = PayrollReadinessPolicy.readiness_blocker_for(
+        pay_period: pay_period,
+        employee: employee,
+        payroll_item: item
+      )
+      next unless blocker
+
+      "#{employee.full_name} — #{blocker.reason}"
+    end
+    return if blocked.empty?
+
+    raise InvalidTransitionError, "Complete employee setup or grant an organization-admin override before approving or committing payroll: #{blocked.join('; ')}"
+  end
+
+  def validate_paycheck_input_freshness!(stage:)
+    stale = PayrollReadinessPolicy.stale_calculation_employees_for(pay_period, stage: stage)
+    return if stale.empty?
+
+    names = stale.map { |entry| entry.fetch(:name) }.uniq.join(", ")
+    raise InvalidTransitionError, "#{PayrollReadinessPolicy::STALE_ERROR_PREFIX}: #{names}."
+  end
+
+  def materialize_scoped_payment_delivery_methods!
+    client_managed = CompanyFeatures.for(pay_period.company).client_managed_employee_lifecycle?
+    scope = pay_period.payroll_items.financially_reportable.where(payment_delivery_method: nil)
+    scope = scope.joins(:employee).where(employees: { readiness_gate_enforced: true }) unless client_managed
+
+    items = scope.includes(:employee).order(:id).to_a
+    items.each do |item|
+      next unless PayrollReadinessPolicy.fingerprint_scoped?(employee: item.employee, pay_period: pay_period, client_managed: client_managed)
+
+      resolved = item.effective_payment_delivery_method
+      updates = { payment_delivery_method: resolved }
+      snapshot = item.calculation_context_snapshot.to_h
+      if snapshot.key?("paycheck_input_fingerprint") && snapshot["item_payment_delivery_method"] != resolved
+        updates[:calculation_context_snapshot] = snapshot.merge("item_payment_delivery_method" => resolved)
+      end
+      item.update!(updates)
+    end
+  end
+
+  def validate_verification_acknowledgements!(acknowledged_items)
+    required_items = PayPeriodUnverifiedChanges.new(pay_period).relation.lock.includes(:employee).to_a
+    if required_items.empty?
+      if acknowledged_items.present?
+        raise CommitConflict.new(
+          "unverified_changes_changed",
+          "Unverified employee changes were resolved or updated. Review the updated details and confirm again."
+        )
+      end
+      return []
+    end
+
+    if actor.nil?
+      raise InvalidTransitionError, "An authenticated staff user is required to acknowledge unverified employee changes."
+    end
+
+    submitted = normalize_acknowledged_verification_items(acknowledged_items)
+    required_pairs = required_items.map { |item| [ item.id, item.updated_at.utc.iso8601(6) ] }.sort
+
+    if submitted.nil? || submitted.size != required_items.size || submitted.uniq.sort != required_pairs
+      raise CommitConflict.new(
+        "unverified_changes_changed",
+        "Unverified employee changes were added or updated. Review every item and confirm again."
+      )
+    end
+
+    required_items
+  end
+
+  def normalize_acknowledged_verification_items(raw)
+    return nil unless raw.is_a?(Array)
+
+    raw.map do |entry|
+      hash = if entry.respond_to?(:to_unsafe_h)
+        entry.to_unsafe_h.stringify_keys
+      elsif entry.is_a?(Hash)
+        entry.stringify_keys
+      else
+        return nil
+      end
+
+      id_str = hash["id"].to_s
+      updated_at_str = hash["updated_at"].to_s
+      return nil unless id_str.match?(/\A[1-9]\d*\z/) && updated_at_str.present?
+
+      parsed_time = Time.iso8601(updated_at_str).utc.iso8601(6)
+      [ id_str.to_i, parsed_time ]
+    rescue ArgumentError
+      return nil
+    end
+  end
+
+  def record_verification_acknowledgements!(items)
+    @acknowledged_verification_items = []
+    return if items.empty?
+
+    acknowledged_at = pay_period.committed_at || Time.current
+    items.each do |item|
+      PayPeriodVerificationAcknowledgement.create!(
+        company_id: pay_period.company_id,
+        pay_period_id: pay_period.id,
+        employee_verification_item_id: item.id,
+        employee_id: item.employee_id,
+        acknowledged_by_id: actor.id,
+        acknowledged_at: acknowledged_at,
+        item_status_snapshot: item.status,
+        item_updated_at_snapshot: item.updated_at
+      )
+      @acknowledged_verification_items << {
+        id: item.id,
+        employee_id: item.employee_id,
+        event_kind: item.event_kind,
+        status: item.status,
+        updated_at: item.updated_at.utc.iso8601(6)
+      }
+    end
   end
 
   def validate_go_live_gate!

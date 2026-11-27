@@ -165,6 +165,10 @@ module PayrollImport
     def restore_without_hours!(employee:, row:, tips_paid_out_from_tips:, evidence: {})
       raise ArgumentError, "Employee must belong to this client" unless employee.company_id == company_id
 
+      if (readiness_blocker = PayrollReadinessPolicy.readiness_blocker_for(pay_period: pay_period, employee: employee))
+        raise ArgumentError, "Skipped — #{readiness_blocker.reason} Hours were not imported."
+      end
+
       payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
       raise ArgumentError, "#{employee.full_name} already has a payroll row in this run." if payroll_item.persisted?
 
@@ -248,9 +252,21 @@ module PayrollImport
       employees_by_id = Employee.where(id: employee_ids, company_id: company_id).with_compensation_history.index_by(&:id)
       rows_by_employee_id = matched.index_by { |row| row[:employee_id].to_i }
       excluded_employee_ids = pay_period.pay_period_excluded_employees.pluck(:employee_id).to_set
+      existing_items_by_employee_id = pay_period.payroll_items.where(employee_id: employee_ids)
+        .includes(:correction_for_payroll_item, :financial_correction_origin_item).index_by(&:employee_id)
+      readiness_blockers_by_employee_id = employees_by_id.each_with_object({}) do |(eid, employee), map|
+        next if excluded_employee_ids.include?(eid)
+
+        blocker = PayrollReadinessPolicy.readiness_blocker_for(
+          pay_period: pay_period,
+          employee: employee,
+          payroll_item: existing_items_by_employee_id[eid]
+        )
+        map[eid] = blocker if blocker
+      end
 
       matched.each do |row|
-        next if excluded_employee_ids.include?(row[:employee_id]) || row[:restore_client_hours_only]
+        next if excluded_employee_ids.include?(row[:employee_id]) || readiness_blockers_by_employee_id.key?(row[:employee_id]) || row[:restore_client_hours_only]
 
         errors = RevelHoursValidation.errors(row)
         next if errors.empty?
@@ -262,7 +278,7 @@ module PayrollImport
       # Fail before writing any source rows. A recurring bonus cannot stand in
       # for the period pay of a variable-salary employee on a regular run.
       missing_salary_names = employees_by_id.values.filter_map do |employee|
-        next if excluded_employee_ids.include?(employee.id)
+        next if excluded_employee_ids.include?(employee.id) || readiness_blockers_by_employee_id.key?(employee.id)
         next unless employee.payroll_compensation_on(pay_period.end_date).variable_salary? && pay_period.includes_base_salary?
 
         item = pay_period.payroll_items.find_by(employee_id: employee.id) || PayrollItem.new(pay_period: pay_period, employee: employee)
@@ -296,6 +312,17 @@ module PayrollImport
 
           employee = employees_by_id[employee_id]
           next unless employee
+
+          if (readiness_blocker = readiness_blockers_by_employee_id[employee.id])
+            results[:skipped] << {
+              employee_id: employee.id,
+              name: employee.full_name,
+              reason: "Skipped — #{readiness_blocker.reason} Hours were not imported.",
+              code: "employee_readiness_incomplete",
+              missing_keys: readiness_blocker.missing_keys
+            }
+            next
+          end
 
           payroll_item = pay_period.payroll_items.find_or_initialize_by(employee_id: employee.id)
           # Calculation resolves deduction mirrors before the first save, and they

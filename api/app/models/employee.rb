@@ -475,12 +475,31 @@ class Employee < ApplicationRecord
   scope :contractor, -> { where(employment_type: "contractor") }
   scope :w2_employees, -> { where(employment_type: %w[hourly salary]) }
   scope :eligible_for_payroll_run, ->(period, explicitly_selected: false) {
-    if explicitly_selected && %w[final correction adjustment].include?(period.run_purpose)
+    base = if explicitly_selected && %w[final correction adjustment].include?(period.run_purpose)
       where("status IN (?) OR (status = ? AND EXISTS (SELECT 1 FROM employee_status_events WHERE employee_id = employees.id AND event_type = ?))", %w[active terminated], "inactive", "deactivated")
         .where("intake_exception = '{}'::jsonb OR (intake_payroll_confirmed_at IS NOT NULL AND intake_payroll_eligible_from <= ?)", period.end_date)
         .where("hire_date IS NULL OR hire_date <= ?", period.end_date)
     else
       eligible_for_period(period.start_date, period.end_date)
+    end
+
+    return base unless PayrollReadinessPolicy.company_has_gated_employees?(period.company_id)
+
+    enforced_candidates = base.where(readiness_gate_enforced: true)
+      .except(:select, :order, :limit, :offset, :includes, :preload, :eager_load)
+      .includes(
+        :employee_compensation_changes,
+        :employee_wage_rates,
+        :employee_wage_rate_versions,
+        :employee_w4_elections,
+        :employee_status_events,
+        :employee_readiness_overrides
+      ).to_a
+    if enforced_candidates.any?
+      blocked_ids = PayrollReadinessPolicy.blocked_employee_ids_for(pay_period: period, employees: enforced_candidates)
+      blocked_ids.any? ? base.where.not(id: blocked_ids) : base
+    else
+      base
     end
   }
   scope :eligible_for_period, ->(period_start, period_end) {

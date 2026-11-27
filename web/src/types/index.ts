@@ -1470,6 +1470,34 @@ export interface AddBackResult {
   not_restored: (AddBackAmount & { reason: string; enter_by_hand?: boolean })[];
 }
 
+export interface ReadinessExcludedEmployee {
+  employee_id: number;
+  name: string;
+  employment_type?: string;
+  reason: string;
+  missing_keys: string[];
+  missing_labels?: string[];
+  status?: string;
+}
+
+export interface StaleCalculationEmployee {
+  payroll_item_id: number;
+  employee_id: number;
+  name: string;
+  reason: string;
+}
+
+export interface UnverifiedEmployeeChange {
+  id: number;
+  updated_at: string;
+  employee_id: number;
+  employee_name: string;
+  event_kind: string;
+  status: 'pending_verification' | 'returned_to_client' | string;
+  effective_on?: string | null;
+  summary: string;
+}
+
 export interface PayPeriod {
   rollback_review_required?: boolean;
   rollback_review_id?: string | null;
@@ -1479,6 +1507,9 @@ export interface PayPeriod {
   ineligible_workers?: { resolution?: string; employee_id: number; reason: string; status: string; effective_date: string | null }[];
   expected_entries?: ExpectedEntries;
   new_hire_document_gaps?: NewHireDocumentGap[];
+  readiness_excluded_employees?: ReadinessExcludedEmployee[];
+  stale_calculation_employees?: StaleCalculationEmployee[];
+  unverified_employee_changes?: UnverifiedEmployeeChange[];
   client_files?: { period_id: number; revision: number; submission_id: number; submitted_at: string; status: string; blocks_calculation: boolean } | null;
   prior_provider_history_available?: boolean;
   /** Initial roster defaults; explicit operator selections remain authoritative. */

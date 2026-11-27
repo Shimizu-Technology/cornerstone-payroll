@@ -20,7 +20,12 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
   const [preview, setPreview] = useState<TimecardImportPreviewRow[]>([]);
   const [allEmployees, setAllEmployees] = useState<{ id: number; name: string }[]>([]);
   const [mappings, setMappings] = useState<Map<number, number | null>>(new Map());
-  const [result, setResult] = useState<{ applied: number; errors: number } | null>(null);
+  const [result, setResult] = useState<{
+    applied: number;
+    skipped: number;
+    skippedReadiness: { name: string; reason: string }[];
+    errors: number;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
@@ -83,7 +88,18 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
       }
 
       const res = await payPeriodsApi.applyTimecardImport(payPeriodId, importMappings);
-      setResult({ applied: res.applied.length, errors: res.errors.length });
+      const skippedEntries = res.skipped || [];
+      setResult({
+        applied: res.applied.length,
+        skipped: skippedEntries.length,
+        skippedReadiness: skippedEntries
+          .filter((entry) => entry.code === 'employee_readiness_incomplete')
+          .map((entry) => ({
+            name: entry.employee_name || entry.name || (entry.employee_id ? `Employee #${entry.employee_id}` : 'Employee'),
+            reason: entry.reason,
+          })),
+        errors: res.errors.length,
+      });
       setStep('done');
       onImportComplete();
     } catch (err) {
@@ -269,8 +285,19 @@ export function TimecardImportModal({ open, onClose, payPeriodId, onImportComple
               <h4 className="text-lg font-semibold text-gray-900">Import Complete</h4>
               <p className="text-sm text-gray-600 mt-2">
                 {result.applied} employee hours imported successfully.
+                {result.skipped > 0 && ` ${result.skipped} skipped.`}
                 {result.errors > 0 && ` ${result.errors} errors occurred.`}
               </p>
+              {result.skippedReadiness.length > 0 && (
+                <div role="status" className="mt-4 text-left bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-950">
+                  <p className="font-medium">Skipped employees (hours not imported):</p>
+                  <ul className="mt-1 list-disc list-inside space-y-1">
+                    {result.skippedReadiness.map((entry, idx) => (
+                      <li key={idx}><span className="font-medium">{entry.name}:</span> {entry.reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <p className="text-xs text-gray-400 mt-1">
                 Remember to run payroll to calculate taxes and deductions for the imported hours.
               </p>

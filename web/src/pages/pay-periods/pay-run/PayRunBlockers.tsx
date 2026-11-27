@@ -26,25 +26,100 @@ export function PayRunClientFiles({ payPeriod }: { payPeriod: PayPeriod }) {
 export function PayRunBlockers({
   part = 'all',
   adoptingConfirmedWorkweek,
+  canEditPayPeriod,
   canImportMosa,
   canImportSpikeIntake,
   clientApprovalLoading,
+  companyId,
   enabledIntakeAdapters = [],
+  financialActionsHeld,
   handleAdoptConfirmedWorkweek,
+  handleRunPayroll,
   hasPendingCalculationChanges,
   openClientApproval,
   openIntakeAdapter,
+  processing,
   reloadClientReview,
   payPeriod,
   setImportModalOpen,
   setPayrollIntakeImportOpen
-}: PayRunSectionProps<'blockers'> & { part?: 'all' | 'hours' | 'approval' }) {
+}: PayRunSectionProps<'blockers'> & { part?: 'all' | 'hours' | 'approval' | 'lifecycle' }) {
   const ficaNote = payPeriod.annual_fica_review_note;
+  const staleEmployees = payPeriod.stale_calculation_employees ?? [];
+  const unverifiedChanges = payPeriod.unverified_employee_changes ?? [];
+  const effectiveCompanyId = companyId ?? payPeriod.company_id;
+  const showLifecycle = part === 'all' || part === 'lifecycle';
+  const showHours = part === 'all' || part === 'hours';
+  const showApproval = part === 'all' || part === 'approval';
   return (<>
-{part !== 'approval' && payPeriod.client_files?.blocks_calculation && <Alert>
+{showLifecycle && staleEmployees.length > 0 && (payPeriod.status === 'calculated' || payPeriod.status === 'approved') && (
+  <Alert id="payroll-stale-calculation" tone="error" tabIndex={-1}>
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger-700" aria-hidden="true" />
+        <div>
+          <p className="font-semibold">Recalculate payroll — employee details changed after calculation</p>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-danger-800">
+            {payPeriod.status === 'approved'
+              ? 'Unapprove and recalculate this payroll before committing so every paycheck reflects current pay, withholding, tax ID, payment delivery, and status.'
+              : 'Approve and commit are blocked until you recalculate this run with updated employee details.'}
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-danger-900">
+            {staleEmployees.map((entry) => (
+              <li key={entry.payroll_item_id}>
+                <span className="font-medium">{entry.name}</span> — {entry.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      {payPeriod.status === 'calculated' && canEditPayPeriod && handleRunPayroll && (
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 border-danger-300 bg-white text-danger-900 hover:bg-danger-100"
+          disabled={processing || financialActionsHeld}
+          onClick={() => void handleRunPayroll()}
+        >
+          Recalculate
+        </Button>
+      )}
+    </div>
+  </Alert>
+)}
+{showLifecycle && unverifiedChanges.length > 0 && payPeriod.status !== 'committed' && payPeriod.correction_status !== 'voided' && (
+  <Alert id="payroll-unverified-changes" tone="warning" tabIndex={-1} className="border-warning-200 bg-warning-50/70">
+    <div>
+      <p className="font-semibold text-warning-950">
+        Changed since last payroll, not verified ({unverifiedChanges.length})
+      </p>
+      <p className="mt-1 text-sm leading-6 text-warning-900">
+        These client-managed employee updates do not block calculating, approving, or client review. Verify them or acknowledge every item in the Commit dialog before finalizing payroll.
+      </p>
+      <ul className="mt-2 space-y-1.5 text-sm text-warning-950">
+        {unverifiedChanges.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            {effectiveCompanyId ? (
+              <Link className="font-medium text-primary-800 underline" to={`/companies/${effectiveCompanyId}/employees/${item.employee_id}`}>
+                {item.employee_name}
+              </Link>
+            ) : (
+              <span className="font-medium">{item.employee_name}</span>
+            )}
+            <span>— {item.summary}</span>
+            <span className="text-xs font-medium text-warning-800">
+              ({item.status === 'returned_to_client' ? 'Sent back to client' : 'Pending verification'})
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </Alert>
+)}
+{showHours && payPeriod.client_files?.blocks_calculation && <Alert>
   <p>Calculate is blocked until you <Link className="text-primary-800 underline" to={`/companies/${payPeriod.company_id}/payroll-submissions/${payPeriod.client_files.period_id}#revision-${payPeriod.client_files.submission_id}`}>review this revision</Link> and import it or record why it is set aside.</p>
 </Alert>}
-{part !== 'approval' && hasPendingCalculationChanges && (
+{showHours && hasPendingCalculationChanges && (
           <Alert>
             <p className="font-semibold">Recalculate to include your changes</p>
             <p className="mt-1 text-sm leading-6 text-warning-800">
@@ -52,7 +127,7 @@ export function PayRunBlockers({
             </p>
           </Alert>
         )}
-{part !== 'hours' && payPeriod.payroll_review && (payPeriod.client_payroll_approval_required || payPeriod.payroll_review.published_at) && (
+{showApproval && payPeriod.payroll_review && (payPeriod.client_payroll_approval_required || payPeriod.payroll_review.published_at) && (
           <Alert tone={payPeriod.payroll_review.status === 'approved' ? 'success' : 'warning'} className={payPeriod.payroll_review.status === 'approved' ? 'border-success-200 bg-success-50/70' : 'border-warning-200 bg-warning-50/70'}>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-start gap-3">
@@ -98,7 +173,7 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
-{part !== 'hours' && payPeriod.payroll_review_history?.some(entry => entry.superseded_at && entry.change_request_note) && <details className="rounded-lg border border-neutral-200 bg-white p-4 text-sm">
+{showApproval && payPeriod.payroll_review_history?.some(entry => entry.superseded_at && entry.change_request_note) && <details className="rounded-lg border border-neutral-200 bg-white p-4 text-sm">
   <summary className="min-h-11 cursor-pointer font-semibold">Earlier client change requests</summary>
   {payPeriod.payroll_review_history.filter(entry => entry.superseded_at && entry.change_request_note).map(entry => <div key={entry.id} className="mt-3 space-y-1 border-t pt-3">
     <p className="font-semibold">Revision {entry.revision} · {entry.changes_requested_by_name}</p>
@@ -106,7 +181,7 @@ export function PayRunBlockers({
     {entry.changes_requested_at && <p>{formatGuam(entry.changes_requested_at)}</p>}
   </div>)}
 </details>}
-{part !== 'approval' && payPeriod.intake_stale_at && (
+{showHours && payPeriod.intake_stale_at && (
           <Alert tone="error">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex items-start gap-3">
@@ -135,12 +210,12 @@ export function PayRunBlockers({
             </div>
           </Alert>
         )}
-        {payPeriod.compensation_warnings?.map((warning) => (
+        {part !== 'lifecycle' && payPeriod.compensation_warnings?.map((warning) => (
           <Alert key={warning}>
             <p className="max-w-4xl leading-6"><span className="font-semibold">Mid-period pay change.</span> {warning}</p>
           </Alert>
         ))}
-        {part !== 'approval' && payPeriod.compliance_warnings?.filter((warning) => warning !== ficaNote).map((warning) => (
+        {showHours && payPeriod.compliance_warnings?.filter((warning) => warning !== ficaNote).map((warning) => (
           <Alert key={warning}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
               <p className="max-w-4xl leading-6">
