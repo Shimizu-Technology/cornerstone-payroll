@@ -2,7 +2,8 @@
 // and pay setup as of today, from GET /employee/job. Rows with nothing set
 // are left out, and a former job shows nothing. Pay follows the Show
 // amounts setting like every other amount. A change scheduled to reach the
-// next paycheck shows under today's pay ("Changes to $17.00 an hour on Dec 1").
+// next paycheck shows under today's pay ("Changes to $17.00 an hour on Dec 1"),
+// and so does a calculated next check that pays something else.
 import type { ReactElement, ReactNode } from 'react';
 import { Link } from 'react-router';
 import type { EmployeeJob, JobPay, PayFrequency, PeriodPayChange } from './contracts';
@@ -35,8 +36,12 @@ function hasAmounts(pay: JobPay | null): boolean {
   return pay.type === 'hourly' || pay.perPeriod !== null;
 }
 
-/** "Changes to $17.00 an hour on Dec 1": the amount the next paycheck will use. */
-function ChangeNote({ children, effectiveOn }: { children: ReactNode; effectiveOn: string }): ReactElement {
+/**
+ * The amount the next paycheck will use: "Changes to $17.00 an hour on Dec 1",
+ * or "Your next paycheck uses $15.00 an hour" once that check is calculated.
+ */
+function ChangeNote({ children, effectiveOn }: { children: ReactNode; effectiveOn: string | null }): ReactElement {
+  if (!effectiveOn) return <span className="emp-job-change">Your next paycheck uses {children}</span>;
   return <span className="emp-job-change">Changes to {children} on {shortDate(effectiveOn)}</span>;
 }
 
