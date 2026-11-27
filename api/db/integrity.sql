@@ -1383,16 +1383,3 @@ CREATE TRIGGER admin_overrides_append_only BEFORE UPDATE OR DELETE ON admin_over
 DROP TRIGGER IF EXISTS admin_overrides_no_truncate ON admin_overrides;
 CREATE TRIGGER admin_overrides_no_truncate BEFORE TRUNCATE ON admin_overrides
   FOR EACH STATEMENT EXECUTE FUNCTION reject_admin_override_mutation();
-
--- 20261127200000_create_payroll_item_bridge_overlap_dispositions.rb
-CREATE OR REPLACE FUNCTION prevent_payroll_item_bridge_overlap_disposition_mutation()
-RETURNS trigger AS $$
-BEGIN
-  RAISE EXCEPTION 'payroll_item_bridge_overlap_dispositions are append-only';
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS payroll_item_bridge_overlap_dispositions_append_only ON payroll_item_bridge_overlap_dispositions;
-CREATE TRIGGER payroll_item_bridge_overlap_dispositions_append_only
-BEFORE UPDATE OR DELETE ON payroll_item_bridge_overlap_dispositions
-FOR EACH ROW EXECUTE FUNCTION prevent_payroll_item_bridge_overlap_disposition_mutation();

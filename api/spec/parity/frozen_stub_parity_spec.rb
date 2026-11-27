@@ -86,24 +86,17 @@ RSpec.describe "Frozen posted pay stubs posted by the base revision", type: :req
       item.reload
     end
 
-    it "keeps the base stub until the run is recorded distinct, then revises it once" do
-      overlap = overlap_run!
+    it "keeps the stub the base revision posted, since an overlap changes no figure" do
+      overlap_run!
       posted = base.dig("native_run_inside_bridge", "prior_provider_ytd_p2")
       document = as_posted_by_base!(:prior_provider_ytd_p2, posted.fetch("payroll_facts_sha256"))
       expect(printed(fixture.items.fetch(:prior_provider_ytd_p2))).to eq(posted.fetch("printed"))
 
-      # No decision yet: the statement still leaves the run out, as the base revision did.
       recheck!(:prior_provider_ytd_p2)
+
       expect(document.reload).to be_posted
       expect(document.revision).to eq(1)
-
-      PayrollBridgeOverlapDispositionService.record_evident!(company_id: fixture.company.id, year: 2026, actor: fixture.staff_user)
-      revised = recheck!(:prior_provider_ytd_p2, days: 2)
-
-      expect(revised.revision).to eq(2)
-      expect(document.reload).to be_replaced
-      expect(printed(fixture.items.fetch(:prior_provider_ytd_p2))["ytd_gross"].to_d)
-        .to eq(posted.dig("printed", "ytd_gross").to_d + overlap.gross_pay.to_d)
+      expect(PayrollBridgeOverlap.new(company_id: fixture.company.id, year: 2026).call.size).to eq(1)
     end
   end
 end

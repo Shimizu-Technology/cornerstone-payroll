@@ -3,9 +3,8 @@
 # The YTD gross and net a paycheck's statement prints, for staff views that
 # list many paychecks (the pay run register, a paycheck, a timecard). It reads
 # the same population as PayrollStatementYtdSources (the opening balance dated
-# on or before the pay date, then earlier and current paychecks, with native
-# pay inside that balance only once recorded distinct) in a few queries per pay
-# run instead of several per paycheck. Saved YTD snapshots are not used: they
+# on or before the pay date, then earlier and current paychecks paid after it)
+# in a few queries per pay run instead of several per paycheck. Saved YTD snapshots are not used: they
 # follow payroll calculation, which counts a different population.
 class StatementYtdFigures
   # gross is the stub's gross: imported non-taxable reimbursements print as
@@ -35,21 +34,20 @@ class StatementYtdFigures
     pay_date = period.pay_date || Date.current
     employee_ids = items.map(&:employee_id).uniq
     balances = opening_balances(company.id, employee_ids, pay_date)
-    distinct = distinct_ids(company.id, balances.values)
     prior = prior_rows(company, employee_ids, period, pay_date)
 
     items.each do |item|
       balance = balances[item.employee_id]
       cutoff = balance&.through_pay_date
-      counted = ->(row_id, row_pay_date) { cutoff.nil? || row_pay_date > cutoff || distinct.include?(row_id) }
+      counted = ->(row_pay_date) { cutoff.nil? || row_pay_date > cutoff }
       opening = balance&.ytd_aggregate_totals || {}
       sums = FIELDS.to_h { |key, field| [ key, opening.fetch(field, 0).to_d ] }
       prior.fetch(item.employee_id, []).each do |row|
-        next unless counted.call(row[:id], row[:pay_date])
+        next unless counted.call(row[:pay_date])
 
         FIELDS.each_key { |key| sums[key] += row.fetch(key) }
       end
-      if item.payroll_included? && period.correction_status.in?([ nil, "correction" ]) && counted.call(item.id, pay_date)
+      if item.payroll_included? && period.correction_status.in?([ nil, "correction" ]) && counted.call(pay_date)
         FIELDS.each { |key, field| sums[key] += item.public_send(field).to_d }
       end
       sums[:gross] -= balance.non_taxable_pay.to_d if balance
@@ -59,20 +57,12 @@ class StatementYtdFigures
 
   # PayrollStatementYtdSources#historical_balance for each employee.
   def opening_balances(company_id, employee_ids, pay_date)
-    HistoricalEmployeeYtdBalance.joins(:historical_ytd_bridge).includes(:historical_ytd_bridge)
+    HistoricalEmployeeYtdBalance.joins(:historical_ytd_bridge)
       .where(company_id: company_id, employee_id: employee_ids, tax_year: pay_date.year, historical_ytd_bridges: { status: "applied" })
       .where("historical_employee_ytd_balances.through_pay_date <= ?", pay_date)
       .order(:employee_id, through_pay_date: :desc, "historical_ytd_bridges.applied_at" => :desc,
         "historical_ytd_bridges.id" => :desc, id: :desc)
       .to_a.group_by(&:employee_id).transform_values(&:first)
-  end
-
-  def distinct_ids(company_id, balances)
-    batch_ids = balances.map { |balance| balance.historical_ytd_bridge.historical_import_batch_id }.uniq
-    return Set.new if batch_ids.empty?
-
-    PayrollItemBridgeOverlapDisposition.distinct_payments
-      .where(company_id: company_id, historical_import_batch_id: batch_ids).pluck(:payroll_item_id).to_set
   end
 
   # PayrollStatementYtdSources#items before the current paycheck, per employee.

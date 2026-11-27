@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_27_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_27_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -3677,31 +3677,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_200000) do
     t.index [ "payroll_item_id" ], name: "index_payroll_item_fica_basis_proofs_on_payroll_item_id", unique: true
   end
 
-  create_table "payroll_item_bridge_overlap_dispositions", force: :cascade do |t|
-    t.bigint "company_id", null: false
-    t.datetime "created_at", null: false
-    t.bigint "created_by_id", null: false
-    t.string "decision", limit: 40, null: false
-    t.jsonb "evidence", default: {}, null: false
-    t.string "evidence_digest", limit: 64, null: false
-    t.bigint "historical_import_batch_id", null: false
-    t.bigint "historical_paycheck_id"
-    t.bigint "payroll_item_id", null: false
-    t.text "reason", null: false
-    t.string "source", limit: 40, null: false
-    t.datetime "updated_at", null: false
-    t.index ["company_id"], name: "index_payroll_item_bridge_overlap_dispositions_on_company_id"
-    t.index ["created_by_id"], name: "idx_on_created_by_id_d5cc9d036a"
-    t.index ["historical_import_batch_id"], name: "idx_on_historical_import_batch_id_86d3acfd84"
-    t.index ["historical_paycheck_id"], name: "idx_on_historical_paycheck_id_26baaa410b"
-    t.index ["payroll_item_id", "historical_import_batch_id"], name: "idx_bridge_overlap_dispositions_item_batch", unique: true
-    t.check_constraint "(decision::text = 'duplicate_of_imported'::text) = (historical_paycheck_id IS NOT NULL)", name: "bridge_overlap_dispositions_duplicate_names_paycheck"
-    t.check_constraint "decision::text = ANY (ARRAY['distinct'::character varying, 'duplicate_of_imported'::character varying]::text[])", name: "bridge_overlap_dispositions_decision_check"
-    t.check_constraint "evidence_digest::text ~ '^[0-9a-f]{64}$'::text", name: "bridge_overlap_dispositions_digest_check"
-    t.check_constraint "jsonb_typeof(evidence) = 'object'::text", name: "bridge_overlap_dispositions_evidence_object"
-    t.check_constraint "source::text = ANY (ARRAY['payment_evidence'::character varying, 'staff_review'::character varying]::text[])", name: "bridge_overlap_dispositions_source_check"
-  end
-
   create_table "payroll_item_field_entries", force: :cascade do |t|
     t.boolean "active", default: true, null: false
     t.decimal "amount", precision: 10, scale: 2, default: "0.0", null: false
@@ -5918,11 +5893,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_27_200000) do
   add_foreign_key "payroll_item_fica_basis_proofs", "companies", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "payroll_items", on_delete: :restrict
   add_foreign_key "payroll_item_fica_basis_proofs", "users", column: "created_by_id", on_delete: :restrict
-  add_foreign_key "payroll_item_bridge_overlap_dispositions", "companies", on_delete: :restrict
-  add_foreign_key "payroll_item_bridge_overlap_dispositions", "historical_import_batches", on_delete: :restrict
-  add_foreign_key "payroll_item_bridge_overlap_dispositions", "historical_paychecks", on_delete: :restrict
-  add_foreign_key "payroll_item_bridge_overlap_dispositions", "payroll_items", on_delete: :restrict
-  add_foreign_key "payroll_item_bridge_overlap_dispositions", "users", column: "created_by_id", on_delete: :restrict
   add_foreign_key "payroll_item_field_entries", "payroll_field_definitions"
   add_foreign_key "payroll_item_field_entries", "payroll_items"
   add_foreign_key "payroll_item_field_entries", "payroll_items", column: [ "payroll_item_id", "company_id" ], primary_key: [ "id", "company_id" ], name: "fk_payroll_item_field_entries_company_parent"

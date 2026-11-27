@@ -67,6 +67,22 @@ module HistoricalPayroll
     end
 
     def adjustment_digest
+      self.class.digest_for(adjustments)
+    end
+
+    # adjustment_digest for several imports in one query, keyed by import id.
+    def self.adjustment_digests(batches)
+      ids = batches.map(&:id)
+      return {} if ids.empty?
+
+      grouped = HistoricalPaycheckAdjustment.joins(:historical_paycheck)
+        .where(historical_paychecks: { historical_import_batch_id: ids })
+        .select("historical_paycheck_adjustments.*", "historical_paychecks.historical_import_batch_id AS ledger_batch_id")
+        .chronological.to_a.group_by(&:ledger_batch_id)
+      ids.index_with { |id| digest_for(grouped.fetch(id, [])) }
+    end
+
+    def self.digest_for(adjustments)
       payload = adjustments.map do |adjustment|
         [ adjustment.id, adjustment.created_at&.iso8601(6), *FIELDS.map { |field| adjustment.public_send(field).to_s } ]
       end

@@ -469,11 +469,12 @@ class UnifiedPayrollReporting
   # (HistoricalPayrollFilingSource's bridge for W-2GU).
   def range_balances
     @range_balances ||= begin
-      bridges = HistoricalImportBatch.where(company_id: @company_id, status: "locked")
-        .includes(:latest_applied_historical_ytd_bridge).filter_map do |batch|
-          bridge = batch.latest_applied_historical_ytd_bridge
-          bridge if bridge && bridge.preview_summary.to_h["adjustment_digest"].to_s == HistoricalPayroll::Ledger.new(batch: batch).adjustment_digest
-        end
+      batches = HistoricalImportBatch.where(company_id: @company_id, status: "locked").includes(:latest_applied_historical_ytd_bridge).to_a
+      digests = HistoricalPayroll::Ledger.adjustment_digests(batches)
+      bridges = batches.filter_map do |batch|
+        bridge = batch.latest_applied_historical_ytd_bridge
+        bridge if bridge && bridge.preview_summary.to_h["adjustment_digest"].to_s == digests.fetch(batch.id)
+      end
       years = @period.start_date.year..@period.end_date.year
       HistoricalEmployeeYtdBalance.includes(:historical_ytd_bridge)
         .where(company_id: @company_id, historical_ytd_bridge_id: bridges.map(&:id), tax_year: years)

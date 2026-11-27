@@ -5,33 +5,30 @@ require "digest"
 # A native paycheck paid on or before an applied opening balance's through
 # date. The balance holds only imported pay, so the paycheck is either its own
 # payment, which must count once, or the same payment the import already
-# holds, which must not count twice. The pay date alone can't tell which.
+# holds, which must not count twice. The date alone can't tell which, and
+# nothing here decides it: readers keep counting as before (the statement
+# leaves the paycheck out, W-2GU counts it), the statement says its YTD is
+# under review, and W-2GU preflight, mark-ready and final files are blocked
+# while any such paycheck exists.
 #
-# Payment evidence proposes an answer: one imported paycheck in the same
-# import with the same pay date, gross and net (and check number when both
-# have one) is a duplicate; no imported paycheck sharing a pay date, check
-# number or amounts is a distinct payment; anything else is ambiguous and
-# needs staff review. Only a recorded PayrollItemBridgeOverlapDisposition
-# changes what readers count:
-# - the as-of-check statement counts the paycheck only once it is recorded
-#   distinct, and until then keeps leaving it out, as it always has;
-# - W-2GU leaves out one recorded as a duplicate, and otherwise keeps it;
-# - until it is recorded, W-2GU preflight blocks and the statement says its
-#   year-to-date is under review.
+# The payment evidence is shown for review only: one imported paycheck in the
+# same import with the same pay date, gross and net (and check number when
+# both have one) suggests a duplicate; none sharing a pay date, check number
+# or amounts suggests a distinct payment; anything else is ambiguous.
 class PayrollBridgeOverlap
-  Overlap = Data.define(:payroll_item, :balance, :batch_id, :disposition, :evidence, :proposal, :matched_paycheck_id) do
-    def pending? = disposition.nil?
+  Overlap = Data.define(:payroll_item, :balance, :batch_id, :evidence, :proposal, :matched_paycheck_id) do
+    # Contractors are never on a W-2GU, so they don't block it.
+    def blocks_w2? = payroll_item.employment_type != "contractor"
 
     def evidence_digest
       Digest::SHA256.hexdigest(JSON.generate(evidence))
     end
   end
 
-  PROPOSALS = %i[distinct duplicate ambiguous].freeze
   EMPLOYEE_NOTE = "Your year-to-date totals are being reviewed: an earlier paycheck may already be in your opening balance. " \
     "If a total changes, a corrected stub will follow."
-  STAFF_NOTE = "Year-to-date excludes a native paycheck dated inside the imported opening balance until it is recorded as " \
-    "its own payment or a duplicate. W-2GU filing is blocked until then."
+  STAFF_NOTE = "A native paycheck is dated inside the imported opening balance, so year-to-date may leave it out or W-2GU may " \
+    "count it twice. W-2GU filing is blocked until it is resolved."
 
   def initialize(company_id:, year:, employee_ids: nil)
     @company_id = Integer(company_id)
@@ -43,44 +40,36 @@ class PayrollBridgeOverlap
   def call
     return [] if balances.empty?
 
-    dispositions = PayrollItemBridgeOverlapDisposition.where(company_id: @company_id, payroll_item_id: candidate_items.map(&:id))
-      .index_by { |row| [ row.payroll_item_id, row.historical_import_batch_id ] }
     candidate_items.flat_map do |item|
       balances.fetch(item.employee_id, []).filter_map do |balance|
-        next unless item.pay_period.pay_date <= balance.through_pay_date
+        next unless inside?(item, balance)
 
         batch_id = balance.historical_ytd_bridge.historical_import_batch_id
         evidence, proposal, matched = evaluate(item, batch_id)
-        Overlap.new(payroll_item: item, balance: balance, batch_id: batch_id,
-          disposition: dispositions[[ item.id, batch_id ]], evidence: evidence, proposal: proposal, matched_paycheck_id: matched)
+        Overlap.new(payroll_item: item, balance: balance, batch_id: batch_id, evidence: evidence, proposal: proposal,
+          matched_paycheck_id: matched)
       end
     end
   end
 
-  def pending
-    call.select(&:pending?)
+  def w2_blocking
+    call.select(&:blocks_w2?)
   end
 
-  # Native paychecks recorded as distinct payments against this import: the
-  # only ones dated inside its balance that a statement counts.
-  def self.distinct_item_ids(company_id:, batch_id:)
-    PayrollItemBridgeOverlapDisposition.distinct_payments
-      .where(company_id: company_id, historical_import_batch_id: batch_id).select(:payroll_item_id)
-  end
-
-  # Native paychecks recorded as the same payment an import already holds.
-  def self.duplicate_item_ids(company_ids)
-    PayrollItemBridgeOverlapDisposition.duplicates.where(company_id: company_ids).select(:payroll_item_id)
-  end
-
-  # An employee's overlapping paychecks still awaiting a disposition, paid on
-  # or before this date.
-  def self.pending_for(employee:, year:, through:)
-    new(company_id: employee.company_id, year: year, employee_ids: [ employee.id ]).pending
+  # An employee's overlapping paychecks paid on or before this date.
+  def self.for_employee(employee:, year:, through:)
+    new(company_id: employee.company_id, year: year, employee_ids: [ employee.id ]).call
       .select { |overlap| overlap.payroll_item.pay_period.pay_date <= through }
   end
 
   private
+
+  # The check date the payment carries (the evidence's date) or the run's pay
+  # date (the statement's cutoff), whichever is earlier, on or before the
+  # balance's through date.
+  def inside?(item, balance)
+    [ item.check_date, item.pay_period.pay_date ].compact.min <= balance.through_pay_date
+  end
 
   # The latest applied bridge of each locked import: the balances W-2GU reads.
   def balances
@@ -98,9 +87,10 @@ class PayrollBridgeOverlap
     @candidate_items ||= begin
       latest = balances.values.flatten.map(&:through_pay_date).max
       company = Company.find(@company_id)
-      PayrollItem.financially_reportable.reportable
+      PayrollItem.financially_reportable.reportable.joins(:pay_period)
         .where(company_id: @company_id, employee_id: balances.keys)
-        .where(pay_period_id: PayPeriod.reportable_for_company(company).where(pay_date: Date.new(@year, 1, 1)..latest).select(:id))
+        .where(pay_period_id: PayPeriod.reportable_for_company(company).where(pay_date: Date.new(@year, 1, 1)..Date.new(@year, 12, 31)).select(:id))
+        .where("pay_periods.pay_date <= :latest OR payroll_items.check_date <= :latest", latest: latest)
         .includes(:pay_period, :employee).order(:employee_id, :id).to_a
     end
   end
@@ -116,7 +106,7 @@ class PayrollBridgeOverlap
     paid_on = item.check_date || item.pay_period.pay_date
     candidates = imported_paychecks(batch_id).fetch(item.employee_id, [])
     rows = candidates.map do |paycheck|
-      same_date = paycheck.pay_date == paid_on || paycheck.pay_date == item.pay_period.pay_date
+      same_date = paycheck.pay_date == paid_on
       same_amounts = paycheck.gross_pay.to_d == item.gross_pay.to_d && paycheck.net_pay.to_d == item.net_pay.to_d
       numbers = [ paycheck.check_number, item.check_number ].map { |value| value.to_s.strip.presence }
       same_number = numbers.all? && numbers.uniq.one?
@@ -143,6 +133,7 @@ class PayrollBridgeOverlap
       "payroll_item" => {
         "id" => item.id, "pay_period_id" => item.pay_period_id, "period_pay_date" => item.pay_period.pay_date.iso8601,
         "paid_on" => paid_on.iso8601, "check_number" => item.check_number.to_s.presence,
+        "employment_type" => item.employment_type,
         "gross_pay" => item.gross_pay.to_d.round(2).to_s("F"), "net_pay" => item.net_pay.to_d.round(2).to_s("F")
       },
       "imported_paychecks" => rows.map do |row|
@@ -154,8 +145,9 @@ class PayrollBridgeOverlap
           "same_pay_date" => row[:same_date], "same_amounts" => row[:same_amounts], "same_check_number" => row[:same_number]
         }
       end,
-      "proposal" => proposal.to_s,
-      "matched_historical_paycheck_id" => matched
+      # For review only; nothing is recorded or applied from it.
+      "suggestion" => proposal.to_s,
+      "suggested_historical_paycheck_id" => matched
     }
   end
 end
