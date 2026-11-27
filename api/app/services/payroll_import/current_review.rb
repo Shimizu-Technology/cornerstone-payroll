@@ -5,10 +5,20 @@ module PayrollImport
   module CurrentReview
     module_function
 
+    # Returns the newest current intake session that has an open previewed
+    # PayrollImportRecord so direct intake previews (which have no
+    # PayrollImportRecord) never hide an open reviewed-hours or portal review.
     def source_package_for(pay_period, source_type: nil)
-      source_types = source_type.present? ? [ source_type.to_s ] : PayrollIntake::Registry.tracks_reviewed_hours_keys
+      source_types = if source_type.present?
+        [ source_type.to_s ]
+      else
+        (PayrollIntake::Registry.tracks_reviewed_hours_keys +
+          PayrollIntake::Registry.all.select(&:portal_submittable?).map(&:key)).uniq
+      end
       pay_period.payroll_intake_sessions.current
+                .joins("INNER JOIN payroll_imports ON payroll_imports.payroll_intake_session_id = payroll_intake_sessions.id")
                 .where(source_type: source_types, status: %w[previewed reviewed])
+                .where(payroll_imports: { pay_period_id: pay_period.id, status: "previewed" })
                 .order(package_revision: :desc, id: :desc)
                 .first
     end

@@ -187,7 +187,7 @@ it('reopens the open review when Back leaves the same files chosen, instead of o
   fireEvent.click(again);
 
   await screen.findByRole('region', { name: 'Files for this import' });
-  expect(mocks.currentImport).toHaveBeenCalledWith(9);
+  expect(mocks.currentImport).toHaveBeenCalledWith(9, 'mosa_revel');
   expect(mocks.previewImport).toHaveBeenCalledTimes(1);
 });
 

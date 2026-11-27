@@ -23,6 +23,7 @@ module PayrollIntake
       :portal_label,
       :portal_hint,
       :supports_link,
+      :template_formats,
       :provides
     ) do
       def matches?(filename:, content_type: nil)
@@ -53,6 +54,7 @@ module PayrollIntake
           "portal_label" => portal_label || label,
           "portal_hint" => portal_hint || hint,
           "supports_link" => supports_link == true,
+          "template_formats" => Array(template_formats),
           "provides" => provides
         }
       end
@@ -83,6 +85,7 @@ module PayrollIntake
           portal_label: definition["portal_label"]&.to_s&.freeze,
           portal_hint: definition["portal_hint"]&.to_s&.freeze,
           supports_link: definition.fetch("supports_link", false) == true,
+          template_formats: Array(definition["template_formats"]).map { |fmt| fmt.to_s.downcase.freeze }.freeze,
           provides: Array(definition["provides"]).map { |field| field.to_s.freeze }.freeze
         )
       end
@@ -269,6 +272,7 @@ module PayrollIntake
         portal_label: hash[:portal_label]&.to_s&.freeze,
         portal_hint: hash[:portal_hint]&.to_s&.freeze,
         supports_link: hash.fetch(:supports_link, false) == true,
+        template_formats: Array(hash[:template_formats]).map { |fmt| fmt.to_s.downcase.freeze }.freeze,
         provides: Array(hash[:provides]).map { |field| field.to_s.freeze }.freeze
       )
     end

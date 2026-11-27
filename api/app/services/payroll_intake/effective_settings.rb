@@ -107,7 +107,7 @@ module PayrollIntake
         descriptor&.overtime_mode ||
         OperatingProfileCatalog.default_for("overtime.mode")
       alignment = per_source["workweek_alignment"].presence ||
-        (overtime.to_s == "source_reports" ? (descriptor&.workweek_alignment || "warn_if_offset") : OperatingProfileCatalog.default_for("workweek.alignment"))
+        (overtime.to_s == "source_reports" ? "warn_if_offset" : OperatingProfileCatalog.default_for("workweek.alignment"))
       has_company_override = per_source.slice("tips_default", "overtime_mode", "workweek_alignment").values.any?(&:present?)
 
       Result.new(

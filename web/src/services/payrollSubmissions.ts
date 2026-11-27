@@ -117,6 +117,8 @@ export const clientPayrollSubmissionsApi = {
     return api.get<PayrollIntakeProfile>(`/client/intake_profile${query}`);
   },
   submit: (ref: string, form: FormData) => api.postForm<Detail & { outcome: 'created' | 'replayed' | 'duplicate' }>(`/client/payroll_submission_periods/${encode(ref)}/submissions`, form),
+  downloadTemplate: (ref: string, format: 'xlsx' | 'csv') =>
+    api.getBlobWithParams(`/client/payroll_submission_periods/${encode(ref)}/template`, { file_format: format }),
   decide: (ref: string, data: { decision: 'approve' | 'request_changes'; draft_id: number; note?: string }) =>
     api.post<Detail>(`/client/payroll_submission_periods/${encode(ref)}/decision`, data),
   threads: clientPortalThreadsApi,

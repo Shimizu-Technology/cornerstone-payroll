@@ -22,6 +22,41 @@ module Api
           render json: { import: session_json(@session), disposition_targets: disposition_targets_json }
         end
 
+        # GET /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/template?source_type=cornerstone_workbook&file_format=xlsx|csv
+        def template
+          source_type = params[:source_type].presence&.to_s || "cornerstone_workbook"
+          unless @pay_period.company.payroll_intake_source_enabled?(source_type)
+            return render json: { error: "Payroll intake source '#{source_type}' is not enabled for this client" }, status: :unprocessable_entity
+          end
+
+          file_format = (params[:file_format].presence || params[:format].presence || "xlsx").to_s.downcase
+          case source_type
+          when "cornerstone_workbook"
+            unless file_format.in?(%w[xlsx csv])
+              return render json: { error: "Unsupported template format '#{file_format}'. Use xlsx or csv." }, status: :unprocessable_entity
+            end
+
+            generator = PayrollIntake::UniversalWorkbook::Template.new(pay_period: @pay_period)
+            payload = file_format == "csv" ? generator.generate_csv : generator.generate_xlsx
+            send_data payload,
+                      filename: generator.filename(format: file_format),
+                      type: generator.content_type(format: file_format),
+                      disposition: "attachment"
+          when "mosa_revel"
+            unless file_format == "xlsx"
+              return render json: { error: "MoSa change workbook template is available in xlsx format only." }, status: :unprocessable_entity
+            end
+
+            generator = PayrollImport::MosaSupplementalTemplate.new(@pay_period)
+            send_data generator.generate,
+                      filename: generator.filename,
+                      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      disposition: "attachment"
+          else
+            render json: { error: "No downloadable template is available for '#{source_type}'." }, status: :unprocessable_entity
+          end
+        end
+
         # POST /api/v1/admin/pay_periods/:pay_period_id/payroll_intake_imports/preview
         def preview
           service = PayrollIntake::PreviewService.new(
@@ -173,6 +208,7 @@ module Api
               :id, :row_id, :position, :include, :employee_id,
               :disposition, :disposition_reason, :target_pay_period_id,
               :week1_hours, :week2_hours, :regular_hours, :overtime_hours,
+              :pto_hours, :holiday_hours, :bonus,
               :week1_tips, :week2_tips, :reported_tips, :tips_paid_out,
               :loan_deduction, :acknowledge_warnings
             ]
@@ -254,6 +290,10 @@ module Api
             extracted_total_hours: row.total_hours,
             regular_hours: row.regular_hours.to_f,
             overtime_hours: row.overtime_hours.to_f,
+            pto_hours: row.source_payload.to_h["pto_hours"].to_d.to_f,
+            holiday_hours: row.source_payload.to_h["holiday_hours"].to_d.to_f,
+            bonus: row.source_payload.to_h["bonus"].present? ? row.source_payload.to_h["bonus"].to_d.to_f : nil,
+            payroll_components: Array(row.source_payload.to_h["payroll_components"]),
             week1_tips: row.week1_tips.to_f,
             week2_tips: row.week2_tips.to_f,
             reported_tips: row.reported_tips.to_f,
@@ -337,6 +377,9 @@ module Api
             pay_rate: item.pay_rate,
             salary_override: item.salary_override,
             non_taxable_pay: item.non_taxable_pay,
+            bonus: item.bonus,
+            bonus_source: item.bonus_source,
+            imported_bonus: item.imported_bonus,
             hours_worked: item.hours_worked,
             overtime_hours: item.overtime_hours,
             holiday_hours: item.holiday_hours,
