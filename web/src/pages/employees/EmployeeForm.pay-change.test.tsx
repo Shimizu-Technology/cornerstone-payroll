@@ -234,7 +234,12 @@ it('warns about client re-approval before saving a verification fix and hands of
   </Routes></MemoryRouter>);
   await screen.findByText('Checking for approved payroll before editing…');
   expect((screen.getByRole('button', { name: 'Update Employee' }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByLabelText(/^Social Security Number/) as HTMLInputElement).value).toBe('');
+  const ssn = screen.getByLabelText(/^Social Security Number/) as HTMLInputElement;
+  expect(ssn.value).toBe('');
+  expect(ssn.type).toBe('password');
+  expect(ssn.required).toBe(false);
+  expect(ssn.placeholder).toContain('1234');
+  expect((screen.getByLabelText(/^Re-enter Social Security Number/) as HTMLInputElement).type).toBe('password');
   expect(screen.getByText(/Saved SSN ending in 1234/)).toBeTruthy();
   resolveItem({ data: { id: 22, company_id: 1, employee_id: 7, can_review: true, updated_at: updatedAt, warnings: { approved_pay_period_ids: [44] } } });
   await screen.findByText(/unapprove the run, recalculate, republish the review package, and get client re-approval/);
@@ -270,12 +275,67 @@ it.each(['hourly', 'salary', 'contractor'] as const)('saves a verification fix o
   expect(mocks.listRates).not.toHaveBeenCalled();
 });
 
-it('still requires a saved pay rate and withholding date on a gated employee', async () => {
-  await loadEmployee(employee({ readiness_gate_enforced: true }));
+it('still requires a saved pay rate and withholding date in a verification fix', async () => {
+  const data = employee({ readiness_gate_enforced: true, ssn: undefined, ssn_last_four: '1234' });
+  mocks.employeeForFix.mockResolvedValue({ data });
+  mocks.verifyItem.mockResolvedValue({ data: { id: 22, company_id: 1, employee_id: 7, can_review: true,
+    updated_at: '2026-11-27T12:00:00Z', warnings: { approved_pay_period_ids: [] } } });
+  render(<MemoryRouter initialEntries={['/companies/1/employees/7/edit?verify_item_id=22']}><Routes>
+    <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
+  </Routes></MemoryRouter>);
+  const update = await screen.findByRole('button', { name: 'Update Employee' });
+  await waitFor(() => expect(update).toHaveProperty('disabled', false));
   changeHourlyRate('0');
   fireEvent.change(screen.getByLabelText(/^Effective date/), { target: { value: '' } });
   submit();
   expect(screen.getByText('Each hourly pay rate must be greater than 0')).toBeTruthy();
   expect(screen.getByText('Enter the date this W-4 became effective')).toBeTruthy();
+  expect(mocks.updateEmployee).not.toHaveBeenCalled();
+});
+
+it('keeps the saved EIN and blocks clearing the business name or DOB in a verification fix', async () => {
+  const data = employee({ readiness_gate_enforced: true, ssn: undefined, contractor_ein_last_four: '4321',
+    employment_type: 'contractor', contractor_type: 'business', contractor_pay_type: 'flat_fee',
+    business_name: 'Synthetic Fixture LLC', date_of_birth: '1985-05-07', wage_rates: [], compensation_history: undefined });
+  mocks.employeeForFix.mockResolvedValue({ data });
+  mocks.updateEmployee.mockResolvedValue({ data });
+  mocks.verifyItem.mockResolvedValue({ data: { id: 22, company_id: 1, employee_id: 7, can_review: true,
+    updated_at: '2026-11-27T12:00:00Z', warnings: { approved_pay_period_ids: [] } } });
+  render(<MemoryRouter initialEntries={['/companies/1/employees/7/edit?verify_item_id=22']}><Routes>
+    <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
+    <Route path="/companies/:companyId/verifications" element={<p>Ready to verify saved fix</p>} />
+  </Routes></MemoryRouter>);
+  const update = await screen.findByRole('button', { name: 'Update Contractor' });
+  await waitFor(() => expect(update).toHaveProperty('disabled', false));
+  const ein = screen.getByLabelText(/^EIN \(Employer Identification Number\)/) as HTMLInputElement;
+  expect(ein.value).toBe('');
+  expect(ein.type).toBe('password');
+  expect(ein.required).toBe(false);
+  expect(ein.placeholder).toContain('4321');
+  expect(screen.getByText('Saved EIN ending in 4321. Enter the full number only to replace it.')).toBeTruthy();
+
+  const businessName = screen.getByLabelText(/^Legal Business Name/);
+  const dob = screen.getByLabelText('Date of Birth');
+  fireEvent.change(businessName, { target: { value: '' } });
+  fireEvent.change(dob, { target: { value: '' } });
+  submit();
+  expect(screen.getByText('Legal business name is required')).toBeTruthy();
+  expect(screen.getByText('Date of birth is required')).toBeTruthy();
+  expect(mocks.updateEmployee).not.toHaveBeenCalled();
+
+  fireEvent.change(businessName, { target: { value: 'Synthetic Fixture LLC' } });
+  fireEvent.change(dob, { target: { value: '1985-05-07' } });
+  submit();
+  expect(await screen.findByText('Ready to verify saved fix')).toBeTruthy();
+  expect(mocks.updateEmployee.mock.calls[0][1]).toMatchObject({ mask_tax_ids: true, contractor_ein: undefined });
+});
+
+it('keeps ordinary staff validation for an incomplete gated employee', async () => {
+  await loadEmployee(employee({ readiness_gate_enforced: true, pay_rate: 0, wage_rates: [], w4_effective_on: null }));
+  expect((screen.getByLabelText(/^Social Security Number/) as HTMLInputElement).type).toBe('text');
+  submit();
+  expect(screen.getByText('Each hourly pay rate must be greater than 0')).toBeTruthy();
+  expect(screen.getByText('Enter the date this W-4 became effective')).toBeTruthy();
+  expect(mocks.verifyItem).not.toHaveBeenCalled();
   expect(mocks.updateEmployee).not.toHaveBeenCalled();
 });

@@ -384,7 +384,7 @@ export function EmployeeContactDetails({
         ...(prev[employee.id] ?? INITIAL_ROW_STATE),
         saving: true,
         saved: false,
-        submittedAddressRequestId: undefined,
+        submittedRequest: undefined,
         pendingAddressRequestId: undefined,
         confirmingAddressReplacement: false,
         error: null,
@@ -408,7 +408,7 @@ export function EmployeeContactDetails({
 
       const updated = toContactRecord(response.data);
       const warnings = response.contact_warnings ?? [];
-      const addressRequest = 'change_request' in response && response.change_request?.profile_address ? response.change_request : null;
+      const changeRequest = 'change_request' in response ? response.change_request : null;
 
       setEmployees((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
       setDrafts((prev) => {
@@ -423,7 +423,7 @@ export function EmployeeContactDetails({
         [updated.id]: {
           saving: false,
           saved: true,
-          submittedAddressRequestId: addressRequest?.id,
+          submittedRequest: changeRequest ?? undefined,
           error: null,
           fieldErrors: {},
           warnings,
@@ -759,7 +759,7 @@ export function EmployeeContactDetails({
                                 </Button>
                                 {state.saved && (
                                   <span role="status" className="inline-flex items-center gap-1 text-xs font-semibold text-success-700">
-                                    <ContactSaveResult requestId={state.submittedAddressRequestId} />
+                                    <ContactSaveResult request={state.submittedRequest} />
                                   </span>
                                 )}
                               </div>
@@ -792,7 +792,7 @@ export function EmployeeContactDetails({
                       <EmployeeNameBlock employee={employee} />
                       {state.saved && !open && (
                         <span role="status" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-success-700">
-                          <ContactSaveResult requestId={state.submittedAddressRequestId} />
+                          <ContactSaveResult request={state.submittedRequest} />
                         </span>
                       )}
                     </div>

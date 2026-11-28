@@ -79,6 +79,12 @@ describe('To verify', () => {
     expect(fix.getAttribute('href')).toContain('verify_item_id=11');
   });
 
+  it('masks formatted EINs and standalone SSNs in verification notes', async () => {
+    mocks.get.mockResolvedValue({ data: { ...item, verification_note: 'Synthetic references: 00-0004321 and 900112233.' } });
+    open();
+    expect(await screen.findByText('Synthetic references: **-***4321 and ***-**-2233.')).toBeTruthy();
+  });
+
   it('loads the next and previous pages and preserves the chosen page in the URL', async () => {
     mocks.list.mockImplementation((_company, filters) => Promise.resolve({
       data: [{ ...item, employee_name: `Sample Worker on page ${filters.page}` }],

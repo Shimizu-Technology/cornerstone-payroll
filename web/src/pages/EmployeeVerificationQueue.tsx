@@ -15,6 +15,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { formatDate } from '@/lib/display-date';
 import { canWriteCompany } from '@/lib/company-write-access';
+import { maskTaxIdsInText } from '@/lib/employee-profile';
 import { formatGuamDateTime } from '@/lib/utils';
 import { currentAppPath, employeeEditPath, employeePath, safeInternalReturnPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
@@ -63,11 +64,11 @@ function maskValue(value: unknown, field = ''): unknown {
   }
   if (Array.isArray(value)) return value.map(entry => maskValue(entry));
   if (typeof value === 'object') return safeComparisonValues(value as Record<string, unknown>);
-  return typeof value === 'string' ? maskSsnInText(value) : value;
+  return typeof value === 'string' ? maskVerificationText(value) : value;
 }
 
-function maskSsnInText(text: string) {
-  return text.replace(/\b\d{3}[- ]?\d{2}[- ]?(\d{4})\b/g, '***-**-$1');
+function maskVerificationText(text: string) {
+  return maskTaxIdsInText(text, '*');
 }
 
 function isLifecycleDisabled(error: unknown) {
@@ -286,10 +287,10 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
             <StaffReadinessChecklist checklist={currentItem.readiness_checklist} />
             {(currentItem.return_note || currentItem.audit_references.some(reference => reference.return_note)) && <div>
               <h3 className="font-semibold">Notes sent to the client</h3>
-              <ul className="mt-1 space-y-2 text-sm">{[...new Set([...currentItem.audit_references.map(entry => entry.return_note), currentItem.return_note])].filter(Boolean).map(note => <li key={note} className="whitespace-pre-wrap wrap-anywhere">{note && maskSsnInText(note)}</li>)}</ul>
+              <ul className="mt-1 space-y-2 text-sm">{[...new Set([...currentItem.audit_references.map(entry => entry.return_note), currentItem.return_note])].filter(Boolean).map(note => <li key={note} className="whitespace-pre-wrap wrap-anywhere">{note && maskVerificationText(note)}</li>)}</ul>
             </div>}
-            {currentItem.client_response_note && <div><h3 className="font-semibold">Client response</h3><p className="whitespace-pre-wrap wrap-anywhere text-sm">{maskSsnInText(currentItem.client_response_note)}</p></div>}
-            {currentItem.verification_note && <div><h3 className="font-semibold">Internal verification note</h3><p className="whitespace-pre-wrap wrap-anywhere text-sm">{maskSsnInText(currentItem.verification_note)}</p></div>}
+            {currentItem.client_response_note && <div><h3 className="font-semibold">Client response</h3><p className="whitespace-pre-wrap wrap-anywhere text-sm">{maskVerificationText(currentItem.client_response_note)}</p></div>}
+            {currentItem.verification_note && <div><h3 className="font-semibold">Internal verification note</h3><p className="whitespace-pre-wrap wrap-anywhere text-sm">{maskVerificationText(currentItem.verification_note)}</p></div>}
             {canViewAudit && currentItem.audit_references.some(entry => entry.staff_edit_audit_id) &&
               <Link className="inline-flex min-h-11 items-center font-semibold text-primary-700 underline" to={employeePath(companyId, currentItem.employee_id, 'activity', { returnTo: queuePath })}>View employee edit history</Link>}
             {canReview && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

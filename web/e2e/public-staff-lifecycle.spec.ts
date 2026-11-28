@@ -10,6 +10,11 @@ for (const width of [390, 1440]) {
     const revision = '2026-11-28T11:00:00.123456Z';
     let status = 'pending_verification';
     const savedNotes: unknown[] = [];
+    let employee = {
+      id: 31, company_id: 1, first_name: 'Synthetic', last_name: 'Lifecycle Worker', status: 'active',
+      employment_type: 'salary', salary_type: 'annual', pay_frequency: 'biweekly', pay_rate: 0,
+      w4_effective_on: null, w4_form_version: 2020, ssn_last_four: '1234', readiness_gate_enforced: true,
+    };
     const item = {
       id: 45, company_id: 1, employee_id: 31, employee_name: 'Synthetic Lifecycle Worker',
       event_kind: 'termination', affects_pay: true, source_actor_name: 'Synthetic Client Manager',
@@ -18,7 +23,7 @@ for (const width of [390, 1440]) {
       readiness_checklist: { status: 'ready', rates_on: '2026-11-28', w4_on: '2026-12-02', missing_keys: [], items: [] },
       return_note: null, client_response_note: null, verification_note: null, resubmitted_at: null, audit_references: [],
       warnings: { committed_pay_period_ids: [], possible_self_created_hire: false, review_final_pay: true,
-        post_termination_committed_pay_period_ids: [21], direct_deposit_missing_bank_details: false, tax_filing_impact: null, approved_pay_period_ids: [] },
+        post_termination_committed_pay_period_ids: [21], direct_deposit_missing_bank_details: false, tax_filing_impact: null, approved_pay_period_ids: [24] },
     };
     await page.route('**/api/v1/**', async route => {
       const url = new URL(route.request().url());
@@ -44,6 +49,21 @@ for (const width of [390, 1440]) {
         body = { data: { ...item, status } };
       } else if (path.endsWith('/employee_verification_items/45')) {
         body = { data: { ...item, status } };
+      } else if (path.endsWith('/admin/employees/31')) {
+        if (route.request().method() === 'GET') {
+          expect(url.searchParams.get('mask_tax_ids')).toBe('true');
+        } else {
+          const update = route.request().postDataJSON();
+          expect(update.mask_tax_ids).toBe(true);
+          expect(update.employee).toMatchObject({ first_name: 'Synthetic Corrected' });
+          for (const field of ['ssn', 'pay_rate', 'w4_effective_on']) expect(update.employee).not.toHaveProperty(field);
+          employee = { ...employee, first_name: update.employee.first_name };
+        }
+        body = { data: employee };
+      } else if (path.endsWith('/admin/payroll_fields')) {
+        body = { payroll_fields: [] };
+      } else if (path.endsWith('/admin/employees/31/payroll_fields')) {
+        body = { employee_payroll_fields: [] };
       } else if (path.endsWith('/cable_ticket')) {
         await route.fulfill({ status: 204 });
         return;
@@ -82,6 +102,19 @@ for (const width of [390, 1440]) {
       await expect(search).toBeVisible();
       expect((await details.boundingBox())!.x).toBeGreaterThan((await search.boundingBox())!.x);
     }
+    await page.getByRole('link', { name: 'Fix & verify' }).click();
+    await expect(page.getByText('Changing approved payroll may require client re-approval')).toBeVisible();
+    const ssn = page.locator('[name="ssn"]');
+    await expect(ssn).toHaveAttribute('type', 'password');
+    await expect(ssn).toHaveValue('');
+    await expect(page.getByText(/Saved SSN ending in 1234/)).toBeVisible();
+    await page.getByLabel(/^First Name/).fill('Synthetic Corrected');
+    await page.getByRole('button', { name: 'Update Employee' }).click();
+    const verifyFix = page.getByRole('dialog', { name: 'Mark the saved fix verified?' });
+    await expect(verifyFix).toBeVisible();
+    expect(employee.first_name).toBe('Synthetic Corrected');
+    await verifyFix.getByRole('button', { name: 'Cancel' }).click();
+
     const trigger = page.getByRole('button', { name: 'Send back to client' });
     await trigger.click();
     await page.keyboard.press('Escape');

@@ -2,6 +2,13 @@ import type { Employee } from '@/types';
 
 export const canonicalSsn = (value?: string) => (value || '').replace(/\D/g, '');
 
+// Mask SSNs and formatted EINs in free text, preserving standalone long references.
+export function maskTaxIdsInText(value: string, mask: '•' | '*' = '•'): string {
+  return value
+    .replace(/\b\d{3}[-\s]?\d{2}[-\s]?(\d{4})\b/g, `${mask.repeat(3)}-${mask.repeat(2)}-$1`)
+    .replace(/\b\d{2}-\d{3}(\d{4})\b/g, `${mask.repeat(2)}-${mask.repeat(3)}$1`);
+}
+
 // Match the API's source-review exception. An unrelated edit must not clear it.
 export function importedProfileAllowsBlank(employee: Employee | null, field: string): boolean {
   return employee?.configuration_source === 'quickbooks_history'

@@ -3,8 +3,8 @@ import { Badge } from '@/components/ui/badge';
 import { formatDate } from '@/lib/display-date';
 import type { ReadinessChecklist } from '@/services/staff-employee-lifecycle';
 
-// PR 5a has its own checklist card. Consolidate the shared checklist display
-// once both branches land, while keeping the client setup links in the portal.
+// TODO(L11): Share checklist rendering with EmployeeReadinessCard while preserving
+// staff missing-only filtering and the client card's setup links and bank guidance.
 export function StaffReadinessChecklist({ checklist, missingOnly = false }: {
   checklist: ReadinessChecklist;
   missingOnly?: boolean;

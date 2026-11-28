@@ -21,3 +21,7 @@ export function employeePaymentDelivery(employee: Pick<Employee, 'payment_delive
 }
 
 export const paymentMethodLabel = (method: PaymentDeliveryMethod): string => method === 'direct_deposit' ? 'Direct deposit' : 'Paper check';
+
+export function paymentMethodMissing(readiness?: Employee['readiness']): boolean {
+  return readiness?.missing_keys.includes('payment_method') ?? false;
+}

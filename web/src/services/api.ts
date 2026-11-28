@@ -38,6 +38,12 @@ export function apiErrorMessage(
   options: { readOnly?: boolean; retryAfterSeconds?: number; now?: Date } = {},
 ): string {
   const payload = record(data);
+  if (status === 403 && payload.code === 'self_lifecycle_forbidden') {
+    return 'Ask another manager or Cornerstone to make this change to your employee record.';
+  }
+  if (status === 403 && payload.code === 'client_lifecycle_disabled') {
+    return 'Cornerstone handles this change for your company.';
+  }
   const primary = messages(payload.error);
   const errors = Array.isArray(payload.errors) ? messages(payload.errors) : [];
   const fields = { ...record(payload.errors), ...record(payload.details) };
@@ -847,6 +853,7 @@ export const departmentsApi = {
 export const clientEmployeesApi = {
   list: (params?: {
     status?: string;
+    needs_attention?: true;
     department_id?: number;
     employment_type?: string;
     needs_contact_details?: boolean;
@@ -869,7 +876,7 @@ export const clientEmployeesApi = {
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
-  create: (data: EmployeeFormData) => {
+  create: (data: import('@/services/clientEmployeeLifecycle').ClientEmployeeCreateInput) => {
     const { confirm_same_person_email, ...employeePayload } = data;
     return api.post<ClientEmployeeUpdateResponse>('/client/employees', {
       employee: employeePayload,
@@ -4362,6 +4369,7 @@ export interface CompanyListItem {
   staff_employee_lifecycle_available?: boolean;
   has_blocked_lifecycle_activation?: boolean;
   has_open_employee_verifications?: boolean;
+  employee_lifecycle_mode?: import('@/services/clientEmployeeLifecycle').EmployeeLifecycleMode;
   creator?: RecordCreatorInfo | null;
   payroll_intake_source_types?: string[];
   portal_payroll_files_enabled?: boolean;
@@ -4813,6 +4821,7 @@ export interface ClientEmployeeUpdateResponse {
   change_request?: EmployeeChangeRequest | null;
   applied_direct_fields?: string[];
   contact_warnings?: import('@/types').EmployeeContactWarning[];
+  warnings?: string[];
   message?: string;
 }
 

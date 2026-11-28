@@ -52,7 +52,7 @@ export interface RowConflictState {
 export interface RowSaveState {
   saving: boolean;
   saved: boolean;
-  submittedAddressRequestId?: number;
+  submittedRequest?: { id: number; profile_address?: boolean };
   pendingAddressRequestId?: number;
   error: string | null;
   fieldErrors: Record<string, string[]>;
