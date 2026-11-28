@@ -352,111 +352,113 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
     end
 
     it "creates an Incomplete hire directly with readiness_gate_enforced=true, transitions to Ready on update, and records verification items" do
-      expect do
-        post "/api/v1/client/employees", params: {
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        expect do
+          post "/api/v1/client/employees", params: {
+            employee: {
+              first_name: "Jordan",
+              last_name: "Sample",
+              employment_type: "hourly"
+            }
+          }, as: :json
+        end.to change(Employee, :count).by(1)
+          .and change(EmployeeVerificationItem, :count).by(1)
+          .and change(EmployeeChangeRequest, :count).by(0)
+
+        expect(response).to have_http_status(:created), response.body
+        body = response.parsed_body
+        created = Employee.order(:id).last
+        expect(created.status).to eq("active")
+        expect(created.portal_pending_approval).to be(false)
+        expect(created.readiness_gate_enforced).to be(true)
+        expect(created.document_readiness_required).to be(false)
+        expect(created.intake_exception).to eq({})
+        expect(created.employee_document_requirements.pluck(:required_for_payroll)).to all(be(false))
+
+        expect(body.dig("readiness", "status")).to eq("incomplete")
+        expect(body.dig("readiness", "missing_keys")).to include("tax_id", "date_of_birth", "hire_date", "home_address", "pay_setup", "tax_form", "payment_method")
+        expect(body["change_request"]).to be_nil
+
+        new_hire_item = EmployeeVerificationItem.order(:id).last
+        expect(new_hire_item.event_kind).to eq("new_hire")
+        expect(new_hire_item.status).to eq("pending_verification")
+        expect(new_hire_item.affects_pay).to be(true)
+        expect(new_hire_item.metadata["possible_self_created_hire"]).to be_nil
+
+        # Complete setup directly -> flips to Ready with no approval step, direct_deposit missing bank details flagged
+        patch "/api/v1/client/employees/#{created.id}", params: {
           employee: {
-            first_name: "Jordan",
-            last_name: "Sample",
-            employment_type: "hourly"
+            ssn: "900-12-3456",
+            ssn_confirmation: "900-12-3456",
+            date_of_birth: "1994-05-14",
+            hire_date: "2026-11-01",
+            address_line1: "200 Bayview Rd",
+            city: "Hagatna",
+            state: "GU",
+            zip: "96910",
+            pay_rate: 21.50,
+            pay_frequency: "biweekly",
+            filing_status: "single",
+            w4_form_version: 2020,
+            w4_signed_on: "2026-11-01",
+            w4_effective_on: "2026-11-01",
+            w4_election_received: true,
+            payment_delivery_method: "direct_deposit"
           }
         }, as: :json
-      end.to change(Employee, :count).by(1)
-        .and change(EmployeeVerificationItem, :count).by(1)
-        .and change(EmployeeChangeRequest, :count).by(0)
 
-      expect(response).to have_http_status(:created), response.body
-      body = response.parsed_body
-      created = Employee.order(:id).last
-      expect(created.status).to eq("active")
-      expect(created.portal_pending_approval).to be(false)
-      expect(created.readiness_gate_enforced).to be(true)
-      expect(created.document_readiness_required).to be(false)
-      expect(created.intake_exception).to eq({})
-      expect(created.employee_document_requirements.pluck(:required_for_payroll)).to all(be(false))
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body.dig("readiness", "status")).to eq("ready")
+        expect(response.parsed_body.dig("readiness", "direct_deposit_missing_bank_details")).to be(true)
 
-      expect(body.dig("readiness", "status")).to eq("incomplete")
-      expect(body.dig("readiness", "missing_keys")).to include("tax_id", "date_of_birth", "hire_date", "home_address", "pay_setup", "tax_form", "payment_method")
-      expect(body["change_request"]).to be_nil
+        created.reload
+        expect(created.pay_rate.to_f).to eq(21.5)
+        expect(created.payment_delivery_method).to eq("direct_deposit")
+        expect(created.employee_w4_elections.recent_first.first.source).to eq("client_direct")
 
-      new_hire_item = EmployeeVerificationItem.order(:id).last
-      expect(new_hire_item.event_kind).to eq("new_hire")
-      expect(new_hire_item.status).to eq("pending_verification")
-      expect(new_hire_item.affects_pay).to be(true)
-      expect(new_hire_item.metadata["possible_self_created_hire"]).to be_nil
+        payment_item = EmployeeVerificationItem.where(employee: created, event_kind: "payment_method_change").last
+        expect(payment_item).to be_present
+        expect(payment_item.metadata["direct_deposit_missing_bank_details"]).to be(true)
 
-      # Complete setup directly -> flips to Ready with no approval step, direct_deposit missing bank details flagged
-      patch "/api/v1/client/employees/#{created.id}", params: {
-        employee: {
-          ssn: "900-12-3456",
-          ssn_confirmation: "900-12-3456",
-          date_of_birth: "1994-05-14",
-          hire_date: "2026-11-01",
-          address_line1: "200 Bayview Rd",
-          city: "Hagatna",
-          state: "GU",
-          zip: "96910",
-          pay_rate: 21.50,
-          pay_frequency: "biweekly",
-          filing_status: "single",
-          w4_form_version: 2020,
-          w4_signed_on: "2026-11-01",
-          w4_effective_on: "2026-11-01",
-          w4_election_received: true,
-          payment_delivery_method: "direct_deposit"
-        }
-      }, as: :json
+        # Subsequent unacknowledged pay edit supersedes the first compensation_change while keeping last-verified before_values
+        comp_item_1 = EmployeeVerificationItem.where(employee: created, event_kind: "compensation_change").last
+        expect(comp_item_1.before_values["pay_rate"]).to eq(0.0)
 
-      expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body.dig("readiness", "status")).to eq("ready")
-      expect(response.parsed_body.dig("readiness", "direct_deposit_missing_bank_details")).to be(true)
+        patch "/api/v1/client/employees/#{created.id}", params: {
+          employee: { pay_rate: 23.00 }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        comp_item_2 = EmployeeVerificationItem.where(employee: created, event_kind: "compensation_change").order(:id).last
+        expect(comp_item_1.reload.status).to eq("superseded")
+        expect(comp_item_1.superseded_by_id).to eq(comp_item_2.id)
+        expect(comp_item_2.before_values["pay_rate"]).to eq(0.0)
+        expect(comp_item_2.after_values["pay_rate"]).to eq(23.0)
+        expect(comp_item_2.metadata["prior_unverified_item_id"]).to eq(comp_item_1.id)
 
-      created.reload
-      expect(created.pay_rate.to_f).to eq(21.5)
-      expect(created.payment_delivery_method).to eq("direct_deposit")
-      expect(created.employee_w4_elections.recent_first.first.source).to eq("client_direct")
+        # Once acknowledged in a committed pay run, further edits NEVER supersede it
+        committed_period = create(:pay_period, company: company, status: "committed", start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+        PayPeriodVerificationAcknowledgement.create!(
+          company: company,
+          pay_period: committed_period,
+          employee_verification_item: comp_item_2,
+          employee: created,
+          acknowledged_by: staff_manager,
+          acknowledged_at: Time.current,
+          item_status_snapshot: comp_item_2.status,
+          item_updated_at_snapshot: comp_item_2.updated_at
+        )
 
-      payment_item = EmployeeVerificationItem.where(employee: created, event_kind: "payment_method_change").last
-      expect(payment_item).to be_present
-      expect(payment_item.metadata["direct_deposit_missing_bank_details"]).to be(true)
-
-      # Subsequent unacknowledged pay edit supersedes the first compensation_change while keeping last-verified before_values
-      comp_item_1 = EmployeeVerificationItem.where(employee: created, event_kind: "compensation_change").last
-      expect(comp_item_1.before_values["pay_rate"]).to eq(0.0)
-
-      patch "/api/v1/client/employees/#{created.id}", params: {
-        employee: { pay_rate: 23.00 }
-      }, as: :json
-      expect(response).to have_http_status(:ok), response.body
-      comp_item_2 = EmployeeVerificationItem.where(employee: created, event_kind: "compensation_change").order(:id).last
-      expect(comp_item_1.reload.status).to eq("superseded")
-      expect(comp_item_1.superseded_by_id).to eq(comp_item_2.id)
-      expect(comp_item_2.before_values["pay_rate"]).to eq(0.0)
-      expect(comp_item_2.after_values["pay_rate"]).to eq(23.0)
-      expect(comp_item_2.metadata["prior_unverified_item_id"]).to eq(comp_item_1.id)
-
-      # Once acknowledged in a committed pay run, further edits NEVER supersede it
-      committed_period = create(:pay_period, company: company, status: "committed", start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
-      PayPeriodVerificationAcknowledgement.create!(
-        company: company,
-        pay_period: committed_period,
-        employee_verification_item: comp_item_2,
-        employee: created,
-        acknowledged_by: staff_manager,
-        acknowledged_at: Time.current,
-        item_status_snapshot: comp_item_2.status,
-        item_updated_at_snapshot: comp_item_2.updated_at
-      )
-
-      patch "/api/v1/client/employees/#{created.id}", params: {
-        employee: { pay_rate: 24.50 }
-      }, as: :json
-      expect(response).to have_http_status(:ok), response.body
-      comp_item_3 = EmployeeVerificationItem.where(employee: created, event_kind: "compensation_change").order(:id).last
-      expect(comp_item_3.id).not_to eq(comp_item_2.id)
-      expect(comp_item_2.reload.status).to eq("pending_verification")
-      expect(comp_item_3.before_values["pay_rate"]).to eq(0.0)
-      expect(comp_item_3.after_values["pay_rate"]).to eq(24.5)
-      expect(comp_item_3.metadata["prior_unverified_item_id"]).to eq(comp_item_2.id)
+        patch "/api/v1/client/employees/#{created.id}", params: {
+          employee: { pay_rate: 24.50 }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        comp_item_3 = EmployeeVerificationItem.where(employee: created, event_kind: "compensation_change").order(:id).last
+        expect(comp_item_3.id).not_to eq(comp_item_2.id)
+        expect(comp_item_2.reload.status).to eq("pending_verification")
+        expect(comp_item_3.before_values["pay_rate"]).to eq(0.0)
+        expect(comp_item_3.after_values["pay_rate"]).to eq(24.5)
+        expect(comp_item_3.metadata["prior_unverified_item_id"]).to eq(comp_item_2.id)
+      end
     end
 
     it "supports GET /client/verification_items and POST /client/verification_items/:id/respond" do
@@ -873,6 +875,14 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response).to have_http_status(:ok), response.body
       expect(existing_a.reload.job_title).to eq("Lead Cook")
 
+      # 3b. Replacing a legacy duplicated SSN with a unique new SSN succeeds (does not match the replaced SSN)
+      patch "/api/v1/client/employees/#{existing_a.id}", params: {
+        employee: { ssn: "900-44-9999", ssn_confirmation: "900-44-9999" }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(existing_a.reload.ssn_encrypted).to eq("900-44-9999")
+      existing_a.update_columns(ssn_encrypted: "900-44-5566")
+
       # 4. Staff edits through the admin endpoint on existing shared-SSN records succeed (M3: no global model validation!)
       @admin_user = staff_manager
       patch "/api/v1/admin/employees/#{existing_b.id}", params: {
@@ -1090,6 +1100,35 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response).to have_http_status(:ok), response.body
       expect(response.parsed_body.fetch("applied_direct_fields")).to eq([ "job_title" ])
 
+      # 1b. Contractor creation with W-4 fields / w4_election_received does not apply or report W-4 fields
+      expect do
+        post "/api/v1/client/employees", params: {
+          employee: {
+            first_name: "Casey",
+            last_name: "NewContractorW4",
+            employment_type: "contractor",
+            contractor_type: "individual",
+            contractor_pay_type: "flat_fee",
+            filing_status: "married",
+            w4_signed_on: "2026-11-01",
+            w4_effective_on: "2026-11-01",
+            w4_election_received: true
+          }
+        }, as: :json
+      end.not_to change(EmployeeW4Election, :count)
+      expect(response).to have_http_status(:created), response.body
+      expect(response.parsed_body.fetch("applied_direct_fields")).not_to include(
+        "w4_election_received", "filing_status", "w4_signed_on", "w4_effective_on"
+      )
+      contractor_hire_item = EmployeeVerificationItem.order(:id).last
+      expect(contractor_hire_item.event_kind).to eq("new_hire")
+      expect(contractor_hire_item.changed_fields).not_to include(
+        "w4_election_received", "filing_status", "w4_signed_on", "w4_effective_on"
+      )
+      expect(contractor_hire_item.after_values.keys).not_to include(
+        "w4_election_received", "filing_status", "w4_signed_on", "w4_effective_on"
+      )
+
       # 2. Explicitly submitted w4_effective_on is preserved even when matching the current value; omitted date falls back to next unapproved pay date
       later_period = create(
         :pay_period,
@@ -1182,51 +1221,71 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(item_c.before_values["pay_rate"]).to eq(48_000.0)
       expect(item_c.before_values["salary_type"]).to eq("annual")
 
-      # 4. GET /client/employees?rates_on=<period_b.end_date> checks W-4 against period_b.pay_date, matching for_pay_period
-      period_a = create(
-        :pay_period,
-        company: company,
-        status: "draft",
-        cycle: "regular",
-        run_purpose: "regular",
-        start_date: Date.new(2026, 11, 17),
-        end_date: Date.new(2026, 11, 30),
-        pay_date: Date.new(2026, 12, 5)
-      )
-      dated_w4_worker = create(
-        :employee,
-        :hourly,
-        company: company,
-        first_name: "Parker",
-        last_name: "Payday",
-        date_of_birth: Date.new(1992, 5, 1),
-        hire_date: Date.new(2026, 11, 1),
-        pay_rate: 20.0,
-        pay_frequency: "biweekly",
-        payment_delivery_method: "paper_check",
-        readiness_gate_enforced: true
-      )
-      EmployeeW4Election.create!(
-        EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+      # 4. GET /client/employees?rates_on=<entry.end_date> uses the authorized submission entry's payday (not an unrelated earlier-paying run sharing end_date)
+      travel_to(Time.utc(2026, 12, 15, 12)) do
+        period_a = create(
+          :pay_period,
           company: company,
-          employee: dated_w4_worker,
-          effective_on: Date.new(2026, 12, 10),
-          w4_signed_on: Date.new(2026, 12, 1),
-          w4_form_version: 2020,
-          source: "client_direct",
-          reason: "Between period A and period B pay dates"
+          status: "draft",
+          cycle: "regular",
+          run_purpose: "regular",
+          start_date: Date.new(2026, 11, 17),
+          end_date: Date.new(2026, 11, 30),
+          pay_date: Date.new(2026, 12, 5)
         )
-      )
-      allow(company).to receive(:portal_payroll_files_enabled?).and_return(true)
-      allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:submittable_period_end_date?).with(later_period.end_date).and_return(true)
-      expect(EmployeeReadinessEvaluator.for_pay_period(dated_w4_worker, period_a)).to be_incomplete
-      expect(EmployeeReadinessEvaluator.for_pay_period(dated_w4_worker, later_period)).to be_ready
+        # Another approved regular run sharing end_date Dec 14 with an earlier payday (Dec 17)
+        create(
+          :pay_period,
+          :approved,
+          company: company,
+          cycle: "regular",
+          run_purpose: "regular",
+          start_date: Date.new(2026, 12, 8),
+          end_date: Date.new(2026, 12, 14),
+          pay_date: Date.new(2026, 12, 17)
+        )
+        PayrollSubmissionPeriod.create!(
+          company: company,
+          start_date: later_period.start_date,
+          end_date: later_period.end_date,
+          pay_date: later_period.pay_date,
+          pay_period: later_period,
+          source: "pay_period"
+        )
+        dated_w4_worker = create(
+          :employee,
+          :hourly,
+          company: company,
+          first_name: "Parker",
+          last_name: "Payday",
+          date_of_birth: Date.new(1992, 5, 1),
+          hire_date: Date.new(2026, 11, 1),
+          pay_rate: 20.0,
+          pay_frequency: "biweekly",
+          payment_delivery_method: "paper_check",
+          readiness_gate_enforced: true
+        )
+        EmployeeW4Election.create!(
+          EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+            company: company,
+            employee: dated_w4_worker,
+            effective_on: Date.new(2026, 12, 18),
+            w4_signed_on: Date.new(2026, 12, 1),
+            w4_form_version: 2020,
+            source: "client_direct",
+            reason: "Between Dec 17 approved run payday and Dec 19 submission payday"
+          )
+        )
+        allow(company).to receive(:portal_payroll_files_enabled?).and_return(true)
+        expect(EmployeeReadinessEvaluator.for_pay_period(dated_w4_worker, period_a)).to be_incomplete
+        expect(EmployeeReadinessEvaluator.for_pay_period(dated_w4_worker, later_period)).to be_ready
 
-      get "/api/v1/client/employees", params: { rates_on: later_period.end_date.iso8601, per_page: 100 }
-      expect(response).to have_http_status(:ok), response.body
-      row = response.parsed_body.fetch("data").find { |entry| entry["id"] == dated_w4_worker.id }
-      expect(row.dig("readiness", "w4_on")).to eq(later_period.pay_date.iso8601)
-      expect(row.dig("readiness", "status")).to eq("ready")
+        get "/api/v1/client/employees", params: { rates_on: later_period.end_date.iso8601, per_page: 100 }
+        expect(response).to have_http_status(:ok), response.body
+        row = response.parsed_body.fetch("data").find { |entry| entry["id"] == dated_w4_worker.id }
+        expect(row.dig("readiness", "w4_on")).to eq(later_period.pay_date.iso8601)
+        expect(row.dig("readiness", "status")).to eq("ready")
+      end
     end
 
     it "batches readiness queries in O(1) on GET /client/employees in client_managed mode and strips both effective_on keys on create (M1, L4)" do
@@ -1275,19 +1334,28 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response.parsed_body.fetch("data").all? { |row| row["readiness"].is_a?(Hash) }).to be(true)
 
       # M1: verify rates_on passed to GET /client/employees is honored by readiness evaluation
-      allow(company).to receive(:portal_payroll_files_enabled?).and_return(true)
-      open_period = create(
-        :pay_period,
-        company: company,
-        status: "draft",
-        start_date: Date.new(2026, 11, 1),
-        end_date: Date.new(2026, 11, 14),
-        pay_date: Date.new(2026, 11, 20)
-      )
-      allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:submittable_period_end_date?).with(open_period.end_date).and_return(true)
-      get "/api/v1/client/employees", params: { rates_on: open_period.end_date.iso8601 }
-      expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body.fetch("data").first.dig("readiness", "rates_on")).to eq(open_period.end_date.iso8601)
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        allow(company).to receive(:portal_payroll_files_enabled?).and_return(true)
+        open_period = create(
+          :pay_period,
+          company: company,
+          status: "draft",
+          start_date: Date.new(2026, 11, 1),
+          end_date: Date.new(2026, 11, 14),
+          pay_date: Date.new(2026, 11, 20)
+        )
+        PayrollSubmissionPeriod.create!(
+          company: company,
+          start_date: open_period.start_date,
+          end_date: open_period.end_date,
+          pay_date: open_period.pay_date,
+          pay_period: open_period,
+          source: "pay_period"
+        )
+        get "/api/v1/client/employees", params: { rates_on: open_period.end_date.iso8601 }
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body.fetch("data").first.dig("readiness", "rates_on")).to eq(open_period.end_date.iso8601)
+      end
 
       # Staff create and bulk import do NOT stamp readiness_gate_enforced even in client_managed mode (M3)
       @admin_user = staff_manager
@@ -1377,6 +1445,69 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(approved_period.reload.status).to eq("approved")
       expect(legacy_item.reload.payment_delivery_method).to eq("paper_check")
       expect(worker.reload.payment_delivery_method).to eq("direct_deposit")
+    end
+
+    it "clears existing active wage rates when wage_rates: [] is submitted in client_managed mode" do
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        worker = create(:employee, :hourly, company: company, first_name: "Casey", last_name: "ClearRates", hire_date: Date.new(2026, 1, 1), pay_rate: 18.0)
+        rate_row = EmployeeWageRate.create!(employee: worker, label: "Kitchen", rate: 19.50, is_primary: true, active: true)
+        expect(worker.reload.wage_rates_on(PayrollBusinessClock.today).map(&:id)).to eq([ rate_row.id ])
+
+        patch "/api/v1/client/employees/#{worker.id}", params: {
+          employee: { wage_rates: [] }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body.fetch("applied_direct_fields")).to include("wage_rates")
+        expect(worker.reload.wage_rates_on(PayrollBusinessClock.today)).to be_empty
+        expect(rate_row.reload.active).to be(false)
+
+        comp_item = EmployeeVerificationItem.where(employee: worker, event_kind: "compensation_change").order(:id).last
+        expect(comp_item).to be_present
+        expect(comp_item.changed_fields).to include("wage_rates")
+        expect(comp_item.after_values["wage_rates"]).to eq([])
+      end
+    end
+
+    it "builds the rehire response payload inside the transaction so post-commit mutations do not mix states" do
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        worker = create(
+          :employee,
+          :hourly,
+          company: company,
+          first_name: "Jordan",
+          last_name: "Snapshot",
+          status: "terminated",
+          hire_date: Date.new(2026, 1, 1),
+          termination_date: Date.new(2026, 10, 15),
+          readiness_gate_enforced: true
+        )
+
+        # Simulate a concurrent termination committing immediately after the outer rehire transaction commits
+        mutated_after_commit = false
+        tx_depth = 0
+        allow(ActiveRecord::Base).to receive(:transaction).and_wrap_original do |method, *args, **kwargs, &block|
+          tx_depth += 1
+          begin
+            res = method.call(*args, **kwargs, &block)
+          ensure
+            tx_depth -= 1
+          end
+          if tx_depth.zero? && !mutated_after_commit && worker.reload.status == "active"
+            mutated_after_commit = true
+            Employee.where(id: worker.id).update_all(status: "terminated", termination_date: Date.new(2026, 11, 20))
+          end
+          res
+        end
+
+        post "/api/v1/client/employees/#{worker.id}/rehire", params: {
+          effective_date: "2026-11-19"
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(mutated_after_commit).to be(true)
+        expect(response.parsed_body.dig("data", "status")).to eq("active")
+        expect(response.parsed_body.dig("status_event", "resulting_status")).to eq("active")
+        expect(worker.reload.status).to eq("terminated")
+      end
     end
   end
 
@@ -1978,6 +2109,59 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
       expect(strong_email_self.reload.status).to eq("active")
 
+      @acting_user = client_manager
+    end
+
+    it "creates a pending own-record change request when an email-only edit is confirmed by the requester's own login with no prior ownership evidence" do
+      accented_manager = create(
+        :user,
+        company: company,
+        organization: organization,
+        role: "client",
+        name: "Jose Garcia",
+        email: "jose.garcia@example.test"
+      )
+      CompanyAssignment.create!(user: accented_manager, company: company)
+      # Accented employee name passes EmployeeContactValidator#login_name_matches_employee?
+      # while EmployeeProfileIdentity has no prior link, audit, email, or name match.
+      accented_employee = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "José",
+        last_name: "García",
+        email: "old.garcia@example.test",
+        pay_rate: 22.0
+      )
+      expect(EmployeeProfileIdentity.own_record_for_client_managed?(accented_employee, accented_manager)).to be(false)
+
+      @acting_user = accented_manager
+      expect do
+        patch "/api/v1/client/employees/#{accented_employee.id}", params: {
+          employee: { email: "jose.garcia@example.test" },
+          confirm_same_person_email: true
+        }, as: :json
+      end.to change(EmployeeChangeRequest, :count).by(1)
+
+      expect(response).to have_http_status(:ok), response.body
+      expect(accented_employee.reload.email).to eq("old.garcia@example.test")
+
+      req = EmployeeChangeRequest.where(employee: accented_employee, status: :pending).order(:id).last
+      expect(req).to be_present
+      expect(req.own_record).to be(true)
+      expect(req.own_record_signal).to eq("strong")
+      expect(req.proposed_changes).to eq("email" => "jose.garcia@example.test")
+      expect(response.parsed_body.dig("change_request", "id")).to eq(req.id)
+
+      audit = AuditLog.where(
+        company_id: company.id,
+        record_type: "employees",
+        record_id: accented_employee.id,
+        action: "employees#confirm_same_person_email"
+      ).last
+      expect(audit).to be_present
+      expect(audit.metadata["confirmed_login_user_id"]).to eq(accented_manager.id)
+      expect(audit.metadata["email"]).to eq("jose.garcia@example.test")
       @acting_user = client_manager
     end
   end

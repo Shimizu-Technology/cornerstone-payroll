@@ -103,15 +103,12 @@ class EmployeeReadinessEvaluator
       rows = Array(employees)
       return {} if rows.empty?
 
-      resolved_rates_on, resolved_w4_on =
+      shared_dates =
         if rates_on.present? && w4_on.present?
           [ rates_on.to_date, w4_on.to_date ]
         elsif company.present?
           default_rates_on, default_w4_on = target_dates_for(company)
           [ (rates_on || default_rates_on).to_date, (w4_on || default_w4_on).to_date ]
-        else
-          today = PayrollBusinessClock.today
-          [ (rates_on || today).to_date, (w4_on || today).to_date ]
         end
 
       rehired_ids = Set.new
@@ -139,11 +136,21 @@ class EmployeeReadinessEvaluator
         end
       end
 
+      dates_by_company_id = {}
       rows.each_with_object({}) do |employee, results|
+        row_rates_on, row_w4_on = if shared_dates
+          shared_dates
+        elsif employee.company.present?
+          default_rates_on, default_w4_on = dates_by_company_id[employee.company_id] ||= target_dates_for(employee.company)
+          [ (rates_on || default_rates_on).to_date, (w4_on || default_w4_on).to_date ]
+        else
+          resolve_dates(employee, rates_on: rates_on, w4_on: w4_on)
+        end
+
         results[employee.id] = new(
           employee: employee,
-          rates_on: resolved_rates_on,
-          w4_on: resolved_w4_on,
+          rates_on: row_rates_on,
+          w4_on: row_w4_on,
           rehired: company.present? ? rehired_ids.include?(employee.id) : nil,
           prior_committed_payroll: company.present? ? committed_payroll_ids.include?(employee.id) : nil
         ).evaluate

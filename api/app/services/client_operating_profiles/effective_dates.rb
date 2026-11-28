@@ -30,7 +30,7 @@ module ClientOperatingProfiles
     def amend?(date)
       return false unless @latest.present? && @latest.version > 1 && @latest.effective_on == date
       return true if date > @today
-      return true if same_day_lifecycle_rollback?(date)
+      return true if immediate_lifecycle_rollback?(date)
 
       return false unless @latest.lifecycle_mode_activated_at.nil? && @latest.lifecycle_mode_activation_failed_at.present?
       return true if @changed_keys.nil?
@@ -41,10 +41,11 @@ module ClientOperatingProfiles
     private
 
     # Immediate rollback from client_managed to approval_first is always allowed
-    # on today even if another profile version already starts today (§5.2).
-    def same_day_lifecycle_rollback?(date)
+    # on today, including mid-period or when another profile version already
+    # starts today (§5.2).
+    def immediate_lifecycle_rollback?(date)
       return false unless date == @today
-      return false unless @changes.present? && @changed_keys == LIFECYCLE_AMEND_KEYS
+      return false unless @latest.present? && @changes.present? && @changed_keys == LIFECYCLE_AMEND_KEYS
 
       @latest.option_value("client_portal.employee_lifecycle_mode") == "client_managed" &&
         @changes["client_portal.employee_lifecycle_mode"] == "approval_first"
@@ -55,14 +56,16 @@ module ClientOperatingProfiles
     end
 
     def date_error(date, periods)
-      affected = periods.select { |period| period.end_date >= date }
-      if affected.any? { |period| period.status.in?(%w[calculated approved committed retired_history]) || period.training_baseline? }
-        return "This effective date would change a calculated, approved, or committed pay period."
-      end
+      unless immediate_lifecycle_rollback?(date)
+        affected = periods.select { |period| period.end_date >= date }
+        if affected.any? { |period| period.status.in?(%w[calculated approved committed retired_history]) || period.training_baseline? }
+          return "This effective date would change a calculated, approved, or committed pay period."
+        end
 
-      if affected.any? { |period| period.start_date < date } ||
-          affected.none? { |period| period.start_date == date && period.status == "draft" }
-        return "The effective date must be the start of a draft pay period."
+        if affected.any? { |period| period.start_date < date } ||
+            affected.none? { |period| period.start_date == date && period.status == "draft" }
+          return "The effective date must be the start of a draft pay period."
+        end
       end
 
       return if @latest.nil? || date > @latest.effective_on || amend?(date)

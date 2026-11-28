@@ -284,7 +284,7 @@ class EmployeeContactValidator
           record_id: employee.id,
           subject_name: employee.display_name,
           metadata: {
-            email: employee.email,
+            email: result.normalized_email.presence || employee.email,
             same_person_email_confirmed: true,
             confirmed_login_user_id: result.matched_login_user&.id,
             confirmation_basis: result.confirmation_basis

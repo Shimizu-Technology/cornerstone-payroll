@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "English"
 require "rails_helper"
 require "timeout"
 
@@ -35,18 +36,25 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     worker_threads = Array(threads).compact
     Array(barriers).compact.each { |q| worker_threads.size.times { q << true } }
     Array(release_queues).compact.each { |q| q << true }
+    join_errors = []
     worker_threads.each do |thread|
-      next unless thread.alive?
-      next if thread.join(join_timeout)
-
-      thread.kill
-      thread.join(kill_timeout)
+      begin
+        joined = thread.join(join_timeout)
+        unless joined
+          thread.kill
+          thread.join(kill_timeout)
+        end
+      rescue StandardError => e
+        join_errors << e
+      end
     end
 
     still_alive = worker_threads.select(&:alive?)
-    return if still_alive.empty?
+    if still_alive.any?
+      raise "Refusing to clean up non-transactional fixtures while #{still_alive.size} worker thread(s) remain alive"
+    end
 
-    raise "Refusing to clean up non-transactional fixtures while #{still_alive.size} worker thread(s) remain alive"
+    join_errors
   end
 
   def cleanup_non_transactional_company!(company:, organization:, user_ids:, tax_tables:)
@@ -167,88 +175,86 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     outcomes = Queue.new
     thread_count = 5
 
-    threads = [
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier.pop
-            PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(staff_admin.id)).approve!
-            outcomes << [ :approve, :ok ]
-          end
-        rescue PayPeriodLifecycleService::Error => e
-          outcomes << [ :approve, :domain_error, e.message ]
-        rescue StandardError => e
-          outcomes << [ :approve, :unexpected, e.class.name, e.message ]
+    threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier.pop
+          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(staff_admin.id)).approve!
+          outcomes << [ :approve, :ok ]
         end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier.pop
-            ClientEmployeeUpdateService.new(
-              employee: Employee.find(employee.id),
-              attrs: { payment_delivery_method: "direct_deposit", pay_rate: 23.50 },
-              requested_by: User.find(client_manager.id),
-              company: Company.find(company.id)
-            ).update!
-            outcomes << [ :client_update, :ok ]
-          end
-        rescue ActiveRecord::RecordInvalid => e
-          outcomes << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
-        rescue StandardError => e
-          outcomes << [ :client_update, :unexpected, e.class.name, e.message ]
-        end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier.pop
-            EmployeePaymentDefaultService.new(
-              employee: Employee.find(employee.id),
-              method: "direct_deposit",
-              actor: User.find(staff_admin.id)
-            ).call
-            outcomes << [ :payment_default, :ok ]
-          end
-        rescue StandardError => e
-          outcomes << [ :payment_default, :unexpected, e.class.name, e.message ]
-        end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier.pop
-            EmployeeStatusTransitionService.deactivate!(
-              employee: Employee.find(employee.id),
-              actor: User.find(staff_admin.id),
-              attributes: { effective_date: "2026-11-10", reason_category: "seasonal" }
-            )
-            outcomes << [ :staff_deactivate, :ok ]
-          end
-        rescue EmployeeStatusTransitionService::Error => e
-          outcomes << [ :staff_deactivate, :domain_error, e.message ]
-        rescue StandardError => e
-          outcomes << [ :staff_deactivate, :unexpected, e.class.name, e.message ]
-        end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier.pop
-            EmployeeStatusTransitionService.terminate!(
-              employee: Employee.find(employee.id),
-              actor: User.find(client_manager.id),
-              attributes: { effective_date: "2026-11-10", reason_category: "voluntary", source: "client_portal" }
-            )
-            outcomes << [ :client_terminate, :ok ]
-          end
-        rescue EmployeeStatusTransitionService::Error => e
-          outcomes << [ :client_terminate, :domain_error, e.message ]
-        rescue StandardError => e
-          outcomes << [ :client_terminate, :unexpected, e.class.name, e.message ]
-        end
+      rescue PayPeriodLifecycleService::Error => e
+        outcomes << [ :approve, :domain_error, e.message ]
+      rescue StandardError => e
+        outcomes << [ :approve, :unexpected, e.class.name, e.message ]
       end
-    ]
+    end
+    threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier.pop
+          ClientEmployeeUpdateService.new(
+            employee: Employee.find(employee.id),
+            attrs: { payment_delivery_method: "direct_deposit", pay_rate: 23.50 },
+            requested_by: User.find(client_manager.id),
+            company: Company.find(company.id)
+          ).update!
+          outcomes << [ :client_update, :ok ]
+        end
+      rescue ActiveRecord::RecordInvalid => e
+        outcomes << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
+      rescue StandardError => e
+        outcomes << [ :client_update, :unexpected, e.class.name, e.message ]
+      end
+    end
+    threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier.pop
+          EmployeePaymentDefaultService.new(
+            employee: Employee.find(employee.id),
+            method: "direct_deposit",
+            actor: User.find(staff_admin.id)
+          ).call
+          outcomes << [ :payment_default, :ok ]
+        end
+      rescue StandardError => e
+        outcomes << [ :payment_default, :unexpected, e.class.name, e.message ]
+      end
+    end
+    threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier.pop
+          EmployeeStatusTransitionService.deactivate!(
+            employee: Employee.find(employee.id),
+            actor: User.find(staff_admin.id),
+            attributes: { effective_date: "2026-11-10", reason_category: "seasonal" }
+          )
+          outcomes << [ :staff_deactivate, :ok ]
+        end
+      rescue EmployeeStatusTransitionService::Error => e
+        outcomes << [ :staff_deactivate, :domain_error, e.message ]
+      rescue StandardError => e
+        outcomes << [ :staff_deactivate, :unexpected, e.class.name, e.message ]
+      end
+    end
+    threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier.pop
+          EmployeeStatusTransitionService.terminate!(
+            employee: Employee.find(employee.id),
+            actor: User.find(client_manager.id),
+            attributes: { effective_date: "2026-11-10", reason_category: "voluntary", source: "client_portal" }
+          )
+          outcomes << [ :client_terminate, :ok ]
+        end
+      rescue EmployeeStatusTransitionService::Error => e
+        outcomes << [ :client_terminate, :domain_error, e.message ]
+      rescue StandardError => e
+        outcomes << [ :client_terminate, :unexpected, e.class.name, e.message ]
+      end
+    end
 
     thread_count.times { barrier << true }
     threads.each { |thread| Timeout.timeout(15) { thread.join } }
@@ -320,93 +326,91 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     ack_payload = [ { id: verification_item.id, updated_at: verification_item.updated_at.utc.iso8601(6) } ]
 
     outcomes2 = Queue.new
-    round2_threads = [
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier2.pop
-            PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period2.id), actor: User.find(staff_admin.id))
-              .commit!(acknowledged_verification_items: ack_payload)
-            outcomes2 << [ :commit, :ok ]
-          end
-        rescue PayPeriodLifecycleService::Error => e
-          outcomes2 << [ :commit, :domain_error, e.message ]
-        rescue StandardError => e
-          outcomes2 << [ :commit, :unexpected, e.class.name, e.message ]
+    round2_threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier2.pop
+          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period2.id), actor: User.find(staff_admin.id))
+            .commit!(acknowledged_verification_items: ack_payload)
+          outcomes2 << [ :commit, :ok ]
         end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier2.pop
-            EmployeeStatusTransitionService.reactivate!(
-              employee: Employee.find(employee.id),
-              actor: User.find(staff_admin.id),
-              attributes: { effective_date: "2026-11-15" }
-            )
-            outcomes2 << [ :staff_reactivate, :ok ]
-          end
-        rescue EmployeeStatusTransitionService::Error => e
-          outcomes2 << [ :staff_reactivate, :domain_error, e.message ]
-        rescue StandardError => e
-          outcomes2 << [ :staff_reactivate, :unexpected, e.class.name, e.message ]
-        end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier2.pop
-            EmployeeStatusTransitionService.reactivate!(
-              employee: Employee.find(employee.id),
-              actor: User.find(client_manager.id),
-              attributes: { effective_date: "2026-11-15", source: "client_portal" }
-            )
-            outcomes2 << [ :client_reactivate, :ok ]
-          end
-        rescue EmployeeStatusTransitionService::Error => e
-          outcomes2 << [ :client_reactivate, :domain_error, e.message ]
-        rescue StandardError => e
-          outcomes2 << [ :client_reactivate, :unexpected, e.class.name, e.message ]
-        end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier2.pop
-            ClientEmployeeUpdateService.new(
-              employee: Employee.find(active_worker.id),
-              attrs: { payment_delivery_method: "direct_deposit", pay_rate: 26.50, compensation_effective_on: (period2.end_date + 1).iso8601 },
-              requested_by: User.find(client_manager.id),
-              company: Company.find(company.id)
-            ).update!
-            outcomes2 << [ :client_update, :ok ]
-          end
-        rescue ActiveRecord::RecordInvalid => e
-          outcomes2 << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
-        rescue StandardError => e
-          outcomes2 << [ :client_update, :unexpected, e.class.name, e.message ]
-        end
-      end,
-      Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do |conn|
-          with_worker_db_timeouts(conn) do
-            barrier2.pop
-            EmployeeVerificationItems::Recorder.record!(
-              employee: Employee.find(active_worker.id),
-              actor: User.find(client_manager.id),
-              event_kind: "compensation_change",
-              changed_fields: [ "pay_rate" ],
-              before_values: { "pay_rate" => 25.0 },
-              after_values: { "pay_rate" => 26.0 },
-              effective_on: period2.end_date + 1
-            )
-            outcomes2 << [ :verification_write, :ok ]
-          end
-        rescue StandardError => e
-          outcomes2 << [ :verification_write, :unexpected, e.class.name, e.message ]
-        end
+      rescue PayPeriodLifecycleService::Error => e
+        outcomes2 << [ :commit, :domain_error, e.message ]
+      rescue StandardError => e
+        outcomes2 << [ :commit, :unexpected, e.class.name, e.message ]
       end
-    ]
+    end
+    round2_threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier2.pop
+          EmployeeStatusTransitionService.reactivate!(
+            employee: Employee.find(employee.id),
+            actor: User.find(staff_admin.id),
+            attributes: { effective_date: "2026-11-15" }
+          )
+          outcomes2 << [ :staff_reactivate, :ok ]
+        end
+      rescue EmployeeStatusTransitionService::Error => e
+        outcomes2 << [ :staff_reactivate, :domain_error, e.message ]
+      rescue StandardError => e
+        outcomes2 << [ :staff_reactivate, :unexpected, e.class.name, e.message ]
+      end
+    end
+    round2_threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier2.pop
+          EmployeeStatusTransitionService.reactivate!(
+            employee: Employee.find(employee.id),
+            actor: User.find(client_manager.id),
+            attributes: { effective_date: "2026-11-15", source: "client_portal" }
+          )
+          outcomes2 << [ :client_reactivate, :ok ]
+        end
+      rescue EmployeeStatusTransitionService::Error => e
+        outcomes2 << [ :client_reactivate, :domain_error, e.message ]
+      rescue StandardError => e
+        outcomes2 << [ :client_reactivate, :unexpected, e.class.name, e.message ]
+      end
+    end
+    round2_threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier2.pop
+          ClientEmployeeUpdateService.new(
+            employee: Employee.find(active_worker.id),
+            attrs: { payment_delivery_method: "direct_deposit", pay_rate: 26.50, compensation_effective_on: (period2.end_date + 1).iso8601 },
+            requested_by: User.find(client_manager.id),
+            company: Company.find(company.id)
+          ).update!
+          outcomes2 << [ :client_update, :ok ]
+        end
+      rescue ActiveRecord::RecordInvalid => e
+        outcomes2 << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
+      rescue StandardError => e
+        outcomes2 << [ :client_update, :unexpected, e.class.name, e.message ]
+      end
+    end
+    round2_threads << Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          barrier2.pop
+          EmployeeVerificationItems::Recorder.record!(
+            employee: Employee.find(active_worker.id),
+            actor: User.find(client_manager.id),
+            event_kind: "compensation_change",
+            changed_fields: [ "pay_rate" ],
+            before_values: { "pay_rate" => 25.0 },
+            after_values: { "pay_rate" => 26.0 },
+            effective_on: period2.end_date + 1
+          )
+          outcomes2 << [ :verification_write, :ok ]
+        end
+      rescue StandardError => e
+        outcomes2 << [ :verification_write, :unexpected, e.class.name, e.message ]
+      end
+    end
 
     round2_threads.size.times { barrier2 << true }
     round2_threads.each { |thread| Timeout.timeout(15) { thread.join } }
@@ -423,19 +427,296 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     reactivate_oks = round2.count { |entry| entry[0].to_s.include?("reactivate") && entry[1] == :ok }
     expect(reactivate_oks).to eq(1)
 
-    # If commit succeeded, its acknowledged verification item must never have been superseded.
+    # If commit succeeded in the uncontrolled race, its acknowledged verification item must never have been superseded.
     if round2.any? { |entry| entry == [ :commit, :ok ] }
       expect(verification_item.reload.status).to eq("pending_verification")
       expect(verification_item.acknowledged_in_committed_run?).to be(true)
     end
   ensure
-    stop_and_join_workers!(Array(threads) + Array(round2_threads), barriers: [ barrier, barrier2 ])
+    join_errors = stop_and_join_workers!(Array(threads) + Array(round2_threads), barriers: [ barrier, barrier2 ])
     cleanup_non_transactional_company!(
       company: company,
       organization: organization,
       user_ids: [ staff_admin&.id, client_manager&.id ],
       tax_tables: tax_tables
     )
+    raise join_errors.first if join_errors.any? && $ERROR_INFO.nil?
+  end
+
+  it "controls both commit-vs-verification orderings: requires commit success and exact acknowledgement when commit wins, and unverified_changes_changed when verification write wins" do
+    controlled_threads = []
+    release_queues = []
+
+    tax_tables = ensure_verified_test_tax_years(2026)
+    organization = Organization.create!(name: "Ordered Commit Org #{SecureRandom.hex(4)}")
+    company = create(:company, organization: organization, name: "Harborview Ordered #{SecureRandom.hex(4)}")
+    department = Department.create!(company: company, name: "Operations")
+    staff_admin = create(:user, company: company, organization: organization, role: "admin", name: "Dana Staff")
+    client_manager = create(:user, company: company, organization: organization, role: "client", name: "Sloane Owner")
+    CompanyAssignment.create!(user: staff_admin, company: company)
+    CompanyAssignment.create!(user: client_manager, company: company)
+
+    stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
+    ClientOperatingProfile.create!(
+      ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Date.new(2026, 1, 1)).merge(
+        client_portal_enabled: true,
+        options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+        lifecycle_mode_activated_at: Time.current
+      )
+    )
+
+    worker = create(
+      :employee,
+      :hourly,
+      company: company,
+      department: department,
+      first_name: "Quinn",
+      last_name: "Ordered",
+      date_of_birth: Date.new(1992, 8, 5),
+      hire_date: Date.new(2026, 1, 1),
+      pay_rate: 25.00,
+      pay_frequency: "biweekly",
+      payment_delivery_method: "paper_check",
+      readiness_gate_enforced: true
+    )
+    create_ready_w4!(worker)
+
+    wait_until_blocked_by = lambda do |waiter_pid, holder_pid|
+      blocked = false
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5.0
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          if conn.select_values("SELECT unnest(pg_blocking_pids(#{waiter_pid}))").map(&:to_i).include?(holder_pid)
+            blocked = true
+            break
+          end
+          sleep 0.01
+        end
+      end
+      blocked
+    end
+
+    # Order 1: commit! acquires Company.lock first while verification_write blocks on Company.lock.
+    # Commit MUST succeed, record the exact acknowledgement snapshot, and the subsequent write must never supersede it.
+    period_commit_first = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 11, 1),
+      end_date: Date.new(2026, 11, 14),
+      pay_date: Date.new(2026, 11, 20),
+      status: "draft"
+    )
+    item_a = period_commit_first.payroll_items.create!(
+      company: company,
+      employee: worker,
+      employment_type: "hourly",
+      pay_rate: 25.00,
+      hours_worked: 40,
+      payment_delivery_method: "paper_check"
+    )
+    item_a.calculate!
+    period_commit_first.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: staff_admin.id)
+    PayPeriodLifecycleService.new(pay_period: period_commit_first, actor: staff_admin).approve!
+
+    verification_item_a = EmployeeVerificationItems::Recorder.record!(
+      employee: worker,
+      actor: client_manager,
+      event_kind: "compensation_change",
+      changed_fields: [ "pay_rate" ],
+      before_values: { "pay_rate" => 24.0 },
+      after_values: { "pay_rate" => 25.0 },
+      effective_on: period_commit_first.start_date
+    )
+    original_updated_at_a = verification_item_a.updated_at
+    ack_payload_a = [ { id: verification_item_a.id, updated_at: original_updated_at_a.utc.iso8601(6) } ]
+
+    commit_pid_q = Queue.new
+    commit_locked_q = Queue.new
+    release_commit_q = Queue.new
+    release_queues << release_commit_q
+    writer_pid_q = Queue.new
+    order1_outcomes = Queue.new
+
+    allow_any_instance_of(PayPeriodLifecycleService).to receive(:validate_verification_acknowledgements!).and_wrap_original do |method, *args, **kwargs|
+      required = method.call(*args, **kwargs)
+      commit_locked_q << true
+      Timeout.timeout(10) { release_commit_q.pop }
+      required
+    end
+
+    commit_thread_1 = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          commit_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period_commit_first.id), actor: User.find(staff_admin.id))
+            .commit!(acknowledged_verification_items: ack_payload_a)
+          order1_outcomes << [ :commit, :ok ]
+        end
+      rescue StandardError => e
+        order1_outcomes << [ :commit, :error, e.class.name, e.message ]
+      end
+    end
+    controlled_threads << commit_thread_1
+
+    commit_pid = Timeout.timeout(5) { commit_pid_q.pop }
+    Timeout.timeout(5) { commit_locked_q.pop }
+
+    writer_thread_1 = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          writer_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+          EmployeeVerificationItems::Recorder.record!(
+            employee: Employee.find(worker.id),
+            actor: User.find(client_manager.id),
+            event_kind: "compensation_change",
+            changed_fields: [ "pay_rate" ],
+            before_values: { "pay_rate" => 25.0 },
+            after_values: { "pay_rate" => 26.0 },
+            effective_on: period_commit_first.end_date + 1
+          )
+          order1_outcomes << [ :verification_write, :ok ]
+        end
+      rescue StandardError => e
+        order1_outcomes << [ :verification_write, :error, e.class.name, e.message ]
+      end
+    end
+    controlled_threads << writer_thread_1
+
+    writer_pid = Timeout.timeout(5) { writer_pid_q.pop }
+    expect(wait_until_blocked_by.call(writer_pid, commit_pid)).to be(true),
+      "Expected verification write to block on Company.lock held by commit!"
+
+    release_commit_q << true
+    Timeout.timeout(15) { commit_thread_1.join }
+    Timeout.timeout(15) { writer_thread_1.join }
+    allow_any_instance_of(PayPeriodLifecycleService).to receive(:validate_verification_acknowledgements!).and_call_original
+
+    order1 = 2.times.map { order1_outcomes.pop }
+    expect(order1).to contain_exactly([ :commit, :ok ], [ :verification_write, :ok ])
+    expect(period_commit_first.reload.status).to eq("committed")
+    expect(verification_item_a.reload.status).to eq("pending_verification")
+    expect(verification_item_a.acknowledged_in_committed_run?).to be(true)
+
+    ack_row = PayPeriodVerificationAcknowledgement.find_by!(
+      pay_period_id: period_commit_first.id,
+      employee_verification_item_id: verification_item_a.id
+    )
+    expect(ack_row.item_status_snapshot).to eq("pending_verification")
+    expect(ack_row.item_updated_at_snapshot.utc.iso8601(6)).to eq(original_updated_at_a.utc.iso8601(6))
+
+    follow_up_item = EmployeeVerificationItem
+      .where(company_id: company.id, employee_id: worker.id, event_kind: "compensation_change")
+      .where("metadata ->> 'prior_unverified_item_id' = ?", verification_item_a.id.to_s)
+      .order(:id)
+      .last
+    expect(follow_up_item).to be_present
+    expect(follow_up_item.status).to eq("pending_verification")
+
+    # Order 2: verification_write acquires Company.lock first while commit! blocks on Company.lock.
+    # Verification write supersedes the open unacknowledged item, and commit! MUST fail with unverified_changes_changed.
+    period_write_first = create(
+      :pay_period,
+      company: company,
+      start_date: Date.new(2026, 11, 15),
+      end_date: Date.new(2026, 11, 28),
+      pay_date: Date.new(2026, 12, 4),
+      status: "draft"
+    )
+    item_b = period_write_first.payroll_items.create!(
+      company: company,
+      employee: worker,
+      employment_type: "hourly",
+      pay_rate: 25.00,
+      hours_worked: 40,
+      payment_delivery_method: "paper_check"
+    )
+    item_b.calculate!
+    period_write_first.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: staff_admin.id)
+    PayPeriodLifecycleService.new(pay_period: period_write_first, actor: staff_admin).approve!
+
+    # Snapshot all currently open pay-affecting items before the concurrent verification write mutates follow_up_item
+    open_before_write = PayPeriodUnverifiedChanges.new(period_write_first).relation.order(:id).to_a
+    ack_payload_b = open_before_write.map { |i| { id: i.id, updated_at: i.updated_at.utc.iso8601(6) } }
+
+    writer2_pid_q = Queue.new
+    writer2_locked_q = Queue.new
+    release_writer2_q = Queue.new
+    release_queues << release_writer2_q
+    commit2_pid_q = Queue.new
+    order2_outcomes = Queue.new
+
+    allow_any_instance_of(EmployeeVerificationItems::Recorder).to receive(:create_item!).and_wrap_original do |method, *args, **kwargs|
+      writer2_locked_q << true
+      Timeout.timeout(10) { release_writer2_q.pop }
+      method.call(*args, **kwargs)
+    end
+
+    writer_thread_2 = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          writer2_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+          EmployeeVerificationItems::Recorder.record!(
+            employee: Employee.find(worker.id),
+            actor: User.find(client_manager.id),
+            event_kind: "compensation_change",
+            changed_fields: [ "pay_rate" ],
+            before_values: { "pay_rate" => 26.0 },
+            after_values: { "pay_rate" => 27.0 },
+            effective_on: period_write_first.start_date
+          )
+          order2_outcomes << [ :verification_write, :ok ]
+        end
+      rescue StandardError => e
+        order2_outcomes << [ :verification_write, :error, e.class.name, e.message ]
+      end
+    end
+    controlled_threads << writer_thread_2
+
+    writer2_pid = Timeout.timeout(5) { writer2_pid_q.pop }
+    Timeout.timeout(5) { writer2_locked_q.pop }
+
+    commit_thread_2 = Thread.new do
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        with_worker_db_timeouts(conn) do
+          commit2_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period_write_first.id), actor: User.find(staff_admin.id))
+            .commit!(acknowledged_verification_items: ack_payload_b)
+          order2_outcomes << [ :commit, :ok ]
+        end
+      rescue PayPeriodLifecycleService::CommitConflict => e
+        order2_outcomes << [ :commit, :commit_conflict, e.code ]
+      rescue StandardError => e
+        order2_outcomes << [ :commit, :error, e.class.name, e.message ]
+      end
+    end
+    controlled_threads << commit_thread_2
+
+    commit2_pid = Timeout.timeout(5) { commit2_pid_q.pop }
+    expect(wait_until_blocked_by.call(commit2_pid, writer2_pid)).to be(true),
+      "Expected commit! to block on Company.lock held by verification write"
+
+    release_writer2_q << true
+    Timeout.timeout(15) { writer_thread_2.join }
+    Timeout.timeout(15) { commit_thread_2.join }
+    allow_any_instance_of(EmployeeVerificationItems::Recorder).to receive(:create_item!).and_call_original
+
+    order2 = 2.times.map { order2_outcomes.pop }
+    expect(order2).to contain_exactly(
+      [ :verification_write, :ok ],
+      [ :commit, :commit_conflict, "unverified_changes_changed" ]
+    )
+    expect(period_write_first.reload.status).to eq("approved")
+    expect(PayPeriodVerificationAcknowledgement.where(pay_period_id: period_write_first.id)).to be_empty
+    expect(follow_up_item.reload.status).to eq("superseded")
+  ensure
+    join_errors = stop_and_join_workers!(controlled_threads, release_queues: release_queues)
+    cleanup_non_transactional_company!(
+      company: company,
+      organization: organization,
+      user_ids: [ staff_admin&.id, client_manager&.id ],
+      tax_tables: tax_tables
+    )
+    raise join_errors.first if join_errors.any? && $ERROR_INFO.nil?
   end
 
   it "deterministically blocks every writer on Company.lock before any Employee or PayPeriod lock is acquired (M4)" do
@@ -461,6 +742,24 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
 
     employee = create(:employee, :hourly, company: company, department: department, first_name: "Jordan", last_name: "Barrier", hire_date: Date.new(2026, 1, 1), pay_rate: 20.0, payment_delivery_method: "paper_check")
     create_ready_w4!(employee)
+    # Draft pay period with an inherited (nil) payment_delivery_method item so client_update exercises
+    # prelock_payment_method_periods! (Company -> PayPeriod -> Employee) and preserves the inherited method.
+    draft_period = create(
+      :pay_period,
+      company: company,
+      status: "draft",
+      start_date: Date.new(2026, 11, 15),
+      end_date: Date.new(2026, 11, 28),
+      pay_date: Date.new(2026, 12, 4)
+    )
+    draft_item = draft_period.payroll_items.create!(
+      company: company,
+      employee: employee,
+      employment_type: "hourly",
+      pay_rate: 20.0,
+      hours_worked: 40,
+      payment_delivery_method: nil
+    )
     EmployeeVerificationItem.create!(
       company: company,
       employee: employee,
@@ -469,6 +768,16 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       affects_pay: true,
       changed_fields: [ "pay_rate" ],
       return_note: "Barrier requeue check"
+    )
+    # Separate returned item exclusively for the requeue_returned probe so earlier probes don't consume it.
+    requeue_target = EmployeeVerificationItem.create!(
+      company: company,
+      employee: employee,
+      event_kind: "w4_change",
+      status: "returned_to_client",
+      affects_pay: true,
+      changed_fields: [ "filing_status" ],
+      return_note: "Dedicated requeue probe item"
     )
 
     writers = {
@@ -494,7 +803,7 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         EmployeeVerificationItems::Recorder.requeue_returned_items!(
           employee: Employee.find(employee.id),
           actor: User.find(client_manager.id),
-          touched_fields: [ :pay_rate ]
+          touched_fields: [ :filing_status ]
         )
       },
       terminate: -> {
@@ -507,6 +816,8 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     }
 
     writers.each do |label, action|
+      expect(requeue_target.reload.status).to eq("returned_to_client") if label == :requeue_returned
+
       holder_pid_q = Queue.new
       waiter_pid_q = Queue.new
       release_holder = Queue.new
@@ -583,15 +894,23 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       expect(waiting_on_company_lock).to be(true), "Expected #{label} to be waiting on companies lock held by Thread A"
       expect(held_row_locks).to be_empty, "Expected #{label} to hold zero Employee/PayPeriod SELECT FOR UPDATE or write locks while waiting on Company.lock, got: #{held_row_locks.inspect}"
       expect(waiter_error).to be_nil, "Expected #{label} to serialize cleanly after Company.lock released, got: #{waiter_error.inspect}"
+
+      if label == :client_update
+        expect(draft_item.reload.payment_delivery_method).to eq("paper_check")
+        expect(employee.reload.payment_delivery_method).to eq("direct_deposit")
+      elsif label == :requeue_returned
+        expect(requeue_target.reload.status).to eq("pending_verification")
+      end
     end
   ensure
-    stop_and_join_workers!(barrier_threads, release_queues: barrier_releases)
+    join_errors = stop_and_join_workers!(barrier_threads, release_queues: barrier_releases)
     cleanup_non_transactional_company!(
       company: company,
       organization: organization,
       user_ids: [ staff_admin&.id, client_manager&.id ],
       tax_tables: []
     )
+    raise join_errors.first if join_errors.any? && $ERROR_INFO.nil?
   end
 
   it "commits on-demand lifecycle activation outside the caller write transaction and refuses mid-request mode flips (M5)" do

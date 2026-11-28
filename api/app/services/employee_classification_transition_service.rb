@@ -155,6 +155,9 @@ class EmployeeClassificationTransitionService
       :phone,
       :contact_source
     )
+    # Gated hires need a payment method to be Ready, so theirs carries over.
+    # Bank details don't, so other successors keep the NULL = paper check default.
+    attrs[:payment_delivery_method] = employee.payment_delivery_method if employee.readiness_gate_enforced?
     attrs[:email] = attributes[:email] if attributes.key?(:email)
     attrs[:phone] = attributes[:phone] if attributes.key?(:phone)
     attrs[:email_verified_at] = nil
