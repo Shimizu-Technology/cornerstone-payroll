@@ -111,16 +111,29 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
     end
 
-    it "exposes only the allowlisted separation metadata on termination details" do
-      details = { "reason_category" => "voluntary", "last_worked_on" => "2026-11-14",
-                  "final_pay_notes" => "Include the remaining PTO.", "notes" => "Synthetic separation note." }
-      item.update!(event_kind: "termination", metadata: details.merge("internal_reference" => "Synthetic internal value"))
+    %w[accountant manager org_admin].each do |candidate|
+      context "when #{candidate} reads a termination verification" do
+        let(:role) { candidate }
 
-      get "#{queue_path}/#{item.id}", headers: headers
-      expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body.fetch("data")).to include(details)
-      expect(response.parsed_body.fetch("data")).not_to have_key("metadata")
-      expect(response.body).not_to include("Synthetic internal value")
+        it "includes separation metadata and restricts both notes to managers and organization admins" do
+          separation = { "reason_category" => "voluntary", "last_worked_on" => "2026-11-14" }
+          notes = { "final_pay_notes" => "Include the remaining PTO.", "notes" => "Synthetic separation note." }
+          item.update!(event_kind: "termination",
+            metadata: separation.merge(notes).merge("internal_reference" => "Synthetic internal value"))
+
+          get "#{queue_path}/#{item.id}", headers: headers
+          expect(response).to have_http_status(:ok), response.body
+          details = response.parsed_body.fetch("data")
+          expect(details).to include(separation)
+          if candidate == "accountant"
+            expect(details.keys & notes.keys).to be_empty
+          else
+            expect(details).to include(notes)
+          end
+          expect(details).not_to have_key("metadata")
+          expect(response.body).not_to include("Synthetic internal value")
+        end
+      end
     end
 
     it "uses the canonical HTTP 422 status for invalid verification requests" do

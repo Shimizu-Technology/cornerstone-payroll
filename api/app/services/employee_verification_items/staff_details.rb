@@ -47,7 +47,9 @@ module EmployeeVerificationItems
     def termination_details
       return {} unless @item.event_kind == "termination"
 
-      @item.metadata.slice("reason_category", "last_worked_on", "final_pay_notes", "notes")
+      fields = %w[reason_category last_worked_on]
+      fields += %w[final_pay_notes notes] if StaffRolePolicy.can_view_restricted_lifecycle_notes?(@viewer)
+      @item.metadata.slice(*fields)
     end
 
     def serialize_audit(entry)

@@ -35,11 +35,15 @@ module StaffEmployeeLifecycle
   private_class_method def self.with_residual_work(scope, today)
     open_items = EmployeeVerificationItem.open_items.where("employee_verification_items.company_id = companies.id")
     gated_employees = Employee.where(readiness_gate_enforced: true).where("employees.company_id = companies.id")
-    active_overrides = EmployeeReadinessOverride.active.where("employee_readiness_overrides.company_id = companies.id")
-      .where("expires_on IS NULL OR expires_on >= ?", today)
+    active_overrides = EmployeeReadinessOverride.active.left_joins(:pay_period)
+      .where("employee_readiness_overrides.company_id = companies.id")
+    dated_overrides = active_overrides.where(pay_period_id: nil, expires_on: today..)
+    pinned_overrides = active_overrides.where(pay_periods: {
+      status: EmployeeReadinessOverrides::Manage::OPEN_PERIOD_STATUSES, committed_at: nil
+    }).where("pay_periods.correction_status IS DISTINCT FROM 'voided'")
 
     scope.where(open_items.arel.exists)
       .or(scope.where(gated_employees.arel.exists))
-      .or(scope.where(active_overrides.arel.exists))
+      .or(scope.where(dated_overrides.or(pinned_overrides).arel.exists))
   end
 end

@@ -92,6 +92,32 @@ RSpec.describe "Employee readiness override access", type: :request, portal_noti
       expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
     end
 
+    it "closes staff lifecycle access after rollback when only a committed pinned override remains", :aggregate_failures do
+      grant
+      expect(response).to have_http_status(:created), response.body
+      override = EmployeeReadinessOverride.find(response.parsed_body.dig("data", "id"))
+      clear_gate
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload).not_to be_readiness_gate_enforced
+
+      ensure_verified_test_tax_years(2026)
+      period.update!(status: "committed", committed_at: Time.current)
+      roll_back_lifecycle_mode!(company, actor: actor)
+      expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
+      expect(override.reload).to have_attributes(pay_period_id: period.id, expires_on: nil, revoked_at: nil)
+
+      get "/api/v1/admin/employee_verification_items", headers: headers
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
+      revoke(override.id)
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
+
+      get "/api/v1/admin/client_inbox/counts", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("data")).not_to have_key("pending_verifications")
+    end
+
     it "uses the canonical HTTP 422 status for an invalid override" do
       allow(ActionDispatch::Response).to receive(:rack_status_code).and_call_original
 

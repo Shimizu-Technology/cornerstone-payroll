@@ -51,7 +51,7 @@ module Api
 
         def serialize(profile)
           payload = profile.as_json(except: :notes)
-          payload["notes"] = profile.notes if current_user&.manager? || current_user&.organization_admin?
+          payload["notes"] = profile.notes if StaffRolePolicy.can_view_restricted_lifecycle_notes?(current_user)
           payload.merge("confirmed_by_name" => profile.confirmed_by&.name)
         end
       end

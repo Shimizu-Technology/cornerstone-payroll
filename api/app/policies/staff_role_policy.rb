@@ -333,6 +333,10 @@ class StaffRolePolicy
       company.test_workspace_archived_at.nil? && user.accessible_company_ids.include?(company.id)
   end
 
+  def self.can_view_restricted_lifecycle_notes?(user)
+    user&.organization_admin? || user&.manager?
+  end
+
   def self.capabilities_for(user, company: nil)
     capabilities = (CAPABILITY_ROLES.keys - ROLE_ONLY_CAPABILITIES).select { |capability| allowed?(user, capability) }
     capabilities |= DELEGATABLE_CAPABILITIES if company && client_management_allowed?(user, company)
