@@ -32,7 +32,7 @@ export function ClientInbox(): ReactElement {
   const filterKey = params.toString();
   const activeClients = companies.filter(company => company.organization_id === user?.organization_id && company.active);
   const lifecycleAvailable = counts?.pending_verifications !== undefined || activeClients.some(company =>
-    company.client_managed_employee_lifecycle || company.has_open_employee_verifications);
+    company.client_managed_employee_lifecycle || company.staff_employee_lifecycle_available || company.has_open_employee_verifications);
   const blockedActivationVisible = lifecycleAvailable || activeClients.some(company => company.has_blocked_lifecycle_activation)
     || rows.some(row => row.kind === 'lifecycle_activation_blocked');
   const rawKind = params.get('kind') || '';

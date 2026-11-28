@@ -43,6 +43,7 @@ it.each(['employee_verification', 'lifecycle_activation_blocked'])('normalizes u
 
 it.each([
   ['employee_verification', { client_managed_employee_lifecycle: true }],
+  ['employee_verification', { staff_employee_lifecycle_available: true }],
   ['lifecycle_activation_blocked', { has_blocked_lifecycle_activation: true }],
 ] as const)('keeps available %s deep links in the URL, API request, and Kind selector', async (kind, flags) => {
   Object.assign(mocks.companies[0], flags);
