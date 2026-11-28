@@ -237,9 +237,9 @@ class OperatingProfileCatalog
       default: "approval_first",
       allowed: EMPLOYEE_LIFECYCLE_MODES,
       capability: :manage_organization,
-      what: "Controls whether client portal managers submit employee changes for Cornerstone approval first or manage new hires, edits, terminations, and rehires directly with post-change Cornerstone verification.",
-      example: '"approval_first" for Harborview Bistro by default; "client_managed" for Pacific Trade Works once pilot preflights pass.',
-      effect: 'When "approval_first", new hires and pay or tax changes wait in the staff approval queue. When "client_managed", client managers manage records directly behind the Ready to pay checklist while Cornerstone verifies changes and acknowledges unverified items before committing payroll.',
+      what: "Chooses whether Cornerstone pre-approves client employee changes or client managers add, edit, terminate, and rehire directly while Cornerstone verifies afterwards.",
+      example: '"approval_first" for Harbor Finch Kitchen by default; "client_managed" for Harbor Finch Market once mode-switch preflights pass.',
+      effect: 'In "approval_first", new hires and pay or tax changes wait for Cornerstone pre-approval. In "client_managed", client managers add, edit, terminate, and rehire directly without pre-approval; incomplete setup blocks pay unless an organization admin overrides it, and Cornerstone is notified to verify changes afterwards before committing payroll.',
       requires: [ "client_portal_enabled" ].freeze
     ),
     Entry.new(

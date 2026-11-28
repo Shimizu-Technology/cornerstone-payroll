@@ -55,6 +55,16 @@ export function EmployeeReadinessCard({ readiness, setupPath, isBusinessContract
         <p className="text-sm leading-5 text-neutral-600">
           Pay setup as of {formatDate(readiness.rates_on)}. Withholding as of {formatDate(readiness.w4_on)}.
         </p>
+        {readiness.status === 'incomplete' && (
+          <p className="text-sm text-neutral-600">
+            Incomplete setup blocks pay until every required item is finished, unless a Cornerstone organization admin overrides it. Cornerstone is notified and verifies changes afterwards — it does not pre-approve them.
+          </p>
+        )}
+        {readiness.status === 'ready' && !preview && (
+          <p className="text-sm text-neutral-600">
+            Ready for the next payroll with no pre-approval step. Cornerstone is notified and verifies details afterwards.
+          </p>
+        )}
         {readiness.status === 'missing_items' && <p className="text-sm text-neutral-600">This employee can still be paid while you finish these items.</p>}
       </CardHeader>
       <CardContent className="space-y-4">
