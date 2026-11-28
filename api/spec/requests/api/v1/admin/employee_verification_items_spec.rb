@@ -271,9 +271,61 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(data["readiness_checklist"]["missing_keys"]).to include("tax_form")
       expect(data["warnings"]).to include("review_final_pay" => true, "committed_pay_period_ids" => [ committed.id ],
         "post_termination_committed_pay_period_ids" => [ 99 ], "possible_self_created_hire" => true,
+        "possible_self_lifecycle_action" => false, "own_record_signal" => nil,
         "direct_deposit_missing_bank_details" => true, "approved_pay_period_ids" => [ approved.id ],
         "tax_filing_impact" => { "committed_tax_years" => [ 2026 ] })
       expect(data["commit_acknowledgements"].sole).to include("pay_period_id" => committed.id)
+    end
+
+    it "surfaces possible_self_lifecycle_action / name_only and possible_self_created_hire to staff queue and detail, and never to clients" do
+      name_only_item = EmployeeVerificationItem.create!(
+        company: company, employee: employee, source_actor: client, event_kind: "termination", affects_pay: true,
+        metadata: {
+          "possible_self_lifecycle_action" => true,
+          "possible_self_actor_id" => client.id,
+          "own_record_signal" => "name_only",
+          "reason_category" => "voluntary"
+        }
+      )
+      self_hire_item = EmployeeVerificationItem.create!(
+        company: company, employee: employee, source_actor: client, event_kind: "new_hire", affects_pay: true,
+        metadata: { "possible_self_created_hire" => true }
+      )
+
+      get queue_path, headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      rows = response.parsed_body.fetch("data").index_by { |row| row["id"] }
+      expect(rows.fetch(name_only_item.id)).to include(
+        "possible_self_lifecycle_action" => true,
+        "own_record_signal" => "name_only",
+        "possible_self_created_hire" => false
+      )
+      expect(rows.fetch(self_hire_item.id)).to include(
+        "possible_self_created_hire" => true,
+        "possible_self_lifecycle_action" => false
+      )
+
+      get "#{queue_path}/#{name_only_item.id}", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "warnings")).to include(
+        "possible_self_lifecycle_action" => true,
+        "own_record_signal" => "name_only",
+        "possible_self_created_hire" => false
+      )
+
+      get "#{queue_path}/#{self_hire_item.id}", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "warnings")).to include(
+        "possible_self_created_hire" => true,
+        "possible_self_lifecycle_action" => false
+      )
+
+      # Client portal verification list must NEVER expose staff-only self-action flags.
+      get "/api/v1/client/verification_items", headers: headers(client)
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.body).not_to include(
+        "possible_self_lifecycle_action", "possible_self_created_hire", "possible_self_actor_id", "own_record_signal", "name_only"
+      )
     end
 
     it "links a staff fix to its employee audit and refuses a stale or repeated decision" do

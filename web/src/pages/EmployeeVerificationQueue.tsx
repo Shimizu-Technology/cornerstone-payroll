@@ -254,6 +254,18 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
                 onClick={e => pick(row.id, e.currentTarget)}>
                 <span className="block wrap-anywhere font-semibold">{row.employee_name}</span>
                 <span className="block text-sm text-neutral-700">{eventLabels[row.event_kind]} · {statusLabels[row.status]}</span>
+                {(row.possible_self_lifecycle_action || row.possible_self_created_hire) && (
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    {row.possible_self_lifecycle_action && (
+                      <Badge variant="warning" className="whitespace-normal">
+                        {row.own_record_signal === 'name_only' ? 'Possible self-action · Name match only' : 'Possible self-action'}
+                      </Badge>
+                    )}
+                    {row.possible_self_created_hire && (
+                      <Badge variant="warning" className="whitespace-normal">Possible self-created hire</Badge>
+                    )}
+                  </span>
+                )}
                 <span className="block text-xs text-neutral-600">{formatGuamDateTime(row.updated_at)}</span>
               </button>
             </li>)}

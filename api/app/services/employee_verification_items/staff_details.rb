@@ -7,7 +7,10 @@ module EmployeeVerificationItems
         id: item.id, employee_id: item.employee_id, employee_name: item.employee.full_name,
         company_id: item.company_id, event_kind: item.event_kind, status: item.status, affects_pay: item.affects_pay,
         source_actor_id: item.source_actor_id, source_actor_name: item.source_actor&.name,
-        effective_on: item.effective_on, created_at: item.created_at, updated_at: item.updated_at.utc.iso8601(6)
+        effective_on: item.effective_on, created_at: item.created_at, updated_at: item.updated_at.utc.iso8601(6),
+        possible_self_created_hire: item.metadata["possible_self_created_hire"] == true,
+        possible_self_lifecycle_action: item.metadata["possible_self_lifecycle_action"] == true,
+        own_record_signal: item.metadata["own_record_signal"]
       }
     end
 
@@ -67,6 +70,8 @@ module EmployeeVerificationItems
         direct_deposit_missing_bank_details: checklist.direct_deposit_missing_bank_details?,
         tax_filing_impact: @item.metadata["tax_filing_impact"],
         possible_self_created_hire: @item.metadata["possible_self_created_hire"] == true,
+        possible_self_lifecycle_action: @item.metadata["possible_self_lifecycle_action"] == true,
+        own_record_signal: @item.metadata["own_record_signal"],
         approved_pay_period_ids: approved_pay_period_ids
       }
     end

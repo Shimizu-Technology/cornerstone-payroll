@@ -27,10 +27,14 @@ const item: VerificationDetails = {
   return_note: 'Confirm the final date.', client_response_note: 'Confirmed.', verification_note: null, resubmitted_at: null,
   can_review: true, audit_references: [{ id: 3, return_note: 'Review the original date.', staff_edit_audit_id: null }],
   warnings: {
-    committed_pay_period_ids: [20], possible_self_created_hire: true, review_final_pay: true,
+    committed_pay_period_ids: [20], possible_self_created_hire: true, possible_self_lifecycle_action: true, own_record_signal: 'name_only',
+    review_final_pay: true,
     post_termination_committed_pay_period_ids: [21], direct_deposit_missing_bank_details: true,
     tax_filing_impact: { committed_tax_years: [2026], filed_quarters: ['2026-Q3'] }, approved_pay_period_ids: [24],
   },
+  possible_self_created_hire: true,
+  possible_self_lifecycle_action: true,
+  own_record_signal: 'name_only',
   readiness_checklist: {
     status: 'incomplete', rates_on: '2026-11-22', w4_on: '2026-11-24', missing_keys: ['tax_form'],
     items: [{ key: 'tax_form', label: 'W-4', complete: false, applicable: true, missing_label: 'W-4 missing' }],
@@ -68,9 +72,12 @@ afterEach(cleanup);
 describe('To verify', () => {
   it('lists changes, supports selecting a card and renders context and masked tax IDs', async () => {
     open({ selected: false });
-    fireEvent.click(await screen.findByRole('button', { name: /Synthetic Worker/ }));
+    const card = await screen.findByRole('button', { name: /Synthetic Worker/ });
+    expect(within(card).getByText('Possible self-action · Name match only')).toBeTruthy();
+    expect(within(card).getByText('Possible self-created hire')).toBeTruthy();
+    fireEvent.click(card);
     expect(await screen.findByRole('heading', { name: 'Synthetic Worker' })).toBeTruthy();
-    for (const label of [/Paid in committed run #20/, /Possible self-created hire/, /Backdated termination/, /accrued PTO payout/, /Bank details are missing/, /Review W-2c/, /W-4 missing/, /Review the original date/]) {
+    for (const label of [/Paid in committed run #20/, /Possible self-created hire\./, /Possible self-action \(name match only\)\./, /Backdated termination/, /accrued PTO payout/, /Bank details are missing/, /Review W-2c/, /W-4 missing/, /Review the original date/]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
     expect(screen.getByText('Ending in 0234')).toBeTruthy();
