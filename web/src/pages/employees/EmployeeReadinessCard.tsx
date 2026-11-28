@@ -62,7 +62,7 @@ export function EmployeeReadinessCard({ readiness, setupPath, isBusinessContract
         )}
         {readiness.status === 'ready' && !preview && (
           <p className="text-sm text-neutral-600">
-            Ready for the next payroll with no pre-approval step. Cornerstone is notified and verifies details afterwards.
+            Pay setup is complete, with no pre-approval step. Cornerstone is notified and verifies details afterwards.
           </p>
         )}
         {readiness.status === 'missing_items' && <p className="text-sm text-neutral-600">This employee can still be paid while you finish these items.</p>}

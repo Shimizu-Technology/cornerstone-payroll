@@ -182,5 +182,11 @@ RSpec.describe "DemoCompany::Seed client-managed lifecycle showcase" do
     expect(rerun.employees_created).to eq(0)
     expect(rerun.periods_committed).to eq(0)
     expect(market_snapshot).to eq(first_snapshot)
+
+    # A tester who commits the showcase draft can still rerun the seed.
+    draft.update_columns(status: "committed", committed_at: Time.current)
+    committed_rerun = seed!(include_lifecycle_showcase: true)
+    expect(committed_rerun.employees_created).to eq(0)
+    expect(market_snapshot).to eq(first_snapshot)
   end
 end

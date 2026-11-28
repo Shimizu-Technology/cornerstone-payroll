@@ -576,7 +576,13 @@ module DemoCompany
       ).call!
     end
 
+    # The only scenarios not dated from the showcase draft. Once a tester
+    # commits that draft, a rerun leaves the others as the first run made them.
+    UNDATED_LIFECYCLE_SCENARIOS = %i[incomplete_new_hire ready_new_hire grandfathered_missing_items].freeze
+
     def apply_lifecycle_scenario!(company, employee, person, draft_period)
+      return if draft_period.nil? && !person[:scenario].in?(UNDATED_LIFECYCLE_SCENARIOS)
+
       case person[:scenario]
       when :incomplete_new_hire
         ensure_verification_item!(company, employee, event_kind: "new_hire",

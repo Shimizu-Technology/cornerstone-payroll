@@ -77,7 +77,7 @@ function accountRoleLabel(role: UserRole): string {
 }
 
 const clientAccessOptions: { value: ClientAccessLevel; label: string; hint: string }[] = [
-  { value: 'manager', label: 'Client manager', hint: 'Full client portal access: add, edit, terminate, and rehire employees (when client-managed mode is on), approve payroll, upload documents, send messages and invite employees.' },
+  { value: 'manager', label: 'Client manager', hint: 'Full client portal access: add and edit employees (sent to Cornerstone for approval first, or saved directly in client-managed mode, which also lets them terminate and rehire), approve payroll, upload documents, send messages and invite employees.' },
   { value: 'viewer', label: 'Client viewer', hint: 'View only: sees payroll, employees, reports, documents and messages, and can’t change anything.' },
 ];
 
