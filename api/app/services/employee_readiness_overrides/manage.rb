@@ -87,7 +87,7 @@ module EmployeeReadinessOverrides
     def with_company_lock
       ApplicationRecord.transaction do
         company = Company.lock.find(@company_id)
-        unless CompanyFeatures.for(company).client_managed_employee_lifecycle?
+        unless StaffEmployeeLifecycle.available?(company)
           raise AdminOverrideService::AccessDenied, "Client-managed employee lifecycle is not enabled for this company."
         end
 
@@ -157,13 +157,16 @@ module EmployeeReadinessOverrides
     def default_w4_election!(employee, override, target_pay_date, entry)
       current = employee.w4_election_on(target_pay_date)
       return current if current&.source == "default_withholding"
-      if current
-        raise ArgumentError, "Record a valid Form W-4 before overriding this employee's other missing items"
+      if current && current.w4_form_version.to_i >= Employee::MIN_SUPPORTED_W4_FORM_VERSION
+        raise ArgumentError, "Record a valid Form W-4 before granting this override"
       end
 
+      # Shadow the invalid election on its effective date if it already governs the target payday.
+      effective_on = [ target_pay_date, employee.hire_date ].compact.min
+      effective_on = [ effective_on, current.effective_on ].max if current
       EmployeeW4ElectionChangeService.new(employee: employee, actor: entry.actor, source: "default_withholding",
         reason: entry.reason, attributes: EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.merge(
-          w4_effective_on: [ target_pay_date, employee.hire_date ].compact.min,
+          w4_effective_on: effective_on,
           w4_source_reference: "Admin readiness override ##{override.id} — IRS Pub 15-T default (Single, no adjustments)"
         )).call!
     end

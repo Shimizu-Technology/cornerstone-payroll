@@ -16,6 +16,16 @@ module EmployeeLifecyclePr4Helpers
     )
   end
 
+  def roll_back_lifecycle_mode!(company, actor:)
+    today = PayrollBusinessClock.today
+    create(:pay_period, company: company, start_date: today, end_date: today + 13.days, pay_date: today + 19.days)
+    previous = company.client_operating_profiles.history_order.first
+    ClientOperatingProfiles::UpdateService.new(company: company, actor: actor,
+      effective_on: today.iso8601, lock_version: previous.lock_version,
+      reason: "Return the synthetic client to approval first.",
+      changes: { "client_portal.employee_lifecycle_mode" => "approval_first" }).call
+  end
+
   def create_lifecycle_worker!(company, **attributes)
     create(:employee, company: company, department: create(:department, company: company),
       first_name: "Quinn", last_name: "Example", ssn_encrypted: "900-11-2233",

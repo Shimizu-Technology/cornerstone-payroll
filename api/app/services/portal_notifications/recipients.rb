@@ -157,15 +157,17 @@ module PortalNotifications
       private
 
       def verification_subject_available?(event)
+        return false unless StaffEmployeeLifecycle.unlocked?
         return false unless event.subject_type == "EmployeeVerificationItem"
 
         item = EmployeeVerificationItem.find_by(id: event.subject_id, company_id: event.company_id)
         return false unless item
-        return false unless CompanyFeatures.for(event.company).client_managed_employee_lifecycle?
 
         if event.event_type == "employee_verification_queued"
           item.status == "pending_verification" && item.updated_at.utc.iso8601(6) == event.metadata["revision"]
         else
+          return false unless CompanyFeatures.for(event.company).client_managed_employee_lifecycle?
+
           item.status == "returned_to_client" && item.returned_at&.utc&.iso8601(6) == event.metadata["revision"]
         end
       end

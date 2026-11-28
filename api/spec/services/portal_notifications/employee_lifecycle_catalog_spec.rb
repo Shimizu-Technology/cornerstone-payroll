@@ -99,6 +99,28 @@ RSpec.describe "Employee lifecycle notification catalog", :portal_notifications 
     end
   end
 
+  it "delivers queued staff alerts after rollback and suppresses client return alerts" do
+    create_client_managed_profile!(company)
+    list_portal_recipient!(company, user: staff)
+    org_admin = create(:user, company: company, role: "org_admin")
+
+    with_portal_email do
+      pending = queue!
+      returned = queue!(employee, kind: "compensation_change")
+      return!(returned)
+      roll_back_lifecycle_mode!(company, actor: org_admin)
+      expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
+
+      dispatch_after_batch!
+
+      queued_event = PortalNotificationEvent.find_by!(subject: pending, event_type: "employee_verification_queued")
+      expect(queued_event.deliveries.sole.status).to eq("sent")
+      returned_event = PortalNotificationEvent.find_by!(subject: returned, event_type: "employee_verification_returned")
+      expect(returned_event.deliveries.sole.skip_reason).to eq("resource_unavailable")
+      expect(captured_portal_emails.pluck(:to)).to eq([ staff.email ])
+    end
+  end
+
   it "sends returns to assigned active client managers only and makes prior alerts stale on resubmission" do
     create_client_managed_profile!(company)
     viewer = create(:user, :with_client_assignment, company: company, role: "client", client_access_level: "viewer",

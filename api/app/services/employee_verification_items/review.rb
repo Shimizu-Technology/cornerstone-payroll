@@ -5,6 +5,8 @@ module EmployeeVerificationItems
     class Conflict < StandardError; end
     class Invalid < StandardError; end
 
+    STAFF_EMPLOYEE_EDIT_ACTIONS = %w[employees#update employees#terminate employees#deactivate employees#reactivate].freeze
+
     def initialize(company_id:, item_id:, actor:)
       @company_id = company_id
       @item_id = item_id
@@ -60,7 +62,7 @@ module EmployeeVerificationItems
     def staff_edit_audit_id(item, audit_id)
       edits = AuditLog.where(company_id: item.company_id, user_id: @actor.id, record_id: item.employee_id,
         created_at: item.updated_at.., view_as_grant_id: nil)
-      edits = edits.where(record_type: "employees", action: "employees#update")
+      edits = edits.where(record_type: "employees", action: STAFF_EMPLOYEE_EDIT_ACTIONS)
         .or(edits.where(record_type: "Employee", action: "employee#compensation_changed").where("metadata->>'source' = 'staff'"))
       edits = edits.where(id: audit_id) if audit_id.present?
       edits.newest_first.pick(:id) || raise(Invalid, "Save the employee fix before marking it verified")

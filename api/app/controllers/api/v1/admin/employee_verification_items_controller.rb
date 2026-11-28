@@ -12,7 +12,7 @@ module Api
         end
 
         rescue_from EmployeeVerificationItems::Review::Invalid, ActiveRecord::RecordInvalid do |error|
-          render json: { error: error.message }, status: :unprocessable_entity
+          render json: { error: error.message }, status: :unprocessable_content
         end
 
         rescue_from ActiveRecord::RecordNotFound do
@@ -22,7 +22,7 @@ module Api
         def index
           items = verification_items.order(updated_at: :desc, id: :desc)
           filters = params.permit(:status, :event_kind, :employee_id, :affects_pay).to_h.compact_blank
-          return render json: { error: "affects_pay must be true or false" }, status: :unprocessable_entity if
+          return render json: { error: "affects_pay must be true or false" }, status: :unprocessable_content if
             filters.key?("affects_pay") && !filters["affects_pay"].to_s.in?(%w[true false])
 
           items = items.where(filters)
@@ -65,7 +65,7 @@ module Api
           item = EmployeeVerificationItems::Review.new(company_id: current_company_id, item_id: params[:id], actor: current_user)
             .call!(operation, params.permit(:verification_note, :return_note, :fixed_by_staff, :staff_edit_audit_id, :updated_at)) do |company|
               revalidate_current_company_write_access!(company: company, capability: :manage_client_configuration)
-              raise CompanyWriteAccessChanged unless CompanyFeatures.for(company).client_managed_employee_lifecycle?
+              raise CompanyWriteAccessChanged unless staff_employee_lifecycle_available?(company)
             end
           render json: { data: details_for(item) }
         end

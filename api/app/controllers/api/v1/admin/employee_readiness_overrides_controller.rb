@@ -15,7 +15,7 @@ module Api
         end
 
         rescue_from ArgumentError, ActiveRecord::RecordInvalid, EmployeeW4ElectionChangeService::Error do |error|
-          render json: { error: error.message }, status: :unprocessable_entity
+          render json: { error: error.message }, status: :unprocessable_content
         end
 
         rescue_from ActiveRecord::RecordNotFound do

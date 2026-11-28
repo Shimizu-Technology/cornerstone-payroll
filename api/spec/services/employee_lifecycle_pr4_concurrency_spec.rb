@@ -73,9 +73,14 @@ RSpec.describe "Staff lifecycle writes serialize with payroll", :postgres_concur
           writer_ready << connection.raw_connection.backend_pid
           release_writer.pop
         end
+      rescue StandardError => error
+        writer_ready << error
+        raise
       end
     end
     writer_pid = Timeout.timeout(10) { writer_ready.pop }
+    raise writer_pid if writer_pid.is_a?(StandardError)
+
     payroll_thread = Thread.new do
       ApplicationRecord.connection_pool.with_connection do |connection|
         payroll_ready << connection.raw_connection.backend_pid
@@ -147,6 +152,26 @@ RSpec.describe "Staff lifecycle writes serialize with payroll", :postgres_concur
       expect(error.message).to include("W-4 missing")
       expect(override.reload.revoked_at).to be_present
       expect(period.reload).to be_calculated
+    end
+
+    it "rechecks the cleared gate after the staff writer releases the company lock after rollback" do
+      manager = EmployeeReadinessOverrides::Manage.new(company_id: company.id, employee_id: employee.id, actor: actor,
+        verified: true, impersonated: false)
+      override = manager.grant!(pay_period_id: period.id, default_w4_acknowledged: true,
+        reason: "Record default withholding for this synthetic hire.")
+      calculate_run!
+      manager.revoke!(override_id: override.id, reason: "Remove the exception before clearing the gate.")
+      roll_back_lifecycle_mode!(company, actor: actor)
+      expect(PayrollReadinessPolicy.readiness_blocker_for(pay_period: period, employee: employee.reload).missing_keys)
+        .to eq([ "tax_form" ])
+
+      race_with_uncommitted_write(
+        writer: -> { manager.clear_gate!(reason: "Clear the residual gate after mode rollback.") },
+        payroll: -> { lifecycle.approve! }
+      )
+
+      expect(employee.reload).not_to be_readiness_gate_enforced
+      expect(period.reload).to be_approved
     end
   end
 end

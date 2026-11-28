@@ -25,6 +25,7 @@ module EmployeeVerificationItems
         record_type: "employee_verification_items").oldest_first
       {
         **self.class.summary(@item),
+        **termination_details,
         changed_fields: @item.changed_fields,
         before_values: Recorder.sanitize_values(@item.before_values),
         after_values: Recorder.sanitize_values(@item.after_values),
@@ -42,6 +43,12 @@ module EmployeeVerificationItems
     end
 
     private
+
+    def termination_details
+      return {} unless @item.event_kind == "termination"
+
+      @item.metadata.slice("reason_category", "last_worked_on", "final_pay_notes", "notes")
+    end
 
     def serialize_audit(entry)
       {

@@ -60,6 +60,47 @@ RSpec.describe "Employee readiness override access", type: :request, portal_noti
       create_client_managed_profile!(company)
     end
 
+    it "lets an org admin resolve remaining verification and readiness work after rollback" do
+      item = EmployeeVerificationItem.create!(company: company, employee: employee,
+        event_kind: "new_hire", affects_pay: true)
+      expect(CompanyFeatures.for(company)).to be_client_managed_employee_lifecycle
+      roll_back_lifecycle_mode!(company, actor: actor)
+      expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
+
+      queue = "/api/v1/admin/employee_verification_items"
+      get queue, headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("data").pluck("id")).to eq([ item.id ])
+      post "#{queue}/#{item.id}/verify", headers: headers, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload.status).to eq("verified")
+
+      grant
+      expect(response).to have_http_status(:created), response.body
+      override = EmployeeReadinessOverride.find(response.parsed_body.dig("data", "id"))
+      expect(PayrollReadinessPolicy.readiness_blocker_for(pay_period: period, employee: employee.reload)).to be_nil
+
+      clear_gate
+      expect(response).to have_http_status(:ok), response.body
+      expect(employee.reload).not_to be_readiness_gate_enforced
+      revoke(override.id)
+      expect(response).to have_http_status(:ok), response.body
+      expect(override.reload.revoked_by).to eq(actor)
+
+      grant
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
+    end
+
+    it "uses the canonical HTTP 422 status for an invalid override" do
+      allow(ActionDispatch::Response).to receive(:rack_status_code).and_call_original
+
+      grant(default_w4_acknowledged: false)
+      expect(response).to have_http_status(422)
+
+      expect(ActionDispatch::Response).to have_received(:rack_status_code).with(:unprocessable_content)
+    end
+
     [
       [ "accountant", false ], [ "accountant", true ], [ "manager", false ], [ "admin", false ], [ "client", false ]
     ].each do |candidate, delegation|

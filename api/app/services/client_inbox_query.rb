@@ -180,12 +180,10 @@ class ClientInboxQuery
   end
 
   def verification_company_ids(scoped_companies)
-    return [] if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+    return [] unless StaffEmployeeLifecycle.unlocked?
     return [] unless StaffRolePolicy.allowed?(@user, :payroll_operations)
 
-    activated_companies = ClientOperatingProfile.where.not(lifecycle_mode_activated_at: nil).select(:company_id)
-    scoped_companies.where(id: activated_companies)
-      .select { |company| CompanyFeatures.for(company).client_managed_employee_lifecycle? }.map(&:id)
+    StaffEmployeeLifecycle.companies(scoped_companies).pluck(:id)
   end
 
   def verification_sql(company_ids, snapshot)

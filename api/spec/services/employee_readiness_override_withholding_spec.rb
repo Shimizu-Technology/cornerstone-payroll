@@ -79,4 +79,32 @@ RSpec.describe "Readiness override Pub 15-T withholding" do
     expect(employee.reload.w4_election_on(period.pay_date)).to eq(replacement)
     expect(employee.w4_election_on(future_date)).to eq(future)
   end
+
+  it "shadows a new hire's pre-2020 W-4 with the payroll default until a valid election applies" do
+    legacy_date = period.pay_date - 7.days
+    legacy = EmployeeW4ElectionChangeService.new(employee: employee, actor: actor, source: "client_direct",
+      reason: "Record the synthetic outdated form.", attributes: {
+        filing_status: "married", allowances: 3, additional_withholding: 10,
+        w4_form_version: 2019, w4_effective_on: legacy_date, w4_signed_on: legacy_date
+      }).call!
+    future_date = period.pay_date + 14.days
+    future = receive_w4(w4_form_version: 2020, w4_effective_on: future_date, w4_signed_on: future_date - 1.day)
+    expect(EmployeeReadinessEvaluator.for_pay_period(employee.reload, period).missing_keys).to eq([ "tax_form" ])
+
+    override = grant_override
+    default = override.default_w4_election
+    expect(default).to have_attributes(source: "default_withholding", effective_on: legacy_date,
+      w4_form_version: 2020, filing_status: "single", allowances: 0, additional_withholding: 0, w4_signed_on: nil)
+    expect(legacy.reload.w4_form_version).to eq(2019)
+    expect(employee.reload.w4_election_on(period.pay_date)).to eq(default)
+    expect(PayrollReadinessPolicy.readiness_blocker_for(pay_period: period, employee: employee)).to be_nil
+    item = create(:payroll_item, company: company, pay_period: period, employee: employee, pay_rate: 25, hours_worked: 80)
+    PayrollCalculator.for(employee, item).calculate
+    expect(item.withholding_tax).to eq(BigDecimal("156.15"))
+
+    replacement = receive_w4(w4_form_version: 2020, w4_signed_on: period.pay_date)
+    expect(employee.reload.w4_election_on(period.pay_date)).to eq(replacement)
+    expect(EmployeeReadinessEvaluator.for_pay_period(employee, period)).to be_ready
+    expect(employee.w4_election_on(future_date)).to eq(future)
+  end
 end

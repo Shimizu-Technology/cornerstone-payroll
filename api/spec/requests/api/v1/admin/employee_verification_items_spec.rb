@@ -58,10 +58,81 @@ RSpec.describe "Staff employee verification queue", type: :request do
     end
   end
 
+  it "keeps the queue closed for an approval-first company without lifecycle work after unlock" do
+    unlock_lifecycle_mode!
+    expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
+
+    get queue_path, headers: headers
+    expect(response).to have_http_status(:forbidden)
+    expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
+    get "#{inbox_path}/counts", headers: headers
+    expect(response.parsed_body.fetch("data")).not_to have_key("pending_verifications")
+  end
+
   context "with client-managed mode activated" do
     before do
       unlock_lifecycle_mode!
       create_client_managed_profile!(company)
+    end
+
+    it "keeps open verification work available to staff after rollback" do
+      employee.update!(readiness_gate_enforced: false)
+      item
+      returned = EmployeeVerificationItem.create!(company: company, employee: employee,
+        event_kind: "termination", status: "returned_to_client", affects_pay: true)
+      expect(CompanyFeatures.for(company)).to be_client_managed_employee_lifecycle
+      roll_back_lifecycle_mode!(company, actor: create(:user, company: company, role: "org_admin"))
+      expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
+
+      get queue_path, headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("data").pluck("id")).to contain_exactly(item.id, returned.id)
+      get "#{queue_path}/#{item.id}", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.dig("data", "id")).to eq(item.id)
+
+      get "#{inbox_path}/counts", headers: headers
+      expect(response.parsed_body.fetch("data")).to include("pending_verifications" => 1, "waiting_count" => 1)
+
+      post "#{queue_path}/#{item.id}/return_to_client", headers: headers,
+        params: { return_note: "Please confirm the synthetic form." }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
+
+      [ item, returned ].each do |open_item|
+        post "#{queue_path}/#{open_item.id}/verify", headers: headers, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(open_item.reload.status).to eq("verified")
+      end
+      get "#{inbox_path}/counts", headers: headers
+      expect(response.parsed_body.fetch("data")).not_to have_key("pending_verifications")
+      get queue_path, headers: headers
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
+    end
+
+    it "exposes only the allowlisted separation metadata on termination details" do
+      details = { "reason_category" => "voluntary", "last_worked_on" => "2026-11-14",
+                  "final_pay_notes" => "Include the remaining PTO.", "notes" => "Synthetic separation note." }
+      item.update!(event_kind: "termination", metadata: details.merge("internal_reference" => "Synthetic internal value"))
+
+      get "#{queue_path}/#{item.id}", headers: headers
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("data")).to include(details)
+      expect(response.parsed_body.fetch("data")).not_to have_key("metadata")
+      expect(response.body).not_to include("Synthetic internal value")
+    end
+
+    it "uses the canonical HTTP 422 status for invalid verification requests" do
+      allow(ActionDispatch::Response).to receive(:rack_status_code).and_call_original
+
+      get queue_path, headers: headers, params: { affects_pay: "sometimes" }
+      expect(response).to have_http_status(422)
+      post "#{queue_path}/#{item.id}/verify", headers: headers,
+        params: { verification_note: "x" * 1_001 }, as: :json
+      expect(response).to have_http_status(422)
+
+      expect(ActionDispatch::Response).to have_received(:rack_status_code).with(:unprocessable_content).twice
     end
 
     [
@@ -153,6 +224,20 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(response).to have_http_status(:conflict)
     end
 
+    it "links a staff lifecycle correction to its employee status audit" do
+      item.update!(event_kind: "termination")
+      post "/api/v1/admin/employees/#{employee.id}/terminate", headers: headers,
+        params: { termination: { effective_date: PayrollBusinessClock.today.iso8601 } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      edit = AuditLog.find_by!(action: "employees#terminate", company: company, record_id: employee.id)
+
+      post "#{queue_path}/#{item.id}/verify", headers: headers,
+        params: { fixed_by_staff: true, staff_edit_audit_id: edit.id }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(item.reload).to have_attributes(status: "verified", fixed_by_staff: true)
+      expect(response.parsed_body.dig("data", "audit_references").sole).to include("staff_edit_audit_id" => edit.id)
+    end
+
     it "rolls back a send-back when its audit write fails" do
       allow(AuditLog).to receive(:record!).and_call_original
       allow(AuditLog).to receive(:record!).with(hash_including(action: "employee_verification_items#return_to_client"))
@@ -197,6 +282,32 @@ RSpec.describe "Staff employee verification queue", type: :request do
         expect(response).to have_http_status(:ok), response.body
         get "#{inbox_path}/counts", headers: headers
         expect(response.parsed_body.fetch("data")).to include("pending_verifications" => 0, "waiting_count" => 0)
+      end
+
+      it "queries effective operating profiles once across eligible companies" do
+        item
+        additional_items = Array.new(3) do
+          client_company = create(:company, organization: company.organization)
+          create_client_managed_profile!(client_company)
+          EmployeeVerificationItem.create!(company: client_company, employee: create_lifecycle_worker!(client_company),
+            event_kind: "new_hire", affects_pay: true)
+        end
+        today = PayrollBusinessClock.today
+        [ { effective_on: today + 1.day }, { ends_on: today - 1.day },
+          { lifecycle_mode_activated_at: nil }, { client_portal_enabled: false } ].each do |profile_attrs|
+          inactive = create(:company, organization: company.organization)
+          create_client_managed_profile!(inactive, **profile_attrs)
+          EmployeeVerificationItem.create!(company: inactive,
+            employee: create_lifecycle_worker!(inactive, readiness_gate_enforced: false),
+            event_kind: "new_hire", status: "verified", affects_pay: true)
+        end
+
+        query = ClientInboxQuery.new(user: staff, params: { kind: "employee_verification" })
+        queries = []
+        capture = ->(*, event) { queries << event[:sql] if event[:sql].include?("client_operating_profiles") }
+        result = ActiveSupport::Notifications.subscribed(capture, "sql.active_record") { query.page }
+        expect(result.fetch(:data).pluck(:id)).to contain_exactly(item.id, *additional_items.map(&:id))
+        expect(queries.size).to eq(1)
       end
     end
   end
