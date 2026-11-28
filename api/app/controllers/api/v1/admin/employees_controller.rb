@@ -260,7 +260,7 @@ module Api
             data: if EmployeeContactProjection.requested?(params)
                     EmployeeContactProjection.call(e.employee, context: contact_context)
                   else
-                    serialize_employee(e.employee, contact_context: contact_context)
+                    serialize_employee(e.employee, mask_tax_ids: mask_tax_ids?, contact_context: contact_context)
                   end
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e

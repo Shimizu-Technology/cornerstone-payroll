@@ -104,7 +104,7 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
   const [list, setList] = useState<{ key: string; rows: VerificationRow[]; pages: number; error?: string } | null>(null);
   const [detail, setDetail] = useState<{ id: number; item?: VerificationDetails; error?: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const [decision, setDecision] = useState<{ itemId: number; action: Decision } | null>(null);
+  const [decision, setDecision] = useState<{ itemId: number; action: Decision; revision: string } | null>(null);
   const [dismissedFix, setDismissedFix] = useState<string | null>(null);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   const decisionTrigger = useRef<HTMLButtonElement>(null);
@@ -220,8 +220,9 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
   const fixPath = `${editPath}${editPath.includes('?') ? '&' : '?'}verify_item_id=${currentItem?.id}`;
   const canReview = canManage && currentItem?.can_review;
   const canSendBack = canReview && activeCompany?.client_managed_employee_lifecycle && currentItem?.status === 'pending_verification';
-  const selectedDecision = decision?.itemId === selectedId ? decision?.action : null;
-  const openDecision = selectedDecision ?? (canReview && fixRevision === currentItem?.updated_at && dismissedFix !== location.key ? 'verify-fix' : null);
+  const selectedDecision = decision?.itemId === selectedId ? decision : null;
+  const openDecision = selectedDecision?.action ?? (canReview && fixRevision === currentItem?.updated_at && dismissedFix !== location.key ? 'verify-fix' : null);
+  const reviewedRevision = selectedDecision?.revision ?? fixRevision;
 
   return <>
     <Header title="To verify" description="Review employee changes made by your clients."
@@ -296,16 +297,16 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
             {canReview && <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <Button className="min-h-11!" onClick={event => {
                 decisionTrigger.current = event.currentTarget;
-                setDecision({ itemId: currentItem.id, action: 'verify' });
+                setDecision({ itemId: currentItem.id, action: 'verify', revision: currentItem.updated_at });
               }}>Mark verified</Button>
               <Link className="inline-flex min-h-11 items-center justify-center rounded-lg border border-neutral-300 px-4 font-semibold text-neutral-800 hover:bg-neutral-50" to={fixPath}>Fix &amp; verify</Link>
               {canSendBack && <Button variant="outline" className="min-h-11!" onClick={event => {
                 decisionTrigger.current = event.currentTarget;
-                setDecision({ itemId: currentItem.id, action: 'send-back' });
+                setDecision({ itemId: currentItem.id, action: 'send-back', revision: currentItem.updated_at });
               }}>Send back to client</Button>}
             </div>}
             {canReview && fixRevision && fixRevision !== currentItem.updated_at && <Alert>Employee details were saved. This verification item changed while you were editing. Review the latest details before deciding.</Alert>}
-            {canReview && openDecision && (openDecision !== 'send-back' || canSendBack) && <VerificationDecision key={`${currentItem.id}:${openDecision}`} item={currentItem} decision={openDecision}
+            {canReview && openDecision && reviewedRevision && (openDecision !== 'send-back' || canSendBack) && <VerificationDecision key={`${currentItem.id}:${openDecision}`} item={currentItem} reviewedRevision={reviewedRevision} decision={openDecision}
               returnFocusRef={openDecision === 'verify-fix' ? detailHeading : decisionTrigger}
               onClose={() => { setDecision(null); setDismissedFix(location.key); }}
               onReload={reload} onSaved={saved => {
@@ -324,8 +325,9 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
   </>;
 }
 
-function VerificationDecision({ item, decision, returnFocusRef, onClose, onSaved, onReload }: {
+function VerificationDecision({ item, reviewedRevision, decision, returnFocusRef, onClose, onSaved, onReload }: {
   item: VerificationDetails;
+  reviewedRevision: string;
   decision: Decision;
   returnFocusRef: RefObject<HTMLElement | null>;
   onClose: () => void;
@@ -344,9 +346,9 @@ function VerificationDecision({ item, decision, returnFocusRef, onClose, onSaved
     setFailure(null);
     try {
       const result = sendingBack
-        ? await staffEmployeeLifecycleApi.sendBack(item.company_id, item.id, { updated_at: item.updated_at, return_note: note.trim() })
+        ? await staffEmployeeLifecycleApi.sendBack(item.company_id, item.id, { updated_at: reviewedRevision, return_note: note.trim() })
         : await staffEmployeeLifecycleApi.verify(item.company_id, item.id, {
-          updated_at: item.updated_at, verification_note: note.trim(), fixed_by_staff: decision === 'verify-fix',
+          updated_at: reviewedRevision, verification_note: note.trim(), fixed_by_staff: decision === 'verify-fix',
         });
       onSaved(result.data);
     } catch (error) {

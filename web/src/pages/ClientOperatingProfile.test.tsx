@@ -266,4 +266,57 @@ describe('Employee lifecycle controls', () => {
       effective_on: '2026-11-16', lock_version: 4, reason: 'Keep current employee approvals.',
     });
   });
+
+  it('rebases untouched settings from the activation response while preserving local edits', async () => {
+    const serverChanged = {
+      ...version,
+      id: 11,
+      version: 2,
+      hours_source: 'connected_app',
+      options: { tips: { default: 'paid_in_check' }, client_portal: { employee_lifecycle_mode: 'client_managed' } },
+    };
+    const activatedResponse: OperatingProfileResponse = {
+      ...fixture,
+      lock_version: 2,
+      locked_keys: [],
+      effective: serverChanged,
+      history: [serverChanged, version],
+      employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'active' },
+    };
+    const saved = {
+      ...serverChanged,
+      id: 12,
+      version: 3,
+      effective_on: '2026-11-16',
+      options: { tips: { default: 'already_paid_out' }, client_portal: { employee_lifecycle_mode: 'client_managed' } },
+    };
+    lifecycleMocks.retry.mockResolvedValue(activatedResponse);
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({
+      ...fixture,
+      lock_version: 1,
+      locked_keys: [],
+      employee_lifecycle_preflight: pendingChecks,
+    });
+    vi.mocked(operatingProfileApi.update).mockResolvedValue({ ...activatedResponse, lock_version: 3, effective: saved, history: [saved, serverChanged], saved });
+
+    open();
+    const user = userEvent.setup();
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Tips default' }), 'already_paid_out');
+    await user.click(screen.getByRole('button', { name: 'Retry activation' }));
+    await screen.findByText('Client-managed mode is active.');
+
+    expect((screen.getByRole('combobox', { name: 'Hours source' }) as HTMLSelectElement).value).toBe('connected_app');
+    expect((screen.getByRole('combobox', { name: 'Tips default' }) as HTMLSelectElement).value).toBe('already_paid_out');
+
+    fireEvent.change(screen.getByLabelText('Effective date'), { target: { value: '2026-11-16' } });
+    await user.type(screen.getByLabelText('Reason for change'), 'Preserve local tips edit without overwriting hours source');
+    await user.click(screen.getByRole('button', { name: 'Save operating profile' }));
+
+    expect(operatingProfileApi.update).toHaveBeenCalledWith(34, {
+      effective_on: '2026-11-16',
+      reason: 'Preserve local tips edit without overwriting hours source',
+      lock_version: 2,
+      changes: { 'tips.default': 'already_paid_out' },
+    });
+  });
 });

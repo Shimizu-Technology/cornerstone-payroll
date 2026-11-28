@@ -286,6 +286,11 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(response).to have_http_status(:conflict)
       expect(response.parsed_body["code"]).to eq("verification_item_changed")
 
+      post "#{queue_path}/#{item.id}/return_to_client", headers: headers,
+        params: { updated_at: 1.day.ago.utc.iso8601(6), return_note: "Please confirm the synthetic form." }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("verification_item_changed")
+
       post "#{queue_path}/#{item.id}/verify", headers: headers, params: { fixed_by_staff: true }, as: :json
       expect(response).to have_http_status(:unprocessable_content)
       patch "/api/v1/admin/employees/#{employee.id}", headers: headers, params: { employee: { job_title: "Example technician" } }, as: :json

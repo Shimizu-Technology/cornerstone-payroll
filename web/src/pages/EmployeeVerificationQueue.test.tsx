@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api';
 import type { VerificationDetails } from '@/services/staff-employee-lifecycle';
 import { EmployeeVerificationQueue } from './EmployeeVerificationQueue';
 
@@ -174,5 +175,49 @@ describe('To verify', () => {
     await waitFor(() => expect(mocks.verify).toHaveBeenCalledWith(2, 11, {
       updated_at: item.updated_at, verification_note: 'Reviewed source.', fixed_by_staff: fix,
     }));
+  });
+
+  it.each(['verify', 'send-back'] as const)('binds %s decisions to the revision opened by staff when a refresh loads a newer revision', async (action) => {
+    const revision1 = item.updated_at;
+    const revision2 = '2026-11-28T12:05:00.012345Z';
+    let resolveRefresh!: (value: { data: VerificationDetails }) => void;
+
+    open();
+    await screen.findByRole('heading', { name: item.employee_name });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to employee changes' }));
+
+    mocks.get.mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: /Synthetic Worker/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: action === 'verify' ? 'Mark verified' : 'Send back to client' }));
+    const dialog = screen.getByRole('dialog');
+
+    await act(async () => {
+      resolveRefresh({ data: { ...item, updated_at: revision2 } });
+    });
+
+    const conflict = new ApiError('This item changed. Refresh it before submitting a decision.', 409);
+    if (action === 'verify') mocks.verify.mockRejectedValueOnce(conflict);
+    else mocks.sendBack.mockRejectedValueOnce(conflict);
+
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'Reviewed original revision.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: action === 'verify' ? 'Mark verified' : 'Send back' }));
+
+    await waitFor(() => {
+      if (action === 'verify') {
+        expect(mocks.verify).toHaveBeenCalledWith(2, 11, {
+          updated_at: revision1, verification_note: 'Reviewed original revision.', fixed_by_staff: false,
+        });
+      } else {
+        expect(mocks.sendBack).toHaveBeenCalledWith(2, 11, {
+          updated_at: revision1, return_note: 'Reviewed original revision.',
+        });
+      }
+    });
+
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('This item changed.');
+    mocks.get.mockResolvedValueOnce({ data: { ...item, updated_at: revision2 } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Load latest change' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

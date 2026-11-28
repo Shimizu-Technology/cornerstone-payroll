@@ -272,7 +272,17 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
         <BlockedLifecycleActivation profile={profile} companyId={companyId} disabled={saving} inboxReturn={params.get('inbox')} onUpdated={(updated) => {
           setProfile(updated);
           void refreshCompanies();
-          setDraft(current => ({ ...current, [LIFECYCLE_MODE_KEY]: draftFor(updated)[LIFECYCLE_MODE_KEY] }));
+          setDraft(current => {
+            const next = draftFor(updated);
+            for (const field of updated.catalog) {
+              if (field.id === LIFECYCLE_MODE_KEY) continue;
+              if (!updated.editable_keys.includes(field.id) || updated.locked_keys.includes(field.id)) continue;
+              if (JSON.stringify(current[field.id]) !== JSON.stringify(baseline[field.id])) {
+                next[field.id] = current[field.id];
+              }
+            }
+            return next;
+          });
           setError(null);
           const activationStatus = updated.employee_lifecycle_preflight?.lifecycle_mode_activation_status;
           setSaved(activationStatus === 'active' ? 'Client-managed mode is active.'

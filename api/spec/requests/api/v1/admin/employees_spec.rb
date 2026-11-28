@@ -667,6 +667,26 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
       end
     end
 
+    it "omits contractor_ein on a contact_revision_conflict when tax ID masking is requested" do
+      contractor = create(:employee, :business_contractor, company: company, department: department,
+        business_name: "Synthetic Contracting LLC", contractor_ein: "98-0000913", email: "contractor.old@example.net")
+      opened_revision = contractor.contact_revision
+      contractor.update_columns(email: "coworker.set@example.net", updated_at: contractor.updated_at + 2.seconds)
+
+      patch "/api/v1/admin/employees/#{contractor.id}", params: {
+        mask_tax_ids: true,
+        row_revision: opened_revision,
+        baseline_values: { email: "contractor.old@example.net" },
+        employee: { email: "contractor.new@example.net" }
+      }, as: :json
+
+      expect(response).to have_http_status(:conflict), response.body
+      expect(response.parsed_body).to include("code" => "contact_revision_conflict", "conflicting_fields" => [ "email" ])
+      data = response.parsed_body.fetch("data")
+      expect(data).to include("contractor_ein_last_four" => "0913", "email" => "coworker.set@example.net")
+      expect(data.keys).not_to include("contractor_ein", "ssn", "ssn_encrypted", "bank_account_number_encrypted", "bank_routing_number_encrypted")
+    end
+
     it "persists a correction without requiring the missing payroll setup of a gated hire" do
       incomplete = create(:employee, company: company, department: department, first_name: "Synthetic",
         readiness_gate_enforced: true, pay_rate: 0, ssn_encrypted: nil, hire_date: nil, w4_effective_on: nil)

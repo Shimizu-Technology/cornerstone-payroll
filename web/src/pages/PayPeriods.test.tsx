@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 
 import { ActionFeedback, FeedbackProvider } from '@/components/ui/action-feedback';
 import { PayPeriods } from './PayPeriods';
@@ -445,5 +445,88 @@ describe('PayPeriods check numbering', () => {
     expect(apiMocks.commit).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm commit' }));
     await waitFor(() => expect(apiMocks.commit).toHaveBeenCalledWith(12, { acknowledged_outstanding_file_request_ids: [], expected_next_check_number: 1001 }));
+  });
+});
+
+describe('PayPeriods final paycheck query parameters', () => {
+  function LocationQuery() {
+    return <output aria-label="PayPeriods query">{useLocation().search}</output>;
+  }
+
+  function NavigateToFinal() {
+    const navigate = useNavigate();
+    return <button type="button" onClick={() => navigate('/companies/11/pay-runs?new_final=1')}>Open final from link</button>;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.activeCompany = { id: 11 };
+    apiMocks.payrollHistoryList.mockResolvedValue(historyResponse([]));
+    apiMocks.companyGet.mockResolvedValue({ company: { id: 11, next_check_number: 1001 } });
+  });
+
+  it('ignores a pending regular schedule request after opening new_final=1', async () => {
+    let resolveSchedule!: (value: unknown) => void;
+    apiMocks.payScheduleGet.mockImplementationOnce(() => new Promise((resolve) => { resolveSchedule = resolve; }));
+
+    render(
+      <MemoryRouter initialEntries={['/companies/11/pay-runs']}>
+        <NavigateToFinal />
+        <PayPeriods />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'New Pay Period' }));
+    expect(await screen.findByText('Loading this client’s pay-schedule rules…')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open final from link' }));
+    await waitFor(() => expect((screen.getByLabelText('Run purpose') as HTMLSelectElement).value).toBe('final'));
+    expect(screen.queryByText('Loading this client’s pay-schedule rules…')).toBeNull();
+
+    await act(async () => {
+      resolveSchedule({
+        pay_schedule_settings: {
+          pay_schedule: {
+            confirmation_status: 'confirmed',
+            frequency: 'semimonthly',
+            period_rule: 'semimonthly',
+            pay_date_rule: 'semimonthly_15th_and_month_end',
+          },
+        },
+      });
+    });
+
+    expect((screen.getByLabelText('Run purpose') as HTMLSelectElement).value).toBe('final');
+    expect((screen.getByLabelText('Start Date') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByText(/boundary rule applied/)).toBeNull();
+  });
+
+  it('consumes competing new_after when opening new_final=1 while preserving unrelated parameters and new_after-only flow', async () => {
+    render(
+      <MemoryRouter initialEntries={['/companies/11/pay-runs?new_final=1&new_after=2026-10-31&year=2026']}>
+        <LocationQuery />
+        <PayPeriods />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('PayPeriods query').textContent).toBe('?year=2026'));
+    expect((screen.getByLabelText('Run purpose') as HTMLSelectElement).value).toBe('final');
+    expect((screen.getByLabelText('Start Date') as HTMLInputElement).value).toBe('');
+    expect((screen.getByRole('checkbox', { name: /Include ordinary base salary/ }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole('checkbox', { name: /Include recurring employee setup/ }) as HTMLInputElement).checked).toBe(false);
+
+    cleanup();
+    render(
+      <MemoryRouter initialEntries={['/companies/11/pay-runs?new_after=2026-10-31&year=2026']}>
+        <LocationQuery />
+        <PayPeriods />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.getByLabelText('PayPeriods query').textContent).toBe('?year=2026'));
+    expect((screen.getByLabelText('Run purpose') as HTMLSelectElement).value).toBe('regular');
+    expect((screen.getByLabelText('Start Date') as HTMLInputElement).value).toBe('2026-11-01');
+    expect((screen.getByRole('checkbox', { name: /Include ordinary base salary/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('checkbox', { name: /Include recurring employee setup/ }) as HTMLInputElement).checked).toBe(true);
   });
 });

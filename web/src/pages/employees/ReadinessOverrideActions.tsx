@@ -53,7 +53,11 @@ function AuthorizedReadinessActions({ companyId, employeeId, employeeName, gateE
     if (!loadOptions) return;
     const controller = new AbortController();
     staffEmployeeLifecycleApi.readinessOptions(companyId, employeeId, controller.signal).then(
-      response => { if (!controller.signal.aborted) setOptions(response.data); },
+      response => {
+        if (controller.signal.aborted) return;
+        setOptionsError('');
+        setOptions(response.data);
+      },
       (error: unknown) => {
         if (controller.signal.aborted) return;
         if (!gateEnforced && error instanceof ApiError && error.status === 403) return;
@@ -63,16 +67,21 @@ function AuthorizedReadinessActions({ companyId, employeeId, employeeName, gateE
     return () => controller.abort();
   }, [companyId, employeeId, gateEnforced, loadOptions, attempt]);
 
+  const reloadOptions = () => {
+    setOptionsError('');
+    setAttempt(current => current + 1);
+  };
+
   const openAction = (event: MouseEvent<HTMLButtonElement>, next: ReadinessAction) => {
     triggerRef.current = event.currentTarget;
     setAction(next);
   };
 
-  if (!gateEnforced && !options?.active_overrides.length && !notice) return null;
+  if (!gateEnforced && !options?.active_overrides.length && !notice && !(!payPeriodId && optionsError)) return null;
 
   return <div className="min-w-0 space-y-2">
     {!payPeriodId && notice && <p ref={noticeRef} tabIndex={-1} role="status" className="text-sm text-success-800">{notice}</p>}
-    {!payPeriodId && optionsError && <Alert tone="error">{optionsError}</Alert>}
+    {!payPeriodId && optionsError && <Alert tone="error">{optionsError}<Button type="button" variant="outline" className="mt-2 block min-h-11!" onClick={reloadOptions}>Try again</Button></Alert>}
     {gateEnforced && <div className="flex flex-wrap gap-2">
       <Button className="min-h-11!" variant="outline" disabled={disabled} onClick={event => openAction(event, { type: 'grant' })}>Readiness override</Button>
       <Button className="min-h-11!" variant="outline" disabled={disabled} onClick={event => openAction(event, { type: 'clear' })}>Clear readiness gate</Button>
@@ -84,7 +93,7 @@ function AuthorizedReadinessActions({ companyId, employeeId, employeeName, gateE
     </div>)}
     {action && <ReadinessDialog {...{ companyId, employeeId, employeeName, payPeriodId, options, optionsError, action }}
       returnFocusRef={triggerRef}
-      onReloadOptions={() => { setOptionsError(''); setAttempt(current => current + 1); }}
+      onReloadOptions={reloadOptions}
       onClose={() => setAction(null)}
       onSaved={() => {
         if (action.type === 'revoke') {

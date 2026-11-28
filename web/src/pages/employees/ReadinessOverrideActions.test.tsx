@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api';
 import { ReadinessOverrideActions } from './ReadinessOverrideActions';
 
 const mocks = vi.hoisted(() => ({ allowed: true, unlocked: true, managed: true, options: vi.fn(), preview: vi.fn(), send: vi.fn() }));
@@ -142,5 +143,25 @@ describe('Readiness override actions', () => {
     expect(screen.getByRole('button', { name: 'Allow in payroll' })).toHaveProperty('disabled', true);
     expect(mocks.preview).not.toHaveBeenCalled();
     expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps options failures visible with a retry for ungated employees while suppressing HTTP 403', async () => {
+    mocks.options
+      .mockRejectedValueOnce(new Error('Readiness service unavailable'))
+      .mockResolvedValueOnce({ data: options });
+    open(undefined, false);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('Readiness service unavailable');
+    fireEvent.click(within(alert).getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByRole('button', { name: 'Revoke override' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    cleanup();
+    mocks.options.mockReset();
+    mocks.options.mockRejectedValueOnce(new ApiError('Forbidden', 403));
+    open(undefined, false);
+    await waitFor(() => expect(mocks.options).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 });

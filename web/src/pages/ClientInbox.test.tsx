@@ -25,12 +25,36 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-it.each(['employee_verification', 'lifecycle_activation_blocked'])('hides locked lifecycle kinds and counts even on a %s deep link', async kind => {
-  render(<MemoryRouter initialEntries={[`/app/client-inbox?kind=${kind}`]}><ClientInbox /></MemoryRouter>);
+it.each(['employee_verification', 'lifecycle_activation_blocked'])('normalizes unavailable %s deep links out of the URL before loading and hides locked counts', async kind => {
+  mocks.list.mockImplementation(({ kind: requestedKind }) => Promise.resolve({
+    data: requestedKind === 'employee_verification' || requestedKind === 'lifecycle_activation_blocked' ? [] : [row('message')],
+    meta: { next_cursor: null },
+  }));
+  render(<MemoryRouter initialEntries={[`/app/client-inbox?kind=${kind}&status=all`]}><ClientInbox /><Destination /></MemoryRouter>);
   await screen.findByText('message item 1');
+  expect(mocks.list).not.toHaveBeenCalledWith(expect.objectContaining({ kind }));
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind: undefined, status: 'all' }));
+  expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByTestId('destination').textContent).toBe('/app/client-inbox?status=all');
   expect(screen.queryByRole('option', { name: 'Employee updates to verify' })).toBeNull();
   expect(screen.queryByRole('option', { name: 'Blocked mode switches' })).toBeNull();
   expect(screen.queryByText(/\d+ to verify/)).toBeNull();
+});
+
+it.each([
+  ['employee_verification', { client_managed_employee_lifecycle: true }],
+  ['lifecycle_activation_blocked', { has_blocked_lifecycle_activation: true }],
+] as const)('keeps available %s deep links in the URL, API request, and Kind selector', async (kind, flags) => {
+  Object.assign(mocks.companies[0], flags);
+  mocks.list.mockImplementation(({ kind: requestedKind }) => Promise.resolve({
+    data: [row(requestedKind === kind ? kind : 'message')],
+    meta: { next_cursor: null },
+  }));
+  render(<MemoryRouter initialEntries={[`/app/client-inbox?kind=${kind}&status=all`]}><ClientInbox /><Destination /></MemoryRouter>);
+  await screen.findByText(`${kind} item 1`);
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind, status: 'all' }));
+  expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe(kind);
+  expect(screen.getByTestId('destination').textContent).toBe(`/app/client-inbox?kind=${kind}&status=all`);
 });
 
 it('offers the blocked switch filter from another kind before any blocked row is loaded', async () => {
