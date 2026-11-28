@@ -16,6 +16,7 @@ module DemoCompany
   module Roster
     KITCHEN = "harbor-finch-kitchen"
     CATERING = "harbor-finch-catering"
+    MARKET = "harbor-finch-market"
 
     CLIENT_MANAGER_LABEL = "Client Manager"
     CLIENT_USER_LABEL = "Client User"
@@ -37,7 +38,15 @@ module DemoCompany
       zip: "96910"
     }.freeze
 
+    MARKET_ADDRESS = {
+      address_line1: "303 Market Lantern Way",
+      city: "Tamuning",
+      state: "GU",
+      zip: "96913"
+    }.freeze
+
     EMPLOYEE_STREET = "Finch Cove Lane"
+    MARKET_EMPLOYEE_STREET = "Market Lantern Lane"
     EMPLOYEE_CITY = "Hagåtña"
     EMPLOYEE_STATE = "GU"
     EMPLOYEE_ZIP = "96910"
@@ -85,6 +94,45 @@ module DemoCompany
         hire_date: Date.new(2026, 7, 13) }
     ].freeze
 
+    # Synthetic client-managed employee lifecycle showcase roster for Harbor
+    # Finch Market. Kept separate from PEOPLE so the Kitchen/Catering history,
+    # QuickBooks sample, and rename fixture stay unchanged.
+    LIFECYCLE_PEOPLE = [
+      { key: "lifecycle-incomplete", number: 1, company: MARKET, first: "Jordan", last: "Sample", dept: "Retail",
+        type: "hourly", rate: "16.50".to_d, ssn: "900-02-2001", dob: Date.new(1996, 4, 12), phone: "(671) 555-0181",
+        delivery: "paper_check", hire_date: Date.new(2026, 11, 2), scenario: :incomplete_new_hire },
+      { key: "lifecycle-ready", number: 2, company: MARKET, first: "Morgan", last: "Example", dept: "Retail",
+        type: "hourly", rate: "18.00".to_d, ssn: "900-02-2002", dob: Date.new(1993, 9, 8), phone: "(671) 555-0182",
+        delivery: "paper_check", hire_date: Date.new(2026, 11, 2), scenario: :ready_new_hire },
+      { key: "lifecycle-pay-change", number: 3, company: MARKET, first: "Casey", last: "Fixture", dept: "Operations",
+        type: "hourly", rate: "17.00".to_d, new_rate: "18.75".to_d, ssn: "900-02-2003", dob: Date.new(1990, 2, 19),
+        phone: "(671) 555-0183", delivery: "paper_check", hire_date: Date.new(2026, 8, 3), scenario: :pay_change },
+      { key: "lifecycle-w4-change", number: 4, company: MARKET, first: "Taylor", last: "Sample", dept: "Operations",
+        type: "hourly", rate: "15.50".to_d, ssn: "900-02-2004", dob: Date.new(1995, 7, 25), phone: "(671) 555-0184",
+        delivery: "paper_check", hire_date: Date.new(2026, 8, 3), scenario: :w4_change },
+      { key: "lifecycle-dd-missing-bank", number: 5, company: MARKET, first: "Avery", last: "Example", dept: "Office",
+        type: "hourly", rate: "19.00".to_d, ssn: "900-02-2005", dob: Date.new(1992, 12, 3), phone: "(671) 555-0185",
+        delivery: "direct_deposit", hire_date: Date.new(2026, 8, 3), scenario: :direct_deposit_missing_bank },
+      { key: "lifecycle-returned", number: 6, company: MARKET, first: "Riley", last: "Fixture", dept: "Retail",
+        type: "hourly", rate: "16.00".to_d, ssn: "900-02-2006", dob: Date.new(1997, 6, 14), phone: "(671) 555-0186",
+        delivery: "paper_check", hire_date: Date.new(2026, 8, 3), scenario: :returned_to_client },
+      { key: "lifecycle-terminated", number: 7, company: MARKET, first: "Jamie", last: "Sample", dept: "Operations",
+        type: "hourly", rate: "15.75".to_d, ssn: "900-02-2007", dob: Date.new(1991, 10, 29), phone: "(671) 555-0187",
+        delivery: "paper_check", hire_date: Date.new(2026, 8, 3), scenario: :termination },
+      { key: "lifecycle-rehired", number: 8, company: MARKET, first: "Quinn", last: "Example", dept: "Retail",
+        type: "hourly", rate: "17.25".to_d, ssn: "900-02-2008", dob: Date.new(1994, 1, 17), phone: "(671) 555-0188",
+        delivery: "paper_check", hire_date: Date.new(2026, 7, 13), scenario: :rehire },
+      { key: "lifecycle-possible-self", number: 9, company: MARKET, first: "Sloane", last: "Fixture", dept: "Office",
+        type: "hourly", rate: "20.00".to_d, ssn: "900-02-2009", dob: Date.new(1988, 5, 11), phone: "(671) 555-0189",
+        delivery: "paper_check", hire_date: Date.new(2026, 8, 3), scenario: :possible_self_action },
+      { key: "lifecycle-override", number: 10, company: MARKET, first: "Parker", last: "Sample", dept: "Retail",
+        type: "hourly", rate: "16.00".to_d, ssn: "900-02-2010", dob: Date.new(1998, 8, 21), phone: "(671) 555-0190",
+        delivery: "paper_check", hire_date: Date.new(2026, 11, 2), scenario: :readiness_override },
+      { key: "lifecycle-grandfathered", number: 11, company: MARKET, first: "Drew", last: "Example", dept: "Operations",
+        type: "hourly", rate: "18.50".to_d, ssn: "900-02-2011", dob: nil, phone: "(671) 555-0191",
+        delivery: nil, hire_date: Date.new(2026, 7, 13), scenario: :grandfathered_missing_items }
+    ].freeze
+
     # Biweekly calendar shared by both: periods start on Sundays, paid the
     # Friday after they end. QuickBooks covers the 14 Kitchen paydays from
     # January 23 to July 24; native payroll starts with the August 7 payday.
@@ -101,6 +149,8 @@ module DemoCompany
 
     def people_for(company_key) = PEOPLE.select { |person| person[:company] == company_key }
 
+    def lifecycle_people = LIFECYCLE_PEOPLE
+
     def quickbooks_people = PEOPLE.select { |person| person[:quickbooks] }
 
     def full_name(person) = "#{person[:first]} #{person[:last]}"
@@ -112,6 +162,8 @@ module DemoCompany
     def ssn_variants(person) = [ person[:ssn], ssn_digits(person) ]
 
     def address_line1_for(person) = "#{100 + person[:number]} #{EMPLOYEE_STREET}"
+
+    def lifecycle_address_line1_for(person) = "#{200 + person[:number]} #{MARKET_EMPLOYEE_STREET}"
 
     def formatted_address(address) = "#{address[:address_line1]}, #{address[:city]}, #{address[:state]} #{address[:zip]}"
 

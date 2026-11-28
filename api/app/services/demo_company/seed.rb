@@ -48,14 +48,27 @@ module DemoCompany
       }
     ].freeze
 
+    LIFECYCLE_COMPANY = {
+      key: Roster::MARKET, name: "Harbor Finch Market", slug: "harborfinch-market",
+      profile: Roster::MARKET_ADDRESS.merge(
+        ein: "07-2026103", phone: "(671) 555-0160", email: "office@harborfinch-market.example",
+        filing_contact_name: Roster::CLIENT_MANAGER_LABEL
+      ),
+      bank: { bank_name: Roster::BANK_NAME, bank_address: Roster::BANK_ADDRESS },
+      branding: { "display_name" => "Harbor Finch Market", "primary_color" => "#244D61", "accent_color" => "#D98E32" },
+      help: [ { name: Roster::CLIENT_MANAGER_LABEL, role: "Store manager", phone: "(671) 555-0161", email: "manager@harborfinch-market.example" } ],
+      departments: [ "Retail", "Operations", "Office" ]
+    }.freeze
+
     REVIEW_NOTE = "Verified against the retained QuickBooks employee setup and the client's hiring records."
     # Fixed 64-bit base for the per-organization seed lock, distinct from the
     # other DedicatedAdvisoryLock bases.
     LOCK_KEY_BASE = 4_200_000_000_000_000_000
 
-    def initialize(organization:, actor:)
+    def initialize(organization:, actor:, include_lifecycle_showcase: false)
       @organization = organization
       @actor = actor
+      @include_lifecycle_showcase = include_lifecycle_showcase
       @employees_created = 0
       @periods_committed = 0
       @periods_skipped = 0
@@ -74,6 +87,14 @@ module DemoCompany
         kitchen = companies.find { |company| fixture_key(company) == Roster::KITCHEN }
         company_scope(kitchen) { seed_quickbooks_history!(kitchen) }
         companies.each { |company| company_scope(company) { seed_native_payroll!(company) } }
+        if @include_lifecycle_showcase
+          market = system_scope { ensure_company!(LIFECYCLE_COMPANY) }
+          company_scope(market) do
+            apply_company_profile!(market)
+            seed_lifecycle_showcase!(market)
+          end
+          companies << market
+        end
         Result.new(companies: companies, employees_created: @employees_created, periods_committed: @periods_committed,
           periods_skipped: @periods_skipped, quickbooks_imported: @quickbooks_imported)
       end
@@ -153,7 +174,7 @@ module DemoCompany
       raise Refused, "Refusing to seed #{company.name}: it is not a demo company" unless company.reload.demo?
     end
 
-    def spec_for(company) = COMPANIES.find { |entry| entry[:key] == fixture_key(company) }
+    def spec_for(company) = (COMPANIES + [ LIFECYCLE_COMPANY ]).find { |entry| entry[:key] == fixture_key(company) }
 
     def departments_for(company)
       spec_for(company)[:departments].index_with { |name| Department.find_or_create_by!(company: company, name: name) }
@@ -444,6 +465,307 @@ module DemoCompany
       period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: actor.id, approved_at: nil, approved_by_id: nil)
       PayrollReview::RevisionService.new(pay_period: period, actor: actor).issue!
       PayPeriodLifecycleService.new(pay_period: period.reload, actor: actor).approve!
+    end
+
+    # -- Client-managed employee lifecycle showcase (Market) -------------------
+
+    def seed_lifecycle_showcase!(company)
+      demo!(company)
+      if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+        raise Refused, "Client-managed employee lifecycle mode is locked"
+      end
+
+      departments = departments_for(company)
+      workweek, schedule = ensure_calendar!(company)
+      draft_spec = Roster.native_periods.last
+      draft_period = period_for_window!(company, schedule, workweek, draft_spec) ||
+        company.pay_periods.where(status: "draft").order(:start_date, :id).last
+
+      ensure_lifecycle_operating_profile!(company)
+
+      Roster.lifecycle_people.each do |person|
+        department = departments.fetch(person[:dept])
+        employee = ensure_lifecycle_employee!(company, department, person)
+        apply_lifecycle_scenario!(company, employee, person, draft_period)
+      end
+    end
+
+    def ensure_lifecycle_operating_profile!(company)
+      PortalNotificationRecipient.find_or_create_by!(company: company, user: actor) do |recipient|
+        recipient.team_role = "lead"
+        recipient.added_by = actor
+      end
+
+      return if company.client_operating_profiles.exists?
+
+      ClientOperatingProfile.create!(
+        ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Roster::CALENDAR_ANCHOR).merge(
+          offering: "payroll_portals",
+          hours_source: "manual",
+          client_portal_enabled: true,
+          employee_portal_enabled: false,
+          options: OperatingProfileCatalog.default_options.deep_merge(
+            "client_portal" => { "employee_lifecycle_mode" => "client_managed" }
+          ),
+          lifecycle_mode_activated_at: Time.current,
+          changed_by: actor,
+          reason: "Seed Harbor Finch Market in client-managed employee lifecycle mode"
+        )
+      )
+    end
+
+    def ensure_lifecycle_employee!(company, department, person)
+      existing = find_employee(company, person)
+      return existing if existing
+
+      gated = person[:scenario].in?(%i[incomplete_new_hire ready_new_hire readiness_override])
+      missing_w4 = person[:scenario].in?(%i[incomplete_new_hire readiness_override])
+      grandfathered = person[:scenario] == :grandfathered_missing_items
+
+      employee = ApplicationRecord.transaction do
+        attrs = {
+          company: company,
+          department: department,
+          first_name: person[:first],
+          last_name: person[:last],
+          email: nil,
+          ssn_encrypted: person[:ssn],
+          employment_type: "hourly",
+          salary_type: "annual",
+          pay_rate: person[:rate],
+          pay_frequency: "biweekly",
+          status: "active",
+          filing_status: "single",
+          allowances: 0,
+          w4_effective_on: missing_w4 ? nil : person[:hire_date],
+          hire_date: person[:hire_date],
+          date_of_birth: person[:dob],
+          phone: person[:phone],
+          payment_delivery_method: person[:delivery],
+          address_line1: Roster.lifecycle_address_line1_for(person),
+          city: Roster::EMPLOYEE_CITY,
+          state: Roster::EMPLOYEE_STATE,
+          zip: Roster::EMPLOYEE_ZIP,
+          readiness_gate_enforced: gated
+        }
+        created = Employee.new(attrs)
+        created.save!(validate: !grandfathered)
+        unless missing_w4
+          source = person[:scenario] == :ready_new_hire ? "client_direct" : "employee_creation"
+          create_lifecycle_w4_election!(created, source: source, effective_on: person[:hire_date],
+            signed_on: person[:hire_date], reason: "Initial showcase W-4 election")
+        end
+        created
+      end
+      @employees_created += 1
+      employee
+    end
+
+    def create_lifecycle_w4_election!(employee, source:, effective_on:, signed_on:, reason:, filing_status: "single")
+      EmployeeW4ElectionChangeService.new(
+        employee: employee,
+        attributes: EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.merge(
+          filing_status: filing_status,
+          w4_effective_on: effective_on,
+          w4_signed_on: signed_on,
+          w4_source_reference: "Synthetic showcase Form W-4 (#{employee.first_name} #{employee.last_name})"
+        ),
+        actor: actor,
+        source: source,
+        reason: reason
+      ).call!
+    end
+
+    def apply_lifecycle_scenario!(company, employee, person, draft_period)
+      case person[:scenario]
+      when :incomplete_new_hire
+        ensure_verification_item!(company, employee, event_kind: "new_hire",
+          changed_fields: %w[first_name last_name hire_date pay_rate payment_delivery_method],
+          after_values: { "first_name" => employee.first_name, "last_name" => employee.last_name,
+                          "pay_rate" => person[:rate].to_f, "payment_delivery_method" => "paper_check" },
+          effective_on: employee.hire_date)
+      when :ready_new_hire
+        ensure_verification_item!(company, employee, event_kind: "new_hire",
+          changed_fields: %w[first_name last_name hire_date pay_rate w4_effective_on payment_delivery_method],
+          after_values: { "first_name" => employee.first_name, "last_name" => employee.last_name,
+                          "pay_rate" => person[:rate].to_f, "filing_status" => "single",
+                          "payment_delivery_method" => "paper_check" },
+          effective_on: employee.hire_date)
+      when :pay_change
+        unless employee.employee_compensation_changes.where(effective_on: draft_period.start_date).exists?
+          EmployeeCompensationChangeService.new(
+            employee: employee, actor: actor, source: "client_direct",
+            reason: "Showcase step increase", effective_on: draft_period.start_date, pay_rate: person[:new_rate]
+          ).call!
+        end
+        ensure_verification_item!(company, employee, event_kind: "compensation_change",
+          changed_fields: %w[pay_rate],
+          before_values: { "pay_rate" => person[:rate].to_f },
+          after_values: { "pay_rate" => person[:new_rate].to_f },
+          effective_on: draft_period.start_date)
+      when :w4_change
+        if employee.employee_w4_elections.where(source: "client_direct").none?
+          create_lifecycle_w4_election!(employee, source: "client_direct",
+            effective_on: draft_period.pay_date, signed_on: draft_period.start_date,
+            filing_status: "married", reason: "Updated marital status on Form W-4")
+        end
+        ensure_verification_item!(company, employee, event_kind: "w4_change",
+          changed_fields: %w[filing_status w4_effective_on],
+          before_values: { "filing_status" => "single", "w4_effective_on" => employee.hire_date.iso8601 },
+          after_values: { "filing_status" => "married", "w4_effective_on" => draft_period.pay_date.iso8601 },
+          effective_on: draft_period.pay_date)
+      when :direct_deposit_missing_bank
+        ensure_verification_item!(company, employee, event_kind: "payment_method_change",
+          changed_fields: %w[payment_delivery_method],
+          before_values: { "payment_delivery_method" => "paper_check" },
+          after_values: { "payment_delivery_method" => "direct_deposit" },
+          effective_on: draft_period.start_date,
+          metadata: { "direct_deposit_missing_bank_details" => true })
+      when :returned_to_client
+        ensure_verification_item!(company, employee, event_kind: "w4_change",
+          status: "returned_to_client",
+          changed_fields: %w[filing_status w4_effective_on],
+          before_values: { "filing_status" => "single" },
+          after_values: { "filing_status" => "head_of_household" },
+          effective_on: draft_period.pay_date,
+          return_note: "W-4 signed date is after the effective date. Confirm the signed date from the employee's form.",
+          returned_by: actor,
+          returned_at: Time.current)
+      when :termination
+        term_date = [ draft_period.start_date + 2.days, PayrollBusinessClock.today ].min
+        if employee.reload.status == "active" && !employee.employee_status_events.exists?(event_type: "terminated")
+          EmployeeStatusTransitionService.terminate!(employee: employee, actor: actor, attributes: {
+            effective_date: term_date, last_worked_on: term_date,
+            reason_category: "voluntary", internal_notes: "Two weeks notice completed.", source: "operator"
+          })
+        end
+        ensure_verification_item!(company, employee, event_kind: "termination",
+          changed_fields: %w[status termination_date],
+          before_values: { "status" => "active", "termination_date" => nil },
+          after_values: { "status" => "terminated", "termination_date" => term_date.iso8601 },
+          effective_on: term_date,
+          metadata: {
+            "reason_category" => "voluntary",
+            "last_worked_on" => term_date.iso8601,
+            "final_pay_notes" => "Pay final 24 hours worked plus 16 hours accrued PTO.",
+            "notes" => "Two weeks notice completed."
+          })
+      when :rehire
+        prior_term = [ Date.new(2026, 10, 15), PayrollBusinessClock.today - 2.days ].min
+        rehire_date = [ draft_period.start_date + 1.day, PayrollBusinessClock.today ].min
+        rehire_date = prior_term + 1.day if rehire_date <= prior_term
+        if employee.reload.employee_status_events.where(event_type: "terminated").none?
+          EmployeeStatusTransitionService.terminate!(employee: employee, actor: actor, attributes: {
+            effective_date: prior_term, last_worked_on: prior_term,
+            reason_category: "voluntary", source: "operator"
+          })
+        end
+        if employee.reload.status == "terminated" && employee.employee_status_events.where(event_type: "reactivated").none?
+          EmployeeStatusTransitionService.reactivate!(employee: employee, actor: actor, attributes: {
+            effective_date: rehire_date, internal_notes: "Rehired for seasonal retail coverage.", source: "operator"
+          })
+        end
+        employee.update!(readiness_gate_enforced: true) unless employee.reload.readiness_gate_enforced?
+        ensure_verification_item!(company, employee, event_kind: "rehire",
+          changed_fields: %w[status termination_date readiness_gate_enforced],
+          before_values: { "status" => "terminated", "termination_date" => prior_term.iso8601, "readiness_gate_enforced" => false },
+          after_values: { "status" => "active", "termination_date" => nil, "readiness_gate_enforced" => true },
+          effective_on: rehire_date,
+          metadata: { "notes" => "Rehired for seasonal retail coverage." })
+      when :possible_self_action
+        term_date = [ draft_period.start_date + 3.days, PayrollBusinessClock.today ].min
+        if employee.reload.status == "active" && !employee.employee_status_events.exists?(event_type: "terminated")
+          EmployeeStatusTransitionService.terminate!(employee: employee, actor: actor, attributes: {
+            effective_date: term_date, last_worked_on: term_date,
+            reason_category: "voluntary", source: "operator"
+          })
+        end
+        ensure_verification_item!(company, employee, event_kind: "termination",
+          changed_fields: %w[status termination_date],
+          before_values: { "status" => "active", "termination_date" => nil },
+          after_values: { "status" => "terminated", "termination_date" => term_date.iso8601 },
+          effective_on: term_date,
+          metadata: {
+            "reason_category" => "voluntary",
+            "last_worked_on" => term_date.iso8601,
+            "possible_self_lifecycle_action" => true,
+            "possible_self_actor_id" => actor.id,
+            "own_record_signal" => "name_only",
+            "notes" => "Client manager name matched this employee record; confirm they are different people."
+          })
+      when :readiness_override
+        ensure_lifecycle_readiness_override!(company, employee, draft_period)
+      when :grandfathered_missing_items
+        nil
+      end
+    end
+
+    def ensure_verification_item!(company, employee, event_kind:, status: "pending_verification", changed_fields: [],
+                                  before_values: {}, after_values: {}, effective_on: nil, metadata: {},
+                                  return_note: nil, returned_by: nil, returned_at: nil)
+      return if EmployeeVerificationItem.where(company: company, employee: employee, event_kind: event_kind).exists?
+
+      EmployeeVerificationItem.create!(
+        company: company,
+        employee: employee,
+        event_kind: event_kind,
+        status: status,
+        affects_pay: true,
+        effective_on: effective_on,
+        source_actor: actor,
+        changed_fields: changed_fields,
+        before_values: before_values,
+        after_values: after_values,
+        metadata: metadata,
+        return_note: return_note,
+        returned_by: returned_by,
+        returned_at: returned_at
+      )
+    end
+
+    def ensure_lifecycle_readiness_override!(company, employee, draft_period)
+      return if employee.employee_readiness_overrides.active.exists?(pay_period_id: draft_period.id)
+
+      checklist = EmployeeReadinessEvaluator.for_pay_period(employee, draft_period)
+      reason = "Allow first paycheck while signed Form W-4 is in transit; withhold at IRS Pub 15-T Single default."
+
+      ApplicationRecord.transaction do
+        admin_override = AdminOverride.create!(
+          company: company,
+          subject: employee,
+          actor: actor,
+          reason: reason,
+          action: "employee_readiness_override#grant",
+          preflight_result: {},
+          before_snapshot: { "missing_items" => checklist.missing_keys },
+          after_snapshot: { "pay_period_id" => draft_period.id, "missing_items" => checklist.missing_keys, "default_withholding" => true },
+          self_override: false
+        )
+        override = EmployeeReadinessOverride.create!(
+          company: company,
+          employee: employee,
+          pay_period: draft_period,
+          missing_items_snapshot: checklist.missing_keys,
+          default_w4_acknowledged: true,
+          reason: reason,
+          granted_by: actor,
+          granted_at: Time.current,
+          admin_override: admin_override
+        )
+        effective_on = [ draft_period.pay_date, employee.hire_date ].compact.min
+        election = employee.employee_w4_elections.find_by(source: "default_withholding") ||
+          EmployeeW4ElectionChangeService.new(
+            employee: employee,
+            actor: actor,
+            source: "default_withholding",
+            reason: reason,
+            attributes: EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.merge(
+              w4_effective_on: effective_on,
+              w4_source_reference: "Admin readiness override ##{override.id} — IRS Pub 15-T default (Single, no adjustments)"
+            )
+          ).call!
+        override.update!(default_w4_election: election)
+      end
     end
   end
 end
