@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, type RenderResult } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within, type RenderResult } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeForm } from './EmployeeForm';
-import { ApiError } from '@/services/api';
+import { ApiError, apiErrorMessage } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), update: vi.fn(), departments: vi.fn(), company: undefined as Record<string, unknown> | undefined }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1, role: 'client' }, isClient: true, isSuperAdmin: false, isManager: false }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: mocks.company }) }));
-vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: false }, loading: false }) }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), update: vi.fn(), departments: vi.fn(), refresh: vi.fn(), intake: vi.fn(), viewer: false, company: undefined as Record<string, unknown> | undefined }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1, role: 'client' }, isClient: true, isClientViewer: mocks.viewer, isSuperAdmin: false, isManager: false }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: mocks.refresh, activeCompanyId: 1, activeCompany: mocks.company }) }));
+vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: mocks.intake }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/employees/EmployeeDocumentsPanel', () => ({ EmployeeDocumentsPanel: () => null }));
 vi.mock('@/components/employees/EmployeeClassificationTransitionDialog', () => ({ EmployeeClassificationTransitionDialog: () => null }));
@@ -44,6 +44,9 @@ function submit(): void { fireEvent.submit(document.getElementById('employee-for
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.company = undefined;
+  mocks.viewer = false;
+  mocks.refresh.mockResolvedValue(undefined);
+  mocks.intake.mockReturnValue({ settings: { enabled: false }, loading: false });
   mocks.departments.mockResolvedValue({ data: [] });
   mocks.update.mockResolvedValue({ data: hourly, change_request: null, message: 'Saved' });
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -117,7 +120,7 @@ describe('Client employee form payload', () => {
     mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
     mocks.get.mockResolvedValue({ data: { ...hourly, lifecycle_edit_context: { own_record: true } } });
     view(7);
-    expect(await screen.findByText(/Changes to your pay or tax details go to Cornerstone for review/)).toBeTruthy();
+    expect(await screen.findByText(/payment method, name, birth date, hire date, or email go to Cornerstone for review/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Hourly Rate/), { target: { value: '15.75' } });
     expect(screen.getByText('Cornerstone will review when the new pay rate should take effect.')).toBeTruthy();
     expect(screen.queryByLabelText('Pay change effective date')).toBeNull();
@@ -140,6 +143,187 @@ describe('Client employee form payload', () => {
     submit();
     await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
     expect(mocks.update.mock.calls[1][1].w4_effective_on).toBeUndefined();
+  });
+
+  it('shows the dated W-4, keeps evidence across toggles, and blocks a cleared effective date', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: {
+      ...hourly, w4_signed_on: '2025-12-28', w4_source_reference: 'Fixture W-4',
+      current_w4_election: {
+        effective_on: '2026-01-01', w4_form_version: 2026, source: 'client_direct',
+        filing_status: 'married', additional_withholding: 42, w4_dependent_credit: 0,
+        w4_step2_multiple_jobs: false, w4_step4a_other_income: 0, w4_step4b_deductions: 0,
+      },
+      readiness: { status: 'ready', rates_on: '2026-11-28', w4_on: '2026-12-04', items: [] },
+      lifecycle_edit_context: { own_record: false, approved_pay_date: '2026-12-05' },
+    } });
+    view(7);
+    expect(await screen.findByText('Current employee election')).toBeTruthy();
+    expect(screen.getByText('Effective Jan 1, 2026 · Form 2026')).toBeTruthy();
+    expect(screen.getByText('$42.00')).toBeTruthy();
+    expect(screen.getByText(/married filing jointly/i)).toBeTruthy();
+
+    const received = screen.getByLabelText('Record a received W-4');
+    fireEvent.click(received);
+    const signed = screen.getByLabelText('Signed date on source W-4') as HTMLInputElement;
+    const source = screen.getByLabelText('Source document / reference') as HTMLInputElement;
+    expect(signed.value).toBe('2025-12-28');
+    expect(source.value).toBe('Fixture W-4');
+    fireEvent.change(source, { target: { value: 'Replacement fixture' } });
+    const effective = screen.getByLabelText(/^Effective date/) as HTMLInputElement;
+    expect(effective.value).toBe('2026-12-04');
+    expect(screen.getByText(/reopen any approved payroll/)).toBeTruthy();
+    fireEvent.change(effective, { target: { value: '' } });
+    expect(screen.queryByText(/reopen any approved payroll/)).toBeNull();
+    fireEvent.click(received);
+    fireEvent.click(received);
+    expect((screen.getByLabelText(/^Effective date/) as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Source document / reference') as HTMLInputElement).value).toBe('Replacement fixture');
+    submit();
+    expect(await screen.findByText('Enter the date this W-4 became effective')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('shows and focuses the DOB error, and does not allow clearing saved filing fields', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: {
+      ...hourly, date_of_birth: '1992-05-01', hire_date: '2090-01-01', city: '',
+      readiness: { status: 'incomplete', rates_on: '2026-11-28', w4_on: '2026-12-04', items: [
+        { key: 'hire_date', applicable: true, complete: false }, { key: 'home_address', applicable: true, complete: false },
+      ] },
+    } });
+    view(7);
+    expect(await screen.findByText(/Required before this employee can be paid/)).toBeTruthy();
+    const dob = screen.getByLabelText('Date of Birth');
+    fireEvent.change(dob, { target: { value: '2090-01-02' } });
+    submit();
+    expect(await screen.findByText('Date of birth must be in the past')).toBeTruthy();
+    expect(dob.getAttribute('aria-invalid')).toBe('true');
+    await waitFor(() => expect(document.activeElement).toBe(dob));
+
+    fireEvent.change(dob, { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText(/Hire Date/), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText(/Address Line 1/), { target: { value: '' } });
+    submit();
+    expect(await screen.findByText('Date of birth is required')).toBeTruthy();
+    expect(screen.getByText('Hire date is required')).toBeTruthy();
+    expect(screen.getByText('Address line 1 is required')).toBeTruthy();
+    expect(screen.queryByText('City is required')).toBeNull();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents clearing a saved legal business name', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: business });
+    view(8);
+    const name = await screen.findByLabelText(/Legal Business Name/);
+    fireEvent.change(name, { target: { value: '' } });
+    submit();
+    expect(await screen.findByText('Legal business name is required')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('shows each API validation detail once in the summary and wires payment errors to the field', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: hourly });
+    const details = { payment_delivery_method: ['Cornerstone needs to reopen this payroll.'], base: ['Review the employee record.'] };
+    mocks.update.mockRejectedValueOnce(new ApiError(apiErrorMessage({ error: 'Validation failed', details }, 422), 422, details));
+    view(7);
+    const payment = await screen.findByLabelText('How this employee is paid');
+    fireEvent.change(payment, { target: { value: 'direct_deposit' } });
+    submit();
+    const summary = await screen.findByRole('alert');
+    expect(summary.textContent?.match(/Cornerstone needs to reopen this payroll/g)).toHaveLength(1);
+    expect(summary.textContent?.match(/Review the employee record/g)).toHaveLength(1);
+    expect(summary.textContent).not.toContain('base:');
+    expect(payment.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(payment.getAttribute('aria-describedby')!)?.textContent).toContain('Cornerstone needs to reopen this payroll.');
+    await waitFor(() => expect(document.activeElement).toBe(payment));
+  });
+
+  it('keeps the approval-first edit form dormant despite persisted readiness', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'approval_first' };
+    mocks.get.mockResolvedValue({ data: {
+      ...hourly, readiness: { status: 'incomplete', rates_on: '2026-11-28', w4_on: '2026-12-04', items: [] },
+    } });
+    view(7);
+    expect(await screen.findByRole('button', { name: 'Update Employee' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Ready to pay' })).toBeNull();
+    expect(screen.queryByLabelText('Record a received W-4')).toBeNull();
+    expect((screen.getByLabelText('How this employee is paid') as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it('blocks edit-mode writes for a client viewer', async () => {
+    mocks.viewer = true;
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: hourly });
+    view(7);
+    const section = await screen.findByRole('region', { name: 'Read-only employee access' });
+    expect(within(section).getByRole('link', { name: 'Back to employee records' })).toBeTruthy();
+    expect(screen.queryByLabelText(/First Name/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save employee' })).toBeNull();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('disables intake requests after activation and returns to approval-first on a later refresh', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'approval_first' };
+    mocks.get.mockResolvedValue({ data: hourly });
+    mocks.update.mockRejectedValueOnce(new ApiError('Mode changed', 409, undefined, {
+      code: 'lifecycle_mode_changed', employee_lifecycle_mode: 'client_managed',
+    }));
+    const rendered = view(7);
+    const payment = await screen.findByLabelText('How this employee is paid') as HTMLSelectElement;
+    await screen.findByText(/Saved SSN ending in/);
+    submit();
+    await screen.findByText(/Your entries are still here/);
+    expect(payment.disabled).toBe(false);
+    expect(mocks.intake).toHaveBeenLastCalledWith(1, true, false);
+    const rerender = () => rendered.rerender(
+      <MemoryRouter initialEntries={['/companies/1/employees/7/edit']}><Routes>
+        <Route path="/companies/:companyId/employees/new" element={<EmployeeForm />} />
+        <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
+        <Route path="*" element={<p>Left the form</p>} />
+      </Routes></MemoryRouter>,
+    );
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    rerender();
+    expect(payment.disabled).toBe(false);
+    mocks.company = { id: 1, employee_lifecycle_mode: 'approval_first' };
+    rerender();
+    expect(payment.disabled).toBe(true);
+    expect(mocks.intake).toHaveBeenLastCalledWith(1, true, true);
+  });
+
+  it('blocks a locked effective date before saving and explains negative scalar pay', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: { ...business, lifecycle_edit_context: {
+      own_record: false, compensation_default_on: '2026-11-30', earliest_compensation_effective_on: '2026-11-30',
+    } } });
+    view(8);
+    const rate = await screen.findByLabelText(/Flat Fee/);
+    fireEvent.change(rate, { target: { value: '-5' } });
+    submit();
+    expect(await screen.findByText('Pay rate cannot be negative')).toBeTruthy();
+    fireEvent.change(rate, { target: { value: '550' } });
+    const date = await screen.findByLabelText('Pay change effective date') as HTMLInputElement;
+    expect(date.min).toBe('2026-11-30');
+    fireEvent.change(date, { target: { value: '2026-11-29' } });
+    submit();
+    expect(await screen.findByText('Choose Nov 30, 2026 or later. Earlier payroll is already approved or finalized.')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('masks nine-digit references and both SSN entries in client-managed mode', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: { ...hourly, w4_source_reference: 'Fixture 900112233' } });
+    view(7);
+    fireEvent.click(await screen.findByLabelText('Record a received W-4'));
+    expect((screen.getByLabelText('Source document / reference') as HTMLInputElement).value).toBe('Fixture •••-••-2233');
+    const ssn = document.querySelector<HTMLInputElement>('[name="ssn"]')!;
+    fireEvent.change(ssn, { target: { value: '900112233' } });
+    expect(ssn.type).toBe('password');
+    expect((screen.getByLabelText(/Re-enter Social Security Number/) as HTMLInputElement).type).toBe('password');
+    expect(screen.queryByText('900-11-2233')).toBeNull();
   });
 
   it('offers the department picker and saves a practice client profile without staff payroll permission', async () => {

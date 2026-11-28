@@ -14,7 +14,8 @@ import { employeePaymentDelivery, paymentMethodMissing } from '@/lib/employee-pa
 import { employeeStatusConfig, employmentTypeLabels, formatCurrency, payFrequencyLabels } from '@/lib/utils';
 import { employeeEditPath, employeesPath, safeInternalReturnPath } from '@/lib/routes';
 import { parsePositiveRouteId } from '@/lib/route-params';
-import { clientEmployeeLifecycleApi } from '@/services/clientEmployeeLifecycle';
+import { clientEmployeesApi } from '@/services/api';
+import { ownEmployeeReviewNotice } from '@/services/clientEmployeeLifecycle';
 import type { Employee } from '@/types';
 import { useClientViewOnly } from '@/hooks/useClientViewOnly';
 import { ClientEmployeeStatusActions } from './ClientEmployeeStatusActions';
@@ -34,6 +35,7 @@ export function ClientEmployeeOverview() {
   const [contactEditRequest, setContactEditRequest] = useState(0);
   const [appPanelVersion, setAppPanelVersion] = useState(0);
   const [lifecycleVersion, setLifecycleVersion] = useState(0);
+  const [contactVersion, setContactVersion] = useState(0);
   const clientManaged = activeCompany?.id === companyId && activeCompany?.employee_lifecycle_mode === 'client_managed';
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export function ClientEmployeeOverview() {
     setLoading(true);
     setEmployee(null);
     setError(null);
-    void clientEmployeeLifecycleApi.get(employeeId).then(
+    void clientEmployeesApi.get(employeeId).then(
       ({ data }) => { if (current) setEmployee(data); },
       (caught) => { if (current) setError(caught instanceof Error ? caught.message : 'Could not load this employee.'); },
     ).finally(() => { if (current) setLoading(false); });
@@ -50,14 +52,14 @@ export function ClientEmployeeOverview() {
   }, [activeCompanyId, companyId, employeeId]);
 
   useEffect(() => {
-    if (!clientManaged || !lifecycleVersion || !employeeId || activeCompanyId !== companyId) return;
+    if (!clientManaged || !contactVersion || !employeeId || activeCompanyId !== companyId) return;
     let current = true;
-    void clientEmployeeLifecycleApi.get(employeeId).then(
+    void clientEmployeesApi.get(employeeId).then(
       ({ data }) => { if (current) setEmployee((previous) => previous?.id === data.id ? { ...previous, ...data } : previous); },
       () => {},
     );
     return () => { current = false; };
-  }, [activeCompanyId, clientManaged, companyId, employeeId, lifecycleVersion]);
+  }, [activeCompanyId, clientManaged, companyId, employeeId, contactVersion]);
 
   if (!companyId || !employeeId) return <p role="alert" className="p-6">This employee link is invalid.</p>;
   if (activeCompanyId !== companyId || loading) return <WorkspaceLoader label="Loading employee" />;
@@ -100,12 +102,13 @@ export function ClientEmployeeOverview() {
         />}
         {clientManaged && canEditContact && employee.lifecycle_edit_context?.own_record &&
           <p className="rounded-lg border border-primary-100 bg-primary-50 p-3 text-sm text-primary-900">
-            This is your own employee record. Changes to your pay or tax details go to Cornerstone for review.
+            {ownEmployeeReviewNotice}
           </p>}
         {clientManaged && <EmployeeReturnedItems key={`${companyId}:${employeeId}:returned`} employeeId={employeeId} canRespond={canEditContact} refreshVersion={lifecycleVersion} />}
         {clientManaged && employee.readiness && <EmployeeReadinessCard
           readiness={employee.readiness}
           isBusinessContractor={employee.employment_type === 'contractor' && employee.contractor_type === 'business'}
+          businessNameMissing={Boolean(employee.first_name?.trim() && employee.last_name?.trim() && !employee.business_name?.trim())}
           setupPath={canEditContact ? employeeEditPath(companyId, employeeId, { returnTo }) : undefined}
         />}
         <EmployeeContactCard
@@ -119,7 +122,10 @@ export function ClientEmployeeOverview() {
           onRecordChange={(updated, { emailChanged }) => {
             setEmployee((current) => (current ? { ...current, ...updated } : current));
             if (emailChanged) setAppPanelVersion((version) => version + 1);
-            if (clientManaged) setLifecycleVersion((version) => version + 1);
+            if (clientManaged) {
+              setContactVersion((version) => version + 1);
+              setLifecycleVersion((version) => version + 1);
+            }
           }}
         />
         <EmployeeAppPanel

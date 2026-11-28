@@ -464,7 +464,7 @@ export interface EmployeeDeliveryConsentsSummary {
   company_counts?: Partial<Record<EmployeeDeliveryConsentItem['kind'], EmployeeDeliveryAnswerCounts>>;
 }
 
-export type EmployeeW4ElectionSource = 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
+export type EmployeeW4ElectionSource = 'client_direct' | 'default_withholding' | 'staff' | 'client_approved' | 'employee_creation' | 'legacy_profile' | 'quickbooks_history';
 
 export interface EmployeeW4Election {
   id: number;
@@ -482,7 +482,7 @@ export interface EmployeeW4Election {
   w4_signed_on?: string | null;
   w4_source_reference?: string | null;
   source: EmployeeW4ElectionSource;
-  reason: string;
+  reason?: string;
   created_by_name?: string | null;
   created_at: string;
 }

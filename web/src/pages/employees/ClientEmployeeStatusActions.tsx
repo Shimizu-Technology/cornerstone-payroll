@@ -1,12 +1,13 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { useCompany } from '@/contexts/CompanyContext';
 import { formatDate, parseDay } from '@/lib/display-date';
-import { clientEmployeeLifecycleApi, lifecycleErrorCode, type LifecycleEditContext } from '@/services/clientEmployeeLifecycle';
+import { clientEmployeeLifecycleApi, lifecycleErrorCode, maskLifecycleNote, type LifecycleEditContext } from '@/services/clientEmployeeLifecycle';
 import type { Employee } from '@/types';
 import { EmployeeReadinessCard } from './EmployeeReadinessCard';
 
@@ -30,13 +31,17 @@ export function ClientEmployeeStatusActions({ employee, context, onSaved }: {
 }) {
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<{ message: string; warnings?: string[] }>();
+  const confirmationRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (result) confirmationRef.current?.focus();
+  }, [result]);
   const transition = employee.status === 'active' ? 'terminate' : employee.status === 'terminated' ? 'rehire' : null;
   if (!result && (!context || context.own_record || !transition)) return null;
 
   return (
     <div className="space-y-3">
-      {result && <Alert tone="success">{result.message}</Alert>}
-      {result?.warnings?.map((message) => <Alert key={message}>{message}</Alert>)}
+      {result && <div ref={confirmationRef} tabIndex={-1}><Alert tone="success">{maskLifecycleNote(result.message)}</Alert></div>}
+      {result?.warnings?.map((message) => <Alert key={message}>{maskLifecycleNote(message)}</Alert>)}
       {context && !context.own_record && transition && <Button type="button" variant="outline" className="min-h-11" onClick={() => setOpen(true)}>
         {transition === 'terminate' ? 'Terminate' : 'Rehire'}
       </Button>}
@@ -62,6 +67,14 @@ function nextDate(value?: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function terminationDateError(date: string, hireDate: string, today: string, lastWorkedOn: string, lastWorkedError?: string): string | undefined {
+  if (hireDate > today) return 'This employee’s hire date is in the future. Update the hire date before recording a termination.';
+  if (!parseDay(date)) return 'Enter a termination date.';
+  if (date > today) return 'The termination date cannot be in the future.';
+  if (date < hireDate) return 'The termination date must be on or after the hire date.';
+  if (!lastWorkedError && date < lastWorkedOn) return 'The termination date must be on or after the last day worked.';
+}
+
 function StatusDialog({ employee, context, transition, onClose, onSaved }: {
   employee: Employee;
   context: LifecycleEditContext;
@@ -70,22 +83,33 @@ function StatusDialog({ employee, context, transition, onClose, onSaved }: {
   onSaved: (employee: Employee, result: { message: string; warnings?: string[] }) => void;
 }) {
   const terminating = transition === 'terminate';
-  const [lastWorkedOn, setLastWorkedOn] = useState(context.today);
-  const [effectiveDate, setEffectiveDate] = useState('');
+  const { refreshCompanies } = useCompany();
+  const [lastWorkedDraft, setLastWorkedDraft] = useState<string | null>(null);
+  const [effectiveDate, setEffectiveDate] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [finalPayNotes, setFinalPayNotes] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const minDate = terminating ? employee.hire_date || '' : nextDate(employee.termination_date);
-  const date = effectiveDate || (terminating ? lastWorkedOn : context.today);
+  const date = effectiveDate ?? (terminating ? lastWorkedDraft ?? context.today : context.today);
+  const lastWorkedOn = lastWorkedDraft ?? date;
+  const lastWorkedError = !parseDay(lastWorkedOn)
+    ? 'Enter the last day worked.'
+    : lastWorkedOn > context.today ? 'The last day worked cannot be in the future.' : undefined;
+  const dateError = terminating
+    ? terminationDateError(date, minDate, context.today, lastWorkedOn, lastWorkedError)
+    : !parseDay(date) || date < minDate || date > context.today
+      ? 'The rehire date must be after the termination date and cannot be in the future.'
+      : undefined;
+  const minEffectiveDate = terminating && lastWorkedDraft && !lastWorkedError && lastWorkedDraft > minDate
+    ? lastWorkedDraft : minDate;
   const label = terminating ? 'Terminate' : 'Rehire';
   const name = `${employee.first_name} ${employee.last_name}`;
   const needsReapproval = terminating && context.approved_runs.some((run) => run.start_date < date && date <= run.end_date);
   const needsUnapproval = terminating && context.approved_runs.some((run) => date <= run.start_date);
   const paidAfterTermination = terminating && context.last_committed_period_end && date < context.last_committed_period_end;
-  const validDate = Boolean(parseDay(date)) && date <= context.today && date >= minDate;
-  const valid = validDate && (!terminating || (Boolean(lastWorkedOn && reason) && lastWorkedOn <= date));
+  const valid = !dateError && (!terminating || (!lastWorkedError && Boolean(reason)));
 
   async function confirm(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -101,9 +125,11 @@ function StatusDialog({ employee, context, transition, onClose, onSaved }: {
         : await clientEmployeeLifecycleApi.rehire(employee.id, { effective_date: date, notes: notes.trim() || undefined });
       onSaved(response.data, response);
     } catch (caught) {
-      setError(lifecycleErrorCode(caught) === 'lifecycle_mode_changed'
-        ? 'Your company’s employee settings changed. Reload the page before trying again.'
-        : caught instanceof Error ? caught.message : 'Could not save the change. Try again.');
+      const code = lifecycleErrorCode(caught);
+      if (code === 'lifecycle_mode_changed' || code === 'client_lifecycle_disabled') void refreshCompanies().catch(() => {});
+      setError(code === 'lifecycle_mode_changed'
+        ? 'Your company’s employee settings changed. Review the employee record before trying again.'
+        : caught instanceof Error ? maskLifecycleNote(caught.message) : 'Could not save the change. Try again.');
       setSaving(false);
     }
   }
@@ -116,19 +142,17 @@ function StatusDialog({ employee, context, transition, onClose, onSaved }: {
           <DialogDescription>{terminating ? 'Record the employee’s last day and any final pay details.' : 'Choose the date this employee returned to work.'}</DialogDescription>
         </DialogHeader>
         <form onSubmit={confirm} className="mt-4 min-w-0 space-y-4">
-          {terminating && <Input label="Last day worked" type="date" value={lastWorkedOn} max={context.today} required onChange={(event) => setLastWorkedOn(event.target.value)} />}
+          {terminating && <Input label="Last day worked" type="date" value={lastWorkedOn} max={context.today} error={lastWorkedError} required onChange={(event) => setLastWorkedDraft(event.target.value)} />}
           <Input
             label={terminating ? 'Termination date' : 'Rehire date'}
             type="date"
             value={date}
-            min={(terminating && lastWorkedOn > minDate ? lastWorkedOn : minDate) || undefined}
+            min={minEffectiveDate || undefined}
             max={context.today}
+            error={dateError}
             required
             onChange={(event) => setEffectiveDate(event.target.value)}
           />
-          {!validDate && <p className="text-sm text-danger-700">
-            {minDate > context.today ? 'The rehire date must be after the termination date and cannot be in the future.' : 'Choose a date within the allowed range.'}
-          </p>}
           {terminating && <>
             <Select label="Reason" value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Select a reason" options={terminationReasons} required />
             <label className="block text-sm font-medium">Final pay and unused PTO payout (optional)

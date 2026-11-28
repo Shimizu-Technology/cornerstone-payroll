@@ -921,6 +921,10 @@ class ClientEmployeeUpdateService
       basis: basis,
       wage_rates: wage_rates.presence
     ).call!
+  rescue EmployeeCompensationChangeService::LockedPeriodError
+    earliest = EmployeeCompensationChangeService.next_uncommitted_period_start(employee)
+    employee.errors.add(:compensation_effective_on, "Payroll is already approved or finalized through #{(earliest - 1).iso8601}. Choose #{earliest.iso8601} or later.")
+    raise ActiveRecord::RecordInvalid, employee
   rescue EmployeeCompensationChangeService::Error => error
     employee.errors.add(:base, error.message)
     raise ActiveRecord::RecordInvalid, employee

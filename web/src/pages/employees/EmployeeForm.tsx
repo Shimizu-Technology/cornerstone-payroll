@@ -20,8 +20,8 @@ import { EmployeeNotesPanel } from '@/components/employees/EmployeeNotesPanel';
 import { canonicalSsn, importedProfileAllowsBlank, validateHireDate, withDocumentReadiness } from '@/lib/employee-profile';
 import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapability';
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
-import { employeesApi, departmentsApi, employeeWageRatesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, type EmployeeDocumentReadinessResponse } from '@/services/api';
-import { clientEmployeeLifecycleApi, clientManagedEmployeePayload, lifecycleModeChanged, maskLifecycleNote } from '@/services/clientEmployeeLifecycle';
+import { clientEmployeesApi, employeesApi, departmentsApi, employeeWageRatesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, errorFieldLabel, type EmployeeDocumentReadinessResponse } from '@/services/api';
+import { clientManagedEmployeePayload, lifecycleModeChanged, maskLifecycleNote, ownEmployeeReviewNotice } from '@/services/clientEmployeeLifecycle';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
@@ -215,11 +215,13 @@ export function EmployeeForm() {
   // Use company_id from auth context, fall back to env var for dev mode
   const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
   const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
-  const [activatedCompanyId, setActivatedCompanyId] = useState<number>();
+  // The write response can be fresher than the company list until its next refresh.
+  const [activation, setActivation] = useState<{ companyId: number; previousCompany: typeof activeCompany }>();
   const clientManaged = isClient && (
-    (activeCompany?.id === companyId && activeCompany.employee_lifecycle_mode === 'client_managed') || activatedCompanyId === companyId
+    (activeCompany?.id === companyId && activeCompany.employee_lifecycle_mode === 'client_managed') ||
+    (activation?.companyId === companyId && activation.previousCompany === activeCompany)
   );
-  const intake = useEmployeeIntakeSettings(companyId, isClient);
+  const intake = useEmployeeIntakeSettings(companyId, isClient, !clientManaged);
   const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
   const airePayPeriodId = searchParams.get('aire_pay_period_id') || '';
   const aireSourceUserId = searchParams.get('aire_source_user_id') || '';
@@ -230,6 +232,7 @@ export function EmployeeForm() {
   const [form, setForm] = useState<EmployeeFormData>(initialFormData);
   const [loadedEmployee, setLoadedEmployee] = useState<Employee | null>(null);
   const lifecycleContext = loadedEmployee?.lifecycle_edit_context;
+  const currentW4 = loadedEmployee?.current_w4_election;
   const [clientPayEffectiveOn, setClientPayEffectiveOn] = useState('');
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_client_configuration');
   // Mark inactive and reactivate are open to all payroll staff; terminate is not.
@@ -258,6 +261,7 @@ export function EmployeeForm() {
   const [w4ChangeReason, setW4ChangeReason] = useState('');
   const [payChangeTiming, setPayChangeTiming] = useState<PayChangeEffectiveDateValue>(emptyPayChangeEffectiveDate);
   const [w4ElectionReceived, setW4ElectionReceived] = useState(false);
+  const w4DatePrefilled = useRef(false);
   const [employeeStatus, setEmployeeStatus] = useState<string>('active');
   // Bringing back a terminated worker is a rehire, which stays with client configuration.
   const canReactivateLoadedWorker = canChangeEmployeeStatus && (employeeStatus !== 'terminated' || canManageClientConfiguration);
@@ -324,7 +328,7 @@ export function EmployeeForm() {
     setIsLoading(true);
     try {
       const response = isClient
-        ? await clientEmployeeLifecycleApi.get(parseInt(id, 10))
+        ? await clientEmployeesApi.get(parseInt(id, 10))
         : await employeesApi.get(parseInt(id, 10));
       if (!isCurrentRequest()) return;
       const employee = response.data;
@@ -383,6 +387,7 @@ export function EmployeeForm() {
       setInitialEmploymentType(employee.employment_type);
       setW4ChangeReason('');
       setW4ElectionReceived(false);
+      w4DatePrefilled.current = false;
       setW4CurrencyDrafts({
         additional_withholding: toCurrencyDraft(nextForm.additional_withholding),
         w4_dependent_credit: toCurrencyDraft(nextForm.w4_dependent_credit),
@@ -789,7 +794,8 @@ export function EmployeeForm() {
   const payHasChanged = Boolean(compensationHistory && (payBasisChanged || scalarPayChanged || wageRateEdits.length));
   const clientPayChanged = clientManaged && isEditing && (payBasisChanged || scalarPayChanged || wageRateEdits.length > 0);
   const clientPayDate = clientPayEffectiveOn || lifecycleContext?.compensation_default_on || '';
-  const clientW4Date = form.w4_effective_on || loadedEmployee?.readiness?.w4_on || '';
+  const clientW4Date = w4ElectionReceived ? form.w4_effective_on || '' : '';
+  const earliestClientPayDate = lifecycleContext?.earliest_compensation_effective_on;
   const canCorrectPay = compensationHistory?.can_correct ?? canManageClientConfiguration;
 
   const cancelScheduledPay = async (date: string, reason: string) => {
@@ -815,10 +821,19 @@ export function EmployeeForm() {
 
   const toggleReceivedWithholding = (received: boolean) => {
     setW4ElectionReceived(received);
+    if (clientManaged) {
+      if (received && !w4DatePrefilled.current) {
+        w4DatePrefilled.current = true;
+        setForm((previous) => ({
+          ...previous,
+          w4_effective_on: loadedEmployee?.readiness?.w4_on || previous.w4_effective_on || previous.hire_date || '',
+        }));
+      }
+      return;
+    }
     if (received) {
       setForm((previous) => ({
-        ...previous, w4_effective_on: clientManaged ? loadedEmployee?.readiness?.w4_on || previous.hire_date || '' : '',
-        w4_signed_on: null, w4_source_reference: '',
+        ...previous, w4_effective_on: '', w4_signed_on: null, w4_source_reference: '',
       }));
       return;
     }
@@ -834,11 +849,9 @@ export function EmployeeForm() {
   const allowsUnverifiedBlank = (field: string) => {
     if (clientManaged) {
       if (field === 'withholding_election') return !w4ElectionReceived;
-      if (field === 'ssn' || field === 'contractor_ein' || field === 'date_of_birth') return true;
-      return !loadedEmployee?.readiness || !loadedEmployee.readiness.items.some((item) => item.complete && (
-        ((field === 'address_line1' || field === 'city' || field === 'state' || field === 'zip') && item.key === 'home_address') ||
-        (field === 'hire_date' && item.key === 'hire_date')
-      ));
+      // A blank input for a masked identifier preserves the current value.
+      if (field === 'ssn' || field === 'contractor_ein') return true;
+      return !String(loadedEmployee?.[field as keyof Employee] ?? '').trim();
     }
     if (isEditing && deferredEditFields.includes(field)) {
       const storedValue = loadedEmployee?.[field as keyof Employee];
@@ -863,7 +876,7 @@ export function EmployeeForm() {
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
     if (!supportsMultipleHourlyRates && !isVariableSalary && (clientManaged ? form.pay_rate < 0 : form.pay_rate <= 0)) {
-      newErrors.pay_rate = ['Pay rate must be greater than 0'];
+      newErrors.pay_rate = [clientManaged ? 'Pay rate cannot be negative' : 'Pay rate must be greater than 0'];
     }
     if (supportsMultipleHourlyRates) {
       const normalizedRates = normalizeWageRates();
@@ -911,7 +924,7 @@ export function EmployeeForm() {
     const hireDateError = (!clientManaged || form.hire_date) && (!isEditing || form.hire_date !== (loadedEmployee?.hire_date || '')) ? validateHireDate(form.hire_date) : null;
     if (hireDateError) newErrors.hire_date = [hireDateError];
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
-      if (!clientManaged && !form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
+      if ((!clientManaged || !allowsUnverifiedBlank('business_name')) && !form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
       const storedEinCanRemain = isClient && isEditing && Boolean(storedEinLastFour);
       if (!form.contractor_ein?.trim() && !storedEinCanRemain && !allowsUnverifiedBlank('contractor_ein')) {
         newErrors.contractor_ein = ['EIN is required'];
@@ -919,12 +932,12 @@ export function EmployeeForm() {
         newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
       }
     }
-    if (form.date_of_birth) {
-      const dob = new Date(form.date_of_birth);
-      const today = new Date();
-      if (dob >= today) {
-        newErrors.date_of_birth = ['Date of birth must be in the past'];
-      }
+    if (clientManaged && !form.date_of_birth && !allowsUnverifiedBlank('date_of_birth')) {
+      newErrors.date_of_birth = ['Date of birth is required'];
+    } else if (form.date_of_birth && (clientManaged && lifecycleContext?.today
+      ? form.date_of_birth >= lifecycleContext.today
+      : new Date(form.date_of_birth) >= new Date())) {
+      newErrors.date_of_birth = ['Date of birth must be in the past'];
     }
     if (form.employment_type !== 'contractor' && ((form.retirement_rate || 0) + (form.roth_retirement_rate || 0)) > 1) {
       newErrors.retirement_rate = ['Combined retirement contributions cannot exceed 100%'];
@@ -936,6 +949,9 @@ export function EmployeeForm() {
     if (w4DateOrderEnforced && (!clientManaged || w4ElectionReceived) && w4EffectiveDate && form.w4_signed_on && w4EffectiveDate < form.w4_signed_on) {
       newErrors.w4_effective_on = ['Set the effective date on or after the date the W-4 was signed.'];
     }
+    if (clientPayChanged && !lifecycleContext?.own_record && clientPayEffectiveOn && earliestClientPayDate && clientPayEffectiveOn < earliestClientPayDate) {
+      newErrors.compensation_effective_on = [`Choose ${formatDate(earliestClientPayDate)} or later. Earlier payroll is already approved or finalized.`];
+    }
     if (payHasChanged && compensationHistory) {
       Object.assign(newErrors, payChangeEffectiveDateErrors(payChangeTiming, compensationHistory.effective_dates, { basisChanged: payBasisChanged, canCorrect: canCorrectPay }));
     }
@@ -943,7 +959,13 @@ export function EmployeeForm() {
       newErrors.w4_change_reason = ['Explain why this W-4 election is changing'];
     }
     if (!clientManaged && loadedEmployee?.current_w4_election?.source === 'default_withholding' && w4HasChanged && !w4ElectionReceived) newErrors.w4_election_received = ['Confirm that the employee withholding election was received before replacing the approved default.'];
-    if ((!clientManaged || form.employment_type !== 'contractor') && w4ElectionReceived && (!w4EffectiveDate || (!form.w4_signed_on && !form.w4_source_reference?.trim()))) newErrors.w4_election_received = ['Enter the received election effective date and its signed date or source reference.'];
+    const w4EvidenceMissing = !form.w4_signed_on && !form.w4_source_reference?.trim();
+    if (clientManaged && form.employment_type !== 'contractor' && w4ElectionReceived && w4EvidenceMissing) {
+      newErrors.w4_signed_on = ['Enter the signed date or provide a reference to the signed form.'];
+    }
+    if (!clientManaged && w4ElectionReceived && (!w4EffectiveDate || w4EvidenceMissing)) {
+      newErrors.w4_election_received = ['Enter the received election effective date and its signed date or source reference.'];
+    }
     const employerPreTaxMatch = form.employer_retirement_match_rate ?? 0;
     const employerRothMatch = form.employer_roth_match_rate ?? 0;
     if (form.employment_type !== 'contractor' && (!Number.isFinite(employerPreTaxMatch) || employerPreTaxMatch < 0 || employerPreTaxMatch > 1)) {
@@ -1119,7 +1141,7 @@ export function EmployeeForm() {
           delete updateData.ssn_confirmation;
         }
         if (isClient) {
-          const response = await clientEmployeeLifecycleApi.update(parseInt(id, 10), updateData);
+          const response = await clientEmployeesApi.update(parseInt(id, 10), updateData);
           savedEmployeeId = response.data.id;
           portalNotice = response.message || null;
           portalChangeRequestId = response.change_request?.id || null;
@@ -1132,7 +1154,7 @@ export function EmployeeForm() {
         }
       } else {
         if (isClient) {
-          const response = await clientEmployeeLifecycleApi.create(employeePayload);
+          const response = await clientEmployeesApi.create(employeePayload);
           savedEmployeeId = response.data.id;
           portalNotice = response.message || null;
           portalChangeRequestId = response.change_request?.id || null;
@@ -1249,17 +1271,18 @@ export function EmployeeForm() {
     } catch (err) {
       if (!isCurrentSubmission()) return;
       if (isClient && lifecycleModeChanged(err)) {
-        setActivatedCompanyId(companyId);
+        setActivation({ companyId, previousCompany: activeCompany });
         if (form.employment_type !== 'contractor' && (isEditing ? w4HasChanged : Boolean(form.w4_effective_on || form.w4_signed_on || form.w4_source_reference))) {
+          w4DatePrefilled.current = true;
           setW4ElectionReceived(true);
         }
         setGeneralError('Your company’s employee settings changed. Your entries are still here. Review the form before saving again.');
         void refreshCompanies().catch(() => {});
         if (isEditing && id) {
-          void clientEmployeeLifecycleApi.get(Number(id)).then(({ data }) => {
+          void clientEmployeesApi.get(Number(id)).then(({ data }) => {
             if (!isCurrentSubmission()) return;
             setLoadedEmployee((current) => current && {
-              ...current, readiness: data.readiness, lifecycle_edit_context: data.lifecycle_edit_context,
+              ...current, readiness: data.readiness, lifecycle_edit_context: data.lifecycle_edit_context, current_w4_election: data.current_w4_election,
             });
           }).catch(() => {});
         }
@@ -1286,15 +1309,17 @@ export function EmployeeForm() {
         const emailReason = contactEmailErrorMessage(err.data);
         const fieldErrors = emailReason && err.fieldErrors.email ? { ...err.fieldErrors, email: [emailReason] } : err.fieldErrors;
         setErrors(fieldErrors);
-        const fieldMessages = Object.entries(fieldErrors).map(([field, messages]) =>
-          `${field.replaceAll('_', ' ')}: ${messages.join(' ')}`
-        ).join('; ');
-        const message = `${err.message}. ${fieldMessages}`;
+        const summary = emailReason && err.fieldErrors.email ? '' : err.message;
+        const details = [...new Set(Object.entries(fieldErrors).flatMap(([field, messages]) =>
+          messages.map((message) => field === 'base' ? message : `${errorFieldLabel(field)}: ${message}`)
+        ))].filter((detail) => !summary.includes(detail));
+        const message = [summary && details.length ? summary.replace(/\.?$/, '.') : summary, ...details].filter(Boolean).join(' ');
         setGeneralError(clientManaged ? maskLifecycleNote(message) : message);
         if ((err.data as { code?: string } | undefined)?.code === 'employee_intake_expired') void intake.reload();
-        focusFirstInvalidField(Object.keys(fieldErrors)[0]);
+        focusFirstInvalidField(Object.keys(fieldErrors).find((field) => field !== 'base'));
       } else {
-        setGeneralError(err instanceof Error ? err.message : 'Failed to save employee');
+        const message = err instanceof Error ? err.message : 'Failed to save employee';
+        setGeneralError(clientManaged ? maskLifecycleNote(message) : message);
       }
     } finally {
       if (isCurrentSubmission()) setIsSaving(false);
@@ -1302,11 +1327,13 @@ export function EmployeeForm() {
   };
 
   const getFieldError = (field: string): string | undefined => {
-    return errors[field]?.[0];
+    const message = errors[field]?.[0];
+    return clientManaged && message ? maskLifecycleNote(message) : message;
   };
 
   const employeeDisplayName = [form.first_name, form.last_name].filter(Boolean).join(' ') || 'this employee';
   const isW2Employee = form.employment_type !== 'contractor';
+  const dateOfBirthError = getFieldError('date_of_birth');
   const taxIdUsesSsn = isW2Employee || form.contractor_type !== 'business';
   const ssnConfirmationRequired = taxIdUsesSsn && Boolean(form.ssn?.trim())
     && (!isEditing || canonicalSsn(form.ssn) !== canonicalSsn(initialSsn));
@@ -1423,10 +1450,11 @@ export function EmployeeForm() {
 
         {clientManaged && <div className="mb-6 space-y-4">
           {!isEditing && <Alert tone="info">You can save with just a name and worker type. The Ready to pay checklist will show what to add before this employee can be paid.</Alert>}
-          {lifecycleContext?.own_record && <Alert tone="info">This is your own employee record. Changes to your pay or tax details go to Cornerstone for review. If you only change your address, another manager may be able to review it.</Alert>}
+          {lifecycleContext?.own_record && <Alert tone="info">{ownEmployeeReviewNotice}</Alert>}
           {loadedEmployee?.readiness && <EmployeeReadinessCard
             readiness={loadedEmployee.readiness}
-            isBusinessContractor={form.employment_type === 'contractor' && form.contractor_type === 'business'}
+            isBusinessContractor={loadedEmployee.employment_type === 'contractor' && loadedEmployee.contractor_type === 'business'}
+            businessNameMissing={Boolean(loadedEmployee.first_name?.trim() && loadedEmployee.last_name?.trim() && !loadedEmployee.business_name?.trim())}
             setupPath={`${location.pathname}${location.search}`}
             showBankNote={false}
           />}
@@ -1561,9 +1589,13 @@ export function EmployeeForm() {
                   type="date"
                   value={form.date_of_birth || ''}
                   onChange={(e) => handleChange('date_of_birth', e.target.value)}
-                  aria-describedby="employee-dob-hint"
+                  name="date_of_birth"
+                  error={dateOfBirthError}
+                  aria-describedby={dateOfBirthError ? 'employee-field-6-error' : 'employee-dob-hint'}
                 />
-                <p id="employee-dob-hint" className="mt-1 text-xs text-gray-500">Optional for payroll. Needed for the employee app sign-up.</p>
+                <p id="employee-dob-hint" className="mt-1 text-xs text-gray-500">
+                  {clientManaged && isW2Employee ? 'Required before this employee can be paid. Also used for employee app sign-up.' : 'Optional for payroll. Needed for the employee app sign-up.'}
+                </p>
               </div>
               {!taxIdUsesSsn && (
                 <div>
@@ -1696,7 +1728,7 @@ export function EmployeeForm() {
                     aria-invalid={Boolean(getFieldError('pay_rate'))}
                     value={form.pay_rate}
                     onValueChange={(value) => handleChange('pay_rate', value ?? 0)}
-                    min={0}
+                    min={clientManaged ? undefined : 0}
                     fixedDecimalsOnBlur={2}
                     className={getFieldError('pay_rate') ? 'border-danger-300 focus-visible:border-danger-500 focus-visible:ring-danger-200' : undefined}
                   />
@@ -1738,6 +1770,7 @@ export function EmployeeForm() {
                 <Select
                   id="payment_delivery_method"
                   name="payment_delivery_method"
+                  error={getFieldError('payment_delivery_method')}
                   value={form.payment_delivery_method || ''}
                   disabled={isClient && !clientManaged}
                   onChange={(event) => handleChange('payment_delivery_method', (event.target.value || null) as PaymentDeliveryMethod | null)}
@@ -1889,6 +1922,7 @@ export function EmployeeForm() {
                 label="Pay change effective date"
                 name="compensation_effective_on"
                 type="date"
+                min={earliestClientPayDate ?? undefined}
                 value={clientPayEffectiveOn}
                 onChange={(event) => setClientPayEffectiveOn(event.target.value)}
                 helperText={clientPayDate ? `This pay change starts on ${formatDate(clientPayDate)}.` : 'Leave blank to start with the next pay period that can be changed.'}
@@ -2129,11 +2163,11 @@ export function EmployeeForm() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-14">
-                      Legal Business Name {!clientManaged && <span className="text-danger-600">*</span>}
+                      Legal Business Name {(!clientManaged || !allowsUnverifiedBlank('business_name')) && <span className="text-danger-600">*</span>}
                     </label>
                     <Input id="employee-field-14"
                       name="business_name"
-                      required={!clientManaged}
+                      required={!clientManaged || !allowsUnverifiedBlank('business_name')}
                       value={form.business_name || ''}
                       onChange={(e) => handleChange('business_name', e.target.value)}
                       placeholder="DBA or legal entity name"
@@ -2181,17 +2215,27 @@ export function EmployeeForm() {
               </p>
             </CardHeader>
             <CardContent>
-              {isEditing && loadedEmployee?.current_w4_election && (
+              {isEditing && currentW4 && (!isClient || clientManaged) && (
                 <div className="mb-5 rounded-2xl border border-primary-100 bg-primary-50/60 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-primary-950">{loadedEmployee.current_w4_election.source === 'default_withholding' ? 'Approved default withholding' : 'Current employee election'}</p>
+                      <p className="text-sm font-semibold text-primary-950">{currentW4.source === 'default_withholding' ? 'Approved default withholding' : 'Current employee election'}</p>
                       <p className="mt-1 text-sm text-primary-800">
-                        Effective {new Date(`${loadedEmployee.current_w4_election.effective_on}T00:00:00`).toLocaleDateString()} · Form {loadedEmployee.current_w4_election.w4_form_version}
+                        Effective {clientManaged ? formatDate(currentW4.effective_on) : new Date(`${currentW4.effective_on}T00:00:00`).toLocaleDateString()} · Form {currentW4.w4_form_version}
                       </p>
                     </div>
-                    <Badge variant="default">{loadedEmployee.w4_elections?.length || 1} recorded</Badge>
-                  </div>
+                    {!clientManaged && <Badge variant="default">{loadedEmployee?.w4_elections?.length || 1} recorded</Badge>}
+                  </div>                  {clientManaged && <dl className="mt-2 grid gap-x-4 gap-y-2 text-sm text-primary-950 sm:grid-cols-2">
+                    <div><dt>Filing status</dt><dd className="font-medium">{filingStatusLabels[currentW4.filing_status]}</dd></div>
+                    <div><dt>Multiple jobs</dt><dd className="font-medium">{currentW4.w4_step2_multiple_jobs ? 'Yes' : 'No'}</dd></div>
+                    <div><dt>Dependent credit</dt><dd className="font-medium">{formatCurrency(Number(currentW4.w4_dependent_credit))}</dd></div>
+                    <div><dt>Other income</dt><dd className="font-medium">{formatCurrency(Number(currentW4.w4_step4a_other_income))}</dd></div>
+                    <div><dt>Deductions</dt><dd className="font-medium">{formatCurrency(Number(currentW4.w4_step4b_deductions))}</dd></div>
+                    <div><dt>Extra withholding per paycheck</dt><dd className="font-medium">{formatCurrency(Number(currentW4.additional_withholding))}</dd></div>
+                    {currentW4.w4_form_version < 2020 &&
+                      <div><dt>Allowances</dt><dd className="font-medium">{currentW4.allowances}</dd></div>}
+                  </dl>}
+
                   <p className="mt-3 text-xs leading-5 text-primary-800">Future payroll uses the election effective on its pay date. Previously committed and imported checks remain unchanged.</p>
                 </div>
               )}
@@ -2266,13 +2310,13 @@ export function EmployeeForm() {
                 </div>
               </div>
 
-              {clientManaged && <p className="mb-2 text-sm text-neutral-600">Enter either the signed date or a reference to the signed form.</p>}
+              {clientManaged && <p className="mb-2 text-sm text-neutral-600">Enter at least one: the signed date or a reference to the signed form.</p>}
               <div className="mb-4 grid gap-4 md:grid-cols-2">
-                <label className="text-sm font-medium text-gray-700">Signed date on source W-4 (optional)
-                  <Input type="date" value={form.w4_signed_on || ''} onChange={(event) => handleChange('w4_signed_on', event.target.value || null)} />
+                <label className="text-sm font-medium text-gray-700">Signed date on source W-4{!clientManaged && ' (optional)'}
+                  <Input name="w4_signed_on" error={getFieldError('w4_signed_on')} type="date" value={form.w4_signed_on || ''} onChange={(event) => handleChange('w4_signed_on', event.target.value || null)} />
                 </label>
-                <label className="text-sm font-medium text-gray-700">Source document / reference (optional)
-                  <Input maxLength={255} value={form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
+                <label className="text-sm font-medium text-gray-700">Source document / reference{!clientManaged && ' (optional)'}
+                  <Input maxLength={255} value={clientManaged ? maskLifecycleNote(form.w4_source_reference || '') : form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
                 </label>
                 {w4SignedAfterEffective && (w4DateOrderEnforced ? (
                   <p role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900 md:col-span-2">

@@ -36,7 +36,7 @@ import {
   employmentTypeLabels,
   getInitials,
 } from '@/lib/utils';
-import { employeesApi, departmentsApi, clientDepartmentsApi } from '@/services/api';
+import { clientEmployeesApi, employeesApi, departmentsApi, clientDepartmentsApi } from '@/services/api';
 import { clientEmployeeLifecycleApi } from '@/services/clientEmployeeLifecycle';
 import { EmployeeReadinessBadge } from './EmployeeReadinessCard';
 import { useAuth } from '@/contexts/AuthContext';
@@ -142,7 +142,7 @@ export function EmployeeList() {
     setError(null);
     try {
       const payload = isClient
-        ? await clientEmployeeLifecycleApi.list({
+        ? await clientEmployeesApi.list({
             search: search || undefined,
             status: status === 'all' ? undefined : (status || undefined),
             department_id: departmentId ? parseInt(departmentId, 10) : undefined,
@@ -364,8 +364,10 @@ export function EmployeeList() {
           {!needsAttention && <Button variant="outline" className="min-h-11" onClick={() => filterAttention(true)}>Show employees</Button>}
         </div>}
         {clientManaged && attentionError === companyId && <ActionFeedback tone="error" message="Could not check for items sent back by Cornerstone.">
-          <span>Could not check for items sent back by Cornerstone.</span>
-          <Button variant="outline" className="min-h-11" onClick={() => setAttentionRetry((count) => count + 1)}>Try again</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span>Could not check for items sent back by Cornerstone.</span>
+            <Button variant="outline" className="min-h-11" onClick={() => setAttentionRetry((count) => count + 1)}>Try again</Button>
+          </div>
         </ActionFeedback>}
         {!clientManaged && <EmployeeIntakeSettingsPanel key={`intake-${companyId}`} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />}
         {canAddEmployee && !isClientViewer && (

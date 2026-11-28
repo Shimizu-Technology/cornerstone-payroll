@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { ActionFeedback } from '@/components/ui/action-feedback';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { useCompany } from '@/contexts/CompanyContext';
 import { clientEmployeeLifecycleApi, lifecycleErrorCode, maskLifecycleNote, type ReturnedVerificationItem } from '@/services/clientEmployeeLifecycle';
 
 const eventLabels: Record<string, string> = {
@@ -25,27 +27,31 @@ export function EmployeeReturnedItems({ employeeId, canRespond, refreshVersion =
   const [items, setItems] = useState<ReturnedVerificationItem[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [responseSent, setResponseSent] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [responseSentCount, setResponseSentCount] = useState(0);
 
   useEffect(() => {
     let current = true;
     void clientEmployeeLifecycleApi.returnedForEmployee(employeeId).then(
       (data) => { if (current) { setItems(data); setLoadError(false); } },
       () => { if (current) setLoadError(true); },
-    );
+    ).finally(() => { if (current) setRetrying(false); });
     return () => { current = false; };
   }, [employeeId, refreshVersion, retry]);
 
-  if (loadError) return <ActionFeedback tone="error" message="Could not load items sent back by Cornerstone.">
+  if (loadError) return <Alert tone="error" className="flex flex-wrap items-center gap-2">
     <p>Could not load items sent back by Cornerstone.</p>
-    <Button variant="outline" className="min-h-11" onClick={() => setRetry((current) => current + 1)}>Try again</Button>
-  </ActionFeedback>;
+    <Button variant="outline" className="min-h-11" disabled={retrying} onClick={() => {
+      setRetrying(true);
+      setRetry((current) => current + 1);
+    }}>{retrying ? 'Checking…' : 'Try again'}</Button>
+  </Alert>;
 
-  if (!items.length && !responseSent) return null;
+  if (!items.length && !responseSentCount) return null;
 
   return (
     <div className="space-y-3">
-      {responseSent && <ActionFeedback tone="success" message="Response sent to Cornerstone for review." />}
+      {responseSentCount > 0 && <ActionFeedback tone="success" message="Response sent to Cornerstone for review." retryKey={responseSentCount} />}
       {items.length > 0 && <Card className="border-warning-200 bg-warning-50">
         <CardHeader>
           <CardTitle>Needs attention</CardTitle>
@@ -60,7 +66,7 @@ export function EmployeeReturnedItems({ employeeId, canRespond, refreshVersion =
             canRespond={canRespond}
             onSent={() => {
               setItems((current) => current.filter((row) => row.id !== item.id));
-              setResponseSent(true);
+              setResponseSentCount((count) => count + 1);
             }}
           />)}
         </CardContent>
@@ -70,6 +76,7 @@ export function EmployeeReturnedItems({ employeeId, canRespond, refreshVersion =
 }
 
 function ReturnedItem({ item, canRespond, onSent }: { item: ReturnedVerificationItem; canRespond: boolean; onSent: () => void }) {
+  const { refreshCompanies } = useCompany();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
@@ -84,9 +91,11 @@ function ReturnedItem({ item, canRespond, onSent }: { item: ReturnedVerification
       await clientEmployeeLifecycleApi.respond(item.id, note.trim());
       onSent();
     } catch (caught) {
-      setError(lifecycleErrorCode(caught) === 'lifecycle_mode_changed'
-        ? 'Your company’s employee settings changed. Reload the page before sending your reply.'
-        : caught instanceof Error ? caught.message : 'Could not send your reply. Try again.');
+      const code = lifecycleErrorCode(caught);
+      if (code === 'lifecycle_mode_changed' || code === 'client_lifecycle_disabled') void refreshCompanies().catch(() => {});
+      setError(code === 'lifecycle_mode_changed'
+        ? 'Your company’s employee settings changed. Review the employee record before sending your reply.'
+        : caught instanceof Error ? maskLifecycleNote(caught.message) : 'Could not send your reply. Try again.');
       setSaving(false);
     }
   }

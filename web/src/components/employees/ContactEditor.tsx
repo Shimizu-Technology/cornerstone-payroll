@@ -224,9 +224,11 @@ export function RowInlineFeedback({
   );
 }
 
-export function ContactSaveResult({ requestId }: { requestId?: number }) {
-  if (requestId) {
-    return <Link className="text-primary-700 underline" to={`/change-requests?request_id=${requestId}`}>Address sent for review</Link>;
+export function ContactSaveResult({ request }: { request?: RowSaveState['submittedRequest'] }) {
+  if (request) {
+    return <Link className={request.profile_address ? 'text-primary-700 underline' : 'inline-flex min-h-11 items-center text-primary-700 underline'} to={`/change-requests?request_id=${request.id}`}>
+      {request.profile_address ? 'Address sent for review' : 'Sent to Cornerstone for review'}
+    </Link>;
   }
   return <><Check className="h-3.5 w-3.5" aria-hidden="true" />Saved</>;
 }

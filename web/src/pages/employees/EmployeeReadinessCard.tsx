@@ -32,16 +32,17 @@ export function DirectDepositSetupNote() {
   </p>;
 }
 
-export function EmployeeReadinessCard({ readiness, setupPath, isBusinessContractor, preview = false, showBankNote = true }: {
+export function EmployeeReadinessCard({ readiness, setupPath, isBusinessContractor, businessNameMissing, preview = false, showBankNote = true }: {
   readiness: EmployeeReadiness;
   setupPath?: string;
   isBusinessContractor?: boolean;
+  businessNameMissing?: boolean;
   preview?: boolean;
   showBankNote?: boolean;
 }) {
   const firstMissing = readiness.items.find((item) => item.applicable && !item.complete);
   const section = firstMissing && (isBusinessContractor && (
-    firstMissing.key === 'tax_id' || firstMissing.missing_label === 'business name missing'
+    firstMissing.key === 'tax_id' || (firstMissing.key === 'legal_name' && businessNameMissing)
   ) ? 'employee-tax' : setupSections[firstMissing.key]);
 
   return (

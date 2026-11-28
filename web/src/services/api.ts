@@ -38,6 +38,12 @@ export function apiErrorMessage(
   options: { readOnly?: boolean; retryAfterSeconds?: number; now?: Date } = {},
 ): string {
   const payload = record(data);
+  if (status === 403 && payload.code === 'self_lifecycle_forbidden') {
+    return 'Ask another manager or Cornerstone to make this change to your employee record.';
+  }
+  if (status === 403 && payload.code === 'client_lifecycle_disabled') {
+    return 'Cornerstone handles this change for your company.';
+  }
   const primary = messages(payload.error);
   const errors = Array.isArray(payload.errors) ? messages(payload.errors) : [];
   const fields = { ...record(payload.errors), ...record(payload.details) };

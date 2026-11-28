@@ -1,6 +1,8 @@
 import { apiClient, clientEmployeesApi, type BoundedListMeta } from '@/services/api';
 import type { EmployeeFormData } from '@/types';
 
+export const ownEmployeeReviewNotice = 'This is your own employee record. Changes to your pay, tax details, payment method, name, birth date, hire date, or email go to Cornerstone for review. Address-only changes can be reviewed by another manager or Cornerstone.';
+
 export type EmployeeLifecycleMode = 'approval_first' | 'client_managed';
 export type ClientEmployeeCreateInput = Pick<EmployeeFormData, 'first_name' | 'last_name' | 'employment_type'> & Partial<EmployeeFormData>;
 
@@ -28,6 +30,7 @@ export interface LifecycleEditContext {
   own_record: boolean;
   today: string;
   compensation_default_on: string;
+  earliest_compensation_effective_on?: string | null;
   calculated_through: string | null;
   calculated_pay_date: string | null;
   approved_pay_date: string | null;
@@ -67,11 +70,6 @@ async function returnedPage(employeeId?: number, page?: number, perPage?: number
 }
 
 export const clientEmployeeLifecycleApi = {
-  create: (...args: Parameters<typeof clientEmployeesApi.create>) => clientEmployeesApi.create(...args),
-  update: (...args: Parameters<typeof clientEmployeesApi.update>) => clientEmployeesApi.update(...args),
-  get: (...args: Parameters<typeof clientEmployeesApi.get>) => clientEmployeesApi.get(...args),
-  list: (...args: Parameters<typeof clientEmployeesApi.list>) => clientEmployeesApi.list(...args),
-
   returnedCount: async () => (await returnedPage(undefined, 1, 1)).meta.total_count,
   returnedForEmployee: async (employeeId: number) => {
     const first = await returnedPage(employeeId, 1);
@@ -106,6 +104,7 @@ export function lifecycleModeChanged(error: unknown): boolean {
   return Boolean(data && typeof data === 'object' && 'employee_lifecycle_mode' in data && data.employee_lifecycle_mode === 'client_managed');
 }
 
+// Free text can contain an SSN without separators. Mask any standalone nine digits.
 export function maskLifecycleNote(value: string): string {
   return value.replace(/\b\d{3}[-\s]?\d{2}[-\s]?(\d{4})\b/g, '•••-••-$1');
 }

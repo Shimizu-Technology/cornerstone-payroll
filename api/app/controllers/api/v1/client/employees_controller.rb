@@ -65,8 +65,11 @@ module Api
             EmployeeReadinessEvaluator.evaluate(@employee, rates_on: @rates_on)
           end
           data = serialize_employee(@employee, include_department: true, include_document_readiness: true, contact_context: contact_context, readiness: readiness)
-          if client_managed && current_user.client? && !current_user.client_viewer?
-            data["lifecycle_edit_context"] = lifecycle_edit_context(@employee, features, readiness)
+          if client_managed
+            data["current_w4_election"] = client_w4_election(@employee)
+            if current_user.client? && !current_user.client_viewer?
+              data["lifecycle_edit_context"] = lifecycle_edit_context(@employee, features, readiness)
+            end
           end
           render json: { data: data }
         end
@@ -316,8 +319,9 @@ module Api
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           reloaded = @employee.reload
+          readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
           render json: {
-            data: serialize_employee(reloaded, contact_context: contact_context, readiness: EmployeeReadinessEvaluator.evaluate(reloaded)),
+            data: serialize_lifecycle_transition_employee(reloaded, contact_context, readiness),
             status_event: serialize_status_event(event),
             verification_item: serialize_verification_item(verification_item),
             post_termination_committed_pay_period_ids: post_termination_committed_ids,
@@ -433,7 +437,7 @@ module Api
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(@employee.reload, contact_context: contact_context, readiness: readiness),
+            data: serialize_lifecycle_transition_employee(@employee.reload, contact_context, readiness),
             status_event: serialize_status_event(event),
             readiness: readiness.as_json,
             verification_item: serialize_verification_item(verification_item),
@@ -453,17 +457,38 @@ module Api
 
         private
 
+        def serialize_lifecycle_transition_employee(employee, contact_context, readiness)
+          serialize_employee(employee, include_department: true, include_document_readiness: true, contact_context: contact_context, readiness: readiness).merge(
+            "lifecycle_edit_context" => lifecycle_edit_context(employee, CompanyFeatures.for(current_company), readiness)
+          )
+        end
+
+        def client_w4_election(employee)
+          return if employee.contractor?
+
+          election = employee.w4_election_on(PayrollBusinessClock.today)
+          return unless election
+
+          election.as_json(only: EmployeeW4Election::SNAPSHOT_ATTRIBUTES - [ :w4_source_reference ] +
+            [ :id, :employee_id, :company_id, :effective_on, :source, :created_at ])
+        end
+
         def lifecycle_edit_context(employee, features, readiness)
           own_record = EmployeeProfileIdentity.own_record_for_client_managed?(employee, current_user)
-          runs = EmployeeStatusTransitionService.open_runs(employee)
+          termination_runs = EmployeeStatusTransitionService.open_runs(employee)
+          runs = PayPeriod.where(company_id: employee.company_id, status: %w[calculated approved])
+            .where.not(run_purpose: "correction")
+            .where(id: PayrollItem.financially_reportable.where(employee_id: employee.id).select(:pay_period_id))
+          locked_through = EmployeeCompensationChangeService.locked_through(employee)
           {
             own_record: own_record,
             today: PayrollBusinessClock.today.iso8601,
             compensation_default_on: EmployeeCompensationChangeService.default_effective_on(employee).iso8601,
+            earliest_compensation_effective_on: locked_through&.next_day&.iso8601,
             calculated_through: runs.where(status: "calculated").maximum(:end_date)&.iso8601,
             calculated_pay_date: runs.where(status: "calculated").maximum(:pay_date)&.iso8601,
             approved_pay_date: runs.where(status: "approved").maximum(:pay_date)&.iso8601,
-            approved_runs: runs.where(status: "approved").pluck(:start_date, :end_date).map do |start_date, end_date|
+            approved_runs: termination_runs.where(status: "approved").pluck(:start_date, :end_date).map do |start_date, end_date|
               { start_date: start_date.iso8601, end_date: end_date.iso8601 }
             end,
             last_committed_period_end: committed_regular_runs(employee).maximum(:end_date)&.iso8601,

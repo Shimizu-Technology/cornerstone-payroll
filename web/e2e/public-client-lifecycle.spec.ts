@@ -151,6 +151,8 @@ for (const width of [390, 1280]) {
     await expect(page.locator('#employee-personal')).toBeFocused();
     await page.locator('[name="ssn"]').fill('900112233');
     await page.getByLabel(/Re-enter Social Security Number/).fill('900112233');
+    await expect(page.locator('[name="ssn"]')).toHaveAttribute('type', 'password');
+    await expect(page.getByLabel(/Re-enter Social Security Number/)).toHaveAttribute('type', 'password');
     await page.getByLabel('Date of Birth').fill('1990-01-05');
     await page.getByLabel('Hire Date').fill('2026-11-07');
     await page.getByRole('textbox', { name: /^Hourly Rate/ }).fill('18.25');
@@ -162,6 +164,12 @@ for (const width of [390, 1280]) {
     await page.getByLabel(/Signed date on source W-4/).fill('2026-11-07');
     await page.getByLabel('How this employee is paid').selectOption('direct_deposit');
     await expect(page.getByText(/confirm bank setup before payday/)).toBeVisible();
+    const electionDate = page.getByLabel(/^Effective date/);
+    await electionDate.fill('');
+    await page.getByRole('button', { name: 'Save employee' }).click();
+    await expect(page.getByText('Enter the date this W-4 became effective')).toBeVisible();
+    await expect(electionDate).toBeFocused();
+    await electionDate.fill('2026-12-04');
     await page.getByRole('button', { name: 'Save employee' }).click();
     await expect(page.getByRole('heading', { name: 'Rowan Fixture' })).toBeVisible();
     await expect(page.getByText(/Withholding as of Dec 4, 2026/)).toBeVisible();
@@ -181,15 +189,23 @@ for (const width of [390, 1280]) {
 
     await page.getByRole('button', { name: 'Terminate', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Terminate Rowan Fixture' });
-    await expect(dialog.getByLabel('Termination date')).toHaveAttribute('max', today);
-    await dialog.getByLabel('Last day worked').fill('2026-11-11');
+    const terminationDate = dialog.getByLabel('Termination date');
+    const lastWorked = dialog.getByLabel('Last day worked');
+    await expect(terminationDate).toHaveAttribute('max', today);
+    await terminationDate.fill('2026-11-11');
+    await expect(lastWorked).toHaveValue('2026-11-11');
     await dialog.getByLabel('Reason').selectOption('end_of_contract');
+    await lastWorked.fill('2026-11-12');
+    await expect(dialog.getByText('The termination date must be on or after the last day worked.')).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Terminate', exact: true })).toBeDisabled();
+    await lastWorked.fill('2026-11-11');
     await dialog.getByLabel(/Final pay and unused PTO/).fill('Review unused leave.');
     await expect(dialog.getByText(/approve the updated payroll again/)).toBeVisible();
     await expect(dialog.getByText(/already finalized/)).toBeVisible();
     expect(await dialog.evaluate((node) => node.scrollWidth)).toBeLessThanOrEqual(await dialog.evaluate((node) => node.clientWidth));
     await dialog.getByRole('button', { name: 'Terminate', exact: true }).click();
     await expect(page.getByText('Cornerstone will review the earlier payroll.')).toBeVisible();
+    await expect(page.locator('[tabindex="-1"]').filter({ has: page.getByText('Termination saved.', { exact: true }) })).toBeFocused();
 
     await page.getByRole('button', { name: 'Rehire', exact: true }).click();
     const rehire = page.getByRole('dialog', { name: 'Rehire Rowan Fixture' });

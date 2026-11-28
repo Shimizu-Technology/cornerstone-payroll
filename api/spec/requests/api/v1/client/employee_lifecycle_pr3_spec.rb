@@ -102,6 +102,7 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       get "/api/v1/client/employees/#{employee.id}"
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("data")).not_to have_key("lifecycle_edit_context")
+      expect(response.parsed_body.fetch("data")).not_to have_key("current_w4_election")
     end
 
     it "reports activated mode and gives the manager a rehire preview while keeping viewer access read-only" do
@@ -134,6 +135,57 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("data")).to have_key("readiness")
       expect(response.parsed_body.fetch("data")).not_to have_key("lifecycle_edit_context")
+    end
+
+    it "serializes the currently effective W-4 profile without internal evidence or a future election" do
+      unlock_and_enable_client_managed!
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        employee = create(:employee, :hourly, company: company)
+        current = employee.employee_w4_elections.create!(
+          company: company, effective_on: Date.new(2026, 11, 1), filing_status: "married",
+          additional_withholding: 42, w4_signed_on: Date.new(2026, 10, 29),
+          source: "client_direct", reason: "Internal fixture note", w4_source_reference: "Fixture signed W-4",
+          created_by: client_manager
+        )
+        employee.employee_w4_elections.create!(
+          company: company, effective_on: Date.new(2026, 12, 1), filing_status: "single",
+          source: "client_direct", reason: "Scheduled fixture", created_by: client_manager
+        )
+
+        get "/api/v1/client/employees/#{employee.id}"
+        expect(response).to have_http_status(:ok)
+        election = response.parsed_body.fetch("data").fetch("current_w4_election")
+        expect(election).to include(
+          "id" => current.id, "effective_on" => "2026-11-01", "filing_status" => "married",
+          "additional_withholding" => "42.0", "w4_signed_on" => "2026-10-29", "source" => "client_direct"
+        )
+        expect(election.keys).not_to include("reason", "w4_source_reference", "created_by_id")
+      end
+    end
+
+    it "includes reportable off-cycle paychecks in edit warnings and reserves approved regular runs for termination" do
+      unlock_and_enable_client_managed!
+      employee = create(:employee, :hourly, company: company)
+      calculated = create(:pay_period, :calculated, company: company, run_purpose: "bonus",
+                          start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 15), pay_date: Date.new(2026, 11, 20))
+      approved = create(:pay_period, :approved, company: company, run_purpose: "commission",
+                        start_date: Date.new(2026, 11, 16), end_date: Date.new(2026, 11, 23), pay_date: Date.new(2026, 11, 28))
+      correction = create(:pay_period, :calculated, company: company, run_purpose: "correction",
+                          start_date: Date.new(2026, 12, 1), end_date: Date.new(2026, 12, 6), pay_date: Date.new(2026, 12, 11))
+      [ calculated, approved, correction ].each do |period|
+        create(:payroll_item, company: company, pay_period: period, employee: employee)
+      end
+      reversed = create(:pay_period, :calculated, company: company, run_purpose: "bonus",
+                        start_date: Date.new(2026, 12, 7), end_date: Date.new(2026, 12, 13), pay_date: Date.new(2026, 12, 18))
+      reversed_item = create(:payroll_item, company: company, pay_period: reversed, employee: employee)
+      reversed_item.update_columns(payroll_reversed_at: Time.current, payroll_reversed_by_id: staff_manager.id, payroll_reversal_reason: "Fixture reversal")
+
+      get "/api/v1/client/employees/#{employee.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "lifecycle_edit_context")).to include(
+        "calculated_through" => "2026-11-15", "calculated_pay_date" => "2026-11-20",
+        "approved_pay_date" => "2026-11-28", "approved_runs" => []
+      )
     end
 
     it "filters returned employees before pagination and ignores the filter in approval-first mode" do
@@ -532,6 +584,7 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
         }, as: :json
         expect(response).to have_http_status(:ok), response.body
 
+        expect(response.parsed_body.dig("data", "lifecycle_edit_context", "rehire_readiness")).to be_present
         expect(worker.reload.status).to eq("terminated")
         expect(worker.termination_date).to eq(Date.new(2026, 11, 10))
         expect(worker.employee_status_events.last.source).to eq("client_portal")
@@ -557,6 +610,9 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
         expect(worker.readiness_gate_enforced).to be(true)
         expect(worker.document_readiness_required).to be(true)
         expect(response.parsed_body.dig("readiness", "status")).to eq("ready")
+        expect(response.parsed_body.dig("data", "lifecycle_edit_context")).to include(
+          "own_record" => false, "rehire_readiness" => nil
+        )
         expect(EmployeeVerificationItem.where(employee: worker, event_kind: "rehire")).to exist
         expect(AuditLog.where(company_id: company.id, action: "client_employees#rehire", record_id: worker.id)).to exist
 
@@ -929,6 +985,25 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       ])
       expect(import_result[:created]).to eq(1)
       expect(Employee.find_by!(first_name: "Imported", last_name: "Worker").readiness_gate_enforced).to be(false)
+    end
+
+    it "exposes the first editable compensation date and returns a client-facing field error for locked pay" do
+      worker = create(:employee, :hourly, company: company, hire_date: Date.new(2026, 1, 1), pay_rate: 20)
+      period = create(:pay_period, :approved, company: company, start_date: Date.new(2026, 11, 1),
+                      end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+      create(:payroll_item, company: company, pay_period: period, employee: worker)
+
+      get "/api/v1/client/employees/#{worker.id}"
+      expect(response.parsed_body.dig("data", "lifecycle_edit_context", "earliest_compensation_effective_on")).to eq("2026-11-15")
+
+      patch "/api/v1/client/employees/#{worker.id}", params: {
+        employee: { pay_rate: 24, compensation_effective_on: "2026-11-14" }
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_content)
+      expect(response.parsed_body.fetch("details")).to eq(
+        "compensation_effective_on" => [ "Payroll is already approved or finalized through 2026-11-14. Choose 2026-11-15 or later." ]
+      )
+      expect(worker.reload.pay_rate).to eq(20)
     end
 
     it "refuses client payment-method edit when a legacy approved run has payment_delivery_method=NULL instead of silently unapproving it" do
