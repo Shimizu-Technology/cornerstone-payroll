@@ -23,26 +23,28 @@ module EmployeeVerificationItems
       fields = Array(touched_fields).map(&:to_s).uniq
       return [] if fields.empty?
 
-      Company.lock.find(employee.company_id)
-      returned_items = EmployeeVerificationItem
-        .where(company_id: employee.company_id, employee_id: employee.id, status: "returned_to_client")
-        .order(:id)
-        .lock
-        .to_a
+      ApplicationRecord.transaction do
+        Company.lock.find(employee.company_id)
+        returned_items = EmployeeVerificationItem
+          .where(company_id: employee.company_id, employee_id: employee.id, status: "returned_to_client")
+          .order(:id)
+          .lock
+          .to_a
 
-      requeued = []
-      returned_items.each do |item|
-        next if item.acknowledged_in_committed_run?
-        next unless item.event_kind == "new_hire" || (Array(item.changed_fields).map(&:to_s) & fields).any?
+        requeued = []
+        returned_items.each do |item|
+          next if item.acknowledged_in_committed_run?
+          next unless item.event_kind == "new_hire" || (Array(item.changed_fields).map(&:to_s) & fields).any?
 
-        item.update!(
-          status: "pending_verification",
-          resubmitted_at: Time.current,
-          source_actor: actor
-        )
-        requeued << item
+          item.update!(
+            status: "pending_verification",
+            resubmitted_at: Time.current,
+            source_actor: actor
+          )
+          requeued << item
+        end
+        requeued
       end
-      requeued
     end
 
     def self.tax_filing_impact_for(employee)

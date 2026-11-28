@@ -40,13 +40,21 @@ module Api
             return render json: { error: "Response note must be #{MAX_RESPONSE_NOTE_LENGTH} characters or fewer." }, status: :unprocessable_entity
           end
 
+          activation_result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
+          if activation_result&.activated?
+            return render json: {
+              error: "This company switched to Client-managed employee lifecycle. Reload and submit your change again.",
+              code: "lifecycle_mode_changed",
+              employee_lifecycle_mode: "client_managed"
+            }, status: :conflict
+          end
+
           item = nil
           error_response = nil
           skip_default_audit_log!
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
             revalidate_client_company_write_access!
-            ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
             unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
               error_response = [ {
                 error: "Client-managed employee lifecycle is not enabled for this company.",

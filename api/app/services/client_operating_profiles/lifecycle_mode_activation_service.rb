@@ -12,6 +12,8 @@ module ClientOperatingProfiles
   #   client_operating_profile.lifecycle_mode_activation_blocked, and notifies
   #   when the PR 4 notification hook is present.
   class LifecycleModeActivationService
+    class ModeChanged < StandardError; end
+
     ACTIVATED_AUDIT_ACTION = "client_operating_profile.lifecycle_mode_activated"
     BLOCKED_AUDIT_ACTION = "client_operating_profile.lifecycle_mode_activation_blocked"
 
@@ -111,9 +113,10 @@ module ClientOperatingProfiles
               errors: preflight.error_messages
             }
           )
-          if PortalNotifications.respond_to?(:lifecycle_mode_activation_blocked!)
-            PortalNotifications.lifecycle_mode_activation_blocked!(profile, actor: acting_user)
-          end
+          # TODO(PR4): PR 4 implements real notification delivery here (safe
+          # because on-demand activation runs in its own committed transaction
+          # before client write transactions).
+          PortalNotifications.lifecycle_mode_activation_blocked!(profile, actor: acting_user)
           Result.new(status: :blocked, profile: profile, preflight: preflight)
         end
       end

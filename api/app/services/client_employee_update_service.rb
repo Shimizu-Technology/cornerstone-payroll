@@ -64,15 +64,30 @@ class ClientEmployeeUpdateService
   ].freeze
   PROTECTED_IDENTIFIER_FIELDS = %i[ssn_encrypted contractor_ein].freeze
   PAYMENT_METHOD_FIELD = :payment_delivery_method
-  CLIENT_MANAGED_CREATE_FIELDS = (DIRECT_FIELDS + APPROVAL_FIELDS + [ PAYMENT_METHOD_FIELD ] - [ WAGE_RATES_KEY, :w4_election_received ]).freeze
+  WRITABLE_FIELDS = (DIRECT_FIELDS + APPROVAL_FIELDS + [ PAYMENT_METHOD_FIELD ]).freeze
+  CLIENT_MANAGED_CREATE_FIELDS = (WRITABLE_FIELDS - [ WAGE_RATES_KEY, :w4_election_received ]).freeze
   IDENTITY_TAX_FIELDS = %i[ssn_encrypted first_name middle_name last_name name_suffix date_of_birth hire_date].freeze
   TAX_FILING_IMPACT_FIELDS = %i[ssn_encrypted first_name middle_name last_name name_suffix].freeze
+  # On own-record updates in client-managed mode, identity fields (name, DOB,
+  # hire date) and email must never save directly — routing them to Cornerstone
+  # prevents a dual-role manager from renaming/re-emailing their own record to
+  # evade self-dealing checks, and keeps legal-name/DOB/hire-date edits gated.
+  OWN_RECORD_RESTRICTED_DIRECT_FIELDS = (IDENTITY_TAX_FIELDS - [ :ssn_encrypted ] + [ :email ]).freeze
   CONTRACTOR_TAX_FIELDS = %i[business_name contractor_ein contractor_type w9_on_file].freeze
-  COMPENSATION_VERIFICATION_FIELDS = %i[
-    pay_rate employment_type salary_type pay_frequency contractor_pay_type
-    wage_rates default_custom_earnings default_payroll_adjustments
-  ].freeze
+  COMPENSATION_VERIFICATION_FIELDS = (
+    %i[
+      pay_rate employment_type salary_type pay_frequency contractor_pay_type
+      wage_rates default_custom_earnings default_payroll_adjustments
+    ] + LEGACY_RETIREMENT_FIELDS
+  ).freeze
   W4_VERIFICATION_FIELDS = (EmployeeW4Election::PROFILE_ATTRIBUTES + [ :w4_election_received ]).freeze
+  PAY_AFFECTING_VERIFICATION_FIELDS = (
+    COMPENSATION_VERIFICATION_FIELDS +
+    W4_VERIFICATION_FIELDS +
+    [ PAYMENT_METHOD_FIELD ] +
+    IDENTITY_TAX_FIELDS +
+    CONTRACTOR_TAX_FIELDS
+  ).uniq.freeze
   PROFILE_CHANGE_FIELDS = %i[job_title department_id email phone address_line1 address_line2 city state zip].freeze
 
   Result = Struct.new(
@@ -94,16 +109,23 @@ class ClientEmployeeUpdateService
   )
 
   def initialize(employee:, attrs:, requested_by:, company:, confirm_same_person_email: false, row_revision: nil, baseline_values: nil,
-                 email_locked: false)
+                 email_locked: false, attempt_lifecycle_activation: true)
     @employee = employee
     @email_locked = email_locked
+    @attempt_lifecycle_activation = attempt_lifecycle_activation
     raw_attrs = attrs.deep_symbolize_keys
+    deleted_confirm = raw_attrs.delete(:confirm_same_person_email)
     @confirm_same_person_email = ActiveModel::Type::Boolean.new.cast(
-      confirm_same_person_email || raw_attrs.delete(:confirm_same_person_email)
+      confirm_same_person_email || deleted_confirm
     ) == true
-    @row_revision = row_revision.presence || raw_attrs.delete(:row_revision).presence || raw_attrs.delete(:contact_revision).presence
-    @baseline_values = baseline_values.presence || raw_attrs.delete(:baseline_values)
-    @compensation_effective_on = raw_attrs.delete(:compensation_effective_on).presence || raw_attrs.delete(:effective_on).presence
+    deleted_row_revision = raw_attrs.delete(:row_revision).presence
+    deleted_contact_revision = raw_attrs.delete(:contact_revision).presence
+    @row_revision = row_revision.presence || deleted_row_revision || deleted_contact_revision
+    deleted_baseline_values = raw_attrs.delete(:baseline_values)
+    @baseline_values = baseline_values.presence || deleted_baseline_values
+    comp_effective_on = raw_attrs.delete(:compensation_effective_on).presence
+    legacy_effective_on = raw_attrs.delete(:effective_on).presence
+    @compensation_effective_on = comp_effective_on || legacy_effective_on
     @attrs = without_inapplicable_contractor_fields(normalize_attrs(raw_attrs))
     guard_legacy_recurring_components!
     @requested_by = requested_by
@@ -119,6 +141,7 @@ class ClientEmployeeUpdateService
   private :guard_legacy_recurring_components!
 
   def create!
+    ensure_lifecycle_activation_outside_transaction!
     direct_attrs = attrs.slice(*DIRECT_FIELDS)
     approval_attrs = attrs.slice(*APPROVAL_FIELDS)
     candidate = nil
@@ -128,7 +151,6 @@ class ClientEmployeeUpdateService
 
     ActiveRecord::Base.transaction do
       company.lock!
-      ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company)
       if client_managed_employee_lifecycle?
         client_managed_result = create_client_managed_in_lock!
         next
@@ -190,6 +212,7 @@ class ClientEmployeeUpdateService
   end
 
   def update!
+    ensure_lifecycle_activation_outside_transaction!
     direct_attrs = {}
     approval_attrs = {}
     direct_before = {}
@@ -200,7 +223,6 @@ class ClientEmployeeUpdateService
 
     ActiveRecord::Base.transaction do
       company.lock!
-      ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company)
       if client_managed_employee_lifecycle?
         client_managed_result = update_client_managed_in_lock!
         next
@@ -461,6 +483,16 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
+  def ensure_lifecycle_activation_outside_transaction!
+    return unless @attempt_lifecycle_activation
+
+    result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company)
+    return unless result&.activated?
+
+    raise ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged,
+          "This company switched to Client-managed employee lifecycle. Reload and submit your change again."
+  end
+
   def client_managed_employee_lifecycle?
     CompanyFeatures.for(company).client_managed_employee_lifecycle?
   end
@@ -541,6 +573,7 @@ class ClientEmployeeUpdateService
     }
     if EmployeeProfileIdentity.possible_self_created_hire?(reloaded, requested_by, same_person_confirmed: contact_result&.same_person_confirmed?)
       metadata["possible_self_created_hire"] = true
+      metadata["own_record_actor_id"] = requested_by.id
     end
     metadata["direct_deposit_missing_bank_details"] = true if readiness.direct_deposit_missing_bank_details?
 
@@ -732,7 +765,8 @@ class ClientEmployeeUpdateService
   def update_client_managed_own_record!(direct_attrs:, approval_attrs:, payment_method_attrs:, contact:, contact_result:)
     address_keys = EmployeeChangeRequest::ADDRESS_FIELDS.map(&:to_sym)
     own_address_attrs = direct_attrs.extract!(*address_keys)
-    non_address_restricted = approval_attrs.merge(payment_method_attrs)
+    own_identity_attrs = direct_attrs.extract!(*OWN_RECORD_RESTRICTED_DIRECT_FIELDS)
+    non_address_restricted = own_identity_attrs.merge(approval_attrs, payment_method_attrs)
     restricted_attrs = non_address_restricted.merge(own_address_attrs)
     is_address_only = restricted_attrs.present? && non_address_restricted.empty?
 
@@ -752,7 +786,9 @@ class ClientEmployeeUpdateService
     verification_items = []
     if direct_attrs.present?
       update_attrs = direct_attrs.dup
-      update_attrs[:contact_source] = contact.contact_source if contact.contact_source
+      if contact.contact_source && (direct_attrs.key?(:email) || direct_attrs.key?(:phone))
+        update_attrs[:contact_source] = contact.contact_source
+      end
       employee.update!(update_attrs)
       EmployeeContactValidator.record_same_person_confirmation_audit!(
         employee: employee,
@@ -768,6 +804,7 @@ class ClientEmployeeUpdateService
         changed_fields: direct_attrs.keys,
         before_values: display_values_for(direct_before),
         after_values: serialized_values_for(direct_attrs.keys),
+        metadata: { "own_record_actor_id" => requested_by.id },
         affects_pay: false
       )
     end
@@ -849,10 +886,14 @@ class ClientEmployeeUpdateService
     return if ssn_digits.blank?
 
     excluded_ids = [ employee.id, employee.previous_employee_id, employee.next_employee&.id ].compact
-    scope = company.employees.where("employees.ssn_encrypted IS NOT NULL AND employees.ssn_encrypted <> ''")
+    scope = company.employees
     scope = scope.where.not(id: excluded_ids) if excluded_ids.any?
 
-    duplicate_exists = scope.select(:id, :ssn_encrypted).any? { |other| other.ssn_digits == ssn_digits }
+    formatted_dashed = ssn_digits.length == 9 ? "#{ssn_digits[0, 3]}-#{ssn_digits[3, 2]}-#{ssn_digits[5, 4]}" : nil
+    formatted_spaced = ssn_digits.length == 9 ? "#{ssn_digits[0, 3]} #{ssn_digits[3, 2]} #{ssn_digits[5, 4]}" : nil
+    candidate_values = [ ssn_digits, formatted_dashed, formatted_spaced, target.ssn_encrypted.to_s.strip.presence ].compact.uniq
+
+    duplicate_exists = scope.where(ssn_encrypted: candidate_values).exists?
     return unless duplicate_exists
 
     target.errors.add(:ssn, "This Social Security Number is already assigned to another employee in this company.")

@@ -41,6 +41,8 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         PortalNotificationEvent.where(id: event_ids).delete_all if event_ids.any?
         EmployeeVerificationItem.where(company_id: company.id).update_all(superseded_by_id: nil)
         EmployeeVerificationItem.where(company_id: company.id).delete_all
+        EmployeeChangeRequest.where(company_id: company.id).delete_all
+        EmployeeDocumentRequirement.where(company_id: company.id).delete_all if defined?(EmployeeDocumentRequirement)
         NonEmployeeCheck.where(company_id: company.id).find_each(&:destroy!)
         PayrollLiabilityEntry.where(company_id: company.id).delete_all if defined?(PayrollLiabilityEntry)
         PayrollLiabilityPosting.where(company_id: company.id).delete_all if defined?(PayrollLiabilityPosting)
@@ -129,10 +131,10 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     item.calculate!
     period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: staff_admin.id)
 
-    # Round 1: Parallel approve! + payment default change + staff deactivate! + client terminate!
+    # Round 1: Parallel approve! + ClientEmployeeUpdateService (payment_delivery_method + pay_rate) + payment default + staff deactivate! + client terminate!
     barrier = Queue.new
     outcomes = Queue.new
-    thread_count = 4
+    thread_count = 5
 
     threads = [
       Thread.new do
@@ -144,6 +146,22 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
           outcomes << [ :approve, :domain_error, e.message ]
         rescue StandardError => e
           outcomes << [ :approve, :unexpected, e.class.name, e.message ]
+        end
+      end,
+      Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          barrier.pop
+          ClientEmployeeUpdateService.new(
+            employee: Employee.find(employee.id),
+            attrs: { payment_delivery_method: "direct_deposit", pay_rate: 23.50 },
+            requested_by: User.find(client_manager.id),
+            company: Company.find(company.id)
+          ).update!
+          outcomes << [ :client_update, :ok ]
+        rescue ActiveRecord::RecordInvalid => e
+          outcomes << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
+        rescue StandardError => e
+          outcomes << [ :client_update, :unexpected, e.class.name, e.message ]
         end
       end,
       Thread.new do
@@ -197,6 +215,10 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     round1 = thread_count.times.map { outcomes.pop }
     unexpected_round1 = round1.select { |entry| entry[1] == :unexpected }
     expect(unexpected_round1).to be_empty, "Expected zero deadlocks/unexpected errors in round 1, got: #{round1.inspect}"
+    expected_round1_errors = /recalculat|stale|already terminated|Only active workers|approved pay run|status|changed after calculation|payment/i
+    round1.select { |entry| entry[1] == :domain_error }.each do |entry|
+      expect(entry[2]).to match(expected_round1_errors), "Unexpected domain error in round 1: #{entry.inspect}"
+    end
 
     # Round 2: Parallel reactivate! (staff/client) + commit! + verification item write under Company.lock
     period.reload
@@ -304,6 +326,22 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       Thread.new do
         ActiveRecord::Base.connection_pool.with_connection do
           barrier2.pop
+          ClientEmployeeUpdateService.new(
+            employee: Employee.find(active_worker.id),
+            attrs: { payment_delivery_method: "direct_deposit", pay_rate: 26.50, compensation_effective_on: (period2.end_date + 1).iso8601 },
+            requested_by: User.find(client_manager.id),
+            company: Company.find(company.id)
+          ).update!
+          outcomes2 << [ :client_update, :ok ]
+        rescue ActiveRecord::RecordInvalid => e
+          outcomes2 << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
+        rescue StandardError => e
+          outcomes2 << [ :client_update, :unexpected, e.class.name, e.message ]
+        end
+      end,
+      Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          barrier2.pop
           EmployeeVerificationItems::Recorder.record!(
             employee: Employee.find(active_worker.id),
             actor: User.find(client_manager.id),
@@ -326,6 +364,10 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     round2 = round2_threads.size.times.map { outcomes2.pop }
     unexpected_round2 = round2.select { |entry| entry[1] == :unexpected }
     expect(unexpected_round2).to be_empty, "Expected zero deadlocks/unexpected errors in round 2, got: #{round2.inspect}"
+    expected_round2_errors = /unverified|acknowledged|Only terminated|Only inactive|after the worker's latest status change|stale|recalculat|approved pay run/i
+    round2.select { |entry| entry[1] == :domain_error }.each do |entry|
+      expect(entry[2]).to match(expected_round2_errors), "Unexpected domain error in round 2: #{entry.inspect}"
+    end
 
     # Exactly one reactivate succeeded; never a deadlock or duplicate reactivate event.
     reactivate_oks = round2.count { |entry| entry[0].to_s.include?("reactivate") && entry[1] == :ok }
@@ -342,6 +384,217 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       organization: organization,
       user_ids: [ staff_admin&.id, client_manager&.id ],
       tax_tables: tax_tables
+    )
+  end
+
+  it "deterministically blocks every writer on Company.lock before any Employee or PayPeriod lock is acquired (M4)" do
+    organization = Organization.create!(name: "Barrier Lock Org #{SecureRandom.hex(4)}")
+    company = create(:company, organization: organization, name: "Harborview Barrier #{SecureRandom.hex(4)}")
+    department = Department.create!(company: company, name: "Operations")
+    staff_admin = create(:user, company: company, organization: organization, role: "admin", name: "Dana Staff")
+    client_manager = create(:user, company: company, organization: organization, role: "client", name: "Sloane Owner")
+    CompanyAssignment.create!(user: staff_admin, company: company)
+    CompanyAssignment.create!(user: client_manager, company: company)
+
+    stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
+    ClientOperatingProfile.create!(
+      ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Date.new(2026, 1, 1)).merge(
+        client_portal_enabled: true,
+        options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+        lifecycle_mode_activated_at: Time.current
+      )
+    )
+
+    employee = create(:employee, :hourly, company: company, department: department, first_name: "Jordan", last_name: "Barrier", hire_date: Date.new(2026, 1, 1), pay_rate: 20.0, payment_delivery_method: "paper_check")
+    create_ready_w4!(employee)
+
+    writers = {
+      client_update: -> {
+        ClientEmployeeUpdateService.new(
+          employee: Employee.find(employee.id),
+          attrs: { payment_delivery_method: "direct_deposit", pay_rate: 21.50 },
+          requested_by: User.find(client_manager.id),
+          company: Company.find(company.id)
+        ).update!
+      },
+      verification_record: -> {
+        EmployeeVerificationItems::Recorder.record!(
+          employee: Employee.find(employee.id),
+          actor: User.find(client_manager.id),
+          event_kind: "compensation_change",
+          changed_fields: [ "pay_rate" ],
+          before_values: { "pay_rate" => 21.50 },
+          after_values: { "pay_rate" => 22.00 }
+        )
+      },
+      terminate: -> {
+        EmployeeStatusTransitionService.terminate!(
+          employee: Employee.find(employee.id),
+          actor: User.find(client_manager.id),
+          attributes: { effective_date: "2026-11-10", reason_category: "voluntary", source: "client_portal" }
+        )
+      }
+    }
+
+    writers.each do |label, action|
+      holder_pid_q = Queue.new
+      waiter_pid_q = Queue.new
+      release_holder = Queue.new
+      waiter_error = nil
+
+      holder = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          ActiveRecord::Base.transaction do
+            Company.lock.find(company.id)
+            holder_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+            Timeout.timeout(10) { release_holder.pop }
+          end
+        end
+      end
+
+      holder_pid = Timeout.timeout(5) { holder_pid_q.pop }
+
+      waiter = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          waiter_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+          action.call
+        rescue StandardError => e
+          waiter_error = e
+        end
+      end
+
+      waiter_pid = Timeout.timeout(5) { waiter_pid_q.pop }
+
+      blocked_by_holder = false
+      held_row_locks = []
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5.0
+      ActiveRecord::Base.connection_pool.with_connection do |conn|
+        while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          blocking = conn.select_values("SELECT unnest(pg_blocking_pids(#{waiter_pid}))").map(&:to_i)
+          if blocking.include?(holder_pid)
+            blocked_by_holder = true
+            held_row_locks = conn.select_values(<<~SQL.squish)
+              SELECT c.relname
+              FROM pg_locks l
+              JOIN pg_class c ON c.oid = l.relation
+              WHERE l.pid = #{waiter_pid}
+                AND l.granted = TRUE
+                AND l.locktype IN ('relation', 'tuple')
+                AND l.mode IN ('RowExclusiveLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
+                AND c.relname IN ('employees', 'pay_periods')
+            SQL
+            break
+          end
+          sleep 0.01
+        end
+      end
+
+      release_holder << true
+      Timeout.timeout(10) { holder.join }
+      Timeout.timeout(10) { waiter.join }
+
+      expect(blocked_by_holder).to be(true), "Expected #{label} to block on Company.lock held by Thread A (preventing Employee->PayPeriod inversion)"
+      expect(held_row_locks).to be_empty, "Expected #{label} to hold zero Employee/PayPeriod write locks while waiting on Company.lock, got: #{held_row_locks.inspect}"
+      expect(waiter_error).to be_nil, "Expected #{label} to serialize cleanly after Company.lock released, got: #{waiter_error.inspect}"
+    end
+  ensure
+    cleanup_non_transactional_company!(
+      company: company,
+      organization: organization,
+      user_ids: [ staff_admin&.id, client_manager&.id ],
+      tax_tables: []
+    )
+  end
+
+  it "commits on-demand lifecycle activation outside the caller write transaction and refuses mid-request mode flips (M5)" do
+    organization = Organization.create!(name: "Activation Tx Org #{SecureRandom.hex(4)}")
+    company = create(:company, organization: organization, name: "Harborview Tx #{SecureRandom.hex(4)}")
+    department = Department.create!(company: company, name: "Operations")
+    org_admin = create(:user, company: company, organization: organization, role: "org_admin", name: "Alex Admin")
+    staff_manager = create(:user, company: company, organization: organization, role: "manager", name: "Dana Manager")
+    client_manager = create(:user, company: company, organization: organization, role: "client", name: "Sloane Owner")
+    CompanyAssignment.create!(user: org_admin, company: company)
+    CompanyAssignment.create!(user: staff_manager, company: company)
+    CompanyAssignment.create!(user: client_manager, company: company)
+
+    stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
+    PortalNotificationRecipient.create!(company: company, user: staff_manager, team_role: "lead", added_by: org_admin)
+
+    # Case 1: Blocked due scheduled profile survives a failing client write transaction rollback!
+    worker = create(:employee, :hourly, company: company, department: department, first_name: "Casey", last_name: "Blocker")
+    blocker_req = create(
+      :employee_change_request,
+      company: company,
+      employee: worker,
+      requested_by: client_manager,
+      proposed_changes: { pay_rate: 29.0 },
+      original_values: { pay_rate: 20.0 }
+    )
+    due_profile = ClientOperatingProfile.create!(
+      ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Date.new(2026, 1, 1)).merge(
+        client_portal_enabled: true,
+        options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+        lifecycle_mode_activated_at: nil
+      )
+    )
+
+    # Failing create (missing required last_name -> ActiveRecord::RecordInvalid rolls back write tx)
+    expect do
+      ClientEmployeeUpdateService.new(
+        employee: Employee.new,
+        attrs: { first_name: "InvalidOnly", employment_type: "hourly" },
+        requested_by: client_manager,
+        company: company
+      ).create!
+    end.to raise_error(ActiveRecord::RecordInvalid)
+
+    # Blocked stamp and audit row MUST survive the rolled-back write transaction!
+    expect(due_profile.reload.lifecycle_mode_activation_failed_at).to be_present
+    expect(due_profile.lifecycle_mode_activation_blockers).to include("pending_non_address_change_requests_count" => 1)
+    blocked_audits_after_first = AuditLog.where(company_id: company.id, action: "client_operating_profile.lifecycle_mode_activation_blocked").count
+    expect(blocked_audits_after_first).to eq(1)
+
+    # Second failing write must NOT re-attempt or duplicate the blocked audit row
+    expect do
+      ClientEmployeeUpdateService.new(
+        employee: Employee.new,
+        attrs: { first_name: "InvalidAgain", employment_type: "hourly" },
+        requested_by: client_manager,
+        company: company
+      ).create!
+    end.to raise_error(ActiveRecord::RecordInvalid)
+    expect(AuditLog.where(company_id: company.id, action: "client_operating_profile.lifecycle_mode_activation_blocked").count).to eq(1)
+
+    # Case 2: Successful activation commits independently and raises ModeChanged so the in-flight request never flips mode mid-request!
+    blocker_req.update!(status: :rejected, reviewed_by: staff_manager, reviewed_at: Time.current, review_notes: "Resolved")
+    due_profile.update!(lifecycle_mode_activation_failed_at: nil, lifecycle_mode_activation_blockers: {})
+
+    expect do
+      ClientEmployeeUpdateService.new(
+        employee: Employee.new,
+        attrs: { first_name: "MidRequest", last_name: "Flip", employment_type: "hourly" },
+        requested_by: client_manager,
+        company: company
+      ).create!
+    end.to raise_error(ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged)
+      .and change(Employee, :count).by(0)
+
+    # Activation IS committed in DB, so the immediate retry runs cleanly in client_managed mode!
+    expect(due_profile.reload.lifecycle_mode_activated_at).to be_present
+    retry_result = ClientEmployeeUpdateService.new(
+      employee: Employee.new,
+      attrs: { first_name: "AfterReload", last_name: "Hire", employment_type: "hourly" },
+      requested_by: client_manager,
+      company: company
+    ).create!
+    expect(retry_result.client_managed).to be(true)
+    expect(retry_result.employee.readiness_gate_enforced).to be(true)
+  ensure
+    cleanup_non_transactional_company!(
+      company: company,
+      organization: organization,
+      user_ids: [ org_admin&.id, staff_manager&.id, client_manager&.id ],
+      tax_tables: []
     )
   end
 end

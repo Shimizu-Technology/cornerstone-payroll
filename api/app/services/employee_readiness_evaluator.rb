@@ -99,6 +99,57 @@ class EmployeeReadinessEvaluator
       new(employee: employee, rates_on: resolved_rates_on, w4_on: resolved_w4_on).evaluate
     end
 
+    def evaluate_batch(employees, company:, rates_on: nil, w4_on: nil)
+      rows = Array(employees)
+      return {} if rows.empty?
+
+      resolved_rates_on, resolved_w4_on =
+        if rates_on.present? && w4_on.present?
+          [ rates_on.to_date, w4_on.to_date ]
+        elsif company.present?
+          default_rates_on, default_w4_on = target_dates_for(company)
+          [ (rates_on || default_rates_on).to_date, (w4_on || default_w4_on).to_date ]
+        else
+          today = PayrollBusinessClock.today
+          [ (rates_on || today).to_date, (w4_on || today).to_date ]
+        end
+
+      enforced_ids = rows.select(&:readiness_gate_enforced?).filter_map(&:id)
+      rehired_ids = if enforced_ids.any?
+        EmployeeStatusEvent.where(
+          company_id: company.id,
+          employee_id: enforced_ids,
+          event_type: "reactivated",
+          previous_status: "terminated"
+        ).distinct.pluck(:employee_id).to_set
+      else
+        Set.new
+      end
+
+      remaining_ids = enforced_ids - rehired_ids.to_a
+      committed_payroll_ids = if remaining_ids.any?
+        PayrollItem.where(company_id: company.id, employee_id: remaining_ids)
+          .joins(:pay_period)
+          .financially_reportable
+          .where(pay_periods: { status: "committed" })
+          .distinct
+          .pluck(:employee_id)
+          .to_set
+      else
+        Set.new
+      end
+
+      rows.each_with_object({}) do |employee, results|
+        results[employee.id] = new(
+          employee: employee,
+          rates_on: resolved_rates_on,
+          w4_on: resolved_w4_on,
+          rehired: rehired_ids.include?(employee.id),
+          prior_committed_payroll: committed_payroll_ids.include?(employee.id)
+        ).evaluate
+      end
+    end
+
     def for_pay_period(employee, pay_period)
       evaluate(employee, rates_on: pay_period.end_date, w4_on: pay_period.pay_date)
     end
@@ -159,11 +210,13 @@ class EmployeeReadinessEvaluator
     end
   end
 
-  def initialize(employee:, rates_on:, w4_on:)
+  def initialize(employee:, rates_on:, w4_on:, rehired: nil, prior_committed_payroll: nil)
     @employee = employee
     @rates_on = rates_on.to_date
     @w4_on = w4_on.to_date
     @today = PayrollBusinessClock.today
+    @preloaded_rehired = rehired
+    @preloaded_prior_committed_payroll = prior_committed_payroll
   end
 
   def evaluate
@@ -204,6 +257,8 @@ class EmployeeReadinessEvaluator
   end
 
   def rehired?
+    return @preloaded_rehired unless @preloaded_rehired.nil?
+
     if employee.association(:employee_status_events).loaded?
       employee.employee_status_events.any? do |event|
         event.event_type == "reactivated" && event.previous_status == "terminated"
@@ -217,6 +272,7 @@ class EmployeeReadinessEvaluator
   end
 
   def prior_committed_payroll?
+    return @preloaded_prior_committed_payroll unless @preloaded_prior_committed_payroll.nil?
     return false unless employee.persisted?
 
     employee.payroll_items

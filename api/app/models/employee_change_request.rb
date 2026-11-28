@@ -11,6 +11,7 @@ class EmployeeChangeRequest < ApplicationRecord
   PERMITTED_EMPLOYEE_UPDATE_KEYS = %i[
     first_name
     middle_name
+    name_suffix
     last_name
     email
     ssn_encrypted

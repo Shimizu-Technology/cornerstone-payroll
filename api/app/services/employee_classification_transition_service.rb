@@ -24,7 +24,7 @@ class EmployeeClassificationTransitionService
       new_employee = Employee.new(new_employee_attributes.merge(initial_compensation_source: "classification_transition", initial_compensation_actor: actor))
       contact_result = validate_contact_details!(new_employee)
       apply_validated_contact_details!(new_employee, contact_result)
-      EmployeeIntakePolicy.prepare!(new_employee, actor: actor) unless CompanyFeatures.for(employee.company).client_managed_employee_lifecycle?
+      EmployeeIntakePolicy.prepare!(new_employee, actor: actor) unless new_employee.readiness_gate_enforced?
       new_employee.save!
       create_w4_election!(new_employee)
       create_primary_wage_rate!(new_employee)

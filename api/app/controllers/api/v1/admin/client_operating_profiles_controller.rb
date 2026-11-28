@@ -38,7 +38,7 @@ module Api
             return render json: { error: StaffRolePolicy.error_message(:manage_organization) }, status: :forbidden
           end
 
-          if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+          if lifecycle_mode_locked?
             return render json: { error: "Employee lifecycle mode is locked until its milestone launches." }, status: :unprocessable_entity
           end
 
@@ -89,8 +89,12 @@ module Api
             locked_keys: OperatingProfileCatalog.locked_keys,
             connected_source_active: @target_company.time_tracking_sources.active.where(source_type: "aire_services").exists?,
             editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company),
-            employee_lifecycle_preflight: ClientOperatingProfiles::LifecycleModePreflight.summary_for(@target_company, as_of: as_of)
+            employee_lifecycle_preflight: lifecycle_mode_locked? ? nil : ClientOperatingProfiles::LifecycleModePreflight.summary_for(@target_company, as_of: as_of)
           }
+        end
+
+        def lifecycle_mode_locked?
+          CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
         end
 
         def audit_company_id

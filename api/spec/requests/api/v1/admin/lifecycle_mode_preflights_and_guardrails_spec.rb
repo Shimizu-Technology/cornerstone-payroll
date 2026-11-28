@@ -7,6 +7,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
 
   let!(:organization) { create(:organization, name: "Cornerstone Practice") }
   let!(:company) { create(:company, organization: organization, name: "Pacific Trade Works") }
+  let!(:department) { create(:department, company: company, name: "Operations") }
   let!(:org_admin) { create(:user, company: company, organization: organization, role: "org_admin", name: "Alex OrgAdmin", email: "alex.admin@example.test") }
   let!(:manager) { create(:user, company: company, organization: organization, role: "manager", name: "Dana Manager", email: "dana.manager@example.test") }
   let!(:accountant) { create(:user, company: company, organization: organization, role: "accountant", name: "Lee Accountant", email: "lee.accountant@example.test") }
@@ -41,6 +42,20 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         client_portal_enabled: true
       )
     )
+  end
+
+  describe "locked-mode operating profile payload (L8)" do
+    before do
+      seed_baseline_profile!
+    end
+
+    it "skips LifecycleModePreflight.summary_for while client_portal.employee_lifecycle_mode is locked" do
+      expect(ClientOperatingProfiles::LifecycleModePreflight).not_to receive(:summary_for)
+
+      get "/api/v1/admin/companies/#{company.id}/operating_profile"
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body["employee_lifecycle_preflight"]).to be_nil
+    end
   end
 
   describe "mode-switch preflights and immediate vs scheduled activation" do
@@ -195,6 +210,8 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
 
       # Fast-forward to effective_on: activation fails closed in approval_first and records blockers + audit log
       travel_to(Time.utc(2026, 12, 4, 12)) do
+        expect(PortalNotifications).to receive(:lifecycle_mode_activation_blocked!).with(scheduled, actor: nil).ordered.and_call_original
+        expect(PortalNotifications).to receive(:lifecycle_mode_activation_blocked!).with(scheduled, actor: org_admin).ordered.and_call_original
         ActivateScheduledLifecycleModesJob.perform_now
 
         expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
@@ -255,7 +272,17 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         expect(scheduled.lifecycle_mode_activation_blockers).to include("qualifying_staff_notification_recipients_count" => 0)
         expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
 
-        # Revert to approval_first clears the blocked state cleanly
+        # L5: past/today blocked row must NOT allow amending unrelated settings in place
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: future_date.iso8601,
+          lock_version: scheduled.lock_version,
+          reason: "Attempt unrelated setting amend on due blocked row",
+          changes: { "tips.default" => "already_paid_out" }
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body["error"]).to include("after the latest profile's start date")
+
+        # Revert to approval_first on that same date IS allowed and clears the blocked state cleanly
         patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
           effective_on: future_date.iso8601,
           lock_version: scheduled.lock_version,
@@ -270,10 +297,43 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
     end
   end
 
+  describe "EmployeeVerificationItems::Recorder.requeue_returned_items! transaction safety (L2)" do
+    it "opens its own transaction around Company.lock when called standalone" do
+      worker = create(:employee, :hourly, company: company, first_name: "Casey", last_name: "Returned")
+      returned = EmployeeVerificationItem.create!(
+        company: company,
+        employee: worker,
+        event_kind: "compensation_change",
+        status: "returned_to_client",
+        affects_pay: true,
+        changed_fields: [ "pay_rate" ],
+        return_note: "Confirm rate"
+      )
+
+      expect(ApplicationRecord).to receive(:transaction).at_least(:once).and_call_original
+      requeued = EmployeeVerificationItems::Recorder.requeue_returned_items!(
+        employee: worker,
+        actor: client_manager,
+        touched_fields: [ :pay_rate ]
+      )
+      expect(requeued.map(&:id)).to eq([ returned.id ])
+      expect(returned.reload.status).to eq("pending_verification")
+    end
+  end
+
   describe "EmployeeClassificationTransitionService grandfathering preservation" do
     let!(:super_admin) { create(:user, company: company, organization: organization, role: "super_admin") }
 
-    it "preserves readiness_gate_enforced=false on grandfathered employees and true on enforced employees" do
+    it "preserves readiness_gate_enforced=false on grandfathered employees and runs EmployeeIntakePolicy.prepare! for them even in client_managed mode (L3)" do
+      unlock_lifecycle_mode!
+      ClientOperatingProfile.create!(
+        ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Date.new(2026, 1, 1)).merge(
+          client_portal_enabled: true,
+          options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+          lifecycle_mode_activated_at: Time.current
+        )
+      )
+
       grandfathered = create(
         :employee,
         :hourly,
@@ -283,6 +343,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         hire_date: Date.new(2025, 1, 1),
         readiness_gate_enforced: false
       )
+      expect(EmployeeIntakePolicy).to receive(:prepare!).once.and_call_original
       result = EmployeeClassificationTransitionService.new(
         employee: grandfathered,
         actor: super_admin,
@@ -306,6 +367,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         hire_date: Date.new(2025, 1, 1),
         readiness_gate_enforced: true
       )
+      expect(EmployeeIntakePolicy).not_to receive(:prepare!)
       result_enforced = EmployeeClassificationTransitionService.new(
         employee: enforced,
         actor: super_admin,
@@ -339,6 +401,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         :employee,
         :hourly,
         company: company,
+        department: department,
         first_name: "Morgan",
         last_name: "Incomplete",
         email: "morgan.incomplete@example.test",

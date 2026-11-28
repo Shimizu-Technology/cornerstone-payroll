@@ -6,6 +6,14 @@ module Api
       class EmployeesController < BaseController
         include EmployeeContactLoginRejectionGuard
         SENSITIVE_CHANGE_REQUEST_KEYS = %w[ssn ssn_encrypted contractor_ein sensitive_payload_encrypted].freeze
+        CLIENT_VISIBLE_VERIFICATION_METADATA_KEYS = %w[
+          readiness_status
+          missing_keys
+          direct_deposit_missing_bank_details
+          final_pay_notes
+          post_termination_committed_pay_period_ids
+          client_response_note
+        ].freeze
         DEFAULT_PER_PAGE = 25
         MAX_PER_PAGE = 500
         AUDIT_FAILURE_MESSAGE = "This change was not saved because its activity record could not be written. Please try again."
@@ -31,20 +39,35 @@ module Api
             .preload(:employee_wage_rate_versions, :employee_compensation_changes)
           employees = employees.page(params[:page]).per(bounded_per_page(default: DEFAULT_PER_PAGE, max: MAX_PER_PAGE))
 
+          client_managed = CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+          page_employees = employees.to_a
+          readiness_by_id = if EmployeeContactProjection.requested?(params)
+            {}
+          else
+            readiness_targets = client_managed ? page_employees : page_employees.select(&:readiness_gate_enforced?)
+            EmployeeReadinessEvaluator.evaluate_batch(readiness_targets, company: current_company, rates_on: @rates_on)
+          end
+
           render json: {
-            data: employees.map { |employee| contact_page_or_full(employee, contact_context) },
+            data: page_employees.map { |employee| contact_page_or_full(employee, contact_context, readiness: readiness_by_id[employee.id]) },
             meta: pagination_meta(employees).merge(needs_contact_details_count: needs_contact_details_count)
           }
         end
 
         def show
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          client_managed = CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+          readiness = if client_managed || @employee.readiness_gate_enforced?
+            EmployeeReadinessEvaluator.evaluate(@employee, rates_on: @rates_on)
+          end
           render json: {
-            data: serialize_employee(@employee, include_department: true, include_document_readiness: true, contact_context: contact_context)
+            data: serialize_employee(@employee, include_department: true, include_document_readiness: true, contact_context: contact_context, readiness: readiness)
           }
         end
 
         def create
+          return unless ensure_scheduled_lifecycle_mode_attempted!
+
           employee = Employee.new
           require_ssn_confirmation!(employee)
           result = with_employee_audit(action: "client_employees#create") do
@@ -54,14 +77,15 @@ module Api
               requested_by: current_user,
               company: current_company,
               confirm_same_person_email: confirm_same_person_email_param,
-              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
+              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?,
+              attempt_lifecycle_activation: false
             ).create!
           end
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           if result.client_managed
             render json: {
-              data: serialize_employee(result.employee, contact_context: contact_context),
+              data: serialize_employee(result.employee, contact_context: contact_context, readiness: result.readiness),
               change_request: nil,
               readiness: result.readiness&.as_json,
               verification_items: Array(result.verification_items).map { |item| serialize_verification_item(item) },
@@ -71,14 +95,17 @@ module Api
               message: create_client_managed_message(result)
             }, status: :created
           else
+            readiness = result.employee.readiness_gate_enforced? ? EmployeeReadinessEvaluator.evaluate(result.employee) : nil
             render json: {
-              data: serialize_employee(result.employee, contact_context: contact_context),
+              data: serialize_employee(result.employee, contact_context: contact_context, readiness: readiness),
               change_request: serialize_change_request(result.change_request),
               applied_direct_fields: result.applied_direct_fields,
               contact_warnings: result.contact_warnings || [],
               message: "Employee profile created. Payroll-sensitive details were submitted for approval as request ##{result.change_request.id}."
             }, status: :created
           end
+        rescue ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged => e
+          render_lifecycle_mode_changed!(e.message)
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee || e.record)
         rescue EmployeeContactChanges::EmailChangeLocked
@@ -95,6 +122,8 @@ module Api
         end
 
         def update
+          return unless ensure_scheduled_lifecycle_mode_attempted!
+
           require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
           result = with_employee_audit(action: "client_employees#update") do
             ClientEmployeeUpdateService.new(
@@ -105,14 +134,15 @@ module Api
               confirm_same_person_email: confirm_same_person_email_param,
               row_revision: row_revision_param,
               baseline_values: baseline_values_param,
-              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?
+              email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?,
+              attempt_lifecycle_activation: false
             ).update!
           end
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           if result.client_managed
             render json: {
-              data: contact_page_or_full(result.employee, contact_context),
+              data: contact_page_or_full(result.employee, contact_context, readiness: result.readiness),
               change_request: serialize_change_request(result.change_request),
               readiness: result.readiness&.as_json,
               verification_items: Array(result.verification_items).map { |item| serialize_verification_item(item) },
@@ -122,14 +152,17 @@ module Api
               message: update_client_managed_message(result)
             }
           else
+            readiness = result.employee.readiness_gate_enforced? ? EmployeeReadinessEvaluator.evaluate(result.employee) : nil
             render json: {
-              data: contact_page_or_full(result.employee, contact_context),
+              data: contact_page_or_full(result.employee, contact_context, readiness: readiness),
               change_request: serialize_change_request(result.change_request),
               applied_direct_fields: result.applied_direct_fields,
               contact_warnings: result.contact_warnings || [],
               message: update_message(result.change_request)
             }
           end
+        rescue ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged => e
+          render_lifecycle_mode_changed!(e.message)
         rescue ClientEmployeeUpdateService::PendingAddressRequest => e
           render json: { error: e.message, code: "address_request_pending", pending_request_id: e.request_id },
             status: :conflict
@@ -161,6 +194,8 @@ module Api
         end
 
         def terminate
+          return unless ensure_scheduled_lifecycle_mode_attempted!
+
           payload = termination_params
           reason_category = payload[:reason_category].to_s.strip
           unless EmployeeStatusEvent::TERMINATION_REASONS.include?(reason_category)
@@ -195,7 +230,6 @@ module Api
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
             revalidate_client_company_write_access!
-            ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
             unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
               error_response = [ {
                 error: "Client-managed employee lifecycle is not enabled for this company.",
@@ -275,8 +309,9 @@ module Api
           return render json: error_response[0], status: error_response[1] if error_response
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+          reloaded = @employee.reload
           render json: {
-            data: serialize_employee(@employee.reload, contact_context: contact_context),
+            data: serialize_employee(reloaded, contact_context: contact_context, readiness: EmployeeReadinessEvaluator.evaluate(reloaded)),
             status_event: serialize_status_event(event),
             verification_item: serialize_verification_item(verification_item),
             post_termination_committed_pay_period_ids: post_termination_committed_ids,
@@ -301,6 +336,8 @@ module Api
         end
 
         def rehire
+          return unless ensure_scheduled_lifecycle_mode_attempted!
+
           payload = rehire_params
           notes = payload[:notes].to_s.strip.presence
           if notes && notes.length > 2000
@@ -318,7 +355,6 @@ module Api
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
             revalidate_client_company_write_access!
-            ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
             unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
               error_response = [ {
                 error: "Client-managed employee lifecycle is not enabled for this company.",
@@ -391,7 +427,7 @@ module Api
 
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
           render json: {
-            data: serialize_employee(@employee.reload, contact_context: contact_context),
+            data: serialize_employee(@employee.reload, contact_context: contact_context, readiness: readiness),
             status_event: serialize_status_event(event),
             readiness: readiness.as_json,
             verification_item: serialize_verification_item(verification_item),
@@ -604,13 +640,13 @@ module Api
           end
         end
 
-        def contact_page_or_full(employee, contact_context)
+        def contact_page_or_full(employee, contact_context, readiness: nil)
           return EmployeeContactProjection.call(employee, context: contact_context) if EmployeeContactProjection.requested?(params)
 
-          serialize_employee(employee, contact_context: contact_context)
+          serialize_employee(employee, contact_context: contact_context, readiness: readiness)
         end
 
-        def serialize_employee(employee, include_department: false, include_document_readiness: false, contact_context: nil)
+        def serialize_employee(employee, include_department: false, include_document_readiness: false, contact_context: nil, readiness: nil)
           data = employee.as_json(
             except: [ :intake_exception, :ssn_encrypted, :contractor_ein, :bank_account_number_encrypted, :bank_routing_number_encrypted ]
           )
@@ -642,11 +678,31 @@ module Api
           end
 
           data["document_readiness"] = EmployeeDocumentReadiness.summary(employee) if include_document_readiness
-          if employee.readiness_gate_enforced? || CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
-            data["readiness"] = EmployeeReadinessEvaluator.evaluate(employee).as_json
-          end
+          data["readiness"] = readiness.as_json if readiness
 
           data
+        end
+
+        # Run scheduled mode activation in its own committed transaction BEFORE
+        # opening any client write transaction so a later write failure never
+        # rolls back activation/blocker state, and an in-flight request never
+        # silently changes semantics mid-request.
+        def ensure_scheduled_lifecycle_mode_attempted!
+          result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
+          return true unless result&.activated?
+
+          render_lifecycle_mode_changed!(
+            "This company switched to Client-managed employee lifecycle. Reload and submit your change again."
+          )
+          false
+        end
+
+        def render_lifecycle_mode_changed!(message)
+          render json: {
+            error: message,
+            code: "lifecycle_mode_changed",
+            employee_lifecycle_mode: "client_managed"
+          }, status: :conflict
         end
 
         def create_client_managed_message(result)
@@ -714,7 +770,7 @@ module Api
             affects_pay: item.affects_pay,
             effective_on: item.effective_on&.iso8601,
             changed_fields: item.changed_fields,
-            metadata: item.metadata,
+            metadata: item.metadata.to_h.slice(*CLIENT_VISIBLE_VERIFICATION_METADATA_KEYS),
             created_at: item.created_at&.utc&.iso8601,
             updated_at: item.updated_at&.utc&.iso8601(6)
           }

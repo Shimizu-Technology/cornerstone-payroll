@@ -2,9 +2,12 @@
 
 module ClientOperatingProfiles
   class EffectiveDates
-    def initialize(company:, latest:)
+    LIFECYCLE_AMEND_KEYS = %w[client_portal.employee_lifecycle_mode].freeze
+
+    def initialize(company:, latest:, changed_keys: nil)
       @company = company
       @latest = latest
+      @changed_keys = changed_keys&.map(&:to_s)
       @today = PayrollBusinessClock.today
     end
 
@@ -25,8 +28,12 @@ module ClientOperatingProfiles
 
     def amend?(date)
       return false unless @latest.present? && @latest.version > 1 && @latest.effective_on == date
+      return true if date > @today
 
-      date > @today || (@latest.lifecycle_mode_activated_at.nil? && @latest.lifecycle_mode_activation_failed_at.present?)
+      return false unless @latest.lifecycle_mode_activated_at.nil? && @latest.lifecycle_mode_activation_failed_at.present?
+      return true if @changed_keys.nil?
+
+      @changed_keys.any? && (@changed_keys - LIFECYCLE_AMEND_KEYS).empty?
     end
 
     private
