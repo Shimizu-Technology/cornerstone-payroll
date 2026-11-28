@@ -97,21 +97,42 @@ module Api
               "client_responded_at" => now.utc.iso8601
             }
             if item.acknowledged_in_committed_run?
-              item = EmployeeVerificationItem.create!(
-                company_id: item.company_id,
-                employee: item.employee,
-                event_kind: item.event_kind,
-                status: "pending_verification",
-                affects_pay: item.affects_pay,
-                effective_on: item.effective_on,
-                source_actor: current_user,
-                source_record: item.source_record,
-                changed_fields: item.changed_fields,
-                before_values: item.before_values,
-                after_values: item.after_values,
-                resubmitted_at: now,
-                metadata: item.metadata.to_h.merge(response_metadata).merge("prior_unverified_item_id" => item.id)
-              )
+              existing_linked = EmployeeVerificationItem
+                .where(company_id: item.company_id, employee_id: item.employee_id)
+                .open_items
+                .where("metadata ->> 'prior_unverified_item_id' = ?", item.id.to_s)
+                .order(created_at: :desc, id: :desc)
+                .lock
+                .to_a
+                .find { |candidate| !candidate.acknowledged_in_committed_run? }
+
+              if existing_linked
+                existing_note = existing_linked.metadata.to_h["client_response_note"].to_s.strip.presence
+                appended_note = existing_note.present? ? "#{existing_note}\n\n#{note}" : note
+                existing_linked.update!(
+                  status: "pending_verification",
+                  resubmitted_at: now,
+                  source_actor: current_user,
+                  metadata: existing_linked.metadata.to_h.merge(response_metadata, "client_response_note" => appended_note)
+                )
+                item = existing_linked
+              else
+                item = EmployeeVerificationItem.create!(
+                  company_id: item.company_id,
+                  employee: item.employee,
+                  event_kind: item.event_kind,
+                  status: "pending_verification",
+                  affects_pay: item.affects_pay,
+                  effective_on: item.effective_on,
+                  source_actor: current_user,
+                  source_record: item.source_record,
+                  changed_fields: item.changed_fields,
+                  before_values: item.before_values,
+                  after_values: item.after_values,
+                  resubmitted_at: now,
+                  metadata: item.metadata.to_h.merge(response_metadata).merge("prior_unverified_item_id" => item.id)
+                )
+              end
             else
               item.update!(
                 status: "pending_verification",

@@ -289,7 +289,8 @@ class ClientEmployeeUpdateService
         original_values: approval_before,
         direct_changes: serialized_values_for(direct_attrs.keys),
         request_kind: own_address.present? ? "update" : request_kind,
-        own_record: own_address.present?
+        own_record: own_address.present?,
+        own_record_signal: own_address.present? ? "strong" : nil
       ) if approval_attrs.present?
     end
 
@@ -618,9 +619,16 @@ class ClientEmployeeUpdateService
       "readiness_status" => readiness.status,
       "missing_keys" => readiness.missing_keys
     }
-    if EmployeeProfileIdentity.possible_self_created_hire?(reloaded, requested_by, same_person_confirmed: contact_result&.same_person_confirmed?)
+    confirming_own_login = contact_result&.same_person_confirmed? && contact_result.matched_login_user&.id == requested_by.id
+    self_hire_signal = EmployeeProfileIdentity.possible_self_created_hire_signal(
+      reloaded,
+      requested_by,
+      same_person_confirmed: confirming_own_login
+    )
+    if self_hire_signal.present?
       metadata["possible_self_created_hire"] = true
       metadata["own_record_actor_id"] = requested_by.id
+      metadata["own_record_signal"] = self_hire_signal
     end
     metadata["direct_deposit_missing_bank_details"] = true if readiness.direct_deposit_missing_bank_details?
 
@@ -683,15 +691,20 @@ class ClientEmployeeUpdateService
     contact_result = contact.validation
 
     confirming_own_login = contact_result&.same_person_confirmed? && contact_result.matched_login_user&.id == requested_by.id
-    own_record = confirming_own_login || EmployeeProfileIdentity.own_record_for_client_managed?(employee, requested_by)
+    own_record_signal = EmployeeProfileIdentity.own_record_signal_for_client_managed(
+      employee,
+      requested_by,
+      confirming_own_login: confirming_own_login
+    )
 
-    if own_record
+    if own_record_signal.present?
       return update_client_managed_own_record!(
         direct_attrs: direct_attrs,
         approval_attrs: approval_attrs,
         payment_method_attrs: payment_method_attrs,
         contact: contact,
-        contact_result: contact_result
+        contact_result: contact_result,
+        own_record_signal: own_record_signal
       )
     end
 
@@ -814,7 +827,7 @@ class ClientEmployeeUpdateService
     )
   end
 
-  def update_client_managed_own_record!(direct_attrs:, approval_attrs:, payment_method_attrs:, contact:, contact_result:)
+  def update_client_managed_own_record!(direct_attrs:, approval_attrs:, payment_method_attrs:, contact:, contact_result:, own_record_signal:)
     address_keys = EmployeeChangeRequest::ADDRESS_FIELDS.map(&:to_sym)
     own_address_attrs = direct_attrs.extract!(*address_keys)
     own_identity_attrs = direct_attrs.extract!(*OWN_RECORD_RESTRICTED_DIRECT_FIELDS)
@@ -856,7 +869,10 @@ class ClientEmployeeUpdateService
         changed_fields: direct_attrs.keys,
         before_values: display_values_for(direct_before),
         after_values: serialized_values_for(direct_attrs.keys),
-        metadata: { "own_record_actor_id" => requested_by.id },
+        metadata: {
+          "own_record_actor_id" => requested_by.id,
+          "own_record_signal" => own_record_signal
+        },
         affects_pay: false
       )
     end
@@ -867,7 +883,8 @@ class ClientEmployeeUpdateService
         original_values: restricted_before,
         direct_changes: serialized_values_for(direct_attrs.keys),
         request_kind: "update",
-        own_record: true
+        own_record: true,
+        own_record_signal: own_record_signal
       )
     end
 
@@ -1112,7 +1129,7 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def create_change_request!(approval_attrs:, original_values:, direct_changes:, request_kind:, own_record: false)
+  def create_change_request!(approval_attrs:, original_values:, direct_changes:, request_kind:, own_record: false, own_record_signal: nil)
     proposed_visible, proposed_protected = protect_identifiers(approval_attrs)
     original_visible, original_protected = protect_identifiers(original_values)
     is_profile_address = own_record && request_kind == "update" &&
@@ -1136,6 +1153,7 @@ class ClientEmployeeUpdateService
         requested_by: requested_by,
         request_kind: request_kind,
         own_record: own_record,
+        own_record_signal: own_record ? own_record_signal : nil,
         proposed_changes: serialize_payload(proposed_visible),
         original_values: serialize_payload(original_visible),
         direct_changes_applied: serialize_payload(direct_changes),

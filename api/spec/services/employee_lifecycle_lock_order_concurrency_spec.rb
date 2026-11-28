@@ -31,19 +31,22 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     conn.execute("RESET lock_timeout") rescue nil
   end
 
-  def stop_and_join_workers!(threads, barriers: [], release_queues: [], join_timeout: 5)
-    Array(barriers).each { |q| threads.size.times { q << true } }
-    Array(release_queues).each { |q| q << true }
-    Array(threads).compact.each do |thread|
+  def stop_and_join_workers!(threads, barriers: [], release_queues: [], join_timeout: 5, kill_timeout: 5)
+    worker_threads = Array(threads).compact
+    Array(barriers).compact.each { |q| worker_threads.size.times { q << true } }
+    Array(release_queues).compact.each { |q| q << true }
+    worker_threads.each do |thread|
       next unless thread.alive?
+      next if thread.join(join_timeout)
 
-      begin
-        Timeout.timeout(join_timeout) { thread.join }
-      rescue Timeout::Error
-        thread.kill
-        thread.join(2)
-      end
+      thread.kill
+      thread.join(kill_timeout)
     end
+
+    still_alive = worker_threads.select(&:alive?)
+    return if still_alive.empty?
+
+    raise "Refusing to clean up non-transactional fixtures while #{still_alive.size} worker thread(s) remain alive"
   end
 
   def cleanup_non_transactional_company!(company:, organization:, user_ids:, tax_tables:)
@@ -101,6 +104,11 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
   end
 
   it "serializes parallel EmployeeStatusTransitionService (staff & client), PayPeriodLifecycleService#approve!/#commit!, and EmployeePaymentDefaultService without deadlocks" do
+    threads = []
+    round2_threads = []
+    barrier = Queue.new
+    barrier2 = Queue.new
+
     tax_tables = ensure_verified_test_tax_years(2026)
     organization = Organization.create!(name: "Lock Order Org #{SecureRandom.hex(4)}")
     company = create(:company, organization: organization, name: "Harborview Lock Bistro #{SecureRandom.hex(4)}")
@@ -156,12 +164,8 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     period.update!(status: "calculated", calculated_at: Time.current, calculated_by_id: staff_admin.id)
 
     # Round 1: Parallel approve! + ClientEmployeeUpdateService (payment_delivery_method + pay_rate) + payment default + staff deactivate! + client terminate!
-    barrier = Queue.new
     outcomes = Queue.new
     thread_count = 5
-    threads = []
-    round2_threads = []
-    barrier2 = Queue.new
 
     threads = [
       Thread.new do
@@ -425,7 +429,7 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       expect(verification_item.acknowledged_in_committed_run?).to be(true)
     end
   ensure
-    stop_and_join_workers!(threads + round2_threads, barriers: [ barrier, barrier2 ])
+    stop_and_join_workers!(Array(threads) + Array(round2_threads), barriers: [ barrier, barrier2 ])
     cleanup_non_transactional_company!(
       company: company,
       organization: organization,
@@ -435,6 +439,9 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
   end
 
   it "deterministically blocks every writer on Company.lock before any Employee or PayPeriod lock is acquired (M4)" do
+    barrier_threads = []
+    barrier_releases = []
+
     organization = Organization.create!(name: "Barrier Lock Org #{SecureRandom.hex(4)}")
     company = create(:company, organization: organization, name: "Harborview Barrier #{SecureRandom.hex(4)}")
     department = Department.create!(company: company, name: "Operations")
@@ -499,8 +506,6 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       }
     }
 
-    barrier_threads = []
-    barrier_releases = []
     writers.each do |label, action|
       holder_pid_q = Queue.new
       waiter_pid_q = Queue.new

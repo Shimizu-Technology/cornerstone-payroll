@@ -282,9 +282,10 @@ module Api
               "notes" => notes,
               "post_termination_committed_pay_period_ids" => post_termination_committed_ids
             }.compact
-            if EmployeeProfileIdentity.normalized_full_name_match?(@employee.first_name, @employee.last_name, current_user.name)
+            if EmployeeProfileIdentity.name_only_own_record_for_client_managed?(@employee, current_user)
               metadata["possible_self_lifecycle_action"] = true
               metadata["possible_self_actor_id"] = current_user.id
+              metadata["own_record_signal"] = "name_only"
             end
 
             verification_item = EmployeeVerificationItems::Recorder.record!(
@@ -420,9 +421,10 @@ module Api
               "readiness_status" => readiness.status,
               "missing_keys" => readiness.missing_keys
             }.compact
-            if EmployeeProfileIdentity.normalized_full_name_match?(@employee.first_name, @employee.last_name, current_user.name)
+            if EmployeeProfileIdentity.name_only_own_record_for_client_managed?(@employee, current_user)
               rehire_metadata["possible_self_lifecycle_action"] = true
               rehire_metadata["possible_self_actor_id"] = current_user.id
+              rehire_metadata["own_record_signal"] = "name_only"
             end
 
             verification_item = EmployeeVerificationItems::Recorder.record!(

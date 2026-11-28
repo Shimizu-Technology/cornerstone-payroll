@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 module EmployeeProfileIdentity
+  OWN_RECORD_SIGNALS = %w[strong name_only].freeze
+
   def self.own_record?(employee, user)
     decision = EmployeeAccountLink.contact_email_link_decision(
       user_id: user.id, company_id: employee.company_id, allowed_employee_ids: [ employee.id ]
@@ -20,17 +22,29 @@ module EmployeeProfileIdentity
   end
 
   def self.own_record_for_client_managed?(employee, user)
+    own_record_signal_for_client_managed(employee, user).present?
+  end
+
+  def self.own_record_signal_for_client_managed(employee, user, confirming_own_login: false)
+    return nil unless employee && user
+    return "strong" if confirming_own_login || strong_own_record_for_client_managed?(employee, user)
+    return "name_only" if name_only_own_record_for_client_managed?(employee, user)
+
+    nil
+  end
+
+  def self.name_only_own_record_for_client_managed?(employee, user)
     return false unless employee && user
-    return true if strong_own_record_for_client_managed?(employee, user)
     return true if normalized_full_name_match?(employee.first_name, employee.last_name, user.name)
 
     sticky_own_record?(employee, user, include_name_snapshots: true)
   end
 
   # Strong own-record signals (account link / confirmed email audit, normalized
-  # email match, or sticky prior own-record). Used to hard-block self-terminate
-  # and self-rehire without blocking unrelated employees who merely share tokens
-  # with a manager's name (e.g. "Jose Cruz Camacho" vs "Jose Camacho").
+  # email match, or sticky prior strong own-record). Used to hard-block
+  # self-terminate and self-rehire without blocking unrelated employees who
+  # merely share tokens with a manager's name (e.g. "Jose Cruz Camacho" vs
+  # "Jose Camacho").
   def self.strong_own_record_for_client_managed?(employee, user)
     return false unless employee && user
     return true if own_record?(employee, user)
@@ -39,12 +53,17 @@ module EmployeeProfileIdentity
     sticky_own_record?(employee, user, include_name_snapshots: false)
   end
 
-  def self.possible_self_created_hire?(employee, user, same_person_confirmed: false)
-    return true if same_person_confirmed
-    return false unless employee && user
-    return true if normalized_email_match?(employee.email, user.email)
+  def self.possible_self_created_hire_signal(employee, user, same_person_confirmed: false)
+    return "strong" if same_person_confirmed
+    return nil unless employee && user
+    return "strong" if normalized_email_match?(employee.email, user.email)
+    return "name_only" if normalized_full_name_match?(employee.first_name, employee.last_name, user.name)
 
-    normalized_full_name_match?(employee.first_name, employee.last_name, user.name)
+    nil
+  end
+
+  def self.possible_self_created_hire?(employee, user, same_person_confirmed: false)
+    possible_self_created_hire_signal(employee, user, same_person_confirmed: same_person_confirmed).present?
   end
 
   def self.normalized_email_match?(left, right)
@@ -88,20 +107,19 @@ module EmployeeProfileIdentity
   def self.sticky_own_record?(employee, user, include_name_snapshots: true)
     return false unless employee&.persisted? && user&.persisted?
 
-    if EmployeeChangeRequest.for_company(employee.company_id)
-        .where(employee_id: employee.id, own_record: true, requested_by_id: user.id)
-        .exists?
-      return true
-    end
+    change_requests = EmployeeChangeRequest.for_company(employee.company_id)
+      .where(employee_id: employee.id, own_record: true, requested_by_id: user.id)
+    change_requests = change_requests.where(own_record_signal: [ nil, "strong" ]) unless include_name_snapshots
+    return true if change_requests.exists?
 
     base_scope = EmployeeVerificationItem.where(company_id: employee.company_id, employee_id: employee.id)
-    if base_scope.where(
+    marker_scope = base_scope.where(
       "metadata ->> 'own_record_actor_id' = :uid OR (metadata ->> 'possible_self_created_hire' = 'true' AND source_actor_id = :user_id)",
       uid: user.id.to_s,
       user_id: user.id
-    ).exists?
-      return true
-    end
+    )
+    marker_scope = marker_scope.where("metadata ->> 'own_record_signal' = ?", "strong") unless include_name_snapshots
+    return true if marker_scope.exists?
 
     snapshot_scope = if include_name_snapshots
       base_scope.where(
