@@ -3,6 +3,8 @@
 require "rails_helper"
 
 RSpec.describe EmployeeReadinessEvaluator do
+  include ActiveSupport::Testing::TimeHelpers
+
   let(:company) { create(:company, name: "Harborview Bistro") }
   let(:actor) { create(:user, company: company, organization: company.organization, role: "admin") }
   let(:rates_on) { Date.new(2026, 11, 22) }
@@ -668,11 +670,33 @@ RSpec.describe EmployeeReadinessEvaluator do
         end
       end
 
-      # Nil-company fallback handles readiness_gate_enforced rows consistently without raising
-      nil_company_batch = described_class.evaluate_batch(rows, company: nil, rates_on: open_period.end_date, w4_on: open_period.pay_date)
-      rows.each do |row|
-        expected = described_class.evaluate(row, rates_on: open_period.end_date, w4_on: open_period.pay_date).as_json
-        expect(nil_company_batch.fetch(row.id).as_json).to eq(expected)
+      # Nil-company fallback handles readiness_gate_enforced rows consistently without raising,
+      # including when date overrides are omitted (uses each employee's company open pay period dates)
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        mid_period_w4_worker = create(
+          :employee, :hourly, company: company,
+          date_of_birth: Date.new(1993, 6, 1),
+          hire_date: Date.new(2026, 11, 1),
+          pay_rate: 20.00,
+          payment_delivery_method: "paper_check",
+          readiness_gate_enforced: true
+        )
+        add_w4!(mid_period_w4_worker, effective_on: Date.new(2026, 11, 25), signed_on: Date.new(2026, 11, 20))
+        nil_rows = (rows + [ mid_period_w4_worker ]).map(&:reload)
+
+        [
+          {},
+          { rates_on: open_period.end_date },
+          { rates_on: open_period.end_date, w4_on: open_period.pay_date }
+        ].each do |date_opts|
+          nil_company_batch = described_class.evaluate_batch(nil_rows, company: nil, **date_opts)
+          nil_rows.each do |row|
+            expected = described_class.evaluate(row, **date_opts).as_json
+            expect(nil_company_batch.fetch(row.id).as_json).to eq(expected),
+              "Nil-company parity mismatch for employee #{row.id} with #{date_opts.inspect}"
+          end
+        end
+        expect(described_class.evaluate_batch([ mid_period_w4_worker ], company: nil).fetch(mid_period_w4_worker.id)).to be_ready
       end
     end
   end

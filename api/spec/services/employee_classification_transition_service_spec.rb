@@ -85,6 +85,15 @@ RSpec.describe EmployeeClassificationTransitionService, type: :service do
     expect(contractor.employee_status_events).to be_empty
   end
 
+  it "leaves an ungated successor on the paper-check default because bank details are not copied" do
+    contractor.update!(payment_delivery_method: "direct_deposit")
+
+    result = described_class.new(employee: contractor, attributes: attributes, actor: super_admin).call
+
+    expect(result.new_employee.readiness_gate_enforced).to be(false)
+    expect(result.new_employee.payment_delivery_method).to be_nil
+  end
+
   it "requires a super admin" do
     admin = create(:user, company: company, role: "admin")
 

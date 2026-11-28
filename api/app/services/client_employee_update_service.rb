@@ -543,6 +543,8 @@ class ClientEmployeeUpdateService
 
   def create_client_managed_in_lock!
     create_attrs = attrs.slice(*CLIENT_MANAGED_CREATE_FIELDS)
+    contractor_hire = create_attrs[:employment_type].to_s == "contractor"
+    create_attrs = create_attrs.except(*W4_VERIFICATION_FIELDS) if contractor_hire
     wage_rates_raw = attrs[WAGE_RATES_KEY]
     w4_election_received = ActiveModel::Type::Boolean.new.cast(attrs[:w4_election_received])
 
@@ -597,7 +599,8 @@ class ClientEmployeeUpdateService
       )
     end
 
-    if w4_supplied_on_create?(attrs, employee)
+    w4_applied = w4_supplied_on_create?(attrs, employee)
+    if w4_applied
       w4_attrs = attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
       apply_client_managed_w4!(w4_attrs: w4_attrs, election_received: w4_election_received, reason: "Initial client-portal W-4 election")
     end
@@ -612,8 +615,13 @@ class ClientEmployeeUpdateService
 
     reloaded = employee.reload
     readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
-    submitted_fields = attrs.keys.reject { |key| attrs[key].nil? && key != :w9_on_file }
-    after_display = display_values_for(attrs.slice(*submitted_fields))
+    applied_attrs = contractor_hire ? attrs.except(*W4_VERIFICATION_FIELDS) : attrs
+    submitted_fields = applied_attrs.keys.reject do |key|
+      (applied_attrs[key].nil? && key != :w9_on_file) ||
+        (key == :w4_election_received && !w4_applied) ||
+        (key == WAGE_RATES_KEY && normalized_wage_rates.blank?)
+    end
+    after_display = display_values_for(applied_attrs.slice(*submitted_fields))
 
     metadata = {
       "readiness_status" => readiness.status,
@@ -777,6 +785,7 @@ class ClientEmployeeUpdateService
         pay_rate: requested_pay_rate,
         basis: basis,
         wage_rates: comp_attrs[WAGE_RATES_KEY],
+        replace_missing_wage_rates: comp_attrs.key?(WAGE_RATES_KEY),
         effective_on: @compensation_effective_on,
         reason: "Client portal compensation update"
       )
@@ -855,12 +864,6 @@ class ClientEmployeeUpdateService
         update_attrs[:contact_source] = contact.contact_source
       end
       employee.update!(update_attrs)
-      EmployeeContactValidator.record_same_person_confirmation_audit!(
-        employee: employee,
-        result: contact_result,
-        actor: requested_by,
-        company: company
-      )
       record_contact_changes!(direct_before, direct_attrs.keys) if profile_requests_enabled?
       verification_items << EmployeeVerificationItems::Recorder.record!(
         employee: employee,
@@ -874,6 +877,15 @@ class ClientEmployeeUpdateService
           "own_record_signal" => own_record_signal
         },
         affects_pay: false
+      )
+    end
+
+    if (direct_attrs.present? || restricted_attrs.present?) && contact_result&.same_person_confirmed?
+      EmployeeContactValidator.record_same_person_confirmation_audit!(
+        employee: employee,
+        result: contact_result,
+        actor: requested_by,
+        company: company
       )
     end
 
@@ -934,7 +946,7 @@ class ClientEmployeeUpdateService
       candidate.require_ssn_confirmation = employee.require_ssn_confirmation
       candidate.ssn_confirmation = employee.ssn_confirmation
       if candidate.ssn_digits.present? && candidate.ssn_digits != employee.ssn_digits
-        validate_duplicate_ssn!(candidate.ssn_digits, target: employee)
+        validate_duplicate_ssn!(candidate.ssn_digits, target: employee, raw_ssn: candidate.ssn_encrypted)
       end
     else
       candidate.require_ssn_confirmation = false
@@ -951,7 +963,7 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def validate_duplicate_ssn!(ssn_digits, target:)
+  def validate_duplicate_ssn!(ssn_digits, target:, raw_ssn: target.ssn_encrypted)
     return if ssn_digits.blank?
 
     excluded_ids = [ employee.id, employee.previous_employee_id, employee.next_employee&.id ].compact
@@ -960,14 +972,18 @@ class ClientEmployeeUpdateService
 
     formatted_dashed = ssn_digits.length == 9 ? "#{ssn_digits[0, 3]}-#{ssn_digits[3, 2]}-#{ssn_digits[5, 4]}" : nil
     formatted_spaced = ssn_digits.length == 9 ? "#{ssn_digits[0, 3]} #{ssn_digits[3, 2]} #{ssn_digits[5, 4]}" : nil
-    candidate_values = [ ssn_digits, formatted_dashed, formatted_spaced, target.ssn_encrypted.to_s.strip.presence ].compact.uniq
+    candidate_values = [ ssn_digits, formatted_dashed, formatted_spaced, raw_ssn.to_s.strip.presence ].compact.uniq
 
     duplicate_exists = scope.where(ssn_encrypted: candidate_values).exists?
     unless duplicate_exists
       # Fall back to normalized-digit comparison for legacy or hand-typed rows
       # stored in non-canonical formats (dots, trailing spaces, parentheses, etc.).
-      duplicate_exists = scope.where.not(ssn_encrypted: [ nil, "" ]).select(:id, :ssn_encrypted).any? do |other|
-        other.ssn_digits == ssn_digits
+      # Batch the scan to bound memory while holding the company lock.
+      scope.where.not(ssn_encrypted: [ nil, "" ]).select(:id, :ssn_encrypted).find_each(batch_size: 200) do |other|
+        if other.ssn_digits == ssn_digits
+          duplicate_exists = true
+          break
+        end
       end
     end
     return unless duplicate_exists
@@ -986,7 +1002,7 @@ class ClientEmployeeUpdateService
       submitted_attrs[:w4_source_reference].present?
   end
 
-  def apply_client_managed_compensation!(pay_rate:, basis:, wage_rates:, effective_on:, reason:)
+  def apply_client_managed_compensation!(pay_rate:, basis:, wage_rates:, effective_on:, reason:, replace_missing_wage_rates: false)
     EmployeeCompensationChangeService.new(
       employee: employee,
       actor: requested_by,
@@ -995,7 +1011,8 @@ class ClientEmployeeUpdateService
       effective_on: effective_on,
       pay_rate: pay_rate,
       basis: basis,
-      wage_rates: wage_rates.presence
+      wage_rates: wage_rates,
+      replace_missing_wage_rates: replace_missing_wage_rates
     ).call!
   rescue EmployeeCompensationChangeService::LockedPeriodError
     earliest = EmployeeCompensationChangeService.next_uncommitted_period_start(employee)

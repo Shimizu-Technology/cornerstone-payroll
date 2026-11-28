@@ -170,6 +170,47 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
       end
     end
 
+    it "allows an immediate lifecycle-only rollback to approval_first mid-period on today while keeping the draft-start rule for bundled edits" do
+      PortalNotificationRecipient.create!(company: company, user: manager, team_role: "lead", added_by: org_admin)
+
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: (today - 14).iso8601,
+          lock_version: 0,
+          reason: "Enable client_managed before mid-period rollback test",
+          changes: { "client_portal.employee_lifecycle_mode" => "client_managed" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+      end
+
+      mid_period_day = today + 5 # Inside the Nov 20..Dec 3 draft pay period (no draft period starts on Nov 25)
+      travel_to(Time.utc(2026, 11, 25, 12)) do
+        latest = company.client_operating_profiles.history_order.first
+        # Bundling another setting mid-period is still rejected by the draft-start rule
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: mid_period_day.iso8601,
+          lock_version: latest.lock_version,
+          reason: "Attempt bundled mid-period rollback",
+          changes: {
+            "client_portal.employee_lifecycle_mode" => "approval_first",
+            "tips.default" => "add_to_paycheck"
+          }
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body["error"]).to include("start of a draft pay period")
+
+        # Lifecycle-only rollback dated today succeeds immediately mid-period
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: mid_period_day.iso8601,
+          lock_version: latest.lock_version,
+          reason: "Immediate mid-period rollback to approval_first",
+          changes: { "client_portal.employee_lifecycle_mode" => "approval_first" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(CompanyFeatures.for(company, on: mid_period_day).employee_lifecycle_mode).to eq("approval_first")
+      end
+    end
+
     it "guards intake windows and last qualifying staff recipient while active or scheduled, fails closed if preflight drifts before effective_on, and recovers via activate_lifecycle_mode or revert" do
       PortalNotificationRecipient.create!(company: company, user: manager, team_role: "lead", added_by: org_admin)
       future_date = today + 14
@@ -358,7 +399,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
 
         # Introduce a drifted pending change request before D2
         worker = create(:employee, :hourly, company: company, first_name: "Casey", last_name: "Successor")
-        create(
+        drifted_request = create(
           :employee_change_request,
           company: company,
           employee: worker,
@@ -373,6 +414,35 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         expect(CompanyFeatures.for(company, on: date_v3).client_managed_employee_lifecycle?).to be(true)
         expect(ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company, as_of: date_v3)).to be_nil
         expect(CompanyFeatures.for(company, on: date_v3).client_managed_employee_lifecycle?).to be(true)
+      end
+
+      # On D3 (date_v4), rollback V4 takes effect in approval_first
+      travel_to(Time.utc(2027, 1, 1, 12)) do
+        expect(CompanyFeatures.for(company, on: date_v4).employee_lifecycle_mode).to eq("approval_first")
+      end
+
+      # On D4 (date_v5), re-enable V5 requires a fresh activation attempt: blocks while drifted request is open,
+      # then activates cleanly once the blocker is cleared
+      date_v5 = today + 56
+      travel_to(Time.utc(2027, 1, 15, 12)) do
+        expect(CompanyFeatures.for(company, on: date_v5).employee_lifecycle_mode).to eq("approval_first")
+
+        ActivateScheduledLifecycleModesJob.perform_now(as_of: date_v5.iso8601)
+        expect(v5.reload.lifecycle_mode_activated_at).to be_nil
+        expect(v5.lifecycle_mode_activation_failed_at).to be_present
+        expect(CompanyFeatures.for(company, on: date_v5).employee_lifecycle_mode).to eq("approval_first")
+
+        EmployeeChangeRequest.where(company: company, status: :pending).update_all(
+          status: EmployeeChangeRequest.statuses[:rejected],
+          reviewed_by_id: manager.id,
+          reviewed_at: Time.current,
+          review_notes: "Cleared before V5 retry"
+        )
+        post "/api/v1/admin/companies/#{company.id}/operating_profile/activate_lifecycle_mode", as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(response.parsed_body["activation_status"]).to eq("activated")
+        expect(v5.reload.lifecycle_mode_activated_at).to be_present
+        expect(CompanyFeatures.for(company, on: date_v5).client_managed_employee_lifecycle?).to be(true)
       end
     end
 
@@ -582,6 +652,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         first_name: "Jordan",
         last_name: "Enforced",
         hire_date: Date.new(2025, 1, 1),
+        payment_delivery_method: "paper_check",
         readiness_gate_enforced: true
       )
       expect(EmployeeIntakePolicy).not_to receive(:prepare!)
@@ -598,6 +669,7 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         }
       ).call
       expect(result_enforced.new_employee.readiness_gate_enforced).to be(true)
+      expect(result_enforced.new_employee.payment_delivery_method).to eq("paper_check")
     end
   end
 
@@ -656,6 +728,18 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
       result = EmployeeLinks::Invite.call(employee: incomplete_hire.reload, actor: manager, delivery: "email")
       expect(result.link).to be_persisted
       expect(result.link.status).to eq("invited")
+
+      # If an already-invited worker later becomes incomplete, Invite directs to resend rather than readiness error
+      incomplete_hire.update_columns(payment_delivery_method: nil)
+      expect do
+        EmployeeLinks::Invite.call(employee: incomplete_hire.reload, actor: manager, delivery: "email")
+      end.to raise_error(EmployeeLinks::Error, /Resend it instead/)
+
+      # And if already active, directs to already-active error
+      result.link.update_columns(status: "active", activated_at: Time.current)
+      expect do
+        EmployeeLinks::Invite.call(employee: incomplete_hire.reload, actor: manager, delivery: "email")
+      end.to raise_error(EmployeeLinks::Error, /already has employee app access/)
     end
   end
 end
