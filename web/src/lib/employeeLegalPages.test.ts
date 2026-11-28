@@ -35,3 +35,10 @@ it.each([
   document.body.dataset.status = 'approved';
   expect(getComputedStyle(notice).display).toBe('none');
 });
+
+it('links the employee privacy notice to platform support', () => {
+  const page = new DOMParser().parseFromString(privacy, 'text/html');
+  const supportLink = page.querySelector('main a[href="mailto:support@shimizu-technology.com"]');
+
+  expect(supportLink?.textContent?.trim()).toBe('support@shimizu-technology.com');
+});

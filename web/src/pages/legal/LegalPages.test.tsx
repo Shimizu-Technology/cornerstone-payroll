@@ -83,6 +83,8 @@ describe('TermsOfService', () => {
   it('defers to a written agreement and links to the privacy policy', () => {
     renderPage(<TermsOfService />);
 
+    expect(screen.getByRole('link', { name: 'support@shimizu-technology.com' }).getAttribute('href')).toBe('mailto:support@shimizu-technology.com');
+
     expect(screen.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeTruthy();
     expect(screen.getByText(/If your organization has a written agreement with us, that agreement controls/)).toBeTruthy();
     expect(screen.getByText(/separate agreement with\s+Cornerstone governs Cornerstone's payroll and accounting services/)).toBeTruthy();
