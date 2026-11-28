@@ -23,7 +23,8 @@ class EmployeeReadinessOverride < ApplicationRecord
   def active_for_period?(pay_period)
     return false if revoked_at.present?
     return true if pay_period_id.present? && pay_period_id == pay_period.id
-    return true if pay_period_id.nil? && expires_on.present? && pay_period.pay_date <= expires_on
+    return true if pay_period_id.nil? && expires_on.present? &&
+      PayrollBusinessClock.today <= expires_on && pay_period.pay_date <= expires_on
 
     false
   end

@@ -112,7 +112,8 @@ class AdminOverrideService
   end
 
   def self.perform!(company:, subject:, actor:, action:, reason:, capability:, impersonated:, snapshot:,
-    preflight: {}, fresh_required: false, verified: false, organization_wide: false, client_managers: false, skip_record: nil)
+    preflight: {}, fresh_required: false, verified: false, organization_wide: false, client_managers: false, skip_record: nil,
+    after_record: nil)
     verify_session!(verified: !fresh_required || verified, impersonated: impersonated)
     reason = reason!(reason)
 
@@ -129,7 +130,10 @@ class AdminOverrideService
       subject.lock! unless subject == company
       record!(company: company, subject: subject, actor: actor, reason: reason, action: action,
         snapshot: snapshot, preflight: preflight, audit_metadata: {}, self_override: false, skip_record: skip_record,
-        notify: ->(entry) { PortalNotifications.admin_override!(entry, client_managers: client_managers) }) do
+        notify: ->(entry) do
+          after_record&.call(entry)
+          PortalNotifications.admin_override!(entry, client_managers: client_managers)
+        end) do
         yield actor, reason
       end
     end

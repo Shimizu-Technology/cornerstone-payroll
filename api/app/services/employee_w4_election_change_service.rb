@@ -29,7 +29,7 @@ class EmployeeW4ElectionChangeService
     replacing_default = prior&.source == "default_withholding" && source != "default_withholding"
     return prior unless changed || (replacing_default && election_received)
 
-    validate_default_replacement!(prior: prior, values: values) if replacing_default
+    validate_default_replacement!(prior: prior, values: values)
 
     raise Error, "W-4 effective date is required when withholding elections change" if values[:effective_on].blank?
     if prior.present? && reason.blank?
@@ -73,8 +73,11 @@ class EmployeeW4ElectionChangeService
   end
 
   def validate_default_replacement!(prior: employee.employee_w4_elections.recent_first.first, values: complete_values)
-    return unless prior&.source == "default_withholding" && source != "default_withholding"
+    return if source == "default_withholding"
     return unless changed_from?(prior, values) || election_received
+
+    prior = default_election_to_replace(prior, values)
+    return unless prior
 
     raise Error, "Explicitly record receipt of the employee withholding election" unless election_received
     source_reference = attributes[:w4_source_reference].to_s.strip
@@ -92,8 +95,25 @@ class EmployeeW4ElectionChangeService
 
   attr_reader :employee, :attributes, :actor, :source, :reason, :election_received
 
+  def default_election_to_replace(prior, values)
+    return prior if prior&.source == "default_withholding"
+
+    # A signed future election can be the newest row while an override's
+    # default still governs the payday that this backdated change would replace.
+    date = EmployeeW4Election.type_for_attribute("effective_on").cast(values[:effective_on])
+    return unless prior && date && date < prior.effective_on
+
+    applicable = employee.w4_election_on(date)
+    if applicable&.source == "default_withholding" &&
+        employee.employee_readiness_overrides.exists?(default_w4_election_id: applicable.id)
+      applicable
+    end
+  end
+
   def complete_values
-    baseline = employee.employee_w4_elections.recent_first.first&.profile_attributes ||
+    prior = employee.employee_w4_elections.recent_first.first
+    applicable_default = default_election_to_replace(prior, { effective_on: attributes[:w4_effective_on] }) unless source == "default_withholding"
+    baseline = (applicable_default || prior)&.profile_attributes ||
       EmployeeW4Election::PROFILE_ATTRIBUTES.index_with { |attribute| employee.public_send(attribute) }
     profile = baseline.merge(attributes)
     if profile[:w4_effective_on].blank? && employee.employee_w4_elections.none?

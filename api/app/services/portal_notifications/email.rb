@@ -27,6 +27,18 @@ module PortalNotifications
       "admin_override" => [ "Administrative change recorded", "Sign in to review your client workspace." ],
       "payroll_reopened" => [ "Payroll rolled back or reopened", "View the current payroll status in the portal." ],
       "employee_change_submitted" => [ "Employee change request", "An employee change request is pending." ],
+      "employee_verification_queued" => [
+        "Employee updates to verify",
+        "A client manager added or updated employee details. Review and verify them before committing payroll."
+      ],
+      "employee_verification_returned" => [
+        "Cornerstone asked you to review an employee update",
+        "Cornerstone sent back an employee update with a note. Sign in to review and update the record."
+      ],
+      "lifecycle_mode_activation_blocked" => [
+        "Scheduled mode switch could not activate",
+        "A scheduled switch to Client-managed employee lifecycle stayed in Cornerstone approves first because one or more preflight conditions changed. Sign in to review blockers and retry activation."
+      ],
       "address_approval_requested" => [ "Address request to review", "An employee address request is pending." ],
       "employee_contact_changed" => [ "Employee contact changes", "Employee contact information changed." ],
       "employee_contact_confirmation_requested" => [ "Contact changes to confirm", "Employee contact or delivery changes need confirmation." ],
@@ -127,6 +139,9 @@ module PortalNotifications
     # client; immediate payroll review emails split per client and pay period.
     def self.destination_group(event, delivery_mode: "immediate")
       return [ :admin_override, event.company_id, event.audience ] if event.event_type == "admin_override"
+      if event.event_type.in?(%w[employee_verification_queued employee_verification_returned lifecycle_mode_activation_blocked])
+        return [ event.event_type.to_sym, event.company_id ]
+      end
 
       if event.event_type.in?(%w[payroll_committed payroll_reopened])
         return [ event.event_type, event.company_id, event.subject_id, event.metadata["self_override"] ]
@@ -213,7 +228,12 @@ module PortalNotifications
         app_name: audience == "staff" ? "Account team" : "Portal", logo_url: nil,
         primary_color: CORNERSTONE_BLUE, help_email: nil)
 
-      subject = "#{heading} — #{context}"
+      subject_heading = case event.event_type
+      when "employee_verification_returned" then "Action needed on employee details"
+      when "lifecycle_mode_activation_blocked" then "Scheduled Client-managed mode activation blocked"
+      else heading
+      end
+      subject = "#{subject_heading} — #{context}"
       footer_lines = [ footer ]
       if event.company.demo?
         subject = "[Demo] #{subject}" unless subject.start_with?("[Demo] ")
@@ -247,6 +267,9 @@ module PortalNotifications
 
       path = case group
       when :admin_override then "pay-runs"
+      when :employee_verification_queued then "verifications"
+      when :employee_verification_returned then "employees?filter=needs_attention"
+      when :lifecycle_mode_activation_blocked then "settings/operating-profile"
       when :employee_rollout then "employee-app/rollout"
       when :messages, :file_requests then audience == "staff" ? "client-messages" : "messages"
       when :payroll then audience == "staff" ? "payroll-submissions" : "payroll-files"

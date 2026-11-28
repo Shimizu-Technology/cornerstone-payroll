@@ -4,7 +4,7 @@
 # freezes activity at a signed snapshot and seeks by (activity_at, kind, id),
 # so new messages cannot move a row across pages during a traversal.
 class ClientInboxQuery
-  KINDS = %w[message document employee_change payroll_submission payroll_review file_request].freeze
+  KINDS = %w[message document employee_change employee_verification payroll_submission payroll_review file_request].freeze
   STATUSES = %w[all unread waiting handled].freeze
 
   def initialize(user:, params: {})
@@ -25,7 +25,13 @@ class ClientInboxQuery
   end
 
   def summary
-    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests FROM (#{to_sql(Time.current, actionable_reviews_only: true)}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live' AND counted_company.demo = FALSE")
+    scoped_companies = inbox_companies
+    verification_ids = verification_company_ids(scoped_companies)
+    verification_count = if verification_ids.any?
+      ", COUNT(*) FILTER (WHERE kind = 'employee_verification' AND waiting) AS pending_verifications"
+    end
+    sql = to_sql(Time.current, scoped_companies: scoped_companies, verification_ids: verification_ids, actionable_reviews_only: true)
+    row = connection.select_one("SELECT COUNT(*) FILTER (WHERE unread) AS unread_count, COUNT(*) FILTER (WHERE waiting) AS waiting_count, COUNT(*) FILTER (WHERE kind = 'message' AND unread) AS unread_messages, COUNT(*) FILTER (WHERE kind = 'document' AND unread) AS unread_documents, COUNT(*) FILTER (WHERE kind = 'employee_change' AND waiting) AS pending_changes, COUNT(*) FILTER (WHERE kind IN ('payroll_submission', 'payroll_review') AND waiting) AS waiting_payroll, COUNT(*) FILTER (WHERE kind = 'file_request' AND waiting) AS waiting_file_requests#{verification_count} FROM (#{sql}) inbox JOIN companies counted_company ON counted_company.id = inbox.company_id WHERE counted_company.payroll_environment = 'live' AND counted_company.demo = FALSE")
     row.transform_values(&:to_i)
   end
 
@@ -63,11 +69,13 @@ class ClientInboxQuery
     assignments.exists? ? assignments.active_access.select(:company_id) : [ @user.company_id ]
   end
 
+  def inbox_companies
+    @params[:company_id].present? ? companies.where(id: @params[:company_id]) : companies
+  end
+
   # Values are quoted through sanitize_sql_array; company subqueries are
   # compiled by ActiveRecord rather than assembled from request strings.
-  def to_sql(snapshot, actionable_reviews_only: false)
-    scoped_companies = companies
-    scoped_companies = scoped_companies.where(id: @params[:company_id]) if @params[:company_id].present?
+  def to_sql(snapshot, scoped_companies: inbox_companies, verification_ids: nil, actionable_reviews_only: false)
     ids = scoped_companies.select(:id).to_sql
     review_ids = if StaffRolePolicy.allowed?(@user, :manage_client_configuration)
       ids
@@ -158,6 +166,9 @@ class ClientInboxQuery
         AND (prp.approved_at IS NOT NULL OR prp.changes_requested_at IS NOT NULL)
         AND COALESCE(prp.approved_at, prp.changes_requested_at) <= ?
     SQL
+    if @params[:kind].blank? || @params[:kind] == "employee_verification"
+      sql += verification_sql(verification_ids || verification_company_ids(scoped_companies), snapshot)
+    end
     conditions = []
     conditions << sanitize("kind = ?", @params[:kind]) if @params[:kind].present?
     case @params[:status]
@@ -166,6 +177,28 @@ class ClientInboxQuery
     when "handled" then conditions << "NOT waiting"
     end
     "SELECT inbox.*, c.name AS company_name, (c.payroll_environment = 'migration_rehearsal' AND c.test_workspace_purpose IS DISTINCT FROM 'demo') AS practice_copy, (c.demo = TRUE OR (c.payroll_environment = 'migration_rehearsal' AND c.test_workspace_purpose = 'demo')) AS demo FROM (#{sql}) inbox JOIN companies c ON c.id = inbox.company_id#{conditions.any? ? " WHERE #{conditions.join(' AND ')}" : ''}"
+  end
+
+  def verification_company_ids(scoped_companies)
+    return [] if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+    return [] unless StaffRolePolicy.allowed?(@user, :payroll_operations)
+
+    activated_companies = ClientOperatingProfile.where.not(lifecycle_mode_activated_at: nil).select(:company_id)
+    scoped_companies.where(id: activated_companies)
+      .select { |company| CompanyFeatures.for(company).client_managed_employee_lifecycle? }.map(&:id)
+  end
+
+  def verification_sql(company_ids, snapshot)
+    return "" if company_ids.empty?
+
+    sanitize(<<~SQL, company_ids, snapshot)
+      UNION ALL
+      SELECT v.id, v.company_id, 'employee_verification', 'Employee update to verify', v.updated_at,
+        actor.name, FALSE, (v.status = 'pending_verification')
+      FROM employee_verification_items v
+      LEFT JOIN users actor ON actor.id = v.source_actor_id
+      WHERE v.company_id IN (?) AND v.updated_at <= ? AND v.status <> 'superseded'
+    SQL
   end
 
   def serialize(row, requests = {}, review_packages = {})

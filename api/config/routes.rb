@@ -397,6 +397,10 @@ Rails.application.routes.draw do
             patch :reject
           end
         end
+        resources :employee_verification_items, only: %i[index show] do
+          post :verify, on: :member
+          post :return_to_client, on: :member
+        end
         resources :client_documents, only: [ :index, :show, :create, :destroy ] do
           member do
             post :review
@@ -468,6 +472,9 @@ Rails.application.routes.draw do
         resources :pay_component_tax_rules, only: [ :index, :create, :update ]
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
+          post :readiness_override, to: "employee_readiness_overrides#create", on: :member
+          delete "readiness_override/:override_id", to: "employee_readiness_overrides#destroy", on: :member
+          post :clear_readiness_gate, to: "employee_readiness_overrides#clear_readiness_gate", on: :member
           member do
             post :deactivate
             post :cancel_scheduled_compensation

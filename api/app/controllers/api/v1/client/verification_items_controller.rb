@@ -157,6 +157,7 @@ module Api
               ip_address: request.remote_ip,
               user_agent: request.user_agent
             )
+            PortalNotifications.employee_verification_queued!(item)
           end
 
           return render json: error_response[0], status: error_response[1] if error_response
