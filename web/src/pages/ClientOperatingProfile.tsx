@@ -19,6 +19,7 @@ import { ApiError } from '@/services/api';
 import {
   operatingProfileApi, type CatalogEntry, type OperatingProfileResponse, type SettingValue, type Settings,
 } from '@/services/operating-profile';
+import { readSettingValue as readValue, settingEdited } from '@/lib/operating-profile-settings';
 
 const sectionLabels: Record<string, string> = {
   core: 'Payroll setup',
@@ -51,20 +52,6 @@ function draftFor(data: OperatingProfileResponse): Settings {
       : field.id.split('.').reduce<unknown>((node, key) => (node as Record<string, unknown> | null)?.[key], version.options);
     return [field.id, (value === undefined ? field.default : value) as SettingValue];
   }));
-}
-
-function readValue(field: CatalogEntry, draft: SettingValue): SettingValue {
-  if (typeof draft !== 'string') return draft;
-  if (field.type === 'nullable_string_array') return commaSeparatedItems(draft);
-  if (field.type === 'uploaders' && draft !== 'all_client_users') {
-    const items = commaSeparatedItems(draft);
-    return items.length ? items.map(Number) : 'all_client_users';
-  }
-  return draft;
-}
-
-function commaSeparatedItems(value: string) {
-  return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
 function Help({ field }: { field: CatalogEntry }) {
@@ -201,7 +188,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
   const changes: Settings = {};
   for (const field of visibleCatalog) {
     const value = readValue(field, draft[field.id]);
-    if (editable(field.id) && JSON.stringify(value) !== JSON.stringify(baseline[field.id])) changes[field.id] = value;
+    if (editable(field.id) && settingEdited(field, draft[field.id], baseline[field.id])) changes[field.id] = value;
   }
   const warnings = readinessWarnings(draft, profile.connected_source_active);
   const sectionOrder = [...new Set([...Object.keys(sectionLabels), ...profile.catalog.map((field) => field.section)])];
@@ -277,7 +264,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
             for (const field of updated.catalog) {
               if (field.id === LIFECYCLE_MODE_KEY) continue;
               if (!updated.editable_keys.includes(field.id) || updated.locked_keys.includes(field.id)) continue;
-              if (JSON.stringify(current[field.id]) !== JSON.stringify(baseline[field.id])) {
+              if (settingEdited(field, current[field.id], baseline[field.id])) {
                 next[field.id] = current[field.id];
               }
             }
