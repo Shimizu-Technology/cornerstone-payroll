@@ -482,6 +482,11 @@ module DemoCompany
         company.pay_periods.where(status: "draft").order(:start_date, :id).last
 
       ensure_lifecycle_operating_profile!(company)
+      # An existing profile is left alone, so a Market switched back to
+      # approval-first must be switched again before the showcase reseeds.
+      unless CompanyFeatures.for(company.reload).employee_lifecycle_mode == "client_managed"
+        raise Refused, "#{company.name} isn't in client-managed mode; switch it on in its operating profile and rerun"
+      end
 
       Roster.lifecycle_people.each do |person|
         department = departments.fetch(person[:dept])
@@ -697,7 +702,7 @@ module DemoCompany
             "possible_self_lifecycle_action" => true,
             "possible_self_actor_id" => actor.id,
             "own_record_signal" => "name_only",
-            "notes" => "Client manager name matched this employee record; confirm they are different people."
+            "notes" => "Seeded example: the acting user's name matched this employee record; confirm they are different people."
           })
       when :readiness_override
         ensure_lifecycle_readiness_override!(company, employee, draft_period)

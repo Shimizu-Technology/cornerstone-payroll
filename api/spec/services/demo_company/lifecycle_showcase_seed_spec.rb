@@ -188,5 +188,10 @@ RSpec.describe "DemoCompany::Seed client-managed lifecycle showcase" do
     committed_rerun = seed!(include_lifecycle_showcase: true)
     expect(committed_rerun.employees_created).to eq(0)
     expect(market_snapshot).to eq(first_snapshot)
+
+    # A Market switched back to approval-first is refused, not reseeded as if client-managed.
+    market.client_operating_profiles.update_all(lifecycle_mode_activated_at: nil)
+    expect { seed!(include_lifecycle_showcase: true) }
+      .to raise_error(DemoCompany::Seed::Refused, /isn't in client-managed mode/)
   end
 end

@@ -93,7 +93,13 @@ module EmployeeAppSwitch
         lock_version: later.empty? ? current.lock_version : 0,
         changed_by: @actor,
         reason: @reason,
-        confirmed_at: current.confirmed_at
+        confirmed_at: current.confirmed_at,
+        # The switch never changes the lifecycle mode, so its activation
+        # carries forward; without it a client-managed company reads as
+        # approval-first.
+        lifecycle_mode_activated_at: current.lifecycle_mode_activated_at,
+        lifecycle_mode_activation_failed_at: current.lifecycle_mode_activation_failed_at,
+        lifecycle_mode_activation_blockers: current.lifecycle_mode_activation_blockers
       )
       audit!(profile, before, amended: false)
       profile
