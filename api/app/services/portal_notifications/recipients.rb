@@ -57,7 +57,8 @@ module PortalNotifications
         end
         if event.audience == "staff" && !event.super_admin_alert?
           if delivery.user_id
-            listed = listed_user?(event.company_id, delivery.user_id) || listed_email?(event.company_id, delivery.user&.email)
+            listed = event.activation_fallback_user?(delivery.user) ||
+              listed_user?(event.company_id, delivery.user_id) || listed_email?(event.company_id, delivery.user&.email)
             return "recipient_removed" unless listed
           else
             return "recipient_removed" unless listed_email?(event.company_id, delivery.recipient_email)
@@ -85,6 +86,13 @@ module PortalNotifications
       end
 
       def subject_available?(event, now: Time.current, w2_posting_availability: {})
+        case event.event_type
+        when "employee_verification_queued", "employee_verification_returned"
+          return verification_subject_available?(event)
+        when "lifecycle_mode_activation_blocked"
+          return activation_blocked_subject_available?(event)
+        end
+
         subject = event.subject
         return payroll_review_publication_actionable?(event) if event.event_type == "payroll_review_published"
 
@@ -148,6 +156,33 @@ module PortalNotifications
 
       private
 
+      def verification_subject_available?(event)
+        return false unless StaffEmployeeLifecycle.unlocked?
+        return false unless event.subject_type == "EmployeeVerificationItem"
+
+        item = EmployeeVerificationItem.find_by(id: event.subject_id, company_id: event.company_id)
+        return false unless item
+
+        if event.event_type == "employee_verification_queued"
+          item.status == "pending_verification" && item.updated_at.utc.iso8601(6) == event.metadata["revision"]
+        else
+          return false unless CompanyFeatures.for(event.company).client_managed_employee_lifecycle?
+
+          item.status == "returned_to_client" && item.returned_at&.utc&.iso8601(6) == event.metadata["revision"]
+        end
+      end
+
+      def activation_blocked_subject_available?(event)
+        return false if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+        return false unless event.subject_type == "ClientOperatingProfile"
+
+        profile = ClientOperatingProfile.for_date(event.company_id)
+        return false unless profile&.id == event.subject_id
+        return false if profile.lifecycle_mode_activated_at? || !profile.lifecycle_mode_activation_failed_at?
+
+        profile.lifecycle_mode_activation_failed_at.utc.iso8601(6) == event.metadata["revision"]
+      end
+
       def payroll_review_publication_actionable?(event)
         period = event.subject
         return false unless period.is_a?(PayPeriod) && period.company_id == event.company_id
@@ -190,16 +225,19 @@ module PortalNotifications
 
       def staff_targets(event)
         listed = PortalNotificationRecipient.where(company_id: event.company_id)
-        candidate_ids = if event.super_admin_alert?
-          User.active.where(organization_id: event.organization_id, role: "super_admin").select(:id)
+        candidates = if event.super_admin_alert?
+          User.active.where(organization_id: event.organization_id, role: "super_admin")
         else
-          listed.users.select(:user_id)
+          User.where(id: listed.users.select(:user_id))
+        end
+        if event.event_type == "lifecycle_mode_activation_blocked"
+          candidates = candidates.or(User.active.where(organization_id: event.organization_id, role: %w[org_admin super_admin]))
         end
         users = []
         seen_user_ids = []
         taken_canonicals = []
-        eligible_listed_users = User.where(id: candidate_ids).order(:id).to_a.select { |user| eligible_user?(user, event) }
-        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.category) != "off" }
+        eligible_listed_users = candidates.order(:id).to_a.select { |user| eligible_user?(user, event) }
+        opted_in, opted_out = eligible_listed_users.partition { |user| Preferences.mode_for(user, event.preference_category(user)) != "off" }
         (opted_in + opted_out).each do |user|
           canonical = PortalNotificationRecipient.canonical_email(user.email)
           next if canonical.present? && taken_canonicals.include?(canonical)
@@ -220,7 +258,7 @@ module PortalNotifications
           account_users = account_users_for_email(normalized)
           if account_users.any?
             eligible_accounts = account_users.select { |user| eligible_user?(user, event) }
-            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.category) != "off" } || eligible_accounts.first
+            eligible = eligible_accounts.find { |user| Preferences.mode_for(user, event.preference_category(user)) != "off" } || eligible_accounts.first
             if eligible && !seen_user_ids.include?(eligible.id)
               users << eligible
               seen_user_ids << eligible.id
@@ -262,7 +300,7 @@ module PortalNotifications
         user = User.includes(:organization).find_by(id: user&.id)
         company = Company.includes(:organization).find_by(id: event.company_id)
         return false unless user && company
-        return false if event.actor_id.present? && event.actor_id == user.id
+        return false if event.actor_id == user.id && !event.activation_fallback_user?(user)
         return false if event.exclude_actor_address? && actor_address?(user.email, event)
 
         if event.audience == "staff"
@@ -273,7 +311,8 @@ module PortalNotifications
           if event.event_type.in?(%w[employee_contact_confirmation_requested tax_form_paper_required w2_ready_to_post])
             StaffRolePolicy.allowed?(user, :payroll_operations, company: company)
           else
-            event.category != "employee_changes" || StaffRolePolicy.allowed?(user, :manage_client_configuration, company: company)
+            !event.category.in?(%w[employee_changes employee_verifications]) ||
+              StaffRolePolicy.allowed?(user, :manage_client_configuration, company: company)
           end
         else
           user.client? && user.payroll_access_allowed? && user.organization_id == company.organization_id &&

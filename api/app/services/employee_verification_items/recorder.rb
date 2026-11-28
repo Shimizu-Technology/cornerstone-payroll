@@ -41,6 +41,7 @@ module EmployeeVerificationItems
             resubmitted_at: Time.current,
             source_actor: actor
           )
+          PortalNotifications.employee_verification_queued!(item)
           requeued << item
         end
         requeued
@@ -125,8 +126,6 @@ module EmployeeVerificationItems
 
     def self.mask_identifier(key, value)
       return nil if value.blank?
-      return value if value.to_s.start_with?("***-**-", "Ending in ")
-
       digits = value.to_s.gsub(/\D/, "")
       return nil if digits.blank?
       return "***-**-#{digits.last(4)}" if %w[ssn ssn_encrypted].include?(key.to_s)
@@ -137,7 +136,7 @@ module EmployeeVerificationItems
     def self.serialize_value(value)
       case value
       when Hash
-        value.transform_keys(&:to_s).transform_values { |nested| serialize_value(nested) }
+        sanitize_values(value)
       when Array
         value.map { |nested| serialize_value(nested) }
       when BigDecimal
@@ -207,6 +206,7 @@ module EmployeeVerificationItems
               after_values: latest.after_values.to_h.merge(after_values),
               metadata: latest.metadata.to_h.merge(metadata)
             )
+            PortalNotifications.employee_verification_queued!(latest)
             latest
           else
             replacement = create_item!(
@@ -228,7 +228,7 @@ module EmployeeVerificationItems
                 :effective_on, :source_record, :metadata, :affects_pay
 
     def create_item!(changed_fields:, before_values:, after_values:, metadata:)
-      EmployeeVerificationItem.create!(
+      item = EmployeeVerificationItem.create!(
         company_id: employee.company_id,
         employee: employee,
         event_kind: event_kind,
@@ -242,6 +242,8 @@ module EmployeeVerificationItems
         after_values: after_values,
         metadata: metadata
       )
+      PortalNotifications.employee_verification_queued!(item)
+      item
     end
   end
 end

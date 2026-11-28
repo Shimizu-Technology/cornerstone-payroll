@@ -39,8 +39,12 @@ class PortalNotificationEvent < ApplicationRecord
     metadata["recipient_scope"] == "super_admins"
   end
 
-  def preference_category
-    super_admin_alert? ? "payroll_super_admin" : category
+  def activation_fallback_user?(user)
+    event_type == "lifecycle_mode_activation_blocked" && user&.role.in?(%w[org_admin super_admin])
+  end
+
+  def preference_category(user = nil)
+    super_admin_alert? || activation_fallback_user?(user) ? "payroll_super_admin" : category
   end
 
   def client_viewers_only?
@@ -50,7 +54,8 @@ class PortalNotificationEvent < ApplicationRecord
   def exclude_actor_address?
     override_decision? || event_type.in?(%w[payroll_committed payroll_reopened employee_change_submitted
       address_approval_requested employee_contact_changed
-      employee_contact_confirmation_requested w2_ready_to_post])
+      employee_contact_confirmation_requested w2_ready_to_post
+      employee_verification_queued employee_verification_returned])
   end
 
   def client_managers_only?
