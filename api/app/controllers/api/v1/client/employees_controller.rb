@@ -45,7 +45,7 @@ module Api
             {}
           else
             readiness_targets = client_managed ? page_employees : page_employees.select(&:readiness_gate_enforced?)
-            EmployeeReadinessEvaluator.evaluate_batch(readiness_targets, company: current_company, rates_on: @rates_on)
+            EmployeeReadinessEvaluator.evaluate_batch(readiness_targets, company: current_company, rates_on: @rates_on, w4_on: @w4_on)
           end
 
           render json: {
@@ -69,7 +69,6 @@ module Api
           return unless ensure_scheduled_lifecycle_mode_attempted!
 
           employee = Employee.new
-          require_ssn_confirmation!(employee)
           result = with_employee_audit(action: "client_employees#create") do
             ClientEmployeeUpdateService.new(
               employee: employee,
@@ -78,7 +77,10 @@ module Api
               company: current_company,
               confirm_same_person_email: confirm_same_person_email_param,
               email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?,
-              attempt_lifecycle_activation: false
+              attempt_lifecycle_activation: false,
+              expected_lifecycle_mode: @expected_lifecycle_mode,
+              ssn_confirmation: ssn_confirmation_param,
+              enforce_ssn_confirmation: true
             ).create!
           end
 
@@ -105,7 +107,7 @@ module Api
             }, status: :created
           end
         rescue ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged => e
-          render_lifecycle_mode_changed!(e.message)
+          render_lifecycle_mode_changed!(e.message, mode: e.employee_lifecycle_mode)
         rescue EmployeeContactValidator::ValidationError => e
           render_contact_validation_error!(e, employee: @employee || e.record)
         rescue EmployeeContactChanges::EmailChangeLocked
@@ -124,7 +126,6 @@ module Api
         def update
           return unless ensure_scheduled_lifecycle_mode_attempted!
 
-          require_ssn_confirmation!(@employee) if params.dig(:employee, :ssn).present? && params.dig(:employee, :ssn).to_s.gsub(/\D/, "") != @employee.ssn_digits
           result = with_employee_audit(action: "client_employees#update") do
             ClientEmployeeUpdateService.new(
               employee: @employee,
@@ -135,7 +136,10 @@ module Api
               row_revision: row_revision_param,
               baseline_values: baseline_values_param,
               email_locked: contact_email_submitted_in_request? && login_email_cooldown_active?,
-              attempt_lifecycle_activation: false
+              attempt_lifecycle_activation: false,
+              expected_lifecycle_mode: @expected_lifecycle_mode,
+              ssn_confirmation: ssn_confirmation_param,
+              enforce_ssn_confirmation: true
             ).update!
           end
 
@@ -162,7 +166,7 @@ module Api
             }
           end
         rescue ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged => e
-          render_lifecycle_mode_changed!(e.message)
+          render_lifecycle_mode_changed!(e.message, mode: e.employee_lifecycle_mode)
         rescue ClientEmployeeUpdateService::PendingAddressRequest => e
           render json: { error: e.message, code: "address_request_pending", pending_request_id: e.request_id },
             status: :conflict
@@ -230,18 +234,19 @@ module Api
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
             revalidate_client_company_write_access!
-            unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+            current_mode = CompanyFeatures.for(current_company).employee_lifecycle_mode
+            if @expected_lifecycle_mode.present? && current_mode != @expected_lifecycle_mode
+              error_response = [ {
+                error: "This company's employee lifecycle mode changed. Reload and submit your change again.",
+                code: "lifecycle_mode_changed",
+                employee_lifecycle_mode: current_mode
+              }, :conflict ]
+              next
+            end
+            unless current_mode == "client_managed"
               error_response = [ {
                 error: "Client-managed employee lifecycle is not enabled for this company.",
                 code: "client_lifecycle_disabled"
-              }, :forbidden ]
-              next
-            end
-
-            if EmployeeProfileIdentity.own_record_for_client_managed?(@employee, current_user)
-              error_response = [ {
-                error: "You cannot terminate your own employee record.",
-                code: "self_lifecycle_forbidden"
               }, :forbidden ]
               next
             end
@@ -277,6 +282,10 @@ module Api
               "notes" => notes,
               "post_termination_committed_pay_period_ids" => post_termination_committed_ids
             }.compact
+            if EmployeeProfileIdentity.normalized_full_name_match?(@employee.first_name, @employee.last_name, current_user.name)
+              metadata["possible_self_lifecycle_action"] = true
+              metadata["possible_self_actor_id"] = current_user.id
+            end
 
             verification_item = EmployeeVerificationItems::Recorder.record!(
               employee: @employee,
@@ -325,6 +334,8 @@ module Api
           render json: {
             error: "This employee is on an approved pay run for #{run.start_date.iso8601} to #{run.end_date.iso8601}. Ask Cornerstone to unapprove that run before terminating effective #{e.effective_date.iso8601}."
           }, status: :unprocessable_entity
+        rescue EmployeeStatusTransitionService::SelfLifecycleForbidden => e
+          render json: { error: e.message, code: "self_lifecycle_forbidden" }, status: :forbidden
         rescue EmployeeStatusTransitionService::Forbidden => e
           render json: { error: e.message }, status: :forbidden
         rescue EmployeeStatusTransitionService::Error => e
@@ -355,7 +366,16 @@ module Api
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
             revalidate_client_company_write_access!
-            unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+            current_mode = CompanyFeatures.for(current_company).employee_lifecycle_mode
+            if @expected_lifecycle_mode.present? && current_mode != @expected_lifecycle_mode
+              error_response = [ {
+                error: "This company's employee lifecycle mode changed. Reload and submit your change again.",
+                code: "lifecycle_mode_changed",
+                employee_lifecycle_mode: current_mode
+              }, :conflict ]
+              next
+            end
+            unless current_mode == "client_managed"
               error_response = [ {
                 error: "Client-managed employee lifecycle is not enabled for this company.",
                 code: "client_lifecycle_disabled"
@@ -363,15 +383,7 @@ module Api
               next
             end
 
-            if EmployeeProfileIdentity.own_record_for_client_managed?(@employee, current_user)
-              error_response = [ {
-                error: "You cannot rehire your own employee record.",
-                code: "self_lifecycle_forbidden"
-              }, :forbidden ]
-              next
-            end
-
-            previous_termination_date = @employee.termination_date
+            previous_termination_date = Employee.where(id: @employee.id).pick(:termination_date)
             event = EmployeeStatusTransitionService.reactivate!(
               employee: @employee,
               actor: current_user,
@@ -384,29 +396,45 @@ module Api
 
             # Stamp readiness_gate_enforced = true on client-portal rehire while
             # keeping any existing document_readiness_required gate untouched (§3.2).
-            @employee.update!(readiness_gate_enforced: true) unless @employee.readiness_gate_enforced?
+            gate_was_enforced = @employee.readiness_gate_enforced?
+            @employee.update!(readiness_gate_enforced: true) unless gate_was_enforced
             readiness = EmployeeReadinessEvaluator.evaluate(@employee.reload)
+
+            changed_fields = %w[status termination_date]
+            before_values = {
+              "status" => event.previous_status,
+              "termination_date" => previous_termination_date&.iso8601
+            }
+            after_values = {
+              "status" => "active",
+              "termination_date" => nil
+            }
+            unless gate_was_enforced
+              changed_fields << "readiness_gate_enforced"
+              before_values["readiness_gate_enforced"] = false
+              after_values["readiness_gate_enforced"] = true
+            end
+
+            rehire_metadata = {
+              "notes" => notes,
+              "readiness_status" => readiness.status,
+              "missing_keys" => readiness.missing_keys
+            }.compact
+            if EmployeeProfileIdentity.normalized_full_name_match?(@employee.first_name, @employee.last_name, current_user.name)
+              rehire_metadata["possible_self_lifecycle_action"] = true
+              rehire_metadata["possible_self_actor_id"] = current_user.id
+            end
 
             verification_item = EmployeeVerificationItems::Recorder.record!(
               employee: @employee,
               actor: current_user,
               event_kind: "rehire",
-              changed_fields: %w[status termination_date readiness_gate_enforced],
-              before_values: {
-                "status" => event.previous_status,
-                "termination_date" => previous_termination_date&.iso8601
-              },
-              after_values: {
-                "status" => "active",
-                "termination_date" => nil
-              },
+              changed_fields: changed_fields,
+              before_values: before_values,
+              after_values: after_values,
               effective_on: event.effective_date,
               source_record: event,
-              metadata: {
-                "notes" => notes,
-                "readiness_status" => readiness.status,
-                "missing_keys" => readiness.missing_keys
-              }.compact
+              metadata: rehire_metadata
             )
 
             record_lifecycle_audit!(
@@ -435,6 +463,8 @@ module Api
           }
         rescue EmployeeProfileIdentity::LinkCheckUnavailable => e
           render json: { error: e.message }, status: :service_unavailable
+        rescue EmployeeStatusTransitionService::SelfLifecycleForbidden => e
+          render json: { error: e.message, code: "self_lifecycle_forbidden" }, status: :forbidden
         rescue EmployeeStatusTransitionService::Forbidden => e
           render json: { error: e.message }, status: :forbidden
         rescue EmployeeStatusTransitionService::Error => e
@@ -532,9 +562,8 @@ module Api
           end
         end
 
-        def require_ssn_confirmation!(employee)
-          employee.require_ssn_confirmation = true
-          employee.ssn_confirmation = params.require(:employee).permit(:ssn_confirmation)[:ssn_confirmation]
+        def ssn_confirmation_param
+          params.require(:employee).permit(:ssn_confirmation)[:ssn_confirmation]
         end
 
         def apply_filters(scope)
@@ -616,7 +645,26 @@ module Api
           end
 
           @rates_on = parsed
+          @w4_on = resolve_w4_on_for_rates_on(parsed)
           true
+        end
+
+        def resolve_w4_on_for_rates_on(end_date)
+          period = PayPeriod.where(
+            company_id: current_company_id,
+            end_date: end_date,
+            status: %w[draft calculated approved],
+            cycle: "regular",
+            run_purpose: "regular",
+            correction_status: nil,
+            test_workspace_role: nil,
+            parallel_run: false
+          ).order(pay_date: :asc, id: :asc).first
+          return period.pay_date if period
+
+          catalog = PayrollSubmissions::Catalog.new(company: current_company)
+          entry = catalog.entries.find { |candidate| candidate.end_date == end_date }
+          entry ? catalog.pay_date_for(entry) : nil
         end
 
         def parse_bounded_iso_date(value)
@@ -688,20 +736,26 @@ module Api
         # rolls back activation/blocker state, and an in-flight request never
         # silently changes semantics mid-request.
         def ensure_scheduled_lifecycle_mode_attempted!
-          result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
-          return true unless result&.activated?
+          return true if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
 
-          render_lifecycle_mode_changed!(
-            "This company switched to Client-managed employee lifecycle. Reload and submit your change again."
-          )
-          false
+          result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
+          if result&.activated?
+            render_lifecycle_mode_changed!(
+              "This company switched to Client-managed employee lifecycle. Reload and submit your change again.",
+              mode: "client_managed"
+            )
+            return false
+          end
+
+          @expected_lifecycle_mode = CompanyFeatures.for(current_company).employee_lifecycle_mode
+          true
         end
 
-        def render_lifecycle_mode_changed!(message)
+        def render_lifecycle_mode_changed!(message, mode: nil)
           render json: {
             error: message,
             code: "lifecycle_mode_changed",
-            employee_lifecycle_mode: "client_managed"
+            employee_lifecycle_mode: mode || CompanyFeatures.for(current_company).employee_lifecycle_mode
           }, status: :conflict
         end
 

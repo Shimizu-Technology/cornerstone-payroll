@@ -114,29 +114,29 @@ class EmployeeReadinessEvaluator
           [ (rates_on || today).to_date, (w4_on || today).to_date ]
         end
 
-      enforced_ids = rows.select(&:readiness_gate_enforced?).filter_map(&:id)
-      rehired_ids = if enforced_ids.any?
-        EmployeeStatusEvent.where(
-          company_id: company.id,
-          employee_id: enforced_ids,
-          event_type: "reactivated",
-          previous_status: "terminated"
-        ).distinct.pluck(:employee_id).to_set
-      else
-        Set.new
-      end
+      rehired_ids = Set.new
+      committed_payroll_ids = Set.new
+      if company.present?
+        enforced_ids = rows.select(&:readiness_gate_enforced?).filter_map(&:id)
+        if enforced_ids.any?
+          rehired_ids = EmployeeStatusEvent.where(
+            company_id: company.id,
+            employee_id: enforced_ids,
+            event_type: "reactivated",
+            previous_status: "terminated"
+          ).distinct.pluck(:employee_id).to_set
+        end
 
-      remaining_ids = enforced_ids - rehired_ids.to_a
-      committed_payroll_ids = if remaining_ids.any?
-        PayrollItem.where(company_id: company.id, employee_id: remaining_ids)
-          .joins(:pay_period)
-          .financially_reportable
-          .where(pay_periods: { status: "committed" })
-          .distinct
-          .pluck(:employee_id)
-          .to_set
-      else
-        Set.new
+        remaining_ids = enforced_ids - rehired_ids.to_a
+        if remaining_ids.any?
+          committed_payroll_ids = PayrollItem.where(company_id: company.id, employee_id: remaining_ids)
+            .joins(:pay_period)
+            .financially_reportable
+            .where(pay_periods: { status: "committed" })
+            .distinct
+            .pluck(:employee_id)
+            .to_set
+        end
       end
 
       rows.each_with_object({}) do |employee, results|
@@ -144,8 +144,8 @@ class EmployeeReadinessEvaluator
           employee: employee,
           rates_on: resolved_rates_on,
           w4_on: resolved_w4_on,
-          rehired: rehired_ids.include?(employee.id),
-          prior_committed_payroll: committed_payroll_ids.include?(employee.id)
+          rehired: company.present? ? rehired_ids.include?(employee.id) : nil,
+          prior_committed_payroll: company.present? ? committed_payroll_ids.include?(employee.id) : nil
         ).evaluate
       end
     end

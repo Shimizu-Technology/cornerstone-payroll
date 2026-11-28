@@ -22,6 +22,30 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     )
   end
 
+  def with_worker_db_timeouts(conn, statement_ms: 10_000, lock_ms: 10_000)
+    conn.execute("SET statement_timeout = #{Integer(statement_ms)}")
+    conn.execute("SET lock_timeout = #{Integer(lock_ms)}")
+    yield
+  ensure
+    conn.execute("RESET statement_timeout") rescue nil
+    conn.execute("RESET lock_timeout") rescue nil
+  end
+
+  def stop_and_join_workers!(threads, barriers: [], release_queues: [], join_timeout: 5)
+    Array(barriers).each { |q| threads.size.times { q << true } }
+    Array(release_queues).each { |q| q << true }
+    Array(threads).compact.each do |thread|
+      next unless thread.alive?
+
+      begin
+        Timeout.timeout(join_timeout) { thread.join }
+      rescue Timeout::Error
+        thread.kill
+        thread.join(2)
+      end
+    end
+  end
+
   def cleanup_non_transactional_company!(company:, organization:, user_ids:, tax_tables:)
     if company&.persisted?
       ActiveRecord::Base.connection_pool.with_connection do |conn|
@@ -135,13 +159,18 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     barrier = Queue.new
     outcomes = Queue.new
     thread_count = 5
+    threads = []
+    round2_threads = []
+    barrier2 = Queue.new
 
     threads = [
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier.pop
-          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(staff_admin.id)).approve!
-          outcomes << [ :approve, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier.pop
+            PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period.id), actor: User.find(staff_admin.id)).approve!
+            outcomes << [ :approve, :ok ]
+          end
         rescue PayPeriodLifecycleService::Error => e
           outcomes << [ :approve, :domain_error, e.message ]
         rescue StandardError => e
@@ -149,15 +178,17 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier.pop
-          ClientEmployeeUpdateService.new(
-            employee: Employee.find(employee.id),
-            attrs: { payment_delivery_method: "direct_deposit", pay_rate: 23.50 },
-            requested_by: User.find(client_manager.id),
-            company: Company.find(company.id)
-          ).update!
-          outcomes << [ :client_update, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier.pop
+            ClientEmployeeUpdateService.new(
+              employee: Employee.find(employee.id),
+              attrs: { payment_delivery_method: "direct_deposit", pay_rate: 23.50 },
+              requested_by: User.find(client_manager.id),
+              company: Company.find(company.id)
+            ).update!
+            outcomes << [ :client_update, :ok ]
+          end
         rescue ActiveRecord::RecordInvalid => e
           outcomes << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
         rescue StandardError => e
@@ -165,27 +196,31 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier.pop
-          EmployeePaymentDefaultService.new(
-            employee: Employee.find(employee.id),
-            method: "direct_deposit",
-            actor: User.find(staff_admin.id)
-          ).call
-          outcomes << [ :payment_default, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier.pop
+            EmployeePaymentDefaultService.new(
+              employee: Employee.find(employee.id),
+              method: "direct_deposit",
+              actor: User.find(staff_admin.id)
+            ).call
+            outcomes << [ :payment_default, :ok ]
+          end
         rescue StandardError => e
           outcomes << [ :payment_default, :unexpected, e.class.name, e.message ]
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier.pop
-          EmployeeStatusTransitionService.deactivate!(
-            employee: Employee.find(employee.id),
-            actor: User.find(staff_admin.id),
-            attributes: { effective_date: "2026-11-10", reason_category: "seasonal" }
-          )
-          outcomes << [ :staff_deactivate, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier.pop
+            EmployeeStatusTransitionService.deactivate!(
+              employee: Employee.find(employee.id),
+              actor: User.find(staff_admin.id),
+              attributes: { effective_date: "2026-11-10", reason_category: "seasonal" }
+            )
+            outcomes << [ :staff_deactivate, :ok ]
+          end
         rescue EmployeeStatusTransitionService::Error => e
           outcomes << [ :staff_deactivate, :domain_error, e.message ]
         rescue StandardError => e
@@ -193,14 +228,16 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier.pop
-          EmployeeStatusTransitionService.terminate!(
-            employee: Employee.find(employee.id),
-            actor: User.find(client_manager.id),
-            attributes: { effective_date: "2026-11-10", reason_category: "voluntary", source: "client_portal" }
-          )
-          outcomes << [ :client_terminate, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier.pop
+            EmployeeStatusTransitionService.terminate!(
+              employee: Employee.find(employee.id),
+              actor: User.find(client_manager.id),
+              attributes: { effective_date: "2026-11-10", reason_category: "voluntary", source: "client_portal" }
+            )
+            outcomes << [ :client_terminate, :ok ]
+          end
         rescue EmployeeStatusTransitionService::Error => e
           outcomes << [ :client_terminate, :domain_error, e.message ]
         rescue StandardError => e
@@ -278,15 +315,16 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
     )
     ack_payload = [ { id: verification_item.id, updated_at: verification_item.updated_at.utc.iso8601(6) } ]
 
-    barrier2 = Queue.new
     outcomes2 = Queue.new
     round2_threads = [
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier2.pop
-          PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period2.id), actor: User.find(staff_admin.id))
-            .commit!(acknowledged_verification_items: ack_payload)
-          outcomes2 << [ :commit, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier2.pop
+            PayPeriodLifecycleService.new(pay_period: PayPeriod.find(period2.id), actor: User.find(staff_admin.id))
+              .commit!(acknowledged_verification_items: ack_payload)
+            outcomes2 << [ :commit, :ok ]
+          end
         rescue PayPeriodLifecycleService::Error => e
           outcomes2 << [ :commit, :domain_error, e.message ]
         rescue StandardError => e
@@ -294,14 +332,16 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier2.pop
-          EmployeeStatusTransitionService.reactivate!(
-            employee: Employee.find(employee.id),
-            actor: User.find(staff_admin.id),
-            attributes: { effective_date: "2026-11-15" }
-          )
-          outcomes2 << [ :staff_reactivate, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier2.pop
+            EmployeeStatusTransitionService.reactivate!(
+              employee: Employee.find(employee.id),
+              actor: User.find(staff_admin.id),
+              attributes: { effective_date: "2026-11-15" }
+            )
+            outcomes2 << [ :staff_reactivate, :ok ]
+          end
         rescue EmployeeStatusTransitionService::Error => e
           outcomes2 << [ :staff_reactivate, :domain_error, e.message ]
         rescue StandardError => e
@@ -309,14 +349,16 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier2.pop
-          EmployeeStatusTransitionService.reactivate!(
-            employee: Employee.find(employee.id),
-            actor: User.find(client_manager.id),
-            attributes: { effective_date: "2026-11-15", source: "client_portal" }
-          )
-          outcomes2 << [ :client_reactivate, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier2.pop
+            EmployeeStatusTransitionService.reactivate!(
+              employee: Employee.find(employee.id),
+              actor: User.find(client_manager.id),
+              attributes: { effective_date: "2026-11-15", source: "client_portal" }
+            )
+            outcomes2 << [ :client_reactivate, :ok ]
+          end
         rescue EmployeeStatusTransitionService::Error => e
           outcomes2 << [ :client_reactivate, :domain_error, e.message ]
         rescue StandardError => e
@@ -324,15 +366,17 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier2.pop
-          ClientEmployeeUpdateService.new(
-            employee: Employee.find(active_worker.id),
-            attrs: { payment_delivery_method: "direct_deposit", pay_rate: 26.50, compensation_effective_on: (period2.end_date + 1).iso8601 },
-            requested_by: User.find(client_manager.id),
-            company: Company.find(company.id)
-          ).update!
-          outcomes2 << [ :client_update, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier2.pop
+            ClientEmployeeUpdateService.new(
+              employee: Employee.find(active_worker.id),
+              attrs: { payment_delivery_method: "direct_deposit", pay_rate: 26.50, compensation_effective_on: (period2.end_date + 1).iso8601 },
+              requested_by: User.find(client_manager.id),
+              company: Company.find(company.id)
+            ).update!
+            outcomes2 << [ :client_update, :ok ]
+          end
         rescue ActiveRecord::RecordInvalid => e
           outcomes2 << [ :client_update, :domain_error, e.record.errors.full_messages.join(", ") ]
         rescue StandardError => e
@@ -340,18 +384,20 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         end
       end,
       Thread.new do
-        ActiveRecord::Base.connection_pool.with_connection do
-          barrier2.pop
-          EmployeeVerificationItems::Recorder.record!(
-            employee: Employee.find(active_worker.id),
-            actor: User.find(client_manager.id),
-            event_kind: "compensation_change",
-            changed_fields: [ "pay_rate" ],
-            before_values: { "pay_rate" => 25.0 },
-            after_values: { "pay_rate" => 26.0 },
-            effective_on: period2.end_date + 1
-          )
-          outcomes2 << [ :verification_write, :ok ]
+        ActiveRecord::Base.connection_pool.with_connection do |conn|
+          with_worker_db_timeouts(conn) do
+            barrier2.pop
+            EmployeeVerificationItems::Recorder.record!(
+              employee: Employee.find(active_worker.id),
+              actor: User.find(client_manager.id),
+              event_kind: "compensation_change",
+              changed_fields: [ "pay_rate" ],
+              before_values: { "pay_rate" => 25.0 },
+              after_values: { "pay_rate" => 26.0 },
+              effective_on: period2.end_date + 1
+            )
+            outcomes2 << [ :verification_write, :ok ]
+          end
         rescue StandardError => e
           outcomes2 << [ :verification_write, :unexpected, e.class.name, e.message ]
         end
@@ -379,6 +425,7 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       expect(verification_item.acknowledged_in_committed_run?).to be(true)
     end
   ensure
+    stop_and_join_workers!(threads + round2_threads, barriers: [ barrier, barrier2 ])
     cleanup_non_transactional_company!(
       company: company,
       organization: organization,
@@ -407,6 +454,15 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
 
     employee = create(:employee, :hourly, company: company, department: department, first_name: "Jordan", last_name: "Barrier", hire_date: Date.new(2026, 1, 1), pay_rate: 20.0, payment_delivery_method: "paper_check")
     create_ready_w4!(employee)
+    EmployeeVerificationItem.create!(
+      company: company,
+      employee: employee,
+      event_kind: "compensation_change",
+      status: "returned_to_client",
+      affects_pay: true,
+      changed_fields: [ "pay_rate" ],
+      return_note: "Barrier requeue check"
+    )
 
     writers = {
       client_update: -> {
@@ -427,6 +483,13 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
           after_values: { "pay_rate" => 22.00 }
         )
       },
+      requeue_returned: -> {
+        EmployeeVerificationItems::Recorder.requeue_returned_items!(
+          employee: Employee.find(employee.id),
+          actor: User.find(client_manager.id),
+          touched_fields: [ :pay_rate ]
+        )
+      },
       terminate: -> {
         EmployeeStatusTransitionService.terminate!(
           employee: Employee.find(employee.id),
@@ -436,36 +499,46 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       }
     }
 
+    barrier_threads = []
+    barrier_releases = []
     writers.each do |label, action|
       holder_pid_q = Queue.new
       waiter_pid_q = Queue.new
       release_holder = Queue.new
+      barrier_releases << release_holder
       waiter_error = nil
 
       holder = Thread.new do
         ActiveRecord::Base.connection_pool.with_connection do |conn|
-          ActiveRecord::Base.transaction do
-            Company.lock.find(company.id)
-            holder_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
-            Timeout.timeout(10) { release_holder.pop }
+          with_worker_db_timeouts(conn) do
+            ActiveRecord::Base.transaction do
+              Company.lock.find(company.id)
+              holder_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+              Timeout.timeout(10) { release_holder.pop }
+            end
           end
         end
       end
+      barrier_threads << holder
 
       holder_pid = Timeout.timeout(5) { holder_pid_q.pop }
 
       waiter = Thread.new do
         ActiveRecord::Base.connection_pool.with_connection do |conn|
-          waiter_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
-          action.call
+          with_worker_db_timeouts(conn) do
+            waiter_pid_q << conn.select_value("SELECT pg_backend_pid()").to_i
+            action.call
+          end
         rescue StandardError => e
           waiter_error = e
         end
       end
+      barrier_threads << waiter
 
       waiter_pid = Timeout.timeout(5) { waiter_pid_q.pop }
 
       blocked_by_holder = false
+      waiting_on_company_lock = false
       held_row_locks = []
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5.0
       ActiveRecord::Base.connection_pool.with_connection do |conn|
@@ -473,6 +546,14 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
           blocking = conn.select_values("SELECT unnest(pg_blocking_pids(#{waiter_pid}))").map(&:to_i)
           if blocking.include?(holder_pid)
             blocked_by_holder = true
+            waiting_on_company_lock = conn.select_value(<<~SQL.squish).to_i.positive?
+              SELECT COUNT(*)
+              FROM pg_locks l
+              JOIN pg_class c ON c.oid = l.relation
+              WHERE l.pid = #{waiter_pid}
+                AND c.relname = 'companies'
+                AND l.mode IN ('RowShareLock', 'RowExclusiveLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
+            SQL
             held_row_locks = conn.select_values(<<~SQL.squish)
               SELECT c.relname
               FROM pg_locks l
@@ -480,7 +561,7 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
               WHERE l.pid = #{waiter_pid}
                 AND l.granted = TRUE
                 AND l.locktype IN ('relation', 'tuple')
-                AND l.mode IN ('RowExclusiveLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
+                AND l.mode IN ('RowShareLock', 'RowExclusiveLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
                 AND c.relname IN ('employees', 'pay_periods')
             SQL
             break
@@ -494,10 +575,12 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       Timeout.timeout(10) { waiter.join }
 
       expect(blocked_by_holder).to be(true), "Expected #{label} to block on Company.lock held by Thread A (preventing Employee->PayPeriod inversion)"
-      expect(held_row_locks).to be_empty, "Expected #{label} to hold zero Employee/PayPeriod write locks while waiting on Company.lock, got: #{held_row_locks.inspect}"
+      expect(waiting_on_company_lock).to be(true), "Expected #{label} to be waiting on companies lock held by Thread A"
+      expect(held_row_locks).to be_empty, "Expected #{label} to hold zero Employee/PayPeriod SELECT FOR UPDATE or write locks while waiting on Company.lock, got: #{held_row_locks.inspect}"
       expect(waiter_error).to be_nil, "Expected #{label} to serialize cleanly after Company.lock released, got: #{waiter_error.inspect}"
     end
   ensure
+    stop_and_join_workers!(barrier_threads, release_queues: barrier_releases)
     cleanup_non_transactional_company!(
       company: company,
       organization: organization,
@@ -538,13 +621,28 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       )
     )
 
+    # N5: default attempt_lifecycle_activation is false (opt-in), and opt-in refuses to run inside an open transaction
+    expect do
+      ActiveRecord::Base.transaction do
+        ClientEmployeeUpdateService.new(
+          employee: Employee.new,
+          attrs: { first_name: "InsideTx", last_name: "Refused", employment_type: "hourly" },
+          requested_by: client_manager,
+          company: company,
+          attempt_lifecycle_activation: true
+        ).create!
+      end
+    end.to raise_error(ArgumentError, /open database transaction/)
+    expect(due_profile.reload.lifecycle_mode_activation_failed_at).to be_nil
+
     # Failing create (missing required last_name -> ActiveRecord::RecordInvalid rolls back write tx)
     expect do
       ClientEmployeeUpdateService.new(
         employee: Employee.new,
         attrs: { first_name: "InvalidOnly", employment_type: "hourly" },
         requested_by: client_manager,
-        company: company
+        company: company,
+        attempt_lifecycle_activation: true
       ).create!
     end.to raise_error(ActiveRecord::RecordInvalid)
 
@@ -560,7 +658,8 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         employee: Employee.new,
         attrs: { first_name: "InvalidAgain", employment_type: "hourly" },
         requested_by: client_manager,
-        company: company
+        company: company,
+        attempt_lifecycle_activation: true
       ).create!
     end.to raise_error(ActiveRecord::RecordInvalid)
     expect(AuditLog.where(company_id: company.id, action: "client_operating_profile.lifecycle_mode_activation_blocked").count).to eq(1)
@@ -574,7 +673,8 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
         employee: Employee.new,
         attrs: { first_name: "MidRequest", last_name: "Flip", employment_type: "hourly" },
         requested_by: client_manager,
-        company: company
+        company: company,
+        attempt_lifecycle_activation: true
       ).create!
     end.to raise_error(ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged)
       .and change(Employee, :count).by(0)
@@ -585,7 +685,8 @@ RSpec.describe "Lifecycle PR 3 lock-order and deadlock regression", :postgres_co
       employee: Employee.new,
       attrs: { first_name: "AfterReload", last_name: "Hire", employment_type: "hourly" },
       requested_by: client_manager,
-      company: company
+      company: company,
+      attempt_lifecycle_activation: true
     ).create!
     expect(retry_result.client_managed).to be(true)
     expect(retry_result.employee.readiness_gate_enforced).to be(true)

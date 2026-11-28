@@ -24,7 +24,11 @@ class ActivateScheduledLifecycleModesJob < ApplicationJob
       company = Company.find_by(id: company_id)
       next unless company
 
-      ClientOperatingProfiles::LifecycleModeActivationService.activate!(company: company, as_of: as_of)
+      ClientOperatingProfiles::LifecycleModeActivationService.activate!(
+        company: company,
+        as_of: as_of,
+        allow_retry_blocked: false
+      )
       nil
     rescue StandardError => error
       Rails.logger.error("Scheduled lifecycle mode activation failed for company_id=#{company_id} (#{error.class})")

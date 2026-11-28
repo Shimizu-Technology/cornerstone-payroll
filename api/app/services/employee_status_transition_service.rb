@@ -3,6 +3,7 @@
 class EmployeeStatusTransitionService
   class Error < StandardError; end
   class Forbidden < Error; end
+  class SelfLifecycleForbidden < Forbidden; end
   class ApprovedRunBlocked < Error
     attr_reader :pay_period, :effective_date
 
@@ -59,6 +60,9 @@ class EmployeeStatusTransitionService
       authorize_terminate!(source)
       remove_runs = lock_remove_runs!(effective_date)
       @employee.lock!
+      if source == "client_portal" && EmployeeProfileIdentity.strong_own_record_for_client_managed?(@employee, @actor)
+        raise SelfLifecycleForbidden, "You cannot terminate your own employee record."
+      end
       raise Error, "This worker is already terminated" if @employee.status == "terminated"
       raise Error, "Termination cannot be before the hire date" if @employee.hire_date && effective_date < @employee.hire_date
       raise Error, "Termination cannot be before the worker's latest status change" if before_latest_status_event?(effective_date)
@@ -129,6 +133,9 @@ class EmployeeStatusTransitionService
       authorize_reactivate_entry!(source)
       @employee.lock!
       if source == "client_portal"
+        if EmployeeProfileIdentity.strong_own_record_for_client_managed?(@employee, @actor)
+          raise SelfLifecycleForbidden, "You cannot rehire your own employee record."
+        end
         raise Error, "Only terminated employees can be rehired" unless @employee.status == "terminated"
       else
         # Bringing back a terminated worker is a rehire, which stays with

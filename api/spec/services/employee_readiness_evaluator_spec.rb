@@ -589,4 +589,91 @@ RSpec.describe EmployeeReadinessEvaluator do
       end
     end
   end
+
+  describe ".evaluate_batch parity with .evaluate (N6, nil-company fallback)" do
+    it "matches .evaluate across new hire, rehire, grandfathered, and prior committed pay with and without rates_on" do
+      committed_period = create(
+        :pay_period,
+        :committed,
+        company: company,
+        start_date: Date.new(2026, 10, 12),
+        end_date: Date.new(2026, 10, 25),
+        pay_date: Date.new(2026, 10, 30)
+      )
+      open_period = create(
+        :pay_period,
+        company: company,
+        status: "draft",
+        run_purpose: "regular",
+        start_date: Date.new(2026, 11, 9),
+        end_date: Date.new(2026, 11, 22),
+        pay_date: Date.new(2026, 11, 27)
+      )
+
+      new_hire_incomplete = create(
+        :employee, :hourly, company: company,
+        date_of_birth: Date.new(1994, 5, 14),
+        hire_date: Date.new(2026, 11, 1),
+        pay_rate: 19.00,
+        payment_delivery_method: nil,
+        readiness_gate_enforced: true
+      )
+      add_w4!(new_hire_incomplete, effective_on: Date.new(2026, 12, 1), signed_on: Date.new(2026, 11, 15))
+
+      rehire_worker = create(
+        :employee, :hourly, company: company,
+        date_of_birth: Date.new(1991, 4, 4),
+        hire_date: Date.new(2026, 11, 1),
+        pay_rate: 18.00,
+        payment_delivery_method: nil,
+        readiness_gate_enforced: true
+      )
+      add_w4!(rehire_worker, effective_on: Date.new(2026, 11, 1), signed_on: nil, source: "legacy_profile", version: 2019)
+      EmployeeStatusEvent.create!(
+        company: company,
+        employee: rehire_worker,
+        event_type: "reactivated",
+        previous_status: "terminated",
+        resulting_status: "active",
+        effective_date: Date.new(2026, 11, 5),
+        source: "client_portal"
+      )
+
+      grandfathered_worker = create(
+        :employee, :hourly, company: company,
+        date_of_birth: nil,
+        hire_date: Date.new(2024, 1, 1),
+        pay_rate: 18.00,
+        payment_delivery_method: nil,
+        readiness_gate_enforced: false
+      )
+      add_w4!(grandfathered_worker, effective_on: Date.new(2024, 1, 1), signed_on: nil, source: "legacy_profile", version: 2019)
+
+      prior_paid_worker = create_ready_w2_hourly(hire_date: Date.new(2026, 10, 1), payment_delivery_method: nil)
+      create(:payroll_item, company: company, pay_period: committed_period, employee: prior_paid_worker, pay_rate: 18.50)
+
+      rows = [ new_hire_incomplete, rehire_worker, grandfathered_worker, prior_paid_worker ].map(&:reload)
+
+      [
+        {},
+        { rates_on: open_period.end_date },
+        { rates_on: Date.new(2026, 12, 6), w4_on: Date.new(2026, 12, 11) }
+      ].each do |date_opts|
+        batched = described_class.evaluate_batch(rows, company: company, **date_opts)
+        expect(batched.keys).to match_array(rows.map(&:id))
+        rows.each do |row|
+          expected = described_class.evaluate(row, **date_opts).as_json
+          expect(batched.fetch(row.id).as_json).to eq(expected),
+            "Parity mismatch for employee #{row.id} with #{date_opts.inspect}"
+        end
+      end
+
+      # Nil-company fallback handles readiness_gate_enforced rows consistently without raising
+      nil_company_batch = described_class.evaluate_batch(rows, company: nil, rates_on: open_period.end_date, w4_on: open_period.pay_date)
+      rows.each do |row|
+        expected = described_class.evaluate(row, rates_on: open_period.end_date, w4_on: open_period.pay_date).as_json
+        expect(nil_company_batch.fetch(row.id).as_json).to eq(expected)
+      end
+    end
+  end
 end

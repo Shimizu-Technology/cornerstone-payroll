@@ -18,7 +18,10 @@ module Api
             items = items.where(status: params[:status].to_s)
           end
           if params[:employee_id].present?
-            items = items.where(employee_id: params[:employee_id].to_i)
+            employee_id = parse_positive_id(params[:employee_id])
+            return render json: { error: "Invalid employee_id filter" }, status: :unprocessable_entity unless employee_id
+
+            items = items.where(employee_id: employee_id)
           end
           if params[:event_kind].present? && EmployeeVerificationItem::EVENT_KINDS.include?(params[:event_kind].to_s)
             items = items.where(event_kind: params[:event_kind].to_s)
@@ -40,13 +43,17 @@ module Api
             return render json: { error: "Response note must be #{MAX_RESPONSE_NOTE_LENGTH} characters or fewer." }, status: :unprocessable_entity
           end
 
-          activation_result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
-          if activation_result&.activated?
-            return render json: {
-              error: "This company switched to Client-managed employee lifecycle. Reload and submit your change again.",
-              code: "lifecycle_mode_changed",
-              employee_lifecycle_mode: "client_managed"
-            }, status: :conflict
+          expected_mode = nil
+          unless CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+            activation_result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(current_company)
+            if activation_result&.activated?
+              return render json: {
+                error: "This company switched to Client-managed employee lifecycle. Reload and submit your change again.",
+                code: "lifecycle_mode_changed",
+                employee_lifecycle_mode: "client_managed"
+              }, status: :conflict
+            end
+            expected_mode = CompanyFeatures.for(current_company).employee_lifecycle_mode
           end
 
           item = nil
@@ -55,7 +62,16 @@ module Api
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
             revalidate_client_company_write_access!
-            unless CompanyFeatures.for(current_company).client_managed_employee_lifecycle?
+            current_mode = CompanyFeatures.for(current_company).employee_lifecycle_mode
+            if expected_mode.present? && current_mode != expected_mode
+              error_response = [ {
+                error: "This company's employee lifecycle mode changed. Reload and submit your change again.",
+                code: "lifecycle_mode_changed",
+                employee_lifecycle_mode: current_mode
+              }, :conflict ]
+              next
+            end
+            unless current_mode == "client_managed"
               error_response = [ {
                 error: "Client-managed employee lifecycle is not enabled for this company.",
                 code: "client_lifecycle_disabled"
@@ -75,16 +91,35 @@ module Api
             end
 
             now = Time.current
-            item.update!(
-              status: "pending_verification",
-              resubmitted_at: now,
-              source_actor: current_user,
-              metadata: item.metadata.to_h.merge(
-                "client_response_note" => note,
-                "client_responded_by_id" => current_user.id,
-                "client_responded_at" => now.utc.iso8601
+            response_metadata = {
+              "client_response_note" => note,
+              "client_responded_by_id" => current_user.id,
+              "client_responded_at" => now.utc.iso8601
+            }
+            if item.acknowledged_in_committed_run?
+              item = EmployeeVerificationItem.create!(
+                company_id: item.company_id,
+                employee: item.employee,
+                event_kind: item.event_kind,
+                status: "pending_verification",
+                affects_pay: item.affects_pay,
+                effective_on: item.effective_on,
+                source_actor: current_user,
+                source_record: item.source_record,
+                changed_fields: item.changed_fields,
+                before_values: item.before_values,
+                after_values: item.after_values,
+                resubmitted_at: now,
+                metadata: item.metadata.to_h.merge(response_metadata).merge("prior_unverified_item_id" => item.id)
               )
-            )
+            else
+              item.update!(
+                status: "pending_verification",
+                resubmitted_at: now,
+                source_actor: current_user,
+                metadata: item.metadata.to_h.merge(response_metadata)
+              )
+            end
 
             AuditLog.record!(
               user: current_user,
@@ -109,6 +144,16 @@ module Api
         end
 
         private
+
+        def parse_positive_id(value)
+          return nil unless value.is_a?(String) || value.is_a?(Integer)
+
+          text = value.to_s.strip
+          return nil unless text.match?(/\A[1-9]\d{0,18}\z/)
+
+          parsed = text.to_i
+          parsed <= (2**63 - 1) ? parsed : nil
+        end
 
         def reject_closed_practice_copy
           return unless current_company&.test_workspace_read_only?

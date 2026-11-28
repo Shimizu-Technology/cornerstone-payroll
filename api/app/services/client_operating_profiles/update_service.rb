@@ -27,7 +27,7 @@ module ClientOperatingProfiles
           raise Conflict, "The operating profile changed. Reload the latest version before saving."
         end
 
-        dates = EffectiveDates.new(company: @company, latest: previous, changed_keys: @changes.keys)
+        dates = EffectiveDates.new(company: @company, latest: previous, changed_keys: @changes.keys, changes: @changes)
         dates.validate!(@effective_on)
         previous ||= create_baseline!
         save_profile!(previous, amend: dates.amend?(@effective_on))
