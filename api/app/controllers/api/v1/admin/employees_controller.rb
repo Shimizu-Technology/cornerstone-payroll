@@ -58,22 +58,22 @@ module Api
         # GET /api/v1/admin/employees/:id
         def show
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          render json: {
-            data: serialize_employee(
-              @employee,
-              include_department: true,
-              include_sensitive: true,
-              include_classification_history: true,
-              include_lifecycle: true,
-              include_w4_history: true,
-              include_retirement_history: true,
-              include_configuration_review_history: true,
-              include_document_readiness: true,
-              include_compensation_history: true,
-              include_delivery_consents: true,
-              contact_context: contact_context
-            )
-          }
+          employee = serialize_employee(
+            @employee,
+            include_department: true,
+            include_sensitive: true,
+            mask_tax_ids: mask_tax_ids?,
+            include_classification_history: true,
+            include_lifecycle: true,
+            include_w4_history: true,
+            include_retirement_history: true,
+            include_configuration_review_history: true,
+            include_document_readiness: true,
+            include_compensation_history: true,
+            include_delivery_consents: true,
+            contact_context: contact_context
+          )
+          render json: { data: employee }
         end
 
         # POST /api/v1/admin/employees
@@ -239,7 +239,8 @@ module Api
           data = if EmployeeContactProjection.requested?(params)
             EmployeeContactProjection.call(@employee, context: contact_context)
           else
-            serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
+            serialize_employee(@employee, include_sensitive: true, mask_tax_ids: mask_tax_ids?,
+              include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
           end
           render json: {
             data: data,
@@ -259,7 +260,7 @@ module Api
             data: if EmployeeContactProjection.requested?(params)
                     EmployeeContactProjection.call(e.employee, context: contact_context)
                   else
-                    serialize_employee(e.employee, contact_context: contact_context)
+                    serialize_employee(e.employee, mask_tax_ids: mask_tax_ids?, contact_context: contact_context)
                   end
           }, status: :conflict
         rescue EmployeeContactValidator::ValidationError => e
@@ -766,10 +767,15 @@ module Api
           nil
         end
 
+        def mask_tax_ids?
+          params[:mask_tax_ids].to_s == "true"
+        end
+
         def serialize_employee(
           employee,
           include_department: false,
           include_sensitive: false,
+          mask_tax_ids: false,
           include_classification_history: false,
           include_lifecycle: false,
           include_w4_history: false,
@@ -787,7 +793,8 @@ module Api
           data["contact_details_status"] = EmployeeContactValidator.contact_details_status(employee, context: contact_context)
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: can_review_employee_intake?)
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
-          data["ssn"] = employee.ssn_encrypted if include_sensitive
+          data["ssn"] = employee.ssn_encrypted if include_sensitive && !mask_tax_ids
+          data["contractor_ein_last_four"] = data.delete("contractor_ein")&.last(4) if mask_tax_ids
           data["tax_classification"] = employee.tax_classification
           current_profile = if employee.association(:employee_work_profiles).loaded?
             employee.employee_work_profiles.find { |profile| profile.ends_on.nil? }

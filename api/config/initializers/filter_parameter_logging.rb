@@ -33,7 +33,7 @@ SENSITIVE_EXACT_PARAM_NAMES = %w[
   company_address company_address_line1 company_address_line2 company_city company_state company_zip
   city zip zip_code postal_code
   first_name middle_name last_name name_suffix full_name legal_name preferred_name
-  employee_name payee_name contact_name filing_contact_name
+  employee_name employee_search payee_name contact_name filing_contact_name
   pay_rate hourly_rate salary base_salary annual_salary salary_override salary_overrides
   gross_pay adjusted_gross net_pay regular_pay overtime_pay holiday_pay pto_pay sick_pay
   bonus bonuses commission tips tip_amount reported_tips tips_paid_out service_charge_wages

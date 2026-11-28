@@ -5,10 +5,11 @@ class TestWorkspaceAccessPolicy
   GLOBAL_ADMIN_CAPABILITIES = %i[manage_organization manage_platform].freeze
   PROTECTED_CAPABILITIES = %i[manage_client_administration manage_client_configuration manage_source_delegations manage_payroll_go_live_setup manage_organization manage_platform].freeze
 
-  # These POST endpoints only render plain-paper earnings statements. They do
-  # not prepare/issue checks, persist artifacts, upload, or dispatch providers.
+  # These POST endpoints only search existing records or render plain-paper
+  # earnings statements. They don't change the workspace or dispatch providers.
   # Caller metadata is server controller/action identity, never request params.
   READ_POST_ACTIONS = {
+    "api/v1/admin/employee_verification_items" => %w[index],
     "api/v1/admin/pay_stubs" => %w[batch_pdf direct_deposit_stubs_pdf]
   }.freeze
 

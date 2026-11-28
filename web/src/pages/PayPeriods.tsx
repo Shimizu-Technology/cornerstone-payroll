@@ -782,11 +782,25 @@ export function PayPeriods() {
 
   // Keep the period end and payday explicit after a historical boundary.
   useEffect(() => {
+    if (readOnlyWorkspace || trainingReplayWorkspace) return;
+    if (searchParams.get('new_final') === '1') {
+      ++defaultDatesRequestIdRef.current;
+      createDatesEditedRef.current = true;
+      setFormData({ start_date: '', end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'final', includes_base_salary: false, includes_recurring_items: false });
+      setScheduleContext('');
+      setIsCreateOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('new_final');
+      next.delete('new_after');
+      setSearchParams(next, { replace: true });
+      return;
+    }
     const after = searchParams.get('new_after');
-    if (readOnlyWorkspace || trainingReplayWorkspace || !after || !/^\d{4}-\d{2}-\d{2}$/.test(after)) return;
+    if (!after || !/^\d{4}-\d{2}-\d{2}$/.test(after)) return;
     const date = new Date(`${after}T12:00:00Z`);
     if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== after) return;
     date.setUTCDate(date.getUTCDate() + 1);
+    ++defaultDatesRequestIdRef.current;
     createDatesEditedRef.current = true;
     setFormData({ start_date: date.toISOString().slice(0, 10), end_date: '', pay_date: '', starting_check_number: '', notes: '', run_purpose: 'regular', includes_base_salary: true, includes_recurring_items: true });
     setScheduleContext('First live payroll after the recorded history. Confirm the period end and first unpaid pay date with the client.');

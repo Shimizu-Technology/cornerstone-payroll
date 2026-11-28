@@ -110,6 +110,8 @@ export function PayRunBlockers({
             <span className="text-xs font-medium text-warning-800">
               ({item.status === 'returned_to_client' ? 'Sent back to client' : 'Pending verification'})
             </span>
+            {effectiveCompanyId && <Link className="inline-flex min-h-11 items-center font-medium text-primary-800 underline"
+              to={`/companies/${effectiveCompanyId}/verifications?item_id=${item.id}`}>Review change</Link>}
           </li>
         ))}
       </ul>

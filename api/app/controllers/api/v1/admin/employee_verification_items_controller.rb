@@ -20,15 +20,18 @@ module Api
         end
 
         def index
+          skip_default_audit_log! if request.post?
           items = verification_items.order(updated_at: :desc, id: :desc)
           filters = params.permit(:status, :event_kind, :employee_id, :affects_pay).to_h.compact_blank
           return render json: { error: "affects_pay must be true or false" }, status: :unprocessable_content if
             filters.key?("affects_pay") && !filters["affects_pay"].to_s.in?(%w[true false])
 
           items = items.where(filters)
-          if params[:search].is_a?(String) && params[:search].strip.present?
-            term = Employee.sanitize_sql_like(params[:search].strip)
-            items = items.joins(:employee).where("CONCAT_WS(' ', employees.first_name, employees.last_name) ILIKE ?", "%#{term}%")
+          search = request.request_parameters["employee_search"] if request.post?
+          if search.is_a?(String) && search.strip.present?
+            term = Employee.sanitize_sql_like(search.strip)
+            search_bind = ActiveRecord::Relation::QueryAttribute.new("employee_search", "%#{term}%", ActiveRecord::Type::String.new)
+            items = items.joins(:employee).where("CONCAT_WS(' ', employees.first_name, employees.last_name) ILIKE ?", Arel::Nodes::BindParam.new(search_bind))
           end
 
           page = bounded_page(items)

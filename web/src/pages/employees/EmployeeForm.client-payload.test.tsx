@@ -244,13 +244,21 @@ describe('Client employee form payload', () => {
   it('keeps the approval-first edit form dormant despite persisted readiness', async () => {
     mocks.company = { id: 1, employee_lifecycle_mode: 'approval_first' };
     mocks.get.mockResolvedValue({ data: {
-      ...hourly, readiness: { status: 'incomplete', rates_on: '2026-11-28', w4_on: '2026-12-04', items: [] },
+      ...hourly, w4_effective_on: null, readiness_gate_enforced: true,
+      readiness: { status: 'incomplete', rates_on: '2026-11-28', w4_on: '2026-12-04', items: [] },
     } });
     view(7);
     expect(await screen.findByRole('button', { name: 'Update Employee' })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Ready to pay' })).toBeNull();
     expect(screen.queryByLabelText('Record a received W-4')).toBeNull();
     expect((screen.getByLabelText('How this employee is paid') as HTMLSelectElement).disabled).toBe(true);
+    const ssn = screen.getByLabelText(/^Social Security Number/) as HTMLInputElement;
+    expect(ssn.type).toBe('text');
+    expect(ssn.value).toBe('');
+    expect(screen.getByText(/submit a replacement for approval/)).toBeTruthy();
+    submit();
+    expect(await screen.findByText('Enter the date this W-4 became effective')).toBeTruthy();
+    expect(mocks.update).not.toHaveBeenCalled();
   });
 
   it('blocks edit-mode writes for a client viewer', async () => {
@@ -315,10 +323,10 @@ describe('Client employee form payload', () => {
 
   it('masks nine-digit references and both SSN entries in client-managed mode', async () => {
     mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
-    mocks.get.mockResolvedValue({ data: { ...hourly, w4_source_reference: 'Fixture 900112233' } });
+    mocks.get.mockResolvedValue({ data: { ...hourly, w4_source_reference: 'Fixture 900112233 and 00-0004321' } });
     view(7);
     fireEvent.click(await screen.findByLabelText('Record a received W-4'));
-    expect((screen.getByLabelText('Source document / reference') as HTMLInputElement).value).toBe('Fixture •••-••-2233');
+    expect((screen.getByLabelText('Source document / reference') as HTMLInputElement).value).toBe('Fixture •••-••-2233 and ••-•••4321');
     const ssn = document.querySelector<HTMLInputElement>('[name="ssn"]')!;
     fireEvent.change(ssn, { target: { value: '900112233' } });
     expect(ssn.type).toBe('password');
@@ -379,15 +387,18 @@ describe('Client employee form payload', () => {
     }
   });
 
-  it('shows the saved EIN last four and keeps it when the field is left blank', async () => {
+  it.each(['approval_first', 'client_managed'] as const)('keeps a blank EIN without exposing the saved number in %s mode', async (mode) => {
+    mocks.company = { id: 1, employee_lifecycle_mode: mode };
     mocks.get.mockResolvedValue({ data: business });
     mocks.update.mockResolvedValue({ data: business, change_request: null, message: 'Saved' });
     view(8);
     expect(await screen.findByText(/Saved EIN ending in 4321/)).toBeTruthy();
     const ein = document.querySelector<HTMLInputElement>('[name="contractor_ein"]')!;
     expect(ein.value).toBe('');
+    expect(ein.type).toBe(mode === 'client_managed' ? 'password' : 'text');
     expect(ein.placeholder).toContain('4321');
     expect(ein.required).toBe(false);
+    expect(screen.getByText(mode === 'client_managed' ? /Enter the new number to replace it/ : /submit a replacement for approval/)).toBeTruthy();
     submit();
     await waitFor(() => expect(mocks.update).toHaveBeenCalled());
     const payload = mocks.update.mock.calls[0][1];

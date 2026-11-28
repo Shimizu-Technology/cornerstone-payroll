@@ -12,11 +12,37 @@ module EmployeeReadinessOverrides
       @impersonated = impersonated
     end
 
+    def preview(pay_period_id: nil, expires_on: nil)
+      company = Company.find(@company_id)
+      employee = employee_for(company)
+      today = PayrollBusinessClock.today
+      periods = open_periods(company)
+      if pay_period_id.present? || expires_on.present?
+        validate_scope!(pay_period_id, expires_on)
+        period = target_period(company, pay_period_id, expiration_date(expires_on))
+        checklist = target_checklist(employee, period, today)
+        return {
+          checklist: checklist.as_json,
+          default_w4_acknowledgement_required: default_withholding?(employee, checklist)
+        }
+      end
+
+      {
+        today: today.iso8601,
+        latest_expiration: (today + 30.days).iso8601,
+        pay_periods: periods.order(:pay_date, :id).as_json(only: %i[id start_date end_date pay_date]),
+        active_overrides: employee.employee_readiness_overrides.active
+          .where(pay_period_id: periods.select(:id)).or(
+            employee.employee_readiness_overrides.active.where(pay_period_id: nil, expires_on: today..)
+          ).order(:id).as_json(only: %i[id pay_period_id expires_on])
+      }
+    end
+
     def grant!(reason:, pay_period_id: nil, expires_on: nil, default_w4_acknowledged: false)
       with_company_lock do |company|
         validate_scope!(pay_period_id, expires_on)
         expires_on = expiration_date(expires_on)
-        period = lock_target_period(company, pay_period_id, expires_on)
+        period = target_period(company, pay_period_id, expires_on, lock: true)
         employee = employee_for(company)
         snapshot = {}
         override = nil
@@ -36,7 +62,7 @@ module EmployeeReadinessOverrides
         perform!(company, employee, action: "employee_readiness_override#grant", reason: reason,
           snapshot: -> { snapshot.dup }, after_record: persist_override) do
           checklist = validate_grant!(employee, period, pay_period_id)
-          default_withholding = employee.w2_employee? && checklist.missing_keys.include?("tax_form")
+          default_withholding = default_withholding?(employee, checklist)
           if default_withholding && default_w4_acknowledged != true
             raise ArgumentError, "Acknowledge Single withholding with no adjustments when Form W-4 is missing"
           end
@@ -123,35 +149,49 @@ module EmployeeReadinessOverrides
       raise ArgumentError, "Provide an expiration date in YYYY-MM-DD format"
     end
 
-    def lock_target_period(company, pay_period_id, expires_on)
+    def open_periods(company)
+      company.pay_periods.where(status: OPEN_PERIOD_STATUSES)
+        .where("correction_status IS NULL OR correction_status <> ?", "voided")
+    end
+
+    def target_period(company, pay_period_id, expires_on, lock: false)
       if pay_period_id.present?
-        period = company.pay_periods.lock.find(pay_period_id)
+        periods = company.pay_periods
+        periods = periods.lock if lock
+        period = periods.find(pay_period_id)
         unless period.status.in?(OPEN_PERIOD_STATUSES) && !period.voided?
           raise ArgumentError, "Choose an open pay period"
         end
         return period
       end
 
-      company.pay_periods.where(status: %w[draft calculated], cycle: "regular", run_purpose: "regular",
+      periods = company.pay_periods.where(status: %w[draft calculated], cycle: "regular", run_purpose: "regular",
         correction_status: nil, test_workspace_role: nil, parallel_run: false)
-        .where("pay_date <= ?", expires_on).order(:pay_date, :id).lock.first
+        .where("pay_date <= ?", expires_on).order(:pay_date, :id)
+      periods = periods.lock if lock
+      periods.first
     end
 
     def validate_grant!(employee, period, pay_period_id)
       raise ArgumentError, "This employee does not have a payroll readiness gate" unless employee.readiness_gate_enforced?
 
-      today = PayrollBusinessClock.today
-      checklist = if period
-        EmployeeReadinessEvaluator.for_pay_period(employee, period)
-      else
-        EmployeeReadinessEvaluator.evaluate(employee, rates_on: today, w4_on: today)
-      end
+      checklist = target_checklist(employee, period, PayrollBusinessClock.today)
       raise ArgumentError, "This employee has no missing readiness items" if checklist.ready?
       if pay_period_id.present? && employee.employee_readiness_overrides.active.exists?(pay_period_id: period.id)
         raise ArgumentError, "An active override already exists for this pay period"
       end
 
       checklist
+    end
+
+    def target_checklist(employee, period, today)
+      return EmployeeReadinessEvaluator.for_pay_period(employee, period) if period
+
+      EmployeeReadinessEvaluator.evaluate(employee, rates_on: today, w4_on: today)
+    end
+
+    def default_withholding?(employee, checklist)
+      employee.w2_employee? && checklist.missing_keys.include?("tax_form")
     end
 
     def default_w4_election!(employee, override, target_pay_date, entry)

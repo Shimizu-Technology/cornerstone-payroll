@@ -1,9 +1,11 @@
 
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { BusyStatus } from '@/components/ui/busy-status';
+import { ReadinessOverrideActions } from '@/pages/employees/ReadinessOverrideActions';
 import { AddBackNotice } from './AddBackNotice';
 import { addBackSummary } from './addBackText';
 
@@ -21,6 +23,7 @@ export function PayRunRoster({
   hasStagedWorksheetChanges,
   isCalculated,
   isDraft,
+  loadPayPeriod,
   payPeriod,
   payrollItems,
   processing,
@@ -39,6 +42,8 @@ export function PayRunRoster({
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const restoring = restoringId !== null;
   const [restoreError, setRestoreError] = useState('');
+  const [readinessUpdate, setReadinessUpdate] = useState<{ periodId: number; employeeId: number; name: string; override: boolean } | null>(null);
+  const readinessStatusRef = useRef<HTMLParagraphElement>(null);
   const restore = async (employeeId: number) => {
     setRestoringId(employeeId);
     setRestoreError('');
@@ -49,7 +54,12 @@ export function PayRunRoster({
   // Expected entries shows an add-back it lists; this covers the rest.
   const rosterNotice = addBackNotice?.source === 'roster' &&
     !payPeriod.expected_entries?.added_back?.some(entry => entry.employee_id === addBackNotice.result.employee_id) ? addBackNotice : null;
+  const overrideActive = readinessUpdate?.override && !payPeriod.readiness_excluded_employees?.some(employee => employee.employee_id === readinessUpdate.employeeId);
   return (<>
+{readinessUpdate?.periodId === payPeriod.id && <p ref={readinessStatusRef} tabIndex={-1} role="status" className="flex flex-wrap items-center gap-2 text-sm">
+  <Badge variant="success">{readinessUpdate.override ? (overrideActive ? 'Override active' : 'Override recorded') : 'Readiness gate cleared'}</Badge>
+  <span className="wrap-anywhere">{readinessUpdate.name}</span>
+</p>}
 {rosterNotice && (isCalculated || isDraft) && <AddBackNotice result={rosterNotice.result} hoursEntered={rosterNotice.hoursEntered} />}
 {/* Stays mounted so the add-back result is announced when it arrives. */}
 <p aria-live="polite" aria-atomic="true" className="sr-only" data-testid="add-back-announcement">{addBackNotice?.source === 'roster' ? addBackSummary(addBackNotice.result, addBackNotice.hoursEntered) : ''}</p>
@@ -90,6 +100,13 @@ export function PayRunRoster({
               )}
               <span className="ml-1.5 text-warning-900">— {employee.reason}</span>
             </div>
+            {effectiveCompanyId && <ReadinessOverrideActions companyId={effectiveCompanyId} employeeId={employee.employee_id}
+              gateEnforced fallbackFocusRef={readinessStatusRef}
+              employeeName={employee.name} payPeriodId={payPeriod.id} disabled={processing || financialActionsHeld || !canEditPayPeriod}
+              onUpdated={action => {
+                setReadinessUpdate({ periodId: payPeriod.id, employeeId: employee.employee_id, name: employee.name, override: action === 'grant' });
+                void loadPayPeriod(payPeriod.id, true, true);
+              }} />}
           </li>
         );
       })}

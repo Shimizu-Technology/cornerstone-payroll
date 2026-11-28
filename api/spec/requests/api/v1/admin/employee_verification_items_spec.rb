@@ -54,6 +54,10 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(item.reload.status).to eq("pending_verification")
       get "#{inbox_path}/counts", headers: headers
       expect(response.parsed_body.fetch("data")).not_to have_key("pending_verifications")
+      get "/api/v1/companies", headers: headers
+      expect(response).to have_http_status(:ok)
+      summary = response.parsed_body.fetch("companies").find { |row| row["id"] == company.id }
+      expect(summary.keys).not_to include("has_open_employee_verifications", "client_managed_employee_lifecycle", "staff_employee_lifecycle_available")
       expect(PortalNotifications::Preferences.categories_for(staff)).not_to have_key("employee_verifications")
     end
   end
@@ -73,6 +77,37 @@ RSpec.describe "Staff employee verification queue", type: :request do
     before do
       unlock_lifecycle_mode!
       create_client_managed_profile!(company)
+    end
+
+    it "advertises a blocked activation independently of visible verification items" do
+      profile = ClientOperatingProfile.for_date(company.id, PayrollBusinessClock.today)
+      profile.update!(lifecycle_mode_activated_at: nil, lifecycle_mode_activation_failed_at: 1.minute.ago,
+        lifecycle_mode_activation_blockers: { "qualifying_staff_notification_recipients_count" => 0 })
+
+      get "/api/v1/companies", headers: headers
+
+      expect(response).to have_http_status(:ok)
+      summary = response.parsed_body.fetch("companies").find { |row| row["id"] == company.id }
+      expect(summary).to include("has_blocked_lifecycle_activation" => true)
+      expect(summary.keys).not_to include("has_open_employee_verifications", "client_managed_employee_lifecycle", "staff_employee_lifecycle_available")
+    end
+
+    it "filters the search term from both request and SQL logs" do
+      item
+      output = StringIO.new
+      capture = ActiveSupport::Logger.new(output).tap { |logger| logger.level = :debug }
+      Rails.logger.broadcast_to(capture)
+      begin
+        post "#{queue_path}/search", headers: headers, params: { employee_search: "quinn ex" }, as: :json
+      ensure
+        Rails.logger.stop_broadcasting_to(capture)
+      end
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data").pluck("id")).to eq([ item.id ])
+      sql_log = output.string.lines.find { |line| line.include?("ILIKE") }
+      expect(sql_log).to include("employee_search", "[FILTERED]")
+      expect(output.string).not_to include("quinn ex")
     end
 
     it "keeps open verification work available to staff after rollback" do
@@ -148,6 +183,31 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(ActionDispatch::Response).to have_received(:rack_status_code).with(:unprocessable_content).twice
     end
 
+    it "keeps open verification work visible after rollback and masks IDs in the fix form profile" do
+      employee.update!(ssn_encrypted: "900-70-1234")
+      item
+      profile = ClientOperatingProfile.for_date(company.id, PayrollBusinessClock.today)
+      profile.update!(options: profile.options.deep_merge("client_portal" => { "employee_lifecycle_mode" => "approval_first" }),
+        lifecycle_mode_activated_at: nil)
+
+      get "/api/v1/companies", headers: headers
+      expect(response.parsed_body.fetch("companies").find { |row| row["id"] == company.id }).to include(
+        "has_open_employee_verifications" => true, "staff_employee_lifecycle_available" => true)
+      get inbox_path, headers: headers, params: { kind: "employee_verification" }
+      expect(response.parsed_body.fetch("data").pluck("id")).to include(item.id)
+      get queue_path, headers: headers
+      expect(response).to have_http_status(:ok)
+
+      get "/api/v1/admin/employees/#{employee.id}", headers: headers, params: { mask_tax_ids: true }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data")).to include("ssn_last_four" => "1234")
+      expect(response.parsed_body.fetch("data")).not_to have_key("ssn")
+
+      post "#{queue_path}/#{item.id}/verify", headers: headers, params: { updated_at: item.updated_at.utc.iso8601(6) }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(item.reload.status).to eq("verified")
+    end
+
     [
       [ "accountant", false, :forbidden ], [ "accountant", true, :ok ], [ "manager", false, :ok ],
       [ "admin", false, :ok ], [ "org_admin", false, :ok ], [ "super_admin", false, :ok ]
@@ -191,10 +251,15 @@ RSpec.describe "Staff employee verification queue", type: :request do
         employee_verification_item: item, acknowledged_by: staff, acknowledged_at: Time.current,
         item_status_snapshot: item.status, item_updated_at_snapshot: item.updated_at)
 
-      get queue_path, headers: headers, params: { status: item.status, event_kind: "termination", affects_pay: true, search: "quinn ex", per_page: 1 }
+      post "#{queue_path}/search", headers: headers,
+        params: { status: item.status, event_kind: "termination", affects_pay: true, employee_search: "quinn ex", per_page: 1 }, as: :json
       expect(response).to have_http_status(:ok), response.body
       expect(response.parsed_body.fetch("meta")).to include("per_page" => 1, "total_count" => 1)
       expect(response.parsed_body.fetch("data").sole).to include("id" => item.id)
+
+      post "#{queue_path}/search", headers: headers, params: { employee_search: "Other Synthetic Name" }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data")).to be_empty
 
       get "#{queue_path}/#{foreign.id}", headers: headers
       expect(response).to have_http_status(:not_found)
@@ -218,6 +283,11 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(response).to have_http_status(:unprocessable_content)
 
       post "#{queue_path}/#{item.id}/verify", headers: headers, params: { updated_at: 1.day.ago.utc.iso8601(6) }, as: :json
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("verification_item_changed")
+
+      post "#{queue_path}/#{item.id}/return_to_client", headers: headers,
+        params: { updated_at: 1.day.ago.utc.iso8601(6), return_note: "Please confirm the synthetic form." }, as: :json
       expect(response).to have_http_status(:conflict)
       expect(response.parsed_body["code"]).to eq("verification_item_changed")
 

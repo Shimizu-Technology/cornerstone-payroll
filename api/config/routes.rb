@@ -398,6 +398,7 @@ Rails.application.routes.draw do
           end
         end
         resources :employee_verification_items, only: %i[index show] do
+          post :search, action: :index, on: :collection
           post :verify, on: :member
           post :return_to_client, on: :member
         end
@@ -472,6 +473,7 @@ Rails.application.routes.draw do
         resources :pay_component_tax_rules, only: [ :index, :create, :update ]
 
         resources :employees, only: [ :index, :show, :create, :update, :destroy ] do
+          get :readiness_override, to: "employee_readiness_overrides#show", on: :member
           post :readiness_override, to: "employee_readiness_overrides#create", on: :member
           delete "readiness_override/:override_id", to: "employee_readiness_overrides#destroy", on: :member
           post :clear_readiness_gate, to: "employee_readiness_overrides#clear_readiness_gate", on: :member

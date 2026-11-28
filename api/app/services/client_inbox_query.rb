@@ -4,7 +4,7 @@
 # freezes activity at a signed snapshot and seeks by (activity_at, kind, id),
 # so new messages cannot move a row across pages during a traversal.
 class ClientInboxQuery
-  KINDS = %w[message document employee_change employee_verification payroll_submission payroll_review file_request].freeze
+  KINDS = %w[message document employee_change employee_verification lifecycle_activation_blocked payroll_submission payroll_review file_request].freeze
   STATUSES = %w[all unread waiting handled].freeze
 
   def initialize(user:, params: {})
@@ -169,6 +169,9 @@ class ClientInboxQuery
     if @params[:kind].blank? || @params[:kind] == "employee_verification"
       sql += verification_sql(verification_ids || verification_company_ids(scoped_companies), snapshot)
     end
+    if @params[:kind].blank? || @params[:kind] == "lifecycle_activation_blocked"
+      sql += lifecycle_activation_sql(ids, snapshot)
+    end
     conditions = []
     conditions << sanitize("kind = ?", @params[:kind]) if @params[:kind].present?
     case @params[:status]
@@ -184,6 +187,23 @@ class ClientInboxQuery
     return [] unless StaffRolePolicy.allowed?(@user, :payroll_operations)
 
     StaffEmployeeLifecycle.companies(scoped_companies).pluck(:id)
+  end
+
+  def lifecycle_activation_sql(company_ids_sql, snapshot)
+    return "" if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+    return "" unless StaffRolePolicy.allowed?(@user, :payroll_operations)
+
+    today = PayrollBusinessClock.today
+    sanitize(<<~SQL, snapshot, today, today)
+      UNION ALL
+      SELECT p.id, p.company_id, 'lifecycle_activation_blocked', 'Scheduled employee lifecycle switch blocked',
+        p.lifecycle_mode_activation_failed_at, NULL, FALSE, TRUE
+      FROM client_operating_profiles p
+      WHERE p.company_id IN (#{company_ids_sql}) AND p.lifecycle_mode_activation_failed_at <= ?
+        AND p.effective_on <= ? AND (p.ends_on IS NULL OR p.ends_on >= ?)
+        AND p.lifecycle_mode_activated_at IS NULL AND p.client_portal_enabled
+        AND p.options -> 'client_portal' ->> 'employee_lifecycle_mode' = 'client_managed'
+    SQL
   end
 
   def verification_sql(company_ids, snapshot)

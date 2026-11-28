@@ -3,19 +3,19 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
-const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7, role: 'accountant', access: 'manager', mosa: false }));
+const actor = vi.hoisted(() => ({ allowed: true, delegated: false, selectedId: 7, role: 'accountant', access: 'manager', mosa: false, queue: false, otherOpen: false }));
 vi.mock('@/hooks/usePortalCounts', () => ({ usePortalCounts: () => null }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({
-  user: { role: actor.role, client_access_level: actor.access, name: 'Assigned accountant', email: 'accountant@example.test' },
+  user: { role: actor.role, organization_id: 1, client_access_level: actor.access, name: 'Assigned accountant', email: 'accountant@example.test' },
   isAccountant: true, signOut: vi.fn(),
-  hasCapability: (capability: string) => actor.allowed && capability === 'manage_own_aire_account_link',
+  hasCapability: (capability: string) => actor.allowed && ['manage_own_aire_account_link', 'payroll_operations'].includes(capability),
 }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
-  activeCompanyId: actor.selectedId, activeCompany: { id: 7, name: 'Assigned client', payroll_intake_source_types: actor.mosa ? ['mosa_revel'] : [], client_capabilities: actor.delegated ? ['manage_client_configuration', 'manage_client_administration'] : [] }, canViewClientManagement: false,
+  activeCompanyId: actor.selectedId, companies: [{ id: 9, organization_id: 1, active: true, has_open_employee_verifications: actor.otherOpen }], activeCompany: { id: 7, active: true, client_managed_employee_lifecycle: actor.queue, name: 'Assigned client', payroll_intake_source_types: actor.mosa ? ['mosa_revel'] : [], client_capabilities: actor.delegated ? ['manage_client_configuration', 'manage_client_administration'] : [] }, canViewClientManagement: false,
 }) }));
 vi.mock('./CompanySwitcher', () => ({ CompanySwitcher: () => null }));
 vi.mock('./OrganizationSwitcher', () => ({ OrganizationSwitcher: () => null }));
-beforeEach(() => { actor.allowed = true; actor.delegated = false; actor.selectedId = 7; actor.role = 'accountant'; actor.access = 'manager'; actor.mosa = false; });
+beforeEach(() => { actor.allowed = true; actor.delegated = false; actor.selectedId = 7; actor.role = 'accountant'; actor.access = 'manager'; actor.mosa = false; actor.queue = false; actor.otherOpen = false; });
 afterEach(cleanup);
 describe('Accountant personal connection navigation', () => {
   it('offers personal connection without source or calendar configuration rights', () => {
@@ -99,4 +99,18 @@ it.each(['manager', 'viewer'])('shows client branding navigation only to a %s', 
   render(<MemoryRouter><Sidebar /></MemoryRouter>);
   expect(Boolean(screen.queryByRole('link', { name: 'Employee app branding & help' }))).toBe(access === 'manager');
   expect(screen.getByText(access === 'manager' ? 'Client manager' : 'Client viewer')).toBeTruthy();
+});
+
+it('keeps To verify dormant and exposes it to payroll operators when a client is active or has open work', () => {
+  const view = render(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(screen.queryByRole('link', { name: 'To verify' })).toBeNull();
+  actor.otherOpen = true;
+  view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(screen.getByRole('link', { name: 'To verify' }).getAttribute('href')).toBe('/companies/9/verifications');
+  actor.queue = true;
+  view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(screen.getByRole('link', { name: 'To verify' }).getAttribute('href')).toBe('/companies/7/verifications');
+  actor.role = 'client';
+  view.rerender(<MemoryRouter><Sidebar /></MemoryRouter>);
+  expect(screen.queryByRole('link', { name: 'To verify' })).toBeNull();
 });

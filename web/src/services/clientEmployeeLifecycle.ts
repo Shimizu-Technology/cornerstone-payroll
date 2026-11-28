@@ -1,5 +1,8 @@
 import { apiClient, clientEmployeesApi, type BoundedListMeta } from '@/services/api';
+import { maskTaxIdsInText as maskLifecycleNote } from '@/lib/employee-profile';
 import type { EmployeeFormData } from '@/types';
+
+export { maskLifecycleNote };
 
 export const ownEmployeeReviewNotice = 'This is your own employee record. Changes to your pay, tax details, payment method, name, birth date, hire date, or email go to Cornerstone for review. Address-only changes can be reviewed by another manager or Cornerstone.';
 
@@ -102,11 +105,6 @@ export function lifecycleModeChanged(error: unknown): boolean {
   if (lifecycleErrorCode(error) !== 'lifecycle_mode_changed' || !(error instanceof Error) || !('data' in error)) return false;
   const data = error.data;
   return Boolean(data && typeof data === 'object' && 'employee_lifecycle_mode' in data && data.employee_lifecycle_mode === 'client_managed');
-}
-
-// Free text can contain an SSN without separators. Mask any standalone nine digits.
-export function maskLifecycleNote(value: string): string {
-  return value.replace(/\b\d{3}[-\s]?\d{2}[-\s]?(\d{4})\b/g, '•••-••-$1');
 }
 
 const withholdingFields = [

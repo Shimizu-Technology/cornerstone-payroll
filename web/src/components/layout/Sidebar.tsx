@@ -139,6 +139,7 @@ const portalAdminNavigation: NavItem[] = [
   { name: 'Client Messages', href: '/settings/client-messages', icon: <MessagesSquare className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Client Documents', href: '/settings/client-documents', icon: <Files className="h-[18px] w-[18px] shrink-0" /> },
   { name: 'Change Requests', href: '/settings/client-change-requests', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
+  { name: 'To verify', href: '/verifications', icon: <ClipboardCheck className="h-[18px] w-[18px] shrink-0" /> },
 ];
 
 function FloatingTooltip({ anchorRef, label, visible }: { anchorRef: React.RefObject<HTMLElement | null>; label: string; visible: boolean }) {
@@ -263,13 +264,23 @@ function SectionDivider({ icon, label, collapsed }: { icon: React.ReactNode; lab
 export function Sidebar({ className, onNavigate, collapsed = false, onToggleCollapse, onOpenCommandPalette }: SidebarProps) {
   const counts = usePortalCounts();
   const { user, isAccountant, hasCapability, signOut } = useAuth();
-  const { activeCompany, activeCompanyId, canViewClientManagement } = useCompany();
+  const { activeCompany, activeCompanyId, activeOrganizationId, canViewClientManagement, companies } = useCompany();
   const navigate = useNavigate();
   const isAdmin = user?.role === 'admin' || user?.role === 'org_admin' || user?.role === 'super_admin';
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration');
   const canManageClientAdministration = useSelectedCompanyCapability('manage_client_administration');
   const isSuperAdmin = user?.role === 'super_admin';
   const isClient = user?.role === 'client';
+  const queueAvailable = (company: typeof activeCompany) => company?.active && (company.client_managed_employee_lifecycle || company.has_open_employee_verifications);
+  const verificationCompany = queueAvailable(activeCompany) ? activeCompany
+    : companies?.find(company => company.organization_id === (activeOrganizationId ?? user?.organization_id) && queueAvailable(company));
+  const portalAdminItems = portalAdminNavigation.flatMap(item => {
+    if (item.href === '/settings/client-change-requests' && !canManageClientConfiguration) return [];
+    if (item.href === '/verifications') {
+      return verificationCompany && hasCapability('payroll_operations') ? [{ ...item, href: `/companies/${verificationCompany.id}/verifications` }] : [];
+    }
+    return [item];
+  });
   const collapseButtonRef = useRef<HTMLButtonElement | null>(null);
   const commandButtonRef = useRef<HTMLButtonElement | null>(null);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -407,9 +418,7 @@ export function Sidebar({ className, onNavigate, collapsed = false, onToggleColl
             <SectionDivider icon={<FileSpreadsheet className="h-3.5 w-3.5 text-neutral-400 shrink-0" />} label="Client Portal" collapsed={collapsed} />
             <div className="space-y-1.5">
               <NavSection
-                items={canManageClientConfiguration
-                  ? portalAdminNavigation
-                  : portalAdminNavigation.filter((item) => item.href !== '/settings/client-change-requests')}
+                items={portalAdminItems}
                 collapsed={collapsed}
                 onNavigate={onNavigate}
               />

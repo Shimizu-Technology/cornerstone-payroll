@@ -324,6 +324,7 @@ export interface PayrollAdjustment {
 }
 
 export interface Employee {
+  readiness_gate_enforced?: boolean;
   readiness?: import('@/services/clientEmployeeLifecycle').EmployeeReadiness;
   lifecycle_edit_context?: import('@/services/clientEmployeeLifecycle').LifecycleEditContext | null;
   intake_readiness?: import('@/services/employee-intake-api').EmployeeIntakeReadiness;
@@ -718,6 +719,7 @@ export interface EmployeeFormData {
   baseline_values?: Record<string, string | null | undefined>;
   /** "contact" asks the admin API for a record without the full SSN. */
   response_view?: 'contact';
+  mask_tax_ids?: boolean;
   ssn?: string;
   ssn_confirmation?: string;
   date_of_birth?: string;

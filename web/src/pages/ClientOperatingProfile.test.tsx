@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,6 +7,11 @@ import { ApiError } from '@/services/api';
 import { operatingProfileApi, type CatalogEntry, type OperatingProfileResponse } from '@/services/operating-profile';
 import { ClientOperatingProfile } from './ClientOperatingProfile';
 
+const lifecycleMocks = vi.hoisted(() => ({ retry: vi.fn(), revert: vi.fn() }));
+vi.mock('@/services/staff-employee-lifecycle', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/staff-employee-lifecycle')>(),
+  staffEmployeeLifecycleApi: { retryActivation: lifecycleMocks.retry, revertActivation: lifecycleMocks.revert },
+}));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title }: { title: string }) => <h1>{title}</h1> }));
 vi.mock('@/services/operating-profile', () => ({
   operatingProfileApi: { get: vi.fn(), update: vi.fn() },
@@ -188,5 +193,130 @@ describe('Client operating profile editor', () => {
     await user.click(await screen.findByRole('button', { name: 'Reload and discard draft' }));
     await waitFor(() => expect(operatingProfileApi.get).toHaveBeenCalledTimes(2));
     expect((await screen.findByRole('combobox', { name: 'Tips default' }) as HTMLSelectElement).value).toBe('paid_in_check');
+  });
+});
+
+describe('Employee lifecycle controls', () => {
+  const lifecycle = 'client_portal.employee_lifecycle_mode';
+  const pendingChecks = {
+    pending_non_address_change_requests_count: 2,
+    active_intake_window: true,
+    qualifying_staff_notification_recipients_count: 0,
+    ready: false,
+    blockers: [],
+    lifecycle_mode_activation_status: 'blocked' as const,
+    lifecycle_mode_activation_blockers: {
+      pending_non_address_change_requests_count: 1, active_intake_window: true, qualifying_staff_notification_recipients_count: 0,
+    },
+    scheduled_effective_on: '2026-11-16',
+  };
+
+  it('keeps the mode control locked and hides deprecated review-first settings', async () => {
+    const deprecated = { ...catalog.find(field => field.id === lifecycle)!, id: 'client_portal.review_first.pay', label: 'Legacy review-first pay', deprecated: true };
+    const catalogDeprecated = { ...deprecated, id: 'client_portal.retired_option', label: 'Retired option' };
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, catalog: [...catalog, deprecated, catalogDeprecated],
+      editable_keys: [...fixture.editable_keys, catalogDeprecated.id] });
+    open();
+    await screen.findByText(/Cornerstone approves first · Available in Milestone 4/);
+    expect(screen.queryByRole('combobox', { name: 'Employee lifecycle mode' })).toBeNull();
+    expect(screen.queryByText('Legacy review-first pay')).toBeNull();
+    expect(screen.queryByText('Retired option')).toBeNull();
+    expect(screen.queryByText('Scheduled employee lifecycle switch blocked')).toBeNull();
+  });
+
+  it('renders each preflight requirement and retries through the activation endpoint', async () => {
+    lifecycleMocks.retry.mockResolvedValue({ ...fixture, employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'active' } });
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, locked_keys: [], employee_lifecycle_preflight: pendingChecks });
+    open();
+    const blocked = (await screen.findByRole('heading', { name: 'Scheduled employee lifecycle switch blocked' })).closest('[role=status]') as HTMLElement;
+    const preflight = screen.getByRole('heading', { name: 'Before switching to client-managed mode' }).parentElement!;
+    expect(within(blocked).getByText('1 pending employee change request to review.')).toBeTruthy();
+    expect(within(preflight).getByText('2 pending employee change requests to review.')).toBeTruthy();
+    for (const section of [blocked, preflight]) {
+      expect(within(section).getByRole('link', { name: 'Review change requests' })).toHaveProperty('pathname', '/companies/34/client-change-requests');
+      expect(within(section).getByRole('link', { name: 'Open employee entry settings' })).toHaveProperty('pathname', '/companies/34/employees');
+      expect(within(section).getByRole('link', { name: 'Manage notification recipients' }).getAttribute('href')).toBe('/companies/34/client-documents#portal-alert-recipients');
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Retry activation' }));
+    await screen.findByText('Client-managed mode is active.');
+    expect(lifecycleMocks.retry).toHaveBeenCalledWith(34);
+  });
+
+  it('explains by Save why the selected mode cannot be saved', async () => {
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, locked_keys: [], employee_lifecycle_preflight: {
+      ...pendingChecks, lifecycle_mode_activation_status: 'inactive',
+    } });
+    open();
+    await fillDraft();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Employee lifecycle mode' }), { target: { value: 'client_managed' } });
+    const save = screen.getByRole('button', { name: 'Save operating profile' });
+    expect(save).toHaveProperty('disabled', true);
+    expect(within(save.parentElement!).getByText(/Resolve the employee lifecycle preflight checks above/)).toBeTruthy();
+  });
+
+  it('reverts the blocked scheduled version using its effective date, reason and lock token', async () => {
+    lifecycleMocks.revert.mockResolvedValue({ ...fixture, employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'inactive' } });
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, lock_version: 4, locked_keys: [], employee_lifecycle_preflight: pendingChecks });
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Revert to Cornerstone approval' }));
+    fireEvent.change(screen.getByLabelText('Reason for reverting'), { target: { value: 'Keep current employee approvals.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Revert mode' }));
+    await screen.findByText('The scheduled switch was reverted.');
+    expect(lifecycleMocks.revert).toHaveBeenCalledWith(34, {
+      effective_on: '2026-11-16', lock_version: 4, reason: 'Keep current employee approvals.',
+    });
+  });
+
+  it('rebases untouched settings from the activation response while preserving local edits', async () => {
+    const serverChanged = {
+      ...version,
+      id: 11,
+      version: 2,
+      hours_source: 'connected_app',
+      options: { tips: { default: 'paid_in_check' }, client_portal: { employee_lifecycle_mode: 'client_managed' } },
+    };
+    const activatedResponse: OperatingProfileResponse = {
+      ...fixture,
+      lock_version: 2,
+      locked_keys: [],
+      effective: serverChanged,
+      history: [serverChanged, version],
+      employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'active' },
+    };
+    const saved = {
+      ...serverChanged,
+      id: 12,
+      version: 3,
+      effective_on: '2026-11-16',
+      options: { tips: { default: 'already_paid_out' }, client_portal: { employee_lifecycle_mode: 'client_managed' } },
+    };
+    lifecycleMocks.retry.mockResolvedValue(activatedResponse);
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({
+      ...fixture,
+      lock_version: 1,
+      locked_keys: [],
+      employee_lifecycle_preflight: pendingChecks,
+    });
+    vi.mocked(operatingProfileApi.update).mockResolvedValue({ ...activatedResponse, lock_version: 3, effective: saved, history: [saved, serverChanged], saved });
+
+    open();
+    const user = userEvent.setup();
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Tips default' }), 'already_paid_out');
+    await user.click(screen.getByRole('button', { name: 'Retry activation' }));
+    await screen.findByText('Client-managed mode is active.');
+
+    expect((screen.getByRole('combobox', { name: 'Hours source' }) as HTMLSelectElement).value).toBe('connected_app');
+    expect((screen.getByRole('combobox', { name: 'Tips default' }) as HTMLSelectElement).value).toBe('already_paid_out');
+
+    fireEvent.change(screen.getByLabelText('Effective date'), { target: { value: '2026-11-16' } });
+    await user.type(screen.getByLabelText('Reason for change'), 'Preserve local tips edit without overwriting hours source');
+    await user.click(screen.getByRole('button', { name: 'Save operating profile' }));
+
+    expect(operatingProfileApi.update).toHaveBeenCalledWith(34, {
+      effective_on: '2026-11-16',
+      reason: 'Preserve local tips edit without overwriting hours source',
+      lock_version: 2,
+      changes: { 'tips.default': 'already_paid_out' },
+    });
   });
 });

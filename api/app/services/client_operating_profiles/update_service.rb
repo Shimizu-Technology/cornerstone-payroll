@@ -27,6 +27,9 @@ module ClientOperatingProfiles
           raise Conflict, "The operating profile changed. Reload the latest version before saving."
         end
 
+        blocked = blocked_lifecycle_revert_profile
+        next save_profile!(blocked, amend: true) if blocked
+
         dates = EffectiveDates.new(company: @company, latest: previous, changed_keys: @changes.keys, changes: @changes)
         dates.validate!(@effective_on)
         previous ||= create_baseline!
@@ -35,6 +38,17 @@ module ClientOperatingProfiles
     end
 
     private
+
+    def blocked_lifecycle_revert_profile
+      return unless @changes == { "client_portal.employee_lifecycle_mode" => "approval_first" }
+
+      active = @company.client_operating_profiles.active_on(PayrollBusinessClock.today).first
+      return unless active&.effective_on == @effective_on && active.client_portal_enabled? &&
+        active.option_value("client_portal.employee_lifecycle_mode") == "client_managed" &&
+        active.lifecycle_mode_activated_at.nil? && active.lifecycle_mode_activation_failed_at.present?
+
+      active
+    end
 
     def validate_request!
       unless @effective_on.is_a?(String) && @effective_on.match?(/\A\d{4}-\d{2}-\d{2}\z/)

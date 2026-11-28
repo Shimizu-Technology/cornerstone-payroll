@@ -24,6 +24,52 @@ beforeEach(() => {
   mocks.switchCompany.mockReturnValue(true);
 });
 afterEach(cleanup);
+
+it.each(['employee_verification', 'lifecycle_activation_blocked'])('normalizes unavailable %s deep links out of the URL before loading and hides locked counts', async kind => {
+  mocks.list.mockImplementation(({ kind: requestedKind }) => Promise.resolve({
+    data: requestedKind === 'employee_verification' || requestedKind === 'lifecycle_activation_blocked' ? [] : [row('message')],
+    meta: { next_cursor: null },
+  }));
+  render(<MemoryRouter initialEntries={[`/app/client-inbox?kind=${kind}&status=all`]}><ClientInbox /><Destination /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  expect(mocks.list).not.toHaveBeenCalledWith(expect.objectContaining({ kind }));
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind: undefined, status: 'all' }));
+  expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe('');
+  expect(screen.getByTestId('destination').textContent).toBe('/app/client-inbox?status=all');
+  expect(screen.queryByRole('option', { name: 'Employee updates to verify' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Blocked mode switches' })).toBeNull();
+  expect(screen.queryByText(/\d+ to verify/)).toBeNull();
+});
+
+it.each([
+  ['employee_verification', { client_managed_employee_lifecycle: true }],
+  ['employee_verification', { staff_employee_lifecycle_available: true }],
+  ['lifecycle_activation_blocked', { has_blocked_lifecycle_activation: true }],
+] as const)('keeps available %s deep links in the URL, API request, and Kind selector', async (kind, flags) => {
+  Object.assign(mocks.companies[0], flags);
+  mocks.list.mockImplementation(({ kind: requestedKind }) => Promise.resolve({
+    data: [row(requestedKind === kind ? kind : 'message')],
+    meta: { next_cursor: null },
+  }));
+  render(<MemoryRouter initialEntries={[`/app/client-inbox?kind=${kind}&status=all`]}><ClientInbox /><Destination /></MemoryRouter>);
+  await screen.findByText(`${kind} item 1`);
+  expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ kind, status: 'all' }));
+  expect((screen.getByLabelText('Kind') as HTMLSelectElement).value).toBe(kind);
+  expect(screen.getByTestId('destination').textContent).toBe(`/app/client-inbox?kind=${kind}&status=all`);
+});
+
+it('offers the blocked switch filter from another kind before any blocked row is loaded', async () => {
+  mocks.companies[0].has_blocked_lifecycle_activation = true;
+  mocks.list.mockImplementation(({ kind }) => Promise.resolve({
+    data: [row(kind === 'lifecycle_activation_blocked' ? kind : 'message')], meta: { next_cursor: null },
+  }));
+  render(<MemoryRouter initialEntries={['/app/client-inbox?kind=message']}><ClientInbox /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  expect(screen.queryByText('lifecycle_activation_blocked item 1')).toBeNull();
+  expect(screen.getByRole('option', { name: 'Blocked mode switches' })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'lifecycle_activation_blocked' } });
+  expect(await screen.findByText('lifecycle_activation_blocked item 1')).toBeTruthy();
+});
 it('deduplicates refresh/page overlap by kind and id, replacing stale row data', () => {
   expect(mergeInboxRows([row('message'), row('document')], [{ ...row('message'), waiting: false }, row('document', 2)])).toEqual([{ ...row('message'), waiting: false }, row('document'), row('document', 2)]);
 });
@@ -211,4 +257,21 @@ it('includes a demo company in the client filter dropdown', async () => {
   render(<MemoryRouter><ClientInbox /></MemoryRouter>);
   await screen.findByText('message item 1');
   expect(screen.getByRole('option', { name: 'Harbor Finch Kitchen · Demo' })).toBeTruthy();
+});
+
+it.each([
+  ['employee_verification', '/companies/2/verifications', 'item_id'],
+  ['lifecycle_activation_blocked', '/companies/2/operating-profile', null],
+] as const)('opens an inbox %s entry in its company and preserves the inbox return', async (kind, path, itemParameter) => {
+  mocks.list.mockResolvedValue({ data: [row(kind, 45)], meta: { next_cursor: null } });
+  mocks.counts.mockResolvedValue({ data: { waiting_count: 1, pending_verifications: 1 } });
+  render(<MemoryRouter initialEntries={['/app/client-inbox?status=waiting']}><ClientInbox /><Destination /></MemoryRouter>);
+  expect(await screen.findByText(/1 to verify/)).toBeTruthy();
+  fireEvent.click(await screen.findByRole('button', { name: new RegExp(`${kind} item 45`) }));
+  expect(mocks.switchCompany).toHaveBeenCalledWith(2);
+  const [destination, query] = screen.getByTestId('destination').textContent!.split('?');
+  expect(destination).toBe(path);
+  const params = new URLSearchParams(query);
+  if (itemParameter) expect(params.get(itemParameter)).toBe('45');
+  expect(params.get('inbox')).toBe('/app/client-inbox?status=waiting');
 });

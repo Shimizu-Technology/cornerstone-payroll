@@ -22,6 +22,10 @@ import { useSelectedCompanyCapability } from '@/hooks/useSelectedCompanyCapabili
 import { canWriteClientEmployeeProfile, canWriteCompany, companyReadOnlyMessage } from '@/lib/company-write-access';
 import { clientEmployeesApi, employeesApi, departmentsApi, employeeWageRatesApi, clientDepartmentsApi, employeePayrollFieldsApi, payPeriodsApi, ApiError, errorFieldLabel, type EmployeeDocumentReadinessResponse } from '@/services/api';
 import { clientManagedEmployeePayload, lifecycleModeChanged, maskLifecycleNote, ownEmployeeReviewNotice } from '@/services/clientEmployeeLifecycle';
+import { staffEmployeeLifecycleApi, type VerificationDetails } from '@/services/staff-employee-lifecycle';
+import { parsePositiveRouteId } from '@/lib/route-params';
+import type { SavedVerificationFix } from '@/pages/EmployeeVerificationQueue';
+import { ApprovedRunFixWarning } from './VerificationWarnings';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useEmployeeIntakeSettings } from '@/hooks/useEmployeeIntakeSettings';
@@ -222,7 +226,17 @@ export function EmployeeForm() {
     (activation?.companyId === companyId && activation.previousCompany === activeCompany)
   );
   const intake = useEmployeeIntakeSettings(companyId, isClient, !clientManaged);
-  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
+  const verifyItemId = !isClient && isEditing ? parsePositiveRouteId(searchParams.get('verify_item_id') ?? undefined) : undefined;
+  const maskTaxIds = isClient || Boolean(verifyItemId);
+  const taxIdInputType = clientManaged || verifyItemId ? 'password' : 'text';
+  const queuePath = `/companies/${companyId}/verifications`;
+  const formReturnTo = safeInternalReturnPath(searchParams.get('return_to'), employeesPath(companyId));
+  const returnTo = verifyItemId && !formReturnTo.startsWith(`${queuePath}?`) ? `${queuePath}?item_id=${verifyItemId}` : formReturnTo;
+  const [fixCheck, setFixCheck] = useState<{ key: string; item?: VerificationDetails; error?: string } | null>(null);
+  const [fixCheckAttempt, setFixCheckAttempt] = useState(0);
+  const fixKey = `${companyId}:${id}:${verifyItemId}:${fixCheckAttempt}`;
+  const fixItem = fixCheck?.key === fixKey ? fixCheck.item : undefined;
+  const fixError = fixCheck?.key === fixKey ? fixCheck.error : undefined;
   const airePayPeriodId = searchParams.get('aire_pay_period_id') || '';
   const aireSourceUserId = searchParams.get('aire_source_user_id') || '';
   const aireSourceUserUuid = searchParams.get('aire_source_user_uuid') || '';
@@ -235,6 +249,25 @@ export function EmployeeForm() {
   const currentW4 = loadedEmployee?.current_w4_election;
   const [clientPayEffectiveOn, setClientPayEffectiveOn] = useState('');
   const canManageClientConfiguration = useSelectedCompanyCapability('manage_client_configuration', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_client_configuration');
+  useEffect(() => {
+    if (!verifyItemId || activeCompanyId !== companyId) return;
+    const controller = new AbortController();
+    staffEmployeeLifecycleApi.get(companyId, verifyItemId, controller.signal).then(
+      ({ data }) => {
+        if (controller.signal.aborted) return;
+        if (data.company_id === companyId && String(data.employee_id) === id && data.can_review) {
+          setFixCheck({ key: fixKey, item: data });
+        } else {
+          setFixCheck({ key: fixKey, error: 'This change is no longer available to fix and verify.' });
+        }
+      },
+      (error: unknown) => {
+        if (!controller.signal.aborted) setFixCheck({ key: fixKey, error: error instanceof Error ? error.message : 'Could not check this verification item.' });
+      },
+    );
+    return () => controller.abort();
+  }, [activeCompanyId, companyId, fixKey, id, verifyItemId]);
+  const canSaveFix = !verifyItemId || Boolean(fixItem && canManageClientConfiguration);
   // Mark inactive and reactivate are open to all payroll staff; terminate is not.
   const canChangeEmployeeStatus = useSelectedCompanyCapability('manage_employee_status', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_employee_status');
   const [initialSsn, setInitialSsn] = useState('');
@@ -308,7 +341,7 @@ export function EmployeeForm() {
     || toBoolean(loadedEmployee.w4_step2_multiple_jobs) !== form.w4_step2_multiple_jobs
     || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4a_other_income)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4a_other_income) || 0)
     || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4b_deductions)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4b_deductions) || 0)
-    || toNumberOrZero(loadedEmployee.w4_form_version) !== toNumberOrZero(form.w4_form_version)
+    || (toNumberOrZero(loadedEmployee.w4_form_version) || 2020) !== toNumberOrZero(form.w4_form_version)
     || (loadedEmployee.w4_effective_on || '') !== (form.w4_effective_on || '')
     || (loadedEmployee.w4_signed_on || '') !== (form.w4_signed_on || '')
     || (loadedEmployee.w4_source_reference || '') !== (form.w4_source_reference || '')
@@ -331,13 +364,15 @@ export function EmployeeForm() {
     try {
       const response = isClient
         ? await clientEmployeesApi.get(parseInt(id, 10))
-        : await employeesApi.get(parseInt(id, 10));
+        : maskTaxIds
+          ? await staffEmployeeLifecycleApi.employeeForFix(requestedCompanyId, Number(id))
+          : await employeesApi.get(parseInt(id, 10));
       if (!isCurrentRequest()) return;
       const employee = response.data;
       setLoadedEmployee(employee);
       setPayChangeTiming(emptyPayChangeEffectiveDate());
 
-      const loadedSsn = isClient ? '' : formatSSN(employee.ssn || '');
+      const loadedSsn = maskTaxIds ? '' : formatSSN(employee.ssn || '');
       const nextForm = {
         first_name: employee.first_name,
         middle_name: employee.middle_name || '',
@@ -370,8 +405,8 @@ export function EmployeeForm() {
         employer_roth_match_rate: toNumberOrZero(employee.employer_roth_match_rate),
         department_id: employee.department_id ?? undefined,
         business_name: employee.business_name || '',
-        // Clients only receive the EIN's last four; a blank field keeps the saved EIN.
-        contractor_ein: isClient ? '' : (employee.contractor_ein || ''),
+        // Masked edits receive only the EIN's last four. Leaving the field blank keeps it.
+        contractor_ein: maskTaxIds ? '' : (employee.contractor_ein || ''),
         contractor_type: employee.contractor_type || 'individual',
         contractor_pay_type: employee.contractor_pay_type || 'flat_fee',
         w9_on_file: toBoolean(employee.w9_on_file),
@@ -385,7 +420,7 @@ export function EmployeeForm() {
       setForm(normalizeEmployeeMonetaryFields(nextForm));
       setInitialSsn(loadedSsn);
       setStoredSsnLastFour(employee.ssn_last_four || null);
-      setStoredEinLastFour(isClient ? (employee.contractor_ein_last_four || null) : null);
+      setStoredEinLastFour(maskTaxIds ? (employee.contractor_ein_last_four || null) : null);
       setInitialEmploymentType(employee.employment_type);
       setW4ChangeReason('');
       setW4ElectionReceived(false);
@@ -431,7 +466,7 @@ export function EmployeeForm() {
     } finally {
       if (isCurrentRequest()) setIsLoading(false);
     }
-  }, [companyId, id, isClient, setGeneralError]);
+  }, [companyId, id, isClient, maskTaxIds, setGeneralError]);
 
   const handleDocumentReadinessChange = useCallback((readiness: EmployeeDocumentReadinessResponse['readiness'] | undefined): void => {
     if (companyIdRef.current !== companyId) return;
@@ -793,6 +828,11 @@ export function EmployeeForm() {
     }
   }
   const payBasisChanged = Object.keys(basisEdits).length > 0;
+  const readinessGatedEdit = Boolean(verifyItemId) && loadedEmployee?.readiness_gate_enforced === true;
+  const leavingPayRateBlank = readinessGatedEdit && savedPayRate === 0 && formPayRate === 0
+    && !payBasisChanged && (!supportsMultipleHourlyRates || scalarOnly);
+  const leavingWithholdingBlank = readinessGatedEdit && !loadedEmployee?.w4_effective_on && !form.w4_effective_on
+    && !w4HasChanged && !w4ElectionReceived;
   const payHasChanged = Boolean(compensationHistory && (payBasisChanged || scalarPayChanged || wageRateEdits.length));
   const clientPayChanged = clientManaged && isEditing && (payBasisChanged || scalarPayChanged || wageRateEdits.length > 0);
   const clientPayDate = clientPayEffectiveOn || lifecycleContext?.compensation_default_on || '';
@@ -855,6 +895,11 @@ export function EmployeeForm() {
       if (field === 'ssn' || field === 'contractor_ein') return true;
       return !String(loadedEmployee?.[field as keyof Employee] ?? '').trim();
     }
+    if (readinessGatedEdit) {
+      if (field === 'withholding_election') return leavingWithholdingBlank;
+      if (field === 'business_name') return !loadedEmployee?.business_name?.trim();
+      if (field === 'contractor_ein') return !storedEinLastFour && !loadedEmployee?.contractor_ein?.trim();
+    }
     if (isEditing && deferredEditFields.includes(field)) {
       const storedValue = loadedEmployee?.[field as keyof Employee];
       const hasStoredSsn = field === 'ssn' && Boolean(storedSsnLastFour);
@@ -863,12 +908,13 @@ export function EmployeeForm() {
     return importedProfileAllowsBlank(loadedEmployee, field)
       || intakeAllowsBlank(loadedEmployee, field, !isEditing && Boolean(intake.settings?.enabled));
   };
+  const businessNameRequired = !(clientManaged || readinessGatedEdit) || !allowsUnverifiedBlank('business_name');
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
     const usesSsn = form.employment_type !== 'contractor' || form.contractor_type !== 'business';
     const ssnChanged = canonicalSsn(form.ssn) !== canonicalSsn(initialSsn);
-    const storedSsnCanRemain = isClient && isEditing && Boolean(storedSsnLastFour) && !form.ssn?.trim();
+    const storedSsnCanRemain = maskTaxIds && isEditing && Boolean(storedSsnLastFour) && !form.ssn?.trim();
 
     if (!form.first_name.trim()) {
       newErrors.first_name = ['First name is required'];
@@ -877,10 +923,10 @@ export function EmployeeForm() {
       newErrors.last_name = ['Last name is required'];
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
-    if (!supportsMultipleHourlyRates && !isVariableSalary && (clientManaged ? form.pay_rate < 0 : form.pay_rate <= 0)) {
+    if (!leavingPayRateBlank && !supportsMultipleHourlyRates && !isVariableSalary && (clientManaged ? form.pay_rate < 0 : form.pay_rate <= 0)) {
       newErrors.pay_rate = [clientManaged ? 'Pay rate cannot be negative' : 'Pay rate must be greater than 0'];
     }
-    if (supportsMultipleHourlyRates) {
+    if (supportsMultipleHourlyRates && !leavingPayRateBlank) {
       const normalizedRates = normalizeWageRates();
       const optionalEmptyRate = clientManaged && !savedRates.length && wageRates.length === 1 && Number(wageRates[0].rate) === 0;
       if (!optionalEmptyRate && normalizedRates.length === 0) {
@@ -926,15 +972,18 @@ export function EmployeeForm() {
     const hireDateError = (!clientManaged || form.hire_date) && (!isEditing || form.hire_date !== (loadedEmployee?.hire_date || '')) ? validateHireDate(form.hire_date) : null;
     if (hireDateError) newErrors.hire_date = [hireDateError];
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
-      if ((!clientManaged || !allowsUnverifiedBlank('business_name')) && !form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
-      const storedEinCanRemain = isClient && isEditing && Boolean(storedEinLastFour);
+      if (businessNameRequired && !form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
+      const storedEinCanRemain = maskTaxIds && isEditing && Boolean(storedEinLastFour);
       if (!form.contractor_ein?.trim() && !storedEinCanRemain && !allowsUnverifiedBlank('contractor_ein')) {
         newErrors.contractor_ein = ['EIN is required'];
       } else if (form.contractor_ein?.trim() && !/^\d{2}-\d{7}$/.test(form.contractor_ein)) {
         newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
       }
     }
-    if (clientManaged && !form.date_of_birth && !allowsUnverifiedBlank('date_of_birth')) {
+    const dateOfBirthRequired = clientManaged
+      ? !allowsUnverifiedBlank('date_of_birth')
+      : readinessGatedEdit && Boolean(loadedEmployee?.date_of_birth);
+    if (!form.date_of_birth && dateOfBirthRequired) {
       newErrors.date_of_birth = ['Date of birth is required'];
     } else if (form.date_of_birth && (clientManaged && lifecycleContext?.today
       ? form.date_of_birth >= lifecycleContext.today
@@ -989,6 +1038,7 @@ export function EmployeeForm() {
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
+    if (!canSaveFix) return;
     if (payItemPending || showQuickPayrollField || quickPayrollFieldSaving) {
       setGeneralError('Finish saving or cancel the open pay item before saving the employee profile.');
       return;
@@ -1039,7 +1089,7 @@ export function EmployeeForm() {
               w9_on_file: undefined,
             }
           : {}),
-        ...(isClient && !form.contractor_ein?.trim()
+        ...(maskTaxIds && !form.contractor_ein?.trim()
           ? { contractor_ein: undefined }
           : {}),
         pay_rate: supportsMultipleHourlyRates
@@ -1083,7 +1133,7 @@ export function EmployeeForm() {
       let fallbackRates: Awaited<ReturnType<typeof employeeWageRatesApi.list>> | undefined;
       let fallbackRevision: string | undefined;
       if (isEditing && id) {
-        if (!isClient && !compensationHistory && supportsMultipleHourlyRates) {
+        if (!isClient && !compensationHistory && supportsMultipleHourlyRates && !leavingPayRateBlank) {
           fallbackRates = await employeeWageRatesApi.list(Number(id), requestedCompanyId);
           if (!isCurrentSubmission()) return;
           fallbackRevision = fallbackRates.compensation_revision;
@@ -1093,6 +1143,13 @@ export function EmployeeForm() {
         // not restore a legacy allowance another operator has already converted.
         const updateData = {
           ...employeePayload,
+          ...(leavingPayRateBlank ? { pay_rate: undefined, wage_rates: undefined } : {}),
+          ...(leavingWithholdingBlank ? {
+            filing_status: undefined, allowances: undefined, additional_withholding: undefined,
+            w4_effective_on: undefined, w4_signed_on: undefined, w4_source_reference: undefined,
+            w4_form_version: undefined, w4_dependent_credit: undefined, w4_step2_multiple_jobs: undefined,
+            w4_step4a_other_income: undefined, w4_step4b_deductions: undefined,
+          } : {}),
           default_payroll_adjustments: undefined,
           default_custom_earnings: undefined,
           ...(compensationHistory || fallbackRevision ? {
@@ -1149,7 +1206,10 @@ export function EmployeeForm() {
           portalChangeRequestId = response.change_request?.id || null;
           lifecycleWarnings = response.warnings || [];
         } else {
-          const response = await employeesApi.update(parseInt(id, 10), updateData, requestedCompanyId);
+          const response = await employeesApi.update(parseInt(id, 10), {
+            ...updateData,
+            ...(maskTaxIds ? { mask_tax_ids: true } : {}),
+          }, requestedCompanyId);
           savedEmployeeId = response.data.id;
           compensationWarnings = response.compensation_warnings || [];
           fallbackRevision = response.data.compensation_history?.revision || fallbackRevision;
@@ -1178,7 +1238,7 @@ export function EmployeeForm() {
       // A new employee's hourly rates are added after the profile exists. An
       // edit with pay history saved them with the profile above, together with
       // their effective date; without it the per-rate endpoints still apply.
-      if (!isClient && (!isEditing || !compensationHistory) && !initialWageRatesSaved && supportsMultipleHourlyRates) {
+      if (!isClient && (!isEditing || !compensationHistory) && !initialWageRatesSaved && supportsMultipleHourlyRates && !leavingPayRateBlank) {
         const existingRatesResponse = fallbackRates || await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
@@ -1263,8 +1323,11 @@ export function EmployeeForm() {
           : isClient
             ? employeeEditPath(companyId, savedEmployeeId, { returnTo })
             : employeePath(companyId, savedEmployeeId, 'overview', { returnTo });
+      const lifecycleFix: SavedVerificationFix | undefined = fixItem ? {
+        id: fixItem.id, companyId, employeeId: savedEmployeeId, revision: fixItem.updated_at,
+      } : undefined;
       navigate(saveDestination, {
-        state: portalNotice
+        state: lifecycleFix ? { lifecycleFix } : portalNotice
           ? { portalNotice, selectedRequestId: portalChangeRequestId }
           : aireMappingNotice
             ? { aireMappingNotice }
@@ -1385,6 +1448,13 @@ export function EmployeeForm() {
         }
       />
 
+      {verifyItemId && <div className="mx-4 mt-4 max-w-4xl sm:mx-6 lg:mx-8">
+        {fixItem && canManageClientConfiguration ? <ApprovedRunFixWarning ids={fixItem.warnings.approved_pay_period_ids} />
+          : fixError || (fixItem && !canManageClientConfiguration) ? <Alert tone="error">
+            {fixError || 'You need permission to manage this client before fixing this change.'}
+            <Button type="button" variant="outline" className="ml-2 min-h-11" onClick={() => setFixCheckAttempt(value => value + 1)}>Check again</Button>
+          </Alert> : <p role="status" className="text-sm">Checking for approved payroll before editing…</p>}
+      </div>}
       {(!clientManaged && intake.settings?.enabled && !isEditing) && <div role="status" className="mx-4 mt-4 rounded-xl border border-warning-200 bg-warning-50 p-4 text-sm leading-6 text-warning-900 sm:mx-6 lg:mx-8"><p className="font-semibold">Incomplete employee entry is enabled for this client.</p><p>Enter the name and valid pay setup. Unknown personal details may stay blank and will remain on a follow-up checklist. Payroll setup and documents need separate review.</p></div>}
       {!clientManaged && isEditing && deferredEditFields.some((field) => field === 'ssn'
         ? taxIdUsesSsn && !form.ssn && !storedSsnLastFour
@@ -1440,7 +1510,7 @@ export function EmployeeForm() {
         </div>
       )}
 
-      <form id="employee-form" noValidate onSubmit={handleSubmit} className={`max-w-4xl p-4 pb-32 sm:p-6 sm:pb-32 lg:p-8 lg:pb-32 ${clientManaged ? '[&_input]:min-w-0 [&_button]:min-h-11' : ''}`}>
+      <form id="employee-form" noValidate onSubmit={handleSubmit} className={`max-w-4xl p-4 pb-32 sm:p-6 sm:pb-32 lg:p-8 lg:pb-32${clientManaged ? ' [&_input]:min-w-0 [&_button]:min-h-11' : ''}${verifyItemId ? ' [&_input]:text-base! [&_select]:text-base! [&_textarea]:text-base!' : ''}`}>
         {generalError && (
           <ActionFeedback retryKey={generalErrorFeedbackAttempt} tone="error" message={generalError}><AlertCircle className="w-5 h-5 text-danger-600 shrink-0 mt-0.5" />
             <p className="text-danger-700">
@@ -1533,18 +1603,20 @@ export function EmployeeForm() {
                     </label>
                     <Input id="employee-field-4"
                       name="ssn"
-                      type={clientManaged ? 'password' : undefined}
-                      required={!allowsUnverifiedBlank('ssn') && !(isClient && storedSsnLastFour && !form.ssn)}
-                      placeholder={isClient && storedSsnLastFour ? `Saved ending in ${storedSsnLastFour} — enter replacement` : 'XXX-XX-XXXX'}
+                      type={taxIdInputType}
+                      required={!allowsUnverifiedBlank('ssn') && !(maskTaxIds && storedSsnLastFour && !form.ssn)}
+                      placeholder={maskTaxIds && storedSsnLastFour ? `Saved ending in ${storedSsnLastFour} — enter replacement` : 'XXX-XX-XXXX'}
                       value={form.ssn || ''}
                       onChange={(e) => handleChange('ssn', formatSSN(e.target.value))}
                       error={getFieldError('ssn')}
                       inputMode="numeric"
                       autoComplete="off"
                     />
-                    {isClient && storedSsnLastFour && !form.ssn && (
+                    {maskTaxIds && storedSsnLastFour && !form.ssn && (
                       <p className="mt-1 text-xs text-gray-500">
-                        Saved SSN ending in {storedSsnLastFour}. {clientManaged ? 'Enter and confirm the new number to replace it.' : 'Enter the full number only to submit a replacement for approval.'}
+                        Saved SSN ending in {storedSsnLastFour}. {clientManaged
+                          ? 'Enter and confirm the new number to replace it.'
+                          : isClient ? 'Enter the full number only to submit a replacement for approval.' : 'Enter the full number only to replace it.'}
                       </p>
                     )}
                   </div>
@@ -1558,7 +1630,7 @@ export function EmployeeForm() {
                     </label>
                     <Input id="employee-field-5"
                       name="ssn_confirmation"
-                      type={clientManaged ? 'password' : undefined}
+                      type={taxIdInputType}
                       required={ssnConfirmationRequired}
                       placeholder="XXX-XX-XXXX"
                       value={form.ssn_confirmation || ''}
@@ -2165,11 +2237,11 @@ export function EmployeeForm() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-14">
-                      Legal Business Name {(!clientManaged || !allowsUnverifiedBlank('business_name')) && <span className="text-danger-600">*</span>}
+                      Legal Business Name {businessNameRequired && <span className="text-danger-600">*</span>}
                     </label>
                     <Input id="employee-field-14"
                       name="business_name"
-                      required={!clientManaged || !allowsUnverifiedBlank('business_name')}
+                      required={businessNameRequired}
                       value={form.business_name || ''}
                       onChange={(e) => handleChange('business_name', e.target.value)}
                       placeholder="DBA or legal entity name"
@@ -2182,15 +2254,18 @@ export function EmployeeForm() {
                     </label>
                     <Input id="employee-field-15"
                       name="contractor_ein"
-                      required={!allowsUnverifiedBlank('contractor_ein') && !(isClient && storedEinLastFour && !form.contractor_ein)}
+                      type={taxIdInputType}
+                      required={!allowsUnverifiedBlank('contractor_ein') && !(maskTaxIds && storedEinLastFour && !form.contractor_ein)}
                       value={form.contractor_ein || ''}
                       onChange={(e) => handleChange('contractor_ein', formatEIN(e.target.value))}
-                      placeholder={isClient && storedEinLastFour ? `Saved ending in ${storedEinLastFour} — enter replacement` : 'XX-XXXXXXX'}
+                      placeholder={maskTaxIds && storedEinLastFour ? `Saved ending in ${storedEinLastFour} — enter replacement` : 'XX-XXXXXXX'}
                       error={getFieldError('contractor_ein')}
                     />
-                    {isClient && storedEinLastFour && !form.contractor_ein && (
+                    {maskTaxIds && storedEinLastFour && !form.contractor_ein && (
                       <p className="mt-1 text-xs text-gray-500">
-                        Saved EIN ending in {storedEinLastFour}. {clientManaged ? 'Enter the new number to replace it.' : 'Enter the full number only to submit a replacement for approval.'}
+                        Saved EIN ending in {storedEinLastFour}. {clientManaged
+                          ? 'Enter the new number to replace it.'
+                          : isClient ? 'Enter the full number only to submit a replacement for approval.' : 'Enter the full number only to replace it.'}
                       </p>
                     )}
                   </div>
@@ -2662,7 +2737,7 @@ export function EmployeeForm() {
             <Button type="button" variant="outline" className="h-11 w-full sm:w-auto" onClick={() => navigate(returnTo)} disabled={isSaving || payItemPending || showQuickPayrollField}>
               Cancel
             </Button>
-            <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving || payItemPending || showQuickPayrollField || quickPayrollFieldSaving}>
+            <Button type="submit" form="employee-form" className="h-11 w-full sm:w-auto" disabled={isSaving || !canSaveFix || payItemPending || showQuickPayrollField || quickPayrollFieldSaving}>
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? 'Saving...' : clientManaged ? `Save ${form.employment_type === 'contractor' ? 'contractor' : 'employee'}` : isEditing ? `Update ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}` : `Create ${form.employment_type === 'contractor' ? 'Contractor' : 'Employee'}`}
             </Button>

@@ -58,6 +58,7 @@ export const STAFF_ROUTE_OBJECTS: RouteObject[] = [
       { path: 'payroll-submissions/:ref' },
       { path: 'contact-changes-to-confirm' },
       { path: 'client-change-requests' },
+      { path: 'verifications' },
       { path: 'employees' },
       { path: 'employees/contact-details' },
       { path: 'employees/new' },
