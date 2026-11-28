@@ -1,4 +1,5 @@
 import api from '@/services/api';
+import type { LifecyclePreflight } from '@/services/staff-employee-lifecycle';
 
 export type SettingValue = string | number | boolean | string[] | number[] | null;
 export type Settings = Record<string, SettingValue>;
@@ -46,6 +47,7 @@ export interface OperatingProfileResponse {
   locked_keys: string[];
   offering_presets: Record<string, Settings>;
   connected_source_active: boolean;
+  employee_lifecycle_preflight?: LifecyclePreflight | null;
 }
 
 export const operatingProfileApi = {

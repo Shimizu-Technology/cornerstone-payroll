@@ -148,6 +148,30 @@ RSpec.describe "Staff employee verification queue", type: :request do
       expect(ActionDispatch::Response).to have_received(:rack_status_code).with(:unprocessable_content).twice
     end
 
+    it "keeps open verification work visible after rollback and masks IDs in the fix form profile" do
+      employee.update!(ssn_encrypted: "900-70-1234")
+      item
+      profile = ClientOperatingProfile.for_date(company.id, PayrollBusinessClock.today)
+      profile.update!(options: profile.options.deep_merge("client_portal" => { "employee_lifecycle_mode" => "approval_first" }),
+        lifecycle_mode_activated_at: nil)
+
+      get "/api/v1/companies", headers: headers
+      expect(response.parsed_body.fetch("companies").find { |row| row["id"] == company.id }).to include("has_open_employee_verifications" => true)
+      get inbox_path, headers: headers, params: { kind: "employee_verification" }
+      expect(response.parsed_body.fetch("data").pluck("id")).to include(item.id)
+      get queue_path, headers: headers
+      expect(response).to have_http_status(:ok)
+
+      get "/api/v1/admin/employees/#{employee.id}", headers: headers, params: { mask_tax_ids: true }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data")).to include("ssn_last_four" => "1234")
+      expect(response.parsed_body.fetch("data")).not_to have_key("ssn")
+
+      post "#{queue_path}/#{item.id}/verify", headers: headers, params: { updated_at: item.updated_at.utc.iso8601(6) }, as: :json
+      expect(response).to have_http_status(:ok)
+      expect(item.reload.status).to eq("verified")
+    end
+
     [
       [ "accountant", false, :forbidden ], [ "accountant", true, :ok ], [ "manager", false, :ok ],
       [ "admin", false, :ok ], [ "org_admin", false, :ok ], [ "super_admin", false, :ok ]

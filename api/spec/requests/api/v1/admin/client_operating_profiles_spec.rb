@@ -4,6 +4,7 @@ require "rails_helper"
 
 RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
   include ActiveSupport::Testing::TimeHelpers
+  include EmployeeLifecyclePr4Helpers
 
   let(:organization) { create(:organization) }
   let(:company) do
@@ -57,6 +58,29 @@ RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
     allow_any_instance_of(ApplicationController).to receive(:auth_disabled?).and_return(true)
     allow_any_instance_of(ApplicationController).to receive(:current_user).and_return(user)
     allow_any_instance_of(ApplicationController).to receive(:current_user_id).and_return(user.id)
+  end
+
+  it "lets an administrator cancel an activation that never took effect, even after payroll advances" do
+    unlock_lifecycle_mode!
+    org_admin = create(:user, organization: organization, company: company, role: "org_admin")
+    sign_in_as(org_admin)
+    v2.update!(options: v2.options.deep_merge("client_portal" => { "employee_lifecycle_mode" => "client_managed" }),
+      lifecycle_mode_activation_failed_at: Time.current,
+      lifecycle_mode_activation_blockers: { "qualifying_staff_notification_recipients_count" => 0 })
+    path = "/api/v1/admin/companies/#{company.id}/operating_profile"
+
+    get path
+    expect(response.parsed_body.dig("employee_lifecycle_preflight", "lifecycle_mode_activation_status")).to eq("blocked")
+    expect(response.parsed_body.fetch("available_effective_dates")).not_to include(v2.effective_on.iso8601)
+
+    patch path, params: {
+      effective_on: v2.effective_on.iso8601, lock_version: v2.lock_version,
+      reason: "Keep existing approvals for this client.",
+      changes: { "client_portal.employee_lifecycle_mode" => "approval_first" }
+    }, as: :json
+    expect(response).to have_http_status(:ok), response.body
+    expect(v2.reload.lifecycle_mode_activation_failed_at).to be_nil
+    expect(v2.option_value("client_portal.employee_lifecycle_mode")).to eq("approval_first")
   end
 
   describe "GET /api/v1/admin/companies/:company_id/operating_profile" do

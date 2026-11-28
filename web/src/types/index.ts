@@ -324,6 +324,7 @@ export interface PayrollAdjustment {
 }
 
 export interface Employee {
+  readiness_gate_enforced?: boolean;
   intake_readiness?: import('@/services/employee-intake-api').EmployeeIntakeReadiness;
   id: number;
   company_id: number;

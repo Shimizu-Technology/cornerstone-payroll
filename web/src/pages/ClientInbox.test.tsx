@@ -212,3 +212,20 @@ it('includes a demo company in the client filter dropdown', async () => {
   await screen.findByText('message item 1');
   expect(screen.getByRole('option', { name: 'Harbor Finch Kitchen · Demo' })).toBeTruthy();
 });
+
+it.each([
+  ['employee_verification', '/companies/2/verifications', 'item_id'],
+  ['lifecycle_activation_blocked', '/companies/2/operating-profile', null],
+] as const)('opens an inbox %s entry in its company and preserves the inbox return', async (kind, path, itemParameter) => {
+  mocks.list.mockResolvedValue({ data: [row(kind, 45)], meta: { next_cursor: null } });
+  mocks.counts.mockResolvedValue({ data: { waiting_count: 1, pending_verifications: 1 } });
+  render(<MemoryRouter initialEntries={['/app/client-inbox?status=waiting']}><ClientInbox /><Destination /></MemoryRouter>);
+  expect(await screen.findByText(/1 to verify/)).toBeTruthy();
+  fireEvent.click(await screen.findByRole('button', { name: new RegExp(`${kind} item 45`) }));
+  expect(mocks.switchCompany).toHaveBeenCalledWith(2);
+  const [destination, query] = screen.getByTestId('destination').textContent!.split('?');
+  expect(destination).toBe(path);
+  const params = new URLSearchParams(query);
+  if (itemParameter) expect(params.get(itemParameter)).toBe('45');
+  expect(params.get('inbox')).toBe('/app/client-inbox?status=waiting');
+});

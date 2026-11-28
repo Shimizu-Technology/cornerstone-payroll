@@ -1,7 +1,10 @@
 import { formatDate, formatDateRange } from '@/lib/display-date';
 import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Info, LockKeyhole } from 'lucide-react';
-import { useParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
+import { LIFECYCLE_MODE_KEY } from '@/services/staff-employee-lifecycle';
+import { BlockedLifecycleActivation, LifecyclePreflightSummary } from './employees/LifecycleModePreflight';
+import { useCompany } from '@/contexts/CompanyContext';
 import { Header } from '@/components/layout/Header';
 import { WorkspaceLoader } from '@/components/records/WorkspaceLoader';
 import { Alert } from '@/components/ui/alert';
@@ -27,7 +30,7 @@ const sectionLabels: Record<string, string> = {
 };
 
 const settingValueLabels: Record<string, Record<string, string>> = {
-  'client_portal.employee_lifecycle_mode': {
+  [LIFECYCLE_MODE_KEY]: {
     approval_first: 'Cornerstone approves first',
     client_managed: 'Client manages, Cornerstone verifies',
   },
@@ -179,6 +182,8 @@ function readinessWarnings(values: Settings, connectedSourceActive: boolean) {
 
 function ProfileForm({ data, companyId, reload }: { data: OperatingProfileResponse; companyId: number; reload: () => void }) {
   const [profile, setProfile] = useState(data);
+  const [params] = useSearchParams();
+  const { refreshCompanies } = useCompany();
   const baseline = draftFor(profile);
   const [draft, setDraft] = useState(() => draftFor(data));
   const [effectiveOn, setEffectiveOn] = useState('');
@@ -189,9 +194,11 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
   const [saved, setSaved] = useState('');
   const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
-  const editable = (id: string) => profile.editable_keys.includes(id) && !profile.locked_keys.includes(id);
+  const visibleCatalog = profile.catalog.filter(field => !field.id.startsWith('client_portal.review_first.'));
+  const editable = (id: string) => !id.startsWith('client_portal.review_first.') && profile.editable_keys.includes(id) && !profile.locked_keys.includes(id);
+  const preflight = profile.employee_lifecycle_preflight;
   const changes: Settings = {};
-  for (const field of profile.catalog) {
+  for (const field of visibleCatalog) {
     const value = readValue(field, draft[field.id]);
     if (editable(field.id) && JSON.stringify(value) !== JSON.stringify(baseline[field.id])) changes[field.id] = value;
   }
@@ -199,9 +206,10 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
   const sectionOrder = [...new Set([...Object.keys(sectionLabels), ...profile.catalog.map((field) => field.section)])];
   const sections = sectionOrder.map((section) => ({
     id: section,
-    fields: profile.catalog.filter((field) => field.section === section),
+    fields: visibleCatalog.filter((field) => field.section === section),
   })).filter((section) => section.fields.length > 0);
-  const hasEdits = profile.catalog.some((field) => editable(field.id));
+  const hasEdits = visibleCatalog.some((field) => editable(field.id));
+  const modeBlocked = changes[LIFECYCLE_MODE_KEY] === 'client_managed' && preflight?.ready !== true;
   const earliestDate = profile.available_effective_dates[0];
   const latest = profile.history[0];
   const correctionDate = latest?.version > 1 && latest.effective_on > profile.as_of ? latest.effective_on : null;
@@ -230,7 +238,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || error?.stale || !profile.available_effective_dates.includes(effectiveOn) || !Object.keys(changes).length) return;
+    if (saving || modeBlocked || error?.stale || !profile.available_effective_dates.includes(effectiveOn) || !Object.keys(changes).length) return;
     setSaving(true);
     setError(null);
     try {
@@ -243,6 +251,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
       setEffectiveOn('');
       setReason('');
       setPresetNote('');
+      if (changes[LIFECYCLE_MODE_KEY] !== undefined) void refreshCompanies();
     } catch (problem) {
       setError({ message: problem instanceof Error ? problem.message : 'The operating profile could not be saved.', stale: problem instanceof ApiError && problem.status === 409 });
     } finally {
@@ -259,6 +268,15 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
           <Badge variant="info">{profile.effective.persisted ? `Active version ${profile.effective.version}` : 'Default payroll settings'}</Badge>
           {(profile.history[0]?.effective_on ?? '') > profile.as_of && <Badge variant="outline">Editing scheduled version {profile.history[0].version}</Badge>}
         </div>
+        <BlockedLifecycleActivation profile={profile} companyId={companyId} disabled={saving} inboxReturn={params.get('inbox')} onUpdated={(updated) => {
+          setProfile(updated);
+          void refreshCompanies();
+          setDraft(current => ({ ...current, [LIFECYCLE_MODE_KEY]: draftFor(updated)[LIFECYCLE_MODE_KEY] }));
+          setError(null);
+          setSaved(updated.employee_lifecycle_preflight?.lifecycle_mode_activation_status === 'active'
+            ? 'Client-managed mode is active.' : 'The scheduled switch was reverted.');
+        }} />
+        {saved && <Alert tone="success" role="status">{saved}</Alert>}
         {!hasEdits && <Alert tone="info">You have read-only access to this operating profile.</Alert>}
         <Card>
           <CardHeader><CardTitle>Readiness</CardTitle></CardHeader>
@@ -278,6 +296,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
                     <div key={field.id} className="min-w-0">
                       <SettingControl field={field} value={draft[field.id]} editable={editable(field.id)}
                         locked={profile.locked_keys.includes(field.id)} onChange={(value) => changeSetting(field, value)} />
+                      {field.id === LIFECYCLE_MODE_KEY && preflight && <LifecyclePreflightSummary checks={preflight} />}
                       {field.id === 'offering' && presetNote && <p role="status" className="mt-2 text-sm text-neutral-600">{presetNote}</p>}
                     </div>
                   ))}
@@ -303,10 +322,9 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
                     <Textarea id={reasonId} required value={reason} onChange={(event) => setReason(event.target.value)} />
                   </div>
                   {error && <Alert tone="error" role="alert">{error.message}</Alert>}
-                  {saved && <Alert tone="success" role="status">{saved}</Alert>}
                   {error?.stale
                     ? <Button type="button" variant="outline" onClick={reload}>Reload and discard draft</Button>
-                    : <Button type="submit" className="w-full sm:w-auto" disabled={saving || !reason.trim() || !effectiveOn || !Object.keys(changes).length}>
+                    : <Button type="submit" className="w-full sm:w-auto" disabled={saving || modeBlocked || !reason.trim() || !effectiveOn || !Object.keys(changes).length}>
                       {saving ? 'Saving…' : 'Save operating profile'}
                     </Button>}
                 </CardContent>

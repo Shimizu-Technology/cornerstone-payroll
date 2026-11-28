@@ -127,6 +127,23 @@ RSpec.describe "Employee readiness override access", type: :request, portal_noti
       expect(ActionDispatch::Response).to have_received(:rack_status_code).with(:unprocessable_content)
     end
 
+    it "previews the target paycheck dates and W-4 acknowledgement without changing readiness" do
+      employee
+      period
+      get "#{route}/readiness_override", headers: headers(age: 90)
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "pay_periods").pluck("id")).to include(period.id)
+
+      expect do
+        get "#{route}/readiness_override", headers: headers(age: 90), params: { pay_period_id: period.id }
+      end.not_to change(EmployeeReadinessOverride, :count)
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.dig("data", "checklist")).to include(
+        "rates_on" => period.end_date.iso8601, "w4_on" => period.pay_date.iso8601
+      )
+      expect(response.parsed_body.dig("data", "default_w4_acknowledgement_required")).to be(true)
+    end
+
     [
       [ "accountant", false ], [ "accountant", true ], [ "manager", false ], [ "admin", false ], [ "client", false ]
     ].each do |candidate, delegation|
@@ -136,6 +153,8 @@ RSpec.describe "Employee readiness override access", type: :request, portal_noti
 
         it "refuses grant, revoke, and clear even after a fresh sign-in" do
           expect(StaffRolePolicy.allowed?(actor, :override_employee_readiness, company: company)).to be(false)
+          get "#{route}/readiness_override", headers: headers
+          expect(response).to have_http_status(:forbidden), response.body
           grant
           expect(response).to have_http_status(:forbidden), response.body
           revoke(999_999)

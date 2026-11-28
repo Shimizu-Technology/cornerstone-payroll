@@ -7,6 +7,11 @@ import { ApiError } from '@/services/api';
 import { operatingProfileApi, type CatalogEntry, type OperatingProfileResponse } from '@/services/operating-profile';
 import { ClientOperatingProfile } from './ClientOperatingProfile';
 
+const lifecycleMocks = vi.hoisted(() => ({ retry: vi.fn(), revert: vi.fn() }));
+vi.mock('@/services/staff-employee-lifecycle', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/staff-employee-lifecycle')>(),
+  staffEmployeeLifecycleApi: { retryActivation: lifecycleMocks.retry, revertActivation: lifecycleMocks.revert },
+}));
 vi.mock('@/components/layout/Header', () => ({ Header: ({ title }: { title: string }) => <h1>{title}</h1> }));
 vi.mock('@/services/operating-profile', () => ({
   operatingProfileApi: { get: vi.fn(), update: vi.fn() },
@@ -188,5 +193,57 @@ describe('Client operating profile editor', () => {
     await user.click(await screen.findByRole('button', { name: 'Reload and discard draft' }));
     await waitFor(() => expect(operatingProfileApi.get).toHaveBeenCalledTimes(2));
     expect((await screen.findByRole('combobox', { name: 'Tips default' }) as HTMLSelectElement).value).toBe('paid_in_check');
+  });
+});
+
+describe('Employee lifecycle controls', () => {
+  const lifecycle = 'client_portal.employee_lifecycle_mode';
+  const pendingChecks = {
+    pending_non_address_change_requests_count: 2,
+    active_intake_window: true,
+    qualifying_staff_notification_recipients_count: 0,
+    ready: false,
+    blockers: [],
+    lifecycle_mode_activation_status: 'blocked' as const,
+    lifecycle_mode_activation_blockers: {
+      pending_non_address_change_requests_count: 2, active_intake_window: true, qualifying_staff_notification_recipients_count: 0,
+    },
+    scheduled_effective_on: '2026-11-16',
+  };
+
+  it('keeps the mode control locked and hides deprecated review-first settings', async () => {
+    const deprecated = { ...catalog.find(field => field.id === lifecycle)!, id: 'client_portal.review_first.pay', label: 'Legacy review-first pay', deprecated: true };
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, catalog: [...catalog, deprecated] });
+    open();
+    await screen.findByText(/Cornerstone approves first · Available in Milestone 4/);
+    expect(screen.queryByRole('combobox', { name: 'Employee lifecycle mode' })).toBeNull();
+    expect(screen.queryByText('Legacy review-first pay')).toBeNull();
+    expect(screen.queryByText('Scheduled employee lifecycle switch blocked')).toBeNull();
+  });
+
+  it('renders each preflight requirement and retries through the activation endpoint', async () => {
+    lifecycleMocks.retry.mockResolvedValue({ ...fixture, employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'active' } });
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, locked_keys: [], employee_lifecycle_preflight: pendingChecks });
+    open();
+    await screen.findByText('Scheduled employee lifecycle switch blocked');
+    expect(screen.getByText('2 pending employee change requests to review')).toBeTruthy();
+    expect(screen.getByText('Incomplete-employee entry window is still open')).toBeTruthy();
+    expect(screen.getByText('Add at least one staff notification recipient')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry activation' }));
+    await screen.findByText('Client-managed mode is active.');
+    expect(lifecycleMocks.retry).toHaveBeenCalledWith(34);
+  });
+
+  it('reverts the blocked scheduled version using its effective date, reason and lock token', async () => {
+    lifecycleMocks.revert.mockResolvedValue({ ...fixture, employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'inactive' } });
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, lock_version: 4, locked_keys: [], employee_lifecycle_preflight: pendingChecks });
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Revert to Cornerstone approval' }));
+    fireEvent.change(screen.getByLabelText('Reason for reverting'), { target: { value: 'Keep current employee approvals.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Revert mode' }));
+    await screen.findByText('The scheduled switch was reverted.');
+    expect(lifecycleMocks.revert).toHaveBeenCalledWith(34, {
+      effective_on: '2026-11-16', lock_version: 4, reason: 'Keep current employee approvals.',
+    });
   });
 });

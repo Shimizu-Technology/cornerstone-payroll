@@ -1,20 +1,20 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Employee, EmployeeCompensationHistory } from '@/types';
 import { EmployeeForm } from './EmployeeForm';
 
 const mocks = vi.hoisted(() => ({
   get: vi.fn(), updateEmployee: vi.fn(), createEmployee: vi.fn(), departments: vi.fn(),
-  listRates: vi.fn(), updateRate: vi.fn(), createRate: vi.fn(), deleteRate: vi.fn(), notify: vi.fn(),
+  listRates: vi.fn(), updateRate: vi.fn(), createRate: vi.fn(), deleteRate: vi.fn(), notify: vi.fn(), verifyItem: vi.fn(), employeeForFix: vi.fn(),
 }));
 vi.mock('@/components/ui/action-feedback', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/components/ui/action-feedback')>()),
   useFeedback: () => ({ notify: mocks.notify }),
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1 }, isClient: false, isSuperAdmin: true, isManager: true }) }));
-vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: { id: 1, pay_frequency: 'biweekly' } }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: { id: 1, pay_frequency: 'biweekly', client_capabilities: ['manage_client_configuration'] } }) }));
 vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: false }, loading: false }) }));
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
 vi.mock('@/components/employees/EmployeePayItemsPanel', () => ({ EmployeePayItemsPanel: () => null }));
@@ -22,6 +22,9 @@ vi.mock('@/components/employees/EmployeeDocumentsPanel', () => ({ EmployeeDocume
 vi.mock('@/components/employees/EmployeeClassificationTransitionDialog', () => ({ EmployeeClassificationTransitionDialog: () => null }));
 vi.mock('@/components/employees/EmployeeStatusTransitionDialog', () => ({ EmployeeStatusTransitionDialog: () => null }));
 vi.mock('@/components/employees/EmployeeWorkProfilePanel', () => ({ EmployeeWorkProfilePanel: () => null }));
+vi.mock('@/services/staff-employee-lifecycle', () => ({
+  staffEmployeeLifecycleApi: { employeeForFix: mocks.employeeForFix, get: mocks.verifyItem },
+}));
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
   return { ...actual,
@@ -213,4 +216,30 @@ describe('pay changes with an effective date', () => {
     await screen.findByText('Saved employee profile');
     expect(mocks.notify).toHaveBeenCalledWith({ tone: 'info', message: expect.stringMatching(/starts mid-period on 2026-11-22/) });
   });
+});
+
+it('warns about client re-approval before saving a verification fix and hands off the displayed revision', async () => {
+  function QueueDestination() {
+    const { state } = useLocation();
+    return <output>{JSON.stringify(state.lifecycleFix)}</output>;
+  }
+  const updatedAt = '2026-11-27T12:00:00.000001Z';
+  let resolveItem: (value: unknown) => void = () => {};
+  mocks.verifyItem.mockReturnValue(new Promise(resolve => { resolveItem = resolve; }));
+  mocks.employeeForFix.mockResolvedValue({ data: employee({ ssn: undefined, ssn_last_four: '1234' }) });
+  mocks.updateEmployee.mockResolvedValue({ data: employee(), compensation_warnings: [] });
+  render(<MemoryRouter initialEntries={['/companies/1/employees/7/edit?verify_item_id=22']}><Routes>
+    <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
+    <Route path="/companies/:companyId/verifications" element={<QueueDestination />} />
+  </Routes></MemoryRouter>);
+  await screen.findByText('Checking for approved payroll before editing…');
+  expect((screen.getByRole('button', { name: 'Update Employee' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText(/^Social Security Number/) as HTMLInputElement).value).toBe('');
+  expect(screen.getByText(/Saved SSN ending in 1234/)).toBeTruthy();
+  resolveItem({ data: { id: 22, company_id: 1, employee_id: 7, can_review: true, updated_at: updatedAt, warnings: { approved_pay_period_ids: [44] } } });
+  await screen.findByText(/unapprove the run, recalculate, republish the review package, and get client re-approval/);
+  fireEvent.change(screen.getByLabelText(/^First Name/), { target: { value: 'Synthetic Fix' } });
+  submit();
+  expect(await screen.findByText(JSON.stringify({ id: 22, companyId: 1, employeeId: 7, revision: updatedAt }))).toBeTruthy();
+  expect(mocks.updateEmployee.mock.calls[0][1].ssn).toBeUndefined();
 });

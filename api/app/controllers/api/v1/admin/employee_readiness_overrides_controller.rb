@@ -7,8 +7,8 @@ module Api
         include StaffEmployeeLifecycleAccess
         include RecentVerification
 
-        before_action :require_override_verification
-        before_action :skip_default_audit_log!
+        before_action :require_override_verification, except: :show
+        before_action :skip_default_audit_log!, except: :show
 
         rescue_from AdminOverrideService::AccessDenied do |error|
           render json: { error: error.message }, status: :forbidden
@@ -20,6 +20,14 @@ module Api
 
         rescue_from ActiveRecord::RecordNotFound do
           render json: { error: "Employee, pay period, or readiness override not found" }, status: :not_found
+        end
+
+        def show
+          if impersonated_session?
+            return render json: { error: "Exit Sign in as before changing employee readiness." }, status: :forbidden
+          end
+
+          render json: { data: manager.preview(pay_period_id: params[:pay_period_id], expires_on: params[:expires_on]) }
         end
 
         def create

@@ -59,6 +59,7 @@ import {
 } from '@/lib/routes';
 import { employeesApi, payStubsApi, reportsApi } from '@/services/api';
 import type { Employee } from '@/types';
+import { ReadinessOverrideActions } from './ReadinessOverrideActions';
 import { parsePositiveRouteId } from '@/lib/route-params';
 import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
 import { SavedHours } from '@/components/employees/SavedHours';
@@ -362,6 +363,8 @@ export function EmployeeWorkspace(): ReactElement {
             </Button>
           </div>
         )}
+        {employee.readiness_gate_enforced && <ReadinessOverrideActions companyId={companyId} employeeId={employee.id}
+          employeeName={employeeName} onUpdated={() => void load()} />}
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <>

@@ -4357,6 +4357,8 @@ export const printerProfilesApi = {
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {
+  client_managed_employee_lifecycle?: boolean;
+  has_open_employee_verifications?: boolean;
   creator?: RecordCreatorInfo | null;
   payroll_intake_source_types?: string[];
   portal_payroll_files_enabled?: boolean;

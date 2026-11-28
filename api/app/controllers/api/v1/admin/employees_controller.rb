@@ -58,22 +58,25 @@ module Api
         # GET /api/v1/admin/employees/:id
         def show
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          render json: {
-            data: serialize_employee(
-              @employee,
-              include_department: true,
-              include_sensitive: true,
-              include_classification_history: true,
-              include_lifecycle: true,
-              include_w4_history: true,
-              include_retirement_history: true,
-              include_configuration_review_history: true,
-              include_document_readiness: true,
-              include_compensation_history: true,
-              include_delivery_consents: true,
-              contact_context: contact_context
-            )
-          }
+          mask_tax_ids = params[:mask_tax_ids] == "true"
+          employee = serialize_employee(
+            @employee,
+            include_department: true,
+            include_sensitive: !mask_tax_ids,
+            include_classification_history: true,
+            include_lifecycle: true,
+            include_w4_history: true,
+            include_retirement_history: true,
+            include_configuration_review_history: true,
+            include_document_readiness: true,
+            include_compensation_history: true,
+            include_delivery_consents: true,
+            contact_context: contact_context
+          )
+          if mask_tax_ids
+            employee["contractor_ein_last_four"] = employee.delete("contractor_ein")&.last(4)
+          end
+          render json: { data: employee }
         end
 
         # POST /api/v1/admin/employees
