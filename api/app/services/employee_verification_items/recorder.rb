@@ -183,8 +183,10 @@ module EmployeeVerificationItems
           )
         else
           latest = open_items.first
-          baseline = open_items.last
-          merged_before = before_values.merge(baseline.before_values.to_h)
+          oldest_before = open_items.reverse_each.with_object({}) do |item, values|
+            values.merge!(item.before_values.to_h) { |_field, older, _newer| older }
+          end
+          merged_before = before_values.merge(oldest_before)
 
           if latest.acknowledged_in_committed_run?
             create_item!(

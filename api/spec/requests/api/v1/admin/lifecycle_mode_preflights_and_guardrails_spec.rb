@@ -146,16 +146,26 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         expect(company.client_operating_profiles.history_order.first.lifecycle_mode_activated_at.to_i).to eq(original_activated_at.to_i)
         expect(CompanyFeatures.for(company).client_managed_employee_lifecycle?).to be(true)
 
-        # Rollback to approval_first is always allowed immediately even with open verification items
+        # Unrelated same-day edit on today is rejected once a version starts today
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: today.iso8601,
+          lock_version: company.client_operating_profiles.history_order.first.lock_version,
+          reason: "Attempt second same-day unrelated edit",
+          changes: { "tips.default" => "add_to_paycheck" }
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body["error"]).to include("after the latest profile's start date")
+
+        # Immediate same-day rollback to approval_first on today is always allowed even after a same-day edit and with open verification items
         open_item = EmployeeVerificationItem.create!(company: company, employee: worker, event_kind: "new_hire", status: "pending_verification", affects_pay: true)
         patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
-          effective_on: (today + 14).iso8601,
+          effective_on: today.iso8601,
           lock_version: company.client_operating_profiles.history_order.first.lock_version,
-          reason: "Rollback to approval_first",
+          reason: "Immediate same-day rollback to approval_first",
           changes: { "client_portal.employee_lifecycle_mode" => "approval_first" }
         }, as: :json
         expect(response).to have_http_status(:ok), response.body
-        expect(CompanyFeatures.for(company, on: today + 14).client_managed_employee_lifecycle?).to be(false)
+        expect(CompanyFeatures.for(company, on: today).client_managed_employee_lifecycle?).to be(false)
         expect(open_item.reload.status).to eq("pending_verification")
       end
     end
@@ -223,10 +233,26 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         get "/api/v1/admin/companies/#{company.id}/operating_profile"
         expect(response.parsed_body.dig("employee_lifecycle_preflight", "lifecycle_mode_activation_status")).to eq("blocked")
 
-        # Manual retry while still blocked returns 422
+        # While activation is blocked (still approval_first), opening a valid intake window is allowed,
+        # and manual retry still rechecks and blocks until that window is closed.
+        patch "/api/v1/admin/employee_intake_settings", params: {
+          employee_intake_settings: { enabled: true, duration_hours: 4, reason: "Urgent onboarding while blocked" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(company.reload.employee_intake_expires_at).to be_present
+
+        # Manual retry while still blocked returns 422 (both pending request and opened intake window)
         post "/api/v1/admin/companies/#{company.id}/operating_profile/activate_lifecycle_mode", as: :json
         expect(response).to have_http_status(:unprocessable_content)
         expect(response.parsed_body["lifecycle_mode_activation_status"]).to eq("blocked")
+        expect(response.parsed_body["blockers"]).to include("active_intake_window" => true)
+
+        # Close the temporary intake window before resolving the remaining blocker
+        patch "/api/v1/admin/employee_intake_settings", params: {
+          employee_intake_settings: { enabled: false, reason: "Closing window before retry" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        expect(company.reload.employee_intake_expires_at).to be_nil
 
         # Resolve blocker -> manager (lacking :manage_organization) gets 403, org_admin activates cleanly!
         drifted_request.update!(status: :approved, reviewed_by: manager, reviewed_at: Time.current)
@@ -245,6 +271,170 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         expect(scheduled.lifecycle_mode_activation_blockers).to eq({})
         expect(CompanyFeatures.for(company).client_managed_employee_lifecycle?).to be(true)
         expect(AuditLog.where(company_id: company.id, action: "client_operating_profile.lifecycle_mode_activated")).to exist
+
+        # Proactive guardrails remain enforced AFTER activation:
+        # 1. Opening an intake window is refused (422) and leaves employee_intake_expires_at unchanged
+        patch "/api/v1/admin/employee_intake_settings", params: {
+          employee_intake_settings: { enabled: true, duration_hours: 4, reason: "Try opening while active" }
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body["error"]).to include("while Client-managed employee lifecycle is active or scheduled")
+        expect(company.reload.employee_intake_expires_at).to be_nil
+
+        # 2. Removing the last qualifying staff recipient is refused (422) and leaves manager listed
+        patch "/api/v1/admin/portal_notification_recipients", params: {
+          user_ids: [ accountant.id ],
+          lead_user_id: accountant.id,
+          emails: []
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content)
+        expect(response.parsed_body["error"]).to include("qualifying staff notification recipient")
+        expect(PortalNotificationRecipient.where(company_id: company.id, user_id: manager.id)).to exist
+      end
+    end
+
+    it "keeps an unrelated future successor profile activated when its predecessor activates, while still requiring activation after a rollback" do
+      PortalNotificationRecipient.create!(company: company, user: manager, team_role: "lead", added_by: org_admin)
+      create(:pay_period, company: company, status: "draft", start_date: today + 28, end_date: today + 41, pay_date: today + 46)
+      create(:pay_period, company: company, status: "draft", start_date: today + 42, end_date: today + 55, pay_date: today + 60)
+
+      date_v2 = today + 14
+      date_v3 = today + 28
+      date_v4 = today + 42
+      v2 = nil
+      v3 = nil
+
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: date_v2.iso8601,
+          lock_version: 0,
+          reason: "Schedule client_managed V2",
+          changes: { "client_portal.employee_lifecycle_mode" => "client_managed" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        v2 = company.client_operating_profiles.history_order.first
+
+        # Save unrelated V3 before V2 activates
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: date_v3.iso8601,
+          lock_version: v2.lock_version,
+          reason: "Schedule unrelated tip change V3 before V2 activates",
+          changes: { "tips.default" => "already_paid_out" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        v3 = company.client_operating_profiles.history_order.first
+        expect(v3.lifecycle_mode_activated_at).to be_nil
+
+        # Schedule a rollback V4 after V3 and a new re-enable V5 after V4
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: date_v4.iso8601,
+          lock_version: v3.lock_version,
+          reason: "Schedule rollback V4",
+          changes: { "client_portal.employee_lifecycle_mode" => "approval_first" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+      end
+
+      v4 = company.client_operating_profiles.history_order.first
+      create(:pay_period, company: company, status: "draft", start_date: today + 56, end_date: today + 69, pay_date: today + 74)
+      v5 = nil
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: (today + 56).iso8601,
+          lock_version: v4.lock_version,
+          reason: "Schedule re-enable V5 after rollback",
+          changes: { "client_portal.employee_lifecycle_mode" => "client_managed" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        v5 = company.client_operating_profiles.history_order.first
+      end
+
+      # On D (date_v2), V2 activates and propagates activation to contiguous successor V3, NOT past rollback V4 to V5
+      travel_to(Time.utc(2026, 12, 4, 12)) do
+        ActivateScheduledLifecycleModesJob.perform_now
+        expect(v2.reload.lifecycle_mode_activated_at).to be_present
+        expect(v3.reload.lifecycle_mode_activated_at).to eq(v2.lifecycle_mode_activated_at)
+        expect(v5.reload.lifecycle_mode_activated_at).to be_nil
+
+        # Introduce a drifted pending change request before D2
+        worker = create(:employee, :hourly, company: company, first_name: "Casey", last_name: "Successor")
+        create(
+          :employee_change_request,
+          company: company,
+          employee: worker,
+          requested_by: client_manager,
+          proposed_changes: { pay_rate: 28.0 },
+          original_values: { pay_rate: 20.0 }
+        )
+      end
+
+      # On D2 (date_v3), V3 stays active in client_managed without re-running preflights or failing closed
+      travel_to(Time.utc(2026, 12, 18, 12)) do
+        expect(CompanyFeatures.for(company, on: date_v3).client_managed_employee_lifecycle?).to be(true)
+        expect(ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company, as_of: date_v3)).to be_nil
+        expect(CompanyFeatures.for(company, on: date_v3).client_managed_employee_lifecycle?).to be(true)
+      end
+    end
+
+    it "skips a profile blocked by an on-demand failure when ActivateScheduledLifecycleModesJob runs, while activating a clean first scheduled attempt" do
+      PortalNotificationRecipient.create!(company: company, user: manager, team_role: "lead", added_by: org_admin)
+      future_date = today + 14
+      worker = create(:employee, :hourly, company: company, first_name: "Sam", last_name: "Interleave")
+      blocker = nil
+
+      travel_to(Time.utc(2026, 11, 20, 12)) do
+        patch "/api/v1/admin/companies/#{company.id}/operating_profile", params: {
+          effective_on: future_date.iso8601,
+          lock_version: 0,
+          reason: "Schedule client_managed for interleaving test",
+          changes: { "client_portal.employee_lifecycle_mode" => "client_managed" }
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+
+        blocker = create(
+          :employee_change_request,
+          company: company,
+          employee: worker,
+          requested_by: client_manager,
+          proposed_changes: { pay_rate: 26.0 },
+          original_values: { pay_rate: 20.0 }
+        )
+      end
+
+      scheduled = company.client_operating_profiles.history_order.first
+
+      # Interleaving: job captures due_company_ids BEFORE on-demand attempt stamps failure and staff clears blocker
+      travel_to(Time.utc(2026, 12, 4, 12)) do
+        job = ActivateScheduledLifecycleModesJob.new
+        allow(job).to receive(:due_company_ids).and_return([ company.id ])
+
+        ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company, as_of: future_date)
+        expect(scheduled.reload.lifecycle_mode_activation_failed_at).to be_present
+        blocker.update!(status: :rejected, reviewed_by: manager, reviewed_at: Time.current, review_notes: "Cleared")
+
+        job.perform(as_of: future_date.iso8601)
+        expect(scheduled.reload.lifecycle_mode_activated_at).to be_nil
+        expect(CompanyFeatures.for(company, on: future_date).employee_lifecycle_mode).to eq("approval_first")
+      end
+
+      # Clean first scheduled attempt (no failure marker) activates normally
+      other_company = create(:company, organization: organization, name: "Clean Scheduled Co")
+      CompanyAssignment.create!(user: org_admin, company: other_company)
+      CompanyAssignment.create!(user: manager, company: other_company)
+      PortalNotificationRecipient.create!(company: other_company, user: manager, team_role: "lead", added_by: org_admin)
+      clean_profile = ClientOperatingProfile.create!(
+        ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(other_company, effective_on: future_date).merge(
+          client_portal_enabled: true,
+          options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+          lifecycle_mode_activated_at: nil,
+          lifecycle_mode_activation_failed_at: nil
+        )
+      )
+
+      travel_to(Time.utc(2026, 12, 4, 12)) do
+        ActivateScheduledLifecycleModesJob.perform_now(as_of: future_date.iso8601)
+        expect(clean_profile.reload.lifecycle_mode_activated_at).to be_present
+        expect(CompanyFeatures.for(other_company, on: future_date).client_managed_employee_lifecycle?).to be(true)
       end
     end
 
@@ -310,12 +500,39 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
         return_note: "Confirm rate"
       )
 
-      expect(ApplicationRecord).to receive(:transaction).at_least(:once).and_call_original
+      in_recorder_tx = false
+      locked_inside_tx = false
+      updated_inside_tx = false
+
+      original_transaction = ApplicationRecord.method(:transaction)
+      allow(ApplicationRecord).to receive(:transaction) do |*args, **kwargs, &block|
+        original_transaction.call(*args, **kwargs) do
+          previous = in_recorder_tx
+          in_recorder_tx = true
+          block.call
+        ensure
+          in_recorder_tx = previous
+        end
+      end
+
+      original_lock = Company.method(:lock)
+      allow(Company).to receive(:lock) do |*args|
+        locked_inside_tx = in_recorder_tx
+        original_lock.call(*args)
+      end
+
+      allow_any_instance_of(EmployeeVerificationItem).to receive(:update!).and_wrap_original do |method, *args, **kwargs|
+        updated_inside_tx = in_recorder_tx
+        method.call(*args, **kwargs)
+      end
+
       requeued = EmployeeVerificationItems::Recorder.requeue_returned_items!(
         employee: worker,
         actor: client_manager,
         touched_fields: [ :pay_rate ]
       )
+      expect(locked_inside_tx).to be(true)
+      expect(updated_inside_tx).to be(true)
       expect(requeued.map(&:id)).to eq([ returned.id ])
       expect(returned.reload.status).to eq("pending_verification")
     end

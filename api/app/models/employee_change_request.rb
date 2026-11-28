@@ -72,7 +72,9 @@ class EmployeeChangeRequest < ApplicationRecord
   validates :proposed_changes, presence: true
   validates :requested_by, presence: true, on: :create
   validates :request_kind, inclusion: { in: %w[create update] }
+  validates :own_record_signal, inclusion: { in: EmployeeProfileIdentity::OWN_RECORD_SIGNALS }, allow_nil: true
 
+  before_validation :assign_own_record_signal, on: :create
   validate :validate_profile_address_origin, on: :create, if: :profile_address_origin?
 
   scope :recent_first, -> { order(created_at: :desc, id: :desc) }
@@ -223,6 +225,17 @@ class EmployeeChangeRequest < ApplicationRecord
   def client_address_reviewer?(actor)
     actor.client? && actor.organization_id == company.organization_id && profile_address? &&
       CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
+  end
+
+  def assign_own_record_signal
+    return unless own_record?
+    return if own_record_signal.present?
+
+    if company.present? && CompanyFeatures.for(company).client_managed_employee_lifecycle?
+      self.own_record_signal = EmployeeProfileIdentity.own_record_signal_for_client_managed(employee, requested_by)
+    elsif employee && requested_by
+      self.own_record_signal = "strong"
+    end
   end
 
   def validate_profile_address_origin

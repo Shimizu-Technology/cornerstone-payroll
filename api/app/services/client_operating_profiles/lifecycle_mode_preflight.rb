@@ -108,7 +108,7 @@ module ClientOperatingProfiles
 
         today = as_of.to_date
         company.client_operating_profiles
-          .where(client_portal_enabled: true)
+          .where(client_portal_enabled: true, lifecycle_mode_activation_failed_at: nil)
           .where("ends_on IS NULL OR ends_on >= ?", today)
           .where("options -> 'client_portal' ->> 'employee_lifecycle_mode' = ?", "client_managed")
           .exists?

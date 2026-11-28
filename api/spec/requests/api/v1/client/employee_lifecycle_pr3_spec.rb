@@ -511,10 +511,127 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body.fetch("data")).to eq([])
 
+      # Malformed employee_id filter (array or non-numeric) returns 422
+      get "/api/v1/client/verification_items", params: { employee_id: [ worker.id.to_s ] }
+      expect(response).to have_http_status(:unprocessable_content)
+      get "/api/v1/client/verification_items", params: { employee_id: "not-an-id" }
+      expect(response).to have_http_status(:unprocessable_content)
+
       # Responding to an item that is NOT returned_to_client returns 422 (M3)
       post "/api/v1/client/verification_items/#{returned_item.id}/respond",
            params: { note: "Second response after already resubmitted" }, as: :json
       expect(response).to have_http_status(:unprocessable_content)
+
+      # Responding to an item acknowledged in a committed pay run leaves the acknowledged row and its snapshot untouched,
+      # creating a new pending_verification item linked through prior_unverified_item_id
+      committed_period = create(:pay_period, company: company, status: "committed", start_date: Date.new(2026, 11, 1), end_date: Date.new(2026, 11, 14), pay_date: Date.new(2026, 11, 20))
+      ack_returned = EmployeeVerificationItem.create!(
+        company: company,
+        employee: worker,
+        event_kind: "compensation_change",
+        status: "returned_to_client",
+        affects_pay: true,
+        changed_fields: [ "pay_rate" ],
+        before_values: { "pay_rate" => 18.0 },
+        after_values: { "pay_rate" => 21.0 },
+        returned_by: staff_manager,
+        returned_at: 1.hour.ago,
+        return_note: "Confirm rate change"
+      )
+      original_updated_at = ack_returned.updated_at
+      PayPeriodVerificationAcknowledgement.create!(
+        company: company,
+        pay_period: committed_period,
+        employee_verification_item: ack_returned,
+        employee: worker,
+        acknowledged_by: staff_manager,
+        acknowledged_at: Time.current,
+        item_status_snapshot: ack_returned.status,
+        item_updated_at_snapshot: original_updated_at
+      )
+
+      expect do
+        post "/api/v1/client/verification_items/#{ack_returned.id}/respond",
+             params: { note: "Confirmed rate is accurate." }, as: :json
+      end.to change(EmployeeVerificationItem, :count).by(1)
+      expect(response).to have_http_status(:ok), response.body
+      expect(ack_returned.reload.status).to eq("returned_to_client")
+      expect(ack_returned.updated_at.utc.iso8601(6)).to eq(original_updated_at.utc.iso8601(6))
+
+      replacement = EmployeeVerificationItem.find(response.parsed_body.dig("data", "id"))
+      expect(replacement.id).not_to eq(ack_returned.id)
+      expect(replacement.status).to eq("pending_verification")
+      expect(replacement.metadata["prior_unverified_item_id"]).to eq(ack_returned.id)
+      expect(replacement.metadata["client_response_note"]).to eq("Confirmed rate is accurate.")
+    end
+
+    it "reuses the existing open linked pending item when responding repeatedly to an acknowledged returned item (B2)" do
+      worker = create(:employee, :hourly, company: company, first_name: "Casey", last_name: "Resubmit")
+      committed_period = create(
+        :pay_period,
+        company: company,
+        status: "committed",
+        start_date: Date.new(2026, 11, 1),
+        end_date: Date.new(2026, 11, 14),
+        pay_date: Date.new(2026, 11, 20)
+      )
+      ack_returned = EmployeeVerificationItem.create!(
+        company: company,
+        employee: worker,
+        event_kind: "compensation_change",
+        status: "returned_to_client",
+        affects_pay: true,
+        changed_fields: [ "pay_rate" ],
+        before_values: { "pay_rate" => 18.0 },
+        after_values: { "pay_rate" => 21.0 },
+        returned_by: staff_manager,
+        returned_at: 1.hour.ago,
+        return_note: "Confirm rate change"
+      )
+      original_updated_at = ack_returned.updated_at
+      PayPeriodVerificationAcknowledgement.create!(
+        company: company,
+        pay_period: committed_period,
+        employee_verification_item: ack_returned,
+        employee: worker,
+        acknowledged_by: staff_manager,
+        acknowledged_at: Time.current,
+        item_status_snapshot: ack_returned.status,
+        item_updated_at_snapshot: original_updated_at
+      )
+
+      notes = [
+        "First response: confirmed rate matches offer.",
+        "Second response: double-checked pay table.",
+        "Third response: manager signed off."
+      ]
+      returned_ids = []
+
+      notes.each do |note_text|
+        post "/api/v1/client/verification_items/#{ack_returned.id}/respond",
+             params: { note: note_text }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        returned_ids << response.parsed_body.dig("data", "id")
+      end
+
+      expect(returned_ids.uniq.size).to eq(1)
+      linked_items = EmployeeVerificationItem
+        .where(company: company, employee: worker)
+        .where("metadata ->> 'prior_unverified_item_id' = ?", ack_returned.id.to_s)
+        .to_a
+      expect(linked_items.size).to eq(1)
+
+      linked = linked_items.first
+      expect(linked.id).to eq(returned_ids.first)
+      expect(linked.id).not_to eq(ack_returned.id)
+      expect(linked.status).to eq("pending_verification")
+      notes.each do |note_text|
+        expect(linked.metadata["client_response_note"]).to include(note_text)
+        expect(response.parsed_body.dig("data", "client_response_note")).to include(note_text)
+      end
+
+      expect(ack_returned.reload.status).to eq("returned_to_client")
+      expect(ack_returned.updated_at.utc.iso8601(6)).to eq(original_updated_at.utc.iso8601(6))
     end
 
     it "terminates (retiring link, flagging backdated committed runs) and rehires (accepting legacy W-4 & NULL payment method while preserving document_readiness_required)" do
@@ -613,8 +730,33 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
         expect(response.parsed_body.dig("data", "lifecycle_edit_context")).to include(
           "own_record" => false, "rehire_readiness" => nil
         )
-        expect(EmployeeVerificationItem.where(employee: worker, event_kind: "rehire")).to exist
+        rehire_item = EmployeeVerificationItem.where(employee: worker, event_kind: "rehire").last
+        expect(rehire_item).to be_present
+        expect(rehire_item.changed_fields).to include("readiness_gate_enforced")
+        expect(rehire_item.before_values["readiness_gate_enforced"]).to be(false)
+        expect(rehire_item.after_values["readiness_gate_enforced"]).to be(true)
         expect(AuditLog.where(company_id: company.id, action: "client_employees#rehire", record_id: worker.id)).to exist
+
+        # Rehire when readiness_gate_enforced is ALREADY true omits readiness_gate_enforced from changed_fields/before/after
+        already_gated_terminated = create(
+          :employee,
+          :hourly,
+          company: company,
+          first_name: "Avery",
+          last_name: "AlreadyGated",
+          status: "terminated",
+          hire_date: Date.new(2026, 1, 1),
+          termination_date: Date.new(2026, 10, 15),
+          readiness_gate_enforced: true
+        )
+        post "/api/v1/client/employees/#{already_gated_terminated.id}/rehire", params: {
+          effective_date: "2026-11-19"
+        }, as: :json
+        expect(response).to have_http_status(:ok), response.body
+        gated_rehire_item = EmployeeVerificationItem.where(employee: already_gated_terminated, event_kind: "rehire").last
+        expect(gated_rehire_item.changed_fields).to eq(%w[status termination_date])
+        expect(gated_rehire_item.before_values).not_to have_key("readiness_gate_enforced")
+        expect(gated_rehire_item.after_values).not_to have_key("readiness_gate_enforced")
 
         # Document gate on the rehired staff-created worker is still enforced!
         next_period = create(:pay_period, company: company, start_date: Date.new(2026, 11, 15), end_date: Date.new(2026, 11, 28), pay_date: Date.new(2026, 12, 4))
@@ -667,6 +809,55 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(response).to have_http_status(:unprocessable_content)
       expect(response.parsed_body.dig("details", "ssn")).to include("This Social Security Number is already assigned to another employee in this company.")
       expect(undashed_existing.reload.ssn_encrypted).to eq("900556677")
+
+      # N1: Non-canonical stored SSN formats (dots, trailing space, odd grouping, parentheses) are still caught via normalized-digit fallback
+      [
+        [ "dots", "900.11.2233", "900-11-2233" ],
+        [ "trailing_space", "900-11-2234 ", "900-11-2234" ],
+        [ "odd_grouping", "9001-12235", "900-11-2235" ],
+        [ "parentheses", "(900)112236", "900-11-2236" ]
+      ].each do |label, stored_format, submitted_format|
+        create(:employee, :hourly, company: company, first_name: "Stored", last_name: label.camelize, ssn_encrypted: stored_format)
+        other_editor = create(:employee, :hourly, company: company, first_name: "Edit", last_name: label.camelize, ssn_encrypted: "900-90-0001")
+
+        post "/api/v1/client/employees", params: {
+          employee: {
+            first_name: "CreateDup",
+            last_name: label.camelize,
+            employment_type: "hourly",
+            ssn: submitted_format,
+            ssn_confirmation: submitted_format
+          }
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content), "Expected create duplicate rejection for #{label} (#{stored_format})"
+        expect(response.parsed_body.dig("details", "ssn")).to include("This Social Security Number is already assigned to another employee in this company.")
+
+        patch "/api/v1/client/employees/#{other_editor.id}", params: {
+          employee: { ssn: submitted_format, ssn_confirmation: submitted_format }
+        }, as: :json
+        expect(response).to have_http_status(:unprocessable_content), "Expected update duplicate rejection for #{label} (#{stored_format})"
+        expect(response.parsed_body.dig("details", "ssn")).to include("This Social Security Number is already assigned to another employee in this company.")
+      end
+
+      # Post-lock SSN confirmation: if another writer changed the employee's SSN before the lock,
+      # submitting the stale pre-lock SSN without ssn_confirmation is still rejected with 422.
+      stale_ssn_emp = create(:employee, :hourly, company: company, first_name: "Race", last_name: "Ssn", ssn_encrypted: "900-71-8293")
+      mutated_ssn = false
+      allow(Employee).to receive(:find_by).and_wrap_original do |method, *args, **kwargs|
+        loaded = method.call(*args, **kwargs)
+        if !mutated_ssn && loaded&.id == stale_ssn_emp.id
+          mutated_ssn = true
+          Employee.find(stale_ssn_emp.id).update!(ssn_encrypted: "900-71-9999")
+        end
+        loaded
+      end
+      patch "/api/v1/client/employees/#{stale_ssn_emp.id}", params: {
+        employee: { ssn: "900-71-8293" }
+      }, as: :json
+      expect(response).to have_http_status(:unprocessable_content), response.body
+      expect(response.parsed_body.dig("details", "ssn_confirmation")).to be_present
+      expect(stale_ssn_emp.reload.ssn_digits).to eq("900719999")
+      allow(Employee).to receive(:find_by).and_call_original
 
       # 2. SSN double-entry confirmation required on client SSN change
       patch "/api/v1/client/employees/#{target.id}", params: {
@@ -871,12 +1062,171 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       expect(field_samples.keys).to match_array(pay_required)
       pay_required.each do |field|
         emp, attrs, setup = field_samples.fetch(field)
+        EmployeeVerificationItem.where(employee_id: emp.id).update_all(superseded_by_id: nil)
+        EmployeeVerificationItem.where(employee_id: emp.id).delete_all
         emp.reload
         setup&.call(emp)
         res = ClientEmployeeUpdateService.new(employee: emp, attrs: attrs, requested_by: client_manager, company: company).update!
+        expect(res.changed_fields.map(&:to_s)).to include(field.to_s), "Expected res.changed_fields to include #{field}"
         pay_items = res.verification_items.select { |item| item.affects_pay && item.changed_fields.include?(field.to_s) }
         expect(pay_items).not_to be_empty, "Expected pay-affecting verification item for field #{field}"
       end
+    end
+
+    it "handles contractor W-4 payloads, explicit unchanged w4_effective_on, coalesced multi-field baselines, and period-matched W-4 readiness on index" do
+      # 1. Contractors must not report W-4 fields in applied_direct_fields or create w4_change verification items
+      contractor = create(:employee, :contractor, company: company, first_name: "Casey", last_name: "ContractorW4")
+      expect do
+        patch "/api/v1/client/employees/#{contractor.id}", params: {
+          employee: {
+            filing_status: "married",
+            w4_signed_on: "2026-11-01",
+            w4_effective_on: "2026-11-01",
+            w4_election_received: true,
+            job_title: "Consultant"
+          }
+        }, as: :json
+      end.not_to change { EmployeeVerificationItem.where(employee: contractor, event_kind: "w4_change").count }
+      expect(response).to have_http_status(:ok), response.body
+      expect(response.parsed_body.fetch("applied_direct_fields")).to eq([ "job_title" ])
+
+      # 2. Explicitly submitted w4_effective_on is preserved even when matching the current value; omitted date falls back to next unapproved pay date
+      later_period = create(
+        :pay_period,
+        company: company,
+        status: "draft",
+        cycle: "regular",
+        run_purpose: "regular",
+        start_date: Date.new(2026, 12, 1),
+        end_date: Date.new(2026, 12, 14),
+        pay_date: Date.new(2026, 12, 19)
+      )
+      w4_worker = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Drew",
+        last_name: "Withholding",
+        filing_status: "single",
+        w4_effective_on: Date.new(2026, 11, 1),
+        w4_signed_on: Date.new(2026, 11, 1),
+        w4_form_version: 2020
+      )
+      EmployeeW4Election.create!(
+        EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+          company: company,
+          employee: w4_worker,
+          filing_status: "single",
+          effective_on: Date.new(2026, 11, 1),
+          w4_signed_on: Date.new(2026, 11, 1),
+          w4_form_version: 2020,
+          source: "client_direct",
+          reason: "Initial W-4"
+        )
+      )
+
+      patch "/api/v1/client/employees/#{w4_worker.id}", params: {
+        employee: {
+          filing_status: "married",
+          w4_effective_on: "2026-11-01"
+        }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(w4_worker.employee_w4_elections.recent_first.first.effective_on).to eq(Date.new(2026, 11, 1))
+
+      patch "/api/v1/client/employees/#{w4_worker.id}", params: {
+        employee: {
+          additional_withholding: 35.0
+        }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(w4_worker.employee_w4_elections.recent_first.first.effective_on).to eq(later_period.pay_date)
+
+      # 3. Coalescing preserves the earliest before_value for every field across all open items (not only open_items.last)
+      coalesce_emp = create(:employee, :salary, company: company, first_name: "Blake", last_name: "Coalesce", salary_type: "annual", pay_rate: 50_000.0)
+      committed_run = create(:pay_period, company: company, status: "committed", start_date: Date.new(2026, 10, 1), end_date: Date.new(2026, 10, 14), pay_date: Date.new(2026, 10, 20))
+      item_a = EmployeeVerificationItems::Recorder.record!(
+        employee: coalesce_emp,
+        actor: client_manager,
+        event_kind: "compensation_change",
+        changed_fields: [ "pay_rate" ],
+        before_values: { "pay_rate" => 48_000.0 },
+        after_values: { "pay_rate" => 50_000.0 }
+      )
+      PayPeriodVerificationAcknowledgement.create!(
+        company: company,
+        pay_period: committed_run,
+        employee_verification_item: item_a,
+        employee: coalesce_emp,
+        acknowledged_by: staff_manager,
+        acknowledged_at: Time.current,
+        item_status_snapshot: item_a.status,
+        item_updated_at_snapshot: item_a.updated_at
+      )
+      EmployeeVerificationItems::Recorder.record!(
+        employee: coalesce_emp,
+        actor: client_manager,
+        event_kind: "compensation_change",
+        changed_fields: [ "salary_type" ],
+        before_values: { "salary_type" => "annual" },
+        after_values: { "salary_type" => "variable" }
+      )
+      item_c = EmployeeVerificationItems::Recorder.record!(
+        employee: coalesce_emp,
+        actor: client_manager,
+        event_kind: "compensation_change",
+        changed_fields: [ "salary_type" ],
+        before_values: { "salary_type" => "variable" },
+        after_values: { "salary_type" => "annual" }
+      )
+      expect(item_c.before_values["pay_rate"]).to eq(48_000.0)
+      expect(item_c.before_values["salary_type"]).to eq("annual")
+
+      # 4. GET /client/employees?rates_on=<period_b.end_date> checks W-4 against period_b.pay_date, matching for_pay_period
+      period_a = create(
+        :pay_period,
+        company: company,
+        status: "draft",
+        cycle: "regular",
+        run_purpose: "regular",
+        start_date: Date.new(2026, 11, 17),
+        end_date: Date.new(2026, 11, 30),
+        pay_date: Date.new(2026, 12, 5)
+      )
+      dated_w4_worker = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Parker",
+        last_name: "Payday",
+        date_of_birth: Date.new(1992, 5, 1),
+        hire_date: Date.new(2026, 11, 1),
+        pay_rate: 20.0,
+        pay_frequency: "biweekly",
+        payment_delivery_method: "paper_check",
+        readiness_gate_enforced: true
+      )
+      EmployeeW4Election.create!(
+        EmployeeW4Election::DEFAULT_PROFILE_ATTRIBUTES.except(:w4_effective_on).merge(
+          company: company,
+          employee: dated_w4_worker,
+          effective_on: Date.new(2026, 12, 10),
+          w4_signed_on: Date.new(2026, 12, 1),
+          w4_form_version: 2020,
+          source: "client_direct",
+          reason: "Between period A and period B pay dates"
+        )
+      )
+      allow(company).to receive(:portal_payroll_files_enabled?).and_return(true)
+      allow_any_instance_of(Api::V1::Client::EmployeesController).to receive(:submittable_period_end_date?).with(later_period.end_date).and_return(true)
+      expect(EmployeeReadinessEvaluator.for_pay_period(dated_w4_worker, period_a)).to be_incomplete
+      expect(EmployeeReadinessEvaluator.for_pay_period(dated_w4_worker, later_period)).to be_ready
+
+      get "/api/v1/client/employees", params: { rates_on: later_period.end_date.iso8601, per_page: 100 }
+      expect(response).to have_http_status(:ok), response.body
+      row = response.parsed_body.fetch("data").find { |entry| entry["id"] == dated_w4_worker.id }
+      expect(row.dig("readiness", "w4_on")).to eq(later_period.pay_date.iso8601)
+      expect(row.dig("readiness", "status")).to eq("ready")
     end
 
     it "batches readiness queries in O(1) on GET /client/employees in client_managed mode and strips both effective_on keys on create (M1, L4)" do
@@ -1328,20 +1678,141 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
       @acting_user = client_manager
     end
 
-    it "returns 403 self_lifecycle_forbidden on self-terminate and self-rehire, 404 on cross-company and DELETE" do
-      self_active = create(:employee, :hourly, company: company, first_name: "Sloane", last_name: "Owner", email: "different@example.test")
-      self_terminated = create(:employee, :hourly, company: company, first_name: "Other", last_name: "Name", email: "sloane.owner@example.test", status: "terminated", termination_date: Date.new(2026, 10, 1))
+    it "does not combine names from different historical snapshots and uses targeted SQL in sticky_own_record? (N7, snapshot integrity)" do
+      # Taylor Rivera -> Morgan Rivera -> Morgan Chen must NOT match manager "Taylor Chen",
+      # while manager "Taylor Rivera" still matches via the complete historical name snapshot.
+      taylor_chen = create(:user, company: company, organization: organization, role: "client", name: "Taylor Chen", email: "taylor.chen@example.test")
+      taylor_rivera = create(:user, company: company, organization: organization, role: "client", name: "Taylor Rivera", email: "taylor.rivera@example.test")
+      CompanyAssignment.create!(user: taylor_chen, company: company)
+      CompanyAssignment.create!(user: taylor_rivera, company: company)
+
+      renamed_emp = create(:employee, :hourly, company: company, first_name: "Taylor", last_name: "Rivera", email: "worker.renamed@example.test", pay_rate: 20.0)
+
+      # Step 1: change first_name only (Taylor -> Morgan)
+      patch "/api/v1/client/employees/#{renamed_emp.id}", params: { employee: { first_name: "Morgan" } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      first_item = EmployeeVerificationItem.where(employee: renamed_emp, event_kind: "identity_tax_change").order(:id).last
+      first_item.update!(status: "verified", verified_by: staff_manager, verified_at: Time.current)
+
+      # Step 2: change last_name only (Rivera -> Chen)
+      patch "/api/v1/client/employees/#{renamed_emp.id}", params: { employee: { last_name: "Chen" } }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      renamed_emp.reload
+
+      expect(EmployeeProfileIdentity.own_record_for_client_managed?(renamed_emp, taylor_chen)).to be(false)
+      expect(EmployeeProfileIdentity.own_record_for_client_managed?(renamed_emp, taylor_rivera)).to be(true)
+
+      # N7: sticky_own_record? uses targeted JSONB key predicates rather than loading unrelated verification items
+      other_emp = create(:employee, :hourly, company: company, first_name: "Unrelated", last_name: "PayOnly", email: "unrelated.pay@example.test")
+      3.times do |idx|
+        EmployeeVerificationItem.create!(
+          company: company,
+          employee: other_emp,
+          event_kind: "compensation_change",
+          status: "verified",
+          affects_pay: true,
+          changed_fields: [ "pay_rate" ],
+          before_values: { "pay_rate" => 20.0 + idx },
+          after_values: { "pay_rate" => 21.0 + idx }
+        )
+      end
+
+      queries = []
+      callback = lambda do |_name, _start, _finish, _id, payload|
+        next if payload[:name] == "SCHEMA" || payload[:cached]
+
+        sql = payload[:sql].to_s
+        queries << sql if sql.include?("employee_verification_items")
+      end
+      ActiveSupport::Notifications.subscribed(callback, "sql.active_record") do
+        expect(EmployeeProfileIdentity.sticky_own_record?(other_emp, client_manager)).to be(false)
+      end
+      expect(queries.any? { |sql| sql.include?("own_record_actor_id") }).to be(true)
+      expect(queries.any? { |sql| sql.include?("identity_name_before") }).to be(true)
+      expect(queries.none? { |sql| !sql.include?("own_record_actor_id") && !sql.include?("identity_name_before") && !sql.include?("before_values ? 'email'") }).to be(true)
+    end
+
+    it "returns 403 self_lifecycle_forbidden only for strong own-record signals (re-checked post-lock), allows name-only matches with flagged verification items, and returns 404 on cross-company and DELETE (N2)" do
+      # Strong signal 1: linked active record
+      linked_self = create(:employee, :hourly, company: company, first_name: "Linked", last_name: "Self", email: "linked.only@example.test")
+      EmployeeAccountLink.create!(company: company, employee: linked_self, user: client_manager, status: "active", activated_at: 1.week.ago)
+
+      # Strong signal 2: normalized email match
+      email_self_terminated = create(:employee, :hourly, company: company, first_name: "Other", last_name: "Name", email: "SLOANE.OWNER@example.test", status: "terminated", termination_date: Date.new(2026, 10, 1))
+
+      # Strong signal 3: sticky prior own-record (even after rename + re-email)
+      sticky_self = create(:employee, :hourly, company: company, first_name: "Sloane", last_name: "Owner", email: "sloane.owner@example.test")
+      EmployeeChangeRequest.create!(
+        company: company,
+        employee: sticky_self,
+        requested_by: client_manager,
+        request_kind: "update",
+        own_record: true,
+        status: :approved,
+        proposed_changes: { "pay_rate" => 30.0 },
+        original_values: { "pay_rate" => 25.0 }
+      )
+      sticky_self.update_columns(first_name: "Renamed", last_name: "Record", email: "new.inbox@example.test")
+
       foreign_employee = create(:employee, :hourly, company: other_company, first_name: "Foreign", last_name: "Worker")
 
-      post "/api/v1/client/employees/#{self_active.id}/terminate",
+      post "/api/v1/client/employees/#{linked_self.id}/terminate",
            params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
 
-      post "/api/v1/client/employees/#{self_terminated.id}/rehire",
+      post "/api/v1/client/employees/#{sticky_self.id}/terminate",
+           params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
+
+      post "/api/v1/client/employees/#{email_self_terminated.id}/rehire",
            params: { effective_date: "2026-11-10" }, as: :json
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
+
+      # Post-lock own-record recheck: if staff updates employee email to match acting client before @employee.lock!, terminate still returns 403
+      race_emp = create(:employee, :hourly, company: company, first_name: "Race", last_name: "Target", email: "different.before.lock@example.test")
+      mutated_email = false
+      allow(Employee).to receive(:find_by).and_wrap_original do |method, *args, **kwargs|
+        loaded = method.call(*args, **kwargs)
+        if !mutated_email && loaded&.id == race_emp.id
+          mutated_email = true
+          Employee.where(id: race_emp.id).update_all(email: client_manager.email)
+        end
+        loaded
+      end
+      post "/api/v1/client/employees/#{race_emp.id}/terminate",
+           params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
+      expect(race_emp.reload.status).to eq("active")
+      allow(Employee).to receive(:find_by).and_call_original
+
+      # N2: fuzzy name-only match ("Jose Cruz Camacho" terminating different employee "Jose Camacho") SUCCEEDS and flags verification item
+      camacho_manager = create(:user, company: company, organization: organization, role: "client", name: "Jose Cruz Camacho", email: "jose.cruz.camacho@example.test")
+      CompanyAssignment.create!(user: camacho_manager, company: company)
+      jose_camacho = create(:employee, :hourly, company: company, first_name: "Jose", last_name: "Camacho", email: "jose.camacho.worker@example.test", hire_date: Date.new(2026, 1, 1))
+
+      @acting_user = camacho_manager
+      post "/api/v1/client/employees/#{jose_camacho.id}/terminate",
+           params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(jose_camacho.reload.status).to eq("terminated")
+      term_item = EmployeeVerificationItem.where(employee: jose_camacho, event_kind: "termination").last
+      expect(term_item.metadata["possible_self_lifecycle_action"]).to be(true)
+      expect(term_item.metadata["possible_self_actor_id"]).to eq(camacho_manager.id)
+      expect(response.parsed_body.dig("verification_item", "metadata")).not_to have_key("possible_self_lifecycle_action")
+      expect(response.parsed_body.dig("verification_item", "metadata")).not_to have_key("possible_self_actor_id")
+
+      # Rehiring the same name-only match also succeeds and flags the rehire verification item
+      post "/api/v1/client/employees/#{jose_camacho.id}/rehire",
+           params: { effective_date: "2026-11-15" }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(jose_camacho.reload.status).to eq("active")
+      rehire_flag_item = EmployeeVerificationItem.where(employee: jose_camacho, event_kind: "rehire").last
+      expect(rehire_flag_item.metadata["possible_self_lifecycle_action"]).to be(true)
+      @acting_user = client_manager
 
       post "/api/v1/client/employees/#{foreign_employee.id}/terminate",
            params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
@@ -1351,17 +1822,193 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
            params: { effective_date: "2026-11-10" }, as: :json
       expect(response).to have_http_status(:not_found)
 
-      delete "/api/v1/client/employees/#{self_active.id}", as: :json
+      delete "/api/v1/client/employees/#{linked_self.id}", as: :json
       expect(response.status).to be_in([ 404, 405 ])
 
       # LinkCheckUnavailable fails closed with HTTP 503 on update, terminate, and rehire
       allow(EmployeeProfileIdentity).to receive(:own_record?).and_raise(EmployeeProfileIdentity::LinkCheckUnavailable, "Link check unavailable")
-      patch "/api/v1/client/employees/#{self_active.id}", params: { employee: { job_title: "Chef" } }, as: :json
+      patch "/api/v1/client/employees/#{linked_self.id}", params: { employee: { job_title: "Chef" } }, as: :json
       expect(response).to have_http_status(:service_unavailable)
-      post "/api/v1/client/employees/#{self_active.id}/terminate", params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
+      post "/api/v1/client/employees/#{linked_self.id}/terminate", params: { effective_date: "2026-11-10", reason_category: "voluntary" }, as: :json
       expect(response).to have_http_status(:service_unavailable)
-      post "/api/v1/client/employees/#{self_terminated.id}/rehire", params: { effective_date: "2026-11-10" }, as: :json
+      post "/api/v1/client/employees/#{email_self_terminated.id}/rehire", params: { effective_date: "2026-11-10" }, as: :json
       expect(response).to have_http_status(:service_unavailable)
+    end
+
+    it "never escalates a name-only match into a strong own-record signal after edits or self-created hires while keeping strong signals 403 (B1)" do
+      camacho_manager = create(
+        :user,
+        company: company,
+        organization: organization,
+        role: "client",
+        name: "Jose Cruz Camacho",
+        email: "jose.cruz.camacho@example.test"
+      )
+      CompanyAssignment.create!(user: camacho_manager, company: company)
+      @acting_user = camacho_manager
+
+      # Case 1: Name-only match -> job-title edit (writes profile_change verification item) -> terminate returns 200 and flags staff-side
+      edited_camacho = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Jose",
+        last_name: "Camacho",
+        email: "jose.camacho.edited@example.test",
+        hire_date: Date.new(2026, 1, 1),
+        job_title: "Line Cook",
+        pay_rate: 20.0
+      )
+      patch "/api/v1/client/employees/#{edited_camacho.id}", params: {
+        employee: { job_title: "Shift Lead" }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      profile_item = EmployeeVerificationItem.where(employee: edited_camacho, event_kind: "profile_change").order(:id).last
+      expect(profile_item).to be_present
+      expect(profile_item.metadata["own_record_actor_id"]).to eq(camacho_manager.id)
+      expect(profile_item.metadata["own_record_signal"]).to eq("name_only")
+
+      post "/api/v1/client/employees/#{edited_camacho.id}/terminate", params: {
+        effective_date: "2026-11-10",
+        reason_category: "voluntary"
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(edited_camacho.reload.status).to eq("terminated")
+      edited_term_item = EmployeeVerificationItem.where(employee: edited_camacho, event_kind: "termination").order(:id).last
+      expect(edited_term_item.metadata["possible_self_lifecycle_action"]).to be(true)
+      expect(edited_term_item.metadata["possible_self_actor_id"]).to eq(camacho_manager.id)
+      expect(edited_term_item.metadata["own_record_signal"]).to eq("name_only")
+      expect(response.parsed_body.dig("verification_item", "metadata")).not_to have_key("possible_self_lifecycle_action")
+      expect(response.parsed_body.dig("verification_item", "metadata")).not_to have_key("own_record_signal")
+
+      # Case 1b: Name-only match -> restricted pay edit (creates own-record EmployeeChangeRequest) -> terminate still returns 200 and flags staff-side
+      pay_req_camacho = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Jose",
+        last_name: "Camacho",
+        email: "jose.camacho.payreq@example.test",
+        hire_date: Date.new(2026, 1, 1),
+        pay_rate: 20.0
+      )
+      patch "/api/v1/client/employees/#{pay_req_camacho.id}", params: {
+        employee: { pay_rate: 24.0 }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      name_only_req = EmployeeChangeRequest.where(employee: pay_req_camacho).order(:id).last
+      expect(name_only_req).to be_present
+      expect(name_only_req.own_record).to be(true)
+      expect(name_only_req.own_record_signal).to eq("name_only")
+
+      post "/api/v1/client/employees/#{pay_req_camacho.id}/terminate", params: {
+        effective_date: "2026-11-10",
+        reason_category: "voluntary"
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(pay_req_camacho.reload.status).to eq("terminated")
+      pay_req_term_item = EmployeeVerificationItem.where(employee: pay_req_camacho, event_kind: "termination").order(:id).last
+      expect(pay_req_term_item.metadata["possible_self_lifecycle_action"]).to be(true)
+      expect(pay_req_term_item.metadata["possible_self_actor_id"]).to eq(camacho_manager.id)
+      expect(pay_req_term_item.metadata["own_record_signal"]).to eq("name_only")
+
+      # Case 2: Name-only self-created hire -> terminate returns 200 and flags staff-side
+      post "/api/v1/client/employees", params: {
+        employee: {
+          first_name: "Jose",
+          last_name: "Camacho",
+          email: "jose.camacho.newhire@example.test",
+          hire_date: "2026-11-01",
+          employment_type: "hourly"
+        }
+      }, as: :json
+      expect(response).to have_http_status(:created), response.body
+      hired_camacho = Employee.find(response.parsed_body.dig("data", "id"))
+      hire_item = EmployeeVerificationItem.where(employee: hired_camacho, event_kind: "new_hire").order(:id).last
+      expect(hire_item.metadata["possible_self_created_hire"]).to be(true)
+      expect(hire_item.metadata["own_record_actor_id"]).to eq(camacho_manager.id)
+      expect(hire_item.metadata["own_record_signal"]).to eq("name_only")
+
+      post "/api/v1/client/employees/#{hired_camacho.id}/terminate", params: {
+        effective_date: "2026-11-10",
+        reason_category: "voluntary"
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(hired_camacho.reload.status).to eq("terminated")
+      hire_term_item = EmployeeVerificationItem.where(employee: hired_camacho, event_kind: "termination").order(:id).last
+      expect(hire_term_item.metadata["possible_self_lifecycle_action"]).to be(true)
+      expect(hire_term_item.metadata["possible_self_actor_id"]).to eq(camacho_manager.id)
+      expect(hire_term_item.metadata["own_record_signal"]).to eq("name_only")
+      expect(response.parsed_body.dig("verification_item", "metadata")).not_to have_key("possible_self_lifecycle_action")
+      expect(response.parsed_body.dig("verification_item", "metadata")).not_to have_key("own_record_signal")
+
+      # Case 3: Strong signals (email match, account link, and prior strong own-record after rename/re-email) still return 403
+      strong_email_self = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Jose",
+        last_name: "Camacho",
+        email: "JOSE.CRUZ.CAMACHO@example.test",
+        hire_date: Date.new(2026, 1, 1)
+      )
+      post "/api/v1/client/employees/#{strong_email_self.id}/terminate", params: {
+        effective_date: "2026-11-10",
+        reason_category: "voluntary"
+      }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
+
+      # Prior strong own-record edit stays strong even after the employee is renamed and re-emailed
+      patch "/api/v1/client/employees/#{strong_email_self.id}", params: {
+        employee: { job_title: "General Manager", pay_rate: 45.0 }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      strong_profile_item = EmployeeVerificationItem.where(employee: strong_email_self, event_kind: "profile_change").order(:id).last
+      expect(strong_profile_item.metadata["own_record_signal"]).to eq("strong")
+      strong_req = EmployeeChangeRequest.where(employee: strong_email_self).order(:id).last
+      expect(strong_req.own_record_signal).to eq("strong")
+
+      strong_email_self.update_columns(first_name: "Completely", last_name: "Different", email: "unrelated.after.rename@example.test")
+      post "/api/v1/client/employees/#{strong_email_self.id}/terminate", params: {
+        effective_date: "2026-11-10",
+        reason_category: "voluntary"
+      }, as: :json
+      expect(response).to have_http_status(:forbidden)
+      expect(response.parsed_body["code"]).to eq("self_lifecycle_forbidden")
+      expect(strong_email_self.reload.status).to eq("active")
+
+      @acting_user = client_manager
+    end
+  end
+
+  describe "dual-role own-record routing with profile_requests disabled" do
+    before do
+      unlock_and_enable_client_managed!(profile_requests: false)
+    end
+
+    it "routes own-record non-address edits to Cornerstone staff without applying pay changes" do
+      expect(CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)).to be(false)
+
+      own_emp = create(
+        :employee,
+        :hourly,
+        company: company,
+        first_name: "Sloane",
+        last_name: "Owner",
+        email: "sloane.owner@example.test",
+        pay_rate: 25.0
+      )
+
+      patch "/api/v1/client/employees/#{own_emp.id}", params: {
+        employee: { pay_rate: 45.0 }
+      }, as: :json
+      expect(response).to have_http_status(:ok), response.body
+      expect(own_emp.reload.pay_rate.to_f).to eq(25.0)
+      req = EmployeeChangeRequest.where(employee: own_emp, status: :pending).last
+      expect(req).to be_present
+      expect(req.own_record).to be(true)
+      expect(req.proposed_changes["pay_rate"]).to eq(45.0)
     end
   end
 
@@ -1399,6 +2046,39 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
         }, as: :json
       end.to change(Employee, :count).by(1)
       expect(response).to have_http_status(:created)
+    end
+
+    it "returns 409 lifecycle_mode_changed if another request or job flips lifecycle mode between pre-check and company lock (N3)" do
+      stub_const("OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES",
+                 OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES.except("client_portal.employee_lifecycle_mode"))
+      stub_const("OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS",
+                 OperatingProfileCatalog::M4_TO_M6_TOGGLE_IDS - [ "client_portal.employee_lifecycle_mode" ])
+      stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
+
+      due_profile = ClientOperatingProfile.create!(
+        ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Date.new(2026, 1, 1)).merge(
+          client_portal_enabled: true,
+          options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+          lifecycle_mode_activated_at: nil
+        )
+      )
+
+      # Simulate concurrent activation arriving right after ensure_attempted! returns nil (already handled elsewhere)
+      allow(ClientOperatingProfiles::LifecycleModeActivationService).to receive(:ensure_attempted!).and_return(nil)
+      allow(company).to receive(:lock!).and_wrap_original do |method, *args|
+        due_profile.update_columns(lifecycle_mode_activated_at: Time.current)
+        method.call(*args)
+      end
+
+      expect do
+        post "/api/v1/client/employees", params: {
+          employee: { first_name: "Concurrent", last_name: "Flip", employment_type: "hourly" }
+        }, as: :json
+      end.not_to change(Employee, :count)
+
+      expect(response).to have_http_status(:conflict)
+      expect(response.parsed_body["code"]).to eq("lifecycle_mode_changed")
+      expect(response.parsed_body["employee_lifecycle_mode"]).to eq("client_managed")
     end
   end
 end
