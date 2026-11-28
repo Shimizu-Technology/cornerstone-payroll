@@ -238,6 +238,8 @@ export function EmployeeForm() {
   // Mark inactive and reactivate are open to all payroll staff; terminate is not.
   const canChangeEmployeeStatus = useSelectedCompanyCapability('manage_employee_status', loadedEmployee?.company_id ?? activeCompanyId) && canWriteCompany(activeCompany, 'manage_employee_status');
   const [initialSsn, setInitialSsn] = useState('');
+  // Raw while typing so long references aren't rewritten mid-entry; masked otherwise.
+  const [w4SourceFocused, setW4SourceFocused] = useState(false);
   const [storedSsnLastFour, setStoredSsnLastFour] = useState<string | null>(null);
   const [storedEinLastFour, setStoredEinLastFour] = useState<string | null>(null);
   const [initialEmploymentType, setInitialEmploymentType] = useState<EmploymentType>('hourly');
@@ -2316,7 +2318,7 @@ export function EmployeeForm() {
                   <Input name="w4_signed_on" error={getFieldError('w4_signed_on')} type="date" value={form.w4_signed_on || ''} onChange={(event) => handleChange('w4_signed_on', event.target.value || null)} />
                 </label>
                 <label className="text-sm font-medium text-gray-700">Source document / reference{!clientManaged && ' (optional)'}
-                  <Input maxLength={255} value={clientManaged ? maskLifecycleNote(form.w4_source_reference || '') : form.w4_source_reference || ''} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
+                  <Input maxLength={255} value={clientManaged && !w4SourceFocused ? maskLifecycleNote(form.w4_source_reference || '') : form.w4_source_reference || ''} onFocus={() => setW4SourceFocused(true)} onBlur={() => setW4SourceFocused(false)} onChange={(event) => handleChange('w4_source_reference', event.target.value)} placeholder="Signed W-4 filename or verified source reference" />
                 </label>
                 {w4SignedAfterEffective && (w4DateOrderEnforced ? (
                   <p role="alert" className="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900 md:col-span-2">

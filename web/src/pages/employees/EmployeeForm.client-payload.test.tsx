@@ -326,6 +326,24 @@ describe('Client employee form payload', () => {
     expect(screen.queryByText('900-11-2233')).toBeNull();
   });
 
+  it('keeps a long reference intact while typing and saves the raw value', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: { ...hourly, w4_source_reference: 'Fixture 900112233' } });
+    view(7);
+    fireEvent.click(await screen.findByLabelText('Record a received W-4'));
+    const reference = screen.getByLabelText('Source document / reference') as HTMLInputElement;
+    fireEvent.focus(reference);
+    expect(reference.value).toBe('Fixture 900112233');
+    let typed = '';
+    for (const char of 'Ref 12345678901') {
+      typed += char;
+      fireEvent.change(reference, { target: { value: typed } });
+    }
+    expect(reference.value).toBe('Ref 12345678901');
+    fireEvent.blur(reference);
+    expect(reference.value).not.toContain('•');
+  });
+
   it('offers the department picker and saves a practice client profile without staff payroll permission', async () => {
     mocks.company = { id: 1, active: true, test_workspace: true, practice_portal: true, workspace_can_write: false };
     mocks.get.mockResolvedValue({ data: hourly });
