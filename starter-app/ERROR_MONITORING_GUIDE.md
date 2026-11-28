@@ -844,7 +844,7 @@ Conditions:
 
 Actions:
   - Send Slack notification to #alerts-critical
-  - Send email to on-call@shimizu-technology.com
+  - Send email to admin@shimizu-technology.com
 
 Rate limit: Every 10 minutes (don't spam)
 ```

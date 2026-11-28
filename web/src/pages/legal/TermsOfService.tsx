@@ -122,8 +122,8 @@ export function TermsOfService() {
         </p>
         <p>
           Shimizu Technology,{' '}
-          <a href="mailto:shimizutechnology@gmail.com" className="font-semibold text-primary-800 underline underline-offset-4">
-            shimizutechnology@gmail.com
+          <a href="mailto:support@shimizu-technology.com" className="font-semibold text-primary-800 underline underline-offset-4">
+            support@shimizu-technology.com
           </a>
           , 671-483-0219.
         </p>

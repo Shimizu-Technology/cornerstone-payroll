@@ -53,7 +53,7 @@ describe('PrivacyPolicy', () => {
     expect(analyticsSection.getByText(/do not use session recordings; IP addresses are discarded/i)).toBeTruthy();
     expect(analyticsSection.getByText(/honor Do Not Track and Global Privacy Control/i)).toBeTruthy();
     expect(analyticsSection.getByText(/pending counsel review/i)).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'shimizutechnology@gmail.com' }).getAttribute('href')).toBe('mailto:shimizutechnology@gmail.com');
+    expect(screen.getByRole('link', { name: 'support@shimizu-technology.com' }).getAttribute('href')).toBe('mailto:support@shimizu-technology.com');
   });
 
   it('discloses fonts, connected time apps, and every AI use, and does not promise automatic deletion', () => {
@@ -82,6 +82,8 @@ describe('PrivacyPolicy', () => {
 describe('TermsOfService', () => {
   it('defers to a written agreement and links to the privacy policy', () => {
     renderPage(<TermsOfService />);
+
+    expect(screen.getByRole('link', { name: 'support@shimizu-technology.com' }).getAttribute('href')).toBe('mailto:support@shimizu-technology.com');
 
     expect(screen.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeTruthy();
     expect(screen.getByText(/If your organization has a written agreement with us, that agreement controls/)).toBeTruthy();
