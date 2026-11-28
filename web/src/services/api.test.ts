@@ -551,6 +551,13 @@ describe('actionable API errors', () => {
     expect(apiErrorMessage({ code: 'mfa_enrollment_required', error: 'Set up two-step sign-in to make this change.' }, 403))
       .toBe('Set up two-step sign-in to make this change.');
   });
+  it('gives specific recovery for lifecycle 403s without suggesting a permissions change', () => {
+    expect(apiErrorMessage({ code: 'self_lifecycle_forbidden', error: 'You cannot terminate your own employee record.' }, 403))
+      .toBe('Ask another manager or Cornerstone to make this change to your employee record.');
+    expect(apiErrorMessage({ code: 'client_lifecycle_disabled', error: 'Lifecycle disabled.' }, 403))
+      .toBe('Cornerstone handles this change for your company.');
+  });
+
   it('preserves contained company 403 refusals without suggesting an access problem', () => {
     const demoMessage = 'A demo company is selected, so this option is turned off. Switch to a live client to use it.';
     expect(apiErrorMessage({ code: 'contained_company_restricted', error: demoMessage }, 403)).toBe(demoMessage);

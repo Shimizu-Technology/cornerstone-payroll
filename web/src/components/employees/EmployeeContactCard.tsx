@@ -175,7 +175,7 @@ export function EmployeeContactCard({
     }
 
     setState((prev) => ({
-      ...prev, saving: true, saved: false, submittedAddressRequestId: undefined, pendingAddressRequestId: undefined,
+      ...prev, saving: true, saved: false, submittedRequest: undefined, pendingAddressRequestId: undefined,
       confirmingAddressReplacement: false,
       error: null, fieldErrors: {}, conflict: null,
     }));
@@ -193,12 +193,12 @@ export function EmployeeContactCard({
         ? await clientEmployeesApi.update(record.id, payload)
         : await employeesApi.update(record.id, payload, companyId);
       const updated = toContactRecord(response.data);
-      const addressRequest = 'change_request' in response && response.change_request?.profile_address ? response.change_request : null;
+      const changeRequest = 'change_request' in response ? response.change_request : null;
       setRecord(updated);
       setState({
         ...INITIAL_ROW_STATE,
         saved: true,
-        submittedAddressRequestId: addressRequest?.id,
+        submittedRequest: changeRequest ?? undefined,
         warnings: response.contact_warnings ?? [],
       });
       closeEditor();
@@ -329,7 +329,7 @@ export function EmployeeContactCard({
             </dl>
             {state.saved && (
               <p role="status" className="inline-flex items-center gap-1 text-sm font-semibold text-success-700">
-                <ContactSaveResult requestId={state.submittedAddressRequestId} />
+                <ContactSaveResult request={state.submittedRequest} />
               </p>
             )}
             {otherWarnings.map((warning) => (

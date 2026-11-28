@@ -46,7 +46,7 @@ module Api
         "Count employees across the signed-in user's accessible companies"
       end
 
-      def company_summary(company, total_employee_counts:, active_employee_counts:, preloaded_profile: PayrollIntake::EffectiveSettings::UNLOADED, descriptor_audience: :staff)
+      def company_summary(company, total_employee_counts:, active_employee_counts:, preloaded_profile:, descriptor_audience:)
         summary = {
           id: company.id,
           organization_id: company.organization_id,
@@ -72,6 +72,7 @@ module Api
               audience: descriptor_audience
             )
           end,
+          employee_lifecycle_mode: employee_lifecycle_mode(company, preloaded_profile),
           historical_payroll_enabled: company.historical_payroll_enabled,
           client_capabilities: StaffRolePolicy.capabilities_for(current_user, company: company),
           client_management: StaffRolePolicy.client_management_allowed?(current_user, company),
@@ -87,6 +88,12 @@ module Api
         }
         summary[:creator] = @creators[company.id] if @creators
         summary
+      end
+
+      def employee_lifecycle_mode(company, profile)
+        return "approval_first" unless profile
+
+        CompanyFeatures.new(company: company, profile: profile, as_of: PayrollBusinessClock.today).employee_lifecycle_mode
       end
 
       def company_write_allowed?(company)

@@ -276,6 +276,23 @@ describe('EmployeeContactDetails', () => {
     expect(screen.getByText(warning)).toBeTruthy();
   });
 
+  it('links a queued email change to Cornerstone review and leaves the saved email in place', async () => {
+    const employee = buildEmployee({ id: 201, first_name: 'Rowan', last_name: 'Fixture', email: 'before@example.test', contact_revision: 'rev-1' });
+    apiMocks.clientList.mockResolvedValue({
+      data: [employee],
+      meta: { current_page: 1, total_pages: 1, total_count: 1, per_page: 50, needs_contact_details_count: 0 },
+    });
+    apiMocks.clientUpdate.mockResolvedValue({ data: employee, change_request: { id: 41, profile_address: false } });
+    renderClientPage();
+    await screen.findAllByText('Rowan Fixture');
+    fireEvent.change(field('Email for Rowan Fixture'), { target: { value: 'after@example.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Rowan Fixture' }));
+    const links = await screen.findAllByRole('link', { name: 'Sent to Cornerstone for review' });
+    expect(links[0].getAttribute('href')).toBe('/change-requests?request_id=41');
+    expect(screen.getAllByText('before@example.test').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^Saved$/)).toBeNull();
+  });
+
   it('handles 409 conflict with clear Keep my changes and Discard my changes options', async () => {
     const maria = buildEmployee({
       id: 101,
