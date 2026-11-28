@@ -1521,7 +1521,7 @@ export function EmployeeForm() {
         )}
 
         {clientManaged && <div className="mb-6 space-y-4">
-          {!isEditing && <Alert tone="info">You can save with just a name and worker type. Incomplete setup blocks pay until you finish the Ready to pay checklist, unless a Cornerstone organization admin overrides it. Cornerstone is notified and verifies details afterwards — no pre-approval needed.</Alert>}
+          {!isEditing && <Alert tone="info">You can save with just a name and worker type. Incomplete setup blocks pay until you finish the Pay setup checklist, unless a Cornerstone organization admin overrides it. Cornerstone is notified and verifies details afterwards — no pre-approval needed.</Alert>}
           {lifecycleContext?.own_record && <Alert tone="info">{ownEmployeeReviewNotice}</Alert>}
           {loadedEmployee?.readiness && <EmployeeReadinessCard
             readiness={loadedEmployee.readiness}

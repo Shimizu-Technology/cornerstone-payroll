@@ -811,7 +811,7 @@ module Api
           if result.readiness&.ready?
             "#{result.employee.full_name} is ready for payroll. Cornerstone will verify their details."
           else
-            "#{result.employee.full_name} was saved as Incomplete. Finish the Ready to pay checklist to include them in payroll."
+            "#{result.employee.full_name} was saved as Incomplete. Finish the Pay setup checklist to include them in payroll."
           end
         end
 

@@ -9,7 +9,7 @@ module EmployeeLinks
   # activation_prerequisites separate lets Milestone 5 W-4 self-onboarding toggle
   # invite eligibility to DOB + SSN + email in one place without rewriting Invite.
   class InviteEligibility
-    INCOMPLETE_READINESS_MESSAGE = "Finish this employee's Ready to pay checklist before inviting them to the employee app."
+    INCOMPLETE_READINESS_MESSAGE = "Finish this employee's Pay setup checklist before inviting them to the employee app."
 
     PrerequisiteResult = Data.define(:eligible, :missing) do
       def eligible?
