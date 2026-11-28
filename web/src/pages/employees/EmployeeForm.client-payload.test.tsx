@@ -3,8 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor, type RenderResult } from '
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EmployeeForm } from './EmployeeForm';
+import { ApiError } from '@/services/api';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), update: vi.fn(), departments: vi.fn(), company: undefined as Record<string, unknown> | undefined }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), create: vi.fn(), update: vi.fn(), departments: vi.fn(), company: undefined as Record<string, unknown> | undefined }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { company_id: 1, role: 'client' }, isClient: true, isSuperAdmin: false, isManager: false }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ refreshCompanies: async () => {}, activeCompanyId: 1, activeCompany: mocks.company }) }));
 vi.mock('@/hooks/useEmployeeIntakeSettings', () => ({ useEmployeeIntakeSettings: () => ({ settings: { enabled: false }, loading: false }) }));
@@ -16,7 +17,7 @@ vi.mock('@/components/employees/EmployeeWorkProfilePanel', () => ({ EmployeeWork
 vi.mock('@/components/employees/EmployeePayItemsPanel', () => ({ EmployeePayItemsPanel: () => null }));
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
-  return { ...actual, clientEmployeesApi: { ...actual.clientEmployeesApi, get: mocks.get, update: mocks.update },
+  return { ...actual, clientEmployeesApi: { ...actual.clientEmployeesApi, get: mocks.get, update: mocks.update, create: mocks.create },
     clientDepartmentsApi: { ...actual.clientDepartmentsApi, list: mocks.departments } };
 });
 
@@ -31,8 +32,9 @@ const business = { ...base, id: 8, first_name: 'Tano', last_name: 'Builders', em
   contractor_type: 'business', contractor_pay_type: 'flat_fee', business_name: 'Tano Builders LLC', ssn_last_four: null,
   contractor_ein_last_four: '4321' };
 
-function view(id: number): RenderResult {
-  return render(<MemoryRouter initialEntries={[`/companies/1/employees/${id}/edit`]}><Routes>
+function view(id?: number): RenderResult {
+  return render(<MemoryRouter initialEntries={[id ? `/companies/1/employees/${id}/edit` : '/companies/1/employees/new']}><Routes>
+    <Route path="/companies/:companyId/employees/new" element={<EmployeeForm />} />
     <Route path="/companies/:companyId/employees/:id/edit" element={<EmployeeForm />} />
     <Route path="*" element={<p>Left the form</p>} />
   </Routes></MemoryRouter>);
@@ -49,6 +51,97 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('Client employee form payload', () => {
+  it('keeps approval-first entry fields and validation when the mode is locked', async () => {
+    mocks.company = { id: 1, active: true, employee_lifecycle_mode: 'approval_first' };
+    view();
+    expect((screen.getByLabelText('How this employee is paid') as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.queryByText(/save with just a name/)).toBeNull();
+    expect(screen.queryByLabelText('Record a received W-4')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Create Employee' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/First Name/), { target: { value: 'Rowan' } });
+    fireEvent.change(screen.getByLabelText(/Last Name/), { target: { value: 'Fixture' } });
+    submit();
+    expect(await screen.findByText('Social Security Number is required')).toBeTruthy();
+    expect(mocks.create).not.toHaveBeenCalled();
+  });
+
+  it('creates a partial client-managed hire without recording a default payment method or W-4', async () => {
+    mocks.company = { id: 1, active: true, employee_lifecycle_mode: 'client_managed' };
+    mocks.create.mockResolvedValue({ data: hourly, message: 'Saved as Incomplete' });
+    mocks.get.mockResolvedValue({ data: hourly });
+    view();
+    fireEvent.change(screen.getByLabelText(/First Name/), { target: { value: 'Rowan' } });
+    fireEvent.change(screen.getByLabelText(/Last Name/), { target: { value: 'Fixture' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save employee' }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledOnce());
+    const [payload] = mocks.create.mock.calls[0];
+    expect(payload).toMatchObject({ first_name: 'Rowan', last_name: 'Fixture', employment_type: 'hourly' });
+    for (const field of ['payment_delivery_method', 'wage_rates', 'filing_status', 'w4_effective_on', 'w4_election_received', 'ssn', 'ssn_confirmation']) {
+      expect(payload[field]).toBeUndefined();
+    }
+  });
+
+  it('sends an effective-dated rate, an explicitly received W-4 and confirmed SSN to the client endpoint', async () => {
+    mocks.company = { id: 1, active: true, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: {
+      ...hourly,
+      readiness: { status: 'missing_items', rates_on: '2026-12-06', w4_on: '2026-12-11', items: [] },
+      lifecycle_edit_context: { own_record: false, compensation_default_on: '2026-11-30' },
+    } });
+    view(7);
+    expect(await screen.findByText(/This employee can still be paid/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('How this employee is paid'), { target: { value: 'direct_deposit' } });
+    expect(screen.getByText(/Cornerstone will confirm bank setup/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Hourly Rate/), { target: { value: '15.75' } });
+    expect(screen.getByText('This pay change starts on Nov 30, 2026.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Pay change effective date'), { target: { value: '2026-12-07' } });
+    fireEvent.click(screen.getByLabelText('Record a received W-4'));
+    expect((screen.getByLabelText(/^Effective date/) as HTMLInputElement).value).toBe('2026-12-11');
+    fireEvent.change(screen.getByLabelText(/Source document/), { target: { value: 'Synthetic signed form' } });
+    const ssn = document.querySelector<HTMLInputElement>('[name="ssn"]')!;
+    expect(ssn.type).toBe('password');
+    fireEvent.change(ssn, { target: { value: '900112233' } });
+    expect(screen.getByText(/corrected W-2/)).toBeTruthy();
+    submit();
+    expect(mocks.update).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Re-enter Social Security Number/), { target: { value: '900112233' } });
+    submit();
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(7, expect.objectContaining({
+      compensation_effective_on: '2026-12-07', pay_rate: 15.75, payment_delivery_method: 'direct_deposit',
+      w4_effective_on: '2026-12-11', w4_election_received: true, w4_source_reference: 'Synthetic signed form',
+      ssn: '900-11-2233', ssn_confirmation: '900-11-2233',
+    })));
+  });
+
+  it('explains who reviews pay changes on the manager’s own record', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'client_managed' };
+    mocks.get.mockResolvedValue({ data: { ...hourly, lifecycle_edit_context: { own_record: true } } });
+    view(7);
+    expect(await screen.findByText(/Changes to your pay or tax details go to Cornerstone for review/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/Hourly Rate/), { target: { value: '15.75' } });
+    expect(screen.getByText('Cornerstone will review when the new pay rate should take effect.')).toBeTruthy();
+    expect(screen.queryByLabelText('Pay change effective date')).toBeNull();
+  });
+
+  it('keeps the draft and requires another save when the API switches the company mode', async () => {
+    mocks.company = { id: 1, employee_lifecycle_mode: 'approval_first' };
+    mocks.get.mockResolvedValue({ data: hourly });
+    mocks.update.mockRejectedValueOnce(new ApiError('Company mode changed', 409, undefined, {
+      code: 'lifecycle_mode_changed', employee_lifecycle_mode: 'client_managed',
+    }));
+    view(7);
+    await screen.findByText(/Saved SSN ending in/);
+    fireEvent.change(screen.getByLabelText('Job Title'), { target: { value: 'Fixture coordinator' } });
+    submit();
+    expect(await screen.findByText(/Your entries are still here/)).toBeTruthy();
+    expect((screen.getByLabelText('Job Title') as HTMLInputElement).value).toBe('Fixture coordinator');
+    expect((screen.getByLabelText('How this employee is paid') as HTMLSelectElement).disabled).toBe(false);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    submit();
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(2));
+    expect(mocks.update.mock.calls[1][1].w4_effective_on).toBeUndefined();
+  });
+
   it('offers the department picker and saves a practice client profile without staff payroll permission', async () => {
     mocks.company = { id: 1, active: true, test_workspace: true, practice_portal: true, workspace_can_write: false };
     mocks.get.mockResolvedValue({ data: hourly });

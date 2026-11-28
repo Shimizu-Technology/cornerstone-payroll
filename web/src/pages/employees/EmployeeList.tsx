@@ -36,14 +36,16 @@ import {
   employmentTypeLabels,
   getInitials,
 } from '@/lib/utils';
-import { employeesApi, departmentsApi, clientEmployeesApi, clientDepartmentsApi } from '@/services/api';
+import { employeesApi, departmentsApi, clientDepartmentsApi } from '@/services/api';
+import { clientEmployeeLifecycleApi } from '@/services/clientEmployeeLifecycle';
+import { EmployeeReadinessBadge } from './EmployeeReadinessCard';
 import { useAuth } from '@/contexts/AuthContext';
 import { canWriteClientEmployeeProfile, canWriteCompany } from '@/lib/company-write-access';
 import { useCompany } from '@/contexts/CompanyContext';
 import { currentAppPath, employeeContactDetailsPath, employeePath, newEmployeePath } from '@/lib/routes';
 import { EmployeeIntakeSettingsPanel } from '@/components/employees/EmployeeIntakeSettingsPanel';
 import { EmployeeBulkImportModal } from '@/components/employees/EmployeeBulkImportModal';
-import { employeePaymentDelivery } from '@/lib/employee-payment-delivery';
+import { employeePaymentDelivery, paymentMethodMissing } from '@/lib/employee-payment-delivery';
 import type { Employee, Department, EmployeeWageRate, PaginationMeta } from '@/types';
 
 const DEV_COMPANY_ID = parseInt(import.meta.env.VITE_COMPANY_ID || '1', 10);
@@ -66,10 +68,13 @@ export function EmployeeList() {
   const { user, isClient, isClientViewer } = useAuth();
   const { activeCompanyId, activeCompany } = useCompany();
   const readOnlyWorkspace = !canWriteCompany(activeCompany);
+  const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const clientManaged = isClient && activeCompany?.id === companyId && activeCompany.employee_lifecycle_mode === 'client_managed';
   // A practice-copy client adds employees through the client profile flow,
   // which the staff payroll permission above does not cover.
-  const canAddEmployee = isClient ? canWriteClientEmployeeProfile(activeCompany) : !readOnlyWorkspace;
-  const companyId = activeCompanyId ?? user?.company_id ?? DEV_COMPANY_ID;
+  const canAddEmployee = isClient
+    ? canWriteClientEmployeeProfile(activeCompany) && !(clientManaged && (isClientViewer || activeCompany?.client_view_only))
+    : !readOnlyWorkspace;
   const returnTo = currentAppPath(location.pathname, location.search);
   const openEmployee = (employeeId: number): void => {
     void navigate(
@@ -93,6 +98,9 @@ export function EmployeeList() {
     return state?.portalNotice ?? null;
   });
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [attention, setAttention] = useState<{ companyId: number; count: number }>();
+  const [attentionRetry, setAttentionRetry] = useState(0);
+  const [attentionError, setAttentionError] = useState<number>();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const employeeRequestIdRef = useRef(0);
   const departmentRequestIdRef = useRef(0);
@@ -108,7 +116,8 @@ export function EmployeeList() {
   }, [companyId, setError]);
 
   const search = searchParams.get('search') || '';
-  const status = searchParams.get('status') ?? 'active';
+  const needsAttention = clientManaged && searchParams.get('needs_attention') === 'true';
+  const status = searchParams.get('status') ?? (needsAttention ? 'all' : 'active');
   const departmentId = searchParams.get('department_id') || '';
   const employmentType = searchParams.get('employment_type') || '';
   const intakeStatus = searchParams.get('intake_status') || '';
@@ -133,7 +142,7 @@ export function EmployeeList() {
     setError(null);
     try {
       const payload = isClient
-        ? await clientEmployeesApi.list({
+        ? await clientEmployeeLifecycleApi.list({
             search: search || undefined,
             status: status === 'all' ? undefined : (status || undefined),
             department_id: departmentId ? parseInt(departmentId, 10) : undefined,
@@ -143,6 +152,7 @@ export function EmployeeList() {
             group_by: 'employment_type',
             sort_by: sortBy,
             sort_direction: sortDirection,
+            ...(needsAttention ? { needs_attention: true } : {}),
           })
         : await employeesApi.list({
             company_id: companyId,
@@ -171,7 +181,7 @@ export function EmployeeList() {
         setIsLoading(false);
       }
     }
-  }, [companyId, intakeStatus, configurationReviewStatus, departmentId, employmentType, isClient, page, search, setError, sortBy, sortDirection, status]);
+  }, [companyId, intakeStatus, configurationReviewStatus, departmentId, employmentType, isClient, needsAttention, page, search, setError, sortBy, sortDirection, status]);
 
   const fetchDepartments = useCallback(async (): Promise<void> => {
     const requestedCompanyId = companyId;
@@ -202,6 +212,16 @@ export function EmployeeList() {
     fetchEmployees();
     fetchDepartments();
   }, [fetchEmployees, fetchDepartments]);
+
+  useEffect(() => {
+    if (!clientManaged) return;
+    let current = true;
+    void clientEmployeeLifecycleApi.returnedCount().then(
+      (count) => { if (current) { setAttention({ companyId, count }); setAttentionError(undefined); } },
+      () => { if (current) setAttentionError(companyId); },
+    );
+    return () => { current = false; };
+  }, [attentionRetry, clientManaged, companyId]);
 
   useEffect(() => {
     const state = location.state as { companySwitchNotice?: string } | null;
@@ -292,7 +312,16 @@ export function EmployeeList() {
       .map(t => ({ type: t, label: employmentTypeLabels[t] || t, employees: groups[t] }));
   }, [companyEmployees]);
 
-  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || intakeStatus || status !== 'active');
+  const hasActiveFilters = !!(search || departmentId || employmentType || configurationReviewStatus || intakeStatus || needsAttention || status !== 'active');
+  const attentionCount = attention?.companyId === companyId ? attention.count : 0;
+  const filterAttention = (enabled: boolean) => setSearchParams((previous) => {
+    const next = new URLSearchParams(previous);
+    if (enabled) next.set('needs_attention', 'true');
+    else next.delete('needs_attention');
+    next.delete('status');
+    next.delete('page');
+    return next;
+  });
 
   return (
     <div>
@@ -327,7 +356,18 @@ export function EmployeeList() {
       />
 
       <div className="p-4 sm:p-6 lg:p-8">
-        <EmployeeIntakeSettingsPanel key={`intake-${companyId}`} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />
+        {clientManaged && attentionCount > 0 && <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning-200 bg-warning-50 p-4 text-warning-900">
+          <div>
+            <h2 className="text-sm font-semibold">Needs attention <Badge variant="warning">{attentionCount}</Badge></h2>
+            <p className="mt-1 text-sm">Cornerstone sent back {attentionCount === 1 ? 'an employee update' : 'employee updates'} for review.</p>
+          </div>
+          {!needsAttention && <Button variant="outline" className="min-h-11" onClick={() => filterAttention(true)}>Show employees</Button>}
+        </div>}
+        {clientManaged && attentionError === companyId && <ActionFeedback tone="error" message="Could not check for items sent back by Cornerstone.">
+          <span>Could not check for items sent back by Cornerstone.</span>
+          <Button variant="outline" className="min-h-11" onClick={() => setAttentionRetry((count) => count + 1)}>Try again</Button>
+        </ActionFeedback>}
+        {!clientManaged && <EmployeeIntakeSettingsPanel key={`intake-${companyId}`} companyId={companyId} isClient={isClient} readOnly={readOnlyWorkspace} />}
         {canAddEmployee && !isClientViewer && (
           <EmployeeOrganizationPanel key={`org-${companyId}`} companyId={companyId} isClient={isClient} employees={companyEmployees}
             onSaved={() => { void fetchEmployees(); void fetchDepartments(); }} />
@@ -384,6 +424,16 @@ export function EmployeeList() {
                 </option>
               ))}
             </Select>
+
+            {clientManaged && <Select
+              aria-label="Cornerstone review"
+              value={needsAttention ? 'true' : ''}
+              onChange={(event) => filterAttention(event.target.value === 'true')}
+              className="w-full sm:w-44"
+            >
+              <option value="">All reviews</option>
+              <option value="true">Needs attention</option>
+            </Select>}
 
             {!isClient && <Select value={intakeStatus} onChange={(event) => updateFilter('intake_status', event.target.value)} className="w-full sm:w-44" aria-label="Profile completeness"><option value="">All profiles</option><option value="incomplete">Incomplete profiles</option></Select>}
             {!isClient && (
@@ -481,6 +531,7 @@ export function EmployeeList() {
                               departments={companyDepartments}
                               actionLabel="Open employee"
                               onOpen={() => openEmployee(employee.id)}
+                              showReadiness={clientManaged}
                             />
                           ))}
                         </div>
@@ -538,6 +589,7 @@ export function EmployeeList() {
                                 rowTone={index % 2 === 0 ? 'bg-white' : 'bg-slate-100'}
                                 actionLabel="Open"
                                 onOpen={() => openEmployee(employee.id)}
+                                showReadiness={clientManaged}
                               />
                             ))}
                             </TableBody>
@@ -599,11 +651,13 @@ function EmployeeMobileCard({
   departments,
   actionLabel,
   onOpen,
+  showReadiness,
 }: {
   employee: Employee;
   departments: (Department & { employee_count: number })[];
   actionLabel: string;
   onOpen: () => void;
+  showReadiness: boolean;
 }) {
   const statusConfig = employeeStatusConfig[employee.status];
   const deptName = departments.find(d => d.id === employee.department_id)?.name;
@@ -650,12 +704,13 @@ function EmployeeMobileCard({
               {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
             </div>
           </div>
+          {showReadiness && employee.readiness && <div className="mt-2"><EmployeeReadinessBadge status={employee.readiness.status} /></div>}
           <div className="mt-4 grid grid-cols-2 gap-3">
             <MobileField label="Department" value={deptName || '—'} />
             <MobileField label="Pay" value={payRateLabel} />
-            <MobileField label="Paid by" value={employeePaymentDelivery(employee).label} />
+            <MobileField label="Paid by" value={showReadiness && paymentMethodMissing(employee.readiness) ? 'Not chosen' : employeePaymentDelivery(employee).label} />
           </div>
-          {!employee.payment_delivery_method && <p className="mt-2 text-xs font-medium text-amber-700">Payment method not reviewed</p>}
+          {!showReadiness && !employee.payment_delivery_method && <p className="mt-2 text-xs font-medium text-amber-700">Payment method not reviewed</p>}
           {hasMultipleRates && (
             <div className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3">
               {activeWageRates.map((rate, index) => (
@@ -680,12 +735,14 @@ function EmployeeTableRow({
   rowTone,
   actionLabel,
   onOpen,
+  showReadiness,
 }: {
   employee: Employee;
   departments: (Department & { employee_count: number })[];
   rowTone: string;
   actionLabel: string;
   onOpen: () => void;
+  showReadiness: boolean;
 }) {
   const statusConfig = employeeStatusConfig[employee.status];
   const deptName = departments.find(d => d.id === employee.department_id)?.name;
@@ -753,8 +810,8 @@ function EmployeeTableRow({
         </div>
       </TableCell>
       <TableCell>
-        <span className="text-sm font-medium text-neutral-900">{employeePaymentDelivery(employee).label}</span>
-        {!employee.payment_delivery_method && <span className="block text-xs text-amber-700">Not reviewed</span>}
+        <span className="text-sm font-medium text-neutral-900">{showReadiness && paymentMethodMissing(employee.readiness) ? 'Not chosen' : employeePaymentDelivery(employee).label}</span>
+        {!showReadiness && !employee.payment_delivery_method && <span className="block text-xs text-amber-700">Not reviewed</span>}
       </TableCell>
       <TableCell>
         <div className="flex flex-col items-start gap-2">
@@ -767,6 +824,7 @@ function EmployeeTableRow({
           >
             {statusConfig.label}
           </Badge>
+          {showReadiness && employee.readiness && <EmployeeReadinessBadge status={employee.readiness.status} />}
           {employee.intake_readiness?.profile_incomplete && <Badge variant="warning">Profile incomplete</Badge>}
               {employee.configuration_review_status === 'needs_review' && <Badge variant="warning">Setup review</Badge>}
         </div>

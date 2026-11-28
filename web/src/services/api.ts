@@ -846,6 +846,7 @@ export const departmentsApi = {
 export const clientEmployeesApi = {
   list: (params?: {
     status?: string;
+    needs_attention?: true;
     department_id?: number;
     employment_type?: string;
     needs_contact_details?: boolean;
@@ -868,7 +869,7 @@ export const clientEmployeesApi = {
   }) => api.get<{ data: Employee[]; meta: PaginationMeta }>('/client/employees', params),
   get: (id: number) =>
     api.get<{ data: Employee & { ssn_last_four?: string; department?: { id: number; name: string } } }>(`/client/employees/${id}`),
-  create: (data: EmployeeFormData) => {
+  create: (data: import('@/services/clientEmployeeLifecycle').ClientEmployeeCreateInput) => {
     const { confirm_same_person_email, ...employeePayload } = data;
     return api.post<ClientEmployeeUpdateResponse>('/client/employees', {
       employee: employeePayload,
@@ -4357,6 +4358,7 @@ export const printerProfilesApi = {
 // Companies API (Multi-tenant company switching)
 // ============================================================
 export interface CompanyListItem {
+  employee_lifecycle_mode?: import('@/services/clientEmployeeLifecycle').EmployeeLifecycleMode;
   creator?: RecordCreatorInfo | null;
   payroll_intake_source_types?: string[];
   portal_payroll_files_enabled?: boolean;
@@ -4808,6 +4810,7 @@ export interface ClientEmployeeUpdateResponse {
   change_request?: EmployeeChangeRequest | null;
   applied_direct_fields?: string[];
   contact_warnings?: import('@/types').EmployeeContactWarning[];
+  warnings?: string[];
   message?: string;
 }
 

@@ -324,6 +324,8 @@ export interface PayrollAdjustment {
 }
 
 export interface Employee {
+  readiness?: import('@/services/clientEmployeeLifecycle').EmployeeReadiness;
+  lifecycle_edit_context?: import('@/services/clientEmployeeLifecycle').LifecycleEditContext | null;
   intake_readiness?: import('@/services/employee-intake-api').EmployeeIntakeReadiness;
   id: number;
   company_id: number;

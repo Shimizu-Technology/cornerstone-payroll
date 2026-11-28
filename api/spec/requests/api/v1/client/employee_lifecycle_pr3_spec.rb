@@ -85,6 +85,77 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
     end
   end
 
+  describe "client portal lifecycle display" do
+    before do
+      allow_any_instance_of(Api::V1::CompaniesController).to receive(:current_user) { @acting_user }
+      allow_any_instance_of(Api::V1::CompaniesController).to receive(:current_company_id).and_return(company.id)
+    end
+
+    it "returns the effective locked mode without attaching lifecycle edit context" do
+      get "/api/v1/companies"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("companies")).to include(
+        a_hash_including("id" => company.id, "employee_lifecycle_mode" => "approval_first")
+      )
+
+      employee = create(:employee, :hourly, company: company)
+      get "/api/v1/client/employees/#{employee.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data")).not_to have_key("lifecycle_edit_context")
+    end
+
+    it "reports activated mode and gives the manager a rehire preview while keeping viewer access read-only" do
+      unlock_and_enable_client_managed!
+      employee = create(
+        :employee, :hourly, company: company, first_name: "Rowan", last_name: "Fixture",
+        status: "terminated", termination_date: Date.new(2026, 10, 15), payment_delivery_method: nil
+      )
+      employee.update_columns(readiness_gate_enforced: true)
+
+      get "/api/v1/companies"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("companies")).to include(
+        a_hash_including("id" => company.id, "employee_lifecycle_mode" => "client_managed")
+      )
+
+      get "/api/v1/client/employees/#{employee.id}"
+      expect(response).to have_http_status(:ok)
+      data = response.parsed_body.fetch("data")
+      expect(data.fetch("readiness").fetch("missing_keys")).to include("payment_method")
+      context = data.fetch("lifecycle_edit_context")
+      expect(context).to include("own_record" => false, "today" => PayrollBusinessClock.today.iso8601)
+      expect(context.fetch("rehire_readiness")).to include(
+        "rehire_or_grandfathered" => true, "readiness_gate_enforced" => true
+      )
+      expect(context.fetch("rehire_readiness").fetch("missing_keys")).not_to include("payment_method")
+
+      @acting_user = client_viewer
+      get "/api/v1/client/employees/#{employee.id}"
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data")).to have_key("readiness")
+      expect(response.parsed_body.fetch("data")).not_to have_key("lifecycle_edit_context")
+    end
+
+    it "filters returned employees before pagination and ignores the filter in approval-first mode" do
+      plain = create(:employee, :hourly, company: company, last_name: "Aardvark")
+      returned = create(:employee, :hourly, company: company, last_name: "Sample")
+      EmployeeVerificationItems::Recorder.record!(
+        employee: returned, actor: client_manager, event_kind: "profile_change",
+        changed_fields: [ "job_title" ], before_values: { "job_title" => nil }, after_values: { "job_title" => "Baker" }
+      ).update!(status: "returned_to_client", return_note: "Please confirm the worker’s title.", returned_by: staff_manager, returned_at: Time.current)
+
+      get "/api/v1/client/employees", params: { needs_attention: true, per_page: 1 }
+      expect(response.parsed_body.fetch("data").pluck("id")).to eq([ plain.id ])
+      expect(response.parsed_body.dig("meta", "total_count")).to eq(2)
+
+      unlock_and_enable_client_managed!
+      get "/api/v1/client/employees", params: { needs_attention: true, per_page: 1 }
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body.fetch("data").pluck("id")).to eq([ returned.id ])
+      expect(response.parsed_body.dig("meta", "total_count")).to eq(1)
+    end
+  end
+
   describe "approval_first regression (mode locked by default)" do
     it "keeps client_portal.employee_lifecycle_mode locked and approval_first behavior 100% unchanged" do
       expect(OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES).to have_key("client_portal.employee_lifecycle_mode")
