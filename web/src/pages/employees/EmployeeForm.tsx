@@ -325,7 +325,7 @@ export function EmployeeForm() {
     || toBoolean(loadedEmployee.w4_step2_multiple_jobs) !== form.w4_step2_multiple_jobs
     || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4a_other_income)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4a_other_income) || 0)
     || roundCurrencyValue(toNumberOrZero(loadedEmployee.w4_step4b_deductions)) !== roundCurrencyValue(parseFloat(w4CurrencyDrafts.w4_step4b_deductions) || 0)
-    || toNumberOrZero(loadedEmployee.w4_form_version) !== toNumberOrZero(form.w4_form_version)
+    || (toNumberOrZero(loadedEmployee.w4_form_version) || 2020) !== toNumberOrZero(form.w4_form_version)
     || (loadedEmployee.w4_effective_on || '') !== (form.w4_effective_on || '')
     || (loadedEmployee.w4_signed_on || '') !== (form.w4_signed_on || '')
     || (loadedEmployee.w4_source_reference || '') !== (form.w4_source_reference || '')
@@ -798,6 +798,11 @@ export function EmployeeForm() {
     }
   }
   const payBasisChanged = Object.keys(basisEdits).length > 0;
+  const readinessGatedEdit = isEditing && loadedEmployee?.readiness_gate_enforced === true;
+  const leavingPayRateBlank = readinessGatedEdit && savedPayRate === 0 && formPayRate === 0
+    && !payBasisChanged && (!supportsMultipleHourlyRates || scalarOnly);
+  const leavingWithholdingBlank = readinessGatedEdit && !loadedEmployee?.w4_effective_on && !form.w4_effective_on
+    && !w4HasChanged && !w4ElectionReceived;
   const payHasChanged = Boolean(compensationHistory && (payBasisChanged || scalarPayChanged || wageRateEdits.length));
   const canCorrectPay = compensationHistory?.can_correct ?? canManageClientConfiguration;
 
@@ -838,6 +843,11 @@ export function EmployeeForm() {
 
   const deferredEditFields = ['ssn', 'hire_date', 'address_line1', 'city', 'state', 'zip'];
   const allowsUnverifiedBlank = (field: string) => {
+    if (readinessGatedEdit) {
+      if (field === 'withholding_election') return leavingWithholdingBlank;
+      if (field === 'business_name') return !loadedEmployee?.business_name?.trim();
+      if (field === 'contractor_ein') return !storedEinLastFour && !loadedEmployee?.contractor_ein?.trim();
+    }
     if (isEditing && deferredEditFields.includes(field)) {
       const storedValue = loadedEmployee?.[field as keyof Employee];
       const hasStoredSsn = field === 'ssn' && Boolean(storedSsnLastFour);
@@ -860,10 +870,10 @@ export function EmployeeForm() {
       newErrors.last_name = ['Last name is required'];
     }
     const isVariableSalary = form.employment_type === 'salary' && form.salary_type === 'variable';
-    if (!supportsMultipleHourlyRates && !isVariableSalary && form.pay_rate <= 0) {
+    if (!leavingPayRateBlank && !supportsMultipleHourlyRates && !isVariableSalary && form.pay_rate <= 0) {
       newErrors.pay_rate = ['Pay rate must be greater than 0'];
     }
-    if (supportsMultipleHourlyRates) {
+    if (supportsMultipleHourlyRates && !leavingPayRateBlank) {
       const normalizedRates = normalizeWageRates();
       if (normalizedRates.length === 0) {
         newErrors.wage_rates = ['Add at least one hourly pay rate'];
@@ -906,7 +916,7 @@ export function EmployeeForm() {
     const hireDateError = !isEditing || form.hire_date !== (loadedEmployee?.hire_date || '') ? validateHireDate(form.hire_date) : null;
     if (hireDateError) newErrors.hire_date = [hireDateError];
     if (form.employment_type === 'contractor' && form.contractor_type === 'business') {
-      if (!form.business_name?.trim()) newErrors.business_name = ['Legal business name is required'];
+      if (!form.business_name?.trim() && !allowsUnverifiedBlank('business_name')) newErrors.business_name = ['Legal business name is required'];
       const storedEinCanRemain = maskTaxIds && isEditing && Boolean(storedEinLastFour);
       if (!form.contractor_ein?.trim() && !storedEinCanRemain && !allowsUnverifiedBlank('contractor_ein')) {
         newErrors.contractor_ein = ['EIN is required'];
@@ -914,7 +924,9 @@ export function EmployeeForm() {
         newErrors.contractor_ein = ['EIN must be in format XX-XXXXXXX'];
       }
     }
-    if (form.date_of_birth) {
+    if (!form.date_of_birth && readinessGatedEdit && loadedEmployee?.date_of_birth) {
+      newErrors.date_of_birth = ['Date of birth is required'];
+    } else if (form.date_of_birth) {
       const dob = new Date(form.date_of_birth);
       const today = new Date();
       if (dob >= today) {
@@ -1044,7 +1056,7 @@ export function EmployeeForm() {
       let fallbackRates: Awaited<ReturnType<typeof employeeWageRatesApi.list>> | undefined;
       let fallbackRevision: string | undefined;
       if (isEditing && id) {
-        if (!isClient && !compensationHistory && supportsMultipleHourlyRates) {
+        if (!isClient && !compensationHistory && supportsMultipleHourlyRates && !leavingPayRateBlank) {
           fallbackRates = await employeeWageRatesApi.list(Number(id), requestedCompanyId);
           if (!isCurrentSubmission()) return;
           fallbackRevision = fallbackRates.compensation_revision;
@@ -1054,6 +1066,13 @@ export function EmployeeForm() {
         // not restore a legacy allowance another operator has already converted.
         const updateData = {
           ...employeePayload,
+          ...(leavingPayRateBlank ? { pay_rate: undefined, wage_rates: undefined } : {}),
+          ...(leavingWithholdingBlank ? {
+            filing_status: undefined, allowances: undefined, additional_withholding: undefined,
+            w4_effective_on: undefined, w4_signed_on: undefined, w4_source_reference: undefined,
+            w4_form_version: undefined, w4_dependent_credit: undefined, w4_step2_multiple_jobs: undefined,
+            w4_step4a_other_income: undefined, w4_step4b_deductions: undefined,
+          } : {}),
           default_payroll_adjustments: undefined,
           default_custom_earnings: undefined,
           ...(compensationHistory || fallbackRevision ? {
@@ -1093,7 +1112,10 @@ export function EmployeeForm() {
           portalNotice = response.message || null;
           portalChangeRequestId = response.change_request?.id || null;
         } else {
-          const response = await employeesApi.update(parseInt(id, 10), updateData, requestedCompanyId);
+          const response = await employeesApi.update(parseInt(id, 10), {
+            ...updateData,
+            ...(maskTaxIds ? { mask_tax_ids: true } : {}),
+          }, requestedCompanyId);
           savedEmployeeId = response.data.id;
           compensationWarnings = response.compensation_warnings || [];
           fallbackRevision = response.data.compensation_history?.revision || fallbackRevision;
@@ -1121,7 +1143,7 @@ export function EmployeeForm() {
       // A new employee's hourly rates are added after the profile exists. An
       // edit with pay history saved them with the profile above, together with
       // their effective date; without it the per-rate endpoints still apply.
-      if (!isClient && (!isEditing || !compensationHistory) && !initialWageRatesSaved && supportsMultipleHourlyRates) {
+      if (!isClient && (!isEditing || !compensationHistory) && !initialWageRatesSaved && supportsMultipleHourlyRates && !leavingPayRateBlank) {
         const existingRatesResponse = fallbackRates || await employeeWageRatesApi.list(savedEmployeeId, requestedCompanyId);
         if (!isCurrentSubmission()) return;
         const existingRates = existingRatesResponse.wage_rates;
@@ -2053,11 +2075,11 @@ export function EmployeeForm() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="employee-field-14">
-                      Legal Business Name <span className="text-danger-600">*</span>
+                      Legal Business Name {!allowsUnverifiedBlank('business_name') && <span className="text-danger-600">*</span>}
                     </label>
                     <Input id="employee-field-14"
                       name="business_name"
-                      required
+                      required={!allowsUnverifiedBlank('business_name')}
                       value={form.business_name || ''}
                       onChange={(e) => handleChange('business_name', e.target.value)}
                       placeholder="DBA or legal entity name"

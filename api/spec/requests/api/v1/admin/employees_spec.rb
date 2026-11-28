@@ -649,6 +649,37 @@ RSpec.describe "Api::V1::Admin::Employees", type: :request do
   describe "PATCH /api/v1/admin/employees/:id" do
     let!(:employee) { create(:employee, company: company, department: department, first_name: "Original") }
 
+    it "uses the same tax ID masking as GET for staff verification fixes" do
+      contractor = create(:employee, :business_contractor, company: company, department: department,
+        business_name: "Synthetic Contracting LLC", contractor_ein: "98-0000913")
+      employee.update!(ssn_encrypted: "900-70-1234")
+
+      [ [ employee, "ssn_last_four", "1234" ], [ contractor, "contractor_ein_last_four", "0913" ] ].each do |worker, key, digits|
+        patch "/api/v1/admin/employees/#{worker.id}", params: {
+          mask_tax_ids: true, employee: { first_name: "Corrected" }
+        }, as: :json
+
+        expect(response).to have_http_status(:ok)
+        data = response.parsed_body.fetch("data")
+        expect(data).to include(key => digits, "first_name" => "Corrected")
+        expect(data.keys).not_to include("ssn", "ssn_encrypted", "contractor_ein", "bank_account_number_encrypted", "bank_routing_number_encrypted")
+        expect(worker.reload.first_name).to eq("Corrected")
+      end
+    end
+
+    it "persists a correction without requiring the missing payroll setup of a gated hire" do
+      incomplete = create(:employee, company: company, department: department, first_name: "Synthetic",
+        readiness_gate_enforced: true, pay_rate: 0, ssn_encrypted: nil, hire_date: nil, w4_effective_on: nil)
+
+      patch "/api/v1/admin/employees/#{incomplete.id}", params: {
+        mask_tax_ids: true, employee: { first_name: "Corrected" }
+      }, as: :json
+
+      expect(response).to have_http_status(:ok)
+      expect(incomplete.reload).to have_attributes(first_name: "Corrected", readiness_gate_enforced: true,
+        pay_rate: 0, w4_effective_on: nil, ssn_encrypted: nil)
+    end
+
     context "with valid params" do
       it "updates the employee" do
         patch "/api/v1/admin/employees/#{employee.id}", params: {

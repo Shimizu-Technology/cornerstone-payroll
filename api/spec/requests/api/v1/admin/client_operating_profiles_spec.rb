@@ -83,6 +83,29 @@ RSpec.describe "Api::V1::Admin::ClientOperatingProfiles", type: :request do
     expect(v2.option_value("client_portal.employee_lifecycle_mode")).to eq("approval_first")
   end
 
+  it "reverts the blocked active version while preserving a newer scheduled profile" do
+    unlock_lifecycle_mode!
+    sign_in_as(create(:user, organization: organization, company: company, role: "org_admin"))
+    future_date = PayrollBusinessClock.today + 30.days
+    v2.update!(ends_on: future_date - 1, options: v2.options.deep_merge("client_portal" => { "employee_lifecycle_mode" => "client_managed" }),
+      lifecycle_mode_activation_failed_at: Time.current,
+      lifecycle_mode_activation_blockers: { "qualifying_staff_notification_recipients_count" => 0 })
+    future = ClientOperatingProfile.create!(v2.attributes.except("id", "created_at", "updated_at").merge(
+      effective_on: future_date, ends_on: nil, version: 3, lock_version: 7, reason: "Future profile update",
+      lifecycle_mode_activation_failed_at: nil, lifecycle_mode_activation_blockers: {}))
+    future_before = future.attributes
+    path = "/api/v1/admin/companies/#{company.id}/operating_profile"
+
+    patch path, params: { effective_on: v2.effective_on.iso8601, lock_version: future.lock_version,
+      reason: "Keep existing employee approvals now.", changes: { "client_portal.employee_lifecycle_mode" => "approval_first" } }, as: :json
+
+    expect(response).to have_http_status(:ok), response.body
+    expect(response.parsed_body.dig("employee_lifecycle_preflight", "lifecycle_mode_activation_status")).to eq("scheduled")
+    expect(v2.reload).to have_attributes(ends_on: future_date - 1, lifecycle_mode_activation_failed_at: nil, lifecycle_mode_activation_blockers: {})
+    expect(v2.option_value("client_portal.employee_lifecycle_mode")).to eq("approval_first")
+    expect(future.reload.attributes).to eq(future_before)
+  end
+
   describe "GET /api/v1/admin/companies/:company_id/operating_profile" do
     it "returns effective profile, version history, full catalog, and all editable keys for an org_admin" do
       org_admin = create(:user, organization: organization, company: company, role: "org_admin")

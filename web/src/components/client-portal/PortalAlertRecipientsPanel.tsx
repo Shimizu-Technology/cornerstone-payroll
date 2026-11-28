@@ -31,6 +31,7 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const companyRef = useRef(companyId);
+  const scrolledToRecipients = useRef(false);
   companyRef.current = companyId;
   const countCallbackRef = useRef(onRecipientCountChange);
   countCallbackRef.current = onRecipientCountChange;
@@ -77,6 +78,12 @@ export function PortalAlertRecipientsPanel({ companyId, readOnly = false, onReci
     void load();
     return () => { loadGenerationRef.current += 1; };
   }, [load]);
+
+  useEffect(() => {
+    if (scrolledToRecipients.current || (!settings && !loadError) || window.location.hash !== '#portal-alert-recipients') return;
+    scrolledToRecipients.current = true;
+    document.getElementById('portal-alert-recipients')?.scrollIntoView?.({ block: 'start' });
+  }, [settings, loadError]);
 
   if (loadError) {
     return (

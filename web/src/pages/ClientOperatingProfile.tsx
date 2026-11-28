@@ -1,5 +1,5 @@
 import { formatDate, formatDateRange } from '@/lib/display-date';
-import { useEffect, useId, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Info, LockKeyhole } from 'lucide-react';
 import { useParams, useSearchParams } from 'react-router';
 import { LIFECYCLE_MODE_KEY } from '@/services/staff-employee-lifecycle';
@@ -190,12 +190,13 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
   const [reason, setReason] = useState('');
   const reasonId = useId();
   const dateHelpId = useId();
+  const savedNotice = useRef<HTMLDivElement>(null);
   const [presetNote, setPresetNote] = useState('');
   const [saved, setSaved] = useState('');
   const [error, setError] = useState<{ message: string; stale: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
-  const visibleCatalog = profile.catalog.filter(field => !field.id.startsWith('client_portal.review_first.'));
-  const editable = (id: string) => !id.startsWith('client_portal.review_first.') && profile.editable_keys.includes(id) && !profile.locked_keys.includes(id);
+  const visibleCatalog = profile.catalog.filter(field => !field.deprecated && !field.id.startsWith('client_portal.review_first.'));
+  const editable = (id: string) => visibleCatalog.some(field => field.id === id) && profile.editable_keys.includes(id) && !profile.locked_keys.includes(id);
   const preflight = profile.employee_lifecycle_preflight;
   const changes: Settings = {};
   for (const field of visibleCatalog) {
@@ -273,10 +274,13 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
           void refreshCompanies();
           setDraft(current => ({ ...current, [LIFECYCLE_MODE_KEY]: draftFor(updated)[LIFECYCLE_MODE_KEY] }));
           setError(null);
-          setSaved(updated.employee_lifecycle_preflight?.lifecycle_mode_activation_status === 'active'
-            ? 'Client-managed mode is active.' : 'The scheduled switch was reverted.');
+          const activationStatus = updated.employee_lifecycle_preflight?.lifecycle_mode_activation_status;
+          setSaved(activationStatus === 'active' ? 'Client-managed mode is active.'
+            : activationStatus === 'scheduled' ? 'The blocked switch was reverted. A later switch is still scheduled.'
+              : 'The scheduled switch was reverted.');
+          requestAnimationFrame(() => savedNotice.current?.focus());
         }} />
-        {saved && <Alert tone="success" role="status">{saved}</Alert>}
+        {saved && <div ref={savedNotice} tabIndex={-1}><Alert tone="success" role="status">{saved}</Alert></div>}
         {!hasEdits && <Alert tone="info">You have read-only access to this operating profile.</Alert>}
         <Card>
           <CardHeader><CardTitle>Readiness</CardTitle></CardHeader>
@@ -296,7 +300,7 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
                     <div key={field.id} className="min-w-0">
                       <SettingControl field={field} value={draft[field.id]} editable={editable(field.id)}
                         locked={profile.locked_keys.includes(field.id)} onChange={(value) => changeSetting(field, value)} />
-                      {field.id === LIFECYCLE_MODE_KEY && preflight && <LifecyclePreflightSummary checks={preflight} />}
+                      {field.id === LIFECYCLE_MODE_KEY && preflight && <LifecyclePreflightSummary checks={preflight} companyId={companyId} />}
                       {field.id === 'offering' && presetNote && <p role="status" className="mt-2 text-sm text-neutral-600">{presetNote}</p>}
                     </div>
                   ))}
@@ -319,12 +323,13 @@ function ProfileForm({ data, companyId, reload }: { data: OperatingProfileRespon
                   </p>
                   <div className="space-y-1.5">
                     <Label htmlFor={reasonId}>Reason for change</Label>
-                    <Textarea id={reasonId} required value={reason} onChange={(event) => setReason(event.target.value)} />
+                    <Textarea id={reasonId} className="text-base!" required value={reason} onChange={(event) => setReason(event.target.value)} />
                   </div>
+                  {modeBlocked && <Alert tone="warning">Resolve the employee lifecycle preflight checks above before saving this mode change.</Alert>}
                   {error && <Alert tone="error" role="alert">{error.message}</Alert>}
                   {error?.stale
                     ? <Button type="button" variant="outline" onClick={reload}>Reload and discard draft</Button>
-                    : <Button type="submit" className="w-full sm:w-auto" disabled={saving || modeBlocked || !reason.trim() || !effectiveOn || !Object.keys(changes).length}>
+                    : <Button type="submit" className="min-h-11! w-full sm:w-auto" disabled={saving || modeBlocked || !reason.trim() || !effectiveOn || !Object.keys(changes).length}>
                       {saving ? 'Saving…' : 'Save operating profile'}
                     </Button>}
                 </CardContent>

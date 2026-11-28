@@ -107,6 +107,7 @@ it('renders the stale-calculation banner with Recalculate action and the unverif
   expect(screen.getAllByText('Jordan Sample').length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText('Changed since last payroll, not verified (1)')).toBeTruthy();
   expect(screen.getByText(/Pending verification/)).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Review change' }).getAttribute('href')).toBe('/companies/7/verifications?item_id=501');
 
   const staleAlert = document.getElementById('payroll-stale-calculation');
   const unverifiedAlert = document.getElementById('payroll-unverified-changes');

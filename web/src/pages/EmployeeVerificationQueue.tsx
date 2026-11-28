@@ -96,9 +96,11 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
   const event = eventFilter && Object.hasOwn(eventLabels, eventFilter) ? eventFilter : undefined;
   const statusFilter = params.get('status') as VerificationStatus | null;
   const status = statusFilter && Object.hasOwn(statusLabels, statusFilter) ? statusFilter : 'pending_verification';
-  const search = params.get('q') ?? '';
   const page = parsePositiveRouteId(params.get('page') ?? undefined) ?? 1;
-  const [list, setList] = useState<{ rows: VerificationRow[]; pages: number; error?: string } | null>(null);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const searchPending = searchInput.trim() !== search;
+  const [list, setList] = useState<{ key: string; rows: VerificationRow[]; pages: number; error?: string } | null>(null);
   const [detail, setDetail] = useState<{ id: number; item?: VerificationDetails; error?: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [decision, setDecision] = useState<{ itemId: number; action: Decision } | null>(null);
@@ -113,19 +115,34 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
   const matchesSavedFix = Boolean(savedFix && currentItem && savedFix.id === currentItem.id
     && savedFix.companyId === currentItem.company_id && savedFix.employeeId === currentItem.employee_id);
   const fixRevision = matchesSavedFix ? savedFix?.revision : undefined;
+  const requestKey = JSON.stringify([status, event, search, page, attempt]);
+  const refreshing = searchPending || (list !== null && list.key !== requestKey);
 
   useEffect(() => {
-    if (!companyReady) return;
+    if (!searchPending) return;
+    const timeout = window.setTimeout(() => setSearch(searchInput.trim()), 250);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput, searchPending]);
+
+  useEffect(() => {
+    if (!params.has('q')) return;
+    const clean = new URLSearchParams(params);
+    clean.delete('q');
+    setParams(clean, { replace: true, state: location.state });
+  }, [params, setParams, location.state]);
+
+  useEffect(() => {
+    if (!companyReady || searchPending) return;
     const controller = new AbortController();
     staffEmployeeLifecycleApi.list(companyId, { status, event_kind: event, search: search || undefined, page, per_page: 25 }, controller.signal).then(
-      response => { if (!controller.signal.aborted) setList({ rows: response.data, pages: response.meta.total_pages }); },
+      response => { if (!controller.signal.aborted) setList({ key: requestKey, rows: response.data, pages: response.meta.total_pages }); },
       (error: unknown) => {
         if (controller.signal.aborted) return;
-        setList({ rows: [], pages: 0, error: isLifecycleDisabled(error) ? undefined : error instanceof Error ? error.message : 'Could not load employee changes.' });
+        setList({ key: requestKey, rows: [], pages: 0, error: isLifecycleDisabled(error) ? undefined : error instanceof Error ? error.message : 'Could not load employee changes.' });
       },
     );
     return () => controller.abort();
-  }, [companyReady, companyId, status, event, search, page, attempt]);
+  }, [companyReady, companyId, status, event, search, searchPending, page, requestKey]);
 
   useEffect(() => {
     if (!companyReady || !selectedId) return;
@@ -146,6 +163,7 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
 
   const updateParams = (changes: Record<string, string | null>, replace = false) => {
     const changed = new URLSearchParams(params);
+    changed.delete('q');
     for (const [key, value] of Object.entries(changes)) {
       if (value) changed.set(key, value);
       else changed.delete(key);
@@ -159,10 +177,23 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
     updateParams({ item_id: String(id) });
   };
 
-  const changeFilter = (key: string, value: string, replace = false) => {
+  const changeFilter = (key: 'status' | 'event', value: string) => {
     setList(null);
     setDecision(null);
-    updateParams({ [key]: value, page: null, item_id: null }, replace);
+    updateParams({ [key]: value, page: null, item_id: null });
+  };
+
+  const changePage = (nextPage: number) => {
+    setDecision(null);
+    updateParams({ page: nextPage > 1 ? String(nextPage) : null, item_id: null });
+  };
+
+  const changeSearch = (value: string) => {
+    setSearchInput(value);
+    if (page > 1 || selectedId) {
+      setDecision(null);
+      updateParams({ page: null, item_id: null }, true);
+    }
   };
 
   const closeDetail = () => {
@@ -181,10 +212,13 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
 
   const inbox = params.get('inbox');
   const inboxPath = inbox ? safeInternalReturnPath(inbox, '/app/client-inbox') : null;
-  const queuePath = currentAppPath(location.pathname, location.search);
+  const returnParams = new URLSearchParams(params);
+  returnParams.delete('q');
+  const queuePath = currentAppPath(location.pathname, returnParams.size ? `?${returnParams}` : '');
   const editPath = currentItem ? employeeEditPath(companyId, currentItem.employee_id, { returnTo: queuePath }) : '';
   const fixPath = `${editPath}${editPath.includes('?') ? '&' : '?'}verify_item_id=${currentItem?.id}`;
   const canReview = canManage && currentItem?.can_review;
+  const canSendBack = canReview && activeCompany?.client_managed_employee_lifecycle && currentItem?.status === 'pending_verification';
   const selectedDecision = decision?.itemId === selectedId ? decision?.action : null;
   const openDecision = selectedDecision ?? (canReview && fixRevision === currentItem?.updated_at && dismissedFix !== location.key ? 'verify-fix' : null);
 
@@ -196,7 +230,7 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
         <Card><CardContent className="space-y-4 pt-5">
           <h2 id="verification-list-heading" ref={listHeading} tabIndex={-1} className="font-semibold">Employee changes</h2>
           <div className="grid gap-3">
-            <Input label="Search by employee" type="search" className="h-11 text-base!" value={search} onChange={e => changeFilter('q', e.target.value, true)} />
+            <Input label="Search by employee" type="search" autoComplete="off" className="h-11 text-base!" value={searchInput} onChange={e => changeSearch(e.target.value)} />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
               <Select label="Status" className="h-11 text-base!" value={status} onChange={e => changeFilter('status', e.target.value)}>
                 {Object.entries(statusLabels).filter(([key]) => key !== 'superseded').map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -208,8 +242,9 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
             </div>
           </div>
           {!list && <p role="status" className="text-sm text-neutral-600">Loading employee changes…</p>}
-          {list?.error && <Alert tone="error">{list.error}<Button className="mt-2 block min-h-11!" variant="outline" onClick={reload}>Try again</Button></Alert>}
-          {list && !list.error && !list.rows.length && <p className="text-sm text-neutral-600">No employee changes match these filters.</p>}
+          {list && refreshing && <p role="status" className="text-sm text-neutral-600">Updating employee changes…</p>}
+          {!refreshing && list?.error && <Alert tone="error">{list.error}<Button className="mt-2 block min-h-11!" variant="outline" onClick={reload}>Try again</Button></Alert>}
+          {list && !refreshing && !list.error && !list.rows.length && <p className="text-sm text-neutral-600">No employee changes match these filters.</p>}
           <ul className="space-y-2">
             {list?.rows.map(row => <li key={row.id}>
               <button type="button" aria-current={selectedId === row.id ? 'true' : undefined}
@@ -222,9 +257,9 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
             </li>)}
           </ul>
           {list && (list.pages > 1 || page > 1) && <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button className="min-h-11!" variant="outline" disabled={page <= 1} onClick={() => changeFilter('page', String(page - 1))}>Previous</Button>
+            <Button className="min-h-11!" variant="outline" disabled={refreshing || page <= 1} onClick={() => changePage(page - 1)}>Previous</Button>
             <span className="text-sm">Page {page}</span>
-            <Button className="min-h-11!" variant="outline" disabled={page >= list.pages} onClick={() => changeFilter('page', String(page + 1))}>Next</Button>
+            <Button className="min-h-11!" variant="outline" disabled={refreshing || page >= list.pages} onClick={() => changePage(page + 1)}>Next</Button>
           </div>}
         </CardContent></Card>
       </section>
@@ -237,6 +272,7 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
           {currentItem && <>
             <div>
               <Badge variant={currentItem.status === 'verified' ? 'success' : 'outline'}>{statusLabels[currentItem.status]}</Badge>
+              {currentItem.status === 'verified' && currentItem.fixed_by_staff && <Badge className="ml-2" variant="outline">Fixed by staff</Badge>}
               <h2 ref={detailHeading} tabIndex={-1} className="mt-2 wrap-anywhere text-xl font-semibold">{currentItem.employee_name}</h2>
               <p className="mt-1 wrap-anywhere text-sm text-neutral-700">{eventLabels[currentItem.event_kind]} · {currentItem.source_actor_name || 'Former portal user'} · {formatGuamDateTime(currentItem.resubmitted_at || (currentItem.status === 'pending_verification' ? currentItem.updated_at : currentItem.created_at))}</p>
               {currentItem.effective_on && <p className="mt-1 text-sm text-neutral-700">Effective {formatDate(currentItem.effective_on)}</p>}
@@ -262,13 +298,13 @@ function CompanyVerificationQueue({ companyId }: { companyId: number }) {
                 setDecision({ itemId: currentItem.id, action: 'verify' });
               }}>Mark verified</Button>
               <Link className="inline-flex min-h-11 items-center justify-center rounded-lg border border-neutral-300 px-4 font-semibold text-neutral-800 hover:bg-neutral-50" to={fixPath}>Fix &amp; verify</Link>
-              {currentItem.status === 'pending_verification' && <Button variant="outline" className="min-h-11!" onClick={event => {
+              {canSendBack && <Button variant="outline" className="min-h-11!" onClick={event => {
                 decisionTrigger.current = event.currentTarget;
                 setDecision({ itemId: currentItem.id, action: 'send-back' });
               }}>Send back to client</Button>}
             </div>}
             {canReview && fixRevision && fixRevision !== currentItem.updated_at && <Alert>Employee details were saved. This verification item changed while you were editing. Review the latest details before deciding.</Alert>}
-            {canReview && openDecision && <VerificationDecision key={`${currentItem.id}:${openDecision}`} item={currentItem} decision={openDecision}
+            {canReview && openDecision && (openDecision !== 'send-back' || canSendBack) && <VerificationDecision key={`${currentItem.id}:${openDecision}`} item={currentItem} decision={openDecision}
               returnFocusRef={openDecision === 'verify-fix' ? detailHeading : decisionTrigger}
               onClose={() => { setDecision(null); setDismissedFix(location.key); }}
               onReload={reload} onSaved={saved => {

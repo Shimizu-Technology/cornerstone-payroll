@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -206,18 +206,21 @@ describe('Employee lifecycle controls', () => {
     blockers: [],
     lifecycle_mode_activation_status: 'blocked' as const,
     lifecycle_mode_activation_blockers: {
-      pending_non_address_change_requests_count: 2, active_intake_window: true, qualifying_staff_notification_recipients_count: 0,
+      pending_non_address_change_requests_count: 1, active_intake_window: true, qualifying_staff_notification_recipients_count: 0,
     },
     scheduled_effective_on: '2026-11-16',
   };
 
   it('keeps the mode control locked and hides deprecated review-first settings', async () => {
     const deprecated = { ...catalog.find(field => field.id === lifecycle)!, id: 'client_portal.review_first.pay', label: 'Legacy review-first pay', deprecated: true };
-    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, catalog: [...catalog, deprecated] });
+    const catalogDeprecated = { ...deprecated, id: 'client_portal.retired_option', label: 'Retired option' };
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, catalog: [...catalog, deprecated, catalogDeprecated],
+      editable_keys: [...fixture.editable_keys, catalogDeprecated.id] });
     open();
     await screen.findByText(/Cornerstone approves first · Available in Milestone 4/);
     expect(screen.queryByRole('combobox', { name: 'Employee lifecycle mode' })).toBeNull();
     expect(screen.queryByText('Legacy review-first pay')).toBeNull();
+    expect(screen.queryByText('Retired option')).toBeNull();
     expect(screen.queryByText('Scheduled employee lifecycle switch blocked')).toBeNull();
   });
 
@@ -225,13 +228,30 @@ describe('Employee lifecycle controls', () => {
     lifecycleMocks.retry.mockResolvedValue({ ...fixture, employee_lifecycle_preflight: { ...pendingChecks, lifecycle_mode_activation_status: 'active' } });
     vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, locked_keys: [], employee_lifecycle_preflight: pendingChecks });
     open();
-    await screen.findByText('Scheduled employee lifecycle switch blocked');
-    expect(screen.getByText('2 pending employee change requests to review')).toBeTruthy();
-    expect(screen.getByText('Incomplete-employee entry window is still open')).toBeTruthy();
-    expect(screen.getByText('Add at least one staff notification recipient')).toBeTruthy();
+    const blocked = (await screen.findByRole('heading', { name: 'Scheduled employee lifecycle switch blocked' })).closest('[role=status]') as HTMLElement;
+    const preflight = screen.getByRole('heading', { name: 'Before switching to client-managed mode' }).parentElement!;
+    expect(within(blocked).getByText('1 pending employee change request to review.')).toBeTruthy();
+    expect(within(preflight).getByText('2 pending employee change requests to review.')).toBeTruthy();
+    for (const section of [blocked, preflight]) {
+      expect(within(section).getByRole('link', { name: 'Review change requests' })).toHaveProperty('pathname', '/companies/34/client-change-requests');
+      expect(within(section).getByRole('link', { name: 'Open employee entry settings' })).toHaveProperty('pathname', '/companies/34/employees');
+      expect(within(section).getByRole('link', { name: 'Manage notification recipients' }).getAttribute('href')).toBe('/companies/34/client-documents#portal-alert-recipients');
+    }
     fireEvent.click(screen.getByRole('button', { name: 'Retry activation' }));
     await screen.findByText('Client-managed mode is active.');
     expect(lifecycleMocks.retry).toHaveBeenCalledWith(34);
+  });
+
+  it('explains by Save why the selected mode cannot be saved', async () => {
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({ ...fixture, locked_keys: [], employee_lifecycle_preflight: {
+      ...pendingChecks, lifecycle_mode_activation_status: 'inactive',
+    } });
+    open();
+    await fillDraft();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Employee lifecycle mode' }), { target: { value: 'client_managed' } });
+    const save = screen.getByRole('button', { name: 'Save operating profile' });
+    expect(save).toHaveProperty('disabled', true);
+    expect(within(save.parentElement!).getByText(/Resolve the employee lifecycle preflight checks above/)).toBeTruthy();
   });
 
   it('reverts the blocked scheduled version using its effective date, reason and lock token', async () => {

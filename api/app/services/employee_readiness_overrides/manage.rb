@@ -34,7 +34,7 @@ module EmployeeReadinessOverrides
         active_overrides: employee.employee_readiness_overrides.active
           .where(pay_period_id: periods.select(:id)).or(
             employee.employee_readiness_overrides.active.where(pay_period_id: nil, expires_on: today..)
-          ).order(:id).as_json(only: %i[id pay_period_id expires_on reason])
+          ).order(:id).as_json(only: %i[id pay_period_id expires_on])
       }
     end
 

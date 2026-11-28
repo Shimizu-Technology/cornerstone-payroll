@@ -24,6 +24,27 @@ beforeEach(() => {
   mocks.switchCompany.mockReturnValue(true);
 });
 afterEach(cleanup);
+
+it.each(['employee_verification', 'lifecycle_activation_blocked'])('hides locked lifecycle kinds and counts even on a %s deep link', async kind => {
+  render(<MemoryRouter initialEntries={[`/app/client-inbox?kind=${kind}`]}><ClientInbox /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  expect(screen.queryByRole('option', { name: 'Employee updates to verify' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Blocked mode switches' })).toBeNull();
+  expect(screen.queryByText(/\d+ to verify/)).toBeNull();
+});
+
+it('offers the blocked switch filter from another kind before any blocked row is loaded', async () => {
+  mocks.companies[0].has_blocked_lifecycle_activation = true;
+  mocks.list.mockImplementation(({ kind }) => Promise.resolve({
+    data: [row(kind === 'lifecycle_activation_blocked' ? kind : 'message')], meta: { next_cursor: null },
+  }));
+  render(<MemoryRouter initialEntries={['/app/client-inbox?kind=message']}><ClientInbox /></MemoryRouter>);
+  await screen.findByText('message item 1');
+  expect(screen.queryByText('lifecycle_activation_blocked item 1')).toBeNull();
+  expect(screen.getByRole('option', { name: 'Blocked mode switches' })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'lifecycle_activation_blocked' } });
+  expect(await screen.findByText('lifecycle_activation_blocked item 1')).toBeTruthy();
+});
 it('deduplicates refresh/page overlap by kind and id, replacing stale row data', () => {
   expect(mergeInboxRows([row('message'), row('document')], [{ ...row('message'), waiting: false }, row('document', 2)])).toEqual([{ ...row('message'), waiting: false }, row('document'), row('document', 2)]);
 });

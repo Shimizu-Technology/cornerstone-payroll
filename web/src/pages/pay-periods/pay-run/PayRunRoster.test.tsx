@@ -1,10 +1,21 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import { MemoryRouter } from 'react-router';
 import { PayRunRoster } from './PayRunRoster';
 
+const readiness = vi.hoisted(() => ({ unlocked: false, allowed: false, options: vi.fn(), preview: vi.fn(), send: vi.fn() }));
+vi.mock('@/contexts/AuthContext', () => ({ useOptionalAuth: () => ({ hasCapability: () => readiness.allowed }) }));
+vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({ activeCompanyId: 7, activeCompany: { id: 7, staff_employee_lifecycle_available: readiness.unlocked } }) }));
+vi.mock('@/lib/useOptionalStepUpRequest', () => ({ useOptionalStepUpRequest: () => readiness.send }));
+vi.mock('@/services/staff-employee-lifecycle', () => ({ staffEmployeeLifecycleApi: { readinessOptions: readiness.options, readinessPreview: readiness.preview } }));
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  readiness.unlocked = false;
+  readiness.allowed = false;
+});
 afterEach(cleanup);
 function props() {
   return {
@@ -32,6 +43,49 @@ it('shows removed names and reasons, then offers Enter pay in the unpaid roster'
   view.rerender(<PayRunRoster {...data} addBackNotice={notice} payPeriod={{ ...data.payPeriod, excluded_employee_ids: [], excluded_employees: [] }} />);
   expect(screen.getByRole('button', { name: 'Enter pay' })).toBeTruthy();
   expect(screen.queryByRole('region', { name: 'Removed from this run' })).toBeNull();
+});
+
+function rosterWithReadinessExclusion() {
+  const data = props();
+  return { ...data, companyId: 7, loadPayPeriod: vi.fn(), payPeriod: { ...data.payPeriod, company_id: 7,
+    readiness_excluded_employees: [{ employee_id: 88, name: 'Morgan Example', reason: 'W-4 missing', missing_keys: ['tax_form'] }],
+  } };
+}
+
+it.each(['locked approval-first', 'no override permission'])('keeps payroll readiness controls dormant with %s', state => {
+  readiness.unlocked = state !== 'locked approval-first';
+  readiness.allowed = state !== 'no override permission';
+  render(<MemoryRouter><PayRunRoster {...rosterWithReadinessExclusion()} /></MemoryRouter>);
+  fireEvent.click(screen.getByText('Not included — incomplete setup (1)'));
+  expect(screen.queryByRole('button', { name: 'Readiness override' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Clear readiness gate' })).toBeNull();
+  expect(readiness.options).not.toHaveBeenCalled();
+});
+
+it('grants an override after rollback, reloads the run and focuses the updated badge when the row disappears', async () => {
+  readiness.unlocked = true;
+  readiness.allowed = true;
+  readiness.options.mockResolvedValue({ data: { today: '2026-11-28', latest_expiration: '2026-12-28',
+    pay_periods: [{ id: 1, start_date: '2026-11-16', end_date: '2026-11-29', pay_date: '2026-12-04' }], active_overrides: [] } });
+  readiness.preview.mockResolvedValue({ data: { default_w4_acknowledgement_required: true,
+    checklist: { status: 'incomplete', rates_on: '2026-11-29', w4_on: '2026-12-04', missing_keys: ['tax_form'], items: [] } } });
+  readiness.send.mockResolvedValue({ ok: true });
+  const data = rosterWithReadinessExclusion();
+  const view = render(<MemoryRouter><PayRunRoster {...data} /></MemoryRouter>);
+  data.loadPayPeriod.mockImplementation(() => view.rerender(<MemoryRouter>
+    <PayRunRoster {...data} payPeriod={{ ...data.payPeriod, readiness_excluded_employees: [] }} />
+  </MemoryRouter>));
+
+  fireEvent.click(screen.getByText('Not included — incomplete setup (1)'));
+  fireEvent.click(screen.getByRole('button', { name: 'Readiness override' }));
+  const dialog = within(screen.getByRole('dialog'));
+  fireEvent.click(await dialog.findByRole('checkbox'));
+  fireEvent.change(dialog.getByRole('textbox', { name: /Reason/ }), { target: { value: 'Record a scoped payroll exception.' } });
+  fireEvent.click(dialog.getByRole('button', { name: 'Allow in payroll' }));
+  const badge = await screen.findByText('Override active');
+  expect(screen.queryByText('Not included — incomplete setup (1)')).toBeNull();
+  expect(data.loadPayPeriod).toHaveBeenCalledWith(1, true, true);
+  await waitFor(() => expect(document.activeElement).toBe(badge.closest('[role=status]')));
 });
 it('shows an error and allows retry when a restore fails', async () => {
   const data = props();

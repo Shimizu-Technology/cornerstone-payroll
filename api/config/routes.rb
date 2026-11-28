@@ -398,6 +398,7 @@ Rails.application.routes.draw do
           end
         end
         resources :employee_verification_items, only: %i[index show] do
+          post :search, action: :index, on: :collection
           post :verify, on: :member
           post :return_to_client, on: :member
         end

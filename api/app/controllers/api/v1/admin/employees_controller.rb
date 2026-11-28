@@ -58,11 +58,11 @@ module Api
         # GET /api/v1/admin/employees/:id
         def show
           contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          mask_tax_ids = params[:mask_tax_ids] == "true"
           employee = serialize_employee(
             @employee,
             include_department: true,
-            include_sensitive: !mask_tax_ids,
+            include_sensitive: true,
+            mask_tax_ids: mask_tax_ids?,
             include_classification_history: true,
             include_lifecycle: true,
             include_w4_history: true,
@@ -73,9 +73,6 @@ module Api
             include_delivery_consents: true,
             contact_context: contact_context
           )
-          if mask_tax_ids
-            employee["contractor_ein_last_four"] = employee.delete("contractor_ein")&.last(4)
-          end
           render json: { data: employee }
         end
 
@@ -242,7 +239,8 @@ module Api
           data = if EmployeeContactProjection.requested?(params)
             EmployeeContactProjection.call(@employee, context: contact_context)
           else
-            serialize_employee(@employee, include_sensitive: true, include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
+            serialize_employee(@employee, include_sensitive: true, mask_tax_ids: mask_tax_ids?,
+              include_w4_history: true, include_compensation_history: true, contact_context: contact_context)
           end
           render json: {
             data: data,
@@ -769,10 +767,15 @@ module Api
           nil
         end
 
+        def mask_tax_ids?
+          params[:mask_tax_ids].to_s == "true"
+        end
+
         def serialize_employee(
           employee,
           include_department: false,
           include_sensitive: false,
+          mask_tax_ids: false,
           include_classification_history: false,
           include_lifecycle: false,
           include_w4_history: false,
@@ -790,7 +793,8 @@ module Api
           data["contact_details_status"] = EmployeeContactValidator.contact_details_status(employee, context: contact_context)
           data["intake_readiness"] = EmployeeIntakePolicy.summary(employee).merge(can_review: can_review_employee_intake?)
           data["ssn_last_four"] = employee.ssn_encrypted&.last(4)
-          data["ssn"] = employee.ssn_encrypted if include_sensitive
+          data["ssn"] = employee.ssn_encrypted if include_sensitive && !mask_tax_ids
+          data["contractor_ein_last_four"] = data.delete("contractor_ein")&.last(4) if mask_tax_ids
           data["tax_classification"] = employee.tax_classification
           current_profile = if employee.association(:employee_work_profiles).loaded?
             employee.employee_work_profiles.find { |profile| profile.ends_on.nil? }

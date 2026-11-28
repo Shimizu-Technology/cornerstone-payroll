@@ -1,5 +1,4 @@
-import type { Employee } from '@/types';
-import api, { getApiBaseUrl } from '@/services/api';
+import api, { employeesApi, getApiBaseUrl } from '@/services/api';
 import type { OperatingProfileResponse, OperatingProfileVersion } from '@/services/operating-profile';
 
 export const LIFECYCLE_MODE_KEY = 'client_portal.employee_lifecycle_mode';
@@ -31,6 +30,7 @@ export interface ReadinessChecklist {
 }
 
 export interface VerificationDetails extends VerificationRow {
+  fixed_by_staff?: boolean;
   changed_fields: string[];
   before_values: Record<string, unknown>;
   after_values: Record<string, unknown>;
@@ -53,12 +53,13 @@ export interface VerificationDetails extends VerificationRow {
 }
 
 type VerificationFilters = { status?: VerificationStatus; event_kind?: VerificationEvent; search?: string; page: number; per_page: number };
+type VerificationList = { data: VerificationRow[]; meta: { current_page: number; total_pages: number; total_count: number } };
 export type ReadinessScope = { pay_period_id: number } | { expires_on: string };
 export interface ReadinessOptions {
   today: string;
   latest_expiration: string;
   pay_periods: { id: number; start_date: string; end_date: string; pay_date: string }[];
-  active_overrides: { id: number; pay_period_id: number | null; expires_on: string | null; reason: string }[];
+  active_overrides: { id: number; pay_period_id: number | null; expires_on: string | null }[];
 }
 export interface ReadinessPreview {
   checklist: ReadinessChecklist;
@@ -88,11 +89,10 @@ const profilePath = (companyId: number) => `/admin/companies/${companyId}/operat
 
 export const staffEmployeeLifecycleApi = {
   employeeForFix: (companyId: number, employeeId: number) =>
-    api.get<{ data: Employee }>(employeeApiPath(employeeId), { mask_tax_ids: true }, { companyId }),
-  list: (companyId: number, filters: VerificationFilters, signal: AbortSignal) =>
-    api.get<{ data: VerificationRow[]; meta: { current_page: number; total_pages: number; total_count: number } }>(
-      queuePath, filters, { companyId, signal },
-    ),
+    employeesApi.get(employeeId, companyId, undefined, { maskTaxIds: true }),
+  list: (companyId: number, { search, ...filters }: VerificationFilters, signal: AbortSignal) => search
+    ? api.post<VerificationList>(`${queuePath}/search`, { ...filters, employee_search: search }, { companyId, signal })
+    : api.get<VerificationList>(queuePath, filters, { companyId, signal }),
   get: (companyId: number, itemId: number, signal?: AbortSignal) =>
     api.get<{ data: VerificationDetails }>(`${queuePath}/${itemId}`, undefined, { companyId, signal }),
   verify: (companyId: number, itemId: number, body: { updated_at: string; verification_note?: string; fixed_by_staff?: boolean }) =>

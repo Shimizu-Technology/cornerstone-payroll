@@ -9,17 +9,35 @@ import { safeInternalReturnPath } from '@/lib/routes';
 import type { OperatingProfileResponse } from '@/services/operating-profile';
 import { LIFECYCLE_MODE_KEY, staffEmployeeLifecycleApi, type LifecyclePreflight } from '@/services/staff-employee-lifecycle';
 
-export function LifecyclePreflightSummary({ checks }: { checks: LifecyclePreflight }) {
-  const pending = checks.pending_non_address_change_requests_count;
-  const recipients = checks.qualifying_staff_notification_recipients_count;
+export function LifecyclePreflightSummary({ checks, companyId }: { checks: LifecyclePreflight; companyId: number }) {
   return <div className="mt-3 space-y-2 rounded-lg bg-neutral-50 p-3 text-sm text-neutral-800">
     <h3 className="font-semibold">Before switching to client-managed mode</h3>
-    <ul className="list-disc space-y-1 pl-5">
-      <li>{pending === 0 ? 'No pending employee change requests' : `${pending} pending employee change ${pending === 1 ? 'request' : 'requests'} to review`}</li>
-      <li>{checks.active_intake_window ? 'Incomplete-employee entry window is still open' : 'Incomplete-employee entry window is closed'}</li>
-      <li>{recipients > 0 ? `${recipients} staff notification ${recipients === 1 ? 'recipient' : 'recipients'} configured` : 'Add at least one staff notification recipient'}</li>
-    </ul>
+    <LifecyclePreflightChecks checks={checks} companyId={companyId} showPassed />
   </div>;
+}
+
+function LifecyclePreflightChecks({ checks, companyId, showPassed = false }: {
+  checks: LifecyclePreflight['lifecycle_mode_activation_blockers'];
+  companyId: number;
+  showPassed?: boolean;
+}) {
+  const pending = checks.pending_non_address_change_requests_count;
+  const recipients = checks.qualifying_staff_notification_recipients_count;
+  const linkClass = 'inline-flex min-h-11 items-center font-semibold underline';
+  return <ul className="list-disc space-y-1 pl-5">
+    {pending ? <li>
+      {pending} pending employee change {pending === 1 ? 'request' : 'requests'} to review.{' '}
+      <Link className={linkClass} to={`/companies/${companyId}/client-change-requests`}>Review change requests</Link>
+    </li> : showPassed && <li>No pending employee change requests</li>}
+    {checks.active_intake_window ? <li>
+      {showPassed ? 'The incomplete-employee entry window is open.' : 'The incomplete-employee entry window was open when the switch was attempted.'}{' '}
+      <Link className={linkClass} to={`/companies/${companyId}/employees`}>Open employee entry settings</Link>
+    </li> : showPassed && <li>Incomplete-employee entry window is closed</li>}
+    {recipients === 0 ? <li>
+      {showPassed ? 'Add at least one staff notification recipient.' : 'No qualifying staff notification recipients were configured when the switch was attempted.'}{' '}
+      <Link className={linkClass} to={`/companies/${companyId}/client-documents#portal-alert-recipients`}>Manage notification recipients</Link>
+    </li> : showPassed && <li>{recipients} staff notification {recipients === 1 ? 'recipient' : 'recipients'} configured</li>}
+  </ul>;
 }
 
 export function BlockedLifecycleActivation({ profile, companyId, disabled, inboxReturn, onUpdated }: {
@@ -64,11 +82,7 @@ export function BlockedLifecycleActivation({ profile, companyId, disabled, inbox
     <Alert tone="warning">
       <h2 className="font-semibold">Scheduled employee lifecycle switch blocked</h2>
       <p>{scheduledDate ? `The switch scheduled for ${formatDate(scheduledDate)} could not activate. ` : ''}Cornerstone still approves employee changes first.</p>
-      <ul className="my-2 list-disc space-y-1 pl-5">
-        {Boolean(blockers.pending_non_address_change_requests_count) && <li>{blockers.pending_non_address_change_requests_count} pending employee change requests needed review.</li>}
-        {blockers.active_intake_window && <li>The incomplete-employee entry window was open.</li>}
-        {blockers.qualifying_staff_notification_recipients_count === 0 && <li>No qualifying staff notification recipients were configured.</li>}
-      </ul>
+      <LifecyclePreflightChecks checks={blockers} companyId={companyId} />
       {!reverting && error && <p role="alert" className="font-medium text-danger-800">{error}</p>}
       <div className="mt-3 flex flex-wrap gap-2">
         {canChange && <>

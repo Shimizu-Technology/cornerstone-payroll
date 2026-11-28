@@ -17,8 +17,9 @@ module Api
         active_employee_counts = employee_counts_by_company(company_ids, active_only: true)
         today = PayrollBusinessClock.today
         preloaded_profiles = PayrollIntake::EffectiveSettings.preload_profiles(company_ids, on: today)
-        if StaffRolePolicy.allowed?(current_user, :payroll_operations) && !Current.view_as_grant
+        if StaffEmployeeLifecycle.unlocked? && StaffRolePolicy.allowed?(current_user, :payroll_operations) && !Current.view_as_grant
           @open_employee_verification_company_ids = EmployeeVerificationItem.open_items.where(company_id: company_ids).distinct.pluck(:company_id).to_set
+          @staff_employee_lifecycle_company_ids = StaffEmployeeLifecycle.companies(Company.where(id: company_ids)).pluck(:id).to_set
           @active_employee_lifecycle_company_ids = companies.filter_map do |company|
             profile = preloaded_profiles[company.id]
             company.id if profile && CompanyFeatures.new(company: company, profile: profile, as_of: today).client_managed_employee_lifecycle?
@@ -96,6 +97,13 @@ module Api
         summary[:creator] = @creators[company.id] if @creators
         summary[:has_open_employee_verifications] = true if @open_employee_verification_company_ids&.include?(company.id)
         summary[:client_managed_employee_lifecycle] = true if @active_employee_lifecycle_company_ids&.include?(company.id)
+        summary[:staff_employee_lifecycle_available] = true if @staff_employee_lifecycle_company_ids&.include?(company.id)
+        if @active_employee_lifecycle_company_ids
+          if preloaded_profile&.client_portal_enabled? && preloaded_profile.lifecycle_mode_activation_failed_at.present? &&
+              preloaded_profile.lifecycle_mode_activated_at.nil? && preloaded_profile.option_value("client_portal.employee_lifecycle_mode") == "client_managed"
+            summary[:has_blocked_lifecycle_activation] = true
+          end
+        end
         summary
       end
 

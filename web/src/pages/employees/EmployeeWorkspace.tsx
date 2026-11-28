@@ -144,21 +144,29 @@ export function EmployeeWorkspace(): ReactElement {
   }, [loading, employee, activeTab, location.hash]);
 
   const loadRequestIdRef = useRef(0);
+  const identityRef = useRef<HTMLElement>(null);
   const routeKey = `${companyId}:${employeeId}`;
   const hasValidRouteIds = [companyId, employeeId].every((value) => Number.isInteger(value) && value > 0);
+  const employeeListFallback = companyId > 0 ? employeesPath(companyId) : '/employees';
+  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeeListFallback);
+  const maskTaxIds = activeCompany?.staff_employee_lifecycle_available === true
+    || returnTo.split('?')[0] === `/companies/${companyId}/verifications`;
+  const getEmployeeProfile = useCallback((id: number) => maskTaxIds
+    ? employeesApi.get(id, companyId, undefined, { maskTaxIds: true })
+    : employeesApi.get(id), [companyId, maskTaxIds]);
 
   // A contact save returns only contact fields. Intake readiness (a missing
   // address, for one) is read again so its panel updates without a reload.
   const refreshIntakeReadiness = async (savedEmployeeId: number): Promise<void> => {
     try {
-      const { data } = await employeesApi.get(savedEmployeeId);
+      const { data } = await getEmployeeProfile(savedEmployeeId);
       setEmployee((current) => (current && current.id === savedEmployeeId ? { ...current, intake_readiness: data.intake_readiness } : current));
     } catch {
       // The panel catches up on the next load; the save itself succeeded.
     }
   };
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async ({ background = false } = {}): Promise<void> => {
     const requestId = ++loadRequestIdRef.current;
     const isCurrentRequest = (): boolean => loadRequestIdRef.current === requestId;
 
@@ -173,13 +181,15 @@ export function EmployeeWorkspace(): ReactElement {
 
     if (activeCompanyId !== companyId) return;
 
-    setLoading(true);
-    setResolvedRouteKey(null);
+    if (!background) {
+      setLoading(true);
+      setResolvedRouteKey(null);
+    }
     setError(null);
     setPayHistoryError(null);
     try {
       const [employeeResult, historyResult] = await Promise.allSettled([
-        employeesApi.get(employeeId),
+        getEmployeeProfile(employeeId),
         reportsApi.employeePayHistory(employeeId, { all_time: true }),
       ]);
       if (!isCurrentRequest()) return;
@@ -201,7 +211,7 @@ export function EmployeeWorkspace(): ReactElement {
     } finally {
       if (isCurrentRequest()) setLoading(false);
     }
-  }, [activeCompanyId, companyId, employeeId, hasValidRouteIds, routeKey]);
+  }, [activeCompanyId, companyId, employeeId, getEmployeeProfile, hasValidRouteIds, routeKey]);
 
   useEffect(() => {
     setEmployee(null);
@@ -220,9 +230,6 @@ export function EmployeeWorkspace(): ReactElement {
       loadRequestIdRef.current += 1;
     };
   }, [load, setReviewError]);
-
-  const employeeListFallback = companyId > 0 ? employeesPath(companyId) : '/employees';
-  const returnTo = safeInternalReturnPath(searchParams.get('return_to'), employeeListFallback);
 
   if (hasValidRouteIds && tabParam && !tabIds.has(tabParam as EmployeeWorkspaceTab)) {
     return <Navigate to={employeePath(companyId, employeeId, 'overview', { returnTo })} replace />;
@@ -322,7 +329,7 @@ export function EmployeeWorkspace(): ReactElement {
         }
       />
 
-      <section className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-3 sm:px-6 lg:px-8" aria-label="Employee identity">
+      <section ref={identityRef} tabIndex={-1} className="border-b border-neutral-200 bg-neutral-50/70 px-4 py-3 sm:px-6 lg:px-8" aria-label="Employee identity">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={employee.status === 'active' ? 'success' : employee.status === 'terminated' ? 'danger' : 'default'}>
             {statusConfig?.label || employee.status}
@@ -363,8 +370,8 @@ export function EmployeeWorkspace(): ReactElement {
             </Button>
           </div>
         )}
-        {employee.readiness_gate_enforced && <ReadinessOverrideActions companyId={companyId} employeeId={employee.id}
-          employeeName={employeeName} onUpdated={() => void load()} />}
+        <ReadinessOverrideActions companyId={companyId} employeeId={employee.id} fallbackFocusRef={identityRef}
+          employeeName={employeeName} gateEnforced={employee.readiness_gate_enforced === true} onUpdated={() => void load({ background: true })} />
         <EmployeeIntakePanel key={`${companyId}:${employee.id}`} companyId={companyId} employee={employee} onUpdated={setEmployee} />
         {activeTab === 'overview' && (
           <>

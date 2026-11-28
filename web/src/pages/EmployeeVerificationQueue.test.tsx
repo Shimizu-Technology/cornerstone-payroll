@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VerificationDetails } from '@/services/staff-employee-lifecycle';
 import { EmployeeVerificationQueue } from './EmployeeVerificationQueue';
 
-const mocks = vi.hoisted(() => ({ granted: true, companyReadOnly: false, list: vi.fn(), get: vi.fn(), verify: vi.fn(), sendBack: vi.fn() }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: () => true }) }));
+const mocks = vi.hoisted(() => ({ granted: true, audit: true, managed: true, companyReadOnly: false, list: vi.fn(), get: vi.fn(), verify: vi.fn(), sendBack: vi.fn() }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ hasCapability: (capability: string) => capability !== 'view_audit_history' || mocks.audit }) }));
 vi.mock('@/contexts/CompanyContext', () => ({ useCompany: () => ({
-  activeCompany: { id: 2, workspace_can_write: !mocks.companyReadOnly }, activeCompanyId: 2,
+  activeCompany: { id: 2, workspace_can_write: !mocks.companyReadOnly, client_managed_employee_lifecycle: mocks.managed }, activeCompanyId: 2,
 }) }));
 vi.mock('@/hooks/useSelectedCompanyCapability', () => ({
   useSelectedCompanyCapability: (capability: string, companyId: number) => mocks.granted && capability === 'manage_client_configuration' && companyId === 2,
@@ -36,12 +36,17 @@ const item: VerificationDetails = {
   },
 };
 
-function open({ selected = true, fix = false }: { selected?: boolean; fix?: boolean } = {}) {
+function CurrentSearch() {
+  return <output aria-label="Current URL query">{useLocation().search}</output>;
+}
+
+function open({ selected = true, fix = false, query = '' }: { selected?: boolean; fix?: boolean; query?: string } = {}) {
+  const search = [selected ? 'item_id=11' : '', query].filter(Boolean).join('&');
   render(<MemoryRouter initialEntries={[{
     pathname: '/companies/2/verifications',
-    search: selected ? '?item_id=11' : '',
+    search: search ? `?${search}` : '',
     state: fix ? { lifecycleFix: { id: 11, companyId: 2, employeeId: 31, revision: item.updated_at } } : null,
-  }]}><Routes>
+  }]}><CurrentSearch /><Routes>
     <Route path="/companies/:companyId/verifications" element={<EmployeeVerificationQueue />} />
     <Route path="/companies/:companyId/employees/:id/edit" element={<p>Edit destination</p>} />
   </Routes></MemoryRouter>);
@@ -49,6 +54,8 @@ function open({ selected = true, fix = false }: { selected?: boolean; fix?: bool
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.granted = true;
+  mocks.audit = true;
+  mocks.managed = true;
   mocks.companyReadOnly = false;
   mocks.list.mockResolvedValue({ data: [item], meta: { current_page: 1, total_pages: 1, total_count: 1 } });
   mocks.get.mockResolvedValue({ data: item });
@@ -70,8 +77,54 @@ describe('To verify', () => {
     expect(screen.getByRole('link', { name: 'Create a final pay run' }).getAttribute('href')).toBe('/companies/2/pay-runs?new_final=1');
     const fix = screen.getByRole('link', { name: 'Fix & verify' });
     expect(fix.getAttribute('href')).toContain('verify_item_id=11');
-    fireEvent.change(screen.getByLabelText('Search by employee'), { target: { value: 'Syn' } });
-    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(2, expect.objectContaining({ search: 'Syn' }), expect.any(AbortSignal)));
+  });
+
+  it('loads the next and previous pages and preserves the chosen page in the URL', async () => {
+    mocks.list.mockImplementation((_company, filters) => Promise.resolve({
+      data: [{ ...item, employee_name: `Sample Worker on page ${filters.page}` }],
+      meta: { current_page: filters.page, total_pages: 2, total_count: 26 },
+    }));
+    open({ selected: false });
+    await screen.findByRole('button', { name: /page 1/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByRole('button', { name: /page 2/ });
+    expect(screen.getByLabelText('Current URL query').textContent).toBe('?page=2');
+    fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    await screen.findByRole('button', { name: /page 1/ });
+    expect(screen.getByLabelText('Current URL query').textContent).toBe('');
+    expect(mocks.list.mock.calls.map(([, filters]) => filters.page)).toEqual([1, 2, 1]);
+  });
+
+  it('debounces searches, keeps prior results visible, and drops search text from navigation', async () => {
+    mocks.get.mockResolvedValue({ data: { ...item, audit_references: [{ id: 1, return_note: null, staff_edit_audit_id: 72 }] } });
+    open({ selected: false, query: 'q=legacy-private-search&page=2' });
+    await screen.findByRole('button', { name: /Synthetic Worker/ });
+    expect(screen.getByLabelText('Current URL query').textContent).toBe('?page=2');
+    expect(mocks.list).toHaveBeenLastCalledWith(2, expect.objectContaining({ search: undefined, page: 2 }), expect.any(AbortSignal));
+    const input = screen.getByLabelText('Search by employee');
+    fireEvent.change(input, { target: { value: 'Synth' } });
+    fireEvent.change(input, { target: { value: 'Synthetic Worker' } });
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Updating employee changes…')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Synthetic Worker/ })).toBeTruthy();
+    expect(screen.getByLabelText('Current URL query').textContent).toBe('');
+    await waitFor(() => expect(mocks.list).toHaveBeenLastCalledWith(2, expect.objectContaining({ search: 'Synthetic Worker', page: 1 }), expect.any(AbortSignal)));
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: /Synthetic Worker/ }));
+    await screen.findByRole('heading', { name: 'Synthetic Worker' });
+    for (const name of ['Open employee record', 'Fix & verify', 'View employee edit history']) {
+      const href = screen.getByRole('link', { name }).getAttribute('href')!;
+      expect(new URL(href, 'https://example.test').searchParams.get('return_to')).toBe('/companies/2/verifications?item_id=11');
+    }
+  });
+
+  it('shows managers which verified items were fixed by staff without exposing edit history', async () => {
+    mocks.audit = false;
+    mocks.get.mockResolvedValue({ data: { ...item, status: 'verified', can_review: false, fixed_by_staff: true,
+      audit_references: [{ id: 1, return_note: null, staff_edit_audit_id: 72 }] } });
+    open();
+    expect(await screen.findByText('Fixed by staff')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'View employee edit history' })).toBeNull();
   });
 
   it.each(['permission', 'workspace', 'item'])('requires the action permission from the %s', async (source) => {
@@ -94,6 +147,14 @@ describe('To verify', () => {
     fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: '  Please check the final date.  ' } });
     fireEvent.click(send);
     await waitFor(() => expect(mocks.sendBack).toHaveBeenCalledWith(2, 11, { updated_at: item.updated_at, return_note: 'Please check the final date.' }));
+  });
+
+  it('can verify residual changes but cannot send them back after rollback', async () => {
+    mocks.managed = false;
+    open();
+    expect(await screen.findByRole('button', { name: 'Mark verified' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Fix & verify' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send back to client' })).toBeNull();
   });
 
   it.each([false, true])('supports marking verified after explicit confirmation (saved fix=%s)', async (fix) => {
