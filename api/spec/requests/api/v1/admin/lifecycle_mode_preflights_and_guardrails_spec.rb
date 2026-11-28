@@ -44,17 +44,19 @@ RSpec.describe "Lifecycle PR 3: Mode preflights, scheduled activation, guardrail
     )
   end
 
-  describe "locked-mode operating profile payload (L8)" do
+  describe "unlocked operating profile payload (L8)" do
     before do
       seed_baseline_profile!
     end
 
-    it "skips LifecycleModePreflight.summary_for while client_portal.employee_lifecycle_mode is locked" do
-      expect(ClientOperatingProfiles::LifecycleModePreflight).not_to receive(:summary_for)
-
+    it "exposes LifecycleModePreflight.summary_for and omits client_portal.employee_lifecycle_mode from locked_keys" do
       get "/api/v1/admin/companies/#{company.id}/operating_profile"
       expect(response).to have_http_status(:ok), response.body
-      expect(response.parsed_body["employee_lifecycle_preflight"]).to be_nil
+      expect(response.parsed_body["locked_keys"]).not_to include("client_portal.employee_lifecycle_mode")
+      expect(response.parsed_body["employee_lifecycle_preflight"]).to include(
+        "ready" => false,
+        "lifecycle_mode_activation_status" => "inactive"
+      )
     end
   end
 

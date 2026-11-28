@@ -319,4 +319,71 @@ describe('Employee lifecycle controls', () => {
       changes: { 'tips.default': 'already_paid_out' },
     });
   });
+
+  it('lets an authorized user select client_managed when preflights pass and enforces mode-change capability', async () => {
+    const readyPreflight = {
+      ...pendingChecks,
+      pending_non_address_change_requests_count: 0,
+      active_intake_window: false,
+      qualifying_staff_notification_recipients_count: 2,
+      ready: true,
+      lifecycle_mode_activation_status: 'inactive' as const,
+      lifecycle_mode_activation_blockers: {},
+      scheduled_effective_on: null,
+    };
+    const saved = {
+      ...version, id: 13, version: 2, effective_on: '2026-11-16', client_portal_enabled: true,
+      options: { tips: { default: 'paid_in_check' }, client_portal: { employee_lifecycle_mode: 'client_managed' } },
+    };
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({
+      ...fixture,
+      effective: { ...version, client_portal_enabled: true },
+      history: [{ ...version, client_portal_enabled: true }],
+      locked_keys: ['employee_portal_enabled', 'employee_portal.former_access_years'],
+      employee_lifecycle_preflight: readyPreflight,
+    });
+    vi.mocked(operatingProfileApi.update).mockResolvedValue({
+      ...fixture,
+      locked_keys: ['employee_portal_enabled', 'employee_portal.former_access_years'],
+      effective: saved,
+      history: [saved, version],
+      lock_version: 1,
+      employee_lifecycle_preflight: { ...readyPreflight, lifecycle_mode_activation_status: 'active' },
+      saved,
+    });
+
+    open();
+    const user = userEvent.setup();
+    const modeSelect = await screen.findByRole('combobox', { name: 'Employee lifecycle mode' }) as HTMLSelectElement;
+    expect(modeSelect.disabled).toBe(false);
+    expect(modeSelect.value).toBe('approval_first');
+    expect(screen.getByText('No pending employee change requests')).toBeTruthy();
+    expect(screen.getByText('2 staff notification recipients configured')).toBeTruthy();
+
+    await user.selectOptions(modeSelect, 'client_managed');
+    fireEvent.change(screen.getByLabelText('Effective date'), { target: { value: '2026-11-16' } });
+    await user.type(screen.getByLabelText('Reason for change'), 'Enable client-managed mode after preflights');
+    await user.click(screen.getByRole('button', { name: 'Save operating profile' }));
+
+    expect(operatingProfileApi.update).toHaveBeenCalledWith(34, {
+      effective_on: '2026-11-16',
+      reason: 'Enable client-managed mode after preflights',
+      lock_version: 0,
+      changes: { [lifecycle]: 'client_managed' },
+    });
+
+    cleanup();
+
+    // Without mode-change capability (e.g., manager), the unlocked selector stays disabled while preflights remain visible.
+    vi.mocked(operatingProfileApi.get).mockResolvedValue({
+      ...fixture,
+      locked_keys: ['employee_portal_enabled', 'employee_portal.former_access_years'],
+      editable_keys: fixture.editable_keys.filter(key => key !== lifecycle),
+      employee_lifecycle_preflight: readyPreflight,
+    });
+    open();
+    const readOnlySelect = await screen.findByRole('combobox', { name: 'Employee lifecycle mode' }) as HTMLSelectElement;
+    expect(readOnlySelect.disabled).toBe(true);
+    expect(screen.getByText('No pending employee change requests')).toBeTruthy();
+  });
 });

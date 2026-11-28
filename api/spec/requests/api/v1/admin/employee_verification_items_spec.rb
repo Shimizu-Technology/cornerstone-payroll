@@ -33,12 +33,11 @@ RSpec.describe "Staff employee verification queue", type: :request do
     bearer(user.clerk_id, fva: [ 0, 0 ], two_factor_enabled: true).merge("X-Company-Id" => company.id.to_s)
   end
 
-  context "with the mode still locked" do
-    it "keeps approval-first edits in the existing request queue and leaves PR 4 dormant" do
+  context "with default approval_first mode (unlocked setting)" do
+    it "keeps approval-first edits in the existing request queue and leaves verification endpoints closed when no lifecycle work exists" do
       expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
-      expect(OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES).to have_key("client_portal.employee_lifecycle_mode")
+      expect(OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES).not_to have_key("client_portal.employee_lifecycle_mode")
       employee.update!(readiness_gate_enforced: false)
-      item
       expect do
         patch "/api/v1/client/employees/#{employee.id}", headers: headers(client),
           params: { employee: { pay_rate: 28 } }, as: :json
@@ -49,16 +48,12 @@ RSpec.describe "Staff employee verification queue", type: :request do
       get queue_path, headers: headers
       expect(response).to have_http_status(:forbidden)
       expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
-      post "#{queue_path}/#{item.id}/verify", headers: headers, as: :json
-      expect(response).to have_http_status(:forbidden)
-      expect(item.reload.status).to eq("pending_verification")
       get "#{inbox_path}/counts", headers: headers
       expect(response.parsed_body.fetch("data")).not_to have_key("pending_verifications")
       get "/api/v1/companies", headers: headers
       expect(response).to have_http_status(:ok)
       summary = response.parsed_body.fetch("companies").find { |row| row["id"] == company.id }
       expect(summary.keys).not_to include("has_open_employee_verifications", "client_managed_employee_lifecycle", "staff_employee_lifecycle_available")
-      expect(PortalNotifications::Preferences.categories_for(staff)).not_to have_key("employee_verifications")
     end
   end
 

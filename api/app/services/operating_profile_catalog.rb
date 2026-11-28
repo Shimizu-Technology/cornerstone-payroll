@@ -74,7 +74,6 @@ class OperatingProfileCatalog
   FORMER_ACCESS_YEARS_RANGE = (1..10).freeze
 
   LOCKED_TOGGLE_MILESTONES = {
-    "client_portal.employee_lifecycle_mode" => 4,
     "employee_portal_enabled" => 4,
     "employee_portal.features.stubs" => 4,
     "employee_portal.features.tax_forms" => 4,

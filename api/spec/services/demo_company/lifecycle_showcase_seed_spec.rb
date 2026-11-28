@@ -3,8 +3,6 @@
 require "rails_helper"
 
 RSpec.describe "DemoCompany::Seed client-managed lifecycle showcase" do
-  include EmployeeLifecyclePr4Helpers
-
   let!(:tax_tables) { %w[single married].map { |status| create(:tax_table, tax_year: 2026, filing_status: status) } }
   let!(:annual_config) do
     create(:annual_tax_config, tax_year: 2026, ss_wage_base: 184_500, ss_rate: 0.062, medicare_rate: 0.0145,
@@ -23,7 +21,6 @@ RSpec.describe "DemoCompany::Seed client-managed lifecycle showcase" do
     allow(Rails).to receive(:cache).and_return(ActiveSupport::Cache::MemoryStore.new)
     allow(Resend::Emails).to receive(:send).and_raise("The seed must not send email")
     allow_any_instance_of(ClerkInvitationService).to receive(:create_invitation).and_raise("The seed must not invite anyone")
-    unlock_lifecycle_mode!
   end
 
   after { FileUtils.rm_rf(R2StorageService::LOCAL_STORAGE_ROOT.join("historical-payroll")) }
