@@ -142,31 +142,30 @@ RSpec.describe ClientOperatingProfile, type: :model do
     }.to raise_error(ActiveRecord::StatementInvalid, /client_operating_profiles_intake_adapter_shape_check/)
   end
 
-  it "refuses moving locked enum client_portal.employee_lifecycle_mode off approval_first while allowing legacy rows to close" do
-    locked_create = build_profile(
+  it "allows unlocked client_portal.employee_lifecycle_mode while still locking M5/M6 switches and keeping legacy review_first rows valid" do
+    unlocked_profile = build_profile(
       client_portal_enabled: true,
       options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } }
     )
-    expect(locked_create).not_to be_valid
-    expect(locked_create.errors[:options]).to include("Employee lifecycle mode is locked until its milestone launches")
+    expect(unlocked_profile).to be_valid
+    unlocked_profile.save!
+    expect(unlocked_profile.option_value("client_portal.employee_lifecycle_mode")).to eq("client_managed")
 
-    valid_profile = build_profile(
+    locked_create = build_profile(
+      version: 2,
+      effective_on: Date.new(2026, 7, 1),
       client_portal_enabled: true,
-      options: { "client_portal" => { "employee_lifecycle_mode" => "approval_first" } }
+      options: { "time_module_enabled" => true }
     )
-    expect(valid_profile).to be_valid
-    valid_profile.save!
+    expect(locked_create).not_to be_valid
+    expect(locked_create.errors[:options]).to include("Built-in time tracking module enabled is locked until its milestone launches")
 
-    valid_profile.options = { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } }
-    expect(valid_profile).not_to be_valid
-    expect(valid_profile.errors[:options]).to include("Employee lifecycle mode is locked until its milestone launches")
-
-    # Simulate a legacy row stored with client_managed: closing its dates stays allowed so rollback/sanitization works.
-    valid_profile.update_columns(options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } })
-    valid_profile.reload
-    valid_profile.ends_on = Date.new(2026, 6, 30)
-    expect(valid_profile).to be_valid
-    valid_profile.save!
+    # Simulate a legacy row stored with a locked toggle enabled: closing its dates stays allowed so rollback/sanitization works.
+    unlocked_profile.update_columns(options: unlocked_profile.options.merge("time_module_enabled" => true))
+    unlocked_profile.reload
+    unlocked_profile.ends_on = Date.new(2026, 6, 30)
+    expect(unlocked_profile).to be_valid
+    unlocked_profile.save!
 
     # Deprecated review_first options remain valid on existing and new rows.
     legacy_review_first = build_profile(

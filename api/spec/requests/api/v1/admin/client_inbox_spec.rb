@@ -81,8 +81,6 @@ RSpec.describe "Staff Client Inbox", type: :request do
   end
 
   it "lists a blocked scheduled activation only for companies the staff member can access" do
-    locked = CompanyFeatures::LOCKED_OFF
-    unlock_lifecycle_mode!
     [ company, create(:company) ].each do |target|
       profile = create_client_managed_profile!(target)
       profile.update!(lifecycle_mode_activated_at: nil, lifecycle_mode_activation_failed_at: 1.minute.ago,
@@ -93,7 +91,7 @@ RSpec.describe "Staff Client Inbox", type: :request do
     )
     expect(rows(kind: "lifecycle_activation_blocked", status: "handled")).to be_empty
 
-    stub_const("CompanyFeatures::LOCKED_OFF", locked)
+    stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF + [ "client_portal.employee_lifecycle_mode" ])
     expect(rows(kind: "lifecycle_activation_blocked", status: "waiting")).to be_empty
     expect(rows(status: "waiting").pluck("kind")).not_to include("lifecycle_activation_blocked")
   end

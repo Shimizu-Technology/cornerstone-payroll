@@ -3,16 +3,33 @@
 namespace :demo do
   # Not RlsTask.system: the seed enters its own scopes (system for the
   # organization, each company's own scope for its writes), which can't nest.
-  desc "Seed the two demo employers with fictional people and committed payroll (ORGANIZATION_ID, ACTOR_ID). Safe to rerun."
+  desc "Seed the demo employers with fictional people and committed payroll (ORGANIZATION_ID, ACTOR_ID, optional LIFECYCLE_SHOWCASE=true). Safe to rerun."
   task seed: :environment do
     organization, actor = TenantScope.as_system(reason: "Find the demo seed organization and actor") do
       [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
     end
-    result = Current.set(user: actor) { DemoCompany::Seed.new(organization: organization, actor: actor).call }
+    include_showcase = ENV["LIFECYCLE_SHOWCASE"] == "true"
+    result = Current.set(user: actor) do
+      DemoCompany::Seed.new(organization: organization, actor: actor, include_lifecycle_showcase: include_showcase).call
+    end
     puts "OK    demo:seed companies=#{result.companies.map(&:id).join(',')} employees_created=#{result.employees_created} " \
          "periods_committed=#{result.periods_committed} periods_skipped=#{result.periods_skipped}"
   rescue DemoCompany::Seed::Refused, ActiveRecord::RecordInvalid, ArgumentError => e
     abort "FAIL  demo:seed #{e.message}"
+  end
+
+  desc "Seed the demo employers including the client-managed employee lifecycle showcase company (ORGANIZATION_ID, ACTOR_ID). Safe to rerun."
+  task seed_lifecycle_showcase: :environment do
+    organization, actor = TenantScope.as_system(reason: "Find the demo seed organization and actor") do
+      [ Organization.find(ENV.fetch("ORGANIZATION_ID")), User.find(ENV.fetch("ACTOR_ID")) ]
+    end
+    result = Current.set(user: actor) do
+      DemoCompany::Seed.new(organization: organization, actor: actor, include_lifecycle_showcase: true).call
+    end
+    puts "OK    demo:seed_lifecycle_showcase companies=#{result.companies.map(&:id).join(',')} employees_created=#{result.employees_created} " \
+         "periods_committed=#{result.periods_committed} periods_skipped=#{result.periods_skipped}"
+  rescue DemoCompany::Seed::Refused, ActiveRecord::RecordInvalid, ArgumentError => e
+    abort "FAIL  demo:seed_lifecycle_showcase #{e.message}"
   end
 
   desc "Write the fictional QuickBooks export bundle and matching pay-stub PDFs to OUTPUT_DIR for the import and stub upload screens"

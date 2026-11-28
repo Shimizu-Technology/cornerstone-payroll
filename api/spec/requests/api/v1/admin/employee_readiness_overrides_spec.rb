@@ -45,13 +45,14 @@ RSpec.describe "Employee readiness override access", type: :request, portal_noti
     delete "#{route}/readiness_override/#{override_id}", headers: request_headers, params: { reason: reason }, as: :json
   end
 
-  it "keeps override and gate-clear writes dormant with the mode locked" do
+  it "keeps override and gate-clear writes closed for an approval-first company without lifecycle work" do
+    employee.update!(readiness_gate_enforced: false)
     expect { grant }.not_to change(AdminOverride, :count)
     expect(response).to have_http_status(:forbidden)
     expect(response.parsed_body["code"]).to eq("client_lifecycle_disabled")
     clear_gate
     expect(response).to have_http_status(:forbidden)
-    expect(employee.reload).to be_readiness_gate_enforced
+    expect(employee.reload).not_to be_readiness_gate_enforced
   end
 
   context "when client-managed mode is enabled" do

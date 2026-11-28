@@ -27,6 +27,10 @@ export function VerificationWarnings({ item, canStartFinalPay }: { item: Verific
       </Badge></div>
     ))}
     {warnings.possible_self_created_hire && <Alert><strong>Possible self-created hire.</strong> The client manager’s name or sign-in email matches the new employee. Confirm they are different people or have someone else verify the details before committing payroll.</Alert>}
+    {warnings.possible_self_lifecycle_action && <Alert>
+      <strong>{warnings.own_record_signal === 'name_only' ? 'Possible self-action (name match only).' : 'Possible self-action.'}</strong>{' '}
+      The client manager’s name matched this employee on a {item.event_kind === 'rehire' ? 'rehire' : 'termination'}. Confirm they are different people and verify this change before committing payroll.
+    </Alert>}
     {warnings.post_termination_committed_pay_period_ids.length > 0 && <Alert tone="error">
       <strong>Backdated termination.</strong> This employee was paid after their termination date in committed payroll {runNumbers(warnings.post_termination_committed_pay_period_ids)}. Check for an overpayment and review whether the pay needs to be voided or corrected.
     </Alert>}

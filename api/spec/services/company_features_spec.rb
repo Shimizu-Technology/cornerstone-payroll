@@ -532,7 +532,13 @@ RSpec.describe CompanyFeatures do
       end
     end
 
-    it "forces employee_lifecycle_mode to approval_first while locked and requires activation timestamp when unlocked" do
+    it "defaults employee_lifecycle_mode to approval_first and requires activation timestamp and client portal when unlocked" do
+      expect(described_class::LOCKED_OFF).not_to include("client_portal.employee_lifecycle_mode")
+
+      # Every existing company without an activated client_managed profile defaults to approval_first.
+      expect(described_class.for(company, on: Date.new(2026, 2, 1)).employee_lifecycle_mode).to eq("approval_first")
+      expect(described_class.for(company, on: Date.new(2026, 2, 1)).client_managed_employee_lifecycle?).to be(false)
+
       profile = ClientOperatingProfile.create!(
         company: company,
         effective_on: Date.new(2026, 1, 1),
@@ -540,22 +546,13 @@ RSpec.describe CompanyFeatures do
         offering: "payroll_portals",
         hours_source: "manual",
         client_portal_enabled: true,
-        employee_portal_enabled: false
-      )
-      profile.update_columns(
+        employee_portal_enabled: false,
         options: OperatingProfileCatalog.default_options.deep_merge(
           "client_portal" => { "employee_lifecycle_mode" => "client_managed" }
         ),
         lifecycle_mode_activated_at: Time.current
       )
 
-      # Locked off by default during PRs 1-4 regardless of stored JSON or activation timestamp.
-      locked_features = described_class.for(company, on: Date.new(2026, 2, 1))
-      expect(locked_features.employee_lifecycle_mode).to eq("approval_first")
-      expect(locked_features.client_managed_employee_lifecycle?).to be(false)
-
-      # Even when unlocked, activation timestamp and client_portal_enabled are both required.
-      stub_const("CompanyFeatures::LOCKED_OFF", CompanyFeatures::LOCKED_OFF - [ "client_portal.employee_lifecycle_mode" ])
       unlocked_active = described_class.for(company, on: Date.new(2026, 2, 1))
       expect(unlocked_active.employee_lifecycle_mode).to eq("client_managed")
       expect(unlocked_active.client_managed_employee_lifecycle?).to be(true)

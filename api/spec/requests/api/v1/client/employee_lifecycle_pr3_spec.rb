@@ -208,10 +208,10 @@ RSpec.describe "Lifecycle PR 3: Client-managed employee lifecycle API & no-self-
     end
   end
 
-  describe "approval_first regression (mode locked by default)" do
-    it "keeps client_portal.employee_lifecycle_mode locked and approval_first behavior 100% unchanged" do
-      expect(OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES).to have_key("client_portal.employee_lifecycle_mode")
-      expect(CompanyFeatures::LOCKED_OFF).to include("client_portal.employee_lifecycle_mode")
+  describe "approval_first regression (default mode after unlock)" do
+    it "unlocks client_portal.employee_lifecycle_mode while keeping every default company approval_first and 100% unchanged" do
+      expect(OperatingProfileCatalog::LOCKED_TOGGLE_MILESTONES).not_to have_key("client_portal.employee_lifecycle_mode")
+      expect(CompanyFeatures::LOCKED_OFF).not_to include("client_portal.employee_lifecycle_mode")
       expect(CompanyFeatures.for(company).employee_lifecycle_mode).to eq("approval_first")
       expect(CompanyFeatures.for(company).client_managed_employee_lifecycle?).to be(false)
 

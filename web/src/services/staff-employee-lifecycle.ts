@@ -19,6 +19,9 @@ export interface VerificationRow {
   effective_on: string | null;
   created_at: string;
   updated_at: string;
+  possible_self_created_hire?: boolean;
+  possible_self_lifecycle_action?: boolean;
+  own_record_signal?: 'strong' | 'name_only' | null;
 }
 
 export interface ReadinessChecklist {
@@ -44,6 +47,8 @@ export interface VerificationDetails extends VerificationRow {
   warnings: {
     committed_pay_period_ids: number[];
     possible_self_created_hire: boolean;
+    possible_self_lifecycle_action?: boolean;
+    own_record_signal?: 'strong' | 'name_only' | null;
     review_final_pay: boolean;
     post_termination_committed_pay_period_ids: number[];
     direct_deposit_missing_bank_details: boolean;

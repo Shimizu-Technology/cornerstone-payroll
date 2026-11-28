@@ -2,7 +2,7 @@
 
 **What this is:** a step-by-step test of the employee app and the staff and client tools around it, run on the demo company. The owner, each Cornerstone reviewer and AI agents each follow it **separately** and fill in their own copy.
 **Where it fits:** [go-live runbook](M4_GO_LIVE_RUNBOOK.md) step 1 (whole script, G8a pass 1) and step 2 (the **[critical]** rows again under enforced row-level security). The first pilot user runs sections B and C on their own records in step 4.
-**Plan:** [Milestone 4 build plan](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md) §4 "M4-12"; [demo company plan](../DEMO_COMPANY_PLAN_2026-11-25.md) §§2–3.
+**Plan:** [Milestone 4 build plan](../MILESTONE_4_EMPLOYEE_APP_BUILD_PLAN_2026-11-24.md) §4 "M4-12"; [demo company plan](../DEMO_COMPANY_PLAN_2026-11-25.md) §§2–3; [client-managed employee lifecycle build plan](../CLIENT_EMPLOYEE_LIFECYCLE_BUILD_PLAN_2026-11-28.md) §11.
 
 This repo is public. Fill in your copy in the private evidence location, not here. Don't paste emails, codes, tokens or screenshots of persona inboxes into a PR or ticket. Demo data is fictional, but persona logins are real accounts.
 
@@ -372,6 +372,92 @@ Every failure must look the same to the person trying, and never say whether an 
 | E3 | Lead | Check filing, AIRE and Cornerstone Tax logs. | No transmission, no AIRE or Tax activity for the demo. | ☐ Pass ☐ Fail | |
 | E4 | Lead | Check the employee service logs for the run window. | No 5xx and no RLS guard errors. | ☐ Pass ☐ Fail | |
 | E5 | Cornerstone admin | Revoke the disposable sign-ups the next run needs fresh (keep Employee 06, Client Manager and one employee active for training). | Revoked. | ☐ Pass ☐ Fail | |
+
+---
+
+## F. Client-managed employee lifecycle
+
+Run against the dedicated **Harbor Finch Market** demo company (seeded idempotently with `rake demo:seed_lifecycle_showcase` or `LIFECYCLE_SHOWCASE=true rake demo:seed`), using the synthetic seeded showcase roster (`Jordan Sample`, `Morgan Example`, `Casey Fixture`, `Taylor Sample`, `Avery Example`, `Riley Fixture`, `Jamie Sample`, `Quinn Example`, `Sloane Fixture`, `Parker Sample`, `Drew Example`) and the demo personas (Client Manager, Client Viewer, Cornerstone `accountant`, `manager` or `accountant + client_management`, and `org_admin`). Harbor Finch Kitchen and Harbor Finch Catering stay in **Cornerstone approves first** (`approval_first`) unless a row explicitly tests switching a company. Run on both **Desktop (1280×800)** and **Phone (390×844)** viewports where noted.
+
+**Setup.** `demo:invite_clients` binds the Client Manager and Client User logins to Harbor Finch Kitchen only, so section F needs its own Market logins. Before F1, as `org_admin`, open **Users → Invite User**, choose **Client Portal User**, assign only **Harbor Finch Market**, and invite two allow-listed tester addresses: one as **Client manager** and one as **Client viewer**. The rows below call these **Client Manager** and **Client Viewer**. Revoke both in E5 with the other disposable sign-ups.
+
+### F1. Incomplete new hire, pay-run exclusions, and Ready-to-pay unlock
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F1.1 | Both · Agent OK [critical] | As **Client Manager** on Harbor Finch Market, open **Employees → Add Employee**, create a W-2 hourly hire with only first name, last name, and hire date, and click **Save employee**. | Saved as active with amber **Incomplete — can’t be paid yet** badge and checklist naming missing SSN, date of birth, home address, pay rate, W-4, and payment method. No approval wait. No sideways scroll on phone. | ☐ Pass ☐ Fail | |
+| F1.2 | Desktop · Agent OK [critical] | As staff, open Harbor Finch Market’s draft `regular` pay run (and test off-cycle `bonus`, `off_cycle_tips`, and `commission` drafts). Check `Jordan Sample` and the newly created Incomplete hire. | Incomplete hires appear under **Not included — incomplete setup** with the exact missing-item reason (e.g., *"W-4 missing"*) and stay off the payable roster. Explicitly selecting an `active` or `deactivated`/`inactive` Incomplete hire on a `final` run, an active Incomplete hire on an ad-hoc `adjustment` run, or an operator-created ad-hoc `correction` draft stays blocked. | ☐ Pass ☐ Fail | |
+| F1.3 | Desktop · Agent OK [critical] | Try bypassing the readiness gate for `Jordan Sample`: manually add to the draft run (`POST /api/v1/admin/pay_periods/:id/payroll_items`), and apply a timecard or workbook import containing hours for `Jordan Sample`. | Manual add returns HTTP 422 with the exact missing-item reason. Imports skip `Jordan Sample` and visibly report why hours were not imported. `approve!` and `commit!` fail closed if a row somehow exists. | ☐ Pass ☐ Fail | |
+| F1.4 | Both · Agent OK [critical] | As **Client Manager**, open the Incomplete hire, click **Complete setup**, fill SSN (with double-entry confirmation), DOB, address, hourly rate, W-4 (signed date and effective date covering the payday), and `paper_check`, then save. | Badge flips immediately to **Ready to pay** with no approval wait. Recalculating the draft pay run as staff includes the hire automatically. | ☐ Pass ☐ Fail | |
+
+### F2. Per-period readiness, contractors, and variable salary
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F2.1 | Desktop · Agent OK | Set a new W-2 hire’s W-4 effective date *after* the open draft period’s `pay_date`. | Employee stays **Incomplete** for that period with a dated reason naming when the W-4 takes effect (not falsely Ready). | ☐ Pass ☐ Fail | |
+| F2.2 | Both · Agent OK | Create an individual flat-fee 1099 contractor with `pay_rate = 0`, 9-digit SSN, address, start date, `w9_on_file = true`, and `direct_deposit` (no bank numbers). Also inspect `Avery Example` in **To verify**. | Contractor shows **Ready to pay** with an info note that Cornerstone will confirm bank setup before payday. Staff **To verify** displays the *"Bank details are missing"* / direct-deposit ACH callout. | ☐ Pass ☐ Fail | |
+| F2.3 | Desktop · Agent OK | Create a business hourly 1099 contractor missing `business_name` and `w9_on_file`, then complete both plus 9-digit EIN and hourly rate. | Starts **Incomplete** listing missing business name, EIN, rate, and W-9; flips to **Ready to pay** once completed. | ☐ Pass ☐ Fail | |
+| F2.4 | Desktop · Agent OK | Create a W-2 variable-salary employee (`salary_type = "variable"`, `pay_rate = 0`) with SSN, DOB, hire date, address, W-4, and `paper_check`. | Immediately **Ready to pay** with `$0` base rate allowed. | ☐ Pass ☐ Fail | |
+
+### F3. Direct edits, stale-calculation gate, SSN guards, and staff "To verify"
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F3.1 | Desktop · Agent OK [critical] | On a `calculated` run, as **Client Manager** give an active employee a pay raise effective on or before the period end date. Try **Approve** and **Commit** as staff before recalculating. | Run’s `paycheck_input_fingerprint` turns stale; `approve!` and `commit!` block with a banner naming the stale worker until recalculated. Committing a loan payment on another run does not false-stale an open run; `approval_first` companies (Harbor Finch Kitchen) are unaffected. | ☐ Pass ☐ Fail | |
+| F3.2 | Desktop · Agent OK [critical] | Change `employee.payment_delivery_method` while a run is `calculated`, then repeat after the run is `approved` with a materialized `paper_check` item. | On `calculated`, `approve!` blocks until recalculated or confirmed via payment-method service. On `approved` with materialized `paper_check`, changing the future default does not unapprove the run and `commit!` succeeds as `paper_check`. | ☐ Pass ☐ Fail | |
+| F3.3 | Both · Agent OK | As **Client Manager**, edit an employee’s SSN: test mismatched confirmation, an SSN already assigned to another worker in the same company, and changing SSN on a worker with committed pay. | Mismatched confirmation is rejected; duplicate SSN in the same company is rejected on SSN change in client portal (while non-SSN edits and staff edits on existing shared-SSN records still succeed); SSN change after committed pay flags W-2c / Form 941-GU amendment review to staff. | ☐ Pass ☐ Fail | |
+| F3.4 | Both · Agent OK [critical] | Open **To verify** as a plain `accountant`, then as a `manager` (or `accountant + client_management`). Review seeded `Casey Fixture` (pay change), `Taylor Sample` (W-4 change), and `Avery Example` (direct deposit). | Plain `accountant` can view the queue and detail but has no review actions (and API writes return HTTP 403). `manager` / delegated accountant can **Mark verified**, **Fix & verify** (showing the client-approved run re-approval warning when on an approved run), and **Send back to client** with a 5–1,000 char note. | ☐ Pass ☐ Fail | |
+| F3.5 | Both · Agent OK | As **Client Manager**, open the **Needs attention** filter on **Employees**, open `Riley Fixture` (returned item), and either edit the record or click **Reply to Cornerstone**. | Highlighted Cornerstone note is visible; saving or replying moves the item back to `pending_verification` in Cornerstone’s **To verify** queue. | ☐ Pass ☐ Fail | |
+
+### F4. Dual-role self-dealing, possible-self flag, and client viewer read-only
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F4.1 | Desktop · Agent OK [critical] | As a dual-role **Client Manager** (both with an employee-app link and matching by email without a link), try editing own pay rate, W-4, SSN, payment method, and home address (with `profile_requests` off and on). | Non-address edits (including SSN) create an `own_record: true` `EmployeeChangeRequest` retaining `sensitive_payload` routed to Cornerstone staff (not approvable via the client address route). Address-only edits route to non-self approval. | ☐ Pass ☐ Fail | |
+| F4.2 | Desktop · Agent OK [critical] | As a dual-role **Client Manager**, attempt to terminate or rehire a record with a **strong** own-record signal (account link, confirmed email audit, normalized email match, or prior strong own-record). | Refused with HTTP 403 (`self_lifecycle_forbidden`). | ☐ Pass ☐ Fail | |
+| F4.3 | Both · Agent OK [critical] | As **Client Manager**, terminate or rehire a different employee who matches **by name only** (or inspect seeded `Sloane Fixture`), and also create a new hire matching the manager’s name/email. Check both the client response and staff **To verify**. | Terminate/rehire succeeds (not blocked by a hard 403), flags `possible_self_lifecycle_action` (`own_record_signal: "name_only"`) on the staff **To verify** item (and `possible_self_created_hire` on matching new hire), and requires verification or explicit acknowledgement at payroll commit. Neither flag is ever exposed in client portal responses or UI. | ☐ Pass ☐ Fail | |
+| F4.4 | Both · Agent OK [critical] | Sign in as **Client Viewer** on Harbor Finch Market. Open **Employees** and an employee record, and test direct client API writes. | Checklists, readiness badges, and returned-item notices are visible read-only; Add, Edit, Terminate, Rehire, and Reply buttons are hidden; direct API writes return HTTP 403 (`client_view_only`). | ☐ Pass ☐ Fail | |
+
+### F5. Terminate (mid-period, backdated, final pay) and rehire
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F5.1 | Both · Agent OK | As **Client Manager**, open **Terminate** on an active employee and try entering a future termination date. | Rejected client-side and server-side (`effective_date <= today`). | ☐ Pass ☐ Fail | |
+| F5.2 | Both · Agent OK [critical] | Terminate an active employee with last day worked inside an `approved` (client-approved) pay run, with reason and final-pay / accrued PTO notes. Also inspect seeded `Jamie Sample` in **To verify**. | Modal warns about re-approval; termination succeeds, turns `paycheck_input_fingerprint` stale (forcing unapprove → recalculate → republish → client re-approval before commit), excludes them from periods starting after termination, retires any employee-app link to `former`, and shows the final-pay / PTO prompt + **Create a final pay run** link in staff **To verify**. | ☐ Pass ☐ Fail | |
+| F5.3 | Desktop · Agent OK | Enter a backdated termination dated before an already-committed regular pay run that paid the employee. | Succeeds with a client warning and tags `post_termination_committed_pay_period_ids`, showing the high-priority **Backdated termination** alert in staff **To verify**. | ☐ Pass ☐ Fail | |
+| F5.4 | Desktop · Agent OK | Pay a genuinely `terminated` Incomplete hire on an off-cycle `final` run, and confirm an `active` or `deactivated` Incomplete hire on the same `final` run stays blocked. | Terminated Incomplete hire is payable (using Pub 15-T default withholding if W-4 is missing); active and deactivated Incomplete hires remain blocked. | ☐ Pass ☐ Fail | |
+| F5.5 | Both · Agent OK | Rehire a terminated employee with a legacy W-4 and `NULL` payment method. Also test rehiring a staff-created hire with `document_readiness_required: true`. | Modal previews Ready-to-pay checklist; legacy W-4 and `NULL` = paper check are accepted while missing SSN/DOB/address still blocks; `readiness_gate_enforced` is set to `true` while any pending `document_readiness_required` gate stays enforced; no employee-app invite is auto-sent. | ☐ Pass ☐ Fail | |
+
+### F6. Pay-run commit safety net and concurrent conflict
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F6.1 | Desktop · Agent OK [critical] | With an unverified pay change on a recalculated run, run **Calculate**, **Approve**, and client payroll approval, then open **Commit payroll**. | Unverified items do not block Calculate, Approve, or client approval. Commit dialog lists each unverified item with a per-item checkbox and keeps **Confirm commit** disabled until every item is ticked. | ☐ Pass ☐ Fail | |
+| F6.2 | Desktop · Agent OK [critical] | While the Commit dialog is open, have **Client Manager** submit another pay-affecting edit for an employee on the run, then click **Confirm commit**. | Server returns HTTP 409 (`unverified_changes_changed`), dialog reloads updated items, clears checkboxes, and commits only after explicit re-acknowledgement. | ☐ Pass ☐ Fail | |
+| F6.3 | Desktop · Agent OK [critical] | After commit, inspect the acknowledged item in **To verify**, then have **Client Manager** edit that same field again. | Acknowledged item stays `pending_verification` with a **Paid in committed run #…** badge, is never superseded by the later edit, and the newer item shows `before_values` from the last verified state. | ☐ Pass ☐ Fail | |
+
+### F7. Org-admin readiness override and IRS Pub 15-T default withholding
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F7.1 | Desktop · Agent OK [critical] | Attempt to grant a readiness override or `clear_readiness_gate` as `accountant`, `accountant + client_management`, `manager`, `admin`, and `client`. Also try opening a 24-hour intake window in `client_managed` mode or calling `EmployeeIntakeExceptionReviewService` on a `readiness_gate_enforced` worker. | All non-org-admin roles get HTTP 403; opening a 24-hour intake window returns 422; `EmployeeIntakeExceptionReviewService` rejects `readiness_gate_enforced` workers. | ☐ Pass ☐ Fail | |
+| F7.2 | Both · Agent OK [critical] | As `org_admin` (with fresh step-up verification), grant a readiness override for an Incomplete W-2 hire missing a W-4 (or inspect seeded `Parker Sample`), checking the Pub 15-T acknowledgement and entering a 10+ char reason. | Override allows the hire into the pinned draft run; payroll calculates IRS Pub 15-T Single / no-adjustments withholding, writes a `default_withholding` W-4 election + `admin_overrides` + `audit_logs`, and keeps W-4 missing on the checklist until a real signed W-4 is recorded. | ☐ Pass ☐ Fail | |
+
+### F8. Grandfathered pre-rollout employees and classification transitions
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F8.1 | Desktop · Agent OK | Inspect grandfathered worker `Drew Example` (`readiness_gate_enforced: false`, missing DOB, `payment_delivery_method: NULL`) on Harbor Finch Market’s employee page and draft pay run. | Shows non-blocking **Missing items** badge (DOB only, since `NULL` = paper check) and remains payable in the draft pay run without an override. | ☐ Pass ☐ Fail | |
+| F8.2 | Desktop · Agent OK | Confirm an existing staff-created hire with `document_readiness_required: true` keeps their document gate, and `EmployeeClassificationTransitionService` preserves `readiness_gate_enforced: false` on a grandfathered W-2 ↔ 1099 transition. | Document gate stays enforced; transitioned grandfathered worker is not newly blocked. | ☐ Pass ☐ Fail | |
+
+### F9. Mode switch preflights, scheduled activation recovery, and rollback
+
+| # | Device | Step | Expected | Pass/Fail | Notes |
+|---|---|---|---|---|---|
+| F9.1 | Desktop · Agent OK [critical] | Open **How this client runs** (Operating Profile) for an `approval_first` demo company with (a) a pending non-address change request, (b) an open 24-hour intake window, or (c) zero qualifying staff notification recipients, and select **Client manages, Cornerstone verifies**. | Preflight panel lists each blocker with remediation links and disables/refuses save until all three clear; pending `profile_address?` requests do not block. Deprecated `review_first.*` controls stay hidden. | ☐ Pass ☐ Fail | |
+| F9.2 | Desktop · Agent OK [critical] | Schedule a future-dated switch to `client_managed`, let a blocker drift before `effective_on` (e.g., pending non-address change request), then run activation. | Company stays fail-closed in `approval_first`, records blockers, shows the **Scheduled employee lifecycle switch blocked** banner, and activates cleanly via **Retry activation** once resolved (or cancels via **Revert to Cornerstone approval**). | ☐ Pass ☐ Fail | |
+| F9.3 | Desktop · Agent OK [critical] | Roll back Harbor Finch Market (or the switched demo company) from `client_managed` to `approval_first` while verification items remain open. | Rollback succeeds immediately; open verification items, overrides, acknowledgements, and audit logs stay visible and reviewable; further client edits return to the approval queue. | ☐ Pass ☐ Fail | |
+| F9.4 | Desktop · Agent OK [critical] | Verify cross-cutting invariants: corrective paychecks succeed on terminated/overridden workers; W-2GU includes terminated workers and flags missing SSN/address; Incomplete hire cannot be invited to the employee app; cross-company isolation holds under RLS `raise`. | Every check passes with zero cross-company leakage. | ☐ Pass ☐ Fail | |
 
 ### Sign-off
 

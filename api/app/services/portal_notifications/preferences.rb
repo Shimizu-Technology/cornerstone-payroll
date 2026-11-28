@@ -23,10 +23,11 @@ module PortalNotifications
           categories.except("payroll_viewer_updates")
         end
 
-        enabled = Company.where(id: user.accessible_company_ids).any? do |company|
-          CompanyFeatures.for(company).employee_portal_feature?(:profile_requests)
-        end
-        enabled ? categories : categories.except("address_approvals", "contact_changes")
+        features = Company.where(id: user.accessible_company_ids).map { |company| CompanyFeatures.for(company) }
+        categories = categories.except("address_approvals", "contact_changes") unless features.any? { |feature| feature.employee_portal_feature?(:profile_requests) }
+        # Only a client-managed company has changes Cornerstone can send back.
+        categories = categories.except("employee_verification_followups") unless features.any? { |feature| feature.employee_lifecycle_mode == "client_managed" }
+        categories
       end
 
       def mode_for(user, category)

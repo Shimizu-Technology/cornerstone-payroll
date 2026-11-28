@@ -327,7 +327,11 @@ export function EmployeeList() {
     <div>
       <Header
         title="Employees"
-        description="Manage your company's employees"
+        description={clientManaged
+          ? isClientViewer || activeCompany?.client_view_only
+            ? 'View employees and their setup. Your access is view only.'
+            : 'Add, edit, terminate, and rehire employees directly. Incomplete setup blocks pay until finished or a Cornerstone organization admin overrides it; Cornerstone is notified and verifies afterwards.'
+          : "Manage your company's employees"}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" onClick={() => navigate(employeeContactDetailsPath(companyId))}>

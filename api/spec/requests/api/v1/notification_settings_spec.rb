@@ -22,7 +22,8 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     expect(data.fetch("categories").to_h { |category| category.values_at("key", "delivery_mode") }).to eq(
       "admin_override_staff" => "immediate", "payroll_corrections_staff" => "immediate", "contact_confirmations" => "digest", "employee_app_follow_ups" => "digest",
       "w2_posting" => "immediate", "tax_form_paper_copies" => "immediate", "client_messages" => "immediate",
-      "client_uploads" => "immediate", "employee_changes" => "digest", "payroll_submissions" => "immediate"
+      "client_uploads" => "immediate", "employee_changes" => "digest", "employee_verifications" => "immediate",
+      "payroll_submissions" => "immediate"
     )
     expect(data).not_to have_key("administration")
     patch path, params: { preferences: { payroll_super_admin: "off" } }, as: :json
@@ -37,6 +38,21 @@ RSpec.describe "Personal portal notification settings", :portal_notifications, t
     patch path, params: { preferences: { address_approvals: "off" } }, as: :json
     expect(response).to have_http_status(:unprocessable_entity)
     expect(PortalNotifications::Preferences.mode_for(client, "address_approvals")).to eq("immediate")
+  end
+
+  it "shows returned employee updates only to client managers of a client-managed company" do
+    ClientOperatingProfile.create!(
+      ClientOperatingProfiles::LegacyProfileBuilder.attributes_for(company, effective_on: Date.new(2026, 1, 1)).merge(
+        client_portal_enabled: true,
+        options: { "client_portal" => { "employee_lifecycle_mode" => "client_managed" } },
+        lifecycle_mode_activated_at: Time.current
+      )
+    )
+    viewer = create(:user, company: company, role: "client", client_access_level: "viewer")
+    [ client, viewer ].each { |user| create(:company_assignment, user: user, company: company) }
+
+    expect(PortalNotifications::Preferences.categories_for(client).keys).to include("employee_verification_followups")
+    expect(PortalNotifications::Preferences.categories_for(viewer).keys).not_to include("employee_verification_followups")
   end
 
   it "shows viewers their payroll digest categories and rejects manager-only settings" do

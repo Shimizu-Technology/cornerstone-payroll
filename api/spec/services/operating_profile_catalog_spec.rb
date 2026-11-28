@@ -48,9 +48,8 @@ RSpec.describe OperatingProfileCatalog do
       expect(described_class.fetch("client_portal.employee_lifecycle_mode").as_json[:deprecated]).to be(false)
     end
 
-    it "locks forthcoming M4-M6 toggles and lifecycle mode to their safe defaults with real milestones" do
+    it "unlocks client_portal.employee_lifecycle_mode with approval_first default and locks remaining M4-M6 toggles" do
       expected_toggles = %w[
-        client_portal.employee_lifecycle_mode
         employee_portal_enabled
         employee_portal.features.stubs
         employee_portal.features.tax_forms
@@ -65,23 +64,22 @@ RSpec.describe OperatingProfileCatalog do
       ]
 
       expect(described_class::M4_TO_M6_TOGGLE_IDS).to match_array(expected_toggles)
-      expect(described_class.locked_keys).to include("client_portal.employee_lifecycle_mode")
+      expect(described_class.locked_keys).not_to include("client_portal.employee_lifecycle_mode")
+      lifecycle_entry = described_class.fetch("client_portal.employee_lifecycle_mode")
+      expect(described_class.locked_milestone_for(lifecycle_entry)).to be_nil
+      expect(lifecycle_entry.as_json[:locked_until_milestone]).to be_nil
+      expect(lifecycle_entry.type).to eq("enum")
+      expect(lifecycle_entry.default).to eq("approval_first")
+      expect(lifecycle_entry.allowed).to eq(%w[approval_first client_managed])
+      expect(lifecycle_entry.capability).to eq(:manage_organization)
 
       expected_toggles.each do |toggle_id|
         entry = described_class.fetch(toggle_id)
         expect(described_class.locked_milestone_for(entry)).to be_a(Integer).and be >= 4
         expect(entry.as_json[:locked_until_milestone]).to eq(described_class.locked_milestone_for(entry))
-
-        if toggle_id == "client_portal.employee_lifecycle_mode"
-          expect(entry.type).to eq("enum")
-          expect(entry.default).to eq("approval_first")
-          expect(entry.allowed).to eq(%w[approval_first client_managed])
-          expect(described_class.locked_default_for(toggle_id)).to eq("approval_first")
-        else
-          expect(entry.type).to eq("boolean"), "#{toggle_id} must be boolean"
-          expect(entry.default).to be(false), "#{toggle_id} must default to false"
-          expect(described_class.locked_default_for(toggle_id)).to be(false)
-        end
+        expect(entry.type).to eq("boolean"), "#{toggle_id} must be boolean"
+        expect(entry.default).to be(false), "#{toggle_id} must default to false"
+        expect(described_class.locked_default_for(toggle_id)).to be(false)
       end
     end
 
