@@ -153,7 +153,8 @@ class EmployeeClassificationTransitionService
       :state,
       :zip,
       :phone,
-      :contact_source
+      :contact_source,
+      :payment_delivery_method
     )
     attrs[:email] = attributes[:email] if attributes.key?(:email)
     attrs[:phone] = attributes[:phone] if attributes.key?(:phone)

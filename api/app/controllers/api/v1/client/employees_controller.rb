@@ -234,11 +234,8 @@ module Api
           end
 
           effective_date_input = payload[:effective_date].presence || payload[:last_worked_on].presence
-          event = nil
-          verification_item = nil
-          post_termination_committed_ids = []
-          warnings = []
           error_response = nil
+          response_payload = nil
 
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
@@ -272,6 +269,7 @@ module Api
               }
             )
 
+            warnings = []
             post_termination_committed_ids = post_termination_committed_pay_period_ids(@employee, event.effective_date)
             if post_termination_committed_ids.any?
               warnings << "This employee was already paid in committed payroll after #{event.effective_date.iso8601}. Cornerstone has been alerted to review for overpayment, void, or correction."
@@ -323,21 +321,23 @@ module Api
                 post_termination_committed_pay_period_ids: post_termination_committed_ids
               }.compact
             )
+
+            contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+            reloaded = @employee.reload
+            readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
+            response_payload = {
+              data: serialize_lifecycle_transition_employee(reloaded, contact_context, readiness),
+              status_event: serialize_status_event(event),
+              verification_item: serialize_verification_item(verification_item),
+              post_termination_committed_pay_period_ids: post_termination_committed_ids,
+              warnings: warnings,
+              message: "#{reloaded.full_name} has been terminated effective #{event.effective_date.iso8601}. Cornerstone has been notified to verify."
+            }
           end
 
           return render json: error_response[0], status: error_response[1] if error_response
 
-          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          reloaded = @employee.reload
-          readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
-          render json: {
-            data: serialize_lifecycle_transition_employee(reloaded, contact_context, readiness),
-            status_event: serialize_status_event(event),
-            verification_item: serialize_verification_item(verification_item),
-            post_termination_committed_pay_period_ids: post_termination_committed_ids,
-            warnings: warnings,
-            message: "#{@employee.full_name} has been terminated effective #{event.effective_date.iso8601}. Cornerstone has been notified to verify."
-          }
+          render json: response_payload
         rescue EmployeeProfileIdentity::LinkCheckUnavailable => e
           render json: { error: e.message }, status: :service_unavailable
         rescue EmployeeStatusTransitionService::ApprovedRunBlocked => e
@@ -369,10 +369,8 @@ module Api
             }, status: :unprocessable_entity
           end
 
-          event = nil
-          readiness = nil
-          verification_item = nil
           error_response = nil
+          response_payload = nil
 
           ActiveRecord::Base.transaction do
             Company.lock.find(current_company_id)
@@ -409,7 +407,8 @@ module Api
             # keeping any existing document_readiness_required gate untouched (§3.2).
             gate_was_enforced = @employee.readiness_gate_enforced?
             @employee.update!(readiness_gate_enforced: true) unless gate_was_enforced
-            readiness = EmployeeReadinessEvaluator.evaluate(@employee.reload)
+            reloaded = @employee.reload
+            readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
 
             changed_fields = %w[status termination_date]
             before_values = {
@@ -431,14 +430,14 @@ module Api
               "readiness_status" => readiness.status,
               "missing_keys" => readiness.missing_keys
             }.compact
-            if EmployeeProfileIdentity.name_only_own_record_for_client_managed?(@employee, current_user)
+            if EmployeeProfileIdentity.name_only_own_record_for_client_managed?(reloaded, current_user)
               rehire_metadata["possible_self_lifecycle_action"] = true
               rehire_metadata["possible_self_actor_id"] = current_user.id
               rehire_metadata["own_record_signal"] = "name_only"
             end
 
             verification_item = EmployeeVerificationItems::Recorder.record!(
-              employee: @employee,
+              employee: reloaded,
               actor: current_user,
               event_kind: "rehire",
               changed_fields: changed_fields,
@@ -451,28 +450,30 @@ module Api
 
             record_lifecycle_audit!(
               action: "client_employees#rehire",
-              employee: @employee,
+              employee: reloaded,
               metadata: {
                 source: "client_portal",
-                employee_name: @employee.display_name,
+                employee_name: reloaded.display_name,
                 status_event_id: event.id,
                 verification_item_id: verification_item.id,
                 effective_date: event.effective_date.iso8601,
                 readiness_status: readiness.status
               }.compact
             )
+
+            contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
+            response_payload = {
+              data: serialize_lifecycle_transition_employee(reloaded, contact_context, readiness),
+              status_event: serialize_status_event(event),
+              readiness: readiness.as_json,
+              verification_item: serialize_verification_item(verification_item),
+              message: "#{reloaded.full_name} has been rehired effective #{event.effective_date.iso8601}. Cornerstone has been notified to verify."
+            }
           end
 
           return render json: error_response[0], status: error_response[1] if error_response
 
-          contact_context = EmployeeContactValidator.contact_details_context(company: current_company)
-          render json: {
-            data: serialize_lifecycle_transition_employee(@employee.reload, contact_context, readiness),
-            status_event: serialize_status_event(event),
-            readiness: readiness.as_json,
-            verification_item: serialize_verification_item(verification_item),
-            message: "#{@employee.full_name} has been rehired effective #{event.effective_date.iso8601}. Cornerstone has been notified to verify."
-          }
+          render json: response_payload
         rescue EmployeeProfileIdentity::LinkCheckUnavailable => e
           render json: { error: e.message }, status: :service_unavailable
         rescue EmployeeStatusTransitionService::SelfLifecycleForbidden => e
@@ -702,32 +703,15 @@ module Api
           end
 
           parsed = parse_bounded_iso_date(params[:rates_on])
-          unless parsed && submittable_period_end_date?(parsed)
+          catalog, entry = parsed ? submittable_period_entry_for(parsed) : [ nil, nil ]
+          unless entry
             render json: { error: "rates_on must be the end date of an open payroll submission period (YYYY-MM-DD)" }, status: :unprocessable_entity
             return false
           end
 
           @rates_on = parsed
-          @w4_on = resolve_w4_on_for_rates_on(parsed)
+          @w4_on = catalog.pay_date_for(entry)
           true
-        end
-
-        def resolve_w4_on_for_rates_on(end_date)
-          period = PayPeriod.where(
-            company_id: current_company_id,
-            end_date: end_date,
-            status: %w[draft calculated approved],
-            cycle: "regular",
-            run_purpose: "regular",
-            correction_status: nil,
-            test_workspace_role: nil,
-            parallel_run: false
-          ).order(pay_date: :asc, id: :asc).first
-          return period.pay_date if period
-
-          catalog = PayrollSubmissions::Catalog.new(company: current_company)
-          entry = catalog.entries.find { |candidate| candidate.end_date == end_date }
-          entry ? catalog.pay_date_for(entry) : nil
         end
 
         def parse_bounded_iso_date(value)
@@ -743,12 +727,13 @@ module Api
           nil
         end
 
-        def submittable_period_end_date?(date)
+        def submittable_period_entry_for(date)
           catalog = PayrollSubmissions::Catalog.new(company: current_company)
           serializer = PayrollSubmissions::Serializer.new(current_user: current_user, catalog: catalog)
-          catalog.entries.any? do |entry|
-            entry.end_date == date && serializer.allowed_actions(entry).include?("submit")
+          entry = catalog.entries.find do |candidate|
+            candidate.end_date == date && serializer.allowed_actions(candidate).include?("submit")
           end
+          [ catalog, entry ]
         end
 
         def contact_page_or_full(employee, contact_context, readiness: nil)
