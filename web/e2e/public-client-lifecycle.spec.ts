@@ -145,7 +145,7 @@ for (const width of [390, 1280]) {
     await noPageOverflow(page);
     await page.getByRole('button', { name: 'Save employee' }).click();
 
-    await expect(page.getByRole('heading', { name: 'Ready to pay' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Pay setup' })).toBeVisible();
     await expect(page.getByText(/Incomplete — can’t be paid yet/)).toBeVisible();
     await page.getByRole('link', { name: 'Complete setup' }).click();
     await expect(page.locator('#employee-personal')).toBeFocused();
@@ -209,7 +209,7 @@ for (const width of [390, 1280]) {
 
     await page.getByRole('button', { name: 'Rehire', exact: true }).click();
     const rehire = page.getByRole('dialog', { name: 'Rehire Rowan Fixture' });
-    await expect(rehire.getByRole('heading', { name: 'Ready to pay after rehire' })).toBeVisible();
+    await expect(rehire.getByRole('heading', { name: 'Pay setup after rehire' })).toBeVisible();
     await rehire.getByRole('button', { name: 'Rehire', exact: true }).click();
     await expect(page.getByText('Rehire saved.')).toBeVisible();
     expect(errors).toEqual([]);
