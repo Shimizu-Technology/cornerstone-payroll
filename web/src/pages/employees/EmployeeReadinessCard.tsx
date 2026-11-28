@@ -49,7 +49,7 @@ export function EmployeeReadinessCard({ readiness, setupPath, isBusinessContract
     <Card className={preview ? 'border-neutral-200 shadow-none' : undefined}>
       <CardHeader className="gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>{preview ? 'Ready to pay after rehire' : 'Ready to pay'}</CardTitle>
+          <CardTitle>{preview ? 'Pay setup after rehire' : 'Pay setup'}</CardTitle>
           <EmployeeReadinessBadge status={readiness.status} />
         </div>
         <p className="text-sm leading-5 text-neutral-600">

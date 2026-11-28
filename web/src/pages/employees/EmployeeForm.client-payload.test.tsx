@@ -249,7 +249,7 @@ describe('Client employee form payload', () => {
     } });
     view(7);
     expect(await screen.findByRole('button', { name: 'Update Employee' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Ready to pay' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Pay setup' })).toBeNull();
     expect(screen.queryByLabelText('Record a received W-4')).toBeNull();
     expect((screen.getByLabelText('How this employee is paid') as HTMLSelectElement).disabled).toBe(true);
     const ssn = screen.getByLabelText(/^Social Security Number/) as HTMLInputElement;

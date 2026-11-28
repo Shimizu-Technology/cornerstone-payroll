@@ -61,7 +61,7 @@ describe('ClientEmployeeOverview', () => {
     apiMocks.get.mockResolvedValue({ data: { ...dina, readiness, lifecycle_edit_context: lifecycle } });
     renderOverview();
     expect(await screen.findByRole('link', { name: 'Edit employee' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Ready to pay' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Pay setup' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Terminate' })).toBeNull();
     expect(apiMocks.appGet).not.toHaveBeenCalledWith('/client/verification_items', expect.anything());
   });
@@ -83,7 +83,7 @@ describe('ClientEmployeeOverview', () => {
   it('lets a viewer read the checklist and return note with the mutation controls hidden', async () => {
     clientManaged(dina, true);
     expect(await screen.findByText(returned.return_note)).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Ready to pay' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Pay setup' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Reply to Cornerstone' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Terminate' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Edit employee' })).toBeNull();
@@ -115,7 +115,7 @@ describe('ClientEmployeeOverview', () => {
   it('previews the rehire checklist and sends a date after termination', async () => {
     clientManaged({ ...dina, status: 'terminated', termination_date: '2026-11-15' });
     fireEvent.click(await screen.findByRole('button', { name: 'Rehire' }));
-    expect(screen.getByRole('heading', { name: 'Ready to pay after rehire' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Pay setup after rehire' })).toBeTruthy();
     const date = screen.getByLabelText('Rehire date') as HTMLInputElement;
     expect(date.min).toBe('2026-11-16');
     expect(date.max).toBe('2026-11-28');
