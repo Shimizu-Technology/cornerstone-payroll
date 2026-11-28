@@ -12,10 +12,13 @@ module PortalNotifications
       def categories_for(user)
         audience = audience_for(user)
         categories = CATEGORIES.select { |_key, category| category[:audience] == audience && !category[:mandatory] }
+        if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+          categories = categories.except(*EMPLOYEE_LIFECYCLE_CATEGORIES)
+        end
         return categories unless audience == "client"
 
         categories = if user.client_viewer?
-          categories.except("address_approvals", "contact_changes", "payroll_corrections")
+          categories.except("address_approvals", "contact_changes", "payroll_corrections", "employee_verification_followups")
         else
           categories.except("payroll_viewer_updates")
         end
@@ -111,6 +114,8 @@ module PortalNotifications
         end
 
         scope.includes(:portal_notification_event).find_each do |delivery|
+          next if delivery.event.preference_category(user) != category
+
           if delivery.user_id.nil? &&
               Recipients.eligible_account_user_for_email(delivery.recipient_email, delivery.event)&.id != user.id
             next

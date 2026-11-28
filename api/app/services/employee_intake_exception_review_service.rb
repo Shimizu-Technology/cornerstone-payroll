@@ -11,6 +11,7 @@ class EmployeeIntakeExceptionReviewService
       employee.company.lock!
       employee.lock!
       raise Error, "Manager or administrator access required" unless StaffRolePolicy.allowed?(actor, :manage_client_configuration, company: employee.company)
+      raise Error, "Use the employee readiness checklist to review this employee" if employee.readiness_gate_enforced?
       raise Error, "This employee has no intake exception" if employee.intake_exception.blank?
       exception = employee.intake_exception.deep_dup
       if attrs.key?(:follow_up_due_on)

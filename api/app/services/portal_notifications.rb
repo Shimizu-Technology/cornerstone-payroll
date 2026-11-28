@@ -12,6 +12,7 @@ module PortalNotifications
   DIGEST_TIME_LABEL = "7:00 AM Chamorro Time"
   # Immediate alerts wait briefly so a burst of activity becomes one email.
   BATCH_WINDOW = 2.minutes
+  EMPLOYEE_LIFECYCLE_CATEGORIES = %w[employee_verifications employee_verification_followups].freeze
 
   CATEGORIES = {
     "admin_override_staff" => {
@@ -66,6 +67,14 @@ module PortalNotifications
       audience: "staff", default_mode: "digest", label: "Employee change requests",
       description: "A client submits a new hire or employee change for review."
     },
+    "employee_verifications" => {
+      audience: "staff", default_mode: "immediate", label: "Employee verification",
+      description: "Employee updates are ready for staff verification, or a scheduled mode switch needs attention."
+    },
+    "employee_verification_followups" => {
+      audience: "client", default_mode: "immediate", label: "Employee updates to review",
+      description: "Cornerstone sends an employee update back for your review."
+    },
     "portal_replies" => {
       audience: "client", default_mode: "immediate", label: "Messages from Cornerstone",
       description: "Cornerstone replies to you or starts a conversation."
@@ -115,6 +124,9 @@ module PortalNotifications
     "client_message" => { category: "client_messages", message: true },
     "client_upload" => { category: "client_uploads" },
     "employee_change_submitted" => { category: "employee_changes" },
+    "employee_verification_queued" => { category: "employee_verifications" },
+    "employee_verification_returned" => { category: "employee_verification_followups", client_managers_only: true },
+    "lifecycle_mode_activation_blocked" => { category: "employee_verifications" },
     "address_approval_requested" => { category: "address_approvals", client_managers_only: true },
     "employee_contact_confirmation_requested" => { category: "contact_confirmations" },
     "employee_contact_changed" => { category: "contact_changes", client_managers_only: true },
@@ -264,13 +276,16 @@ module PortalNotifications
       Rails.logger.error("W-2 posting notification failed: filing=#{filing.id} error=#{error.class}")
     end
 
-    # TODO(PR4): Wire lifecycle_mode_activation_blocked into CATEGORIES,
-    # EVENT_TYPES, Recipients (listed :manage_client_configuration staff with
-    # org_admin/super_admin fallback), and Email templates. Kept as an explicit
-    # no-op in PR 3 so PR 4's change is visible and activation never depends on
-    # a silent respond_to? hook.
-    def lifecycle_mode_activation_blocked!(_profile, actor: nil)
-      nil
+    def employee_verification_queued!(item)
+      lifecycle_event!("employee_verification_queued", item, actor: item.source_actor, revision: item.updated_at)
+    end
+
+    def employee_verification_returned!(item)
+      lifecycle_event!("employee_verification_returned", item, actor: item.returned_by, revision: item.returned_at)
+    end
+
+    def lifecycle_mode_activation_blocked!(profile, actor: nil)
+      lifecycle_event!("lifecycle_mode_activation_blocked", profile, actor: actor, revision: profile.lifecycle_mode_activation_failed_at)
     end
 
     # Repeating an event (a retried request, a replayed job) returns the saved
@@ -328,6 +343,15 @@ module PortalNotifications
 
     private
 
+    def lifecycle_event!(type, subject, actor:, revision:)
+      return if CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+      return unless revision
+
+      timestamp = revision.utc.iso8601(6)
+      record!(event_type: type, company: subject.company, actor: actor, subject: subject,
+        dedupe_key: "#{type}:#{subject.id}:#{timestamp}", metadata: { revision: timestamp })
+    end
+
     def payroll_lifecycle_event!(event_type, period, actor:, revision:, self_override: false)
       ApplicationRecord.transaction(requires_new: true) do
         EVENT_TYPES.fetch(event_type).fetch(:scopes).each_key do |scope|
@@ -341,7 +365,7 @@ module PortalNotifications
 
     def create_delivery!(event, target)
       # Extra addresses have no account preferences; they follow the default.
-      mode = target.user ? Preferences.mode_for(target.user, event.category) : CATEGORIES.dig(event.category, :default_mode)
+      mode = target.user ? Preferences.mode_for(target.user, event.preference_category(target.user)) : CATEGORIES.dig(event.category, :default_mode)
       ledger_mode = mode == "off" ? CATEGORIES.dig(event.category, :default_mode) : mode
       intended_email = PortalNotificationRecipient.normalize_email(target.user&.email || target.email)
       attrs = { portal_notification_event: event, user: target.user, recipient_email: target.email,
@@ -363,9 +387,23 @@ module PortalNotifications
       elsif coalesced?(event, target)
         skipped.call("coalesced")
       else
-        deliver_after = deliver_after_for(mode, event.occurred_at)
+        deliver_after = verification_batch_due_at(event, target, mode) || deliver_after_for(mode, event.occurred_at)
         PortalNotificationDelivery.create!(attrs.merge(delivery_mode: mode, status: "pending", deliver_after: deliver_after))
       end
+    end
+
+    # Join the first still-open two-minute window for the same recipient and
+    # link. Keep each subject's ledger row so a resolved item can be skipped
+    # without suppressing the siblings that still need attention.
+    def verification_batch_due_at(event, target, mode)
+      return unless mode == "immediate" && event.event_type.in?(%w[employee_verification_queued employee_verification_returned])
+
+      PortalNotificationDelivery.pending.joins(:portal_notification_event)
+        .where(company_id: event.company_id, recipient_key: target.key, delivery_mode: mode, batch_key: nil, attempts: 0)
+        .where(portal_notification_events: { event_type: event.event_type })
+        .where(portal_notification_events: { occurred_at: ..event.occurred_at })
+        .where("portal_notification_deliveries.deliver_after > ?", event.occurred_at)
+        .minimum(:deliver_after)
     end
 
     # One alert per unread conversation burst: a later message in a conversation

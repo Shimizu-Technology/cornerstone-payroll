@@ -895,19 +895,15 @@ module Api
           return nil unless profile
 
           profile.as_json(except: [ :notes ]).merge(
-            "notes" => can_view_restricted_lifecycle_notes? ? profile.notes : nil
+            "notes" => StaffRolePolicy.can_view_restricted_lifecycle_notes?(current_user) ? profile.notes : nil
           )
         end
 
         def serialize_status_event(event)
           event.as_json(except: [ :internal_notes ]).merge(
             "actor_name" => event.actor&.name,
-            "internal_notes" => can_view_restricted_lifecycle_notes? ? event.internal_notes : nil
+            "internal_notes" => StaffRolePolicy.can_view_restricted_lifecycle_notes?(current_user) ? event.internal_notes : nil
           )
-        end
-
-        def can_view_restricted_lifecycle_notes?
-          current_user&.organization_admin? || current_user&.manager?
         end
 
         def employee_link_summary(employee)

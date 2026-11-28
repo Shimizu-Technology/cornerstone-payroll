@@ -9,8 +9,7 @@ module ClientOperatingProfiles
   # - If any preflight fails: leaves lifecycle_mode_activated_at = nil (staying
   #   fail-closed in approval_first), stamps lifecycle_mode_activation_failed_at
   #   and structured lifecycle_mode_activation_blockers, records
-  #   client_operating_profile.lifecycle_mode_activation_blocked, and notifies
-  #   when the PR 4 notification hook is present.
+  #   client_operating_profile.lifecycle_mode_activation_blocked, and notifies staff.
   class LifecycleModeActivationService
     class ModeChanged < StandardError
       attr_reader :employee_lifecycle_mode
@@ -127,9 +126,6 @@ module ClientOperatingProfiles
               errors: preflight.error_messages
             }
           )
-          # TODO(PR4): PR 4 implements real notification delivery here (safe
-          # because on-demand activation runs in its own committed transaction
-          # before client write transactions).
           PortalNotifications.lifecycle_mode_activation_blocked!(profile, actor: acting_user)
           Result.new(status: :blocked, profile: profile, preflight: preflight)
         end
