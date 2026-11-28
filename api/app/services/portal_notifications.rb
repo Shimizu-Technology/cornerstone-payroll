@@ -264,6 +264,15 @@ module PortalNotifications
       Rails.logger.error("W-2 posting notification failed: filing=#{filing.id} error=#{error.class}")
     end
 
+    # TODO(PR4): Wire lifecycle_mode_activation_blocked into CATEGORIES,
+    # EVENT_TYPES, Recipients (listed :manage_client_configuration staff with
+    # org_admin/super_admin fallback), and Email templates. Kept as an explicit
+    # no-op in PR 3 so PR 4's change is visible and activation never depends on
+    # a silent respond_to? hook.
+    def lifecycle_mode_activation_blocked!(_profile, actor: nil)
+      nil
+    end
+
     # Repeating an event (a retried request, a replayed job) returns the saved
     # event instead of creating more alerts.
     def record!(event_type:, company:, actor:, subject:, dedupe_key:, metadata: {}, occurred_at: Time.current, w2_posting_availability: {})

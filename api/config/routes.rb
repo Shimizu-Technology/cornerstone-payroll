@@ -119,7 +119,14 @@ Rails.application.routes.draw do
           delete :logo, action: :remove_logo
         end
         resources :employees, only: [ :index, :show, :create, :update ] do
+          member do
+            post :terminate
+            post :rehire
+          end
           resources :document_requirements, only: :index, controller: :employee_document_requirements
+        end
+        resources :verification_items, only: [ :index ], controller: :verification_items do
+          post :respond, on: :member
         end
         resources :departments, only: [ :index, :create, :update ]
         resource :employee_organization, only: [ :show, :update ], controller: :employee_organization do
@@ -273,6 +280,7 @@ Rails.application.routes.draw do
         resources :companies, only: [ :index, :show, :create, :update ] do
           resource :operating_profile, only: [ :show ], controller: :client_operating_profiles do
             patch :update, on: :member, path: ""
+            post :activate_lifecycle_mode, on: :member
           end
           member do
             get :intake_profile

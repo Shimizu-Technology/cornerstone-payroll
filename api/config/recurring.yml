@@ -73,6 +73,13 @@ production:
     queue: default
     schedule: "5 0 * * * Pacific/Guam"
 
+  # Activates due future-dated Client-managed employee lifecycle profiles at
+  # Guam midnight and hourly as a backstop after rechecking preflight checks.
+  activate_scheduled_lifecycle_modes:
+    class: ActivateScheduledLifecycleModesJob
+    queue: default
+    schedule: "0 * * * * Pacific/Guam"
+
   send_payroll_reminders:
     class: SendPayrollRemindersJob
     queue: default

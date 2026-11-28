@@ -33,6 +33,37 @@ module Api
           render json: { error: error.message }, status: :unprocessable_entity
         end
 
+        def activate_lifecycle_mode
+          unless StaffRolePolicy.allowed?(current_user, :manage_organization)
+            return render json: { error: StaffRolePolicy.error_message(:manage_organization) }, status: :forbidden
+          end
+
+          if lifecycle_mode_locked?
+            return render json: { error: "Employee lifecycle mode is locked until its milestone launches." }, status: :unprocessable_entity
+          end
+
+          result = ClientOperatingProfiles::LifecycleModeActivationService.activate!(
+            company: @target_company,
+            actor: current_user
+          )
+          case result.status
+          when :activated, :already_active
+            render json: profile_payload(PayrollBusinessClock.today).merge(
+              activation_status: result.status.to_s,
+              saved: serialize_profile(result.profile)
+            )
+          when :blocked
+            render json: {
+              error: result.preflight.error_messages.join(" "),
+              blockers: result.preflight.blockers_hash,
+              errors: result.preflight.error_messages,
+              lifecycle_mode_activation_status: "blocked"
+            }, status: :unprocessable_entity
+          else
+            render json: { error: "No scheduled Client-managed lifecycle mode is due for activation." }, status: :unprocessable_entity
+          end
+        end
+
         private
 
         def rls_company_id
@@ -57,8 +88,13 @@ module Api
             offering_presets: OperatingProfileCatalog::OFFERING_PRESETS,
             locked_keys: OperatingProfileCatalog.locked_keys,
             connected_source_active: @target_company.time_tracking_sources.active.where(source_type: "aire_services").exists?,
-            editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company)
+            editable_keys: OperatingProfileCatalog.editable_keys_for(user: current_user, company: @target_company),
+            employee_lifecycle_preflight: lifecycle_mode_locked? ? nil : ClientOperatingProfiles::LifecycleModePreflight.summary_for(@target_company, as_of: as_of)
           }
+        end
+
+        def lifecycle_mode_locked?
+          CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
         end
 
         def audit_company_id

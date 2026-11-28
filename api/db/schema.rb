@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_28_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_28_050000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "btree_gist"
   enable_extension "pg_catalog.plpgsql"
@@ -1219,6 +1219,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_040000) do
     t.text "sensitive_payload_encrypted"
     t.integer "status", default: 0, null: false
     t.datetime "updated_at", null: false
+    t.string "own_record_signal"
     t.index [ "company_id", "status" ], name: "index_employee_change_requests_on_company_id_and_status"
     t.index [ "company_id" ], name: "index_employee_change_requests_on_company_id"
     t.index [ "employee_id", "created_at" ], name: "index_employee_change_requests_on_employee_id_and_created_at"
@@ -1227,6 +1228,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_28_040000) do
     t.index [ "requested_by_id" ], name: "index_employee_change_requests_on_requested_by_id"
     t.index [ "requested_by_link_id" ], name: "index_employee_change_requests_on_requested_by_link_id"
     t.index [ "reviewed_by_id" ], name: "index_employee_change_requests_on_reviewed_by_id"
+    t.check_constraint "own_record_signal IS NULL OR (own_record_signal::text = ANY (ARRAY['strong'::character varying, 'name_only'::character varying]::text[]))", name: "employee_change_requests_own_record_signal_check"
     t.check_constraint "request_kind::text = ANY (ARRAY['create'::character varying::text, 'update'::character varying::text])", name: "employee_change_requests_kind_check"
     t.check_constraint "status = ANY (ARRAY[0, 1, 2, 3, 4])", name: "employee_change_requests_status_check"
   end

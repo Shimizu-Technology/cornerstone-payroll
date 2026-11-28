@@ -47,6 +47,8 @@ module Api
           render_invalid("#{e.message} already has a Cornerstone Payroll account. Tick that person in the list instead, so their own alert settings apply.")
         rescue PortalNotifications::RecipientListUpdate::InvalidTeamRole => e
           render_invalid(e.message)
+        rescue PortalNotifications::RecipientListUpdate::LastLifecycleRecipientRequired => e
+          render_invalid(e.message)
         end
 
         private

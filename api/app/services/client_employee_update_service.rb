@@ -63,6 +63,32 @@ class ClientEmployeeUpdateService
     retirement_rate roth_retirement_rate employer_retirement_match_rate employer_roth_match_rate
   ].freeze
   PROTECTED_IDENTIFIER_FIELDS = %i[ssn_encrypted contractor_ein].freeze
+  PAYMENT_METHOD_FIELD = :payment_delivery_method
+  WRITABLE_FIELDS = (DIRECT_FIELDS + APPROVAL_FIELDS + [ PAYMENT_METHOD_FIELD ]).freeze
+  CLIENT_MANAGED_CREATE_FIELDS = (WRITABLE_FIELDS - [ WAGE_RATES_KEY, :w4_election_received ]).freeze
+  IDENTITY_TAX_FIELDS = %i[ssn_encrypted first_name middle_name last_name name_suffix date_of_birth hire_date].freeze
+  TAX_FILING_IMPACT_FIELDS = %i[ssn_encrypted first_name middle_name last_name name_suffix].freeze
+  # On own-record updates in client-managed mode, identity fields (name, DOB,
+  # hire date) and email must never save directly — routing them to Cornerstone
+  # prevents a dual-role manager from renaming/re-emailing their own record to
+  # evade self-dealing checks, and keeps legal-name/DOB/hire-date edits gated.
+  OWN_RECORD_RESTRICTED_DIRECT_FIELDS = (IDENTITY_TAX_FIELDS - [ :ssn_encrypted ] + [ :email ]).freeze
+  CONTRACTOR_TAX_FIELDS = %i[business_name contractor_ein contractor_type w9_on_file].freeze
+  COMPENSATION_VERIFICATION_FIELDS = (
+    %i[
+      pay_rate employment_type salary_type pay_frequency contractor_pay_type
+      wage_rates default_custom_earnings default_payroll_adjustments
+    ] + LEGACY_RETIREMENT_FIELDS
+  ).freeze
+  W4_VERIFICATION_FIELDS = (EmployeeW4Election::PROFILE_ATTRIBUTES + [ :w4_election_received ]).freeze
+  PAY_AFFECTING_VERIFICATION_FIELDS = (
+    COMPENSATION_VERIFICATION_FIELDS +
+    W4_VERIFICATION_FIELDS +
+    [ PAYMENT_METHOD_FIELD ] +
+    IDENTITY_TAX_FIELDS +
+    CONTRACTOR_TAX_FIELDS
+  ).uniq.freeze
+  PROFILE_CHANGE_FIELDS = %i[job_title department_id email phone address_line1 address_line2 city state zip].freeze
 
   Result = Struct.new(
     :employee,
@@ -75,19 +101,35 @@ class ClientEmployeeUpdateService
     :contact_warnings,
     :same_person_email_confirmed,
     :confirmed_login_user_id,
+    :readiness,
+    :verification_items,
+    :warnings,
+    :client_managed,
     keyword_init: true
   )
 
   def initialize(employee:, attrs:, requested_by:, company:, confirm_same_person_email: false, row_revision: nil, baseline_values: nil,
-                 email_locked: false)
+                 email_locked: false, attempt_lifecycle_activation: false, expected_lifecycle_mode: nil,
+                 ssn_confirmation: nil, enforce_ssn_confirmation: false)
     @employee = employee
     @email_locked = email_locked
+    @attempt_lifecycle_activation = attempt_lifecycle_activation
+    @expected_lifecycle_mode = expected_lifecycle_mode.presence
+    @ssn_confirmation = ssn_confirmation
+    @enforce_ssn_confirmation = enforce_ssn_confirmation == true
     raw_attrs = attrs.deep_symbolize_keys
+    deleted_confirm = raw_attrs.delete(:confirm_same_person_email)
     @confirm_same_person_email = ActiveModel::Type::Boolean.new.cast(
-      confirm_same_person_email || raw_attrs.delete(:confirm_same_person_email)
+      confirm_same_person_email || deleted_confirm
     ) == true
-    @row_revision = row_revision.presence || raw_attrs.delete(:row_revision).presence || raw_attrs.delete(:contact_revision).presence
-    @baseline_values = baseline_values.presence || raw_attrs.delete(:baseline_values)
+    deleted_row_revision = raw_attrs.delete(:row_revision).presence
+    deleted_contact_revision = raw_attrs.delete(:contact_revision).presence
+    @row_revision = row_revision.presence || deleted_row_revision || deleted_contact_revision
+    deleted_baseline_values = raw_attrs.delete(:baseline_values)
+    @baseline_values = baseline_values.presence || deleted_baseline_values
+    comp_effective_on = raw_attrs.delete(:compensation_effective_on).presence
+    legacy_effective_on = raw_attrs.delete(:effective_on).presence
+    @compensation_effective_on = comp_effective_on || legacy_effective_on
     @attrs = without_inapplicable_contractor_fields(normalize_attrs(raw_attrs))
     guard_legacy_recurring_components!
     @requested_by = requested_by
@@ -103,14 +145,23 @@ class ClientEmployeeUpdateService
   private :guard_legacy_recurring_components!
 
   def create!
+    ensure_lifecycle_activation_outside_transaction!
     direct_attrs = attrs.slice(*DIRECT_FIELDS)
     approval_attrs = attrs.slice(*APPROVAL_FIELDS)
     candidate = nil
     change_request = nil
     contact_result = nil
+    client_managed_result = nil
 
     ActiveRecord::Base.transaction do
       company.lock!
+      ensure_expected_lifecycle_mode_in_lock!
+      if client_managed_employee_lifecycle?
+        client_managed_result = create_client_managed_in_lock!
+        next
+      end
+
+      configure_ssn_confirmation_for!(employee, creation: true)
       candidate = build_validated_candidate!(direct_attrs.merge(approval_attrs), creation: true)
       contact = apply_contact_changes!(direct_attrs, target: candidate, creation: true)
       contact_result = contact.validation
@@ -145,6 +196,8 @@ class ClientEmployeeUpdateService
       )
     end
 
+    return client_managed_result if client_managed_result
+
     direct_fields = direct_attrs.keys
     approval_fields = approval_attrs.keys
     Result.new(
@@ -157,23 +210,33 @@ class ClientEmployeeUpdateService
       after_values: serialized_values_for(direct_fields).merge(display_values_for(approval_attrs)),
       contact_warnings: contact_result&.warnings || [],
       same_person_email_confirmed: contact_result&.same_person_confirmed? || false,
-      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil
+      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil,
+      client_managed: false
     )
   ensure
     candidate&.clear_changes_information
   end
 
   def update!
+    ensure_lifecycle_activation_outside_transaction!
     direct_attrs = {}
     approval_attrs = {}
     direct_before = {}
     approval_before = {}
     change_request = nil
     contact_result = nil
+    client_managed_result = nil
 
     ActiveRecord::Base.transaction do
       company.lock!
+      ensure_expected_lifecycle_mode_in_lock!
+      if client_managed_employee_lifecycle?
+        client_managed_result = update_client_managed_in_lock!
+        next
+      end
+
       employee.lock!
+      configure_ssn_confirmation_for!(employee, creation: false)
       EmployeeContactRevisionGuard.check!(
         employee: employee,
         row_revision: row_revision,
@@ -226,9 +289,12 @@ class ClientEmployeeUpdateService
         original_values: approval_before,
         direct_changes: serialized_values_for(direct_attrs.keys),
         request_kind: own_address.present? ? "update" : request_kind,
-        own_record: own_address.present?
+        own_record: own_address.present?,
+        own_record_signal: own_address.present? ? "strong" : nil
       ) if approval_attrs.present?
     end
+
+    return client_managed_result if client_managed_result
 
     direct_fields = direct_attrs.keys
     approval_fields = approval_attrs.keys
@@ -242,7 +308,8 @@ class ClientEmployeeUpdateService
       after_values: serialized_values_for(direct_fields).merge(display_values_for(approval_attrs)),
       contact_warnings: contact_result&.warnings || [],
       same_person_email_confirmed: contact_result&.same_person_confirmed? || false,
-      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil
+      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil,
+      client_managed: false
     )
   end
 
@@ -383,15 +450,15 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def validate_received_withholding!(candidate_attrs, candidate:)
+  def validate_received_withholding!(candidate_attrs, candidate:, source: "client_approved")
     w4_attrs = candidate_attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
-    EmployeeW4ElectionChangeService.new(employee: candidate, actor: requested_by, source: "client_approved",
+    EmployeeW4ElectionChangeService.new(employee: candidate, actor: requested_by, source: source,
       reason: "Client submitted withholding election", attributes: w4_attrs,
       election_received: candidate_attrs[:w4_election_received]).validate_received_election!
     return if w4_attrs.empty?
 
     change = EmployeeW4ElectionChangeService.new(employee: employee.new_record? ? candidate : employee,
-      actor: requested_by, source: "client_approved",
+      actor: requested_by, source: source,
       reason: "Client submitted withholding election", attributes: w4_attrs,
       election_received: candidate_attrs[:w4_election_received])
     change.validate_default_replacement!
@@ -423,6 +490,601 @@ class ClientEmployeeUpdateService
 
     employee.errors.add(:department_id, "does not belong to this company")
     raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def ensure_lifecycle_activation_outside_transaction!
+    return unless @attempt_lifecycle_activation
+
+    if ApplicationRecord.connection.transaction_open?
+      raise ArgumentError, "attempt_lifecycle_activation: true cannot be called inside an open database transaction"
+    end
+
+    result = ClientOperatingProfiles::LifecycleModeActivationService.ensure_attempted!(company)
+    if result&.activated?
+      raise ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged.new(
+        "This company switched to Client-managed employee lifecycle. Reload and submit your change again.",
+        employee_lifecycle_mode: "client_managed"
+      )
+    end
+
+    @expected_lifecycle_mode ||= CompanyFeatures.for(company).employee_lifecycle_mode unless CompanyFeatures::LOCKED_OFF.include?("client_portal.employee_lifecycle_mode")
+  end
+
+  def ensure_expected_lifecycle_mode_in_lock!
+    return if @expected_lifecycle_mode.blank?
+
+    current_mode = CompanyFeatures.for(company).employee_lifecycle_mode
+    return if current_mode == @expected_lifecycle_mode
+
+    raise ClientOperatingProfiles::LifecycleModeActivationService::ModeChanged.new(
+      "This company's employee lifecycle mode changed. Reload and submit your change again.",
+      employee_lifecycle_mode: current_mode
+    )
+  end
+
+  def configure_ssn_confirmation_for!(target, creation:)
+    return unless @enforce_ssn_confirmation
+
+    submitted_ssn = attrs[:ssn_encrypted]
+    if creation
+      target.require_ssn_confirmation = submitted_ssn.present?
+      target.ssn_confirmation = submitted_ssn.present? ? @ssn_confirmation : nil
+    else
+      submitted_digits = submitted_ssn.to_s.gsub(/\D/, "")
+      changed = submitted_ssn.present? && submitted_digits != target.ssn_digits
+      target.require_ssn_confirmation = changed
+      target.ssn_confirmation = changed ? @ssn_confirmation : nil
+    end
+  end
+
+  def client_managed_employee_lifecycle?
+    CompanyFeatures.for(company).client_managed_employee_lifecycle?
+  end
+
+  def create_client_managed_in_lock!
+    create_attrs = attrs.slice(*CLIENT_MANAGED_CREATE_FIELDS)
+    wage_rates_raw = attrs[WAGE_RATES_KEY]
+    w4_election_received = ActiveModel::Type::Boolean.new.cast(attrs[:w4_election_received])
+
+    new_employee = Employee.new(
+      create_attrs.merge(
+        company: company,
+        status: "active",
+        portal_pending_approval: false,
+        readiness_gate_enforced: true,
+        document_readiness_required: false,
+        pay_rate: create_attrs[:pay_rate].presence || 0,
+        initial_compensation_source: "client_portal",
+        initial_compensation_actor: requested_by
+      )
+    )
+    if @enforce_ssn_confirmation
+      configure_ssn_confirmation_for!(new_employee, creation: true)
+    else
+      new_employee.require_ssn_confirmation = employee.require_ssn_confirmation
+      new_employee.ssn_confirmation = employee.ssn_confirmation
+    end
+
+    validate_department_scope!(create_attrs)
+    contact_attrs = create_attrs.slice(*DIRECT_FIELDS)
+    contact = apply_contact_changes!(contact_attrs, target: new_employee, creation: true)
+    contact_result = contact.validation
+    new_employee.email = contact_attrs[:email] if contact_attrs.key?(:email)
+    new_employee.phone = contact_attrs[:phone] if contact_attrs.key?(:phone)
+    new_employee.contact_source = contact.contact_source if contact.contact_source
+
+    validate_duplicate_ssn!(new_employee.ssn_digits, target: new_employee) if new_employee.ssn_digits.present?
+    if w4_supplied_on_create?(attrs, new_employee)
+      validate_received_withholding!(attrs, candidate: new_employee, source: "client_direct")
+    end
+    normalized_wage_rates = attrs.key?(WAGE_RATES_KEY) ? normalized_wage_rates_payload(wage_rates_raw) : nil
+
+    unless new_employee.valid?
+      new_employee.errors.each { |error| employee.errors.add(error.attribute, error.message) }
+      raise ActiveRecord::RecordInvalid, employee
+    end
+
+    @employee = new_employee
+    employee.save!
+
+    if normalized_wage_rates.present?
+      apply_client_managed_compensation!(
+        pay_rate: EmployeeCompensationChangeService::UNCHANGED,
+        basis: {},
+        wage_rates: normalized_wage_rates,
+        effective_on: EmployeeCompensationChangeService.initial_effective_on(employee),
+        reason: "Initial client-portal pay setup"
+      )
+    end
+
+    if w4_supplied_on_create?(attrs, employee)
+      w4_attrs = attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+      apply_client_managed_w4!(w4_attrs: w4_attrs, election_received: w4_election_received, reason: "Initial client-portal W-4 election")
+    end
+
+    EmployeeContactValidator.record_same_person_confirmation_audit!(
+      employee: employee,
+      result: contact_result,
+      actor: requested_by,
+      company: company
+    )
+    EmployeeDocumentReadiness.seed_new_hire!(employee: employee, actor: requested_by)
+
+    reloaded = employee.reload
+    readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
+    submitted_fields = attrs.keys.reject { |key| attrs[key].nil? && key != :w9_on_file }
+    after_display = display_values_for(attrs.slice(*submitted_fields))
+
+    metadata = {
+      "readiness_status" => readiness.status,
+      "missing_keys" => readiness.missing_keys
+    }
+    confirming_own_login = contact_result&.same_person_confirmed? && contact_result.matched_login_user&.id == requested_by.id
+    self_hire_signal = EmployeeProfileIdentity.possible_self_created_hire_signal(
+      reloaded,
+      requested_by,
+      same_person_confirmed: confirming_own_login
+    )
+    if self_hire_signal.present?
+      metadata["possible_self_created_hire"] = true
+      metadata["own_record_actor_id"] = requested_by.id
+      metadata["own_record_signal"] = self_hire_signal
+    end
+    metadata["direct_deposit_missing_bank_details"] = true if readiness.direct_deposit_missing_bank_details?
+
+    verification_item = EmployeeVerificationItems::Recorder.record!(
+      employee: reloaded,
+      actor: requested_by,
+      event_kind: "new_hire",
+      changed_fields: submitted_fields,
+      before_values: {},
+      after_values: after_display,
+      effective_on: reloaded.hire_date || PayrollBusinessClock.today,
+      metadata: metadata
+    )
+
+    Result.new(
+      employee: reloaded,
+      change_request: nil,
+      applied_direct_fields: submitted_fields,
+      approval_fields: [],
+      changed_fields: submitted_fields,
+      before_values: {},
+      after_values: after_display,
+      contact_warnings: contact_result&.warnings || [],
+      same_person_email_confirmed: contact_result&.same_person_confirmed? || false,
+      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil,
+      readiness: readiness,
+      verification_items: [ verification_item ],
+      warnings: [],
+      client_managed: true
+    )
+  end
+
+  def update_client_managed_in_lock!
+    prelock_payment_method_periods! if attrs.key?(PAYMENT_METHOD_FIELD)
+    employee.lock!
+    configure_ssn_confirmation_for!(employee, creation: false)
+    identity_name_before = { "first_name" => employee.first_name, "last_name" => employee.last_name }
+    EmployeeContactRevisionGuard.check!(
+      employee: employee,
+      row_revision: row_revision,
+      submitted_attrs: attrs.slice(*DIRECT_FIELDS),
+      baseline_values: baseline_values
+    )
+
+    direct_attrs = changed_attributes_subset(attrs.slice(*DIRECT_FIELDS))
+    approval_attrs = changed_attributes_subset(attrs.slice(*APPROVAL_FIELDS).except(WAGE_RATES_KEY))
+    if employee.contractor?
+      approval_attrs.except!(*W4_VERIFICATION_FIELDS)
+    elsif ActiveModel::Type::Boolean.new.cast(attrs[:w4_election_received])
+      approval_attrs.merge!(attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES))
+    end
+    prevent_legacy_retirement_change!(approval_attrs)
+    if attrs.key?(WAGE_RATES_KEY)
+      normalized_wage_rates = normalized_wage_rates_payload(attrs[WAGE_RATES_KEY])
+      approval_attrs[WAGE_RATES_KEY] = normalized_wage_rates if wage_rates_changed?(normalized_wage_rates)
+    end
+    payment_method_attrs = changed_attributes_subset(attrs.slice(PAYMENT_METHOD_FIELD))
+
+    contact = apply_contact_changes!(direct_attrs, target: employee, creation: false)
+    contact_result = contact.validation
+
+    confirming_own_login = contact_result&.same_person_confirmed? && contact_result.matched_login_user&.id == requested_by.id
+    own_record_signal = EmployeeProfileIdentity.own_record_signal_for_client_managed(
+      employee,
+      requested_by,
+      confirming_own_login: confirming_own_login
+    )
+
+    if own_record_signal.present?
+      return update_client_managed_own_record!(
+        direct_attrs: direct_attrs,
+        approval_attrs: approval_attrs,
+        payment_method_attrs: payment_method_attrs,
+        contact: contact,
+        contact_result: contact_result,
+        own_record_signal: own_record_signal
+      )
+    end
+
+    all_changed = direct_attrs.merge(approval_attrs, payment_method_attrs)
+    if all_changed.empty?
+      reloaded = employee.reload
+      return Result.new(
+        employee: reloaded,
+        change_request: nil,
+        applied_direct_fields: [],
+        approval_fields: [],
+        changed_fields: [],
+        before_values: {},
+        after_values: {},
+        contact_warnings: contact_result&.warnings || [],
+        same_person_email_confirmed: contact_result&.same_person_confirmed? || false,
+        confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil,
+        readiness: EmployeeReadinessEvaluator.evaluate(reloaded),
+        verification_items: [],
+        warnings: [],
+        client_managed: true
+      )
+    end
+
+    validate_client_managed_update_candidate!(all_changed)
+    ensure_payment_method_change_safe! if payment_method_attrs.present?
+
+    before_raw = original_values_for(all_changed.keys)
+    before_display = display_values_for(before_raw)
+    after_display = display_values_for(all_changed)
+    warnings = []
+
+    comp_keys = EmployeeCompensationChangeService::COMPENSATION_ATTRIBUTES.map(&:to_sym) + [ WAGE_RATES_KEY ]
+    w4_keys = EmployeeW4Election::PROFILE_ATTRIBUTES + [ :w4_election_received ]
+    comp_attrs = all_changed.slice(*comp_keys)
+    w4_attrs = all_changed.slice(*w4_keys)
+    direct_model_attrs = all_changed.except(*comp_keys, *w4_keys, PAYMENT_METHOD_FIELD)
+
+    if direct_model_attrs.present?
+      update_attrs = direct_model_attrs.dup
+      update_attrs[:contact_source] = contact.contact_source if contact.contact_source
+      unless direct_model_attrs.key?(:ssn_encrypted)
+        employee.require_ssn_confirmation = false
+        employee.ssn_confirmation = nil
+      end
+      employee.update!(update_attrs)
+      EmployeeContactValidator.record_same_person_confirmation_audit!(
+        employee: employee,
+        result: contact_result,
+        actor: requested_by,
+        company: company
+      )
+      record_contact_changes!(before_raw.slice(*direct_attrs.keys), direct_attrs.keys) if profile_requests_enabled? && direct_attrs.present?
+      EmployeeChangeRequest.supersede_pending_address!(employee: employee, actor: requested_by, changed_fields: direct_attrs.keys)
+    end
+
+    if payment_method_attrs.present?
+      EmployeePaymentDefaultService.new(
+        employee: employee,
+        method: payment_method_attrs[PAYMENT_METHOD_FIELD],
+        actor: requested_by
+      ).call
+    end
+
+    comp_result = nil
+    if comp_attrs.present?
+      requested_pay_rate = comp_attrs.key?(:pay_rate) ? comp_attrs[:pay_rate] : EmployeeCompensationChangeService::UNCHANGED
+      basis = comp_attrs.slice(*EmployeeCompensationChangeService::BASIS_ATTRIBUTES.map(&:to_sym))
+      comp_result = apply_client_managed_compensation!(
+        pay_rate: requested_pay_rate,
+        basis: basis,
+        wage_rates: comp_attrs[WAGE_RATES_KEY],
+        effective_on: @compensation_effective_on,
+        reason: "Client portal compensation update"
+      )
+      warnings.concat(Array(comp_result&.warnings))
+    end
+
+    w4_election = nil
+    if w4_attrs.present? && !employee.contractor?
+      w4_election_received = ActiveModel::Type::Boolean.new.cast(w4_attrs[:w4_election_received])
+      w4_profile = w4_attrs.slice(*EmployeeW4Election::PROFILE_ATTRIBUTES)
+      w4_profile[:w4_effective_on] = attrs[:w4_effective_on].presence || next_unapproved_pay_date if w4_profile[:w4_effective_on].blank?
+      w4_election = apply_client_managed_w4!(
+        w4_attrs: w4_profile,
+        election_received: w4_election_received,
+        reason: "Client portal W-4 update"
+      )
+    end
+
+    reloaded = employee.reload
+    readiness = EmployeeReadinessEvaluator.evaluate(reloaded)
+    verification_items, impact_warnings = record_client_managed_update_verifications!(
+      reloaded: reloaded,
+      all_changed: all_changed,
+      before_display: before_display,
+      after_display: after_display,
+      readiness: readiness,
+      comp_result: comp_result,
+      w4_election: w4_election,
+      identity_name_before: identity_name_before
+    )
+    warnings.concat(impact_warnings)
+
+    Result.new(
+      employee: reloaded,
+      change_request: nil,
+      applied_direct_fields: all_changed.keys,
+      approval_fields: [],
+      changed_fields: all_changed.keys,
+      before_values: before_display,
+      after_values: after_display,
+      contact_warnings: contact_result&.warnings || [],
+      same_person_email_confirmed: contact_result&.same_person_confirmed? || false,
+      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil,
+      readiness: readiness,
+      verification_items: verification_items,
+      warnings: warnings.uniq,
+      client_managed: true
+    )
+  end
+
+  def update_client_managed_own_record!(direct_attrs:, approval_attrs:, payment_method_attrs:, contact:, contact_result:, own_record_signal:)
+    address_keys = EmployeeChangeRequest::ADDRESS_FIELDS.map(&:to_sym)
+    own_address_attrs = direct_attrs.extract!(*address_keys)
+    own_identity_attrs = direct_attrs.extract!(*OWN_RECORD_RESTRICTED_DIRECT_FIELDS)
+    non_address_restricted = own_identity_attrs.merge(approval_attrs, payment_method_attrs)
+    restricted_attrs = non_address_restricted.merge(own_address_attrs)
+    is_address_only = restricted_attrs.present? && non_address_restricted.empty?
+
+    combined = direct_attrs.merge(restricted_attrs)
+    if combined.present?
+      validate_client_managed_update_candidate!(combined)
+    end
+
+    employee.require_ssn_confirmation = false
+    employee.ssn_confirmation = nil
+
+    direct_before = original_values_for(direct_attrs.keys)
+    restricted_before = original_values_for(restricted_attrs.keys)
+
+    ensure_no_pending_request!(address_request: is_address_only) if restricted_attrs.present?
+
+    verification_items = []
+    if direct_attrs.present?
+      update_attrs = direct_attrs.dup
+      if contact.contact_source && (direct_attrs.key?(:email) || direct_attrs.key?(:phone))
+        update_attrs[:contact_source] = contact.contact_source
+      end
+      employee.update!(update_attrs)
+      EmployeeContactValidator.record_same_person_confirmation_audit!(
+        employee: employee,
+        result: contact_result,
+        actor: requested_by,
+        company: company
+      )
+      record_contact_changes!(direct_before, direct_attrs.keys) if profile_requests_enabled?
+      verification_items << EmployeeVerificationItems::Recorder.record!(
+        employee: employee,
+        actor: requested_by,
+        event_kind: "profile_change",
+        changed_fields: direct_attrs.keys,
+        before_values: display_values_for(direct_before),
+        after_values: serialized_values_for(direct_attrs.keys),
+        metadata: {
+          "own_record_actor_id" => requested_by.id,
+          "own_record_signal" => own_record_signal
+        },
+        affects_pay: false
+      )
+    end
+
+    change_request = if restricted_attrs.present?
+      create_change_request!(
+        approval_attrs: restricted_attrs,
+        original_values: restricted_before,
+        direct_changes: serialized_values_for(direct_attrs.keys),
+        request_kind: "update",
+        own_record: true,
+        own_record_signal: own_record_signal
+      )
+    end
+
+    reloaded = employee.reload
+    Result.new(
+      employee: reloaded,
+      change_request: change_request,
+      applied_direct_fields: direct_attrs.keys,
+      approval_fields: restricted_attrs.keys,
+      changed_fields: direct_attrs.keys + restricted_attrs.keys,
+      before_values: serialize_payload(direct_before).merge(display_values_for(restricted_before)),
+      after_values: serialized_values_for(direct_attrs.keys).merge(display_values_for(restricted_attrs)),
+      contact_warnings: contact_result&.warnings || [],
+      same_person_email_confirmed: contact_result&.same_person_confirmed? || false,
+      confirmed_login_user_id: contact_result&.same_person_confirmed? ? contact_result.matched_login_user&.id : nil,
+      readiness: EmployeeReadinessEvaluator.evaluate(reloaded),
+      verification_items: verification_items,
+      warnings: [],
+      client_managed: true
+    )
+  end
+
+  def prelock_payment_method_periods!
+    period_ids = PayrollItem.where(company_id: company.id, employee_id: employee.id, payment_delivery_method: nil)
+      .joins(:pay_period).where(pay_periods: { status: %w[draft calculated approved] })
+      .distinct.pluck(:pay_period_id).sort
+    PayPeriod.where(id: period_ids).order(:id).lock.load if period_ids.any?
+  end
+
+  def ensure_payment_method_change_safe!
+    return unless employee.payroll_items.where(payment_delivery_method: nil)
+      .joins(:pay_period).where(pay_periods: { status: "approved" }).exists?
+
+    employee.errors.add(
+      :payment_delivery_method,
+      "This employee is on an approved pay run awaiting commit — wait until commit or ask Cornerstone to update it."
+    )
+    raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def validate_client_managed_update_candidate!(candidate_attrs)
+    candidate = employee.dup
+    candidate.intake_original_employee = employee
+    candidate.assign_attributes(candidate_attrs.except(WAGE_RATES_KEY, :w4_election_received))
+    candidate.company = company
+    if candidate_attrs.key?(:ssn_encrypted)
+      candidate.require_ssn_confirmation = employee.require_ssn_confirmation
+      candidate.ssn_confirmation = employee.ssn_confirmation
+      if candidate.ssn_digits.present? && candidate.ssn_digits != employee.ssn_digits
+        validate_duplicate_ssn!(candidate.ssn_digits, target: employee)
+      end
+    else
+      candidate.require_ssn_confirmation = false
+      candidate.ssn_confirmation = nil
+    end
+
+    validate_received_withholding!(candidate_attrs, candidate: candidate, source: "client_direct")
+    validate_tax_classification_change!(candidate)
+    validate_department_scope!(candidate_attrs)
+    normalized_wage_rates_payload(candidate_attrs[WAGE_RATES_KEY]) if candidate_attrs.key?(WAGE_RATES_KEY)
+    return candidate if candidate.valid?
+
+    candidate.errors.each { |error| employee.errors.add(error.attribute, error.message) }
+    raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def validate_duplicate_ssn!(ssn_digits, target:)
+    return if ssn_digits.blank?
+
+    excluded_ids = [ employee.id, employee.previous_employee_id, employee.next_employee&.id ].compact
+    scope = company.employees
+    scope = scope.where.not(id: excluded_ids) if excluded_ids.any?
+
+    formatted_dashed = ssn_digits.length == 9 ? "#{ssn_digits[0, 3]}-#{ssn_digits[3, 2]}-#{ssn_digits[5, 4]}" : nil
+    formatted_spaced = ssn_digits.length == 9 ? "#{ssn_digits[0, 3]} #{ssn_digits[3, 2]} #{ssn_digits[5, 4]}" : nil
+    candidate_values = [ ssn_digits, formatted_dashed, formatted_spaced, target.ssn_encrypted.to_s.strip.presence ].compact.uniq
+
+    duplicate_exists = scope.where(ssn_encrypted: candidate_values).exists?
+    unless duplicate_exists
+      # Fall back to normalized-digit comparison for legacy or hand-typed rows
+      # stored in non-canonical formats (dots, trailing spaces, parentheses, etc.).
+      duplicate_exists = scope.where.not(ssn_encrypted: [ nil, "" ]).select(:id, :ssn_encrypted).any? do |other|
+        other.ssn_digits == ssn_digits
+      end
+    end
+    return unless duplicate_exists
+
+    target.errors.add(:ssn, "This Social Security Number is already assigned to another employee in this company.")
+    employee.errors.add(:ssn, "This Social Security Number is already assigned to another employee in this company.") unless target.equal?(employee)
+    raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def w4_supplied_on_create?(submitted_attrs, target)
+    return false if target.contractor?
+
+    ActiveModel::Type::Boolean.new.cast(submitted_attrs[:w4_election_received]) ||
+      submitted_attrs[:w4_effective_on].present? ||
+      submitted_attrs[:w4_signed_on].present? ||
+      submitted_attrs[:w4_source_reference].present?
+  end
+
+  def apply_client_managed_compensation!(pay_rate:, basis:, wage_rates:, effective_on:, reason:)
+    EmployeeCompensationChangeService.new(
+      employee: employee,
+      actor: requested_by,
+      source: "client_portal",
+      reason: reason,
+      effective_on: effective_on,
+      pay_rate: pay_rate,
+      basis: basis,
+      wage_rates: wage_rates.presence
+    ).call!
+  rescue EmployeeCompensationChangeService::Error => error
+    employee.errors.add(:base, error.message)
+    raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def apply_client_managed_w4!(w4_attrs:, election_received:, reason:)
+    EmployeeW4ElectionChangeService.new(
+      employee: employee,
+      attributes: w4_attrs,
+      actor: requested_by,
+      source: "client_direct",
+      reason: reason,
+      election_received: election_received
+    ).call!
+  rescue EmployeeW4ElectionChangeService::Error => error
+    employee.errors.add(:w4_effective_on, error.message)
+    raise ActiveRecord::RecordInvalid, employee
+  end
+
+  def next_unapproved_pay_date
+    period = PayPeriod.where(
+      company_id: company.id,
+      status: %w[draft calculated],
+      cycle: "regular",
+      run_purpose: "regular",
+      correction_status: nil,
+      test_workspace_role: nil,
+      parallel_run: false
+    ).order(pay_date: :asc, id: :asc).first
+
+    period&.pay_date || PayrollBusinessClock.today
+  end
+
+  def record_client_managed_update_verifications!(reloaded:, all_changed:, before_display:, after_display:, readiness:, comp_result:, w4_election:, identity_name_before: nil)
+    items = []
+    warnings = []
+    changed_keys = all_changed.keys
+
+    groups = [
+      [ "compensation_change", changed_keys & COMPENSATION_VERIFICATION_FIELDS, comp_result&.effective_on, comp_result&.compensation_change, {} ],
+      [ "w4_change", changed_keys & W4_VERIFICATION_FIELDS, w4_election&.effective_on, w4_election, {} ],
+      [ "payment_method_change", changed_keys & [ PAYMENT_METHOD_FIELD ], nil, nil,
+        readiness.direct_deposit_missing_bank_details? ? { "direct_deposit_missing_bank_details" => true } : {} ],
+      [ "identity_tax_change", changed_keys & IDENTITY_TAX_FIELDS, nil, nil, {} ],
+      [ "contractor_tax_change", changed_keys & CONTRACTOR_TAX_FIELDS, nil, nil, {} ],
+      [ "profile_change", changed_keys & PROFILE_CHANGE_FIELDS, nil, nil, {} ]
+    ]
+
+    groups.each do |event_kind, group_keys, effective_on, source_record, group_metadata|
+      next if group_keys.empty?
+
+      if event_kind == "identity_tax_change"
+        if (group_keys & %i[first_name last_name]).any?
+          group_metadata = group_metadata.merge(
+            "identity_name_before" => identity_name_before,
+            "identity_name_after" => { "first_name" => reloaded.first_name, "last_name" => reloaded.last_name }
+          ).compact
+        end
+        if (group_keys & TAX_FILING_IMPACT_FIELDS).any?
+          impact = EmployeeVerificationItems::Recorder.tax_filing_impact_for(reloaded)
+          if impact.present?
+            group_metadata = group_metadata.merge("tax_filing_impact" => impact)
+            warnings << "SSN or legal name changed after committed payroll in #{impact['committed_tax_years'].join(', ')} — Cornerstone will review W-2c / Form 941-GU amendment impact."
+          end
+        end
+      end
+
+      string_keys = group_keys.map(&:to_s)
+      items << EmployeeVerificationItems::Recorder.record!(
+        employee: reloaded,
+        actor: requested_by,
+        event_kind: event_kind,
+        changed_fields: string_keys,
+        before_values: before_display.stringify_keys.slice(*string_keys),
+        after_values: after_display.stringify_keys.slice(*string_keys),
+        effective_on: effective_on,
+        source_record: source_record,
+        metadata: group_metadata
+      )
+    end
+
+    EmployeeVerificationItems::Recorder.requeue_returned_items!(
+      employee: reloaded,
+      actor: requested_by,
+      touched_fields: changed_keys
+    )
+
+    [ items, warnings ]
   end
 
   def profile_requests_enabled?
@@ -467,12 +1129,17 @@ class ClientEmployeeUpdateService
     raise ActiveRecord::RecordInvalid, employee
   end
 
-  def create_change_request!(approval_attrs:, original_values:, direct_changes:, request_kind:, own_record: false)
+  def create_change_request!(approval_attrs:, original_values:, direct_changes:, request_kind:, own_record: false, own_record_signal: nil)
     proposed_visible, proposed_protected = protect_identifiers(approval_attrs)
     original_visible, original_protected = protect_identifiers(original_values)
+    is_profile_address = own_record && request_kind == "update" &&
+      (approval_attrs.keys.map(&:to_s) - EmployeeChangeRequest::ADDRESS_FIELDS).empty? &&
+      proposed_protected.empty?
 
-    notes = if own_record
+    notes = if is_profile_address
       "Client submitted an address change for their own employee record."
+    elsif own_record
+      "Client submitted payroll or tax changes for their own employee record for Cornerstone review."
     elsif request_kind == "create"
       "Client submitted a new worker's payroll details for approval."
     else
@@ -486,10 +1153,11 @@ class ClientEmployeeUpdateService
         requested_by: requested_by,
         request_kind: request_kind,
         own_record: own_record,
+        own_record_signal: own_record ? own_record_signal : nil,
         proposed_changes: serialize_payload(proposed_visible),
         original_values: serialize_payload(original_visible),
         direct_changes_applied: serialize_payload(direct_changes),
-        sensitive_payload: own_record ? nil : {
+        sensitive_payload: is_profile_address ? nil : {
           proposed: serialize_payload(proposed_protected),
           original: serialize_payload(original_protected)
         },
@@ -501,7 +1169,7 @@ class ClientEmployeeUpdateService
   rescue ActiveRecord::RecordNotUnique => error
     raise unless error.cause&.result&.error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME) == "idx_employee_change_requests_one_pending"
 
-    ensure_no_pending_request!(address_request: own_record, collision: true)
+    ensure_no_pending_request!(address_request: is_profile_address, collision: true)
   end
 
   def protect_identifiers(values)

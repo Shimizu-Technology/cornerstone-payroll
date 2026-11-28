@@ -36,6 +36,7 @@ module EmployeeLinks
         EmployeeLinks.lock_for_issuance!(company)
         @employee.lock!
         raise Error, "Only active employees can be invited" unless @employee.active?
+        InviteEligibility.check!(@employee)
 
         open_link = @employee.employee_account_links.where(status: %w[invited active]).order(:id).lock.first
         raise Error, "This employee already has employee app access" if open_link&.active?

@@ -2,9 +2,13 @@
 
 module ClientOperatingProfiles
   class EffectiveDates
-    def initialize(company:, latest:)
+    LIFECYCLE_AMEND_KEYS = %w[client_portal.employee_lifecycle_mode].freeze
+
+    def initialize(company:, latest:, changed_keys: nil, changes: nil)
       @company = company
       @latest = latest
+      @changed_keys = (changed_keys || changes&.keys)&.map(&:to_s)
+      @changes = changes&.stringify_keys
       @today = PayrollBusinessClock.today
     end
 
@@ -24,10 +28,27 @@ module ClientOperatingProfiles
     end
 
     def amend?(date)
-      @latest.present? && @latest.version > 1 && @latest.effective_on == date && date > @today
+      return false unless @latest.present? && @latest.version > 1 && @latest.effective_on == date
+      return true if date > @today
+      return true if same_day_lifecycle_rollback?(date)
+
+      return false unless @latest.lifecycle_mode_activated_at.nil? && @latest.lifecycle_mode_activation_failed_at.present?
+      return true if @changed_keys.nil?
+
+      @changed_keys.any? && (@changed_keys - LIFECYCLE_AMEND_KEYS).empty?
     end
 
     private
+
+    # Immediate rollback from client_managed to approval_first is always allowed
+    # on today even if another profile version already starts today (§5.2).
+    def same_day_lifecycle_rollback?(date)
+      return false unless date == @today
+      return false unless @changes.present? && @changed_keys == LIFECYCLE_AMEND_KEYS
+
+      @latest.option_value("client_portal.employee_lifecycle_mode") == "client_managed" &&
+        @changes["client_portal.employee_lifecycle_mode"] == "approval_first"
+    end
 
     def periods_from(date)
       @company.pay_periods.where(end_date: date..)
